@@ -2,6 +2,7 @@ import { FileDiff, X } from "lucide-react";
 import { useEffect, useRef, useState, type UIEvent } from "react";
 
 import { useI18n } from "@/i18n";
+import { turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import type { FilePreview } from "@/state/filePreviewStore";
 
@@ -124,7 +125,9 @@ export function ProjectFileTabs({
         })}
         {turnDiffTabs.map((preview, index) => {
           const selected = preview.id === activeTurnDiffID;
-          const label = replace(t("turnFiles.projectTab"), { count: String(preview.fileChanges?.length || 0) });
+          const label = replace(t("turnFiles.projectTab"), {
+            count: String(turnFileDiffChanges(preview.fileChanges || []).length),
+          });
           return (
             <ProjectVirtualTabContextMenu
               key={preview.id}

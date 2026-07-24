@@ -1,4 +1,4 @@
-import { CornerDownRight } from "lucide-react";
+import { CornerDownLeft } from "lucide-react";
 import { memo } from "react";
 
 import { useI18n } from "@/i18n";
@@ -109,13 +109,15 @@ function TurnGuide({ attachmentLabel, label, user }: { attachmentLabel: string; 
   const attachmentCount = user.attachments?.length || 0;
   const text = user.text.trim();
   return (
-    <div className="ml-auto flex max-w-[min(82%,42rem)] min-w-0 items-start gap-2 border-r-2 border-primary/35 pr-3 text-sm text-muted-foreground">
-      <div className="min-w-0 text-right">
-        <div className="text-xs font-medium text-muted-foreground/80">{label}</div>
-        {text ? <div className="selectable-text line-clamp-3 break-words text-foreground/85">{text}</div> : null}
-        {attachmentCount > 0 ? <div className="text-xs">{attachmentLabel}</div> : null}
+    <div
+      aria-label={label}
+      className="pudding-user-message ml-auto flex max-w-[min(82%,42rem)] min-w-0 items-start gap-2 overflow-hidden rounded-[14px] rounded-br-[5px] border-0 px-3.5 py-2 text-left text-sm leading-6 shadow-none"
+    >
+      <CornerDownLeft className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <div className="min-w-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {text ? <div className="selectable-text">{text}</div> : null}
+        {attachmentCount > 0 ? <div className="text-xs text-muted-foreground">{attachmentLabel}</div> : null}
       </div>
-      <CornerDownRight className="mt-0.5 size-4 shrink-0 text-primary/70" />
     </div>
   );
 }

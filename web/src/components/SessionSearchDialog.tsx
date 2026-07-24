@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Briefcase, Code2, MessageSquareText, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { searchSessionMessages, type Message, type Project, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
+import { SessionModeIcon } from "@/components/SessionModeIcon";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
@@ -220,16 +221,6 @@ export function SessionSearchDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function SessionModeIcon({ mode }: { mode: Session["activeMode"] }) {
-  if (mode === "code") {
-    return <Code2 className="size-4" aria-hidden="true" />;
-  }
-  if (mode === "work") {
-    return <Briefcase className="size-4" aria-hidden="true" />;
-  }
-  return <MessageSquareText className="size-4" aria-hidden="true" />;
 }
 
 function buildSearchResults(

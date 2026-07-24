@@ -82,9 +82,9 @@ export function useTranscriptData({
   const steerQueuedMutation = useMutation({
     mutationFn: ({ clientMessageID, turnID }: { clientMessageID: string; input?: PendingUserMessage; turnID: string }) =>
       steerQueuedInput(token, sessionID, clientMessageID, turnID),
-    onSuccess: (_result, { clientMessageID, input, turnID }) => {
+    onMutate: ({ clientMessageID, input, turnID }) => {
       if (!input) {
-        return;
+        return undefined;
       }
       addPendingUser({
         clientMessageID,
@@ -95,8 +95,14 @@ export function useTranscriptData({
         text: input.text,
         turnID,
       });
+      return { input };
     },
-    onError: () => toast.error(t("transcript.guideQueuedFailed")),
+    onError: (_error, _variables, context) => {
+      if (context?.input) {
+        addPendingUser(context.input);
+      }
+      toast.error(t("transcript.guideQueuedFailed"));
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
@@ -165,9 +171,9 @@ function mergePendingUsers(queuedInputs: QueuedInput[], overlayPending: PendingU
   for (const pending of overlayPending) {
     const existingIndex = indexByClientID.get(pending.clientMessageID);
     if (existingIndex !== undefined) {
-      // mutation 成功后 queued query 仍可能短暂保留旧快照；steering
+      // mutation 成功后 queued query 仍可能短暂保留旧快照；steering/steered
       // overlay 必须优先，否则气泡会先退回“稍后发送”再跳入当前 turn。
-      if (pending.status === "steering") {
+      if (pending.status === "steering" || pending.status === "steered") {
         out[existingIndex] = pending;
       }
       continue;

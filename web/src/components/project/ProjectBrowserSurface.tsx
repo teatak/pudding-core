@@ -20,7 +20,7 @@ import { useI18n } from "@/i18n";
 import { revealDesktopPath } from "@/lib/desktopBridge";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
-import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
+import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import { openFilePreview, type FilePreview } from "@/state/filePreviewStore";
 import { consumeProjectFileReveal, useProjectFileReveal } from "@/state/projectRevealStore";
@@ -100,9 +100,13 @@ export function ProjectBrowserSurface({
   });
   const roots = rootsQuery.data?.roots || [];
   const activeTurnDiff = turnDiffTabs.find((preview) => preview.id === activeTurnDiffID);
-  const activeTurnChange = activeTurnDiff?.fileChanges?.find(
-    (change) => change.id === activeTurnDiff.selectedFileChangeID,
-  ) || activeTurnDiff?.fileChanges?.[0];
+  const activeTurnChanges = useMemo(
+    () => turnFileDiffChanges(activeTurnDiff?.fileChanges || []),
+    [activeTurnDiff?.fileChanges],
+  );
+  const activeTurnChange = activeTurnChanges.find(
+    (change) => change.id === activeTurnDiff?.selectedFileChangeID,
+  ) || activeTurnChanges[0];
   const activeTurnDiffSelection = useMemo(
     () => activeTurnChange
       ? resolveProjectFileReveal(roots, {
@@ -150,7 +154,7 @@ export function ProjectBrowserSurface({
         surface: "project",
         resource: "project_diff",
         id: activeTurnChange.id,
-        name: turnFileChangeLabel(activeTurnChange, activeTurnDiff?.fileChanges || []),
+        name: turnFileChangeLabel(activeTurnChange, activeTurnChanges),
         path: turnFileChangeFullPath(activeTurnChange),
         kind: activeTurnChange.kind,
       };
@@ -170,7 +174,7 @@ export function ProjectBrowserSurface({
       rootID: selected.rootID,
       kind: diff ? (selected.staged ? "staged" : "unstaged") : undefined,
     };
-  }, [activeTurnChange, activeTurnDiff?.fileChanges, workspace.selected]);
+  }, [activeTurnChange, activeTurnChanges, workspace.selected]);
 
   useEffect(() => {
     onVisibleContextChange?.(active ? visibleContext : undefined);

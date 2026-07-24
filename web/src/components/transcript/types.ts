@@ -10,7 +10,7 @@ export type UserInputVM = {
   createdAt?: string;
   interrupted?: boolean;
   pending?: boolean;
-  status?: "submitting" | "queued" | "editing" | "steering";
+  status?: "submitting" | "queued" | "editing" | "steering" | "steered";
   text: string;
   attachments?: Attachment[];
   localFolders?: LocalFolder[];

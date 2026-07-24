@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { TurnFileChange } from "@/api/client";
+import { turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 export type FilePreview = {
@@ -108,16 +109,18 @@ export function openFilePreview(preview: FilePreviewInput) {
 }
 
 export function openTurnFileChanges(sessionID: string, turnID: string, changes: TurnFileChange[], selectedChangeID?: string) {
-  if (!changes.length) {
+  const diffableChanges = turnFileDiffChanges(changes);
+  if (!diffableChanges.length) {
     return;
   }
+  const selectedChange = diffableChanges.find((change) => change.id === selectedChangeID) || diffableChanges[0];
   openFilePreview({
     content: "",
-    fileChanges: changes,
+    fileChanges: diffableChanges,
     lineStart: 1,
     lineStep: 1,
     path: `turn-diff://${turnID}`,
-    selectedFileChangeID: selectedChangeID || changes[0].id,
+    selectedFileChangeID: selectedChange.id,
     sessionID,
     source: "turn-diff",
     truncated: false,

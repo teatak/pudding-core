@@ -1,4 +1,4 @@
-import { Captions, Check, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -176,11 +176,18 @@ export const UserInput = memo(function UserInput({
       ) : null}
     </>
   ) : null;
+  const queuedStatus =
+    user.pending && (user.status === "queued" || user.status === "editing") ? (
+      <span className="inline-flex shrink-0 items-center gap-1">
+        <Clock3 className="size-3.5" aria-hidden="true" />
+        <span>{t("transcript.queued")}</span>
+      </span>
+    ) : null;
   const showASRIndicator = asrInput || Boolean(voiceAudioAttachment);
 
   return (
     <>
-      <div className={cn("group flex min-w-0 flex-col items-end", user.pending && "opacity-70")}>
+      <div className="group flex min-w-0 flex-col items-end">
         <div className="flex w-full min-w-0 items-start justify-end gap-1">
           <div
             className={cn(
@@ -278,7 +285,17 @@ export const UserInput = memo(function UserInput({
             )}
           </div>
         </div>
-        {user.createdAt ? <MessageMeta actions={actions} align="end" createdAt={user.createdAt} text={metaText} uiContext={uiContext} /> : null}
+        {user.createdAt ? (
+          <MessageMeta
+            actions={actions}
+            align="end"
+            createdAt={user.createdAt}
+            hideStandardDetails={Boolean(queuedStatus)}
+            persistentStatus={queuedStatus}
+            text={metaText}
+            uiContext={uiContext}
+          />
+        ) : null}
       </div>
       <ImageLightbox images={imagePreviewItems} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
     </>

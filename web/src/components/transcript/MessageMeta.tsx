@@ -27,7 +27,9 @@ export function MessageMeta({
   align = "start",
   createdAt,
   duration,
+  hideStandardDetails = false,
   model,
+  persistentStatus,
   text,
   uiContext,
 }: {
@@ -35,7 +37,9 @@ export function MessageMeta({
   align?: "start" | "end";
   createdAt: string;
   duration?: string;
+  hideStandardDetails?: boolean;
   model?: TurnModelVM;
+  persistentStatus?: ReactNode;
   text: string;
   uiContext?: UIContextPart;
 }) {
@@ -52,51 +56,59 @@ export function MessageMeta({
   return (
     <div
       className={cn(
-        "flex h-6 w-full items-center gap-2 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        "flex h-6 w-full items-center gap-2 text-xs text-muted-foreground",
+        !persistentStatus && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
         align === "end" && "justify-end",
       )}
     >
-      {actions}
-      <Button
-        aria-label={t("common.copy")}
-        className={cn(
-          "size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
-          align === "start" && "-ml-1",
+      <div className="flex items-center gap-2">
+        {actions}
+        {hideStandardDetails ? null : (
+          <>
+            <Button
+              aria-label={t("common.copy")}
+              className={cn(
+                "size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
+                align === "start" && "-ml-1",
+              )}
+              size="icon-xs"
+              tabIndex={-1}
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                void navigator.clipboard.writeText(text).then(() => {
+                  setCopied(true);
+                  if (resetTimer.current) {
+                    window.clearTimeout(resetTimer.current);
+                  }
+                  resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              {copied ? <Check className="text-success" /> : <Copy />}
+            </Button>
+            {uiContext ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="grid size-5 place-items-center text-muted-foreground">
+                    <SquareMousePointer className="size-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            <span>{formatClock(createdAt)}</span>
+            {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
+            {model ? (
+              <>
+                <span aria-hidden className="size-1 shrink-0 rounded-full bg-muted-foreground/35" />
+                <ModelPill model={model} />
+              </>
+            ) : null}
+          </>
         )}
-        size="icon-xs"
-        tabIndex={-1}
-        type="button"
-        variant="ghost"
-        onClick={() => {
-          void navigator.clipboard.writeText(text).then(() => {
-            setCopied(true);
-            if (resetTimer.current) {
-              window.clearTimeout(resetTimer.current);
-            }
-            resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
-          });
-        }}
-      >
-        {copied ? <Check className="text-success" /> : <Copy />}
-      </Button>
-      {uiContext ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="grid size-5 place-items-center text-muted-foreground">
-              <SquareMousePointer className="size-3.5" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
-        </Tooltip>
-      ) : null}
-      <span>{formatClock(createdAt)}</span>
-      {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
-      {model ? (
-        <>
-          <span aria-hidden className="size-1 shrink-0 rounded-full bg-muted-foreground/35" />
-          <ModelPill model={model} />
-        </>
-      ) : null}
+      </div>
+      {persistentStatus}
     </div>
   );
 }

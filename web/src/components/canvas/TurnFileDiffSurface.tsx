@@ -12,13 +12,13 @@ import { TextDiffViewer } from "@/components/diff/TextDiffViewer";
 import { Spinner } from "@/components/Spinner";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
-import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
+import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import { selectTurnFileChange, type FilePreview } from "@/state/filePreviewStore";
 
 export function TurnFileDiffSurface({ active, preview, token }: { active: boolean; preview: FilePreview; token: string }) {
   const { t } = useI18n();
-  const changes = preview.fileChanges || [];
+  const changes = turnFileDiffChanges(preview.fileChanges || []);
   const selected = changes.find((change) => change.id === preview.selectedFileChangeID) || changes[0];
   const detailQuery = useQuery({
     enabled: active && Boolean(token && preview.turnID && selected?.id),

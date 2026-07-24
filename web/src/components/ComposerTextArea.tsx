@@ -45,12 +45,19 @@ type ComposerTextAreaProps = {
   setSessionDraftText: (sessionID: string, text: string) => void;
   sessionID: string;
   onCanSendChange: (canSend: boolean) => void;
+  onHasContentChange: (hasContent: boolean) => void;
   onMentionMenuOpenChange: (open: boolean) => void;
   onSlashMenuOpenChange: (open: boolean) => void;
   onDraftSlashCommandChange: (command: SlashSubmitCommand | null) => void;
   onAction: (actionID: ComposerMentionActionID) => void;
   onSlashCommandSelect: (command: SlashCommand) => void;
-  onEnter: (info: { canSend: boolean; mentionMenuOpen: boolean; slashMenuOpen: boolean; draftSlashCommand: SlashSubmitCommand | null }) => void;
+  onEnter: (info: {
+    canSend: boolean;
+    guideNow: boolean;
+    mentionMenuOpen: boolean;
+    slashMenuOpen: boolean;
+    draftSlashCommand: SlashSubmitCommand | null;
+  }) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onBlur: () => void;
   onClearMascotError: () => void;
@@ -180,6 +187,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     setSessionDraftText,
     sessionID,
     onCanSendChange,
+    onHasContentChange,
     onMentionMenuOpenChange,
     onSlashMenuOpenChange,
     onDraftSlashCommandChange,
@@ -199,6 +207,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
   const draftText = useWatch({ control, name: "text", defaultValue: "" });
   const trimmedDraftText = draftText.trim();
 
+  const hasContent = Boolean(trimmedDraftText || hasAttachments || hasLocalFolders || hasProjectReferences);
   const canSend = Boolean(trimmedDraftText || uploadedAttachmentsCount || hasLocalFolders || hasProjectReferences) && !hasPendingAttachments && !hasFailedAttachments;
   const draftSlashCommand = hasAttachments || hasLocalFolders || hasProjectReferences ? null : parseSlashSubmitCommand(trimmedDraftText);
   const slashQuery = slashCommandQuery(trimmedDraftText, slashCommands);
@@ -231,13 +240,21 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
 
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
 
-  const prevCanSendRef = useRef(canSend);
+  const prevCanSendRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
     if (prevCanSendRef.current !== canSend) {
       prevCanSendRef.current = canSend;
       onCanSendChange(canSend);
     }
   }, [canSend, onCanSendChange]);
+
+  const prevHasContentRef = useRef<boolean | undefined>(undefined);
+  useEffect(() => {
+    if (prevHasContentRef.current !== hasContent) {
+      prevHasContentRef.current = hasContent;
+      onHasContentChange(hasContent);
+    }
+  }, [hasContent, onHasContentChange]);
 
   const prevMentionMenuOpenRef = useRef(mentionMenuOpen);
   useEffect(() => {
@@ -367,7 +384,13 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
       const currentCanSend = Boolean(currentText || uploadedAttachmentsCount || hasLocalFolders || hasProjectReferences) && !hasPendingAttachments && !hasFailedAttachments;
       const currentSlashCommand = hasAttachments || hasLocalFolders || hasProjectReferences ? null : parseSlashSubmitCommand(currentText);
 
-      onEnter({ canSend: currentCanSend, mentionMenuOpen, slashMenuOpen, draftSlashCommand: currentSlashCommand });
+      onEnter({
+        canSend: currentCanSend,
+        guideNow: event.metaKey,
+        mentionMenuOpen,
+        slashMenuOpen,
+        draftSlashCommand: currentSlashCommand,
+      });
     }
     scheduleMascotInputGaze();
   };

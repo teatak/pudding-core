@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Save } from "lucide-react";
+import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minus, Plus, Save } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -411,12 +411,142 @@ function ProjectViewerStatus({ children, icon }: { children: ReactNode; icon?: R
 function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportSize, setViewportSize] = useState({ height: 0, width: 0 });
+  const [imageSize, setImageSize] = useState({ height: 0, width: 0 });
+  const [zoomMode, setZoomMode] = useState<"fit" | "custom">("fit");
+  const [customScale, setCustomScale] = useState(1);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const updateSize = () => {
+      setViewportSize({ height: viewport.clientHeight, width: viewport.clientWidth });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  const fitScale = useMemo(() => {
+    if (!viewportSize.width || !viewportSize.height || !imageSize.width || !imageSize.height) return 1;
+    return Math.max(
+      0.01,
+      Math.min(
+        1,
+        (viewportSize.width - 48) / imageSize.width,
+        (viewportSize.height - 48) / imageSize.height,
+      ),
+    );
+  }, [imageSize.height, imageSize.width, viewportSize.height, viewportSize.width]);
+  const scale = zoomMode === "fit" ? fitScale : customScale;
+  const imageWidth = imageSize.width * scale;
+  const imageHeight = imageSize.height * scale;
+
+  const changeScale = (factor: number) => {
+    setCustomScale(clampImageScale(scale * factor));
+    setZoomMode("custom");
+  };
+
   if (failed) return <ProjectViewerStatus>{t("project.browserUnsupportedFile")}</ProjectViewerStatus>;
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
-      <img alt={alt} className="max-h-full max-w-full object-contain" src={src} onError={() => setFailed(true)} />
+    <div className="relative h-full min-h-0 overflow-hidden bg-[var(--workspace-file-editor-background)]">
+      <div
+        className="absolute top-3 right-3 z-10 flex items-center gap-0.5 rounded-lg bg-popover/90 p-1 text-popover-foreground shadow-sm ring-1 ring-foreground/10 backdrop-blur-sm"
+      >
+        <Button
+          aria-label={t("project.browserZoomOut")}
+          disabled={scale <= 0.1}
+          size="icon-sm"
+          title={t("project.browserZoomOut")}
+          type="button"
+          variant="ghost"
+          onClick={() => changeScale(1 / 1.2)}
+        >
+          <Minus />
+        </Button>
+        <Button
+          aria-label={t("project.browserZoomReset")}
+          className="min-w-12 px-1.5 text-xs tabular-nums"
+          size="sm"
+          title={t("project.browserZoomReset")}
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            setCustomScale(1);
+            setZoomMode("custom");
+          }}
+        >
+          {Math.round(scale * 100)}%
+        </Button>
+        <Button
+          aria-label={t("project.browserZoomIn")}
+          disabled={scale >= 8}
+          size="icon-sm"
+          title={t("project.browserZoomIn")}
+          type="button"
+          variant="ghost"
+          onClick={() => changeScale(1.2)}
+        >
+          <Plus />
+        </Button>
+        <Button
+          aria-label={t("project.browserZoomFit")}
+          aria-pressed={zoomMode === "fit"}
+          className="aria-pressed:bg-muted"
+          size="icon-sm"
+          title={t("project.browserZoomFit")}
+          type="button"
+          variant="ghost"
+          onClick={() => setZoomMode("fit")}
+        >
+          <Maximize2 />
+        </Button>
+      </div>
+      <div
+        ref={viewportRef}
+        className="h-full min-h-0 overflow-auto"
+        onWheel={(event) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          changeScale(event.deltaY < 0 ? 1.1 : 1 / 1.1);
+        }}
+      >
+        <div
+          className="flex min-h-full min-w-full items-center justify-center p-6"
+          style={{
+            height: imageSize.height ? Math.max(viewportSize.height, imageHeight + 48) : undefined,
+            width: imageSize.width ? Math.max(viewportSize.width, imageWidth + 48) : undefined,
+          }}
+        >
+          <img
+            alt={alt}
+            className="block shrink-0 object-contain"
+            draggable={false}
+            src={src}
+            style={{
+              height: imageSize.height ? imageHeight : undefined,
+              maxHeight: imageSize.height ? "none" : "100%",
+              maxWidth: imageSize.width ? "none" : "100%",
+              width: imageSize.width ? imageWidth : undefined,
+            }}
+            onError={() => setFailed(true)}
+            onLoad={(event) => {
+              setImageSize({
+                height: event.currentTarget.naturalHeight,
+                width: event.currentTarget.naturalWidth,
+              });
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
+}
+
+function clampImageScale(scale: number) {
+  return Math.min(8, Math.max(0.1, scale));
 }
 
 function ProjectPDFPreview({ src, title }: { src: string; title: string }) {

@@ -57,7 +57,7 @@ import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu
 import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
+import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { useVisibleBrowserReveal } from "@/state/browserRevealStore";
 import { consumeCanvasReveal, useVisibleCanvasReveal } from "@/state/canvasRevealStore";
 import {
@@ -434,7 +434,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       return projectUIContext || { type: "ui_context", surface: "project" };
     }
     if (filePreviewActive && activeFilePreview) {
-      const fileChanges = activeFilePreview.fileChanges || [];
+      const fileChanges = turnFileDiffChanges(activeFilePreview.fileChanges || []);
       const selectedChange = fileChanges.find((change) => change.id === activeFilePreview.selectedFileChangeID) || fileChanges[0];
       if (activeFilePreview.source === "turn-diff" && selectedChange) {
         return {
@@ -965,7 +965,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               openedAt: preview.openedAt,
               path: preview.source === "turn-diff"
                 ? (() => {
-                    const changes = preview.fileChanges || [];
+                    const changes = turnFileDiffChanges(preview.fileChanges || []);
                     const change = changes.find((item) => item.id === preview.selectedFileChangeID) || changes[0];
                     return change ? turnFileChangeLabel(change, changes) : t("turnFiles.tab");
                   })()

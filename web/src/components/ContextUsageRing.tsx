@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { getSessionUsage, type Session, type SessionUsage } from "@/api/client";
+import { getSessionUsage, type SessionUsage } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,11 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type ContextUsageRingProps = {
-  mode: Session["activeMode"];
   token: string;
   sessionID: string;
 };
 
-export function ContextUsageRing({ mode, token, sessionID }: ContextUsageRingProps) {
+export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
   const { t } = useI18n();
   const usageQuery = useQuery({
     queryKey: queryKeys.sessionUsage(sessionID),
@@ -30,19 +29,18 @@ export function ContextUsageRing({ mode, token, sessionID }: ContextUsageRingPro
   const currentPercent = usage && usage.contextWindow > 0 ? Math.min(100, (currentTokens / usage.contextWindow) * 100) : 0;
   const estimatedPercent = usage && usage.contextWindow > 0 ? Math.min(100, (estimatedTokens / usage.contextWindow) * 100) : 0;
   const tone = Math.max(currentPercent, estimatedPercent) >= 95 ? "danger" : Math.max(currentPercent, estimatedPercent) >= 80 ? "warning" : "ok";
-  const capabilityLabel = t("mode.current").replace("{mode}", t(`mode.${mode}`));
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          aria-label={`${capabilityLabel} · ${t("usage.contextWindow")}`}
+          aria-label={t("usage.contextWindow")}
           className="relative rounded-full text-muted-foreground"
           size="icon"
           type="button"
           variant="ghost"
         >
-          <Ring current={usageQuery.isLoading ? 0 : currentPercent} estimate={usageQuery.isLoading ? 0 : estimatedPercent} mode={mode} tone={tone} />
+          <Ring current={usageQuery.isLoading ? 0 : currentPercent} estimate={usageQuery.isLoading ? 0 : estimatedPercent} tone={tone} />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -52,10 +50,6 @@ export function ContextUsageRing({ mode, token, sessionID }: ContextUsageRingPro
         sideOffset={10}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <div className="flex h-9 items-center gap-2 border-b px-3 font-medium text-muted-foreground">
-          <ModeDot mode={mode} />
-          <span>{capabilityLabel}</span>
-        </div>
         {usage ? (
           <UsagePanel
             currentPercent={currentPercent}
@@ -88,7 +82,7 @@ function UsagePanel({
   tone: "ok" | "warning" | "danger";
   usage: SessionUsage;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const compactPercent =
     usage.contextWindow > 0 && usage.autoCompactThresholdTokens > 0
       ? Math.min(100, (usage.autoCompactThresholdTokens / usage.contextWindow) * 100)
@@ -101,7 +95,7 @@ function UsagePanel({
           <div className="flex min-w-0 items-baseline gap-1.5">
             <span className="shrink-0 text-xs font-medium text-muted-foreground">{t("usage.currentInput")}</span>
             <span className="truncate text-base font-semibold text-foreground">
-              {formatTokens(currentTokens)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow) : "--"}
+              {formatTokens(currentTokens, locale)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow, locale) : "--"}
             </span>
           </div>
           <div className="text-right text-xs font-medium tabular-nums text-muted-foreground">{Math.round(currentPercent)}%</div>
@@ -117,7 +111,7 @@ function UsagePanel({
           />
           {compactPercent > 0 ? (
             <div
-              aria-label={`${t("usage.autoCompactThreshold")} ${formatTokens(usage.autoCompactThresholdTokens)}`}
+              aria-label={`${t("usage.autoCompactThreshold")} ${formatTokens(usage.autoCompactThresholdTokens, locale)}`}
               className="absolute inset-y-[-2px] w-px bg-foreground/45"
               style={{ left: `${compactPercent}%` }}
 
@@ -194,10 +188,11 @@ function EmptyPanel({ loading }: { loading: boolean }) {
 }
 
 function SectionHeader({ children, className, value }: { children: ReactNode; className?: string; value?: number }) {
+  const { locale } = useI18n();
   return (
     <div className={cn("grid min-h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm font-semibold text-foreground", className)}>
       <div>{children}</div>
-      {typeof value === "number" ? <div className="text-right tabular-nums">{formatTokens(value)}</div> : null}
+      {typeof value === "number" ? <div className="text-right tabular-nums">{formatTokens(value, locale)}</div> : null}
     </div>
   );
 }
@@ -217,6 +212,7 @@ function CollapsibleUsageGroup({
   subtle?: boolean;
   value: number;
 }) {
+  const { locale } = useI18n();
   const [open, setOpen] = useState(false);
   const Chevron = open ? ChevronDown : ChevronRight;
 
@@ -237,7 +233,7 @@ function CollapsibleUsageGroup({
           <Chevron className="ml-1 size-3 shrink-0 text-muted-foreground" />
         </div>
         <div className={cn("text-right font-medium tabular-nums", subtle ? "text-foreground/70" : "text-foreground/90")}>
-          {raw ? formatNumber(value) : formatTokens(value)}
+          {raw ? formatNumber(value, locale) : formatTokens(value, locale)}
         </div>
       </button>
       {open ? <div className="space-y-0.5">{children}</div> : null}
@@ -266,6 +262,7 @@ function UsageRow({
   subtle?: boolean;
   value: number;
 }) {
+  const { locale } = useI18n();
   return (
     <div className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 leading-[18px]", subtle && "text-foreground/70", muted && "text-muted-foreground")}>
       <div className={cn("flex min-w-0 items-center gap-1.5 truncate", indent && "pl-3", labelMuted && "text-muted-foreground")}>
@@ -273,13 +270,13 @@ function UsageRow({
         <span className="truncate">{label}</span>
       </div>
       <div className={cn("text-right font-medium tabular-nums", muted ? "text-muted-foreground" : subtle ? "text-foreground/70" : "text-foreground/90")}>
-        {formattedValue ?? (raw ? formatNumber(value) : formatTokens(value))}
+        {formattedValue ?? (raw ? formatNumber(value, locale) : formatTokens(value, locale))}
       </div>
     </div>
   );
 }
 
-function Ring({ current, estimate, mode, tone }: { current: number; estimate: number; mode: Session["activeMode"]; tone: "ok" | "warning" | "danger" }) {
+function Ring({ current, estimate, tone }: { current: number; estimate: number; tone: "ok" | "warning" | "danger" }) {
   const radius = 8;
   const circumference = 2 * Math.PI * radius;
   const currentOffset = circumference - (Math.min(100, current) / 100) * circumference;
@@ -312,20 +309,8 @@ function Ring({ current, estimate, mode, tone }: { current: number; estimate: nu
         strokeLinecap="round"
         strokeWidth="2.4"
       />
-      {mode === "chat" ? null : <circle className={cn("fill-current", modeToneClass(mode))} cx="12" cy="12" r="2.5" />}
     </svg>
   );
-}
-
-function ModeDot({ mode }: { mode: Session["activeMode"] }) {
-  if (mode === "chat") {
-    return null;
-  }
-  return <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full bg-current", modeToneClass(mode))} />;
-}
-
-function modeToneClass(mode: Session["activeMode"]) {
-  return mode === "work" ? "text-blue-500 dark:text-blue-400" : "text-yellow-500 dark:text-yellow-400";
 }
 
 function strokeClass(tone: "ok" | "warning" | "danger") {
@@ -348,28 +333,63 @@ function progressClass(tone: "ok" | "warning" | "danger") {
   return "bg-emerald-500";
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+function formatNumber(value: number, locale: string, maximumFractionDigits = 0) {
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits,
+    useGrouping: !locale.startsWith("zh"),
+  }).format(value);
 }
 
-function formatTokens(value: number) {
+function formatTokens(value: number, locale: string) {
+  if (!locale.startsWith("zh")) {
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000_000) {
+      return `${(value / 1_000_000_000).toFixed(2)}B`;
+    }
+    if (abs >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(2)}M`;
+    }
+    if (abs >= 1_000) {
+      const scaled = value / 1_000;
+      return `${scaled.toFixed(scaled >= 10 ? 0 : 1).replace(/\.0$/, "")}K`;
+    }
+    return formatNumber(value, locale);
+  }
+
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) {
-    return `${formatFixedUnit(value / 1_000_000_000)}B`;
+  const units = tokenUnits(locale);
+  for (const unit of units) {
+    if (abs >= unit.divisor) {
+      const scaled = value / unit.divisor;
+      const scaledAbs = Math.abs(scaled);
+      const maximumFractionDigits = locale.startsWith("zh")
+        ? scaledAbs >= 100
+          ? 0
+          : scaledAbs >= 10
+            ? 1
+            : 2
+        : unit.divisor >= 1_000_000
+          ? 2
+          : scaledAbs >= 10
+            ? 0
+            : 1;
+      return `${formatNumber(scaled, locale, maximumFractionDigits)}${unit.suffix}`;
+    }
   }
-  if (abs >= 1_000_000) {
-    return `${formatFixedUnit(value / 1_000_000)}M`;
-  }
-  if (abs >= 1_000) {
-    return `${formatKUnit(value / 1_000)}K`;
-  }
-  return formatNumber(value);
+  return formatNumber(value, locale);
 }
 
-function formatFixedUnit(value: number) {
-  return value.toFixed(2);
-}
-
-function formatKUnit(value: number) {
-  return value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, "");
+function tokenUnits(locale: string) {
+  if (locale.startsWith("zh")) {
+    const traditional = locale === "zh-TW";
+    return [
+      { divisor: 100_000_000, suffix: traditional ? "億" : "亿" },
+      { divisor: 10_000, suffix: traditional ? "萬" : "万" },
+    ];
+  }
+  return [
+    { divisor: 1_000_000_000, suffix: "B" },
+    { divisor: 1_000_000, suffix: "M" },
+    { divisor: 1_000, suffix: "K" },
+  ];
 }

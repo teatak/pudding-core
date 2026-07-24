@@ -78,6 +78,7 @@ export type TurnPhase =
 export type TurnPhaseState = {
   sessionID: string;
   phase: TurnPhase;
+  activity?: "steering";
   updatedAt: string;
   turnID?: string;
   clientMessageID?: string;
@@ -146,6 +147,7 @@ function phaseForTurn(
   if (
     current?.sessionID === input.sessionID &&
     current.phase === input.phase &&
+    current.activity === input.activity &&
     current.turnID === input.turnID &&
     current.clientMessageID === input.clientMessageID &&
     current.error === input.error
@@ -184,7 +186,7 @@ function upsertPendingUser(
   const existing = (pendingUsers[message.sessionID] || []).find(
     (item) => item.clientMessageID === message.clientMessageID,
   );
-  const next = existing
+  const next: PendingUserMessage = existing
     ? {
         ...existing,
         ...message,
@@ -488,6 +490,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             ...state.turnPhases,
             [event.sessionID]: makePhase({
               clientMessageID: event.clientMessageID,
+              activity: "steering",
               phase: "awaiting_model",
               sessionID: event.sessionID,
               turnID: event.turnID,

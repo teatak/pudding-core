@@ -287,19 +287,19 @@ function AssistantPhaseItem({ phase }: { phase: TurnPhaseState }) {
         <PhaseDot phase={phase.phase} />
       </span>
       <span className="flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0 text-muted-foreground/70">{phaseLabel(phase.phase, t)}</span>
+        <span className="shrink-0 text-muted-foreground/70">{phaseLabel(phase, t)}</span>
         {elapsed ? <span className="shrink-0 text-muted-foreground/50">{elapsed}</span> : null}
       </span>
     </div>
   );
 }
 
-function phaseLabel(phase: TurnPhaseState["phase"], t: (key: string) => string) {
-  switch (phase) {
+function phaseLabel(phase: TurnPhaseState, t: (key: string) => string) {
+  switch (phase.phase) {
     case "submitting":
       return t("transcript.phaseSubmitting");
     case "awaiting_model":
-      return t("transcript.phaseAwaitingModel");
+      return t(phase.activity === "steering" ? "transcript.phaseSteering" : "transcript.phaseAwaitingModel");
     case "thinking":
       return t("transcript.thinking");
     case "streaming_tool_args":

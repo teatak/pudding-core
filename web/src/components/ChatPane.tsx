@@ -19,6 +19,7 @@ import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
 import { PhaseDot } from "@/components/PhaseDot";
 import { SessionAppsControl } from "@/components/SessionAppsControl";
+import { SessionModeIcon } from "@/components/SessionModeIcon";
 import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
@@ -191,7 +192,7 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
   return (
     <section className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
-        className="flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-5"
+        className="flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-6"
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
         style={Object.keys(headerStyle).length ? headerStyle : undefined}
       >
@@ -338,6 +339,13 @@ function HeaderSessionTitle({
         editing ? "flex w-full" : "inline-flex",
       )}
     >
+      <span
+        aria-label={t(`mode.${session.activeMode}`)}
+        className="no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-muted-foreground"
+        role="img"
+      >
+        <SessionModeIcon mode={session.activeMode} />
+      </span>
       <div
         className={cn(
           "relative grid h-7 min-w-0 max-w-full items-center",
@@ -379,7 +387,7 @@ function HeaderSessionTitle({
           <button
             type="button"
             aria-label={t("session.rename")}
-            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left font-normal leading-6 select-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-0 text-left font-medium leading-6 select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
 
             onDoubleClick={startEditing}
           >

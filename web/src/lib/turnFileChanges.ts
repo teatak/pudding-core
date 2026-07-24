@@ -1,5 +1,13 @@
 import type { TurnFileChange } from "@/api/client";
 
+export function turnFileDiffChanges(changes: TurnFileChange[]) {
+  return changes.filter((change) => !change.binary);
+}
+
+export function turnFileResourceChanges(changes: TurnFileChange[]) {
+  return changes.filter((change) => change.binary);
+}
+
 export function turnFileChangeLabel(change: TurnFileChange, changes: TurnFileChange[]) {
   const matchingPaths = changes.filter((candidate) => candidate.path === change.path);
   if (matchingPaths.length <= 1) {

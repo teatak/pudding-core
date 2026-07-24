@@ -155,7 +155,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
   const [textFocused, setTextFocused] = useState(false);
-  const [runningDeliveryMode, setRunningDeliveryMode] = useState<RunningDeliveryMode>("queue");
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -198,6 +197,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
   }, [ensureSessionDraft, form, sessionID]);
   const [canSend, setCanSend] = useState(false);
+  const [hasInput, setHasInput] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [draftSlashCommand, setDraftSlashCommand] = useState<SlashSubmitCommand | null>(null);
@@ -554,37 +554,32 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     [onSubmitError],
   );
   const submitMutation = useMutation({
-    mutationFn: async (value: z.infer<typeof composerSchema> & { parts: ContentPart[] }) => {
+    mutationFn: async (
+      value: z.infer<typeof composerSchema> & { deliveryMode?: RunningDeliveryMode; parts: ContentPart[] },
+    ) => {
       const clientMessageID = draftIDRef.current;
       if (!resolvedModel) {
         throw new APIError(400, "no_model");
       }
       const { provider, model } = resolvedModel;
+      const guideNow = Boolean(runningTurnID && value.deliveryMode === "steer");
       addPendingUser({
         sessionID,
         clientMessageID,
-        status: "submitting",
+        status: guideNow ? "steering" : "submitting",
         text: value.text,
         parts: value.parts,
         createdAt: new Date().toISOString(),
+        turnID: guideNow ? runningTurnID : undefined,
       });
       if (session.provider !== provider || session.model !== model) {
         await updateSession(token, sessionID, { provider, model });
       }
-      if (runningTurnID && runningDeliveryMode === "steer") {
+      if (runningTurnID && guideNow) {
         const result = await steerTurn(token, sessionID, runningTurnID, {
           clientMessageID,
           text: value.text,
           parts: value.parts,
-        });
-        addPendingUser({
-          sessionID,
-          clientMessageID,
-          status: "steering",
-          text: value.text,
-          parts: value.parts,
-          createdAt: new Date().toISOString(),
-          turnID: runningTurnID,
         });
         clearSubmittingTurn(sessionID, clientMessageID);
         return result;
@@ -769,7 +764,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     !renameMutation.isPending &&
     (Boolean(resolvedModel) || Boolean(draftSlashCommand && draftSlashCommand.id !== "summary"));
   const stopEnabled = running && !cancelMutation.isPending;
-  const showStopButton = running || cancelMutation.isPending;
+  const showStopButton = (running || cancelMutation.isPending) && !hasInput;
   const showSendButton =
     !showStopButton ||
     (canSend && !submitMutation.isPending && !compactMutation.isPending && !systemSubmitMutation.isPending && !renameMutation.isPending);
@@ -789,7 +784,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     });
   }, [clearMascotError, navigate, onSubmitError, resetSessionDraft]);
 
-  const submitDraft = (value: z.infer<typeof composerSchema>) => {
+  const submitDraftWithMode = (
+    value: z.infer<typeof composerSchema>,
+    deliveryMode?: RunningDeliveryMode,
+  ) => {
     const text = value.text.trim();
     const attachmentItemsToSubmit = attachments.filter((item) => item.status === "uploaded" && item.attachment);
     const attachmentsToSubmit = attachmentItemsToSubmit.flatMap((item) => (item.attachment ? [item.attachment] : []));
@@ -848,10 +846,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       projectReferencesToSubmit,
     );
     submitMutation.mutate({
+      deliveryMode,
       text,
       parts: draftUIContext ? [...inputParts, draftUIContext] : inputParts,
     });
   };
+  const submitDraft = (value: z.infer<typeof composerSchema>) => submitDraftWithMode(value);
 
   const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
     setResolvedModel((current) => {
@@ -944,9 +944,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   useEffect(() => {
     setMascotGaze({ type: "pointer" });
   }, [sessionID]);
-  useEffect(() => {
-    setRunningDeliveryMode("queue");
-  }, [runningTurnID, sessionID]);
 
   return (
     <>
@@ -1024,6 +1021,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 setSessionDraftText={setSessionDraftText}
                 sessionID={sessionID}
                 onCanSendChange={setCanSend}
+                onHasContentChange={setHasInput}
                 onMentionMenuOpenChange={setMentionMenuOpen}
                 onSlashMenuOpenChange={setSlashMenuOpen}
                 onDraftSlashCommandChange={setDraftSlashCommand}
@@ -1054,7 +1052,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   const hasModel = Boolean(resolvedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
                   const pending = submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending;
                   if (info.canSend && !info.mentionMenuOpen && !info.slashMenuOpen && !pending && hasModel) {
-                    void form.handleSubmit(submitDraft)();
+                    void form.handleSubmit((value) =>
+                      submitDraftWithMode(value, info.guideNow && runningTurnID ? "steer" : undefined),
+                    )();
                   }
                 }}
                 onPaste={handleTextPaste}
@@ -1077,7 +1077,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               session={session}
               showSendButton={showSendButton}
               showStopButton={showStopButton}
-              runningDeliveryMode={runningDeliveryMode}
               steering={Boolean(runningTurnID)}
               stopEnabled={stopEnabled}
               submitPending={
@@ -1097,7 +1096,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onModelPickerClose={focusTextarea}
               onReasoningChange={setSessionReasoningEffort}
               onResolvedModelChange={handleResolvedModelChange}
-              onRunningDeliveryModeChange={setRunningDeliveryMode}
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>

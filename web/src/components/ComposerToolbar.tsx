@@ -1,7 +1,6 @@
-import { ArrowUp, ChevronDown, Clock3, CornerDownRight } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 
 import type { AudioBindings, Session } from "@/api/client";
-import { AppDropdownMenuRadioItem as DropdownMenuRadioItem } from "@/components/AppMenu";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
@@ -11,12 +10,6 @@ import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { Spinner } from "@/components/Spinner";
 import { UIContextControl } from "@/components/UIContextControl";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import type { ResolvedModelSelection } from "@/lib/modelSelection";
@@ -36,7 +29,6 @@ type ComposerToolbarProps = {
   session: Session;
   showSendButton: boolean;
   showStopButton: boolean;
-  runningDeliveryMode: "steer" | "queue";
   steering: boolean;
   stopEnabled: boolean;
   submitPending: boolean;
@@ -47,7 +39,6 @@ type ComposerToolbarProps = {
   onModelPickerClose: () => void;
   onReasoningChange: (value: string) => void;
   onResolvedModelChange: (value: ResolvedModelSelection | null) => void;
-  onRunningDeliveryModeChange: (value: "steer" | "queue") => void;
   onUIContextEnabledChange: (enabled: boolean) => void;
 };
 
@@ -65,7 +56,6 @@ export function ComposerToolbar({
   session,
   showSendButton,
   showStopButton,
-  runningDeliveryMode,
   steering,
   stopEnabled,
   submitPending,
@@ -76,7 +66,6 @@ export function ComposerToolbar({
   onModelPickerClose,
   onReasoningChange,
   onResolvedModelChange,
-  onRunningDeliveryModeChange,
   onUIContextEnabledChange,
 }: ComposerToolbarProps) {
   const { t } = useI18n();
@@ -108,7 +97,7 @@ export function ComposerToolbar({
         </span>
       ) : null}
       <div className="ml-auto flex min-w-0 items-center gap-1">
-        <ContextUsageRing mode={session.activeMode} token={token} sessionID={session.id} />
+        <ContextUsageRing token={token} sessionID={session.id} />
         <ModelReasoningPicker
           className="min-w-0"
           token={token}
@@ -148,47 +137,10 @@ export function ComposerToolbar({
         </Tooltip>
       ) : null}
       {showSendButton ? (
-        steering ? (
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    aria-label={t("composer.deliveryMode")}
-                    className="size-8 rounded-full"
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <ChevronDown />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{t("composer.deliveryMode")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" side="top" className="w-48">
-              <DropdownMenuRadioGroup
-                value={runningDeliveryMode}
-                onValueChange={(value) => onRunningDeliveryModeChange(value as "steer" | "queue")}
-              >
-                <DropdownMenuRadioItem value="steer">
-                  <CornerDownRight />
-                  {t("composer.steer")}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="queue">
-                  <Clock3 />
-                  {t("composer.queue")}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null
-      ) : null}
-      {showSendButton ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              aria-label={t(steering && runningDeliveryMode === "steer" ? "composer.steer" : steering ? "composer.queue" : "composer.send")}
+              aria-label={t(steering ? "composer.queue" : "composer.send")}
               className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
               disabled={!sendEnabled}
               size="icon"
@@ -198,8 +150,17 @@ export function ComposerToolbar({
               {submitPending ? <Spinner /> : <ArrowUp />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>
-            {t(steering && runningDeliveryMode === "steer" ? "composer.steer" : steering ? "composer.queue" : "composer.send")}
+          <TooltipContent className="grid gap-1">
+            <span className="flex items-center gap-2">
+              <kbd className="font-mono text-[11px]">Enter</kbd>
+              <span>{t("composer.send")}</span>
+            </span>
+            {steering ? (
+              <span className="flex items-center gap-2">
+                <kbd className="font-mono text-[11px]">⌘ Enter</kbd>
+                <span>{t("composer.steerShortcut")}</span>
+              </span>
+            ) : null}
           </TooltipContent>
         </Tooltip>
       ) : null}

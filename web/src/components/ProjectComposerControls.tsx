@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FolderOpen, ShieldCheck } from "lucide-react";
+import { Check, FolderOpen, Hand, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,6 +13,11 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const projectApprovalModes: Project["approvalMode"][] = ["ask", "auto", "full"];
+const projectApprovalModeIcons = {
+  ask: Hand,
+  auto: ShieldCheck,
+  full: ShieldAlert,
+};
 
 export function ProjectComposerControls({
   projectID,
@@ -104,6 +109,7 @@ function ProjectApprovalControl({
     return null;
   }
   const value = project?.approvalMode || "auto";
+  const CurrentApprovalIcon = projectApprovalModeIcons[value];
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -116,38 +122,42 @@ function ProjectApprovalControl({
           type="button"
           variant="ghost"
         >
-          {busy ? <Spinner className="size-4" /> : <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />}
+          {busy ? <Spinner className="size-4" /> : <CurrentApprovalIcon className="size-4 shrink-0 text-muted-foreground" />}
           <span className="pudding-composer-approval-label min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 gap-1 p-1" collisionPadding={12} side="top" sideOffset={8}>
-        {projectApprovalModes.map((mode) => (
-          <button
-            key={mode}
-            aria-label={t("composer.projectApproval")}
-            className={cn(
-              "flex w-full items-start gap-1.5 rounded-md px-2 py-0.5 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
-              value === mode && "bg-muted",
-            )}
-            type="button"
-            onClick={() => {
-              if (mode !== value) {
-                onChange(mode);
-              }
-              setOpen(false);
-            }}
-          >
-            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
-              {value === mode ? <Check className="size-3.5" /> : null}
-            </span>
-            <span className="grid min-w-0">
-              <span className="font-medium leading-5">{t(`composer.projectApproval.${mode}`)}</span>
-              <span className="text-[10px] leading-3.5 text-muted-foreground">
-                {t(`composer.projectApproval.${mode}.desc`)}
+      <PopoverContent align="start" className="w-64 gap-1 p-1" collisionPadding={12} side="top" sideOffset={8}>
+        {projectApprovalModes.map((mode) => {
+          const ApprovalIcon = projectApprovalModeIcons[mode];
+          return (
+            <button
+              key={mode}
+              aria-label={t("composer.projectApproval")}
+              className={cn(
+                "relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
+                value === mode && "bg-muted",
+              )}
+              type="button"
+              onClick={() => {
+                if (mode !== value) {
+                  onChange(mode);
+                }
+                setOpen(false);
+              }}
+            >
+              <ApprovalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span className="grid min-w-0 flex-1">
+                <span className={cn("font-medium leading-5", value === mode && "pr-5")}>
+                  {t(`composer.projectApproval.${mode}`)}
+                </span>
+                <span className="text-[10px] leading-3.5 text-muted-foreground">
+                  {t(`composer.projectApproval.${mode}.desc`)}
+                </span>
               </span>
-            </span>
-          </button>
-        ))}
+              {value === mode ? <Check className="absolute top-1.5 right-2 size-3.5" /> : null}
+            </button>
+          );
+        })}
       </PopoverContent>
     </Popover>
   );
