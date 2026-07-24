@@ -281,6 +281,11 @@ export function ProjectFileViewer({
     () => file ? { ...file, content, size: new TextEncoder().encode(content).length } : undefined,
     [content, file],
   );
+  const sourceEditorVisible = Boolean(
+    previewFile
+      && !(isMarkdown && fileViewMode === "preview")
+      && !(documentPreviewKind && fileViewMode === "preview"),
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
@@ -335,7 +340,7 @@ export function ProjectFileViewer({
           <Button size="sm" type="button" variant="outline" onClick={() => save(true)}>{t("project.browserOverwriteExternal")}</Button>
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={sourceEditorVisible ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-auto"}>
         {!fileSelection ? (
           <ProjectViewerStatus icon={<Folders className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
         ) : isImage ? (

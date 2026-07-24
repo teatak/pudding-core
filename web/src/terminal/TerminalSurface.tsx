@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import { terminalWebSocketURL, type Terminal } from "@/api/client";
 import { useI18n } from "@/i18n";
@@ -19,7 +19,7 @@ type TerminalStatusMessage = {
   exitCode?: number;
 };
 
-export function TerminalSurface({
+export const TerminalSurface = memo(function TerminalSurface({
   active,
   activeTerminalID,
   fallbackDimensions = DEFAULT_TERMINAL_DIMENSIONS,
@@ -62,7 +62,7 @@ export function TerminalSurface({
       ))}
     </div>
   );
-}
+});
 
 function TerminalPane({
   active,

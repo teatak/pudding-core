@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Folders, Globe, PanelRightClose, Plus, SquareTerminal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -70,6 +70,7 @@ import {
 } from "@/state/filePreviewStore";
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
+import { retainWorkspaceActivities } from "@/state/workspaceActivityStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
@@ -95,7 +96,11 @@ type WorkspacePaneProps = {
   secondarySessionID?: string;
 };
 
-export function WorkspacePane({ token, sessionID, secondarySessionID }: WorkspacePaneProps) {
+export const WorkspacePane = memo(function WorkspacePane({
+  token,
+  sessionID,
+  secondarySessionID,
+}: WorkspacePaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const terminalDimensionsRef = useRef<TerminalDimensions>({ ...DEFAULT_TERMINAL_DIMENSIONS });
@@ -179,7 +184,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     return initial;
   });
   const activeFilePreviewID = actorSessionID ? activeFilePreviewIDs[actorSessionID] : undefined;
-  const setActiveFilePreviewID = (previewID: string | undefined) => {
+  const setActiveFilePreviewID = useCallback((previewID: string | undefined) => {
     if (!actorSessionID) {
       return;
     }
@@ -194,7 +199,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       delete next[actorSessionID];
       return next;
     });
-  };
+  }, [actorSessionID]);
   useEffect(() => {
     const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
     setRetainedFilePreviews((current) => {
@@ -257,19 +262,26 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     staleTime: 30_000,
   });
 
-  const items = itemsQuery.data?.items ?? [];
-  const closedItems = closedItemsQuery.data?.items ?? [];
-  const savedItems = savedItemsQuery.data?.items ?? [];
+  const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
+  const closedItems = useMemo(() => closedItemsQuery.data?.items ?? [], [closedItemsQuery.data?.items]);
+  const savedItems = useMemo(() => savedItemsQuery.data?.items ?? [], [savedItemsQuery.data?.items]);
+  useEffect(() => {
+    if (!actorSessionID || itemsQuery.isLoading) {
+      return;
+    }
+    retainWorkspaceActivities(actorSessionID, "canvas", items.map((item) => item.id));
+  }, [actorSessionID, items, itemsQuery.isLoading]);
   const selectedCanvasItemID = activeCanvasItemIDs[actorSessionID];
   const activeCanvasItem = items.find((item) => item.id === selectedCanvasItemID) || topCanvasItem(items);
-  const selectCanvasItem = (itemID: string) => {
+  const selectCanvasItem = useCallback((itemID: string) => {
     if (!actorSessionID) return;
     setActiveCanvasItemIDs((current) => (
       current[actorSessionID] === itemID ? current : { ...current, [actorSessionID]: itemID }
     ));
-  };
+  }, [actorSessionID]);
   const {
     activeBrowserTabID,
+    activeBrowserSelection,
     activeSurface,
     browserActive,
     browserTabs,
@@ -295,6 +307,36 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   });
   const terminalActive = activeSurface === "terminal";
   const projectActive = activeSurface === "project" && hasProject;
+  const getInitialTerminalDimensions = useCallback(() => terminalDimensionsRef.current, []);
+  const activateTerminalSurface = useCallback(() => {
+    setActiveFilePreviewID(undefined);
+    selectTerminalSurface();
+  }, [selectTerminalSurface, setActiveFilePreviewID]);
+  const deactivateTerminalSurface = useCallback(() => {
+    if (browserTabs.length > 0) {
+      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
+    } else if (surfaceFilePreviews.length > 0) {
+      setActiveFilePreviewID(surfaceFilePreviews[0].id);
+      selectCanvasSurface();
+    } else if (items.length > 0) {
+      selectCanvasSurface();
+    } else if (projectTabVisible) {
+      selectProjectSurface();
+    } else {
+      selectWorkspaceSurface();
+    }
+  }, [
+    activeBrowserTabID,
+    browserTabs,
+    items.length,
+    projectTabVisible,
+    selectBrowserTab,
+    selectCanvasSurface,
+    selectProjectSurface,
+    selectWorkspaceSurface,
+    setActiveFilePreviewID,
+    surfaceFilePreviews,
+  ]);
   const {
     activeTerminalID,
     closeTerminal,
@@ -308,29 +350,11 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   } = useWorkspaceTerminals({
     active: terminalActive,
     enabled,
-    getInitialDimensions: () => terminalDimensionsRef.current,
+    getInitialDimensions: getInitialTerminalDimensions,
     sessionID: actorSessionID,
     token,
-    onActivate: () => {
-      setActiveFilePreviewID(undefined);
-      selectTerminalSurface();
-    },
-    onDeactivate: () => {
-      if (browserTabs.length > 0) {
-        selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-      } else if (surfaceFilePreviews.length > 0) {
-        setActiveFilePreviewID(surfaceFilePreviews[0].id);
-        selectCanvasSurface();
-      } else {
-        if (items.length > 0) {
-          selectCanvasSurface();
-        } else if (projectTabVisible) {
-          selectProjectSurface();
-        } else {
-          selectWorkspaceSurface();
-        }
-      }
-    },
+    onActivate: activateTerminalSurface,
+    onDeactivate: deactivateTerminalSurface,
   });
   useEffect(() => {
     if (!actorSessionID) {
@@ -398,10 +422,13 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     });
     return mounted;
   }, [actorSessionID, browserTabs, requiredBrowserTabs, retainedBrowserTabs]);
-  const mountedTerminals = actorSessionID
-    ? { ...retainedTerminals, [actorSessionID]: terminals }
-    : retainedTerminals;
-  const updateMountedTerminalStatus = (
+  const mountedTerminals = useMemo(
+    () => actorSessionID
+      ? { ...retainedTerminals, [actorSessionID]: terminals }
+      : retainedTerminals,
+    [actorSessionID, retainedTerminals, terminals],
+  );
+  const updateMountedTerminalStatus = useCallback((
     targetSessionID: string,
     terminalID: string,
     status: Terminal["status"],
@@ -419,7 +446,17 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       ...current,
       [targetSessionID]: update(current[targetSessionID]),
     }));
-  };
+  }, [queryClient, retainedTerminals]);
+  const mountedTerminalStatusHandlers = useMemo(
+    () => Object.fromEntries(
+      Object.keys(mountedTerminals).map((targetSessionID) => [
+        targetSessionID,
+        (terminalID: string, status: Terminal["status"], exitCode?: number) =>
+          updateMountedTerminalStatus(targetSessionID, terminalID, status, exitCode),
+      ]),
+    ),
+    [mountedTerminals, updateMountedTerminalStatus],
+  );
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
   const filePreviewActive = Boolean(
     activeFilePreview
@@ -483,6 +520,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             name: browserTabTitle(tab, t("browser.newTab"), t("browser.newTab")),
             url: tab.url,
             kind: tab.mode,
+            selectionText: activeBrowserSelection || undefined,
           }
         : { type: "ui_context", surface: "browser" };
     }
@@ -503,6 +541,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     return undefined;
   }, [
     activeBrowserTabID,
+    activeBrowserSelection,
     activeCanvasItem,
     activeFilePreview,
     activeSurface,
@@ -1039,7 +1078,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("workspace.add")}
-                className="no-drag-region h-(--workspace-toolbar-tab-h) w-(--workspace-toolbar-tab-h) shrink-0 rounded-md text-muted-foreground"
+                className="pudding-toolbar-icon-button no-drag-region shrink-0 rounded-md"
                 disabled={creatingBrowserTab || creatingTerminal}
                 size="icon-sm"
 
@@ -1198,9 +1237,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               sessionID={targetSessionID}
               terminals={sessionTerminals}
               token={token}
-              onStatus={(terminalID, status, exitCode) =>
-                updateMountedTerminalStatus(targetSessionID, terminalID, status, exitCode)
-              }
+              onStatus={mountedTerminalStatusHandlers[targetSessionID]}
             />
           ) : null,
         )}
@@ -1233,7 +1270,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       </AlertDialog>
     </aside>
   );
-}
+});
 
 function sameResourceList<T>(current: T[] | undefined, next: T[]) {
   return Boolean(current && current.length === next.length && current.every((item, index) => item === next[index]));

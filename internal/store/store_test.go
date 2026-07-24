@@ -159,6 +159,30 @@ func TestNormalizeContentPartsCapsUIContextSelection(t *testing.T) {
 	}
 }
 
+func TestContentPartMarshalJSONPreservesUIContextSelection(t *testing.T) {
+	part := ContentPart{
+		Type:          ContentPartUIContext,
+		Surface:       "browser",
+		Resource:      "browser_tab",
+		CallID:        "tab_1",
+		Name:          "Example",
+		URL:           "https://example.com/",
+		SelectionText: "selected browser text",
+		ResourceKind:  "webview",
+	}
+	data, err := json.Marshal(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded["selectionText"]; got != part.SelectionText {
+		t.Fatalf("selectionText = %v, want %q; json = %s", got, part.SelectionText, data)
+	}
+}
+
 func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
 		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)

@@ -742,6 +742,64 @@ func TestQueuedInputPersistsParts(t *testing.T) {
 	}
 }
 
+func TestQueuedInputPersistsBrowserSelectionContext(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_browser_selection")
+	const selectionText = "selected browser text"
+	parts := []store.ContentPart{
+		{
+			Type:          store.ContentPartUIContext,
+			Surface:       "browser",
+			Resource:      "browser_tab",
+			CallID:        "tab_1",
+			Name:          "Example",
+			URL:           "https://example.com/",
+			SelectionText: selectionText,
+			ResourceKind:  "webview",
+		},
+		{Type: store.ContentPartText, Text: "translate"},
+	}
+	if _, err := st.QueueInput(ctx, store.QueueInputInput{
+		SessionID:       "sess_browser_selection",
+		ClientMessageID: "client_browser_selection",
+		Text:            "translate",
+		Parts:           parts,
+		Provider:        "mock",
+		Model:           "mock",
+		Mode:            store.ModeChat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	queued, err := reopened.ListQueuedInputs(ctx, "sess_browser_selection")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 || len(queued[0].Parts) != 2 || queued[0].Parts[0].SelectionText != selectionText {
+		t.Fatalf("queued browser selection context was not persisted: %+v", queued)
+	}
+	promoted, err := reopened.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{
+		SessionID:     "sess_browser_selection",
+		TurnID:        "turn_browser_selection",
+		UserMessageID: "msg_browser_selection",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(promoted.UserMessage.Parts) != 2 || promoted.UserMessage.Parts[0].SelectionText != selectionText {
+		t.Fatalf("promoted browser selection context was not persisted: %+v", promoted.UserMessage.Parts)
+	}
+}
+
 func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")

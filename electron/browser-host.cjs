@@ -10,6 +10,8 @@ const screenshotMaxDimension = 16_384;
 const screenshotMaxPixels = 32 * 1024 * 1024;
 const screenshotMaxBytes = 64 * 1024 * 1024;
 const selectionMaxCharacters = 16 * 1024;
+const selectionFrameReadTimeoutMS = 1_000;
+const selectionBindingName = "__puddingBrowserSelectionChanged";
 const maxTabsPerSession = 8;
 const maxTabsTotal = 16;
 const maxPopupWindowsTotal = 8;
@@ -27,6 +29,7 @@ class BrowserHost {
     this.resolveFavicon = typeof windowHooks?.resolveFavicon === "function" ? windowHooks.resolveFavicon : async () => "";
     this.onPopupCreated = typeof windowHooks?.created === "function" ? windowHooks.created : () => {};
     this.onBlockedWindowNavigation = typeof windowHooks?.blockedNavigation === "function" ? windowHooks.blockedNavigation : () => false;
+    this.onSelectionChanged = typeof windowHooks?.selectionChanged === "function" ? windowHooks.selectionChanged : () => {};
     this.boundPopupContents = new WeakSet();
     this.popupWindows = new Set();
   }
@@ -131,10 +134,27 @@ class BrowserHost {
 
   async readSelection(request) {
     const slot = this.requireLiveSlot(request);
-    const result = await this.runCommand(slot, () => evaluateJSON(slot, selectionScript()));
-    return {
-      selectionText: String(result.selectionText || "").trim().slice(0, selectionMaxCharacters),
-    };
+    const liveSelectionText = await this.runCommand(slot, () => readLiveSelectionText(slot));
+    if (liveSelectionText) {
+      slot.selectionText = liveSelectionText;
+    }
+    return browserSelectionResult(liveSelectionText || slot.selectionText);
+  }
+
+  noteSelection(webContents, payload) {
+    for (const slot of this.slots.values()) {
+      if (slot.disposed || slot.webContents !== webContents) {
+        continue;
+      }
+      slot.selectionText = normalizeSelectionText(payload?.selectionText);
+      return {
+        selected: Boolean(slot.selectionText),
+        selectionText: slot.selectionText,
+        sessionID: slot.sessionID,
+        tabID: slot.tabID,
+      };
+    }
+    return null;
   }
 
   async screenshot(request) {
@@ -379,6 +399,7 @@ class BrowserHost {
       cdpReady: null,
       mainFrameID: "",
       mainFrameLoaderID: "",
+      selectionText: "",
     });
     this.slots.set(key, slot);
     this.bindSlotEvents(slot);
@@ -451,6 +472,7 @@ class BrowserHost {
       commandQueue: Promise.resolve(),
       mainFrameID: "",
       mainFrameLoaderID: "",
+      selectionText: "",
       navigationGeneration: 0,
       navigationWaiter: null,
       historyIndex: 0,
@@ -533,6 +555,22 @@ class BrowserHost {
           }
           await withTimeout(debug.sendCommand("Page.enable"), cdpCommandTimeoutMS, "Page.enable timed out");
           await withTimeout(debug.sendCommand("Runtime.enable"), cdpCommandTimeoutMS, "Runtime.enable timed out");
+          await withTimeout(
+            debug.sendCommand("Runtime.addBinding", { name: selectionBindingName }),
+            cdpCommandTimeoutMS,
+            "selection binding install timed out",
+          );
+          const selectionTracker = selectionTrackerScript();
+          await withTimeout(
+            debug.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: selectionTracker }),
+            cdpCommandTimeoutMS,
+            "selection tracker install timed out",
+          );
+          await withTimeout(
+            debug.sendCommand("Runtime.evaluate", { expression: selectionTracker }),
+            cdpCommandTimeoutMS,
+            "selection tracker activation timed out",
+          );
           const frameTree = await withTimeout(debug.sendCommand("Page.getFrameTree"), cdpCommandTimeoutMS, "Page.getFrameTree timed out");
           slot.mainFrameID = String(frameTree?.frameTree?.frame?.id || "");
           slot.mainFrameLoaderID = String(frameTree?.frameTree?.frame?.loaderId || "");
@@ -772,6 +810,7 @@ class BrowserHost {
           };
           slot.committedURL = nextURL;
           slot.committedTitle = "";
+          slot.selectionText = "";
           slot.faviconURL = "";
           slot.faviconSourceURL = "";
           slot.faviconResolveID += 1;
@@ -789,6 +828,7 @@ class BrowserHost {
         if (nextURL) {
           slot.committedURL = nextURL;
           slot.displayURL = nextURL;
+          slot.selectionText = "";
           slot.lastMainFrameNavigation = {
             url: nextURL,
             loaderID: slot.mainFrameLoaderID,
@@ -799,6 +839,15 @@ class BrowserHost {
         }
       } else if (method === "Page.loadEventFired") {
         this.scheduleMetadataRefresh(slot);
+      } else if (method === "Runtime.bindingCalled" && params?.name === selectionBindingName) {
+        const selection = selectionPayload(params?.payload);
+        slot.selectionText = selection.selectionText;
+        this.onSelectionChanged({
+          selected: Boolean(slot.selectionText),
+          selectionText: slot.selectionText,
+          sessionID: slot.sessionID,
+          tabID: slot.tabID,
+        });
       }
     });
     webContents.debugger.on("detach", () => {
@@ -969,12 +1018,110 @@ async function evaluateJSON(slot, script, options = {}) {
   return raw || {};
 }
 
+async function readLiveSelectionText(slot) {
+  const frames = liveFrames(slot.webContents);
+  if (frames.length > 0) {
+    const results = await Promise.allSettled(
+      frames.map((frame) => withTimeout(
+        frame.executeJavaScript(selectionScript()),
+        selectionFrameReadTimeoutMS,
+        "browser frame selection timed out",
+      )),
+    );
+    for (const result of results) {
+      if (result.status !== "fulfilled") {
+        continue;
+      }
+      const selectionText = selectionTextFromEvaluation(result.value);
+      if (selectionText) {
+        return selectionText;
+      }
+    }
+    return "";
+  }
+  const result = await evaluateJSON(slot, selectionScript());
+  return normalizeSelectionText(result.selectionText);
+}
+
+function liveFrames(webContents) {
+  try {
+    return (webContents?.mainFrame?.framesInSubtree || []).filter(
+      (frame) => frame && !frame.isDestroyed(),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function selectionTextFromEvaluation(value) {
+  try {
+    const result = typeof value === "string" ? JSON.parse(value) : value;
+    return normalizeSelectionText(result?.selectionText);
+  } catch {
+    return "";
+  }
+}
+
 function markSlotNavigationIntent(slot, url) {
   slot.displayURL = url;
   slot.displayTitle = "";
+  slot.selectionText = "";
   slot.navigationError = null;
   slot.version += 1;
   slot.updatedAt = new Date().toISOString();
+}
+
+function normalizeSelectionText(value) {
+  return String(value || "").trim().slice(0, selectionMaxCharacters);
+}
+
+function browserSelectionResult(selectionText) {
+  return { selectionText: normalizeSelectionText(selectionText) };
+}
+
+function selectionPayload(payload) {
+  try {
+    const parsed = JSON.parse(String(payload || ""));
+    return browserSelectionResult(parsed?.selectionText);
+  } catch {
+    return browserSelectionResult("");
+  }
+}
+
+function selectionTrackerScript() {
+  return `(() => {
+  if (globalThis.__puddingBrowserSelectionTrackerInstalled) return;
+  globalThis.__puddingBrowserSelectionTrackerInstalled = true;
+  const editableSelector = ${JSON.stringify(
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+  )};
+  let lastSelectionText = "";
+  const selectionElement = (node) => {
+    if (!node) return null;
+    return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  };
+  const readSelectionText = () => {
+    const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return "";
+    const anchorElement = selectionElement(selection.anchorNode);
+    const focusElement = selectionElement(selection.focusNode);
+    if (anchorElement?.closest?.(editableSelector) || focusElement?.closest?.(editableSelector)) return "";
+    return String(selection.toString() || "").trim().slice(0, ${selectionMaxCharacters});
+  };
+  const publishSelection = (allowEmpty = false) => {
+    const selectionText = readSelectionText();
+    if (!selectionText && !allowEmpty) return;
+    if (selectionText === lastSelectionText) return;
+    lastSelectionText = selectionText;
+    const binding = globalThis[${JSON.stringify(selectionBindingName)}];
+    if (typeof binding === "function") {
+      binding(JSON.stringify({selectionText}));
+    }
+  };
+  document.addEventListener("selectionchange", () => queueMicrotask(() => publishSelection()), true);
+  document.addEventListener("pointerup", () => queueMicrotask(() => publishSelection(true)), true);
+  document.addEventListener("keyup", () => queueMicrotask(() => publishSelection(true)), true);
+})()`;
 }
 
 function isNavigationAbortCode(errorCode) {

@@ -478,6 +478,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		AudioTranscript string          `json:"audioTranscript,omitempty"`
 		Surface         string          `json:"surface,omitempty"`
 		Resource        string          `json:"resource,omitempty"`
+		SelectionText   string          `json:"selectionText,omitempty"`
 		ResourceKind    string          `json:"kind,omitempty"`
 		RootID          string          `json:"rootID,omitempty"`
 		StartLine       int             `json:"startLine,omitempty"`
@@ -506,6 +507,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		AudioTranscript: p.AudioTranscript,
 		Surface:         p.Surface,
 		Resource:        p.Resource,
+		SelectionText:   p.SelectionText,
 		ResourceKind:    p.ResourceKind,
 		RootID:          p.RootID,
 		StartLine:       p.StartLine,

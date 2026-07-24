@@ -25,15 +25,17 @@ test("hardens the managed browser webview before attachment", () => {
     preload: "file:///tmp/untrusted-preload.cjs",
     src: "about:blank",
   };
+  const trustedPreloadPath = "/app/electron/browser-selection-preload.cjs";
 
   assert.equal(hardenManagedBrowserWebview(
     { preventDefault: () => { prevented = true; } },
     preferences,
     params,
     "persist:pudding-default",
+    trustedPreloadPath,
   ), true);
   assert.equal(prevented, false);
-  assert.equal(preferences.preload, undefined);
+  assert.equal(preferences.preload, trustedPreloadPath);
   assert.equal(params.preload, undefined);
   assert.equal(preferences.contextIsolation, true);
   assert.equal(preferences.nodeIntegration, false);

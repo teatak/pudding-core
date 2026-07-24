@@ -98,7 +98,12 @@ export function ProjectEditor({
   const syncingRef = useRef(false);
   const mouseSelectingRef = useRef(false);
   const valueRef = useRef(value);
+  const selectionActionRef = useRef<SelectionAction | undefined>(undefined);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
+  const commitSelectionAction = (action?: SelectionAction) => {
+    selectionActionRef.current = action;
+    setSelectionAction(action);
+  };
   darkRef.current = dark;
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
@@ -112,6 +117,8 @@ export function ProjectEditor({
     let cancelled = false;
     let editor: monaco.editor.IStandaloneCodeEditor | undefined;
     let model: monaco.editor.ITextModel | undefined;
+    let layoutFrame = 0;
+    let resizeObserver: ResizeObserver | undefined;
     const disposables: monaco.IDisposable[] = [];
     const language = monacoLanguageFromPath(path);
 
@@ -121,7 +128,7 @@ export function ProjectEditor({
       editor = monaco.editor.create(hostRef.current, {
         model,
         theme: darkRef.current ? darkTheme : lightTheme,
-        automaticLayout: true,
+        automaticLayout: false,
         bracketPairColorization: { enabled: true },
         contextmenu: false, // Delegate right-clicks to Electron's native edit menu.
         folding: true,
@@ -145,6 +152,30 @@ export function ProjectEditor({
         wordWrap: "off",
       });
       editorRef.current = editor;
+      let lastLayoutWidth = -1;
+      let lastLayoutHeight = -1;
+      const layoutEditor = () => {
+        layoutFrame = 0;
+        const host = hostRef.current;
+        if (!host || editorRef.current !== editor) return;
+        const width = host.clientWidth;
+        const height = host.clientHeight;
+        if (width === lastLayoutWidth && height === lastLayoutHeight) return;
+        lastLayoutWidth = width;
+        lastLayoutHeight = height;
+        editor.layout({ width, height });
+      };
+      const scheduleEditorLayout = () => {
+        if (layoutFrame) return;
+        layoutFrame = window.requestAnimationFrame(layoutEditor);
+      };
+      resizeObserver = new ResizeObserver(scheduleEditorLayout);
+      resizeObserver.observe(hostRef.current);
+      scheduleEditorLayout();
+      const hideSelectionAction = () => {
+        if (!selectionActionRef.current) return;
+        commitSelectionAction(undefined);
+      };
       disposables.push(
         editor.onDidChangeModelContent(() => {
           if (!syncingRef.current) onChangeRef.current(editor?.getValue() || "");
@@ -152,24 +183,29 @@ export function ProjectEditor({
         editor.onMouseDown((event) => {
           if (!event.event.leftButton) return;
           mouseSelectingRef.current = true;
-          setSelectionAction(undefined);
+          if (selectionActionRef.current) commitSelectionAction(undefined);
         }),
         editor.onMouseUp(() => {
           if (!mouseSelectingRef.current) return;
           mouseSelectingRef.current = false;
           requestAnimationFrame(() => {
             if (editorRef.current === editor) {
-              updateSelectionAction(editor, containerRef.current, setSelectionAction);
+              updateSelectionAction(editor, containerRef.current, commitSelectionAction);
             }
           });
         }),
         editor.onDidChangeCursorSelection(() => {
           if (!mouseSelectingRef.current) {
-            updateSelectionAction(editor, containerRef.current, setSelectionAction);
+            updateSelectionAction(editor, containerRef.current, commitSelectionAction);
           }
         }),
-        editor.onDidScrollChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
-        editor.onDidLayoutChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
+        // Repositioning the floating selection action on every Monaco scroll event
+        // forces geometry reads and a React render in the editor's hot path. Hide it
+        // while the viewport moves; the next selection event will place it again.
+        editor.onDidScrollChange(() => {
+          hideSelectionAction();
+        }),
+        editor.onDidLayoutChange(hideSelectionAction),
       );
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
       revealEditorPosition(editor, revealRef.current);
@@ -177,6 +213,8 @@ export function ProjectEditor({
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
+      if (layoutFrame) window.cancelAnimationFrame(layoutFrame);
       disposables.forEach((disposable) => disposable.dispose());
       editor?.dispose();
       model?.dispose();
@@ -244,7 +282,7 @@ export function ProjectEditor({
           type="button"
           onClick={() => {
             onReferenceSelectionRef.current?.(selectionAction.range);
-            setSelectionAction(undefined);
+            commitSelectionAction(undefined);
           }}
           onMouseDown={(event) => event.preventDefault()}
         >
@@ -307,9 +345,13 @@ function updateSelectionAction(
   }
   const selection = editor.getSelection();
   const range = selectedProjectRange(editor);
+  if (!range) {
+    setSelectionAction(undefined);
+    return;
+  }
   const position = selection?.getPosition();
   const visible = position ? editor.getScrolledVisiblePosition(position) : null;
-  if (!range || !visible) {
+  if (!visible) {
     setSelectionAction(undefined);
     return;
   }

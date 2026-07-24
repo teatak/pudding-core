@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -28,7 +28,10 @@ import {
 import type { BrowserTabsData } from "@/browser/types";
 import type { WorkspaceSurface } from "@/components/workspace/types";
 import { useI18n } from "@/i18n";
-import { consumeBrowserReveal, useBrowserRevealEpoch } from "@/state/browserRevealStore";
+import {
+  consumeBrowserReveal,
+  useBrowserReveal,
+} from "@/state/browserRevealStore";
 
 const SESSION_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v2";
 const LEGACY_WORKSPACE_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v1";
@@ -62,6 +65,7 @@ export function useWorkspaceBrowserSurface({
   const selectedBrowserTabRef = useRef<Record<string, string>>(readSelectedBrowserTabs());
   const syncTimersRef = useRef<Record<string, number>>({});
   const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>("workspace");
+  const [browserSelections, setBrowserSelections] = useState<Record<string, string>>({});
   const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
   const browserActive = activeSurface === "browser";
   const processModeFallback = electronBrowserBridge() ? "webview" : "headless";
@@ -69,12 +73,12 @@ export function useWorkspaceBrowserSurface({
   currentSessionIDRef.current = sessionID;
   selectedBrowserTabRef.current = selectedBrowserTabs;
 
-  const rememberSessionSurface = (targetSessionID: string, surface: WorkspaceSurface) => {
+  const rememberSessionSurface = useCallback((targetSessionID: string, surface: WorkspaceSurface) => {
     sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
     writeSessionSurfaces(sessionSurfaceRef.current);
-  };
+  }, []);
 
-  const rememberSelectedBrowserTab = (targetSessionID: string, tabID?: string) => {
+  const rememberSelectedBrowserTab = useCallback((targetSessionID: string, tabID?: string) => {
     const next = { ...selectedBrowserTabRef.current };
     if (tabID) {
       next[targetSessionID] = tabID;
@@ -84,30 +88,30 @@ export function useWorkspaceBrowserSurface({
     selectedBrowserTabRef.current = next;
     setSelectedBrowserTabs(next);
     writeSelectedBrowserTabs(next);
-  };
+  }, []);
 
-  const setActiveSurface = (surface: WorkspaceSurface) => {
+  const setActiveSurface = useCallback((surface: WorkspaceSurface) => {
     if (sessionID) {
       rememberSessionSurface(sessionID, surface);
     }
     setActiveSurfaceState(surface);
-  };
+  }, [rememberSessionSurface, sessionID]);
 
-  const selectCanvasSurface = () => {
+  const selectCanvasSurface = useCallback(() => {
     setActiveSurface("canvas");
-  };
+  }, [setActiveSurface]);
 
-  const selectWorkspaceSurface = () => {
+  const selectWorkspaceSurface = useCallback(() => {
     setActiveSurface("workspace");
-  };
+  }, [setActiveSurface]);
 
-  const selectTerminalSurface = () => {
+  const selectTerminalSurface = useCallback(() => {
     setActiveSurface("terminal");
-  };
+  }, [setActiveSurface]);
 
-  const selectProjectSurface = () => {
+  const selectProjectSurface = useCallback(() => {
     setActiveSurface("project");
-  };
+  }, [setActiveSurface]);
 
   useEffect(() => {
     if (!sessionID || surfaceSessionRef.current === sessionID) {
@@ -117,7 +121,7 @@ export function useWorkspaceBrowserSurface({
     setActiveSurfaceState(sessionSurfaceRef.current[sessionID] || "workspace");
   }, [sessionID]);
 
-  const browserRevealEpoch = useBrowserRevealEpoch(sessionID);
+  const browserReveal = useBrowserReveal(sessionID);
   const browserStateQuery = useQuery({
     enabled,
     queryKey: sessionID ? queryKeys.browserState(sessionID) : ["browser", "missing-session", "state"],
@@ -142,11 +146,17 @@ export function useWorkspaceBrowserSurface({
     },
     staleTime: browserQueryStaleTimeMS,
   });
-  const browserTabs = (browserTabsQuery.data?.tabs ?? [])
-    .filter((tab) => tab.sessionID === sessionID)
-    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  const browserTabs = useMemo(
+    () => (browserTabsQuery.data?.tabs ?? [])
+      .filter((tab) => tab.sessionID === sessionID)
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
+    [browserTabsQuery.data?.tabs, sessionID],
+  );
   const selectedBrowserTabID = selectedBrowserTabs[sessionID];
   const activeBrowserTab = browserTabs.find((tab) => tab.id === selectedBrowserTabID) || preferredBrowserTab(browserTabs, browserPayload);
+  const activeBrowserSelection = activeBrowserTab
+    ? browserSelections[`${sessionID}:${activeBrowserTab.id}`] || ""
+    : "";
   const hasBrowserState = Boolean(
     activeBrowserTab || browserPayloadHasRealState(browserPayload) || browserPayloadHasBlankTabIntent(browserPayload),
   );
@@ -166,7 +176,19 @@ export function useWorkspaceBrowserSurface({
         return;
       }
       const current = queryClient.getQueryData<BrowserTabsData>(queryKeys.browserTabs(sessionID));
+      const previousTab = current?.tabs.find((tab) => tab.id === snapshot.tabID);
       const isNewTab = !current?.tabs.some((tab) => tab.id === snapshot.tabID);
+      if (snapshot.status === "pending" || (previousTab && previousTab.url !== snapshot.url)) {
+        const key = `${snapshot.sessionID}:${snapshot.tabID}`;
+        setBrowserSelections((selections) => {
+          if (!(key in selections)) {
+            return selections;
+          }
+          const next = { ...selections };
+          delete next[key];
+          return next;
+        });
+      }
       const tab = cacheElectronBrowserSnapshot(queryClient, snapshot, sessionID);
       if (!tab) {
         return;
@@ -199,6 +221,32 @@ export function useWorkspaceBrowserSurface({
       }, 250);
     });
   }, [enabled, queryClient, sessionID, token]);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onSelectionChanged || !enabled || !sessionID) {
+      return;
+    }
+    return bridge.onSelectionChanged((event) => {
+      if (event.sessionID !== sessionID || !event.tabID) {
+        return;
+      }
+      const key = `${event.sessionID}:${event.tabID}`;
+      setBrowserSelections((current) => {
+        if (event.selectionText) {
+          return current[key] === event.selectionText
+            ? current
+            : { ...current, [key]: event.selectionText };
+        }
+        if (!(key in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    });
+  }, [enabled, sessionID]);
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -341,28 +389,34 @@ export function useWorkspaceBrowserSurface({
     setActiveSurfaceState("browser");
   }, [browserActive, enabled, hasBrowserState, hasTransientSurface, itemsLength, sessionID]);
 
-  const createNewBrowserTab = () => {
+  const createNewBrowserTab = useCallback(() => {
     if (!sessionID || createBrowserTabMutation.isPending) {
       return;
     }
     createBrowserTabMutation.mutate(sessionID);
-  };
+  }, [createBrowserTabMutation.isPending, createBrowserTabMutation.mutate, sessionID]);
 
-  const selectBrowserTab = (tabID: string) => {
+  const selectBrowserTab = useCallback((tabID: string) => {
     if (!sessionID || !browserTabs.some((tab) => tab.id === tabID)) {
       return;
     }
     rememberSelectedBrowserTab(sessionID, tabID);
     setActiveSurface("browser");
-  };
+  }, [browserTabs, rememberSelectedBrowserTab, sessionID, setActiveSurface]);
 
   useEffect(() => {
-    if (!enabled || !sessionID || browserRevealEpoch <= 0) {
+    if (!enabled || !sessionID || !browserReveal) {
       return;
     }
+    if (browserReveal.tabID) {
+      if (!browserTabs.some((tab) => tab.id === browserReveal.tabID)) {
+        return;
+      }
+      rememberSelectedBrowserTab(sessionID, browserReveal.tabID);
+    }
     setActiveSurface("browser");
-    consumeBrowserReveal(sessionID, browserRevealEpoch);
-  }, [browserRevealEpoch, enabled, sessionID]);
+    consumeBrowserReveal(sessionID, browserReveal.epoch);
+  }, [browserReveal, browserTabs, enabled, rememberSelectedBrowserTab, sessionID, setActiveSurface]);
 
   const closeBrowserTabMutation = useMutation({
     mutationFn: async ({ targetSessionID, tabID }: { targetSessionID: string; tabID: string }) => {
@@ -453,17 +507,20 @@ export function useWorkspaceBrowserSurface({
     clearElectronBrowserSessionGate(sessionID);
   }, [activeBrowserTab, enabled, sessionID]);
 
+  const closeBrowserTab = useCallback((tabID: string) => {
+    if (sessionID) {
+      closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
+    }
+  }, [closeBrowserTabMutation.mutate, sessionID]);
+
   return {
     activeBrowserTab,
     activeBrowserTabID: activeBrowserTab?.id,
+    activeBrowserSelection,
     activeSurface,
     browserActive,
     browserTabs,
-    closeBrowserTab: (tabID: string) => {
-      if (sessionID) {
-        closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
-      }
-    },
+    closeBrowserTab,
     closingBrowserTabID: closeBrowserTabMutation.isPending ? closeBrowserTabMutation.variables?.tabID : undefined,
     createNewBrowserTab,
     creatingBrowserTab: createBrowserTabMutation.isPending,

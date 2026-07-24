@@ -1,5 +1,5 @@
 import { Check, Copy, FileCode2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { useEditorTypography } from "@/components/EditorTypographyProvider";
 import { Button } from "@/components/ui/button";
@@ -10,12 +10,20 @@ import { getShikiCodeRenderer } from "@/lib/shiki";
 import type { FilePreview } from "@/state/filePreviewStore";
 import { TurnFileDiffSurface } from "./TurnFileDiffSurface";
 
-export function FilePreviewSurface({ active, preview, token }: { active: boolean; preview: FilePreview; token: string }) {
+export const FilePreviewSurface = memo(function FilePreviewSurface({
+  active,
+  preview,
+  token,
+}: {
+  active: boolean;
+  preview: FilePreview;
+  token: string;
+}) {
   if (preview.source === "turn-diff") {
     return <TurnFileDiffSurface active={active} preview={preview} token={token} />;
   }
   return <TextFilePreviewSurface active={active} preview={preview} />;
-}
+});
 
 function TextFilePreviewSurface({ active, preview }: { active: boolean; preview: FilePreview }) {
   const { t } = useI18n();

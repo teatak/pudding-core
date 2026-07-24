@@ -26,7 +26,7 @@ export function PageHeader({
     >
       <div className="flex min-w-0 items-center gap-1">
         {icon ? (
-          <div className="no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-muted-foreground">
+          <div className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center">
             {icon}
           </div>
         ) : null}

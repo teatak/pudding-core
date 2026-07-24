@@ -68,6 +68,10 @@ export function useVisibleUIContext(sessionID: string) {
   );
 }
 
+export function getVisibleUIContext(sessionID: string) {
+  return visible?.sessionID === sessionID ? visible.context : undefined;
+}
+
 export function setUIContextEnabled(next: boolean) {
   if (enabled === next) {
     return;

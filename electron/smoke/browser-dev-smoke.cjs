@@ -70,9 +70,18 @@ async function run() {
     },
   );
   window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-    if (!hardenManagedBrowserWebview(event, webPreferences, params, managedBrowserPartition)) {
+    if (!hardenManagedBrowserWebview(
+      event,
+      webPreferences,
+      params,
+      managedBrowserPartition,
+      path.join(__dirname, "..", "browser-selection-preload.cjs"),
+    )) {
       finish(new Error("smoke webview rejected by managed attachment policy"));
     }
+  });
+  ipcMain.on("pudding:browser:selection-changed", (event, payload) => {
+    host.noteSelection(event.sender, payload);
   });
   ipcMain.on("pudding-browser-smoke:webview-register", (_event, payload) => {
     const target = webContents.fromId(Number(payload?.webContentsID));
@@ -105,6 +114,44 @@ async function run() {
   assert.equal((await host.forward({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/two`);
 
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/form` });
+  currentCheck = "browser selection cache";
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#select-text" });
+  await window.webContents.executeJavaScript("document.getElementById('host-composer').focus()");
+  let selectedBrowserContext;
+  await waitUntil(async () => {
+    selectedBrowserContext = await host.readSelection({
+      sessionID: webTab.sessionID,
+      tabID: webTab.tabID,
+    });
+    return selectedBrowserContext.selectionText === "Selected browser context";
+  });
+  assert.equal(selectedBrowserContext.selectionText, "Selected browser context");
+  assert.deepEqual(
+    await host.readSelection({ sessionID: fileTab.sessionID, tabID: fileTab.tabID }),
+    { selectionText: "" },
+  );
+  currentCheck = "browser child frame selection";
+  const browserSlot = host.getSlot({ sessionID: webTab.sessionID, tabID: webTab.tabID });
+  let selectionFrame;
+  await waitUntil(() => {
+    selectionFrame = browserSlot.webContents.mainFrame.framesInSubtree.find(
+      (frame) => frame.url === `${pageBaseURL}/selection-frame`,
+    );
+    return Boolean(selectionFrame);
+  });
+  await selectionFrame.executeJavaScript(`(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("child-selection"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  })()`);
+  host.noteSelection(browserSlot.webContents, { selectionText: "" });
+  const childFrameContext = await host.readSelection({
+    sessionID: webTab.sessionID,
+    tabID: webTab.tabID,
+  });
+  assert.equal(childFrameContext.selectionText, "Selected child frame context");
   currentCheck = "focus isolation";
   await window.webContents.executeJavaScript(`(() => {
     const composer = document.getElementById("host-composer");
@@ -390,7 +437,7 @@ async function run() {
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
 
-  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "focus-isolation", "input-components", "background-input", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "browser-selection-cache", "focus-isolation", "input-components", "background-input", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
   finish();
 }
 
@@ -487,6 +534,9 @@ function startPageServer() {
         <textarea id="target-textarea">old textarea</textarea>
         <div id="target-editor" contenteditable="true"><span data-slate-zero-width="z">&#xfeff;<br></span></div>
         <output id="target-editor-state">Editor:Waiting</output>
+        <p id="selectable-text">Selected browser context</p>
+        <button id="select-text">Select browser text</button>
+        <iframe src="/selection-frame" title="Selection frame"></iframe>
         <button id="target-button" value="button-value">Click target</button>
         <output id="click-state">Clicked:0</output>
         <output id="click-trust">Trusted:false</output>
@@ -544,6 +594,14 @@ function startPageServer() {
           editor.addEventListener('input', () => {
             document.getElementById('target-editor-state').textContent = 'Editor:' + editor.textContent.replace(/\uFEFF/g, '');
           });
+          document.getElementById('select-text').addEventListener('click', () => {
+            const range = document.createRange();
+            range.selectNodeContents(document.getElementById('selectable-text'));
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            window.addEventListener('blur', () => selection.removeAllRanges(), {once: true});
+          });
           let clickCount = 0;
           document.getElementById('target-button').addEventListener('click', (event) => {
             clickCount += 1;
@@ -551,6 +609,7 @@ function startPageServer() {
             document.getElementById('click-trust').textContent = 'Trusted:' + event.isTrusted;
           });
         </script>`,
+      "/selection-frame": "<!doctype html><title>Selection frame</title><p id=child-selection>Selected child frame context</p>",
       "/popup-parent": `<!doctype html><title>Popup parent</title>
         <a id="open-managed-tab" href="/referrer-child" target="_blank">Open managed tab</a>
         <button id="open-blank" onclick="openBlankPopup()">Open blank</button>

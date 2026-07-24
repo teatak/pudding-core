@@ -87,6 +87,11 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:cursor", wrapped);
     return () => ipcRenderer.off("pudding:browser:cursor", wrapped);
   },
+  onSelectionChanged: (listener) => {
+    const wrapped = (_event, selection) => listener(selection);
+    ipcRenderer.on("pudding:browser:selection-updated", wrapped);
+    return () => ipcRenderer.off("pudding:browser:selection-updated", wrapped);
+  },
   onAutomationStart: (listener) => {
     const wrapped = (_event, automation) => listener(automation);
     ipcRenderer.on("pudding:browser:automation-start", wrapped);

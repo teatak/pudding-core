@@ -88,6 +88,34 @@ export function ProjectBrowserSurface({
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRevealSerial = useRef(0);
+  const resizeCursorCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => resizeCursorCleanupRef.current?.(),
+    [],
+  );
+
+  const startProjectBrowserResize = (pointerID: number) => {
+    resizeCursorCleanupRef.current?.();
+    const root = document.documentElement;
+    root.dataset.projectBrowserResizing = "true";
+
+    const cleanup = () => {
+      window.removeEventListener("pointerup", handlePointerEnd, true);
+      window.removeEventListener("pointercancel", handlePointerEnd, true);
+      window.removeEventListener("blur", cleanup);
+      delete root.dataset.projectBrowserResizing;
+      resizeCursorCleanupRef.current = null;
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (event.pointerId === pointerID) cleanup();
+    };
+
+    window.addEventListener("pointerup", handlePointerEnd, true);
+    window.addEventListener("pointercancel", handlePointerEnd, true);
+    window.addEventListener("blur", cleanup);
+    resizeCursorCleanupRef.current = cleanup;
+  };
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
   const dirtyRootIDs = useMemo(() => new Set(workspace.tabs.flatMap((tab) => (
     !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
@@ -496,6 +524,7 @@ export function ProjectBrowserSurface({
       <ResizablePanelGroup
         className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
         defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
+        disableCursor
         id="project-browser-layout"
         orientation="horizontal"
         onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout)}
@@ -569,7 +598,12 @@ export function ProjectBrowserSurface({
             )}
           />
         </ResizablePanel>
-        <ResizableHandle className="cursor-col-resize after:cursor-col-resize" />
+        <ResizableHandle
+          className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize"
+          onPointerDownCapture={(event) => {
+            if (event.button === 0) startProjectBrowserResize(event.pointerId);
+          }}
+        />
         <ResizablePanel id="viewer" className="min-w-0" minSize={280}>
           <ProjectFileViewer
             active={active}

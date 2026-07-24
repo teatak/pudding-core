@@ -499,7 +499,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-[70] flex items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-[70] flex translate-x-1 items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",

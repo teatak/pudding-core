@@ -7,6 +7,7 @@ import {
   listBrowserTabs,
   listPendingApprovals,
   type AudioBindings,
+  type BrowserState,
   type BrowserTab,
   type BackgroundProcess,
   type PendingApproval,
@@ -23,7 +24,7 @@ import type { BrowserTabsData } from "@/browser/types";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { apiURL } from "@/state/apiBase";
-import { requestBrowserReveal } from "@/state/browserRevealStore";
+import { requestBrowserReveal, retainBrowserActivities } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 export function useSessionEvents(sessionID: string | undefined, token: string) {
@@ -191,14 +192,34 @@ function syncBrowserStateFromEvent(
   const syncedFromToolResult = syncBrowserToolResult(queryClient, event);
   void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(event.sessionID) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(event.sessionID) });
+  if (event.name === "builtin_browser_close" && event.phase === "ok") {
+    retainBrowserActivities(
+      event.sessionID,
+      browserTabsFromToolContent(event.content, event.sessionID).map((tab) => tab.id),
+    );
+  }
   const shouldReveal = revealVisibleSession && shouldRevealBrowserTool(event);
   if (shouldReveal && syncedFromToolResult) {
-    requestBrowserReveal(event.sessionID);
+    publishBrowserActivity(queryClient, event);
   }
   void hydrateBrowserState(queryClient, token, event.sessionID).then((hasBrowser) => {
-    if (shouldReveal && hasBrowser) {
-      requestBrowserReveal(event.sessionID);
+    if (shouldReveal && hasBrowser && !syncedFromToolResult) {
+      publishBrowserActivity(queryClient, event);
     }
+  });
+}
+
+function publishBrowserActivity(
+  queryClient: QueryClient,
+  event: Extract<SessionEvent, { kind: "turn.tool" }>,
+) {
+  const state = queryClient.getQueryData<BrowserState>(queryKeys.browserState(event.sessionID));
+  requestBrowserReveal(event.sessionID, {
+    faviconURL: state?.faviconURL,
+    resourceID: state?.tabID,
+    title: state?.title,
+    toolName: event.name,
+    url: state?.url,
   });
 }
 

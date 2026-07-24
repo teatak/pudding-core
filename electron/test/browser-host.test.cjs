@@ -206,6 +206,164 @@ test("reads the current non-editable browser text selection", async () => {
   host.closeAll();
 });
 
+test("reads browser text selected inside a child frame", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-frame-selection", tabID: "tab-frame-selection" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(66);
+  webContents.mainFrame = {
+    framesInSubtree: [
+      {
+        isDestroyed: () => false,
+        executeJavaScript: async () => JSON.stringify({ selectionText: "" }),
+      },
+      {
+        isDestroyed: () => false,
+        executeJavaScript: async () => JSON.stringify({ selectionText: "selected child frame text" }),
+      },
+    ],
+  };
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.deepEqual(await host.readSelection(request), {
+    selectionText: "selected child frame text",
+  });
+
+  host.closeAll();
+});
+
+test("falls back to the webview selection cache after focus moves to the composer", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-selection-cache", tabID: "tab-selection-cache" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(63);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.deepEqual(
+    host.noteSelection(webContents, { selectionText: "cached browser text" }),
+    {
+      selected: true,
+      selectionText: "cached browser text",
+      sessionID: request.sessionID,
+      tabID: request.tabID,
+    },
+  );
+  const evaluationsBeforeCachedRead = webContents.debugger.commands.filter(
+    ({ method }) => method === "Runtime.evaluate",
+  ).length;
+  assert.deepEqual(await host.readSelection(request), { selectionText: "cached browser text" });
+  assert.equal(
+    webContents.debugger.commands.filter(({ method }) => method === "Runtime.evaluate").length,
+    evaluationsBeforeCachedRead + 1,
+  );
+
+  assert.deepEqual(
+    host.noteSelection(webContents, { selectionText: "" }),
+    {
+      selected: false,
+      selectionText: "",
+      sessionID: request.sessionID,
+      tabID: request.tabID,
+    },
+  );
+  webContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "" })];
+  assert.deepEqual(await host.readSelection(request), { selectionText: "" });
+
+  host.closeAll();
+});
+
+test("prefers the current live selection over an older cache in the same tab", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-live-selection", tabID: "tab-live-selection" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(67);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  host.noteSelection(webContents, { selectionText: "older cached selection" });
+  webContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "current live selection" })];
+  assert.deepEqual(await host.readSelection(request), { selectionText: "current live selection" });
+  webContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "" })];
+  assert.deepEqual(await host.readSelection(request), { selectionText: "current live selection" });
+
+  host.closeAll();
+});
+
+test("does not leak a cached selection from another browser tab", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const sessionID = "session-selection-tabs";
+  const firstRequest = { sessionID, tabID: "tab-first", url: "https://first.example/" };
+  const firstOpening = host.ensure(firstRequest);
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstContents = new FakeWebContents(64);
+  await host.registerWebContents(required.shift(), firstContents);
+  await firstOpening;
+
+  const secondRequest = { sessionID, tabID: "tab-second", url: "https://second.example/" };
+  const secondOpening = host.ensure(secondRequest);
+  await new Promise((resolve) => setImmediate(resolve));
+  const secondContents = new FakeWebContents(65);
+  await host.registerWebContents(required.shift(), secondContents);
+  await secondOpening;
+
+  host.noteSelection(secondContents, { selectionText: "Google selection" });
+  firstContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "" })];
+  assert.deepEqual(await host.readSelection(firstRequest), { selectionText: "" });
+  assert.deepEqual(await host.readSelection(secondRequest), { selectionText: "Google selection" });
+
+  host.closeAll();
+});
+
+test("tracks browser selection changes through the CDP binding", async () => {
+  const required = [];
+  const selectionChanges = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => required.push(request),
+    undefined,
+    { selectionChanged: (selection) => selectionChanges.push(selection) },
+  );
+  const request = { sessionID: "session-cdp-selection", tabID: "tab-cdp-selection" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(68);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.ok(webContents.debugger.commands.some(
+    ({ method, params }) => method === "Runtime.addBinding" && params.name === "__puddingBrowserSelectionChanged",
+  ));
+  assert.ok(webContents.debugger.commands.some(
+    ({ method, params }) => method === "Page.addScriptToEvaluateOnNewDocument"
+      && params.source.includes("selectionchange"),
+  ));
+  webContents.debugger.emit("message", {}, "Runtime.bindingCalled", {
+    name: "__puddingBrowserSelectionChanged",
+    payload: JSON.stringify({ selectionText: "selected through cdp" }),
+  });
+  assert.deepEqual(selectionChanges, [{
+    selected: true,
+    selectionText: "selected through cdp",
+    sessionID: request.sessionID,
+    tabID: request.tabID,
+  }]);
+  webContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "" })];
+  assert.deepEqual(await host.readSelection(request), { selectionText: "selected through cdp" });
+
+  host.closeAll();
+});
+
 test("captures dynamically updated favicons and publishes the resolved local image", async () => {
   const required = [];
   const snapshots = [];

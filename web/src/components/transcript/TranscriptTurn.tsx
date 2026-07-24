@@ -52,53 +52,61 @@ function TranscriptTurnView({
           />
         </div>
       ) : null}
-      {turn.assistant ? (
-        <div className="group min-w-0" data-transcript-ai-anchor={anchorTurnID}>
-          <AssistantOutput
-            assistant={turn.assistant}
-            disclosure={disclosure}
-            displaySettings={displaySettings}
-            sessionID={sessionID}
-            token={token}
-            turnID={assistantTurnID}
-            onContentGrow={onAssistantContentGrow}
-            onRevealComplete={onAssistantRevealComplete}
-          />
-        </div>
-      ) : null}
-      {turn.sequence?.map((item) =>
-        item.kind === "guide" ? (
-          <TurnGuide
-            key={item.key}
-            attachmentLabel={t("transcript.guidedAttachments").replace(
-              "{count}",
-              String(item.user.attachments?.length || 0),
-            )}
-            label={t("transcript.guided")}
-            user={item.user}
-          />
-        ) : (
-          <div key={item.key} className="group min-w-0" data-transcript-ai-anchor={anchorTurnID}>
-            <AssistantOutput
-              assistant={item.assistant}
-              disclosure={disclosure}
-              displaySettings={displaySettings}
-              sessionID={sessionID}
-              token={token}
-              turnID={assistantTurnID}
-              onContentGrow={onAssistantContentGrow}
-              onRevealComplete={onAssistantRevealComplete}
-            />
-          </div>
-        ),
-      )}
-      {turn.turnID && turn.fileChanges?.length ? (
-        <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
-      ) : null}
-      {metaAssistant ? <AssistantOutputMeta assistant={metaAssistant} /> : null}
-      {turn.compact ? (
-        <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
-          <CompactPendingMarker />
+      {turn.assistant || turn.sequence?.length || turn.fileChanges?.length || metaAssistant || turn.compact ? (
+        <div className="group/assistant-turn grid min-w-0 gap-3">
+          {turn.assistant ? (
+            <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+              <AssistantOutput
+                assistant={turn.assistant}
+                disclosure={disclosure}
+                displaySettings={displaySettings}
+                sessionID={sessionID}
+                token={token}
+                turnID={assistantTurnID}
+                onContentGrow={onAssistantContentGrow}
+                onRevealComplete={onAssistantRevealComplete}
+              />
+            </div>
+          ) : null}
+          {turn.sequence?.map((item) =>
+            item.kind === "guide" ? (
+              <TurnGuide
+                key={item.key}
+                attachmentLabel={t("transcript.guidedAttachments").replace(
+                  "{count}",
+                  String(item.user.attachments?.length || 0),
+                )}
+                label={t("transcript.guided")}
+                user={item.user}
+              />
+            ) : (
+              <div key={item.key} className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+                <AssistantOutput
+                  assistant={item.assistant}
+                  disclosure={disclosure}
+                  displaySettings={displaySettings}
+                  sessionID={sessionID}
+                  token={token}
+                  turnID={assistantTurnID}
+                  onContentGrow={onAssistantContentGrow}
+                  onRevealComplete={onAssistantRevealComplete}
+                />
+              </div>
+            ),
+          )}
+          {turn.turnID && turn.fileChanges?.length ? (
+            <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
+          ) : null}
+          {metaAssistant ? (
+            <div className="-mt-2">
+              <AssistantOutputMeta assistant={metaAssistant} />
+            </div>
+          ) : null}
+          {turn.compact ? (
+            <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+              <CompactPendingMarker />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

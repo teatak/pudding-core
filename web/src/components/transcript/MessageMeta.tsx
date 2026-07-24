@@ -28,6 +28,7 @@ export function MessageMeta({
   createdAt,
   duration,
   hideStandardDetails = false,
+  hoverGroup = "message",
   model,
   persistentStatus,
   text,
@@ -38,6 +39,7 @@ export function MessageMeta({
   createdAt: string;
   duration?: string;
   hideStandardDetails?: boolean;
+  hoverGroup?: "assistant-turn" | "message";
   model?: TurnModelVM;
   persistentStatus?: ReactNode;
   text: string;
@@ -57,7 +59,10 @@ export function MessageMeta({
     <div
       className={cn(
         "flex h-6 w-full items-center gap-2 text-xs text-muted-foreground",
-        !persistentStatus && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        !persistentStatus &&
+          (hoverGroup === "assistant-turn"
+            ? "opacity-0 group-hover/assistant-turn:opacity-100 group-focus-within/assistant-turn:opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"),
         align === "end" && "justify-end",
       )}
     >

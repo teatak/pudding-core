@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { recordWorkspaceActivity } from "@/state/workspaceActivityStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 type CanvasReveal = {
@@ -26,7 +27,24 @@ const useCanvasRevealStore = create<CanvasRevealState>((set) => ({
     }),
 }));
 
-export function requestCanvasReveal(sessionID: string, itemID: string) {
+export function requestCanvasReveal(
+  sessionID: string,
+  itemID: string,
+  activity?: { resourceKind: string; title?: string },
+) {
+  useCanvasRevealStore.getState().request(sessionID, itemID);
+  if (activity) {
+    recordWorkspaceActivity({
+      kind: "canvas",
+      resourceID: itemID,
+      resourceKind: activity.resourceKind,
+      sessionID,
+      title: activity.title,
+    });
+  }
+}
+
+export function openCanvasReveal(sessionID: string, itemID: string) {
   useCanvasRevealStore.getState().request(sessionID, itemID);
   setWorkspaceOpen(true);
 }

@@ -43,13 +43,17 @@ import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
+import {
+  clearWorkspaceActivity,
+  useWorkspaceActivities,
+} from "@/state/workspaceActivityStore";
+import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 type ChatPaneProps = {
   token: string;
   sessionID: string | undefined;
   draftActive?: boolean;
   draftProjectID?: string;
-  compact?: boolean;
   headerActions?: ReactNode;
   headerDragHandle?: boolean;
   reserveTopLeftInset?: boolean;
@@ -62,7 +66,6 @@ type ChatPaneProps = {
 export function ChatPane({
   token,
   sessionID,
-  compact = false,
   draftActive = false,
   draftProjectID,
   headerActions,
@@ -75,6 +78,7 @@ export function ChatPane({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
+  const workspaceOpen = useWorkspaceOpen();
   const clearSession = useOverlayStore((state) => state.clearSession);
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -134,6 +138,7 @@ export function ChatPane({
   });
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
+  const workspaceActivities = useWorkspaceActivities(selectedSession?.id);
   const isPrimary = role === "primary";
   const showDraft = isPrimary && !sessionID;
   const sessionsPending = sessionsQuery.isPending;
@@ -155,6 +160,12 @@ export function ChatPane({
         }
       : {}),
   };
+
+  useEffect(() => {
+    if (workspaceOpen && selectedSession && workspaceActivities.length > 0) {
+      clearWorkspaceActivity(selectedSession.id);
+    }
+  }, [selectedSession, workspaceActivities, workspaceOpen]);
 
   useEffect(() => {
     if (!sessionsQuery.isSuccess) {
@@ -246,6 +257,7 @@ export function ChatPane({
               <TooltipTrigger asChild>
                 <Button
                   aria-label={t("pane.closeSplit")}
+                  className="pudding-toolbar-icon-button"
                   size="icon-sm"
                   variant="ghost"
                   onClick={() =>
@@ -266,11 +278,7 @@ export function ChatPane({
           ) : null}
         </div>
       </header>
-      <div
-        aria-hidden={compact || undefined}
-        className="flex min-h-0 flex-1 flex-col"
-        inert={compact || undefined}
-      >
+      <div className="flex min-h-0 flex-1 flex-col">
         {showDraft ? (
           <DraftConversation token={token} projectID={draftProjectID} />
         ) : selectedSession ? (
@@ -371,7 +379,7 @@ function HeaderSessionTitle({
     >
       <span
         aria-label={t(`mode.${session.activeMode}`)}
-        className="no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-muted-foreground"
+        className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center"
         role="img"
       >
         <SessionModeIcon mode={session.activeMode} />
@@ -431,12 +439,12 @@ function HeaderSessionTitle({
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("session.actions")}
-                className="pudding-chat-title-action size-7"
+                className="pudding-toolbar-icon-button pudding-chat-title-action"
                 size="icon-sm"
                 tabIndex={-1}
                 variant="ghost"
               >
-                <Ellipsis className="size-4" />
+                <Ellipsis />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent

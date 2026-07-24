@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
@@ -5,7 +7,7 @@ import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export function BrowserWorkspaceSurface({
+export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
   active,
   activeTabID,
   pending,
@@ -47,7 +49,7 @@ export function BrowserWorkspaceSurface({
       </div>
     </div>
   );
-}
+});
 
 function BrowserLoading() {
   const { t } = useI18n();

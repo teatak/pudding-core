@@ -533,7 +533,7 @@ export function AppsPane({ token }: { token: string }) {
               <ArrowLeft className="size-4" />
             </Button>
           ) : (
-            <Package className="size-4" />
+            <Package strokeWidth={2} />
           )
         }
         title={detailApp ? appDisplayName(detailApp, t) : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}

@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Rnd } from "react-rnd";
+import { Rnd, type Props as RndProps } from "react-rnd";
 import { useGroupRef } from "react-resizable-panels";
 
 import { claimMobilePairing } from "@/api/client";
@@ -54,17 +54,46 @@ type FloatingFrame = StageSize & {
   y: number;
 };
 
+type FloatingAnchor = {
+  horizontal: "left" | "right" | null;
+  vertical: "top" | "bottom" | null;
+};
+
 type ConsoleDisplayMode = "full" | AgentConsoleMode;
 
 const floatingInset = 16;
-const floatingDefaultWidth = 560;
-const floatingDefaultHeight = 560;
+const floatingSnapThreshold = 12;
 const consoleMinimumWidth = 380;
 const consoleMinimumHeight = 320;
+const floatingDefaultWidth = consoleMinimumWidth;
+const floatingDefaultHeight = 560;
 const workspaceMinimumWidth = 320;
 const dockMaximumWidth = 640;
 const dockRatioStorageKey = "pudding.agentConsoleDockRatio";
 const dockRatioFallback = 0.4;
+const floatingResizeHandleStyles: NonNullable<RndProps["resizeHandleStyles"]> = {
+  top: { cursor: "ns-resize" },
+  right: { cursor: "ew-resize" },
+  bottom: { cursor: "ns-resize" },
+  left: { cursor: "ew-resize" },
+  topRight: { cursor: "nesw-resize" },
+  bottomRight: { cursor: "nwse-resize" },
+  bottomLeft: { cursor: "nesw-resize" },
+  topLeft: { cursor: "nwse-resize" },
+};
+
+function resizeCursor(direction: string) {
+  if (direction === "top" || direction === "bottom") {
+    return "ns-resize";
+  }
+  if (direction === "left" || direction === "right") {
+    return "ew-resize";
+  }
+  if (direction === "topLeft" || direction === "bottomRight") {
+    return "nwse-resize";
+  }
+  return "nesw-resize";
+}
 
 function readSavedSplitLayout() {
   return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -79,6 +108,23 @@ function clamp(value: number, min: number, max: number) {
 
 function finiteOr(value: number, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
+}
+
+function lockAgentConsoleResizeCursor(cursor: string) {
+  const root = document.documentElement;
+  const property = "--agent-console-resize-cursor";
+  const previousValue = root.style.getPropertyValue(property);
+  const previousPriority = root.style.getPropertyPriority(property);
+  root.style.setProperty(property, cursor);
+  root.dataset.agentConsoleResizing = "true";
+  return () => {
+    if (previousValue) {
+      root.style.setProperty(property, previousValue, previousPriority);
+    } else {
+      root.style.removeProperty(property);
+    }
+    delete root.dataset.agentConsoleResizing;
+  };
 }
 
 function readDockRatio() {
@@ -117,10 +163,15 @@ export function App() {
     width: floatingDefaultWidth,
     height: floatingDefaultHeight,
   });
+  const [floatingAnchor, setFloatingAnchor] = useState<FloatingAnchor>({
+    horizontal: "right",
+    vertical: "bottom",
+  });
   const splitGroupRef = useGroupRef();
   const dockRatioRef = useRef(dockRatio);
   const dockResizeCleanupRef = useRef<(() => void) | null>(null);
   const floatingDragCleanupRef = useRef<(() => void) | null>(null);
+  const floatingResizeCleanupRef = useRef<(() => void) | null>(null);
   const previewTokenRef = useRef(token);
 
   const appsActive = view === "apps";
@@ -159,7 +210,7 @@ export function App() {
   }, [token]);
 
   useLayoutEffect(() => {
-    if (!stageNode || (consoleDisplayMode !== "floating" && consoleDisplayMode !== "collapsed")) {
+    if (!stageNode || consoleDisplayMode !== "floating") {
       return;
     }
     const update = () => {
@@ -183,6 +234,7 @@ export function App() {
     () => () => {
       dockResizeCleanupRef.current?.();
       floatingDragCleanupRef.current?.();
+      floatingResizeCleanupRef.current?.();
     },
     [],
   );
@@ -190,6 +242,8 @@ export function App() {
   useEffect(() => {
     if (consoleDisplayMode !== "floating") {
       floatingDragCleanupRef.current?.();
+      floatingResizeCleanupRef.current?.();
+      setConsoleInteracting(false);
     }
   }, [consoleDisplayMode]);
 
@@ -253,16 +307,30 @@ export function App() {
     }
     event.preventDefault();
     const pointerID = event.pointerId;
+    const resizeHandle = event.currentTarget;
     const stageRect = stageNode.getBoundingClientRect();
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
     const resizeFromRight = consoleDisplayMode === "dock-right";
+    const resizeShield = document.createElement("div");
+    resizeShield.className = "pudding-agent-console-resize-shield no-drag-region";
+    resizeShield.setAttribute("aria-hidden", "true");
+    resizeShield.style.cursor = "ew-resize";
 
     dockResizeCleanupRef.current?.();
+    try {
+      resizeHandle.setPointerCapture(pointerID);
+    } catch {
+      // The full-screen shield below still keeps host-side pointer events alive.
+    }
+    document.body.appendChild(resizeShield);
+    const restoreResizeCursor = lockAgentConsoleResizeCursor("ew-resize");
     setConsoleInteracting(true);
-    document.body.style.cursor = "col-resize";
+    document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
 
+    let liveRatio = dockRatioRef.current;
+    let cleaned = false;
     const update = (clientX: number) => {
       const rawWidth = resizeFromRight ? stageRect.right - clientX : clientX - stageRect.left;
       const consoleMin = Math.min(consoleMinimumWidth, stageRect.width / 2);
@@ -273,17 +341,31 @@ export function App() {
       );
       const width = clamp(rawWidth, consoleMin, consoleMax);
       const nextRatio = stageRect.width > 0 ? width / stageRect.width : dockRatioFallback;
-      dockRatioRef.current = nextRatio;
+      liveRatio = nextRatio;
       stageNode.style.setProperty("--agent-console-dock-width", `${width}px`);
     };
     const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      resizeShield.remove();
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerCancel);
+      window.removeEventListener("blur", handleWindowBlur);
+      if (resizeHandle.hasPointerCapture(pointerID)) {
+        resizeHandle.releasePointerCapture(pointerID);
+      }
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
+      restoreResizeCursor();
       setConsoleInteracting(false);
       dockResizeCleanupRef.current = null;
+    };
+    const finish = () => {
+      cleanup();
+      commitDockRatio(liveRatio);
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId === pointerID) {
@@ -296,28 +378,23 @@ export function App() {
         return;
       }
       update(upEvent.clientX);
-      const nextRatio = dockRatioRef.current;
-      cleanup();
-      commitDockRatio(nextRatio);
+      finish();
     };
     const handlePointerCancel = (cancelEvent: PointerEvent) => {
       if (cancelEvent.pointerId === pointerID) {
-        cleanup();
+        finish();
       }
     };
+    const handleWindowBlur = () => finish();
 
     window.addEventListener("pointermove", handlePointerMove, { passive: false });
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);
+    window.addEventListener("blur", handleWindowBlur);
     dockResizeCleanupRef.current = cleanup;
   };
 
-  const clampFloatingPosition = (
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ) => {
+  const floatingPositionBounds = (width: number, height: number) => {
     const stageRect = stageNode?.getBoundingClientRect();
     const stageWidth = stageRect?.width || floatingDefaultWidth + floatingInset * 2;
     const stageHeight = stageRect?.height || floatingDefaultHeight + floatingInset * 2;
@@ -327,16 +404,49 @@ export function App() {
       Math.max(0, stageHeight - floatingInset - 1),
     );
     return {
-      x: clamp(
-        x,
-        minimumX,
-        Math.max(minimumX, stageWidth - width - minimumX),
-      ),
-      y: clamp(
-        y,
-        minimumY,
-        Math.max(minimumY, stageHeight - height - floatingInset),
-      ),
+      minimumX,
+      maximumX: Math.max(minimumX, stageWidth - width - minimumX),
+      minimumY,
+      maximumY: Math.max(minimumY, stageHeight - height - floatingInset),
+    };
+  };
+
+  const snapFloatingPosition = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => {
+    const bounds = floatingPositionBounds(width, height);
+    let nextX = clamp(x, bounds.minimumX, bounds.maximumX);
+    let nextY = clamp(y, bounds.minimumY, bounds.maximumY);
+    let horizontal: FloatingAnchor["horizontal"] = null;
+    let vertical: FloatingAnchor["vertical"] = null;
+
+    if (Math.abs(nextX - bounds.minimumX) <= floatingSnapThreshold) {
+      nextX = bounds.minimumX;
+      horizontal =
+        bounds.minimumX === bounds.maximumX
+          ? floatingAnchor.horizontal
+          : "left";
+    } else if (Math.abs(nextX - bounds.maximumX) <= floatingSnapThreshold) {
+      nextX = bounds.maximumX;
+      horizontal = "right";
+    }
+    if (Math.abs(nextY - bounds.minimumY) <= floatingSnapThreshold) {
+      nextY = bounds.minimumY;
+      vertical =
+        bounds.minimumY === bounds.maximumY
+          ? floatingAnchor.vertical
+          : "top";
+    } else if (Math.abs(nextY - bounds.maximumY) <= floatingSnapThreshold) {
+      nextY = bounds.maximumY;
+      vertical = "bottom";
+    }
+
+    return {
+      anchor: { horizontal, vertical } satisfies FloatingAnchor,
+      position: { x: nextX, y: nextY },
     };
   };
 
@@ -360,6 +470,32 @@ export function App() {
     };
 
     floatingDragCleanupRef.current = cleanup;
+  };
+
+  const startFloatingResize = (consoleNode: HTMLElement, direction: string) => {
+    floatingResizeCleanupRef.current?.();
+    const cursor = resizeCursor(direction);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    const resizeShield = document.createElement("div");
+    resizeShield.className = "pudding-agent-console-resize-shield no-drag-region";
+    resizeShield.setAttribute("aria-hidden", "true");
+    resizeShield.style.cursor = cursor;
+    document.body.appendChild(resizeShield);
+    const restoreResizeCursor = lockAgentConsoleResizeCursor(cursor);
+    document.body.style.cursor = cursor;
+    document.body.style.userSelect = "none";
+    consoleNode.dataset.resizing = "true";
+    const cleanup = () => {
+      resizeShield.remove();
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      restoreResizeCursor();
+      delete consoleNode.dataset.resizing;
+      floatingResizeCleanupRef.current = null;
+    };
+
+    floatingResizeCleanupRef.current = cleanup;
   };
 
   const resolvedStageWidth = stageSize.width || floatingDefaultWidth + floatingInset * 2;
@@ -391,37 +527,47 @@ export function App() {
     floatingFrame.x,
     resolvedStageWidth - floatingWidth - floatingXInset,
   );
-  const floatingX = clamp(
-    requestedFloatingX < 0
-      ? resolvedStageWidth - floatingWidth - floatingXInset
-      : requestedFloatingX,
+  const maximumFloatingX = Math.max(
     floatingXInset,
-    Math.max(floatingXInset, resolvedStageWidth - floatingWidth - floatingXInset),
+    resolvedStageWidth - floatingWidth - floatingXInset,
   );
-  const floatingY = clamp(
-    finiteOr(floatingFrame.y, floatingTopInset),
+  const maximumFloatingY = Math.max(
     floatingTopInset,
-    Math.max(floatingTopInset, resolvedStageHeight - floatingHeight - floatingInset),
+    resolvedStageHeight - floatingHeight - floatingInset,
   );
-  const collapsedWidth = Math.min(720, Math.max(1, resolvedStageWidth - floatingInset * 2));
-  const collapsedPosition = {
-    x: Math.max(0, Math.round((resolvedStageWidth - collapsedWidth) / 2)),
-    y: Math.max(0, resolvedStageHeight - 54 - floatingInset),
-  };
+  const floatingX =
+    floatingAnchor.horizontal === "left"
+      ? floatingXInset
+      : floatingAnchor.horizontal === "right"
+        ? maximumFloatingX
+        : clamp(
+            requestedFloatingX < 0 ? maximumFloatingX : requestedFloatingX,
+            floatingXInset,
+            maximumFloatingX,
+          );
+  const floatingY =
+    floatingAnchor.vertical === "top"
+      ? floatingTopInset
+      : floatingAnchor.vertical === "bottom"
+        ? maximumFloatingY
+        : clamp(
+            finiteOr(floatingFrame.y, floatingTopInset),
+            floatingTopInset,
+            maximumFloatingY,
+          );
   const docked =
     consoleDisplayMode === "dock-left" || consoleDisplayMode === "dock-right";
   const consolePosition =
     consoleDisplayMode === "floating"
-      ? { x: floatingX, y: floatingY }
-      : consoleDisplayMode === "collapsed"
-        ? collapsedPosition
-        : { x: 0, y: 0 };
+      ? {
+          x: floatingX - floatingXInset,
+          y: floatingY - floatingTopInset,
+        }
+      : { x: 0, y: 0 };
   const consoleSize =
     consoleDisplayMode === "floating"
       ? { width: floatingWidth, height: floatingHeight }
-      : consoleDisplayMode === "collapsed"
-        ? { width: collapsedWidth, height: 54 }
-        : { width: "100%", height: "100%" };
+      : { width: "100%", height: "100%" };
 
   const consoleAtTrafficLights = consoleDisplayMode === "floating" && floatingX < 120 && floatingY < 54;
   const consoleNeedsLeftInset =
@@ -431,9 +577,14 @@ export function App() {
     railCollapsed && workspaceStartsAtStageLeft
       ? "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
       : "0.75rem";
+  const hiddenWorkspaceWidth =
+    agentConsoleMode === "dock-left" || agentConsoleMode === "dock-right"
+      ? "calc(100% - clamp(min(380px, 50%), var(--agent-console-dock-width), min(640px, calc(100% - min(320px, 50%)))) - 1px)"
+      : "100%";
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: consoleDisplayMode === "dock-left" ? 2 : 0,
+    width: effectiveWorkspaceOpen ? undefined : hiddenWorkspaceWidth,
   } as CSSProperties;
   const stageStyle = {
     "--agent-console-dock-width": `${dockRatio * 100}%`,
@@ -456,7 +607,6 @@ export function App() {
       >
         <ResizablePanel id="primary" className="min-h-0" minSize={splitLayout.minPanePx}>
           <ChatPane
-            compact={consoleDisplayMode === "collapsed"}
             draftActive={draftActive}
             draftProjectID={draftActive ? draftProjectID : undefined}
             headerActions={effectiveWorkspaceOpen ? <AgentConsoleLayoutControl /> : undefined}
@@ -519,7 +669,12 @@ export function App() {
   const workspaceSurface = (
     <div
       key="workspace"
-      className="pudding-workspace-stage h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      aria-hidden={!effectiveWorkspaceOpen}
+      className={cn(
+        "pudding-workspace-stage h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background",
+        !effectiveWorkspaceOpen && "pointer-events-none invisible absolute inset-y-0 right-0 flex-none",
+      )}
+      inert={!effectiveWorkspaceOpen}
       style={workspaceSurfaceStyle}
     >
       <WorkspacePane
@@ -529,16 +684,14 @@ export function App() {
       />
     </div>
   );
-  const sessionStage = (
-    <>
-      <Rnd
+  const agentConsole = (
+    <Rnd
         key="agent-console-native-drag"
         bounds={consoleDisplayMode === "floating" ? "parent" : undefined}
         cancel=".no-drag-region,button,input,textarea,select,a,[role='button']"
         className={cn(
           "pudding-agent-console flex min-h-0 min-w-0 overflow-hidden",
-          consoleDisplayMode === "floating" && "rounded-xl border",
-          consoleDisplayMode === "collapsed" && "rounded-xl border",
+          consoleDisplayMode === "floating" && "pointer-events-auto rounded-xl border",
         )}
         data-mode={consoleDisplayMode}
         disableDragging={consoleDisplayMode !== "floating"}
@@ -549,16 +702,13 @@ export function App() {
         minHeight={consoleDisplayMode === "floating" ? minimumFloatingHeight : 0}
         minWidth={consoleDisplayMode === "floating" ? minimumFloatingWidth : 0}
         position={consolePosition}
+        resizeHandleStyles={floatingResizeHandleStyles}
         size={consoleSize}
         style={{
           flexShrink: 0,
           order: consoleDisplayMode === "dock-right" ? 2 : 0,
-          position:
-            consoleDisplayMode === "floating" || consoleDisplayMode === "collapsed"
-              ? "absolute"
-              : "relative",
-          zIndex:
-            consoleDisplayMode === "floating" || consoleDisplayMode === "collapsed" ? 40 : "auto",
+          position: consoleDisplayMode === "floating" ? "absolute" : "relative",
+          zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
           transition:
             consoleInteracting || docked
               ? "none"
@@ -569,31 +719,37 @@ export function App() {
           startFloatingDrag(data.node);
         }}
         onDragStop={(_event, data) => {
-          const nextPosition = clampFloatingPosition(
-            data.x,
-            data.y,
+          const nextPlacement = snapFloatingPosition(
+            data.x + floatingXInset,
+            data.y + floatingTopInset,
             data.node.offsetWidth,
             data.node.offsetHeight,
           );
           floatingDragCleanupRef.current?.();
           setConsoleInteracting(false);
+          setFloatingAnchor(nextPlacement.anchor);
           setFloatingFrame((current) => ({
             ...current,
-            ...nextPosition,
+            ...nextPlacement.position,
           }));
         }}
-        onResizeStart={() => setConsoleInteracting(true)}
+        onResizeStart={(_event, direction, ref) => {
+          setConsoleInteracting(true);
+          startFloatingResize(ref, direction);
+        }}
         onResizeStop={(_event, _direction, ref, _delta, position) => {
-          const nextPosition = clampFloatingPosition(
-            position.x,
-            position.y,
+          const nextPlacement = snapFloatingPosition(
+            position.x + floatingXInset,
+            position.y + floatingTopInset,
             ref.offsetWidth,
             ref.offsetHeight,
           );
+          floatingResizeCleanupRef.current?.();
           setConsoleInteracting(false);
+          setFloatingAnchor(nextPlacement.anchor);
           setFloatingFrame({
-            x: finiteOr(nextPosition.x, floatingX),
-            y: finiteOr(nextPosition.y, floatingY),
+            x: finiteOr(nextPlacement.position.x, floatingX),
+            y: finiteOr(nextPlacement.position.y, floatingY),
             width: finiteOr(ref.offsetWidth, floatingWidth),
             height: finiteOr(ref.offsetHeight, floatingHeight),
           });
@@ -601,6 +757,19 @@ export function App() {
       >
         {chatArea}
       </Rnd>
+  );
+  const sessionStage = (
+    <>
+      {consoleDisplayMode === "floating" ? (
+        <div
+          className="pointer-events-none absolute z-40"
+          style={{
+            inset: `${floatingTopInset}px ${floatingXInset}px ${floatingInset}px`,
+          }}
+        >
+          {agentConsole}
+        </div>
+      ) : agentConsole}
       {docked ? (
         <div
           key="dock-resize-handle"
@@ -609,7 +778,7 @@ export function App() {
           aria-valuemax={80}
           aria-valuemin={20}
           aria-valuenow={Math.round(dockRatio * 100)}
-          className="group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-col-resize touch-none items-center justify-center outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border focus-visible:before:bg-muted-foreground/80"
+          className="group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border focus-visible:before:bg-muted-foreground/80"
           role="separator"
           tabIndex={0}
           onKeyDown={(event) => {
@@ -627,7 +796,7 @@ export function App() {
         >
           <div
             aria-hidden="true"
-            className="absolute inset-y-0 left-1/2 z-20 w-3 -translate-x-1/2 cursor-col-resize touch-none"
+            className="absolute inset-y-0 left-1/2 z-20 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
           />
           <div
             aria-hidden="true"
@@ -638,7 +807,7 @@ export function App() {
           />
         </div>
       ) : null}
-      {effectiveWorkspaceOpen ? workspaceSurface : null}
+      {workspaceSurface}
     </>
   );
 

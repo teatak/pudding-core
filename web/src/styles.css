@@ -102,7 +102,7 @@
     --traffic-inset: 0px;
     --toolbar-h: 54px;
     --toolbar-edge-inset: 0.75rem;
-    --rail-toggle-left: 11px;
+    --rail-toggle-left: var(--toolbar-edge-inset);
     --rail-title-gap: 6px;
     --workspace-toggle-right: var(--toolbar-edge-inset);
     --workspace-toolbar-pl: var(--toolbar-edge-inset);
@@ -195,7 +195,7 @@ html[data-shell="electron-mac"] {
     /* Electron uses trafficLightPosition { x:18, y:18 }; align toolbar to that visual anchor. */
     --traffic-inset: 72px;
     --toolbar-h: 50px;
-    --rail-toggle-left: 11px;
+    --rail-toggle-left: var(--toolbar-edge-inset);
     --workspace-toggle-right: var(--toolbar-edge-inset);
     --workspace-toolbar-pl: var(--toolbar-edge-inset);
     --workspace-toolbar-pr: var(--toolbar-edge-inset);
@@ -248,7 +248,12 @@ html[data-shell] .pudding-agent-console-drag-shield {
 
 html[data-workspace-resizing],
 html[data-workspace-resizing] * {
-    cursor: col-resize !important;
+    cursor: ew-resize !important;
+}
+
+html[data-project-browser-resizing="true"],
+html[data-project-browser-resizing="true"] * {
+    cursor: ew-resize !important;
 }
 
 html[data-workspace-resizing] .workspace-split-pane {
@@ -651,8 +656,7 @@ html[data-shell] :where(
     background-color: var(--agent-console-background);
 }
 
-.pudding-agent-console[data-mode="floating"],
-.pudding-agent-console[data-mode="collapsed"] {
+.pudding-agent-console[data-mode="floating"] {
     border-color: var(--agent-console-border);
     box-shadow: var(--agent-console-shadow);
 }
@@ -670,6 +674,24 @@ html[data-shell] :where(
     inset: 0;
     cursor: grabbing;
     background: transparent;
+}
+
+.pudding-agent-console-resize-shield {
+    position: fixed;
+    z-index: 9999;
+    inset: 0;
+    background: transparent;
+}
+
+html[data-agent-console-resizing="true"],
+html[data-agent-console-resizing="true"] * {
+    cursor: var(--agent-console-resize-cursor, ew-resize) !important;
+}
+
+/* Electron <webview> 在独立 guest renderer 中处理鼠标事件。
+   会话缩放期间禁用其命中，避免跨过网页时丢失 move/up。 */
+html[data-agent-console-resizing="true"] webview {
+    pointer-events: none !important;
 }
 
 .pudding-agent-console[data-mode="dock-left"],
@@ -823,14 +845,18 @@ html[data-shell] :where(
 
 .pudding-rail-toggle [data-slot="button"] svg,
 .pudding-workspace-toggle [data-slot="button"] svg,
-.pudding-toolbar-icon-button svg {
+.pudding-toolbar-icon-button svg,
+.pudding-chrome-icon svg {
     width: var(--toolbar-icon-size) !important;
     height: var(--toolbar-icon-size) !important;
+    stroke-width: 2;
 }
 
 .pudding-rail-toggle,
-.pudding-workspace-toggle {
-    color: var(--rail-icon-button-foreground);
+.pudding-workspace-toggle,
+.pudding-toolbar-icon-button,
+.pudding-chrome-icon {
+    color: var(--chrome-icon-button-foreground);
 }
 
 .pudding-agent-console:is([data-mode="dock-left"], [data-mode="dock-right"]) {

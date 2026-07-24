@@ -59,8 +59,8 @@ import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
-import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
+import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
@@ -77,24 +77,24 @@ import {
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitParts";
-import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
-import { useOverlayStore, type TurnPhaseState } from "@/state/overlayStore";
+import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
 import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
+  getVisibleUIContext,
   setUIContextEnabled,
   type UIContextPart,
   useUIContextEnabled,
   useVisibleUIContext,
 } from "@/state/uiContextStore";
+import { useWorkspaceActivities } from "@/state/workspaceActivityStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 const composerSchema = z.object({
   text: z.string(),
 });
 
-const MASCOT_INPUT_PITCH_BIAS = 0.65;
 const draftAttachmentSessionID = "draft";
 
 type ComposerProps = {
@@ -122,8 +122,14 @@ async function captureBrowserSelection(sessionID: string, context: UIContextPart
   if (context.surface !== "browser" || context.resource !== "browser_tab" || !context.id) {
     return context;
   }
-  const selectionText = await readElectronBrowserSelection(sessionID, context.id);
-  return selectionText ? { ...context, selectionText } : context;
+  const selection = await readElectronBrowserSelection(sessionID, context.id);
+  const selectionText = selection.selectionText || context.selectionText?.trim() || "";
+  return selectionText
+    ? {
+        ...context,
+        selectionText,
+      }
+    : context;
 }
 
 export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
@@ -147,7 +153,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
   const overlayRunning = Boolean(runningTurnID);
-  const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
   const activeTurnPlan = useOverlayStore((state) => state.activeTurnPlans[sessionID]);
   const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
@@ -161,10 +166,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const audioBindings = audioBindingsQuery.data?.bindings;
   const micActive = audioBindings?.inputOwner === sessionID;
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
-  const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
-  const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
-  const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
-  const [textFocused, setTextFocused] = useState(false);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -172,17 +173,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const workspaceOpen = useWorkspaceOpen();
+  const workspaceActivities = useWorkspaceActivities(sessionID);
+  const showWorkspaceActivities = !workspaceOpen && workspaceActivities.length > 0;
   const uiContextEnabled = useUIContextEnabled();
   const visibleUIContext = useVisibleUIContext(sessionID);
-  const draftUIContext = workspaceOpen && uiContextEnabled ? visibleUIContext : undefined;
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(newClientID());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
-  const mascotErrorTimerRef = useRef<number | null>(null);
-  const mascotGazeRafRef = useRef(0);
   const submitPreparationRef = useRef(false);
   const form = useForm<z.infer<typeof composerSchema>>({
     resolver: zodResolver(composerSchema),
@@ -320,13 +320,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
   }, [reasoningEffort, reasoningOptions, setSessionReasoningEffort]);
 
-  const clearMascotError = useCallback(() => {
-    if (mascotErrorTimerRef.current) {
-      window.clearTimeout(mascotErrorTimerRef.current);
-      mascotErrorTimerRef.current = null;
-    }
-    setMascotErrorMessage(null);
-  }, []);
+  const clearSubmitError = useCallback(() => onSubmitError?.(null), [onSubmitError]);
   const resetSessionDraft = useCallback(() => {
     const current = ensureSessionDraft(sessionID);
     current.attachments.forEach(revokeAttachmentPreview);
@@ -548,22 +542,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const openMentionMenuFromButton = useCallback(() => {
     textAreaHandleRef.current?.openMentionMenu();
   }, []);
-  // Prefer this mascot feedback for composer-local validation and command errors.
-  const showMascotError = useCallback(
-    (message: string) => {
-      onSubmitError?.(null);
-      setMascotErrorMessage(message);
-      setMascotErrorSignal((signal) => signal + 1);
-      if (mascotErrorTimerRef.current) {
-        window.clearTimeout(mascotErrorTimerRef.current);
-      }
-      mascotErrorTimerRef.current = window.setTimeout(() => {
-        mascotErrorTimerRef.current = null;
-        setMascotErrorMessage(null);
-      }, 3600);
-    },
-    [onSubmitError],
-  );
+  const showSubmitError = useCallback((message: string) => onSubmitError?.(message), [onSubmitError]);
   const submitMutation = useMutation({
     mutationFn: async (
       value: z.infer<typeof composerSchema> & { deliveryMode?: RunningDeliveryMode; parts: ContentPart[] },
@@ -608,7 +587,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       return result;
     },
     onSuccess: async (result) => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       resetSessionDraft();
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
@@ -637,7 +616,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         submitFailed: t("composer.submitFailed"),
         turnRunning: t("composer.turnRunning"),
       });
-      showMascotError(failure.message);
+      showSubmitError(failure.message);
     },
     onSettled: () => {
       submitPreparationRef.current = false;
@@ -667,7 +646,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     },
     onMutate: (submission) => {
       const clientMessageID = `input-flow-${submission.request.id}`;
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       if (!running) {
         startSubmittingTurn(sessionID, clientMessageID);
@@ -696,7 +675,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         submitFailed: t("composer.submitFailed"),
         turnRunning: t("composer.turnRunning"),
       });
-      showMascotError(failure.message);
+      showSubmitError(failure.message);
     },
   });
   const cancelMutation = useMutation({
@@ -705,20 +684,20 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const compactMutation = useMutation({
     mutationFn: ({ hint }: { hint: string }) => compactSession(token, sessionID, { hint }),
     onMutate: () => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       startCompactRun(sessionID);
       resetSessionDraft();
     },
     onSuccess: async () => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       await queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
     onError: (error) => {
-      showMascotError(compactErrorMessage(error, t));
+      showSubmitError(compactErrorMessage(error, t));
     },
     onSettled: () => {
       finishCompactRun(sessionID);
@@ -736,12 +715,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       return submitMessage(token, sessionID, { clientMessageID, kind: "system", text });
     },
     onMutate: () => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       resetSessionDraft();
     },
     onSuccess: async () => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
@@ -753,19 +732,19 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         submitFailed: t("composer.summaryFailed"),
         turnRunning: t("composer.turnRunning"),
       });
-      showMascotError(failure.message);
+      showSubmitError(failure.message);
     },
   });
   const renameMutation = useMutation({
     mutationFn: ({ title }: { title: string }) => updateSession(token, sessionID, { title }),
     onSuccess: async () => {
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       resetSessionDraft();
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
     onError: () => {
-      showMascotError(t("composer.renameFailed"));
+      showSubmitError(t("composer.renameFailed"));
     },
   });
   const sendEnabled =
@@ -784,10 +763,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     (canSend && !submitMutation.isPending && !compactMutation.isPending && !systemSubmitMutation.isPending && !renameMutation.isPending);
 
   const runClearCommand = useCallback(() => {
-    clearMascotError();
+    clearSubmitError();
     onSubmitError?.(null);
     resetSessionDraft();
-    setTextFocused(false);
     void navigate({
       to: "/",
       search: (prev) => {
@@ -796,7 +774,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         return next;
       },
     });
-  }, [clearMascotError, navigate, onSubmitError, resetSessionDraft]);
+  }, [clearSubmitError, navigate, onSubmitError, resetSessionDraft]);
 
   const submitDraftWithMode = async (
     value: z.infer<typeof composerSchema>,
@@ -833,10 +811,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
     if (slashCommand?.id === "rename") {
       if (!slashCommand.title) {
-        showMascotError(t("composer.renameMissing"));
+        showSubmitError(t("composer.renameMissing"));
         return;
       }
-      clearMascotError();
+      clearSubmitError();
       onSubmitError?.(null);
       renameMutation.mutate({ title: slashCommand.title });
       return;
@@ -848,12 +826,15 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       });
       return;
     }
-    clearMascotError();
+    clearSubmitError();
     onSubmitError?.(null);
     submitPreparationRef.current = true;
     try {
-      const capturedUIContext = draftUIContext
-        ? await captureBrowserSelection(sessionID, draftUIContext)
+      const currentUIContext = workspaceOpen && uiContextEnabled
+        ? getVisibleUIContext(sessionID)
+        : undefined;
+      const capturedUIContext = currentUIContext
+        ? await captureBrowserSelection(sessionID, currentUIContext)
         : undefined;
       if (submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending) {
         submitPreparationRef.current = false;
@@ -897,38 +878,11 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       return next;
     });
   }, []);
-  const setMascotPointerGaze = useCallback(() => {
-    if (mascotGazeRafRef.current) {
-      window.cancelAnimationFrame(mascotGazeRafRef.current);
-      mascotGazeRafRef.current = 0;
-    }
-    setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
-  }, []);
-  const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {
-    setMascotGaze(target ? { type: "input", target } : { type: "pointer" });
-  }, []);
-  const updateMascotInputGaze = useCallback(() => {
-    const textArea = textAreaRef.current;
-    if (!textArea || document.activeElement !== textArea) {
-      return;
-    }
-    setMascotInputGaze(getTextAreaCaretClientPoint(textArea));
-  }, [setMascotInputGaze]);
-  const scheduleMascotInputGaze = useCallback(() => {
-    if (mascotGazeRafRef.current) {
-      window.cancelAnimationFrame(mascotGazeRafRef.current);
-    }
-    mascotGazeRafRef.current = window.requestAnimationFrame(() => {
-      mascotGazeRafRef.current = 0;
-      updateMascotInputGaze();
-    });
-  }, [updateMascotInputGaze]);
   const focusTextarea = useCallback(() => {
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus({ preventScroll: true });
-      scheduleMascotInputGaze();
     });
-  }, [scheduleMascotInputGaze]);
+  }, []);
   useEffect(() => {
     if (!droppedFiles || droppedFiles.nonce === lastDroppedFilesNonceRef.current) {
       return;
@@ -957,27 +911,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
 
-  useEffect(() => {
-    return () => {
-      if (mascotGazeRafRef.current) {
-        window.cancelAnimationFrame(mascotGazeRafRef.current);
-      }
-      if (mascotErrorTimerRef.current) {
-        window.clearTimeout(mascotErrorTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    setMascotGaze({ type: "pointer" });
-  }, [sessionID]);
-
   return (
     <>
       <form
-        className="relative shrink-0 pt-2 pb-4"
+        className={cn(
+          "relative shrink-0 pb-4",
+          showWorkspaceActivities ? "pt-11" : "pt-2",
+        )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
+      {showWorkspaceActivities ? <WorkspaceActivityCard activities={workspaceActivities} /> : null}
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
           文字边缘外漏不归遮罩管——那是 WKWebView 字形渲染溢出,Transcript overflow-hidden 裁掉 */}
       <div className="pointer-events-none absolute inset-x-0 -top-10">
@@ -1085,9 +1028,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   }
                 }}
                 onPaste={handleTextPaste}
-                onBlur={() => setMascotInputGaze(null)}
-                onClearMascotError={clearMascotError}
-                scheduleMascotInputGaze={scheduleMascotInputGaze}
+                onClearError={clearSubmitError}
               />
             </div>
             <ComposerToolbar
@@ -1126,26 +1067,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>
-          <span className="absolute z-30 size-12 overflow-visible" style={{ left: 6, top: -36 }}>
-            <Mascot
-              className="size-full overflow-visible"
-              gaze={mascotErrorMessage ? { type: "center" } : mascotGaze}
-              inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
-              mood={mascotErrorMessage ? "error" : mascotMoodFromPhase(turnPhase, running)}
-              headShakeSignal={mascotErrorSignal}
-              onPointerGaze={setMascotPointerGaze}
-            />
-          </span>
-          {mascotErrorMessage ? (
-            <span
-              aria-live="polite"
-              className="pointer-events-none absolute z-30 max-w-[min(28rem,calc(100%-4rem))] truncate px-1 text-xs font-semibold text-destructive"
-              role="status"
-              style={{ left: 56, top: -16 }}
-            >
-              {mascotErrorMessage}
-            </span>
-          ) : null}
         </div>
       </ChatColumn>
       </form>
@@ -1195,14 +1116,4 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
     }
   }
   return t("composer.compactFailed");
-}
-
-function mascotMoodFromPhase(phase: TurnPhaseState | undefined, running: boolean): MascotMood {
-  if (phase?.phase === "streaming_text") {
-    return "ready";
-  }
-  if (running || phase?.phase === "submitting" || phase?.phase === "awaiting_model") {
-    return "thinking";
-  }
-  return "idle";
 }

@@ -1,4 +1,4 @@
-import { Minus, PanelLeft, PanelRight, PictureInPicture2 } from "lucide-react";
+import { PanelLeft, PanelRight, PictureInPicture2 } from "lucide-react";
 
 import {
   AppDropdownMenuContent as DropdownMenuContent,
@@ -22,7 +22,6 @@ const icons = {
   floating: PictureInPicture2,
   "dock-left": PanelLeft,
   "dock-right": PanelRight,
-  collapsed: Minus,
 } satisfies Record<AgentConsoleMode, typeof PanelLeft>;
 
 export function AgentConsoleLayoutControl() {
@@ -33,7 +32,6 @@ export function AgentConsoleLayoutControl() {
     { value: "floating", label: t("agentConsole.floating") },
     { value: "dock-left", label: t("agentConsole.dockLeft") },
     { value: "dock-right", label: t("agentConsole.dockRight") },
-    { value: "collapsed", label: t("agentConsole.collapsed") },
   ];
 
   return (

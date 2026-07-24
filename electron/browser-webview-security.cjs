@@ -1,4 +1,10 @@
-function hardenManagedBrowserWebview(event, webPreferences = {}, params = {}, managedPartition) {
+function hardenManagedBrowserWebview(
+  event,
+  webPreferences = {},
+  params = {},
+  managedPartition,
+  trustedPreloadPath,
+) {
   const partition = String(managedPartition || "").trim();
   const requestedPartition = String(params.partition || webPreferences.partition || "").trim();
   const sourceURL = String(params.src || "").trim();
@@ -8,6 +14,10 @@ function hardenManagedBrowserWebview(event, webPreferences = {}, params = {}, ma
   }
 
   delete webPreferences.preload;
+  const preloadPath = String(trustedPreloadPath || "").trim();
+  if (preloadPath) {
+    webPreferences.preload = preloadPath;
+  }
   webPreferences.additionalArguments = [];
   webPreferences.allowRunningInsecureContent = false;
   webPreferences.contextIsolation = true;

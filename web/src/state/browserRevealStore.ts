@@ -1,18 +1,24 @@
 import { create } from "zustand";
 
+import {
+  recordWorkspaceActivity,
+  retainWorkspaceActivities,
+  type BrowserWorkspaceActivity,
+} from "@/state/workspaceActivityStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 type BrowserRevealState = {
   epochs: Record<string, number | undefined>;
   latest?: BrowserReveal;
   consumeReveal: (sessionID: string, epoch: number) => void;
-  requestReveal: (sessionID: string) => void;
+  requestReveal: (sessionID: string, tabID?: string) => void;
 };
 
 type BrowserReveal = {
   epoch: number;
   serial: number;
   sessionID: string;
+  tabID?: string;
 };
 
 let revealSerial = 0;
@@ -32,28 +38,53 @@ export const useBrowserRevealStore = create<BrowserRevealState>((set) => ({
           : state.latest,
       };
     }),
-  requestReveal: (sessionID) =>
+  requestReveal: (sessionID, tabID) =>
     set((state) => {
       const epoch = (state.epochs[sessionID] || 0) + 1;
       revealSerial += 1;
       return {
         epochs: { ...state.epochs, [sessionID]: epoch },
-        latest: { epoch, serial: revealSerial, sessionID },
+        latest: { epoch, serial: revealSerial, sessionID, tabID },
       };
     }),
 }));
 
-export function requestBrowserReveal(sessionID: string) {
-  useBrowserRevealStore.getState().requestReveal(sessionID);
+export function requestBrowserReveal(
+  sessionID: string,
+  activity?: Omit<BrowserWorkspaceActivity, "kind" | "sessionID">,
+) {
+  if (activity) {
+    recordWorkspaceActivity({ ...activity, kind: "browser", sessionID });
+  }
+  useBrowserRevealStore.getState().requestReveal(sessionID, activity?.resourceID);
+}
+
+export function openBrowserReveal(sessionID: string, tabID?: string) {
+  useBrowserRevealStore.getState().requestReveal(sessionID, tabID);
   setWorkspaceOpen(true);
+}
+
+export function retainBrowserActivities(sessionID: string, tabIDs: string[]) {
+  retainWorkspaceActivities(sessionID, "browser", tabIDs);
 }
 
 export function consumeBrowserReveal(sessionID: string, epoch: number) {
   useBrowserRevealStore.getState().consumeReveal(sessionID, epoch);
 }
 
-export function useBrowserRevealEpoch(sessionID: string | undefined) {
-  return useBrowserRevealStore((state) => (sessionID ? state.epochs[sessionID] || 0 : 0));
+export function useBrowserReveal(sessionID: string | undefined) {
+  return useBrowserRevealStore((state) => {
+    if (!sessionID) {
+      return undefined;
+    }
+    const epoch = state.epochs[sessionID] || 0;
+    if (!epoch) {
+      return undefined;
+    }
+    return state.latest?.sessionID === sessionID && state.latest.epoch === epoch
+      ? state.latest
+      : { epoch, serial: 0, sessionID };
+  });
 }
 
 export function useVisibleBrowserReveal(primarySessionID?: string, secondarySessionID?: string) {

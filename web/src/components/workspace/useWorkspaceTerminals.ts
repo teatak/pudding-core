@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { createTerminal, deleteTerminal, listTerminals, type Terminal } from "@/api/client";
@@ -38,7 +38,7 @@ export function useWorkspaceTerminals({
   const [selectedBySession, setSelectedBySession] = useState(selectedRef.current);
   selectedRef.current = selectedBySession;
 
-  const rememberSelected = (targetSessionID: string, terminalID?: string) => {
+  const rememberSelected = useCallback((targetSessionID: string, terminalID?: string) => {
     const next = { ...selectedRef.current };
     if (terminalID) {
       next[targetSessionID] = terminalID;
@@ -48,7 +48,7 @@ export function useWorkspaceTerminals({
     selectedRef.current = next;
     setSelectedBySession(next);
     writeSelectedTerminals(next);
-  };
+  }, []);
 
   const query = useQuery({
     enabled,
@@ -56,9 +56,12 @@ export function useWorkspaceTerminals({
     queryFn: () => listTerminals(token, sessionID),
     staleTime: 10_000,
   });
-  const terminals = (query.data?.terminals || [])
-    .filter((item) => item.sessionID === sessionID)
-    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  const terminals = useMemo(
+    () => (query.data?.terminals || [])
+      .filter((item) => item.sessionID === sessionID)
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
+    [query.data?.terminals, sessionID],
+  );
   const selectedID = selectedBySession[sessionID];
   const activeTerminal = terminals.find((item) => item.id === selectedID) || terminals[0];
 
@@ -131,36 +134,43 @@ export function useWorkspaceTerminals({
     },
   });
 
-  const updateStatus = (terminalID: string, status: Terminal["status"], exitCode?: number) => {
+  const updateStatus = useCallback((terminalID: string, status: Terminal["status"], exitCode?: number) => {
     queryClient.setQueryData<TerminalData>(queryKeys.terminals(sessionID), (current) => ({
       terminals: (current?.terminals || []).map((item) =>
         item.id === terminalID ? { ...item, status, exitCode, updatedAt: new Date().toISOString() } : item,
       ),
     }));
-  };
+  }, [queryClient, sessionID]);
+
+  const closeTerminal = useCallback((terminalID: string) => {
+    closeMutation.mutate(terminalID);
+  }, [closeMutation.mutate]);
+  const createNewTerminal = useCallback(() => {
+    if (enabled && sessionID && !createMutation.isPending) {
+      createMutation.mutate(undefined);
+    }
+  }, [createMutation.isPending, createMutation.mutate, enabled, sessionID]);
+  const createNewTerminalAt = useCallback((cwd: string) => {
+    if (enabled && sessionID && cwd && !createMutation.isPending) {
+      createMutation.mutate(cwd);
+    }
+  }, [createMutation.isPending, createMutation.mutate, enabled, sessionID]);
+  const selectTerminal = useCallback((terminalID: string) => {
+    if (terminals.some((item) => item.id === terminalID)) {
+      rememberSelected(sessionID, terminalID);
+      onActivate();
+    }
+  }, [onActivate, rememberSelected, sessionID, terminals]);
 
   return {
     activeTerminal,
     activeTerminalID: activeTerminal?.id,
-    closeTerminal: (terminalID: string) => closeMutation.mutate(terminalID),
+    closeTerminal,
     closingTerminalID: closeMutation.isPending ? closeMutation.variables : undefined,
-    createNewTerminal: () => {
-      if (enabled && sessionID && !createMutation.isPending) {
-        createMutation.mutate(undefined);
-      }
-    },
-    createNewTerminalAt: (cwd: string) => {
-      if (enabled && sessionID && cwd && !createMutation.isPending) {
-        createMutation.mutate(cwd);
-      }
-    },
+    createNewTerminal,
+    createNewTerminalAt,
     creatingTerminal: createMutation.isPending,
-    selectTerminal: (terminalID: string) => {
-      if (terminals.some((item) => item.id === terminalID)) {
-        rememberSelected(sessionID, terminalID);
-        onActivate();
-      }
-    },
+    selectTerminal,
     terminals,
     terminalInitialDimensions: initialDimensionsRef.current,
     terminalsPending: query.isFetching || createMutation.isPending,

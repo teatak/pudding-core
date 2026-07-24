@@ -34,6 +34,7 @@ const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
+const browserSelectionPreloadPath = path.join(__dirname, "browser-selection-preload.cjs");
 const appDisplayName = "Pudding";
 const repositoryURL = "https://github.com/teatak/pudding";
 const issueTrackerURL = `${repositoryURL}/issues`;
@@ -98,6 +99,9 @@ const browserHost = new BrowserHost(
         window.close();
       }
       return true;
+    },
+    selectionChanged: (selection) => {
+      broadcastToTrustedRenderers("pudding:browser:selection-updated", selection);
     },
   },
 );
@@ -266,7 +270,13 @@ function createMainWindow() {
 
   bindEditContextMenu(window.webContents, window);
   window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-    if (!hardenManagedBrowserWebview(event, webPreferences, params, managedBrowserPartition)) {
+    if (!hardenManagedBrowserWebview(
+      event,
+      webPreferences,
+      params,
+      managedBrowserPartition,
+      browserSelectionPreloadPath,
+    )) {
       console.warn("[electron] blocked unmanaged browser webview attachment");
     }
   });
@@ -1072,6 +1082,13 @@ ipcMain.handle("pudding:browser:reload", (event, request) => {
 ipcMain.handle("pudding:browser:read-selection", (event, request) => {
   assertTrustedSender(event);
   return browserHost.readSelection(request || {});
+});
+
+ipcMain.on("pudding:browser:selection-changed", (event, payload) => {
+  const selection = browserHost.noteSelection(event.sender, payload);
+  if (selection) {
+    broadcastToTrustedRenderers("pudding:browser:selection-updated", selection);
+  }
 });
 
 ipcMain.handle("pudding:browser:list-tabs", (event, request) => {

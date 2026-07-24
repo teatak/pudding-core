@@ -4,6 +4,7 @@ import type { BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { browserURLIsBlank, upsertBrowserTab } from "@/browser/helpers";
 import type { BrowserTabsData } from "@/browser/types";
+import { updateBrowserWorkspaceActivity } from "@/state/workspaceActivityStore";
 
 export type ElectronBrowserRequest = {
   sessionID: string;
@@ -51,6 +52,13 @@ export type ElectronBrowserSelection = {
   selectionText: string;
 };
 
+export type ElectronBrowserSelectionEvent = {
+  selected: boolean;
+  selectionText: string;
+  sessionID: string;
+  tabID: string;
+};
+
 export type ElectronBrowserCursorEvent = {
   sessionID: string;
   tabID: string;
@@ -84,6 +92,7 @@ export type ElectronBrowserBridge = {
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
   onUpdated: (listener: (snapshot: ElectronBrowserSnapshot) => void) => () => void;
   onCursor?: (listener: (event: ElectronBrowserCursorEvent) => void) => () => void;
+  onSelectionChanged?: (listener: (event: ElectronBrowserSelectionEvent) => void) => () => void;
   onAutomationStart?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
   onAutomationEnd?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
   completeAutomationLifecycle?: (request: { requestID: string; ok: boolean }) => Promise<boolean>;
@@ -107,19 +116,21 @@ export function electronBrowserBridge() {
 export async function readElectronBrowserSelection(sessionID: string, tabID: string) {
   const bridge = electronBrowserBridge();
   if (!bridge?.readSelection) {
-    return "";
+    return { selectionText: "" };
   }
   let timeoutID = 0;
   try {
     const result = await Promise.race([
       bridge.readSelection({ sessionID, tabID }),
       new Promise<ElectronBrowserSelection>((resolve) => {
-        timeoutID = window.setTimeout(() => resolve({ selectionText: "" }), 500);
+        timeoutID = window.setTimeout(() => resolve({ selectionText: "" }), 2_000);
       }),
     ]);
-    return String(result.selectionText || "").trim().slice(0, 16 * 1024);
+    return {
+      selectionText: String(result.selectionText || "").trim().slice(0, 16 * 1024),
+    };
   } catch {
-    return "";
+    return { selectionText: "" };
   } finally {
     window.clearTimeout(timeoutID);
   }
@@ -222,6 +233,11 @@ export function cacheElectronBrowserSnapshot(
     processMode: "webview",
     createdAt: tab.createdAt,
     updatedAt: tab.updatedAt,
+  });
+  updateBrowserWorkspaceActivity(snapshot.sessionID, tab.id, {
+    faviconURL: tab.faviconURL,
+    title: tab.title,
+    url: tab.url,
   });
   return tab;
 }

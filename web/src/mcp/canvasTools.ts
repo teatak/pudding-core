@@ -486,7 +486,10 @@ async function saveCanvasItem({
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  requestCanvasReveal(sessionID, saved.id);
+  requestCanvasReveal(sessionID, saved.id, {
+    resourceKind: saved.kind,
+    title: saved.title,
+  });
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -550,7 +553,10 @@ async function saveGalleryItem({
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  requestCanvasReveal(sessionID, saved.id);
+  requestCanvasReveal(sessionID, saved.id, {
+    resourceKind: saved.kind,
+    title: saved.title,
+  });
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -699,7 +705,10 @@ async function patchGridItem({
   };
   const saved = await putCanvasItem(token, sessionID, id, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  requestCanvasReveal(sessionID, saved.id);
+  requestCanvasReveal(sessionID, saved.id, {
+    resourceKind: saved.kind,
+    title: saved.title,
+  });
   return jsonToolResult({
     ok: true,
     id: saved.id,

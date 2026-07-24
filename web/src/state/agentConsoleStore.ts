@@ -1,27 +1,15 @@
 import { useSyncExternalStore } from "react";
 
-export type AgentConsoleMode = "floating" | "dock-left" | "dock-right" | "collapsed";
-type ExpandedAgentConsoleMode = Exclude<AgentConsoleMode, "collapsed">;
+export type AgentConsoleMode = "floating" | "dock-left" | "dock-right";
 
 const MODE_KEY = "pudding.agentConsoleMode";
-const EXPANDED_MODE_KEY = "pudding.agentConsoleExpandedMode";
 
 function isMode(value: string | null): value is AgentConsoleMode {
-  return value === "floating" || value === "dock-left" || value === "dock-right" || value === "collapsed";
-}
-
-function isExpandedMode(value: string | null): value is ExpandedAgentConsoleMode {
   return value === "floating" || value === "dock-left" || value === "dock-right";
 }
 
 const savedMode = localStorage.getItem(MODE_KEY);
-const savedExpandedMode = localStorage.getItem(EXPANDED_MODE_KEY);
-let mode: AgentConsoleMode = isMode(savedMode) ? savedMode : "floating";
-let expandedMode: ExpandedAgentConsoleMode = isExpandedMode(savedExpandedMode)
-  ? savedExpandedMode
-  : mode === "collapsed"
-    ? "floating"
-    : mode;
+let mode: AgentConsoleMode = isMode(savedMode) ? savedMode : "dock-left";
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -34,15 +22,7 @@ export function setAgentConsoleMode(next: AgentConsoleMode) {
   }
   mode = next;
   localStorage.setItem(MODE_KEY, next);
-  if (next !== "collapsed") {
-    expandedMode = next;
-    localStorage.setItem(EXPANDED_MODE_KEY, next);
-  }
   notify();
-}
-
-export function expandAgentConsole() {
-  setAgentConsoleMode(expandedMode);
 }
 
 function subscribe(listener: () => void) {

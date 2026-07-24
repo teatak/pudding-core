@@ -105,6 +105,7 @@ export function AssistantOutputMeta({ assistant }: { assistant: AssistantOutputV
     <MessageMeta
       createdAt={lastMessage.createdAt}
       duration={assistant.duration}
+      hoverGroup="assistant-turn"
       model={assistant.model}
       text={assistantTextFromMessages(assistant.messages)}
     />
