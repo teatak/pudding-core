@@ -2,7 +2,6 @@ import { Globe } from "lucide-react";
 
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
-import { ChatColumn } from "@/components/ChatColumn";
 import { useI18n } from "@/i18n";
 import { openBrowserReveal } from "@/state/browserRevealStore";
 import { openCanvasReveal } from "@/state/canvasRevealStore";
@@ -16,22 +15,19 @@ export function WorkspaceActivityCard({ activities }: { activities: WorkspaceAct
   }
 
   return (
-    <aside
+    <div
       aria-label={t("workspace.recentArtifacts")}
-      className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9"
+      className="pointer-events-auto flex w-fit max-w-full min-w-0 gap-0.5 overflow-x-auto rounded-lg border border-border/70 bg-popover/95 p-0.5 text-popover-foreground shadow-sm backdrop-blur-md overscroll-x-contain"
+      role="group"
     >
-      <ChatColumn className="flex h-full items-center justify-center">
-        <div className="pointer-events-auto flex w-fit max-w-full min-w-0 gap-0.5 overflow-x-auto rounded-lg border border-border/70 bg-popover/95 p-0.5 text-popover-foreground shadow-sm backdrop-blur-md overscroll-x-contain">
-          {activities.map((activity) => (
-            <WorkspaceActivityRow
-              key={`${activity.kind}:${activity.resourceID || activity.serial}`}
-              activity={activity}
-              onOpen={() => openWorkspaceActivity(activity)}
-            />
-          ))}
-        </div>
-      </ChatColumn>
-    </aside>
+      {activities.map((activity) => (
+        <WorkspaceActivityRow
+          key={`${activity.kind}:${activity.resourceID || activity.serial}`}
+          activity={activity}
+          onOpen={() => openWorkspaceActivity(activity)}
+        />
+      ))}
+    </div>
   );
 }
 

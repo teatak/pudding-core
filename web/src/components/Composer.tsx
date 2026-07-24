@@ -59,6 +59,7 @@ import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
+import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -77,6 +78,7 @@ import {
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitParts";
+import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
@@ -95,6 +97,7 @@ const composerSchema = z.object({
   text: z.string(),
 });
 
+const MASCOT_INPUT_PITCH_BIAS = 0.65;
 const draftAttachmentSessionID = "draft";
 
 type ComposerProps = {
@@ -166,6 +169,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const audioBindings = audioBindingsQuery.data?.bindings;
   const micActive = audioBindings?.inputOwner === sessionID;
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
+  const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -174,7 +178,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const workspaceOpen = useWorkspaceOpen();
   const workspaceActivities = useWorkspaceActivities(sessionID);
-  const showWorkspaceActivities = !workspaceOpen && workspaceActivities.length > 0;
   const uiContextEnabled = useUIContextEnabled();
   const visibleUIContext = useVisibleUIContext(sessionID);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
@@ -183,6 +186,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mascotGazeRafRef = useRef(0);
   const submitPreparationRef = useRef(false);
   const form = useForm<z.infer<typeof composerSchema>>({
     resolver: zodResolver(composerSchema),
@@ -211,6 +215,22 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [hasInput, setHasInput] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const showApprovalPanel = Boolean(pendingApproval);
+  const showInputFlowPanel = !showApprovalPanel && Boolean(pendingInputFlow);
+  const showTurnProgress = Boolean(
+    !showApprovalPanel
+      && !showInputFlowPanel
+      && running
+      && activeTurnPlan,
+  );
+  const showWorkspaceActivities = Boolean(
+    !showApprovalPanel
+      && !showInputFlowPanel
+      && !showTurnProgress
+      && !workspaceOpen
+      && workspaceActivities.length > 0,
+  );
+  const showComposerTopStatus = showTurnProgress || showWorkspaceActivities;
   const [draftSlashCommand, setDraftSlashCommand] = useState<SlashSubmitCommand | null>(null);
   const textAreaHandleRef = useRef<ComposerTextAreaHandle | null>(null);
   const uploadedAttachments = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
@@ -878,11 +898,38 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       return next;
     });
   }, []);
+  const setMascotPointerGaze = useCallback(() => {
+    if (mascotGazeRafRef.current) {
+      window.cancelAnimationFrame(mascotGazeRafRef.current);
+      mascotGazeRafRef.current = 0;
+    }
+    setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
+  }, []);
+  const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {
+    setMascotGaze(target ? { type: "input", target } : { type: "pointer" });
+  }, []);
+  const updateMascotInputGaze = useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea || document.activeElement !== textArea) {
+      return;
+    }
+    setMascotInputGaze(getTextAreaCaretClientPoint(textArea));
+  }, [setMascotInputGaze]);
+  const scheduleMascotInputGaze = useCallback(() => {
+    if (mascotGazeRafRef.current) {
+      window.cancelAnimationFrame(mascotGazeRafRef.current);
+    }
+    mascotGazeRafRef.current = window.requestAnimationFrame(() => {
+      mascotGazeRafRef.current = 0;
+      updateMascotInputGaze();
+    });
+  }, [updateMascotInputGaze]);
   const focusTextarea = useCallback(() => {
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus({ preventScroll: true });
+      scheduleMascotInputGaze();
     });
-  }, []);
+  }, [scheduleMascotInputGaze]);
   useEffect(() => {
     if (!droppedFiles || droppedFiles.nonce === lastDroppedFilesNonceRef.current) {
       return;
@@ -910,17 +957,40 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       setAttachmentPreviewIndex(null);
     }
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
+  useEffect(() => {
+    return () => {
+      if (mascotGazeRafRef.current) {
+        window.cancelAnimationFrame(mascotGazeRafRef.current);
+      }
+    };
+  }, []);
+  useEffect(() => {
+    setMascotGaze({ type: "pointer" });
+  }, [sessionID]);
 
   return (
     <>
       <form
         className={cn(
           "relative shrink-0 pb-4",
-          showWorkspaceActivities ? "pt-11" : "pt-2",
+          showComposerTopStatus ? "pt-11" : "pt-2",
         )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
-      {showWorkspaceActivities ? <WorkspaceActivityCard activities={workspaceActivities} /> : null}
+      {showComposerTopStatus ? (
+        <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9">
+          <ChatColumn className="relative flex h-full items-center justify-center">
+            {showTurnProgress && activeTurnPlan ? (
+              <ComposerTurnProgress progress={activeTurnPlan} />
+            ) : null}
+            {showWorkspaceActivities ? (
+              <div className="min-w-0">
+                <WorkspaceActivityCard activities={workspaceActivities} />
+              </div>
+            ) : null}
+          </ChatColumn>
+        </aside>
+      ) : null}
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
           文字边缘外漏不归遮罩管——那是 WKWebView 字形渲染溢出,Transcript overflow-hidden 裁掉 */}
       <div className="pointer-events-none absolute inset-x-0 -top-10">
@@ -930,16 +1000,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       </div>
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
-          {running && activeTurnPlan && !pendingApproval && !pendingInputFlow ? (
-            <ComposerTurnProgress progress={activeTurnPlan} />
-          ) : null}
-          <ComposerApprovalBar approval={pendingApproval} token={token} />
-          {pendingInputFlow ? (
+          {pendingApproval ? (
+            <ComposerApprovalBar approval={pendingApproval} token={token} />
+          ) : pendingInputFlow ? (
             <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />
           ) : null}
           <div
             className={cn(
-              "pudding-composer-shell relative isolate z-10 rounded-[18px] border border-border/70 bg-card/95 transition-shadow",
+              "pudding-composer-shell relative rounded-[18px] border border-border/70 bg-card transition-shadow",
               micActive && "is-mic-active",
             )}
           >
@@ -1028,7 +1096,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   }
                 }}
                 onPaste={handleTextPaste}
+                onBlur={() => setMascotInputGaze(null)}
                 onClearError={clearSubmitError}
+                scheduleMascotInputGaze={scheduleMascotInputGaze}
               />
             </div>
             <ComposerToolbar
@@ -1067,6 +1137,18 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>
+          <span
+            className="absolute z-30 size-12 overflow-visible"
+            style={{ left: 6, top: -36 }}
+          >
+            <Mascot
+              className="size-full overflow-visible"
+              gaze={mascotGaze}
+              inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
+              mood={running ? "thinking" : "idle"}
+              onPointerGaze={setMascotPointerGaze}
+            />
+          </span>
         </div>
       </ChatColumn>
       </form>

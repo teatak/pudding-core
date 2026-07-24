@@ -50,6 +50,7 @@ import { buildComposerMentionReferences } from "@/components/composerMentionData
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
+import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { AudioControlButtons, AudioRuntimeInstallDialog, audioAPIErrorMessage } from "@/components/SessionAudioControls";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -81,6 +82,7 @@ import type { AppSearch } from "@/lib/route";
 import { fetchStarterPromptCatalog, localizeStarterPrompts, STARTER_PROMPTS_CACHE_TTL_MS } from "@/lib/starterPrompts";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
+import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { fetchUserMessageCatalog, localizeUserMessage, USER_MESSAGES_STALE_TIME_MS } from "@/lib/userMessages";
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
@@ -142,6 +144,13 @@ export function DraftConversation({ token, projectID }: { token: string; project
     () => (userMessagesQuery.data ? localizeUserMessage(userMessagesQuery.data, locale, "draft") : null),
     [locale, userMessagesQuery.data],
   );
+  const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
+  const setMascotPointerGaze = useCallback(() => {
+    setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
+  }, []);
+  const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {
+    setMascotGaze(target ? { type: "input", target } : { type: "pointer" });
+  }, []);
   const resetDragState = useCallback(() => {
     setDragActive(false);
   }, []);
@@ -232,6 +241,12 @@ export function DraftConversation({ token, projectID }: { token: string; project
     >
       <div className="pudding-draft-body">
         <div className="pudding-draft-title" aria-busy={userMessagesQuery.isPending}>
+          <Mascot
+            className="pudding-draft-mascot"
+            gaze={mascotGaze}
+            mood="idle"
+            onPointerGaze={setMascotPointerGaze}
+          />
           {userMessagesQuery.isPending ? (
             <Skeleton className="h-8 w-72 max-w-[60vw]" />
           ) : (
@@ -291,6 +306,7 @@ export function DraftConversation({ token, projectID }: { token: string; project
             modelReady={draftModelIsValid}
             modelValue={composerModelValue}
             onModelValueChange={setModelValue}
+            onMascotInputGazeChange={setMascotInputGaze}
             onSubmitError={setSubmitError}
           />
           {!showPresetSetup && starterPrompts.length > 0 ? (
@@ -382,6 +398,7 @@ function DraftComposer({
   modelReady,
   modelValue,
   onModelValueChange,
+  onMascotInputGazeChange,
   onSubmitError,
 }: {
   droppedFiles?: DraftDroppedFilesBatch | null;
@@ -391,6 +408,7 @@ function DraftComposer({
   modelReady: boolean;
   modelValue: DraftModelValue;
   onModelValueChange: (model: DraftModelValue) => void;
+  onMascotInputGazeChange: (target: MascotGazePoint | null) => void;
   onSubmitError: (message: string | null) => void;
 }) {
   const navigate = useNavigate({ from: "/" });
@@ -436,6 +454,7 @@ function DraftComposer({
   const lastDroppedFilesNonceRef = useRef(0);
   const quickSubmitIDRef = useRef<number | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mascotGazeRafRef = useRef(0);
   const selectionGuardRef = useComposerSelectionGuard<HTMLDivElement>();
   const form = useForm<DraftValue>({
     resolver: zodResolver(draftSchema),
@@ -767,12 +786,37 @@ function DraftComposer({
   }, [cleanupDraftVoiceSession, queryClient, t, token]);
   const sendEnabled = canSend && modelReady && !mentionMenuOpen && !draftVoiceInputMutation.isPending;
 
+  const updateMascotInputGaze = useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea || document.activeElement !== textArea) {
+      return;
+    }
+    onMascotInputGazeChange(getTextAreaCaretClientPoint(textArea));
+  }, [onMascotInputGazeChange]);
+  const scheduleMascotInputGaze = useCallback(() => {
+    if (mascotGazeRafRef.current) {
+      window.cancelAnimationFrame(mascotGazeRafRef.current);
+    }
+    mascotGazeRafRef.current = window.requestAnimationFrame(() => {
+      mascotGazeRafRef.current = 0;
+      updateMascotInputGaze();
+    });
+  }, [updateMascotInputGaze]);
   const focusTextarea = useCallback(() => {
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus({ preventScroll: true });
+      scheduleMascotInputGaze();
     });
-  }, []);
-  const ime = useImeCompositionGuard();
+  }, [scheduleMascotInputGaze]);
+  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
+  useEffect(() => {
+    return () => {
+      if (mascotGazeRafRef.current) {
+        window.cancelAnimationFrame(mascotGazeRafRef.current);
+      }
+      onMascotInputGazeChange(null);
+    };
+  }, [onMascotInputGazeChange]);
 
   const clearDraftAttachments = useCallback(() => {
     attachments.forEach(revokeDraftAttachmentPreview);
@@ -1186,15 +1230,18 @@ function DraftComposer({
     textField.onBlur(event);
     mentions.close();
     setTextFocused(false);
+    onMascotInputGazeChange(null);
   };
   const handleTextFocus = () => {
     setTextFocused(true);
     if (textAreaRef.current) {
       mentions.notifyCursor(textAreaRef.current.selectionStart);
     }
+    scheduleMascotInputGaze();
   };
   const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
     mentions.notifyCursor(event.currentTarget.selectionStart);
+    scheduleMascotInputGaze();
   };
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const previousText = form.getValues("text");
@@ -1203,6 +1250,7 @@ function DraftComposer({
     setDraftText(nextText);
     mentions.notifyChange(nextText, previousText, event.currentTarget.selectionStart);
     setTextFocused(true);
+    scheduleMascotInputGaze();
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setPickingAttachment(false);
@@ -1228,10 +1276,12 @@ function DraftComposer({
       mentions.notifyCursor(event.currentTarget.selectionStart + 1);
     }
     if (mentions.onKeyDown(event)) {
+      scheduleMascotInputGaze();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
       if (ime.isComposing(event)) {
+        scheduleMascotInputGaze();
         return;
       }
       event.preventDefault();
@@ -1239,6 +1289,7 @@ function DraftComposer({
         void form.handleSubmit(submitDraft)();
       }
     }
+    scheduleMascotInputGaze();
   };
 
   return (

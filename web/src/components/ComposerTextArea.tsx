@@ -59,7 +59,9 @@ type ComposerTextAreaProps = {
     draftSlashCommand: SlashSubmitCommand | null;
   }) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onBlur: () => void;
   onClearError: () => void;
+  scheduleMascotInputGaze: () => void;
 };
 
 export function parseSlashSubmitCommand(text: string): SlashSubmitCommand | null {
@@ -122,7 +124,7 @@ function SlashCommandMenu({
   return (
     <div
       ref={listRef}
-      className="pudding-composer-suggestion absolute bottom-[calc(100%-3px)] left-16 z-[5] max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-b-0 bg-popover/95 p-1 text-sm text-popover-foreground backdrop-blur"
+      className="pudding-composer-suggestion absolute bottom-full left-16 z-40 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-b-0 bg-card p-1 text-sm text-card-foreground"
       role="listbox"
     >
       {commands.map((command, index) => (
@@ -193,7 +195,9 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     onSlashCommandSelect,
     onEnter,
     onPaste,
+    onBlur,
     onClearError,
+    scheduleMascotInputGaze,
   },
   ref,
 ) {
@@ -234,7 +238,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
 
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
 
-  const ime = useImeCompositionGuard();
+  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
 
   const prevCanSendRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
@@ -294,6 +298,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     textField.onBlur(event);
     mentions.close();
     setTextFocused(false);
+    onBlur();
   };
 
   const handleTextFocus = () => {
@@ -301,10 +306,12 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     if (textAreaRef.current) {
       mentions.notifyCursor(textAreaRef.current.selectionStart);
     }
+    scheduleMascotInputGaze();
   };
 
   const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
     mentions.notifyCursor(event.currentTarget.selectionStart);
+    scheduleMascotInputGaze();
   };
 
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -315,6 +322,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     mentions.notifyChange(nextText, previousText, event.target.selectionStart);
     onClearError();
     setTextFocused(true);
+    scheduleMascotInputGaze();
   };
 
   const selectSlashCommand = (command: SlashCommand) => {
@@ -328,6 +336,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     onSlashCommandSelect(command);
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus();
+      scheduleMascotInputGaze();
     });
   };
 
@@ -336,6 +345,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
       mentions.notifyCursor(event.currentTarget.selectionStart + 1);
     }
     if (mentions.onKeyDown(event)) {
+      scheduleMascotInputGaze();
       return;
     }
     if (slashMenuOpen) {
@@ -365,6 +375,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     }
     if (event.key === "Enter" && !event.shiftKey) {
       if (ime.isComposing(event)) {
+        scheduleMascotInputGaze();
         return;
       }
       event.preventDefault();
@@ -381,6 +392,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         draftSlashCommand: currentSlashCommand,
       });
     }
+    scheduleMascotInputGaze();
   };
 
   const openMentionMenu = useCallback(() => {

@@ -15,12 +15,12 @@ export function ComposerTurnProgress({ progress }: { progress: ActiveTurnPlan })
   const label = `${progress.currentStep}/${progress.totalSteps} · ${current.step}`;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center pb-2">
+    <div className="pointer-events-none flex min-w-0 flex-1 justify-center">
       <HoverCard openDelay={180} closeDelay={100}>
         <HoverCardTrigger asChild>
           <div
             aria-label={t("composer.planProgressAria").replace("{progress}", label)}
-            className="pointer-events-auto flex h-9 max-w-[min(32rem,calc(100%-2rem))] items-center gap-2.5 rounded-lg border border-border/70 bg-popover/95 px-3 text-xs text-popover-foreground shadow-sm backdrop-blur outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="pointer-events-auto flex h-9 w-full max-w-[min(32rem,calc(100%-2rem))] items-center gap-2.5 rounded-lg border border-border/70 bg-popover/95 px-3 text-xs text-popover-foreground shadow-sm backdrop-blur outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             role="status"
             tabIndex={0}
           >

@@ -704,18 +704,6 @@ html[data-agent-console-resizing="true"] webview {
     background-color: var(--agent-console-chrome-background);
 }
 
-.pudding-composer-suggestion {
-    box-shadow:
-        0 -1px 3px oklch(0 0 0 / 6%),
-        0 -7px 16px -8px oklch(0 0 0 / 10%);
-}
-
-.dark .pudding-composer-suggestion {
-    box-shadow:
-        0 -1px 4px oklch(0 0 0 / 14%),
-        0 -8px 18px -8px oklch(0 0 0 / 24%);
-}
-
 [data-app-floating-content] {
     box-shadow: 0 0 0 1px var(--menu-outline), var(--menu-shadow);
 }

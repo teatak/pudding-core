@@ -52,19 +52,26 @@ export function ComposerMentionMenu({
   return (
     <div
       className={cn(
-        "pudding-composer-suggestion absolute bottom-[calc(100%-3px)] z-[5] w-[min(18rem,calc(100%-2rem))] overflow-hidden rounded-t-lg border border-b-0 bg-popover/95 text-sm text-popover-foreground backdrop-blur",
+        "pudding-composer-suggestion absolute bottom-full z-40 w-[min(18rem,calc(100%-2rem))] overflow-hidden rounded-t-lg border border-b-0 bg-card text-sm text-card-foreground",
         align === "start" ? "left-4" : "left-16",
       )}
       role="listbox"
       onContextMenu={(event) => event.preventDefault()}
     >
       {references.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-muted-foreground">{t("composer.mentionNoMatch")}</div>
+        <div className="flex h-9 items-center px-3 text-xs text-muted-foreground">{t("composer.mentionNoMatch")}</div>
       ) : (
-        <div ref={listRef} className="max-h-72 overflow-y-auto p-1">
+        <div
+          ref={listRef}
+          className="grid max-h-[20.25rem] gap-1 overflow-y-auto p-1"
+        >
           {sections.map((section) => (
-            <div key={section.id} className="py-1 first:pt-0">
-              {section.label ? <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">{section.label}</div> : null}
+            <div key={section.id} className="contents">
+              {section.label ? (
+                <div className="flex h-9 items-center rounded-md px-2 text-[11px] font-medium text-muted-foreground">
+                  {section.label}
+                </div>
+              ) : null}
               {section.entries.map(({ index, reference }) => (
                 <button
                   key={`${reference.kind}:${reference.id}`}
