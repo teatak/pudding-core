@@ -229,15 +229,15 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
       {isToolCallApproval && patchApproval ? (
         <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
           <span>{t("transcript.approvalPatchFiles").replace("{count}", String(patchApproval.fileCount))}</span>
-          <span className="font-mono text-success">+{patchApproval.additions}</span>
-          <span className="font-mono text-destructive">-{patchApproval.deletions}</span>
+          <span className="font-mono text-git-added">+{patchApproval.additions}</span>
+          <span className="font-mono text-git-deleted">-{patchApproval.deletions}</span>
         </div>
       ) : null}
       {isToolCallApproval && gitCommitApproval ? (
         <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
           <span>{t("transcript.approvalPatchFiles").replace("{count}", String(gitCommitApproval.fileCount))}</span>
-          <span className="font-mono text-success">+{gitCommitApproval.additions}</span>
-          <span className="font-mono text-destructive">-{gitCommitApproval.deletions}</span>
+          <span className="font-mono text-git-added">+{gitCommitApproval.additions}</span>
+          <span className="font-mono text-git-deleted">-{gitCommitApproval.deletions}</span>
           <span className="min-w-0 truncate">{gitCommitApproval.commitMessage}</span>
         </div>
       ) : null}

@@ -297,10 +297,7 @@ function ProfileModels({
         return (
           <button
             key={model}
-            className={cn(
-              "flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md py-1.5 pr-2.5 pl-5 text-left text-[13px] hover:bg-accent",
-              selected && "bg-accent",
-            )}
+            className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md py-1.5 pr-2.5 pl-5 text-left text-[13px] hover:bg-accent"
 
             type="button"
             onClick={() => onPick(model)}

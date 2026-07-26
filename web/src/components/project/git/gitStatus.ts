@@ -20,8 +20,9 @@ export function projectGitStatusLabel(file: ProjectGitStatusFile, staged: boolea
 }
 
 export function projectGitStatusTone(file: ProjectGitStatusFile) {
-  if (file.kind === "conflicted") return "text-destructive";
-  if (file.kind === "untracked" || file.kind === "added") return "text-emerald-600 dark:text-emerald-400";
-  if (file.kind === "deleted") return "text-destructive";
-  return "text-yellow-600 dark:text-yellow-400";
+  if (file.kind === "conflicted") return "text-git-conflicted";
+  if (file.kind === "untracked" || file.kind === "added") return "text-git-added";
+  if (file.kind === "deleted") return "text-git-deleted";
+  if (file.kind === "renamed") return "text-git-renamed";
+  return "text-git-modified";
 }

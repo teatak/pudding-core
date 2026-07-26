@@ -24,6 +24,11 @@
     --color-overlay: var(--overlay);
     --color-warning: var(--warning);
     --color-success: var(--success);
+    --color-git-added: var(--git-added);
+    --color-git-modified: var(--git-modified);
+    --color-git-deleted: var(--git-deleted);
+    --color-git-renamed: var(--git-renamed);
+    --color-git-conflicted: var(--git-conflicted);
     --color-control-disabled: var(--control-disabled);
     --color-secondary-hover: var(--secondary-hover);
     --color-primary-hover: var(--primary-hover);
@@ -156,6 +161,11 @@
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
+    --git-added: #1a7f37;
+    --git-modified: #9a6700;
+    --git-deleted: #cf222e;
+    --git-renamed: #0969da;
+    --git-conflicted: #bc4c00;
     --overlay: oklch(0 0 0 / 10%);
     --control-disabled: var(--ring);
     --destructive-foreground: oklch(1 0 0);
@@ -558,6 +568,11 @@ html[data-shell] :where(
     --agent-console-shadow: 0 1px 3px oklch(0 0 0 / 28%), 0 20px 52px -14px oklch(0 0 0 / 62%);
     --success: oklch(0.7 0.11 175);
     --warning: oklch(0.76 0.12 75);
+    --git-added: #3fb950;
+    --git-modified: #d29922;
+    --git-deleted: #f85149;
+    --git-renamed: #58a6ff;
+    --git-conflicted: #db6d28;
     --overlay: oklch(0 0 0 / 22%);
     --control-disabled: color-mix(in oklch, var(--foreground) 48%, var(--background));
     --destructive-foreground: oklch(1 0 0);
@@ -745,13 +760,6 @@ html[data-agent-console-resizing="true"] webview {
 [data-slot="context-menu-radio-item"]:active,
 [data-slot="context-menu-sub-trigger"]:active {
     background-color: var(--floating-active);
-}
-
-[data-slot="dropdown-menu-checkbox-item"][data-state="checked"],
-[data-slot="dropdown-menu-radio-item"][data-state="checked"],
-[data-slot="context-menu-checkbox-item"][data-state="checked"],
-[data-slot="context-menu-radio-item"][data-state="checked"] {
-    background-color: var(--floating-selected);
 }
 
 :is(
@@ -2198,19 +2206,18 @@ html[data-agent-console-resizing="true"] webview {
   opacity: 1;
 }
 
-/* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
-   内容窄时行随容器通栏,内容宽时在 wrapper 内横滚 */
+/* 表格按内容撑宽，超出消息宽度时由 wrapper 横向滚动，避免窄列折行。 */
 .pudding-markdown .table-wrap {
   @apply max-w-full overflow-x-auto rounded-lg border border-border/70;
 }
 
 .pudding-markdown table {
-  @apply w-full border-collapse text-sm;
+  @apply w-max min-w-full table-auto border-collapse text-sm;
 }
 
 .pudding-markdown th,
 .pudding-markdown td {
-  @apply border-b border-border/70 px-3 py-2 text-left align-top;
+  @apply whitespace-nowrap border-b border-border/70 px-3 py-2 text-left align-top;
 }
 
 .pudding-markdown th {

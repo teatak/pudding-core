@@ -94,8 +94,8 @@ function ChangeStatus({ change }: { change: TurnFileChange }) {
 function ChangeStats({ change }: { change: TurnFileChange }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5 text-[10px]">
-      {change.additions > 0 ? <span className="text-success">+{change.additions}</span> : null}
-      {change.deletions > 0 ? <span className="text-destructive">−{change.deletions}</span> : null}
+      {change.additions > 0 ? <span className="text-git-added">+{change.additions}</span> : null}
+      {change.deletions > 0 ? <span className="text-git-deleted">−{change.deletions}</span> : null}
     </span>
   );
 }
@@ -112,10 +112,10 @@ function statusLetter(kind: TurnFileChange["kind"]) {
 }
 
 function statusClass(kind: TurnFileChange["kind"]) {
-  if (kind === "added") return "text-success";
-  if (kind === "deleted") return "text-destructive";
-  if (kind === "renamed") return "text-info";
-  return "text-warning";
+  if (kind === "added") return "text-git-added";
+  if (kind === "deleted") return "text-git-deleted";
+  if (kind === "renamed") return "text-git-renamed";
+  return "text-git-modified";
 }
 
 function kindLabelKey(kind: TurnFileChange["kind"]) {

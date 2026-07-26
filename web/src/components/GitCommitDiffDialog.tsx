@@ -52,8 +52,8 @@ export function GitCommitDiffDialog({
           <div className="flex flex-wrap gap-x-4 gap-y-1 border-y border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
             {approval.branch ? <code className="font-mono">{approval.branch}</code> : null}
             <span>{t("transcript.approvalPatchFiles").replace("{count}", String(approval.fileCount))}</span>
-            <span className="font-mono text-success">+{approval.additions}</span>
-            <span className="font-mono text-destructive">-{approval.deletions}</span>
+            <span className="font-mono text-git-added">+{approval.additions}</span>
+            <span className="font-mono text-git-deleted">-{approval.deletions}</span>
             {approval.truncated ? <span className="text-warning">{t("transcript.codeTruncated")}</span> : null}
           </div>
         ) : null}
@@ -65,8 +65,8 @@ export function GitCommitDiffDialog({
                   <div key={file.path} className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/40 text-[11px] last:border-b-0">
                     <code className="min-w-0 truncate font-mono text-foreground/90">{file.path}</code>
                     <span className="shrink-0 font-mono">
-                      <span className="text-success">+{file.additions}</span>{" "}
-                      <span className="text-destructive">-{file.deletions}</span>
+                      <span className="text-git-added">+{file.additions}</span>{" "}
+                      <span className="text-git-deleted">-{file.deletions}</span>
                     </span>
                   </div>
                 ))}

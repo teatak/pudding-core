@@ -46,8 +46,8 @@ export function PatchDiffDialog({
         {approval ? (
           <div className="flex flex-wrap gap-x-4 gap-y-1 border-y border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
             <span>{t("transcript.approvalPatchFiles").replace("{count}", String(approval.fileCount))}</span>
-            <span className="font-mono text-success">+{approval.additions}</span>
-            <span className="font-mono text-destructive">-{approval.deletions}</span>
+            <span className="font-mono text-git-added">+{approval.additions}</span>
+            <span className="font-mono text-git-deleted">-{approval.deletions}</span>
           </div>
         ) : null}
         <div className="min-h-0 min-w-0 overflow-y-auto px-4 py-3">
@@ -59,8 +59,8 @@ export function PatchDiffDialog({
                     <code className="min-w-0 truncate font-mono text-foreground/90">{file.path}</code>
                     <span className="text-muted-foreground">{t(`transcript.codePatchOperation.${file.operation}`)}</span>
                     <span className="shrink-0 font-mono">
-                      <span className="text-success">+{file.additions}</span>{" "}
-                      <span className="text-destructive">-{file.deletions}</span>
+                      <span className="text-git-added">+{file.additions}</span>{" "}
+                      <span className="text-git-deleted">-{file.deletions}</span>
                     </span>
                   </div>
                 ))}

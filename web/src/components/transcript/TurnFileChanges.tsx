@@ -73,8 +73,8 @@ function TextFileChanges({ changes, sessionID, turnID }: {
           <span className={cn("truncate text-foreground", singleChange ? "font-mono text-sm" : "font-medium")}>{summary}</span>
           {additions > 0 || deletions > 0 ? (
             <span className={cn("flex shrink-0 items-center gap-1.5 font-mono", singleChange ? "text-sm" : "text-xs")}>
-              {additions > 0 ? <span className="text-success">+{additions}</span> : null}
-              {deletions > 0 ? <span className="text-destructive">−{deletions}</span> : null}
+              {additions > 0 ? <span className="text-git-added">+{additions}</span> : null}
+              {deletions > 0 ? <span className="text-git-deleted">−{deletions}</span> : null}
             </span>
           ) : null}
         </span>
@@ -97,8 +97,8 @@ function TextFileChanges({ changes, sessionID, turnID }: {
                 {statusLetter(change.kind)}
               </span>
               <code className="relative z-[1] min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
-              {change.additions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-success">+{change.additions}</span> : null}
-              {change.deletions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-destructive">−{change.deletions}</span> : null}
+              {change.additions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-added">+{change.additions}</span> : null}
+              {change.deletions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-deleted">−{change.deletions}</span> : null}
             </button>
           ))}
         </div>
@@ -222,10 +222,10 @@ function statusLetter(kind: TurnFileChange["kind"]) {
 
 function statusClass(kind: TurnFileChange["kind"]) {
   switch (kind) {
-    case "added": return "text-success";
-    case "deleted": return "text-destructive";
-    case "renamed": return "text-info";
-    default: return "text-warning";
+    case "added": return "text-git-added";
+    case "deleted": return "text-git-deleted";
+    case "renamed": return "text-git-renamed";
+    default: return "text-git-modified";
   }
 }
 

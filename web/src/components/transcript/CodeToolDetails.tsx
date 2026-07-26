@@ -408,8 +408,8 @@ function PatchDetails({ output, t }: { output: UnknownRecord | null; t: Translat
       <MetricRow
         metrics={[
           metric(readNumber(output, "fileCount"), t("transcript.codeFilesLabel")),
-          metric(readNumber(output, "additions"), t("transcript.codeAdditions"), "text-success"),
-          metric(readNumber(output, "deletions"), t("transcript.codeDeletions"), "text-destructive"),
+          metric(readNumber(output, "additions"), t("transcript.codeAdditions"), "text-git-added"),
+          metric(readNumber(output, "deletions"), t("transcript.codeDeletions"), "text-git-deleted"),
         ]}
       />
       {files.length > 0 ? <PatchFileList files={files} t={t} /> : null}
@@ -427,8 +427,8 @@ function PatchFileList({ files, t }: { files: UnknownRecord[]; t: Translator }) 
           <span className="min-w-0 truncate font-mono text-foreground/85">{readString(file, "path")}</span>
           <span className="text-muted-foreground">{t(`transcript.codePatchOperation.${readString(file, "operation")}`)}</span>
           <span className="shrink-0 font-mono">
-            <span className="text-success">+{readNumber(file, "additions") ?? 0}</span>{" "}
-            <span className="text-destructive">-{readNumber(file, "deletions") ?? 0}</span>
+            <span className="text-git-added">+{readNumber(file, "additions") ?? 0}</span>{" "}
+            <span className="text-git-deleted">-{readNumber(file, "deletions") ?? 0}</span>
           </span>
         </div>
       ))}
@@ -716,8 +716,8 @@ function GitDiffDetails({ output, t }: { output: UnknownRecord | null; t: Transl
       <MetricRow
         metrics={[
           metric(readNumber(output, "fileCount"), t("transcript.codeFilesLabel")),
-          metric(readNumber(output, "additions"), t("transcript.codeAdditions"), "text-success"),
-          metric(readNumber(output, "deletions"), t("transcript.codeDeletions"), "text-destructive"),
+          metric(readNumber(output, "additions"), t("transcript.codeAdditions"), "text-git-added"),
+          metric(readNumber(output, "deletions"), t("transcript.codeDeletions"), "text-git-deleted"),
         ]}
       />
       {visible.length > 0 ? (
@@ -730,8 +730,8 @@ function GitDiffDetails({ output, t }: { output: UnknownRecord | null; t: Transl
                 <span className="min-w-0 truncate">{readString(file, "path")}</span>
               </div>
               <span className="shrink-0 font-mono">
-                <span className="text-success">+{readNumber(file, "additions") ?? 0}</span>{" "}
-                <span className="text-destructive">-{readNumber(file, "deletions") ?? 0}</span>
+                <span className="text-git-added">+{readNumber(file, "additions") ?? 0}</span>{" "}
+                <span className="text-git-deleted">-{readNumber(file, "deletions") ?? 0}</span>
               </span>
             </div>
           ))}
@@ -1278,12 +1278,18 @@ function formatDate(value: string, locale: string) {
 
 function gitKindTone(kind: string) {
   if (kind === "added" || kind === "untracked") {
-    return "text-success";
+    return "text-git-added";
   }
-  if (kind === "deleted" || kind === "conflicted") {
-    return "text-destructive";
+  if (kind === "deleted") {
+    return "text-git-deleted";
   }
-  return "text-warning";
+  if (kind === "renamed") {
+    return "text-git-renamed";
+  }
+  if (kind === "conflicted") {
+    return "text-git-conflicted";
+  }
+  return "text-git-modified";
 }
 
 function countSummary(record: UnknownRecord | null, key: string, messageKey: string, t: Translator) {

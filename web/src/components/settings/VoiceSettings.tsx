@@ -75,7 +75,9 @@ const VOICE_NS_LEVEL_OPTIONS = ["low", "moderate", "high", "very_high"];
 export function VoiceSettings({ token }: { token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
-  const [form, setForm] = useState<VoiceFormState>(defaultVoiceForm());
+  const initialConfig = queryClient.getQueryData<{ config: AudioConfig }>(queryKeys.audioConfig())?.config;
+  const [form, setForm] = useState<VoiceFormState>(() => initialConfig ? voiceFormFromConfig(initialConfig) : defaultVoiceForm());
+  const [formHydrated, setFormHydrated] = useState(Boolean(initialConfig));
   const [pendingSaveCount, setPendingSaveCount] = useState(0);
   const [pendingToggleCounts, setPendingToggleCounts] = useState<Partial<Record<VoiceToggleKey, number>>>({});
   const [clearRecordingsOpen, setClearRecordingsOpen] = useState(false);
@@ -107,6 +109,7 @@ export function VoiceSettings({ token }: { token: string }) {
   useEffect(() => {
     if (savedConfig && pendingSaveCount === 0) {
       setForm(voiceFormFromConfig(savedConfig));
+      setFormHydrated(true);
     }
   }, [pendingSaveCount, savedConfig]);
 
@@ -230,6 +233,22 @@ export function VoiceSettings({ token }: { token: string }) {
   const clearDisabled = disabled || clearRecordingsMutation.isPending;
   const resetDisabled = disabled || saving || clearRecordingsMutation.isPending;
   const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
+
+  if (!formHydrated) {
+    return (
+      <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
+        {audioQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
+          </Alert>
+        ) : (
+          <div className="flex min-h-64 items-center justify-center">
+            <Spinner className="size-5 text-muted-foreground" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
