@@ -145,14 +145,12 @@ async function startOAuth(
     return json({ error: "transaction_create_failed" }, 502, corsHeaders)
   }
 
-  const authorizationURL =
-    flow === "install"
-      ? new URL(provider.installURL)
-      : new URL(provider.authorizationURL)
-  if (flow === "authorize") {
-    authorizationURL.searchParams.set("client_id", provider.clientID)
-    authorizationURL.searchParams.set("redirect_uri", provider.callbackURL)
-  }
+  // Authorize first for both flows. Existing installations can then complete
+  // immediately; first-time users are redirected to installation only after
+  // the callback confirms that no accessible installation exists.
+  const authorizationURL = new URL(provider.authorizationURL)
+  authorizationURL.searchParams.set("client_id", provider.clientID)
+  authorizationURL.searchParams.set("redirect_uri", provider.callbackURL)
   authorizationURL.searchParams.set("state", transactionID)
   return json(
     {
@@ -237,6 +235,15 @@ async function finishOAuthCallback(
     },
   )
   const handoff = await responseJSON(response)
+  if (
+    response.status === 409 &&
+    readString(handoff?.error) === "installation_required"
+  ) {
+    const installationURL = readString(handoff?.installation_url)
+    if (installationURL.startsWith(provider.installURL)) {
+      return Response.redirect(installationURL, 302)
+    }
+  }
   if (!response.ok || !handoff) {
     return oauthResultPage({
       title:

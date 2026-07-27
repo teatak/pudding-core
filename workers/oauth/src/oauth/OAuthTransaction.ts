@@ -88,6 +88,21 @@ export class OAuthTransaction {
         accessToken,
       )
       if (installations.length === 0) {
+        if (record.flow === "install" && !record.installationAttempted) {
+          const installationURL = new URL(configuredProvider.installURL)
+          installationURL.searchParams.set("state", record.transactionID)
+          await this.state.storage.put(STORAGE_KEY, {
+            ...record,
+            installationAttempted: true,
+          } satisfies OAuthTransactionRecord)
+          return json(
+            {
+              error: "installation_required",
+              installation_url: installationURL.toString(),
+            },
+            409,
+          )
+        }
         throw new Error(
           "Pudding Connector is not installed for an accessible GitHub account or organization.",
         )

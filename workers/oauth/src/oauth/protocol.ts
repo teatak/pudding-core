@@ -11,6 +11,7 @@ export type OAuthTransactionRecord = {
   provider: string
   status: "pending" | "callback_received" | "redeeming"
   transactionID: string
+  installationAttempted?: boolean
   installationID?: string
   redeemSecret?: string
   token?: Record<string, unknown>

@@ -18,17 +18,16 @@ The current Pudding GitHub App uses the public `x-t.top` callback:
 
 1. A client posts `provider`, `client`, `client_state`, `flow`, and a SHA-256
    challenge to `POST https://x-t.top/oauth/start`.
-2. The Worker creates a short-lived Durable Object transaction and returns the
-   GitHub App installation URL for `flow: "install"` or the user
-   authorization URL for `flow: "authorize"`.
-3. GitHub redirects to
-   `GET https://x-t.top/oauth/callback/github`. With GitHub's
-   "Request user authorization during installation" option enabled, an initial
-   installation continues into OAuth without a second Pudding action.
-4. The Worker validates state, exchanges the code for a user token, verifies
-   that Pudding Connector has at least one installation accessible to that
-   token, and stores the response only for the five-minute device handoff
-   window.
+2. The Worker creates a short-lived Durable Object transaction and starts user
+   authorization. For `flow: "install"`, the first callback checks whether the
+   user already has an accessible Pudding Connector installation.
+3. Existing installations complete immediately. When none exists, the same
+   browser session is redirected to the GitHub App installation selector. With
+   GitHub's "Request user authorization during installation" option enabled,
+   installation returns through OAuth without another Pudding action.
+4. The Worker validates state, exchanges the final code for a user token,
+   verifies the accessible installation, and stores the response only for the
+   five-minute device handoff window.
 5. The result page opens either `pudding://` or `pudding-mobile://` with an
    opaque single-use ticket.
 6. The client posts that ticket and its verifier to
