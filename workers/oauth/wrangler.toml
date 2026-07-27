@@ -7,6 +7,19 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
 
+[vars]
+PUDDING_GITHUB_APP_ID = "4187984"
+PUDDING_GITHUB_APP_SLUG = "pudding-connector"
+PUDDING_GITHUB_CLIENT_ID = "Iv23lirZKad1FaxOKF73"
+
+[[durable_objects.bindings]]
+name = "OAUTH_TRANSACTIONS"
+class_name = "OAuthTransaction"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OAuthTransaction"]
+
 [[routes]]
 pattern = "x-t.top"
 custom_domain = true

@@ -52,7 +52,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ConfirmationDialog";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
@@ -981,7 +981,7 @@ export const WorkspacePane = memo(function WorkspacePane({
 
   return (
     <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
-      <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
+      <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-40 flex h-(--toolbar-h) items-center">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

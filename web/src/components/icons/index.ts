@@ -67,6 +67,7 @@ export {
   FolderClosed,
   FolderCog,
   FolderInput,
+  FolderMinus,
   FolderOpen,
   FolderPlus,
   Folders,

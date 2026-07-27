@@ -57,7 +57,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
@@ -499,7 +499,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-[70] flex translate-x-1 items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-40 flex translate-x-1 items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -1166,10 +1166,9 @@ function RailPanel({
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
-          <div aria-hidden="true" className="mx-4 mb-2 h-px shrink-0 bg-sidebar-border/60" />
           <SidebarContent
             ref={scrollContainerRef}
-            className="gap-0.5 pt-0 pb-2 overscroll-contain"
+            className="gap-0.5 pt-2 pb-2 overscroll-contain"
             onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-session-action]")}
           >
             {isLoading ? (
@@ -1497,7 +1496,7 @@ function CollapsibleSessionGroupLabel({
         <span className="min-w-0 truncate">{label}</span>
         <ChevronRight
           className={cn(
-            "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100 group-has-[[data-project-actions-open=true]]/project-label:opacity-100",
+            "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
             !collapsed && "rotate-90",
           )}
         />

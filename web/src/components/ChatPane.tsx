@@ -30,7 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

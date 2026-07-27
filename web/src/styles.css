@@ -182,8 +182,6 @@
     --menu-item-gap: 0.25rem;
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
-    --confirm-destructive: var(--destructive);
-    --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 6%);
     --mascot-body-top: oklch(0.68 0.19 277);
     --mascot-body-mid: oklch(0.52 0.25 277);
     --mascot-body-bottom: oklch(0.39 0.22 277);
@@ -588,8 +586,6 @@ html[data-shell] :where(
     --floating-selected: var(--floating-hover);
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
-    --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
-    --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 14%);
     --mascot-body-top: oklch(0.72 0.16 277);
     --mascot-body-mid: oklch(0.56 0.21 277);
     --mascot-body-bottom: oklch(0.44 0.2 277);
@@ -816,16 +812,6 @@ html[data-agent-console-resizing="true"] webview {
 [data-slot="dropdown-menu-item"][data-variant="destructive"]:is(:hover, :focus, [data-highlighted]),
 [data-slot="context-menu-item"][data-variant="destructive"]:is(:hover, :focus, [data-highlighted]) {
     background-color: var(--dropdown-destructive-hover);
-    color: var(--destructive-foreground);
-}
-
-[data-slot="alert-dialog-action"][data-variant="destructive"] {
-    background-color: var(--confirm-destructive);
-    color: var(--destructive-foreground);
-}
-
-[data-slot="alert-dialog-action"][data-variant="destructive"]:is(:hover, :focus-visible) {
-    background-color: var(--confirm-destructive-hover);
     color: var(--destructive-foreground);
 }
 

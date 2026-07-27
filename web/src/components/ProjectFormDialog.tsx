@@ -166,13 +166,13 @@ export function ProjectFormDialog({
           <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
             <label className="grid gap-1.5">
               <span className="sr-only">{t("project.name")}</span>
-              <div className="flex overflow-hidden rounded-lg border bg-background focus-within:border-ring">
+              <div className="flex overflow-hidden rounded-lg border focus-within:border-ring">
                 <span className="grid w-11 shrink-0 place-items-center border-r text-muted-foreground">
                   <FolderClosed className="size-4" />
                 </span>
                 <Input
                   autoFocus
-                  className="h-10 rounded-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0"
+                  className="h-10 rounded-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
                   disabled={isPending}
                   maxLength={120}
                   placeholder={t("project.namePlaceholder")}

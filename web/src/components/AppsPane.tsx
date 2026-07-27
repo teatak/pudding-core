@@ -7,7 +7,6 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -53,7 +52,7 @@ import {
   X,
   type LucideIcon,
 } from "@/components/icons";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -103,7 +102,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ConfirmationDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -536,10 +535,16 @@ export function AppsPane({ token }: { token: string }) {
             <Package />
           )
         }
-        title={detailApp ? appDisplayName(detailApp, t) : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}
+        title={
+          detailApp
+            ? appDetailName(appDisplayName(detailApp, t))
+            : detailCatalogApp
+              ? appDetailName(appRegistryTitle(detailCatalogApp, locale))
+              : t("apps.title")
+        }
       />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid w-full max-w-5xl gap-8 px-6 pt-4 pb-10">
+        <div className="mx-auto grid w-full max-w-3xl gap-8 px-6 pt-4 pb-10">
           {detailApp ? (
             <AppDetail
               app={detailApp}
@@ -553,7 +558,9 @@ export function AppsPane({ token }: { token: string }) {
                 setSelectedSkill({
                   appID: detailApp.id,
                   appSource: detailApp.source,
-                  appName: detailCatalogForInstalled ? appRegistryTitle(detailCatalogForInstalled, locale) : appDisplayName(detailApp, t),
+                  appName: appDetailName(
+                    detailCatalogForInstalled ? appRegistryTitle(detailCatalogForInstalled, locale) : appDisplayName(detailApp, t),
+                  ),
                   icon,
                   iconSrc,
                   skill,
@@ -590,7 +597,7 @@ export function AppsPane({ token }: { token: string }) {
               }
               onSkillSelect={(skill) =>
                 setSelectedSkill({
-                  appName: appRegistryTitle(detailCatalogApp, locale),
+                  appName: appDetailName(appRegistryTitle(detailCatalogApp, locale)),
                   icon: detailCatalogApp.icon,
                   iconSrc: appRegistryIconURL(detailCatalogApp, OFFICIAL_APP_REGISTRY),
                   skill,
@@ -1197,6 +1204,19 @@ function appRegistryTitle(item: AppRegistryItem, locale: string) {
   return localizedText(item.title, locale) || item.name || item.id;
 }
 
+function appDetailName(value: string, replaceHyphens = false) {
+  const separators = replaceHyphens ? /[_-]+(.)?/g : /_+(.)?/g;
+  const normalized = value.trim().replace(separators, (_, next: string | undefined) => ` ${next?.toUpperCase() || ""}`);
+  if (!normalized) {
+    return "";
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function skillDetailName(value: string) {
+  return appDetailName(value, true);
+}
+
 function appRegistryDescription(item: AppRegistryItem, locale: string) {
   return localizedText(item.description, locale) || "";
 }
@@ -1298,7 +1318,7 @@ function AppDetail({
   const skills = (app.skills || []) as AppSkillItems;
   const icon = mergeAppIconSpec(app.icon, catalogApp?.icon);
   const iconSrc = appIconURL(token, app) || (catalogApp ? appRegistryIconURL(catalogApp, OFFICIAL_APP_REGISTRY) : undefined);
-  const title = catalogApp ? appRegistryTitle(catalogApp, locale) : appDisplayName(app, t);
+  const title = appDetailName(catalogApp ? appRegistryTitle(catalogApp, locale) : appDisplayName(app, t));
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || appDisplayDescription(app, t);
   const authMethods = appAuthMethods(app);
   const canManageConnections = appCanManageConnections(app);
@@ -1325,8 +1345,8 @@ function AppDetail({
   );
 
   return (
-    <section className="grid gap-8">
-      <div className="min-w-0 border-b pb-6">
+    <section className="grid gap-6">
+      <div className="min-w-0 border-b pb-5">
         <div className="flex min-w-0 items-start gap-4">
           <AppIdentityIcon app={app} icon={icon} iconSrc={iconSrc} size="hero" />
           <div className="min-w-0 flex-1">
@@ -1369,14 +1389,14 @@ function AppDetail({
         </div>
       </div>
 
-      <div className="grid gap-8">
+      <div className="grid gap-6">
         {canManageConnections || connections.length > 0 ? (
           <DetailSection
             title={t("apps.connections")}
             count={connections.length}
             action={
               canManageConnections ? (
-                <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
+                <Button size="sm" type="button" variant="outline" onClick={onAdd}>
                   <Plus className="size-3.5" />
                   {t("apps.addConnection")}
                 </Button>
@@ -1384,15 +1404,18 @@ function AppDetail({
             }
           >
             {connections.length > 0 ? (
-              connections.map((connection) => (
-                <ConnectionRow
-                  key={connection.id}
-                  authMethods={authMethods}
-                  connection={connection}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                />
-              ))
+              <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card">
+                {connections.map((connection, index) => (
+                  <ConnectionRow
+                    key={connection.id}
+                    authMethods={authMethods}
+                    connection={connection}
+                    divided={index > 0}
+                    onDelete={onDelete}
+                    onEdit={onEdit}
+                  />
+                ))}
+              </div>
             ) : (
               <EmptyLine>{t("apps.noConnections")}</EmptyLine>
             )}
@@ -1449,7 +1472,7 @@ function CatalogAppItem({
   token: string;
 }) {
   const { locale, t } = useI18n();
-  const title = appRegistryTitle(app, locale);
+  const title = appDetailName(appRegistryTitle(app, locale));
   const description = appRegistryDescription(app, locale);
   const upgradeAvailable = installed ? needsAppUpgrade(installed, release) : false;
   const installedCurrentOrNewer = Boolean(installed) && !upgradeAvailable;
@@ -1520,12 +1543,14 @@ function CatalogAppDetail({
   onSkillSelect: (skill: AppSkillItem) => void;
 }) {
   const { locale, t } = useI18n();
-  const title = appRegistryTitle(app, locale);
+  const title = appDetailName(appRegistryTitle(app, locale));
   const description = appRegistryDescription(app, locale);
   const upgradeAvailable = installed && selectedRelease ? needsAppUpgrade(installed, selectedRelease) : false;
   const installedCurrentOrNewer = Boolean(installed && selectedRelease && !upgradeAvailable);
   const endpoints = Object.entries(detail?.endpoints || {}).sort(([a], [b]) => a.localeCompare(b));
   const skills = detail?.skills || [];
+  const showEndpoints = detailLoading || detailFailed || endpoints.length > 0;
+  const showSkills = detailLoading || detailFailed || skills.length > 0;
   return (
     <section className="grid gap-8">
       <div className="min-w-0 border-b pb-6">
@@ -1575,7 +1600,7 @@ function CatalogAppDetail({
           </div>
         </div>
       </div>
-      {detailLoading || detailFailed || endpoints.length > 0 ? (
+      {showEndpoints ? (
         <AppEndpointsSection count={detail ? endpoints.length : undefined} endpoints={endpoints}>
           {detailLoading ? (
             <DetailSkeletonRows />
@@ -1586,7 +1611,7 @@ function CatalogAppDetail({
           )}
         </AppEndpointsSection>
       ) : null}
-      {detailLoading || detailFailed || skills.length > 0 ? (
+      {showSkills ? (
         <AppSkillsSection
           count={detail ? skills.length : undefined}
           icon={app.icon}
@@ -1686,17 +1711,23 @@ function EndpointRows({
   }
   return (
     <>
-      <div className="grid gap-2">
-        {endpoints.map(([name, endpoint]) => {
+      <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card">
+        {endpoints.map(([name, endpoint], index) => {
           const statuses = mcpStatusByEndpoint?.get(name) || [];
           const statusConfigured = statuses.some((status) => status.configured);
           const isMCPConfigured = endpoint.kind === "mcp" && (mcpConfiguredByEndpoint[name] ?? statusConfigured);
           return (
-            <DetailRow key={name}>
+            <DetailRow key={name} className="relative rounded-none bg-transparent px-3 py-2.5">
+              {index > 0 ? <span aria-hidden="true" className="absolute inset-x-3 top-0 border-t border-border/70" /> : null}
               <div className="flex min-w-0 items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-sm font-medium">{name}</span>
-                  <Badge variant="outline">{endpoint.kind}</Badge>
+                  <span className="truncate text-sm font-medium">{appDetailName(name)}</span>
+                  <Badge
+                    className="h-4 px-1.5 py-0 text-[10px] leading-none font-semibold text-muted-foreground"
+                    variant="secondary"
+                  >
+                    {endpoint.kind.toUpperCase()}
+                  </Badge>
                   {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
                 </div>
                 {endpoint.kind === "mcp" && onEditMCPConfig ? (
@@ -1716,7 +1747,6 @@ function EndpointRows({
                   </Button>
                 ) : null}
               </div>
-              <EndpointTarget endpoint={endpoint} />
               {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
               {endpoint.kind === "mcp" && mcpStatusVisible ? (
                 <MCPStatusDetails
@@ -1748,18 +1778,6 @@ function EndpointRows({
         />
       ) : null}
     </>
-  );
-}
-
-function EndpointTarget({ endpoint }: { endpoint: AppEndpoints[string] }) {
-  const target = endpoint.kind === "mcp" && endpoint.transport === "stdio" ? endpoint.command : endpoint.url || endpoint.command;
-  if (!target) {
-    return null;
-  }
-  return (
-    <div className="truncate text-xs text-muted-foreground" >
-      {target}
-    </div>
   );
 }
 
@@ -2185,77 +2203,43 @@ function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
   return (
     <DetailSection title={t("apps.tools")} count={tools.length}>
       <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-        {tools.map((tool) => (
-          <div key={tool.key} className="flex min-w-0 items-start gap-3 rounded-lg border px-3 py-2.5">
-            <AppToolGlyph kind={tool.kind} name={tool.name} />
-            <div className="grid min-w-0 flex-1 gap-1">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-sm font-medium">{tool.title || appToolDisplayName(tool.name, t)}</span>
-                {tool.kind === "builtin" ? null : (
-                  <Badge className="shrink-0" variant="outline">
-                    {tool.kind.toUpperCase()}
-                  </Badge>
-                )}
-              </div>
-              {tool.description ? <AppToolDescription description={tool.description} /> : null}
-              {tool.inputSchema ? (
-                <details className="group min-w-0">
-                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                    {t("apps.mcpInputSchema")}
-                  </summary>
-                  <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
-                    {formatMCPInputSchema(tool.inputSchema)}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
-          </div>
-        ))}
+        {tools.map((tool) => <AppToolCard key={tool.key} tool={tool} />)}
       </div>
     </DetailSection>
   );
 }
 
-function AppToolDescription({ description }: { description: string }) {
+function AppToolCard({ tool }: { tool: AppToolItem }) {
   const { t } = useI18n();
-  const descriptionRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [overflowing, setOverflowing] = useState(false);
-
-  useLayoutEffect(() => {
-    const element = descriptionRef.current;
-    if (!element || expanded) {
-      return;
-    }
-    const measure = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [description, expanded]);
 
   return (
-    <div className="min-w-0">
-      <div
-        ref={descriptionRef}
-        className={cn(
-          "max-w-full whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground",
-          !expanded && "line-clamp-2",
-        )}
-      >
-        {description}
+    <div className="flex min-w-0 items-start gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5">
+      <AppToolGlyph kind={tool.kind} name={tool.name} />
+      <div className="grid min-w-0 flex-1 gap-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium">{tool.title || appToolDisplayName(tool.name, t)}</span>
+          {tool.kind === "builtin" ? null : (
+            <Badge className="shrink-0" variant="outline">
+              {tool.kind.toUpperCase()}
+            </Badge>
+          )}
+        </div>
+        {tool.description ? (
+          <div className="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+            {tool.description}
+          </div>
+        ) : null}
+        {tool.inputSchema ? (
+          <details className="group min-w-0">
+            <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+              {t("apps.mcpInputSchema")}
+            </summary>
+            <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
+              {formatMCPInputSchema(tool.inputSchema)}
+            </pre>
+          </details>
+        ) : null}
       </div>
-      {overflowing ? (
-        <button
-          aria-expanded={expanded}
-          className="mt-0.5 inline-flex cursor-pointer items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
-          type="button"
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-          {expanded ? t("apps.mcpCollapseDescription") : t("apps.mcpExpandDescription")}
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -2433,16 +2417,23 @@ function SkillRows({
     return <EmptyLine>{t("apps.none")}</EmptyLine>;
   }
   return (
-    <ItemGroup className="gap-2">
-      {skills.map((skill) => (
-        <Item key={skill.path} asChild className="items-start gap-3 rounded-lg px-3 py-3 hover:bg-muted/35" variant="outline">
+    <ItemGroup className="gap-0 overflow-hidden rounded-lg border border-border/70 bg-card">
+      {skills.map((skill, index) => (
+        <Item
+          key={skill.path}
+          asChild
+          className="relative items-start gap-3 rounded-none border-0 px-3 py-2.5 hover:bg-muted/35"
+        >
           <button type="button" onClick={() => onSkillSelect?.(skill)}>
+            {index > 0 ? <span aria-hidden="true" className="absolute inset-x-3 top-0 border-t border-border/70" /> : null}
             <ItemMedia>
               {app ? <AppIdentityIcon app={app} icon={icon} iconSrc={iconSrc} size="md" /> : <AppIcon icon={icon} size="md" src={iconSrc} />}
             </ItemMedia>
             <ItemContent className="min-w-0 gap-1">
               <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
-                <span className="min-w-0 truncate text-sm font-medium">{skill.name || skill.id || skill.path}</span>
+                <span className="min-w-0 truncate text-sm font-medium">
+                  {skillDetailName(skill.name || skill.id || skill.path)}
+                </span>
               </ItemTitle>
               <ItemDescription className="line-clamp-2 text-xs leading-5">{skill.description || skill.path}</ItemDescription>
             </ItemContent>
@@ -2476,7 +2467,7 @@ function SkillDetailDialog({
 }) {
   const { t } = useI18n();
   const content = stripSkillFrontmatter(skill?.content || "");
-  const title = skill?.name || skill?.id || skill?.path || "";
+  const title = skillDetailName(skill?.name || skill?.id || skill?.path || "");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[82vh] max-h-[760px] flex-col overflow-hidden sm:max-w-3xl">
@@ -2523,7 +2514,7 @@ function stripSkillFrontmatter(content: string) {
 
 function DetailSection({ action, title, count, children }: { action?: ReactNode; title: string; count?: number; children: ReactNode }) {
   return (
-    <section className="grid min-w-0 gap-3.5">
+    <section className="grid min-w-0 gap-3">
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-baseline gap-2">
           <h3 className="text-base font-semibold tracking-normal">{title}</h3>
@@ -2536,8 +2527,8 @@ function DetailSection({ action, title, count, children }: { action?: ReactNode;
   );
 }
 
-function DetailRow({ children }: { children: ReactNode }) {
-  return <div className="grid min-w-0 gap-1 rounded-md bg-muted/35 px-3 py-2.5">{children}</div>;
+function DetailRow({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("grid min-w-0 gap-1 rounded-md bg-muted/35 px-3 py-2.5", className)}>{children}</div>;
 }
 
 function EmptyLine({ children }: { children: ReactNode }) {
@@ -2587,11 +2578,13 @@ function DetailSkeletonRows() {
 function ConnectionRow({
   authMethods,
   connection,
+  divided,
   onDelete,
   onEdit,
 }: {
   authMethods: AppAuthMethod[];
   connection: AppConnection;
+  divided: boolean;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
 }) {
@@ -2599,7 +2592,8 @@ function ConnectionRow({
   const name = connection.name || connection.id || t("apps.connection");
   const authLabel = connectionAuthBadgeLabel(connection, authMethods, t);
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-md bg-muted/35 px-3 py-2.5">
+    <div className="relative flex min-w-0 items-center gap-3 px-3 py-2.5">
+      {divided ? <span aria-hidden="true" className="absolute inset-x-3 top-0 border-t border-border/70" /> : null}
       <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

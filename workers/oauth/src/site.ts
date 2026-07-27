@@ -150,7 +150,7 @@ function homePage(origin: string): PageOptions {
               <div><span>✓</span><p><b>See basic account information</b><small>Name, email address, and profile</small></p></div>
               <div class="blocked"><span>—</span><p><b>Send, edit, or delete mail</b><small>Never requested</small></p></div>
             </div>
-            <p class="permission-foot">OAuth credentials are returned to Pudding on your device. This website does not retain them.</p>
+            <p class="permission-foot">OAuth credentials are returned to Pudding on your device. Cloud handoff records are short-lived and are deleted after redemption or expiry.</p>
           </div>
         </section>
 
@@ -174,7 +174,7 @@ function privacyPage(origin: string): PageOptions {
     eyebrow: "Your data, explained",
     heading: "Privacy Policy",
     intro:
-      "Pudding is a local-first desktop AI workspace. This policy explains how the Pudding desktop app and the OAuth service at oauth.x-t.top handle information.",
+      "Pudding is a local-first AI workspace. This policy explains how the Pudding apps and the OAuth services at x-t.top and oauth.x-t.top handle information.",
     content: `
       <section id="scope"><h2>1. Scope</h2><p>This policy applies to Pudding for desktop and the public website and OAuth exchange service hosted at <a href="${origin}">${escapeHTML(origin)}</a>. Pudding does not require a website account.</p></section>
       <section id="information"><h2>2. Information Pudding handles</h2>
@@ -183,10 +183,10 @@ function privacyPage(origin: string): PageOptions {
         <h3>Service metadata</h3><p>Our hosting and security providers may process standard request metadata such as IP address, timestamp, user agent, and requested URL to deliver and protect the service. We do not use advertising cookies or third-party analytics on this website.</p>
       </section>
       <section id="use"><h2>3. How information is used</h2><p>Google user data is used only to provide user-requested Gmail features, such as finding, reading, organizing, or summarizing messages inside Pudding. Basic profile information identifies the account you connected.</p><p>Pudding does not sell Google user data, use it for advertising, or use Gmail content to train a general-purpose AI model. Pudding's use and transfer of information received from Google APIs complies with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p></section>
-      <section id="oauth"><h2>4. OAuth and credential handling</h2><p>During connection, the authorization code is sent to <code>oauth.x-t.top</code> solely to exchange it with Google for tokens. The exchange service returns Google's response to the Pudding desktop app and does not persist authorization codes, access tokens, refresh tokens, or Gmail content.</p><p>Connection credentials are stored locally by Pudding on your computer. Treat access to your operating-system account as sensitive and keep your device secured.</p></section>
+      <section id="oauth"><h2>4. OAuth and credential handling</h2><p>During a GitHub connection, GitHub returns an authorization code to <code>x-t.top</code>. The service exchanges that code for tokens and keeps the result only during a short device-handoff window. Pudding receives a single-use ticket, redeems it over HTTPS, and the handoff record is then deleted. The legacy Gmail flow sends an authorization code to <code>oauth.x-t.top</code> solely to exchange it for tokens.</p><p>Connection credentials are stored locally by Pudding on your device. Treat access to your operating-system account as sensitive and keep your device secured.</p></section>
       <section id="sharing"><h2>5. Data sharing</h2><p>Pudding does not sell personal information. Information is disclosed only as needed to provide a feature you request:</p><ul><li><strong>Google</strong> processes authorization and Gmail API requests.</li><li><strong>Cloudflare</strong> hosts this website and the short-lived OAuth token exchange.</li><li><strong>Your chosen AI provider</strong> may receive message excerpts or derived context when you explicitly ask Pudding to use Gmail content in an AI task. That provider's terms and privacy policy apply.</li><li><strong>Legal and safety requests</strong> may require disclosure where applicable law demands it.</li></ul><p>We do not allow humans to read Google user data except with your affirmative agreement for support or security, when necessary to investigate abuse, or when required by law.</p></section>
-      <section id="retention"><h2>6. Retention and deletion</h2><p>The OAuth exchange service does not retain Google tokens or Gmail content. Locally stored credentials remain until you remove the Gmail connection, delete Pudding's local data, or revoke access from your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>. Gmail-derived text you intentionally place in a conversation may remain in that local conversation until you delete it.</p><p>See the <a href="/data-deletion">data deletion guide</a> for step-by-step options.</p></section>
-      <section id="security"><h2>7. Security</h2><p>We use HTTPS for network requests, restrict OAuth redirect destinations to local Pudding callbacks, and avoid persistent server-side token storage. No security measure is perfect; please report suspected issues to <a href="mailto:${supportEmail}">${supportEmail}</a>.</p></section>
+      <section id="retention"><h2>6. Retention and deletion</h2><p>GitHub OAuth handoff records expire within minutes and are deleted immediately after successful redemption. The legacy exchange service does not retain Google tokens or Gmail content. Locally stored credentials remain until you remove the connection, delete Pudding's local data, or revoke access from the connected service.</p><p>See the <a href="/data-deletion">data deletion guide</a> for step-by-step options.</p></section>
+      <section id="security"><h2>7. Security</h2><p>We use HTTPS for network requests, fixed allowlisted application return schemes, random state values, client-bound challenges, short-lived single-use tickets, and no persistent server-side token database. No security measure is perfect; please report suspected issues to <a href="mailto:${supportEmail}">${supportEmail}</a>.</p></section>
       <section id="choices"><h2>8. Your choices</h2><p>Connecting Gmail is optional. You can decline a requested permission, remove the Gmail connection in Pudding, revoke access in Google, or stop using the feature at any time.</p></section>
       <section id="children"><h2>9. Children</h2><p>Pudding is not directed to children under 13, and we do not knowingly collect personal information from children through this website.</p></section>
       <section id="changes"><h2>10. Changes and contact</h2><p>We may update this policy as the product changes. The date at the top identifies the latest revision. Questions or privacy requests can be sent to <a href="mailto:${supportEmail}">${supportEmail}</a>.</p></section>`,
@@ -201,9 +201,9 @@ function termsPage(origin: string): PageOptions {
     eyebrow: "Clear expectations",
     heading: "Terms of Service",
     intro:
-      "These terms govern your use of Pudding and the supporting public services at oauth.x-t.top. By using them, you agree to these terms.",
+      "These terms govern your use of Pudding and the supporting public services at x-t.top and oauth.x-t.top. By using them, you agree to these terms.",
     content: `
-      <section><h2>1. The service</h2><p>Pudding is a local-first desktop AI workspace. Its public OAuth service helps the desktop app connect user-authorized services such as Gmail and GitHub. Features may change as Pudding evolves.</p></section>
+      <section><h2>1. The service</h2><p>Pudding is a local-first AI workspace. Its public OAuth service helps Pudding apps connect user-authorized services such as Gmail and GitHub. Features may change as Pudding evolves.</p></section>
       <section><h2>2. Your accounts and permissions</h2><p>You may connect only accounts you own or are authorized to use. You are responsible for your device, connected accounts, chosen AI providers, and actions you approve through Pudding. You may disconnect a service at any time.</p></section>
       <section><h2>3. Acceptable use</h2><p>Do not use Pudding or its OAuth service to violate law, infringe rights, access accounts without authorization, distribute malware, interfere with the service, or bypass security and usage controls.</p></section>
       <section><h2>4. Third-party services</h2><p>Pudding can interact with services operated by others, including Google, GitHub, Cloudflare, and AI model providers you configure. Their own terms and privacy policies govern their services. We are not responsible for third-party availability or changes.</p></section>
@@ -229,7 +229,7 @@ function supportPage(origin: string): PageOptions {
       <section><h2>Download and updates</h2><p>Get the latest macOS build from the <a href="${downloadURL}">Pudding releases page</a>. Packaged builds check for updates automatically and wait for you to restart before installing them.</p></section>
       <section><h2>Why does Pudding ask for Gmail access?</h2><p>Gmail is an optional Pudding connection. If you enable it, Pudding requests <code>gmail.readonly</code> so it can find and read messages when you ask. Pudding cannot send, edit, or delete email with this permission.</p></section>
       <section><h2>How do I disconnect Gmail?</h2><ol><li>Remove the Gmail connection inside Pudding.</li><li>Open <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li><li>Select Pudding and revoke access.</li></ol><p>For local data removal, follow the <a href="/data-deletion">data deletion guide</a>.</p></section>
-      <section><h2>OAuth connection problems</h2><p>Confirm that you selected the intended Google account, accepted only the permissions you want, and returned to the Pudding desktop app after authorization. If the callback does not complete, close the authorization tab and start the connection again from Pudding.</p></section>
+      <section><h2>OAuth connection problems</h2><p>Confirm that you selected the intended account and repositories, accepted only the permissions you want, and returned to the Pudding app after authorization. If the callback does not complete, close the authorization tab and start the connection again from Pudding.</p></section>
       <section><h2>Contact</h2><p>Email <a href="mailto:${supportEmail}">${supportEmail}</a> with a concise description, your Pudding version, and your macOS version. Do not send passwords, access tokens, full email content, or other secrets.</p><p>You can also review the public project at <a href="${repositoryURL}">GitHub</a>.</p></section>`,
   })
 }
@@ -242,11 +242,11 @@ function dataDeletionPage(origin: string): PageOptions {
     eyebrow: "You stay in control",
     heading: "Data Deletion",
     intro:
-      "Pudding keeps its application data on your computer, while the OAuth exchange service does not retain Google tokens or Gmail content.",
+      "Pudding keeps its application data on your device, while OAuth handoff records are short-lived and deleted after redemption or expiry.",
     content: `
       <section><h2>Remove a Gmail connection</h2><ol><li>Open Pudding and remove the Gmail connection you no longer want to use.</li><li>Visit <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.</li><li>Select Pudding and choose the option to remove access.</li></ol><p>Revoking access invalidates Pudding's authorization to call Gmail APIs for that Google account.</p></section>
       <section><h2>Delete local conversations and settings</h2><p>Delete individual conversations in Pudding when you no longer need them. To remove all Pudding application data, quit the app, remove its local Pudding data directory, and uninstall the application. This action is destructive and cannot be undone.</p></section>
-      <section><h2>Server-side data</h2><p>The OAuth exchange at <code>oauth.x-t.top</code> does not persist authorization codes, Google tokens, or Gmail content, so there is no corresponding account database to delete from this website.</p></section>
+      <section><h2>Server-side data</h2><p>The GitHub OAuth handoff at <code>x-t.top</code> expires within minutes and is deleted immediately after successful redemption. The legacy exchange at <code>oauth.x-t.top</code> does not persist authorization codes, Google tokens, or Gmail content. There is no Pudding account database to delete from this website.</p></section>
       <section><h2>Need help?</h2><p>For a privacy or deletion question, email <a href="mailto:${supportEmail}">${supportEmail}</a>. Do not include passwords, OAuth tokens, or email contents in your message. See the <a href="${origin}/privacy">Privacy Policy</a> for more detail.</p></section>`,
   })
 }
@@ -273,7 +273,7 @@ function legalPage(_origin: string, options: LegalOptions): PageOptions {
           <p class="overline">${escapeHTML(options.eyebrow)}</p>
           <h1>${escapeHTML(options.heading)}</h1>
           <p>${escapeHTML(options.intro)}</p>
-          <div class="updated">Last updated: July 22, 2026</div>
+          <div class="updated">Last updated: July 27, 2026</div>
         </header>
         <article class="legal-content">${options.content}</article>
       </main>`,

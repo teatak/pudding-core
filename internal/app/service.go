@@ -190,7 +190,6 @@ func decorateInstalledDefinition(def *Definition) {
 			break
 		}
 	}
-	def.Tools = inferredEndpointTools(def.Endpoints)
 	if len(def.Skills) > 0 {
 		def.DefaultSkillID = def.Skills[0].ID
 		if def.DefaultSkillID == "" {
@@ -200,31 +199,6 @@ func decorateInstalledDefinition(def *Definition) {
 			def.DefaultSkillID = def.Skills[0].Path
 		}
 	}
-}
-
-func inferredEndpointTools(endpoints map[string]Endpoint) []ToolRef {
-	hasREST := false
-	hasGraphQL := false
-	for _, endpoint := range endpoints {
-		switch endpoint.Kind {
-		case EndpointKindREST:
-			hasREST = true
-		case EndpointKindGraphQL:
-			hasGraphQL = true
-		}
-	}
-	tools := make([]ToolRef, 0, 4)
-	if hasREST {
-		tools = append(tools, ToolRef{Name: toolRESTRequest})
-	}
-	if hasGraphQL {
-		tools = append(tools,
-			ToolRef{Name: toolGraphQLRequest},
-			ToolRef{Name: toolGraphQLIntrospect},
-			ToolRef{Name: toolGraphQLSearch},
-		)
-	}
-	return tools
 }
 
 func applyEnabledOverride(def *Definition, enabled map[string]bool) {

@@ -638,7 +638,7 @@ export function App() {
 
   const workspaceToggleLabel = t("workspace.open");
   const workspaceToggle = canUseWorkspace && !effectiveWorkspaceOpen ? (
-    <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
+    <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-40 flex h-(--toolbar-h) items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

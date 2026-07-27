@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, FolderCog, Trash } from "@/components/icons";
+import { Ellipsis, FolderCog, FolderMinus } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -30,7 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ConfirmationDialog";
 import { DropdownMenu, DropdownMenuSub, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
@@ -253,7 +253,7 @@ export function ProjectActionsMenu({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={deleteMutation.isPending} onSelect={() => setDeleteOpen(true)}>
-            <Trash />
+            <FolderMinus />
             {t("project.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -292,7 +292,11 @@ export function ProjectActionsMenu({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+            >
               {deleteMutation.isPending ? <Spinner /> : null}
               {t("project.delete")}
             </AlertDialogAction>

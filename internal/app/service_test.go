@@ -190,21 +190,15 @@ func definitionByID(defs []*Definition, id string) *Definition {
 	return nil
 }
 
-func TestDecorateInstalledDefinitionInfersAPITools(t *testing.T) {
+func TestDecorateInstalledDefinitionDoesNotDuplicateEndpointTools(t *testing.T) {
 	def := &Definition{Endpoints: map[string]Endpoint{
 		"rest":    {Kind: EndpointKindREST},
 		"graphql": {Kind: EndpointKindGraphQL},
 		"mcp":     {Kind: EndpointKindMCP},
 	}}
 	decorateInstalledDefinition(def)
-	want := []string{toolRESTRequest, toolGraphQLRequest, toolGraphQLIntrospect, toolGraphQLSearch}
-	if len(def.Tools) != len(want) {
-		t.Fatalf("tools = %+v, want %v", def.Tools, want)
-	}
-	for i, name := range want {
-		if def.Tools[i].Name != name {
-			t.Fatalf("tools[%d] = %q, want %q", i, def.Tools[i].Name, name)
-		}
+	if len(def.Tools) != 0 {
+		t.Fatalf("tools = %+v, want endpoint tools resolved at runtime", def.Tools)
 	}
 }
 

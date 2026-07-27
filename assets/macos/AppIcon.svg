@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="pudding app icon">
+  <!-- macOS Big Sur+ Dock app icon 约定:
+       - squircle 形状自己画进 PNG(macOS 不再 auto-mask)
+       - 不要自带 drop shadow / stroke - Dock 自动加,baked-in 会双阴影 + 框感
+       - squircle 走 Apple 标准 live area:100px padding 各边,824x824,
+         圆角约 22.37% width(184)
+  -->
+  <defs>
+    <linearGradient id="bot" x1="0" y1="5" x2="0" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7778ff"/>
+      <stop offset="0.45" stop-color="#5f58ff"/>
+      <stop offset="1" stop-color="#3b25d2"/>
+    </linearGradient>
+    <linearGradient id="botSoft" x1="0" y1="5" x2="0" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8f90ff"/>
+      <stop offset="1" stop-color="#554cff"/>
+    </linearGradient>
+    <filter id="botShadow" x="-28%" y="-28%" width="156%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#3520c7" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#584cff" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle 底板:Apple 标准 live area。无 stroke / 无 baked shadow,
+       让 Dock 渲染时自己加 shadow - 跟其它 macOS app 视觉对齐。 -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="#ffffff"/>
+  <!-- bot 整体居中。原 transform translate(127 142) scale(35) 是按旧 squircle
+       (74,74,876x876) 算的;新 squircle 缩到 824x824 后,等比缩 bot 让其在新
+       squircle 内同样居中:scale 从 35 → 33,translate 跟着重算让 bot 视觉
+       居中。 -->
+  <g transform="translate(143 158) scale(33)" filter="url(#botShadow)" stroke-linecap="round" stroke-linejoin="round">
+    <g fill="url(#bot)" stroke="url(#bot)" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 5.2 C11.08 4.3 10.95 3.45 10.68 2.75" fill="none" stroke-width="1"/>
+      <circle cx="10.6" cy="2.35" r="0.85"/>
+      <path d="M4.25 12.9 Q2.35 14.25 1.35 16.35" fill="none" stroke-width="1.25"/>
+      <path d="M17.75 12.9 Q19.65 14.25 20.65 16.35" fill="none" stroke-width="1.25"/>
+      <circle cx="1.35" cy="16.35" r="0.9"/>
+      <circle cx="20.65" cy="16.35" r="0.9"/>
+      <rect x="3.6" y="5.2" width="14.8" height="12.6" rx="4.1"/>
+    </g>
+    <rect x="4.4" y="5.8" width="13.2" height="5.8" rx="3.4" fill="#ffffff" opacity="0.16"/>
+    <rect x="7.1" y="10" width="2.5" height="1.5" rx="0.45" fill="#ffffff"/>
+    <rect x="12.4" y="10" width="2.5" height="1.5" rx="0.45" fill="#ffffff"/>
+    <path d="M9.8 15 Q11 15.15 12.2 15" fill="none" stroke="#ffffff" stroke-width="0.9"/>
+  </g>
+</svg>
