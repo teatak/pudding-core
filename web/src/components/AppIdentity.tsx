@@ -77,7 +77,7 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
       data-light-background="true"
       size={size}
     >
-      <Icon className="size-[56%]" />
+      <Icon className="size-[64%]" />
     </IdentityIcon>
   );
 }
