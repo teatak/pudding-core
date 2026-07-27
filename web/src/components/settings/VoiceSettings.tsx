@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, RotateCcw, Trash } from "lucide-react";
+import { ChevronRight, RotateCcw, Trash } from "@/components/icons";
 import { useEffect, useState } from "react";
 
 import {

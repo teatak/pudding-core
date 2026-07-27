@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, FolderCog, FolderPlus, Search } from "lucide-react";
+import { FolderClosed, FolderCog, FolderPlus, Search } from "@/components/icons";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -95,7 +95,7 @@ export function ProjectsPane({ token }: { token: string }) {
   return (
     <main className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
-        icon={<FolderCog strokeWidth={2} />}
+        icon={<FolderCog />}
         title={t("project.manage")}
       />
       <div className="min-h-0 flex-1 overflow-auto">

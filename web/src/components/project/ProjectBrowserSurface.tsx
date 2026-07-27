@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, X } from "lucide-react";
+import { Search, X } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 

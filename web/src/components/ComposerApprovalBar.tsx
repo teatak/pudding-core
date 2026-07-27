@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, FileText, FolderOpen, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { Check, FileText, FolderOpen, ShieldCheck, X, type LucideIcon } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 

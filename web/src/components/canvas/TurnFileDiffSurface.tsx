@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileDiff } from "lucide-react";
+import { ChevronDown, FileDiff } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { getTurnFileChange, type TurnFileChange } from "@/api/client";

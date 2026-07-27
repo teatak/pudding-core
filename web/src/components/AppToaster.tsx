@@ -1,4 +1,4 @@
-import { CircleCheckIcon, InfoIcon, OctagonXIcon, TriangleAlertIcon } from "lucide-react";
+import { CircleCheckIcon, InfoIcon, OctagonXIcon, TriangleAlertIcon } from "@/components/icons";
 
 import { Spinner } from "@/components/Spinner";
 import { Toaster } from "@/components/ui/sonner";

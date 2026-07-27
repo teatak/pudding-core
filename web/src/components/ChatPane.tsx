@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, Trash, X } from "lucide-react";
+import { Ellipsis, Trash, X } from "@/components/icons";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -379,7 +379,7 @@ function HeaderSessionTitle({
     >
       <span
         aria-label={t(`mode.${session.activeMode}`)}
-        className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center"
+        className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-foreground/80!"
         role="img"
       >
         <SessionModeIcon mode={session.activeMode} />

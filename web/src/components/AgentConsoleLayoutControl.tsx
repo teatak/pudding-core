@@ -1,4 +1,4 @@
-import { PanelLeft, PanelRight, PictureInPicture2 } from "lucide-react";
+import { PanelLeft, PanelRight, PictureInPicture2 } from "@/components/icons";
 
 import {
   AppDropdownMenuContent as DropdownMenuContent,

@@ -1,4 +1,4 @@
-import { Languages } from "lucide-react";
+import { Languages } from "@/components/icons";
 
 import {
   AppDropdownMenuContent as DropdownMenuContent,

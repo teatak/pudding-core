@@ -1,4 +1,4 @@
-import { Archive, CircleAlert } from "lucide-react";
+import { Archive, CircleAlert } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";

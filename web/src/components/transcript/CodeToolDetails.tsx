@@ -10,7 +10,7 @@ import {
   GitBranch,
   PanelRightOpen,
   XCircle,
-} from "lucide-react";
+} from "@/components/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";

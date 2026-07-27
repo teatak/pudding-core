@@ -1,4 +1,4 @@
-import { Globe } from "lucide-react";
+import { Globe } from "@/components/icons";
 
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";

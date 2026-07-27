@@ -52,7 +52,7 @@ import {
   Wrench,
   X,
   type LucideIcon,
-} from "lucide-react";
+} from "@/components/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -533,7 +533,7 @@ export function AppsPane({ token }: { token: string }) {
               <ArrowLeft className="size-4" />
             </Button>
           ) : (
-            <Package strokeWidth={2} />
+            <Package />
           )
         }
         title={detailApp ? appDisplayName(detailApp, t) : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}

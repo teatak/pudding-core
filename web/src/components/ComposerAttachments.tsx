@@ -1,4 +1,4 @@
-import { FileText, FolderOpen, Pause, Play, X } from "lucide-react";
+import { FileText, FolderOpen, Pause, Play, X } from "@/components/icons";
 import { useRef, useState } from "react";
 
 import type { ProjectReference } from "@/api/client";
@@ -101,7 +101,7 @@ function LocalFolderChip({
 
     >
       <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
-        <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <FolderOpen className="size-4 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
         <span className="min-w-0 truncate font-medium leading-5 text-foreground">{folder.name}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
       </button>
@@ -137,7 +137,7 @@ function ProjectReferenceChip({
       className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
 
     >
-      <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <Icon className="size-4 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
       <span className="min-w-0 truncate font-medium leading-5 text-foreground">{reference.name}</span>
       <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
         {range || (reference.kind === "dir" ? folderLabel : fileLabel)}
@@ -231,7 +231,7 @@ function ComposerAttachmentChip({
         ) : audio ? (
           <AudioPreviewButton label={item.name} src={attachmentResourceURL(item.attachment, token)} />
         ) : (
-          <FileText className="size-4" strokeWidth={1.8} />
+          <FileText className="size-4" data-icon-weight="subtle" />
         )}
       </span>
       <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap">
@@ -277,7 +277,7 @@ function AudioPreviewButton({ label, src }: { label: string; src: string }) {
           }
         }}
       >
-        {playing ? <Pause className="size-4" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-4" fill="currentColor" strokeWidth={1.8} />}
+        {playing ? <Pause className="size-4" data-icon-weight="subtle" fill="currentColor" /> : <Play className="size-4" data-icon-weight="subtle" fill="currentColor" />}
       </button>
       {src ? (
         <audio
@@ -337,5 +337,4 @@ export function revokeAttachmentPreview(item: ComposerAttachment) {
     URL.revokeObjectURL(item.previewURL);
   }
 }
-
 

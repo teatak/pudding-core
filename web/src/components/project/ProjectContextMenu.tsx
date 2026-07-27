@@ -1,4 +1,4 @@
-import { FilePlus2, FolderPlus, LocateFixed, SquareTerminal, Trash2 } from "lucide-react";
+import { FilePlus2, FolderPlus, LocateFixed, SquareTerminal, Trash2 } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import {

@@ -114,6 +114,9 @@
     --workspace-toolbar-pr: var(--toolbar-edge-inset);
     --toolbar-icon-button-size: 2rem;
     --toolbar-icon-size: 1rem;
+    --icon-stroke-subtle: 1.75;
+    --icon-stroke-regular: 2;
+    --icon-stroke-strong: 2.25;
     --workspace-toolbar-tab-h: 2rem;
     --workspace-toolbar-tab-padding: 3px;
     --workspace-toolbar-tab-icon: 18px;
@@ -845,7 +848,7 @@ html[data-agent-console-resizing="true"] webview {
 .pudding-chrome-icon svg {
     width: var(--toolbar-icon-size) !important;
     height: var(--toolbar-icon-size) !important;
-    stroke-width: 2;
+    stroke-width: var(--icon-stroke-regular);
 }
 
 .pudding-rail-toggle,
@@ -1393,6 +1396,15 @@ html[data-agent-console-resizing="true"] webview {
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    }
+  svg.lucide {
+    stroke-width: var(--icon-stroke-width, var(--icon-stroke-regular));
+    }
+  svg.lucide[data-icon-weight="subtle"] {
+    --icon-stroke-width: var(--icon-stroke-subtle);
+    }
+  svg.lucide[data-icon-weight="strong"] {
+    --icon-stroke-width: var(--icon-stroke-strong);
     }
   body {
     @apply h-full w-full overflow-hidden text-sm leading-relaxed bg-background text-foreground;

@@ -1,4 +1,4 @@
-import { Check, Copy, SquareMousePointer } from "lucide-react";
+import { Check, Copy, SquareMousePointer } from "@/components/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Blocks } from "lucide-react";
+import { Blocks } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { patchCanvasItemWindow } from "@/api/client";

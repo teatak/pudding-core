@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "@/components/icons";
 import { useState, type ReactNode } from "react";
 
 import { getSessionUsage, type SessionUsage } from "@/api/client";

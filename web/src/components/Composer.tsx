@@ -6,7 +6,7 @@ import {
   MessageSquarePlus,
   NotebookText,
   PenLine,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   useCallback,
   useEffect,

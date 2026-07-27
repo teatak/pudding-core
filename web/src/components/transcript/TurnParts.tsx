@@ -58,7 +58,7 @@ import {
   Waypoints,
   Wrench,
   type LucideIcon,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Children,
   isValidElement,
@@ -275,7 +275,7 @@ function shouldKeepProcessPartVisible(part: TurnPartVM) {
 function PartIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
-      <Icon aria-hidden="true" className="size-3.5" strokeWidth={2} />
+      <Icon aria-hidden="true" className="size-3.5" />
     </span>
   );
 }

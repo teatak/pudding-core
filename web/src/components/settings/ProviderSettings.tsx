@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Pencil, Plus, Sparkles, Trash } from "lucide-react";
+import { Copy, Pencil, Plus, Sparkles, Trash } from "@/components/icons";
 import { useEffect, useState } from "react";
 
 import { deleteProvider, listProviders, type ProviderProfile } from "@/api/client";

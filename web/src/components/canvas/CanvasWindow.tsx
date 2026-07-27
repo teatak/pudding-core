@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, X } from "lucide-react";
+import { Maximize2, Minimize2, X } from "@/components/icons";
 import { useMemo } from "react";
 import { Rnd } from "react-rnd";
 

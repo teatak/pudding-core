@@ -1,4 +1,4 @@
-import { Folders, Globe, PanelsTopLeft, SquareTerminal } from "lucide-react";
+import { Folders, Globe, PanelsTopLeft, SquareTerminal } from "@/components/icons";
 
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export function WorkspaceEmpty({
       <div className="flex min-h-full items-center justify-center px-6 py-8">
         <div className="w-full max-w-xl text-center">
           <div className="mx-auto max-w-sm">
-            <PanelsTopLeft className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.6} />
+            <PanelsTopLeft className="mx-auto mb-4 size-8 text-muted-foreground" data-icon-weight="subtle" />
             <h1 className="text-base font-semibold text-foreground">{t("workspace.startTitle")}</h1>
           </div>
           <div className={cn("mx-auto mt-5 grid gap-2", hasProject ? "max-w-md grid-cols-3" : "max-w-sm grid-cols-2")}>

@@ -1,4 +1,4 @@
-import { SquareMousePointer } from "lucide-react";
+import { SquareMousePointer } from "@/components/icons";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

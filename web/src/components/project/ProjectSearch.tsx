@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, Search } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { searchProjectFiles, type ProjectBrowserRoot, type ProjectSearchMatch } from "@/api/client";

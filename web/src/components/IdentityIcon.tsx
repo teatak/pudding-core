@@ -1,4 +1,4 @@
-import { BookmarkCheck, Box, Package } from "lucide-react";
+import { BookmarkCheck, Box, Package } from "@/components/icons";
 import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -133,9 +133,9 @@ function IdentityIconFallbackView({ fallback, size }: { fallback: IdentityIconFa
     case "app":
       return <Package className={appFallbackSizeClassByToken[size]} />;
     case "skill":
-      return <BookmarkCheck className={fallbackSizeClassByToken[size]} strokeWidth={2.25} />;
+      return <BookmarkCheck className={fallbackSizeClassByToken[size]} data-icon-weight="strong" />;
     case "brand":
     default:
-      return <Box className={fallbackSizeClassByToken[size]} strokeWidth={2.1} />;
+      return <Box className={fallbackSizeClassByToken[size]} />;
   }
 }

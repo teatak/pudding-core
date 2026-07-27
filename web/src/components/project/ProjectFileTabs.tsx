@@ -1,4 +1,4 @@
-import { FileDiff, X } from "lucide-react";
+import { FileDiff, X } from "@/components/icons";
 import { useEffect, useRef, useState, type UIEvent } from "react";
 
 import { useI18n } from "@/i18n";

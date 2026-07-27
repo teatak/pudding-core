@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";

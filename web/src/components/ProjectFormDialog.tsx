@@ -1,4 +1,4 @@
-import { FolderClosed, FolderPlus, X } from "lucide-react";
+import { FolderClosed, FolderPlus, X } from "@/components/icons";
 import {
   useEffect,
   useLayoutEffect,

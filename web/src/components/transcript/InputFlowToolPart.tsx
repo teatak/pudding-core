@@ -1,4 +1,4 @@
-import { Check, ChevronRight, TextCursorInput, X } from "lucide-react";
+import { Check, ChevronRight, TextCursorInput, X } from "@/components/icons";
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
@@ -595,7 +595,7 @@ function MultiSelect({
             render: () => (
               <div className="flex min-w-0 items-start gap-2">
                 <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border", checked ? "border-primary bg-primary text-primary-foreground" : "border-border")}>
-                  {checked ? <Check className="size-3" strokeWidth={2.5} /> : null}
+                  {checked ? <Check className="size-3" data-icon-weight="strong" /> : null}
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">{title}</span>

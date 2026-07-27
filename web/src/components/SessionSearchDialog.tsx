@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Search } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { searchSessionMessages, type Message, type Project, type Session } from "@/api/client";

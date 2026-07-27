@@ -16,7 +16,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileCode2, FileDiff, Folders, Globe, SquareTerminal, X } from "lucide-react";
+import { FileCode2, FileDiff, Folders, Globe, SquareTerminal, X } from "@/components/icons";
 import { useEffect } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";

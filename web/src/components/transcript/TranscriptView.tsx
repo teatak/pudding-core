@@ -1,4 +1,4 @@
-import { ArrowDown, CircleAlert } from "lucide-react";
+import { ArrowDown, CircleAlert } from "@/components/icons";
 import { useState } from "react";
 
 import { ChatColumn } from "@/components/ChatColumn";

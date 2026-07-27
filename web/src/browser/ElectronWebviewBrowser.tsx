@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileX, Globe, MousePointer2, RefreshCw } from "lucide-react";
+import { FileX, Globe, MousePointer2, RefreshCw } from "@/components/icons";
 import { createElement, useCallback, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 
 import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
@@ -608,7 +608,7 @@ function BrowserEmptyState({
       <div className="flex min-h-full items-center justify-center px-6 py-8">
         <div className="w-full max-w-5xl text-center">
           <div className="mx-auto max-w-sm">
-            <Globe className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.6} />
+            <Globe className="mx-auto mb-4 size-8 text-muted-foreground" data-icon-weight="subtle" />
             <h2 className="text-base font-semibold text-foreground">{t("browser.emptyTitle")}</h2>
           </div>
           {history.length > 0 ? (
@@ -684,7 +684,7 @@ function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorSt
         fill="currentColor"
         stroke="white"
         strokeLinejoin="round"
-        strokeWidth={1.35}
+        data-icon-weight="subtle"
         style={iconStyle}
       />
     </div>
@@ -709,7 +709,7 @@ function BrowserLoadErrorPage({ error, onReload }: { error: WebviewLoadError; on
   return (
     <div className="absolute inset-0 z-10 overflow-auto bg-[var(--workspace-background)] text-foreground">
       <div className="mx-auto w-full max-w-[520px] px-8 pt-[18vh] pb-12">
-        <FileX className="mb-8 h-12 w-12 text-muted-foreground" strokeWidth={1.75} />
+        <FileX className="mb-8 h-12 w-12 text-muted-foreground" data-icon-weight="subtle" />
         <h2 className="text-2xl leading-8 font-semibold text-foreground">{t("browser.errorTitle")}</h2>
         <p className="mt-4 text-[15px] leading-6 text-muted-foreground">{message}</p>
         <div className="mt-6 text-[15px] leading-6 text-muted-foreground">

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minus, Plus, Save } from "lucide-react";
+import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minus, Plus, Save } from "@/components/icons";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 

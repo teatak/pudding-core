@@ -7,7 +7,7 @@ import {
   Image,
   Sheet,
   type LucideIcon,
-} from "lucide-react";
+} from "@/components/icons";
 
 import type { CanvasItem } from "@/contracts/api";
 import { builtinAppIconClass } from "@/components/AppIdentity";

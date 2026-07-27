@@ -1,4 +1,4 @@
-import { Captions, Check, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "@/components/icons";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -404,7 +404,7 @@ function ProjectReferenceCard({
       className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 text-xs leading-5 whitespace-nowrap"
 
     >
-      <Icon className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <Icon className="size-3 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
       <span className="min-w-0 truncate whitespace-nowrap">{reference.name}</span>
       <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
         {range || (reference.kind === "dir" ? folderLabel : fileLabel)}
@@ -421,7 +421,7 @@ function LocalFolderCard({ label, name, path, onReveal }: { label: string; name:
       type="button"
       onClick={onReveal}
     >
-      <FolderOpen className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <FolderOpen className="size-3 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
       <span className="min-w-0 truncate whitespace-nowrap">{name}</span>
       <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">{label}</span>
     </button>
@@ -456,7 +456,7 @@ function AudioAttachmentCard({ attachment, token }: { attachment: UserAttachment
           }
         }}
       >
-        {playing ? <Pause className="size-5" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-5" fill="currentColor" strokeWidth={1.8} />}
+        {playing ? <Pause className="size-5" data-icon-weight="subtle" fill="currentColor" /> : <Play className="size-5" data-icon-weight="subtle" fill="currentColor" />}
       </button>
       <span className="flex min-w-0 max-w-52 flex-1 flex-col justify-center">
         <span className="truncate font-medium leading-5 text-foreground">{attachment.name}</span>
@@ -486,9 +486,9 @@ function ASRIndicator({ rawInput }: { rawInput: boolean }) {
       <TooltipTrigger asChild>
         <span aria-label={label} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
           {rawInput ? (
-            <Mic aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+            <Mic aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
           ) : (
-            <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+            <Captions aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
           )}
         </span>
       </TooltipTrigger>

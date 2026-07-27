@@ -8,7 +8,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Wrench,
-} from "lucide-react";
+} from "@/components/icons";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";

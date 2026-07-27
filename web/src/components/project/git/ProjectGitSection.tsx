@@ -9,7 +9,7 @@ import {
   Plus,
   RefreshCw,
   Undo2,
-} from "lucide-react";
+} from "@/components/icons";
 import { useState } from "react";
 import { toast } from "sonner";
 

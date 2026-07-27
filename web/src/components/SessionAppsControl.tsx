@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { X } from "@/components/icons";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
@@ -90,7 +90,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
               type="button"
               onClick={() => unloadMutation.mutate(appID)}
             >
-              {pending ? <Spinner className="size-2.5" /> : <X className="size-2" strokeWidth={2.5} />}
+              {pending ? <Spinner className="size-2.5" /> : <X className="size-2" data-icon-weight="strong" />}
             </button>
           </div>
         );

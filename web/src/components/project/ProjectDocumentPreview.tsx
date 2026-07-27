@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "@/components/icons";
 import { useMemo } from "react";
 import { parse as parseYAML } from "yaml";
 

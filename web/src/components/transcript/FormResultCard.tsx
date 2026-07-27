@@ -1,4 +1,4 @@
-import { Check, Eye, EyeOff, MessageSquareMore } from "lucide-react";
+import { Check, Eye, EyeOff, MessageSquareMore } from "@/components/icons";
 import { useState } from "react";
 
 import type { ContentPart } from "@/api/client";
@@ -54,10 +54,10 @@ export function FormResultCard({ part }: { part: FormResultPart }) {
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2 border-b border-border/50 pb-2">
-        <MessageSquareMore className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <MessageSquareMore className="size-4 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
         <div className="min-w-0 flex-1 truncate font-medium">{part.title}</div>
         <div className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-          <Check className="size-3.5 text-success" strokeWidth={2} />
+          <Check className="size-3.5 text-success" />
           <span>{t("inputFlow.completed")}</span>
         </div>
       </div>

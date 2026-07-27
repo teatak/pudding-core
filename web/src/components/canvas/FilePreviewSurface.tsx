@@ -1,4 +1,4 @@
-import { Check, Copy, FileCode2 } from "lucide-react";
+import { Check, Copy, FileCode2 } from "@/components/icons";
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { useEditorTypography } from "@/components/EditorTypographyProvider";

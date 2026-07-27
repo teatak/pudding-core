@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, CircleAlert, FileText, FolderOpen, Pause, Play, Upload, X } from "lucide-react";
+import { ArrowUp, CircleAlert, FileText, FolderOpen, Pause, Play, Upload, X } from "@/components/icons";
 import {
   useCallback,
   useEffect,
@@ -1485,7 +1485,7 @@ function DraftLocalFolderChip({
 
     >
       <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
-        <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <FolderOpen className="size-4 shrink-0 text-muted-foreground" data-icon-weight="subtle" />
         <span className="min-w-0 truncate font-medium leading-5 text-foreground">{folder.name}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
       </button>
@@ -1582,7 +1582,7 @@ function DraftAttachmentChip({
         ) : audio ? (
           <DraftAudioPreviewButton label={item.name} src={draftAttachmentImageSource(item, token)} />
         ) : (
-          <FileText className="size-4" strokeWidth={1.8} />
+          <FileText className="size-4" data-icon-weight="subtle" />
         )}
       </span>
       <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap">
@@ -1629,7 +1629,7 @@ function DraftAudioPreviewButton({ label, src }: { label: string; src: string })
           }
         }}
       >
-        {playing ? <Pause className="size-4" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-4" fill="currentColor" strokeWidth={1.8} />}
+        {playing ? <Pause className="size-4" data-icon-weight="subtle" fill="currentColor" /> : <Play className="size-4" data-icon-weight="subtle" fill="currentColor" />}
       </button>
       {src ? (
         <audio
@@ -1655,7 +1655,7 @@ function DraftDropOverlay({ active }: { active: boolean }) {
     >
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background/90 text-primary shadow-sm ring-1 ring-border/80">
-          <Upload className="h-5 w-5" strokeWidth={1.9} />
+          <Upload className="h-5 w-5" />
         </div>
       </div>
     </div>

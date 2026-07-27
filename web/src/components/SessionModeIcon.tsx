@@ -1,4 +1,4 @@
-import { Briefcase, FolderClosed, MessageSquareText } from "lucide-react";
+import { Briefcase, FolderClosed, MessageSquareText } from "@/components/icons";
 
 import type { Session } from "@/api/client";
 

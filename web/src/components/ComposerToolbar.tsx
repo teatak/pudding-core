@@ -1,4 +1,4 @@
-import { ArrowUp } from "lucide-react";
+import { ArrowUp } from "@/components/icons";
 
 import type { AudioBindings, Session } from "@/api/client";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Captions, Mic, Volume2 } from "lucide-react";
+import { Captions, Mic, Volume2 } from "@/components/icons";
 import { toast } from "sonner";
 
 import {

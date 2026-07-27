@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Plus } from "lucide-react";
+import { ExternalLink, Plus } from "@/components/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {

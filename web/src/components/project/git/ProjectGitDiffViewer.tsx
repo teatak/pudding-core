@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff } from "lucide-react";
+import { FileDiff } from "@/components/icons";
 
 import { getProjectGitDiff } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";

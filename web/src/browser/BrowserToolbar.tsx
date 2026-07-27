@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, History, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, History, RefreshCw, Trash2 } from "@/components/icons";
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 

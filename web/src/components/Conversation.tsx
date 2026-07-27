@@ -1,4 +1,4 @@
-import { Paperclip, Upload } from "lucide-react";
+import { Paperclip, Upload } from "@/components/icons";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
@@ -127,7 +127,7 @@ function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null 
     >
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background/90 text-primary shadow-sm ring-1 ring-border/80">
-          <Icon className="h-5 w-5" strokeWidth={1.9} />
+          <Icon className="h-5 w-5" />
         </div>
       </div>
     </div>

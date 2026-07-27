@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Square, SquareTerminal } from "lucide-react";
+import { ChevronRight, Square, SquareTerminal } from "@/components/icons";
 import { useState } from "react";
 import { toast } from "sonner";
 

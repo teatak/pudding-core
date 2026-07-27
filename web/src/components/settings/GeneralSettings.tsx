@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw } from "@/components/icons";
 import { useEffect, useMemo, useState } from "react";
 
 import { getSettings, getUserPrompt, putSettings, putUserPrompt, resetSettings } from "@/api/client";

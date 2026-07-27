@@ -16,7 +16,7 @@ import {
   Settings,
   SquareTerminal,
   Trash,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   createContext,
   Fragment,
@@ -1478,6 +1478,7 @@ function CollapsibleSessionGroupLabel({
       data-active={active}
       className={cn(
         "group/project-label h-8 min-h-8 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        icon === "project" && "font-normal text-sidebar-foreground!",
         active && "text-sidebar-accent-foreground",
       )}
     >
@@ -1486,7 +1487,13 @@ function CollapsibleSessionGroupLabel({
         type="button"
         onClick={onToggle}
       >
-        <Icon className={cn("size-4 shrink-0 text-sidebar-foreground/60", icon === "pinned" && "rotate-45")} />
+        <Icon
+          className={cn(
+            "size-4 shrink-0",
+            icon === "project" ? "text-sidebar-foreground/80" : "text-sidebar-foreground/60",
+            icon === "pinned" && "rotate-45",
+          )}
+        />
         <span className="min-w-0 truncate">{label}</span>
         <ChevronRight
           className={cn(

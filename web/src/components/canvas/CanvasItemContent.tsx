@@ -15,7 +15,7 @@ import {
   Percent,
   Users,
   type LucideIcon,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   memo,
   useEffect,

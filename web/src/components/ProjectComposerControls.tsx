@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FolderOpen, Hand, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Check, FolderOpen, Hand, ShieldAlert, ShieldCheck } from "@/components/icons";
 import { useState } from "react";
 import { toast } from "sonner";
 

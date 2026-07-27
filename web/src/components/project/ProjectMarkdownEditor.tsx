@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "@/components/icons";
 import { useTheme } from "next-themes";
 import { useEffect, useRef, useState } from "react";
 import Vditor from "vditor";

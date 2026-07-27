@@ -1,4 +1,4 @@
-import { Trash2, Undo2 } from "lucide-react";
+import { Trash2, Undo2 } from "@/components/icons";
 
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
 import { Button } from "@/components/ui/button";

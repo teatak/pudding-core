@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, EyeOff, Plus, Trash } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, EyeOff, Plus, Trash } from "@/components/icons";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";

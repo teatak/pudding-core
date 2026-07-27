@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash } from "lucide-react";
+import { Trash } from "@/components/icons";
 import { useState } from "react";
 
 import { deleteSkill, listSkills, skillIconURL, type Skill } from "@/api/client";

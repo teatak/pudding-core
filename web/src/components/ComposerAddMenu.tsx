@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Plus } from "@/components/icons";
 
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";

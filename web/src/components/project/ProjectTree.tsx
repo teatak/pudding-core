@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, File } from "lucide-react";
+import { ChevronRight, File } from "@/components/icons";
 import { useState, type ReactNode } from "react";
 
 import {

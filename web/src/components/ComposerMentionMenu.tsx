@@ -4,7 +4,7 @@ import {
   Paperclip,
   ScanLine,
   WandSparkles,
-} from "lucide-react";
+} from "@/components/icons";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/AppIcon";

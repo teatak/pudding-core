@@ -1,4 +1,4 @@
-import { BookOpen, Folders, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "lucide-react";
+import { BookOpen, Folders, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "@/components/icons";
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
@@ -77,7 +77,7 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
       data-light-background="true"
       size={size}
     >
-      <Icon className="size-[56%]" strokeWidth={2} />
+      <Icon className="size-[56%]" />
     </IdentityIcon>
   );
 }

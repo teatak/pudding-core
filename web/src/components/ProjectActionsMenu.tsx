@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, FolderCog, Trash } from "lucide-react";
+import { Ellipsis, FolderCog, Trash } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 

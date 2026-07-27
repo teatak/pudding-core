@@ -1,4 +1,4 @@
-import { Circle, CircleCheck } from "lucide-react";
+import { Circle, CircleCheck } from "@/components/icons";
 
 import { Spinner } from "@/components/Spinner";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -72,11 +72,11 @@ function PlanStep({ active, index, step }: { active: boolean; index: number; ste
     <div className={cn("flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5", active && "bg-muted")}>
       <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
         {step.status === "completed" ? (
-          <CircleCheck className="size-4 text-muted-foreground" strokeWidth={1.8} />
+          <CircleCheck className="size-4 text-muted-foreground" data-icon-weight="subtle" />
         ) : step.status === "in_progress" ? (
           <Spinner className="size-4 text-foreground" />
         ) : (
-          <Circle className="size-4 text-muted-foreground" strokeWidth={1.8} />
+          <Circle className="size-4 text-muted-foreground" data-icon-weight="subtle" />
         )}
       </span>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>

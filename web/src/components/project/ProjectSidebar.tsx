@@ -1,4 +1,4 @@
-import { ChevronDown, Folders, GitBranch } from "lucide-react";
+import { ChevronDown, Folders, GitBranch } from "@/components/icons";
 import { useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 

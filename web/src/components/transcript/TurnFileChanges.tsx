@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileImage, Files } from "lucide-react";
+import { ChevronDown, ChevronRight, FileImage, Files } from "@/components/icons";
 import { useState } from "react";
 
 import type { TurnFileChange } from "@/api/client";

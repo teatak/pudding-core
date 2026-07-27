@@ -1,5 +1,5 @@
 import { useSearch } from "@tanstack/react-router";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen } from "@/components/icons";
 import {
   useEffect,
   useLayoutEffect,

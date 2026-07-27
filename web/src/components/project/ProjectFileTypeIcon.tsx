@@ -1,4 +1,4 @@
-import { File, Folder, FolderOpen } from "lucide-react";
+import { File, Folder, FolderOpen } from "@/components/icons";
 import { useTheme } from "next-themes";
 import { useSyncExternalStore, type ReactNode } from "react";
 

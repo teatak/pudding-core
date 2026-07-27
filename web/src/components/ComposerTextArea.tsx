@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type ClipboardEvent, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
 import { useWatch, type Control, type UseFormRegisterReturn } from "react-hook-form";
-import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "@/components/icons";
 
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -98,7 +98,7 @@ function SlashCommandIcon({ command }: { command: SlashCommand }) {
   const Icon = command.icon;
   return (
     <span className="grid size-5 shrink-0 place-items-center text-foreground/70">
-      <Icon className="size-4" strokeWidth={2.15} />
+      <Icon className="size-4" data-icon-weight="strong" />
     </span>
   );
 }

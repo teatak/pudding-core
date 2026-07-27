@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Folders, Globe, PanelRightClose, Plus, SquareTerminal } from "lucide-react";
+import { Folders, Globe, PanelRightClose, Plus, SquareTerminal } from "@/components/icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
