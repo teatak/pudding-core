@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, FolderCog, FolderOpen, FolderPlus, Trash, X } from "lucide-react";
+import { Ellipsis, FolderCog, Trash } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { Spinner } from "@/components/Spinner";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
@@ -30,24 +31,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuSub, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 
 export function ProjectActionsMenu({
-  allowDirectoryEditing = false,
   alwaysVisible = false,
   project,
   surface = "default",
   token,
   onOverlayOpenChange,
 }: {
-  allowDirectoryEditing?: boolean;
   alwaysVisible?: boolean;
   project: Project;
   surface?: "default" | "sidebar";
@@ -58,12 +54,11 @@ export function ProjectActionsMenu({
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [directoriesOpen, setDirectoriesOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const [directoryPaths, setDirectoryPaths] = useState(project.rootDirs);
-  const overlayOpen = menuOpen || renameOpen || directoriesOpen || deleteOpen;
+  const overlayOpen = menuOpen || editOpen || deleteOpen;
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
     (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
@@ -85,21 +80,18 @@ export function ProjectActionsMenu({
         : { projects: [updated] },
     );
   };
-  const renameMutation = useMutation({
-    mutationFn: (nextName: string) => updateProject(token, project.id, { name: nextName }),
-    onSuccess: (updated) => {
-      cacheProject(updated);
-      setRenameOpen(false);
-    },
-    onError: () => toast.error(t("project.renameFailed")),
-  });
-  const directoriesMutation = useMutation({
-    mutationFn: (paths: string[]) => updateProject(token, project.id, { rootDirs: paths }),
+  const editMutation = useMutation({
+    mutationFn: ({ nextName, paths }: { nextName: string; paths: string[] }) =>
+      updateProject(token, project.id, {
+        name: nextName,
+        rootDirs: paths,
+      }),
     onSuccess: async (updated) => {
       cacheProject(updated);
-      setDirectoriesOpen(false);
-      toast.success(t("project.directoriesUpdated"));
-      const sessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions())?.sessions || [];
+      setEditOpen(false);
+      toast.success(t("project.updated"));
+      const sessions =
+        queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions())?.sessions || [];
       await Promise.all(
         sessions
           .filter((session) => session.projectID === project.id)
@@ -110,7 +102,7 @@ export function ProjectActionsMenu({
           ),
       );
     },
-    onError: () => toast.error(t("project.updateDirectoriesFailed")),
+    onError: () => toast.error(t("project.updateFailed")),
   });
   const deleteMutation = useMutation({
     mutationFn: () => deleteProject(token, project.id),
@@ -153,27 +145,26 @@ export function ProjectActionsMenu({
     onError: () => toast.error(t("project.deleteFailed")),
   });
 
-  const openRename = () => {
+  const openEdit = () => {
     setName(project.name);
-    setRenameOpen(true);
-  };
-  const openDirectories = () => {
     setDirectoryPaths(project.rootDirs);
-    setDirectoriesOpen(true);
+    setEditOpen(true);
   };
   const chooseDirectories = async () => {
     const picked = await pickDirectories({
       buttonLabel: t("project.createPickButton"),
-      message: t("project.editDirectoriesPickMessage"),
-      title: t("project.editDirectoriesTitle"),
+      message: t("project.editPickMessage"),
+      title: t("project.edit"),
     });
     setDirectoryPaths((current) =>
       Array.from(new Set([...current, ...picked].map((path) => path.trim()).filter(Boolean))),
     );
   };
-  const saveDirectories = () => {
-    if (directoryPaths.length === 0) return;
-    const projects = queryClient.getQueryData<{ projects: Project[] }>(queryKeys.projects())?.projects || [];
+  const saveProject = () => {
+    const nextName = name.trim();
+    if (!nextName || directoryPaths.length === 0) return;
+    const projects =
+      queryClient.getQueryData<{ projects: Project[] }>(queryKeys.projects())?.projects || [];
     if (
       projects.some(
         (entry) =>
@@ -184,15 +175,7 @@ export function ProjectActionsMenu({
       toast.error(t("project.alreadyExists"));
       return;
     }
-    directoriesMutation.mutate(directoryPaths);
-  };
-  const saveRename = () => {
-    const nextName = name.trim();
-    if (!nextName || nextName === project.name) {
-      setRenameOpen(false);
-      return;
-    }
-    renameMutation.mutate(nextName);
+    editMutation.mutate({ nextName, paths: directoryPaths });
   };
   const copyPaths = (paths: string[]) => {
     void navigator.clipboard.writeText(paths.join("\n")).then(
@@ -264,13 +247,10 @@ export function ProjectActionsMenu({
               </DropdownMenuSub>
             ))
           )}
-          {allowDirectoryEditing ? (
-            <DropdownMenuItem onSelect={openDirectories}>
-              <FolderCog />
-              {t("project.editDirectories")}
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem onSelect={openRename}>{t("project.rename")}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={openEdit}>
+            <FolderCog />
+            {t("project.edit")}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={deleteMutation.isPending} onSelect={() => setDeleteOpen(true)}>
             <Trash />
@@ -278,131 +258,32 @@ export function ProjectActionsMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent>
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveRename();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>{t("project.renameTitle")}</DialogTitle>
-              <DialogDescription>{t("project.renameDescription")}</DialogDescription>
-            </DialogHeader>
-            <Input
-              autoFocus
-              aria-label={t("project.name")}
-              disabled={renameMutation.isPending}
-              maxLength={120}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                }
-              }}
-            />
-            <DialogFooter>
-              <Button disabled={renameMutation.isPending} type="button" variant="outline" onClick={() => setRenameOpen(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button disabled={renameMutation.isPending || !name.trim()} type="submit">
-                {renameMutation.isPending ? <Spinner /> : null}
-                {t("common.save")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={directoriesOpen}
+      <ProjectFormDialog
+        description={t("project.editDescription")}
+        directoryPaths={directoryPaths}
+        isPending={editMutation.isPending}
+        name={name}
+        open={editOpen}
+        submitDisabled={
+          !name.trim() ||
+          directoryPaths.length === 0 ||
+          (name.trim() === project.name &&
+            normalizedDirectoryList(directoryPaths) === normalizedDirectoryList(project.rootDirs))
+        }
+        submitLabel={t("common.save")}
+        title={t("project.edit")}
+        onChooseDirectories={() => void chooseDirectories()}
+        onDirectoryPathsChange={setDirectoryPaths}
+        onNameChange={setName}
         onOpenChange={(open) => {
           if (open) {
-            openDirectories();
-          } else if (!directoriesMutation.isPending) {
-            setDirectoriesOpen(false);
+            openEdit();
+          } else if (!editMutation.isPending) {
+            setEditOpen(false);
           }
         }}
-      >
-        <DialogContent className="max-h-[min(680px,calc(100svh-2rem))] sm:max-w-xl">
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveDirectories();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>{t("project.editDirectoriesTitle")}</DialogTitle>
-              <DialogDescription>
-                {t("project.editDirectoriesDescription").replace("{name}", project.name)}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid min-h-0 gap-2 overflow-y-auto pr-1">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm">{t("project.directories")}</span>
-                <Button
-                  disabled={directoriesMutation.isPending}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => void chooseDirectories()}
-                >
-                  <FolderPlus className="size-3.5" />
-                  {t("project.chooseFolders")}
-                </Button>
-              </div>
-              <div className="grid gap-1 rounded-lg border p-1">
-                {directoryPaths.map((path) => (
-                  <div
-                    key={path}
-                    className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70 focus-within:bg-muted/70"
-                  >
-                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
-                    <Button
-                      aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
-                      disabled={directoriesMutation.isPending || directoryPaths.length === 1}
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        setDirectoryPaths((current) => current.filter((entry) => entry !== path))
-                      }
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                disabled={directoriesMutation.isPending}
-                type="button"
-                variant="outline"
-                onClick={() => setDirectoriesOpen(false)}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                disabled={
-                  directoriesMutation.isPending ||
-                  directoryPaths.length === 0 ||
-                  normalizedDirectorySet(directoryPaths) ===
-                    normalizedDirectorySet(project.rootDirs)
-                }
-                type="submit"
-              >
-                {directoriesMutation.isPending ? <Spinner /> : null}
-                {t("common.save")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        onSubmit={saveProject}
+      />
       <AlertDialog open={deleteOpen} onOpenChange={(open) => !deleteMutation.isPending && setDeleteOpen(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -442,5 +323,12 @@ function normalizedDirectorySet(paths: string[]) {
     .map((path) => path.trim().replace(/[\\/]+$/, ""))
     .filter(Boolean)
     .sort()
+    .join("\n");
+}
+
+function normalizedDirectoryList(paths: string[]) {
+  return paths
+    .map((path) => path.trim().replace(/[\\/]+$/, ""))
+    .filter(Boolean)
     .join("\n");
 }

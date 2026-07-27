@@ -1523,7 +1523,6 @@ function RailProjectActionsMenu({ project, token }: { project: Project; token: s
   useRailOverlayHold(overlayOpen);
   return (
     <ProjectActionsMenu
-      allowDirectoryEditing
       project={project}
       surface="sidebar"
       token={token}

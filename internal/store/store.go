@@ -90,6 +90,7 @@ const (
 type Project struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
+	// RootDirs preserves user order; the first entry is the primary project directory.
 	RootDirs     []string     `json:"rootDirs"`
 	ApprovalMode ApprovalMode `json:"approvalMode"`
 	CreatedAt    time.Time    `json:"createdAt"`

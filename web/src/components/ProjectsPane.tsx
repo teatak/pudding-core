@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, FolderCog, FolderPlus, Search, X } from "lucide-react";
+import { FolderClosed, FolderCog, FolderPlus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -7,9 +7,9 @@ import { createProject, listProjects, type Project } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { PageHeader } from "@/components/PageHeader";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
+import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
@@ -152,8 +152,18 @@ export function ProjectsPane({ token }: { token: string }) {
           </section>
         </div>
       </div>
-      <Dialog
+      <ProjectFormDialog
+        description={t("project.addDescription")}
+        directoryPaths={rootDirs}
+        isPending={createMutation.isPending}
+        name={name}
         open={adding}
+        submitDisabled={!name.trim() || rootDirs.length === 0}
+        submitLabel={t("project.add")}
+        title={t("project.add")}
+        onChooseDirectories={() => void chooseDirectories()}
+        onDirectoryPathsChange={setRootDirs}
+        onNameChange={setName}
         onOpenChange={(open) => {
           if (open) {
             setAdding(true);
@@ -161,77 +171,8 @@ export function ProjectsPane({ token }: { token: string }) {
             closeAddForm();
           }
         }}
-      >
-        <DialogContent className="max-h-[min(680px,calc(100svh-2rem))] sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t("project.add")}</DialogTitle>
-            <DialogDescription>{t("project.addDescription")}</DialogDescription>
-          </DialogHeader>
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitProject();
-            }}
-          >
-            <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
-              <label className="grid gap-1.5 text-sm">
-                <span>{t("project.name")}</span>
-                <Input
-                  autoFocus
-                  disabled={createMutation.isPending}
-                  maxLength={120}
-                  placeholder={t("project.namePlaceholder")}
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm">{t("project.directories")}</span>
-                  <Button disabled={createMutation.isPending} size="sm" type="button" variant="outline" onClick={() => void chooseDirectories()}>
-                    <FolderPlus className="size-3.5" />
-                    {t("project.chooseFolders")}
-                  </Button>
-                </div>
-                {rootDirs.length > 0 ? (
-                  <div className="grid gap-1 rounded-lg border p-1">
-                    {rootDirs.map((path) => (
-                      <div key={path} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70 focus-within:bg-muted/70">
-                        <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
-                        <Button
-                          aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
-                          disabled={createMutation.isPending}
-                          size="icon-xs"
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setRootDirs((current) => current.filter((entry) => entry !== path))}
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">
-                    {t("project.noDirectories")}
-                  </div>
-                )}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button disabled={createMutation.isPending} type="button" variant="outline" onClick={closeAddForm}>
-                {t("common.cancel")}
-              </Button>
-              <Button disabled={createMutation.isPending || !name.trim() || rootDirs.length === 0} type="submit">
-                {createMutation.isPending ? <Spinner /> : null}
-                {t("project.add")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        onSubmit={submitProject}
+      />
     </main>
   );
 }
@@ -258,7 +199,6 @@ function ProjectRow({ locale, project, token }: { locale: string; project: Proje
           </div>
         </div>
         <ProjectActionsMenu
-          allowDirectoryEditing
           alwaysVisible
           project={project}
           token={token}
