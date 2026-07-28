@@ -110,6 +110,9 @@ func TestResponsesRequestShape(t *testing.T) {
 	if len(got.Tools) != 1 || got.Tools[0].Name != "web_fetch" || string(got.Tools[0].Parameters) != `{"type":"object"}` {
 		t.Fatalf("tools not applied: %+v", got.Tools)
 	}
+	if len(got.Include) != 1 || got.Include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("encrypted reasoning was not requested: %+v", got.Include)
+	}
 	if got.Instructions != "system prompt" {
 		t.Fatalf("unexpected instructions: %q", got.Instructions)
 	}
@@ -157,6 +160,81 @@ func TestResponsesRequestShapeWithToolHistory(t *testing.T) {
 	if got.Input[1].Type != "function_call_output" || got.Input[1].CallID != "call_1" || got.Input[1].Output != `{"iso":"now"}` {
 		t.Fatalf("function_call_output item wrong: %+v", got.Input[1])
 	}
+}
+
+func TestResponsesContinuationReplaysNativeOutputItems(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readResponsesSSE(context.Background(), strings.NewReader(
+		`data: {"type":"response.output_item.added","item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":""}}`+"\n\n"+
+			`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"q\":\"value\"}"}`+"\n\n"+
+			`data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","encrypted_content":"cipher","summary":[{"type":"summary_text","text":"summary"}]}}`+"\n\n"+
+			`data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"value\"}"}}`+"\n\n"+
+			`data: {"type":"response.completed"}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil || continuation.Kind != provider.ContinuationOpenAIResponses {
+		t.Fatalf("missing responses continuation: %+v", continuation)
+	}
+
+	inputs := responsesInputsFor(provider.Message{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartThought, Text: "display-only summary"},
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "lookup", Args: json.RawMessage(`{"q":"value"}`)},
+			{Type: provider.PartToolResult, CallID: "call_1", Name: "lookup", Ok: true, Content: `{"answer":1}`},
+		},
+		Continuations: []provider.Continuation{*continuation},
+	})
+	encoded, err := json.Marshal(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(encoded, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("got %d replay items, want 3: %s", len(items), encoded)
+	}
+	if items[0]["type"] != "reasoning" || items[0]["id"] != "rs_1" || items[0]["encrypted_content"] != "cipher" {
+		t.Fatalf("reasoning item changed: %+v", items[0])
+	}
+	if items[1]["type"] != "function_call" || items[1]["id"] != "fc_1" || items[1]["call_id"] != "call_1" {
+		t.Fatalf("function call item changed: %+v", items[1])
+	}
+	if items[2]["type"] != "function_call_output" || items[2]["call_id"] != "call_1" || items[2]["output"] != `{"answer":1}` {
+		t.Fatalf("tool result item changed: %+v", items[2])
+	}
+}
+
+func TestResponsesContinuationFallsBackToCompletedOutput(t *testing.T) {
+	out := make(chan provider.Chunk, 2)
+	err := readResponsesSSE(context.Background(), strings.NewReader(
+		`data: {"type":"response.completed","response":{"output":[{"type":"reasoning","id":"rs_1","encrypted_content":"cipher"}]}}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for chunk := range out {
+		if !chunk.Done {
+			continue
+		}
+		if chunk.Continuation == nil || !strings.Contains(string(chunk.Continuation.Data), `"encrypted_content":"cipher"`) {
+			t.Fatalf("completed output was not retained: %+v", chunk.Continuation)
+		}
+		return
+	}
+	t.Fatal("missing done chunk")
 }
 
 func TestResponsesToolCallChunks(t *testing.T) {

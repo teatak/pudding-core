@@ -30,3 +30,54 @@ func TestEstimateImageTokensUsesModelImageDimensions(t *testing.T) {
 		t.Fatalf("estimatePartTokens(image) = %d, want 1407", got)
 	}
 }
+
+func TestEstimateMessagesTokensCountsNativeContinuationAndToolResult(t *testing.T) {
+	continuation := provider.Continuation{
+		Kind: provider.ContinuationOpenAIResponses,
+		Data: []byte(`{"type":"reasoning","encrypted_content":"abcdefghijklmnopqrstuvwxyz"}`),
+	}
+	messages := []provider.Message{{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "inspect"},
+			{Type: provider.PartToolResult, CallID: "call_1", Content: "result"},
+		},
+		Continuations: []provider.Continuation{continuation},
+	}}
+
+	got := EstimateMessagesTokens(messages)
+	continuationTokens := EstimateTextTokens(string(continuation.Data))
+	toolResultTokens := estimatePartTokens(messages[0].Parts[1])
+	wantFloor := 2*messageTokenOverhead + continuationTokens + toolResultTokens
+	if got < wantFloor {
+		t.Fatalf("EstimateMessagesTokens() = %d, want at least %d", got, wantFloor)
+	}
+}
+
+func TestEstimateMessagesTokensCountsTrailingStateOnlyContinuation(t *testing.T) {
+	first := provider.Continuation{
+		Kind: provider.ContinuationOpenAIResponses,
+		Data: []byte(`{"type":"function_call","call_id":"call_1"}`),
+	}
+	trailing := provider.Continuation{
+		Kind: provider.ContinuationOpenAIResponses,
+		Data: []byte(`{"type":"reasoning","encrypted_content":"final-native-state"}`),
+	}
+	messages := []provider.Message{{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "inspect"},
+			{Type: provider.PartToolResult, CallID: "call_1", Content: "result"},
+		},
+		Continuations: []provider.Continuation{first, trailing},
+	}}
+
+	got := EstimateMessagesTokens(messages)
+	wantFloor := 3*messageTokenOverhead +
+		EstimateTextTokens(string(first.Data)) +
+		estimatePartTokens(messages[0].Parts[1]) +
+		EstimateTextTokens(string(trailing.Data))
+	if got < wantFloor {
+		t.Fatalf("EstimateMessagesTokens() = %d, want at least %d", got, wantFloor)
+	}
+}

@@ -1006,7 +1006,9 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 			return store.ErrNotFound
 		}
 		segments := store.AssistantOutputSegments(in.Parts)
-		if len(segments) == 0 {
+		state := store.CloneProviderState(in.ProviderState)
+		segments = store.EnsureProviderStateAssistantSegment(segments, state)
+		if len(segments) == 0 && !store.ValidProviderState(state) {
 			out = &store.AppendTurnOutputResult{}
 			return nil
 		}
@@ -1018,6 +1020,25 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, in.Interrupted, now)
 		if err != nil {
 			return err
+		}
+		if store.ValidProviderState(state) {
+			target := lastAssistantMessage(messages)
+			if target == nil {
+				target, err = latestAssistantMessageForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+				if err != nil {
+					return err
+				}
+			}
+			if target != nil {
+				target.ProviderState = state
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE messages SET metadata=? WHERE id=?`,
+					string(store.EncodeMessageMetadataForStorage(target.Metadata, state)),
+					target.ID,
+				); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err
@@ -2244,6 +2265,12 @@ func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string
 }
 
 func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange) *store.ConversationTurn {
+	visibleMessages := make([]*store.Message, 0, len(messages))
+	for _, message := range messages {
+		if !store.IsProtocolOnlyMessage(message) {
+			visibleMessages = append(visibleMessages, message)
+		}
+	}
 	return &store.ConversationTurn{
 		ID:              turn.ID,
 		SessionID:       turn.SessionID,
@@ -2255,7 +2282,7 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileCh
 		Error:           turn.Error,
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,
-		Messages:        messages,
+		Messages:        visibleMessages,
 		FileChanges:     fileChanges,
 	}
 }
@@ -2362,7 +2389,7 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 		return nil, err
 	}
 	msg.Parts = decodeParts(parts)
-	msg.Metadata = normalizeMessageMetadata(metadata)
+	msg.Metadata, msg.ProviderState = store.DecodeMessageMetadataFromStorage(normalizeMessageMetadata(metadata))
 	msg.Interrupted = interrupted != 0
 	msg.CreatedAt = timeFromMS(created)
 	return &msg, nil
@@ -2533,6 +2560,30 @@ func appendTurnOutputSegmentsTx(ctx context.Context, tx *sql.Tx, turn *store.Tur
 	return out, nil
 }
 
+func lastAssistantMessage(messages []*store.Message) *store.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i] != nil && messages[i].Role == store.RoleAssistant {
+			return messages[i]
+		}
+	}
+	return nil
+}
+
+func latestAssistantMessageForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) (*store.Message, error) {
+	msg, err := scanMessage(tx.QueryRowContext(ctx,
+		`SELECT `+messageSelectColumns+`
+		 FROM messages
+		 WHERE session_id=? AND turn_id=? AND role=?
+		 ORDER BY turn_index DESC, rowid DESC
+		 LIMIT 1`,
+		sessionID, turnID, store.RoleAssistant,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return msg, err
+}
+
 func encodeParts(parts []store.ContentPart) string {
 	normalized := store.NormalizeContentParts(parts)
 	if len(normalized) == 0 {
@@ -2557,7 +2608,7 @@ func insertMessageTx(ctx context.Context, tx *sql.Tx, msg *store.Message) error 
 		searchtext.IndexText(msg.Text),
 		encodeParts(msg.Parts),
 		msg.TurnIndex,
-		string(normalizeJSON(msg.Metadata)),
+		string(store.EncodeMessageMetadataForStorage(msg.Metadata, msg.ProviderState)),
 		msg.ClientMessageID,
 		boolInt(msg.Interrupted),
 		unixMS(msg.CreatedAt),

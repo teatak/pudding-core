@@ -1,11 +1,11 @@
 package engine
 
-// titler.go — 会话自动标题,移植旧项目 session_titler.go 的方案:
+// titler.go — 会话自动标题:
 //
 //   - 触发:空标题会话的 user 消息提交成功后(Submit 内),与主 turn
 //     生命周期解耦,不等 assistant 回答。
 //   - 两段式:先同步写 provisional(用户文本截断)让列表立即有名字,
-//     再异步起裸 LLM 调用生成正式标题。
+//     再异步起裸 LLM 调用总结首条 user 消息。
 //   - 覆盖纪律:provisional 只写在空标题上;LLM 标题只写在 provisional
 //     上(逐步校验前值)。用户手动改名后两步都不会动它。
 //   - 通知:每次写回 emit session.titled(不落库),前端刷新会话列表。
@@ -30,6 +30,8 @@ const titlerSystemPrompt = `You write only a short session-list title.
 Requirements:
 
 - Make it specific to the concrete task, question, or topic.
+- Rewrite the request as a concise topic noun phrase; do not copy the request sentence.
+- Remove request filler or imperative wording such as "please", "help me", "again", "请", "帮我", "再", or "查一下".
 - Use the conversation's dominant user language. If no dominant language is clear, use English.
 - Chinese titles must be 2-8 Chinese characters. English titles must be 2-5 words.
 - Avoid filler such as "about", "discussion", or "chat".
@@ -49,7 +51,7 @@ const titlerTimeout = 30 * time.Second
 const (
 	provisionalTitleRunes = 24
 	finalTitleRunes       = 20
-	titlerMaxOutputTokens = 64
+	titlerMaxOutputTokens = 1024
 
 	titleQuoteChars          = "\"'`“”‘’「」《》"
 	titleTrailingPunctuation = ".,:;!?。，：；！？…"
@@ -76,12 +78,39 @@ func (e *Engine) autoTitle(sessionID, providerName, model string, modelConfig pr
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
+		startedAt := time.Now()
 		title, err := e.generateTitle(providerName, model, modelConfig, userText)
 		if err != nil {
-			slog.Warn("titler: generate failed, keeping provisional", "session", sessionID, "err", err)
+			slog.Warn(
+				"titler: generate failed, keeping provisional",
+				"session", sessionID,
+				"profile", providerName,
+				"model", model,
+				"duration", time.Since(startedAt),
+				"err", err,
+			)
 			return
 		}
-		if title == "" || title == provisional {
+		slog.Info(
+			"titler: generation completed",
+			"session", sessionID,
+			"profile", providerName,
+			"model", model,
+			"duration", time.Since(startedAt),
+			"provisional", provisional,
+			"generated", title,
+			"sameAsProvisional", title == provisional,
+		)
+		if title == "" {
+			slog.Warn(
+				"titler: model returned no title, keeping provisional",
+				"session", sessionID,
+				"profile", providerName,
+				"model", model,
+			)
+			return
+		}
+		if title == provisional {
 			return
 		}
 		cur, err := e.store.GetSession(context.Background(), sessionID)
@@ -184,32 +213,11 @@ func titlerConfig(base provider.ModelConfig) provider.ModelConfig {
 	}
 	cfg.Limits = &provider.ModelLimits{MaxOutputTokens: titlerMaxOutputTokens}
 	cfg.ProviderOptions = &provider.ModelProviderOptions{
-		OpenAI:    cloneAnyMap(base.OpenAIOptions()),
-		Google:    cloneAnyMap(base.GoogleOptions()),
-		Anthropic: cloneAnyMap(base.AnthropicOptions()),
+		OpenAI:    map[string]any{"reasoning_effort": "low"},
+		Google:    map[string]any{},
+		Anthropic: map[string]any{},
 	}
-	if cfg.ProviderOptions.OpenAI == nil {
-		cfg.ProviderOptions.OpenAI = map[string]any{}
-	}
-	if cfg.ProviderOptions.Google == nil {
-		cfg.ProviderOptions.Google = map[string]any{}
-	}
-	if cfg.ProviderOptions.Anthropic == nil {
-		cfg.ProviderOptions.Anthropic = map[string]any{}
-	}
-	cfg.ProviderOptions.OpenAI["reasoning_effort"] = "low"
 	return cfg
-}
-
-func cloneAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func truncateRunes(s string, n int) string {

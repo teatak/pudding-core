@@ -183,6 +183,95 @@ func TestContentPartMarshalJSONPreservesUIContextSelection(t *testing.T) {
 	}
 }
 
+func TestProviderStateMetadataRoundTripPreservesPublicShape(t *testing.T) {
+	state := &ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"cipher"}]`),
+	}
+	tests := []struct {
+		name     string
+		metadata json.RawMessage
+		want     string
+		wantNil  bool
+	}{
+		{name: "empty", wantNil: true},
+		{name: "object", metadata: json.RawMessage(`{"source":"compact"}`), want: `{"source":"compact"}`},
+		{name: "array", metadata: json.RawMessage(`["one",2]`), want: `["one",2]`},
+		{name: "scalar", metadata: json.RawMessage(`"opaque"`), want: `"opaque"`},
+		{name: "null", metadata: json.RawMessage(`null`), want: `null`},
+		{name: "reserved key", metadata: json.RawMessage(`{"_provider_state":"public"}`), want: `{"_provider_state":"public"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := EncodeMessageMetadataForStorage(tt.metadata, state)
+			if strings.Contains(string(stored), "cipher") && !strings.Contains(string(stored), providerStateMetadataKey) {
+				t.Fatalf("provider state was not stored in the hidden field: %s", stored)
+			}
+			got, decodedState := DecodeMessageMetadataFromStorage(stored)
+			if decodedState == nil || string(decodedState.Data) != string(state.Data) {
+				t.Fatalf("provider state changed: %+v", decodedState)
+			}
+			if tt.wantNil {
+				if len(got) != 0 {
+					t.Fatalf("metadata = %s, want nil", got)
+				}
+				return
+			}
+			if string(got) != tt.want {
+				t.Fatalf("metadata = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeMetadataWithoutProviderStateKeepsPublicMetadata(t *testing.T) {
+	for _, metadata := range []json.RawMessage{
+		json.RawMessage(`{"source":"user"}`),
+		json.RawMessage(`["one",2]`),
+		json.RawMessage(`"_provider_state"`),
+	} {
+		got, state := DecodeMessageMetadataFromStorage(metadata)
+		if state != nil || string(got) != string(metadata) {
+			t.Fatalf("metadata changed: got=%s state=%+v want=%s", got, state, metadata)
+		}
+	}
+	if got, state := DecodeMessageMetadataFromStorage(json.RawMessage(`{}`)); state != nil || len(got) != 0 {
+		t.Fatalf("empty object should remain omitted: got=%s state=%+v", got, state)
+	}
+}
+
+func TestEnsureProviderStateAssistantSegmentAddsHiddenAnchorAfterToolResult(t *testing.T) {
+	state := &ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"cipher"}]`),
+	}
+	segments := []AssistantOutputSegment{{
+		Role: RoleTool,
+		Kind: MessageKindToolResult,
+	}}
+	got := EnsureProviderStateAssistantSegment(segments, state)
+	if len(got) != 2 || got[0].Role != RoleTool || got[1].Role != RoleAssistant {
+		t.Fatalf("segments = %+v, want tool result followed by assistant anchor", got)
+	}
+	message := &Message{
+		Role:          got[1].Role,
+		Kind:          got[1].Kind,
+		Text:          got[1].Text,
+		Parts:         got[1].Parts,
+		ProviderState: state,
+	}
+	if !IsProtocolOnlyMessage(message) {
+		t.Fatalf("assistant anchor should be protocol-only: %+v", message)
+	}
+	if IsProtocolOnlyMessage(&Message{Role: RoleAssistant, Parts: TextPart("visible"), ProviderState: state}) {
+		t.Fatal("visible assistant message must not be protocol-only")
+	}
+}
+
 func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
 		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)

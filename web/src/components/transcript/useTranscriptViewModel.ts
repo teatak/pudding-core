@@ -232,11 +232,13 @@ export function useTranscriptViewModel({
       }
 
       const outputMessages = turn.messages.filter(isTurnOutputMessage);
+      const failed = turn.status === "failed" && Boolean(turn.error);
       const item: TranscriptTurnVM = {
         assistant:
-          outputMessages.length > 0
+          outputMessages.length > 0 || failed
             ? {
                 duration,
+                error: failed ? turn.error : undefined,
                 kind: "canonical",
                 messages: outputMessages,
                 model: modelFromTurn(turn),

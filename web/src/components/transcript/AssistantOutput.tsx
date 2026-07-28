@@ -75,10 +75,6 @@ function CanonicalAssistantOutput({
 }) {
   const parts = useMemo(() => partsFromMessages(assistant.messages), [assistant.messages]);
   const text = useMemo(() => assistantTextFromMessages(assistant.messages), [assistant.messages]);
-  const lastMessage = assistant.messages[assistant.messages.length - 1];
-  if (!lastMessage) {
-    return null;
-  }
   const compactMessage = assistant.messages.find(isCompactMessage);
   if (compactMessage) {
     return <CompactMarker message={compactMessage} sessionID={sessionID} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
@@ -86,7 +82,13 @@ function CanonicalAssistantOutput({
   return (
     <div className="group flex min-w-0 flex-col">
       <div className="selectable-text min-w-0 text-sm leading-6">
-        <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} />
+        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
+        {assistant.error ? (
+          <Alert className="mt-2 min-w-0" variant="destructive">
+            <CircleAlert className="h-3.5 w-3.5" />
+            <AlertDescription className="min-w-0 overflow-hidden break-words">{assistant.error}</AlertDescription>
+          </Alert>
+        ) : null}
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
     </div>

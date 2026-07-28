@@ -88,8 +88,8 @@ const (
 )
 
 type Project struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 	// RootDirs preserves user order; the first entry is the primary project directory.
 	RootDirs     []string     `json:"rootDirs"`
 	ApprovalMode ApprovalMode `json:"approvalMode"`
@@ -583,12 +583,130 @@ type Message struct {
 	Parts     []ContentPart   `json:"parts"`
 	TurnIndex int             `json:"turnIndex"`
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	// ProviderState 是 canonical message 的隐藏协议状态。它只用于向同一
+	// provider/model 重放原生 reasoning、签名和 tool-call items，不暴露给 UI。
+	ProviderState *ProviderState `json:"-"`
 	// ClientMessageID 只在 user message 上有值,承载 submit 幂等与前端 overlay 对账。
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 	// Interrupted 标记 cancel / failed 时保留的半截 assistant 输出
 	// (开放问题的当前倾向:保留进 canonical context)。
 	Interrupted bool      `json:"interrupted,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type ProviderState struct {
+	Provider string          `json:"provider"`
+	Model    string          `json:"model"`
+	Kind     string          `json:"kind"`
+	Data     json.RawMessage `json:"data"`
+}
+
+func CloneProviderState(state *ProviderState) *ProviderState {
+	if state == nil {
+		return nil
+	}
+	out := *state
+	out.Data = append(json.RawMessage(nil), state.Data...)
+	return &out
+}
+
+const (
+	providerStateMetadataKey  = "_provider_state"
+	publicMetadataEnvelopeKey = "_provider_public_metadata"
+)
+
+// EncodeMessageMetadataForStorage merges hidden provider state into the
+// metadata persisted by the store. Public message metadata remains unchanged.
+func EncodeMessageMetadataForStorage(metadata json.RawMessage, state *ProviderState) json.RawMessage {
+	public := cloneValidMetadata(metadata)
+	if !ValidProviderState(state) {
+		if len(public) == 0 {
+			return json.RawMessage(`{}`)
+		}
+		return public
+	}
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		if len(public) == 0 {
+			return json.RawMessage(`{}`)
+		}
+		return public
+	}
+	fields, object := decodeMetadataObject(public)
+	if !object {
+		fields = make(map[string]json.RawMessage)
+		if len(public) > 0 {
+			fields[publicMetadataEnvelopeKey] = public
+		}
+	} else if _, stateCollision := fields[providerStateMetadataKey]; stateCollision {
+		fields = map[string]json.RawMessage{publicMetadataEnvelopeKey: public}
+	} else if _, envelopeCollision := fields[publicMetadataEnvelopeKey]; envelopeCollision {
+		fields = map[string]json.RawMessage{publicMetadataEnvelopeKey: public}
+	}
+	fields[providerStateMetadataKey] = stateData
+	return encodeMetadataObject(fields)
+}
+
+// DecodeMessageMetadataFromStorage separates hidden provider state from
+// metadata before a Message leaves the store boundary.
+func DecodeMessageMetadataFromStorage(raw json.RawMessage) (json.RawMessage, *ProviderState) {
+	fields, object := decodeMetadataObject(raw)
+	if !object {
+		return cloneValidMetadata(raw), nil
+	}
+	var state ProviderState
+	if data := fields[providerStateMetadataKey]; len(data) > 0 {
+		_ = json.Unmarshal(data, &state)
+	}
+	if !ValidProviderState(&state) {
+		if len(fields) == 0 {
+			return nil, nil
+		}
+		return append(json.RawMessage(nil), raw...), nil
+	}
+	if public := fields[publicMetadataEnvelopeKey]; len(public) > 0 && json.Valid(public) {
+		return append(json.RawMessage(nil), public...), CloneProviderState(&state)
+	}
+	delete(fields, providerStateMetadataKey)
+	if len(fields) == 0 {
+		return nil, CloneProviderState(&state)
+	}
+	return encodeMetadataObject(fields), CloneProviderState(&state)
+}
+
+func ValidProviderState(state *ProviderState) bool {
+	return state != nil &&
+		strings.TrimSpace(state.Provider) != "" &&
+		strings.TrimSpace(state.Model) != "" &&
+		strings.TrimSpace(state.Kind) != "" &&
+		len(state.Data) > 0 &&
+		json.Valid(state.Data)
+}
+
+func decodeMetadataObject(raw json.RawMessage) (map[string]json.RawMessage, bool) {
+	fields := make(map[string]json.RawMessage)
+	if len(raw) == 0 || !json.Valid(raw) || json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil, false
+	}
+	return fields, true
+}
+
+func encodeMetadataObject(fields map[string]json.RawMessage) json.RawMessage {
+	if len(fields) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	data, err := json.Marshal(fields)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
+func cloneValidMetadata(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }
 
 type MessageSearchInput struct {
@@ -1214,6 +1332,35 @@ func AssistantOutputSegments(parts []ContentPart) []AssistantOutputSegment {
 	return out
 }
 
+// EnsureProviderStateAssistantSegment adds a protocol-only assistant anchor
+// when provider-native state follows output that contains no assistant segment
+// (for example, a tool result followed by a state-only model response).
+func EnsureProviderStateAssistantSegment(segments []AssistantOutputSegment, state *ProviderState) []AssistantOutputSegment {
+	if !ValidProviderState(state) {
+		return segments
+	}
+	for _, segment := range segments {
+		if segment.Role == RoleAssistant {
+			return segments
+		}
+	}
+	return append(segments, AssistantOutputSegment{
+		Role: RoleAssistant,
+		Kind: MessageKindText,
+	})
+}
+
+// IsProtocolOnlyMessage reports whether a message exists only to preserve
+// provider-native continuation state. These messages remain canonical context
+// but are omitted from the user-facing conversation turn projection.
+func IsProtocolOnlyMessage(message *Message) bool {
+	return message != nil &&
+		message.Role == RoleAssistant &&
+		strings.TrimSpace(message.Text) == "" &&
+		len(message.Parts) == 0 &&
+		ValidProviderState(message.ProviderState)
+}
+
 func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment {
 	parts := NormalizeContentParts(in.AssistantParts)
 	if len(parts) == 0 && in.Status == TurnCompleted {
@@ -1478,9 +1625,10 @@ type TurnFileChange struct {
 }
 
 type AppendTurnOutputInput struct {
-	TurnID      string
-	Parts       []ContentPart
-	Interrupted bool
+	TurnID        string
+	Parts         []ContentPart
+	ProviderState *ProviderState
+	Interrupted   bool
 }
 
 type AppendTurnOutputResult struct {

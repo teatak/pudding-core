@@ -447,7 +447,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	e.hub.Publish(*res.StartedEvent)
 
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
-	// 与 turn 生命周期解耦(titler.go)
+	// 与 turn 生命周期解耦(titler.go)。
 	if sess.Title == "" && strings.TrimSpace(in.Text) != "" {
 		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, resolved.config, in.Text)
 	}
@@ -510,18 +510,27 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 		return nil, err
 	}
 	mode := initialMode(sess)
-	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode), resolved.config)
+	var defs []provider.ToolDef
+	if modelSupportsTools(resolved.config) {
+		defs, err = e.toolDefinitions(ctx, sessionID, mode)
+		if err != nil {
+			return nil, err
+		}
+	}
+	req, err := e.builder.BuildForProviderWithTools(
+		ctx,
+		sessionID,
+		resolved.providerName,
+		resolved.model,
+		string(mode),
+		defs,
+		resolved.config,
+	)
 	if err != nil {
 		return nil, err
 	}
 	req.Config = resolved.config
-	if modelSupportsTools(resolved.config) {
-		defs, err := e.toolDefinitions(ctx, sessionID, mode)
-		if err != nil {
-			return nil, err
-		}
-		req.Tools = defs
-	}
+	req.Tools = defs
 	estimate := contextbuilder.EstimateRequest(req)
 	stat, err := e.store.SessionUsage(ctx, sessionID)
 	if err != nil {
@@ -1114,7 +1123,7 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 	interruptedOutputCommitted := false
 	if steers := active.consumeSteers(); len(steers) > 0 {
 		interruptedOutputCommitted = status != store.TurnCompleted && len(parts.UncommittedParts()) > 0
-		if err := e.commitTurnPartsWithStatus(turnID, &parts, true, interruptedOutputCommitted); err != nil {
+		if err := e.commitTurnPartsWithStatus(turnID, &parts, true, interruptedOutputCommitted, nil); err != nil {
 			status = store.TurnFailed
 			errMsg = fmt.Sprintf("append output before steer: %v", err)
 		} else if err := e.applyTurnSteers(turnID, steers); err != nil {
@@ -1259,15 +1268,19 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		maxLoops = v
 	}
 	consecutiveToolOnlyLoops := 0
+	var continuations []provider.Continuation
+	providerCallIndex := 0
 	for {
+		parts.BeginProviderCall(providerCallIndex)
+		providerCallIndex++
 		req := baseReq
-		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), sessionID, e.attachmentHome, resolved.config)
+		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, e.attachmentHome, resolved.config)
 		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
 		}
-		finish, status, errMsg, assistantOutput := e.consumeStream(
+		finish, status, errMsg, assistantOutput, continuation := e.consumeStream(
 			ctx,
 			sessionID,
 			turnID,
@@ -1280,8 +1293,12 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if status != store.TurnRunning {
 			return status, errMsg, currentMode
 		}
+		if continuation != nil {
+			continuations = append(continuations, *continuation)
+		}
+		providerState := storeProviderState(resolved, continuation)
 		if finish == "" || finish == provider.FinishStop {
-			if err := e.commitTurnParts(turnID, parts, true); err != nil {
+			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
 			if steers := active.consumeSteersOrSeal(); len(steers) > 0 {
@@ -1289,6 +1306,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 					return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
 				}
 				parts.Reset()
+				continuations = nil
 				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 				if err != nil {
 					return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
@@ -1312,7 +1330,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			}
 			consecutiveToolOnlyLoops++
 		}
-		if err := e.commitTurnParts(turnID, parts, true); err != nil {
+		if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 		}
 		status, msg, nextMode, changed := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, parts)
@@ -1330,6 +1348,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
 			}
 			parts.Reset()
+			continuations = nil
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
 				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
@@ -1370,23 +1389,49 @@ func (e *Engine) applyTurnSteers(turnID string, steers []pendingSteer) error {
 	return nil
 }
 
-func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, includeLast bool) error {
-	return e.commitTurnPartsWithStatus(turnID, parts, includeLast, false)
+func storeProviderState(resolved *resolvedModel, continuation *provider.Continuation) *store.ProviderState {
+	if resolved == nil || continuation == nil {
+		return nil
+	}
+	state := &store.ProviderState{
+		Provider: strings.TrimSpace(resolved.providerName),
+		Model:    strings.TrimSpace(resolved.model),
+		Kind:     strings.TrimSpace(continuation.Kind),
+		Data:     append(json.RawMessage(nil), continuation.Data...),
+	}
+	if !store.ValidProviderState(state) {
+		return nil
+	}
+	return state
 }
 
-func (e *Engine) commitTurnPartsWithStatus(turnID string, parts *turnPartAccumulator, includeLast, interrupted bool) error {
+func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, includeLast bool) error {
+	return e.commitTurnPartsWithStatus(turnID, parts, includeLast, false, nil)
+}
+
+func (e *Engine) commitTurnPartsWithProviderState(turnID string, parts *turnPartAccumulator, state *store.ProviderState) error {
+	return e.commitTurnPartsWithStatus(turnID, parts, true, false, state)
+}
+
+func (e *Engine) commitTurnPartsWithStatus(
+	turnID string,
+	parts *turnPartAccumulator,
+	includeLast, interrupted bool,
+	state *store.ProviderState,
+) error {
 	upto := len(parts.parts)
 	if !includeLast && upto > parts.committedParts {
 		upto--
 	}
-	if upto <= parts.committedParts {
+	if upto <= parts.committedParts && !store.ValidProviderState(state) {
 		return nil
 	}
 	commitParts := parts.PartsRange(parts.committedParts, upto)
 	if _, err := e.store.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
-		TurnID:      turnID,
-		Parts:       commitParts,
-		Interrupted: interrupted,
+		TurnID:        turnID,
+		Parts:         commitParts,
+		ProviderState: store.CloneProviderState(state),
+		Interrupted:   interrupted,
 	}); err != nil {
 		return err
 	}
@@ -1395,18 +1440,28 @@ func (e *Engine) commitTurnPartsWithStatus(turnID string, parts *turnPartAccumul
 }
 
 func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, resolved *resolvedModel, mode store.AgentMode) (provider.Request, error) {
-	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode), resolved.config)
+	var defs []provider.ToolDef
+	if modelSupportsTools(resolved.config) {
+		var err error
+		defs, err = e.toolDefinitions(ctx, sessionID, mode)
+		if err != nil {
+			return provider.Request{}, err
+		}
+	}
+	req, err := e.builder.BuildForProviderWithTools(
+		ctx,
+		sessionID,
+		resolved.providerName,
+		resolved.model,
+		string(mode),
+		defs,
+		resolved.config,
+	)
 	if err != nil {
 		return provider.Request{}, err
 	}
 	req.Config = resolved.config
-	if modelSupportsTools(resolved.config) {
-		defs, err := e.toolDefinitions(ctx, sessionID, mode)
-		if err != nil {
-			return provider.Request{}, err
-		}
-		req.Tools = defs
-	}
+	req.Tools = defs
 	return req, nil
 }
 
@@ -1567,17 +1622,18 @@ func (e *Engine) consumeStream(
 	estimatedInputTokens int,
 	ch <-chan provider.Chunk,
 	parts *turnPartAccumulator,
-) (provider.FinishReason, store.TurnStatus, string, bool) {
+) (provider.FinishReason, store.TurnStatus, string, bool, *provider.Continuation) {
 	coalescer := newStreamEventCoalescer(e.hub)
 	defer coalescer.Flush()
 	var usage provider.UsageInfo
 	usageSeen := false
 	assistantOutput := false
+	var continuation *provider.Continuation
 
 	for {
 		select {
 		case <-ctx.Done():
-			return "", store.TurnCancelled, "", assistantOutput
+			return "", store.TurnCancelled, "", assistantOutput, nil
 		case <-coalescer.C():
 			coalescer.Flush()
 		case chunk, ok := <-ch:
@@ -1585,22 +1641,27 @@ func (e *Engine) consumeStream(
 				// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
 				// 避免用户主动停止被记成 failed。
 				if ctx.Err() != nil {
-					return "", store.TurnCancelled, "", assistantOutput
+					return "", store.TurnCancelled, "", assistantOutput, nil
 				}
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				}
-				return "", store.TurnFailed, "provider stream ended without terminal chunk", assistantOutput
+				return "", store.TurnFailed, "provider stream ended without terminal chunk", assistantOutput, nil
+			}
+			if chunk.Continuation != nil {
+				cp := *chunk.Continuation
+				cp.Data = append(json.RawMessage(nil), chunk.Continuation.Data...)
+				continuation = &cp
 			}
 			switch {
 			case chunk.Err != nil:
 				if errors.Is(chunk.Err, context.Canceled) {
-					return "", store.TurnCancelled, "", assistantOutput
+					return "", store.TurnCancelled, "", assistantOutput, nil
 				}
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				}
-				return "", store.TurnFailed, chunk.Err.Error(), assistantOutput
+				return "", store.TurnFailed, chunk.Err.Error(), assistantOutput, nil
 			case chunk.Usage != nil:
 				mergeUsageInfo(&usage, *chunk.Usage)
 				usageSeen = true
@@ -1610,11 +1671,11 @@ func (e *Engine) consumeStream(
 				} else {
 					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, provider.UsageInfo{}, 1)
 				}
-				return chunk.Finish, store.TurnRunning, "", assistantOutput
+				return chunk.Finish, store.TurnRunning, "", assistantOutput, continuation
 			case chunk.Tool != nil:
 				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
-					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput, nil
 				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,
@@ -1636,7 +1697,7 @@ func (e *Engine) consumeStream(
 				assistantOutput = true
 				parts.AppendDelta(part, chunk.Delta)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
-					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput, nil
 				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,
@@ -2423,8 +2484,9 @@ type turnPartAccumulator struct {
 	parts          []store.ContentPart
 	committedParts int
 	toolPartByKey  map[string]int
-	toolKeyByIndex map[int]string
+	toolKeyByIndex map[string]string
 	toolArgs       map[string]*strings.Builder
+	providerCall   int
 }
 
 func (a *turnPartAccumulator) Reset() {
@@ -2433,6 +2495,11 @@ func (a *turnPartAccumulator) Reset() {
 	a.toolPartByKey = nil
 	a.toolKeyByIndex = nil
 	a.toolArgs = nil
+	a.providerCall = 0
+}
+
+func (a *turnPartAccumulator) BeginProviderCall(index int) {
+	a.providerCall = index
 }
 
 func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) {
@@ -2456,20 +2523,18 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 		a.toolPartByKey = make(map[string]int)
 	}
 	if a.toolKeyByIndex == nil {
-		a.toolKeyByIndex = make(map[int]string)
+		a.toolKeyByIndex = make(map[string]string)
 	}
 	if a.toolArgs == nil {
 		a.toolArgs = make(map[string]*strings.Builder)
 	}
 	key := a.toolKey(chunk)
-	if chunk.CallID != "" {
-		a.toolKeyByIndex[chunk.Index] = key
-	}
+	a.toolKeyByIndex[a.toolIndexKey(chunk.Index)] = key
 	partIndex, ok := a.toolPartByKey[key]
 	if !ok {
 		callID := chunk.CallID
 		if callID == "" {
-			callID = fmt.Sprintf("tool_%d", chunk.Index)
+			callID = a.syntheticToolCallID(chunk.Index)
 		}
 		a.parts = append(a.parts, store.ContentPart{
 			Type:   store.ContentPartToolUse,
@@ -2484,7 +2549,7 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 		part.CallID = chunk.CallID
 	}
 	if part.CallID == "" {
-		part.CallID = fmt.Sprintf("tool_%d", chunk.Index)
+		part.CallID = a.syntheticToolCallID(chunk.Index)
 	}
 	if chunk.Name != "" {
 		part.Name = chunk.Name
@@ -2501,13 +2566,24 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 }
 
 func (a *turnPartAccumulator) toolKey(chunk provider.ToolCallChunk) string {
+	if key := a.toolKeyByIndex[a.toolIndexKey(chunk.Index)]; key != "" {
+		return key
+	}
 	if chunk.CallID != "" {
 		return "id:" + chunk.CallID
 	}
-	if key := a.toolKeyByIndex[chunk.Index]; key != "" {
-		return key
+	return "idx:" + a.toolIndexKey(chunk.Index)
+}
+
+func (a *turnPartAccumulator) toolIndexKey(index int) string {
+	return fmt.Sprintf("%d:%d", a.providerCall, index)
+}
+
+func (a *turnPartAccumulator) syntheticToolCallID(index int) string {
+	if a.providerCall == 0 {
+		return fmt.Sprintf("tool_%d", index)
 	}
-	return fmt.Sprintf("idx:%d", chunk.Index)
+	return fmt.Sprintf("tool_%d_%d", a.providerCall, index)
 }
 
 func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
@@ -2620,16 +2696,17 @@ func (a *turnPartAccumulator) PartsRange(start, end int) []store.ContentPart {
 	return store.NormalizeContentParts(out)
 }
 
-func requestMessagesWithTurnParts(base []provider.Message, parts []store.ContentPart, sessionID, attachmentHome string, cfg provider.ModelConfig) []provider.Message {
+func requestMessagesWithTurnParts(
+	base []provider.Message,
+	parts []store.ContentPart,
+	continuations []provider.Continuation,
+	sessionID, attachmentHome string,
+	cfg provider.ModelConfig,
+) []provider.Message {
 	out := cloneProviderMessages(base)
 	assistantStoreParts := nonAttachmentParts(parts)
-	assistantProviderParts := providerPartsFromStore(assistantStoreParts)
-	if len(assistantProviderParts) > 0 {
-		out = append(out, provider.Message{
-			Role:  provider.RoleAssistant,
-			Text:  store.TextFromParts(assistantStoreParts),
-			Parts: assistantProviderParts,
-		})
+	if currentTurn := currentTurnProviderMessage(assistantStoreParts, continuations); currentTurn != nil {
+		out = append(out, *currentTurn)
 	}
 	attachmentProviderParts := providerAttachmentPartsFromStore(sessionID, parts, attachmentHome, cfg)
 	if len(attachmentProviderParts) > 0 {
@@ -2640,6 +2717,26 @@ func requestMessagesWithTurnParts(base []provider.Message, parts []store.Content
 		})
 	}
 	return out
+}
+
+func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation) *provider.Message {
+	providerParts := providerPartsFromCurrentTurn(parts)
+	if len(providerParts) == 0 {
+		return nil
+	}
+	message := &provider.Message{
+		Role:  provider.RoleAssistant,
+		Text:  textFromProviderParts(providerParts),
+		Parts: providerParts,
+	}
+	if len(continuations) > 0 {
+		message.Continuations = make([]provider.Continuation, len(continuations))
+		for i := range continuations {
+			message.Continuations[i] = continuations[i]
+			message.Continuations[i].Data = append(json.RawMessage(nil), continuations[i].Data...)
+		}
+	}
+	return message
 }
 
 func nonAttachmentParts(parts []store.ContentPart) []store.ContentPart {
@@ -2663,6 +2760,38 @@ func providerPartsFromStore(parts []store.ContentPart) []provider.Part {
 			}
 		case store.ContentPartThought:
 			continue
+		case store.ContentPartToolUse:
+			out = append(out, provider.Part{
+				Type:   provider.PartToolUse,
+				CallID: part.CallID,
+				Name:   part.Name,
+				Args:   append(json.RawMessage(nil), part.Args...),
+			})
+		case store.ContentPartToolResult:
+			out = append(out, provider.Part{
+				Type:    provider.PartToolResult,
+				CallID:  part.CallID,
+				Name:    part.Name,
+				Ok:      part.Ok,
+				Content: part.Content,
+			})
+		}
+	}
+	return out
+}
+
+func providerPartsFromCurrentTurn(parts []store.ContentPart) []provider.Part {
+	out := make([]provider.Part, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case store.ContentPartText:
+			if part.Text != "" {
+				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
+			}
+		case store.ContentPartThought:
+			if part.Text != "" {
+				out = append(out, provider.Part{Type: provider.PartThought, Text: part.Text})
+			}
 		case store.ContentPartToolUse:
 			out = append(out, provider.Part{
 				Type:   provider.PartToolUse,
@@ -2809,6 +2938,13 @@ func cloneProviderMessages(in []provider.Message) []provider.Message {
 					pp.Args = append(json.RawMessage(nil), part.Args...)
 				}
 				cp.Parts = append(cp.Parts, pp)
+			}
+		}
+		if len(msg.Continuations) > 0 {
+			cp.Continuations = make([]provider.Continuation, len(msg.Continuations))
+			for i := range msg.Continuations {
+				cp.Continuations[i] = msg.Continuations[i]
+				cp.Continuations[i].Data = append(json.RawMessage(nil), msg.Continuations[i].Data...)
 			}
 		}
 		out = append(out, cp)

@@ -302,12 +302,14 @@ func TestThinkingProtocolFramesCompatible(t *testing.T) {
 	ch, _ := client.Stream(context.Background(), provider.Request{Model: "gemini-3.5-flash"})
 	var text, thought strings.Builder
 	done := false
+	var continuation *provider.Continuation
 	for chunk := range ch {
 		if chunk.Err != nil {
 			t.Fatal(chunk.Err)
 		}
 		if chunk.Done {
 			done = true
+			continuation = chunk.Continuation
 			break
 		}
 		switch chunk.Part {
@@ -322,6 +324,128 @@ func TestThinkingProtocolFramesCompatible(t *testing.T) {
 	}
 	if text.String() != "答案" || thought.String() != "推理摘要..." {
 		t.Fatalf("unexpected parts: text=%q thought=%q", text.String(), thought.String())
+	}
+	if continuation == nil {
+		t.Fatal("missing continuation")
+	}
+	if got := string(continuation.Data); !strings.Contains(got, `{"text":"","thoughtSignature":"AbCd=="}`) {
+		t.Fatalf("empty text field presence was not preserved: %s", got)
+	}
+	contents := contentsForMessage(provider.Message{
+		Role:          provider.RoleAssistant,
+		Continuations: []provider.Continuation{*continuation},
+	}, newFunctionRegistry())
+	data, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, `{"text":"","thoughtSignature":"AbCd=="}`) {
+		t.Fatalf("continuation was not replayed verbatim: %s", got)
+	}
+}
+
+func TestContinuationDropsStructurallyEmptyPart(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"candidates":[{"content":{"parts":[{"thoughtSignature":"signed-native-state","functionCall":{"id":"call_1","name":"lookup","args":{}}},{}]},"finishReason":"STOP","index":0}]}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil {
+		t.Fatal("missing continuation")
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(continuation.Data, &parts); err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("got %d persisted parts, want 1: %s", len(parts), continuation.Data)
+	}
+	if bytes.Equal(bytes.TrimSpace(parts[0]), []byte("{}")) {
+		t.Fatalf("structurally empty part was persisted: %s", continuation.Data)
+	}
+}
+
+func TestContinuationReplaysThoughtSignatureAndFunctionCall(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"candidates":[{"content":{"parts":[{"text":"summary","thought":true},{"thoughtSignature":"signed-native-state","functionCall":{"id":"call_1","name":"lookup","args":{"q":"value"}}}]},"finishReason":"STOP","index":0}]}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil || continuation.Kind != provider.ContinuationGoogle {
+		t.Fatalf("missing google continuation: %+v", continuation)
+	}
+
+	contents := contentsForMessage(provider.Message{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartThought, Text: "summary"},
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "lookup", Args: json.RawMessage(`{"q":"value"}`)},
+			{Type: provider.PartToolResult, CallID: "call_1", Name: "lookup", Ok: true, Content: `{"answer":1}`},
+		},
+		Continuations: []provider.Continuation{*continuation},
+	}, newFunctionRegistry())
+	if len(contents) != 2 {
+		t.Fatalf("got %d contents, want 2: %+v", len(contents), contents)
+	}
+	model := contents[0]
+	if model.Role != "model" || len(model.Parts) != 2 {
+		t.Fatalf("model continuation changed: %+v", model)
+	}
+	callPart := model.Parts[1]
+	if callPart.ThoughtSignature != "signed-native-state" ||
+		callPart.FunctionCall == nil ||
+		callPart.FunctionCall.ID != "call_1" ||
+		callPart.FunctionCall.Name != "lookup" ||
+		string(callPart.FunctionCall.Args) != `{"q":"value"}` {
+		t.Fatalf("signed function call changed: %+v", callPart)
+	}
+	result := contents[1]
+	if result.Role != "user" || len(result.Parts) != 1 || result.Parts[0].FunctionResponse == nil {
+		t.Fatalf("function response missing: %+v", result)
+	}
+	if got := result.Parts[0].FunctionResponse; got.ID != "call_1" || got.Name != "lookup" {
+		t.Fatalf("function response identity changed: %+v", got)
+	}
+}
+
+func TestContinuationWithoutNativeFunctionCallIDOmitSyntheticResponseID(t *testing.T) {
+	continuationData := json.RawMessage(`[
+		{"thoughtSignature":"signed-native-state","functionCall":{"name":"lookup","args":{"q":"value"}}}
+	]`)
+	contents := contentsForMessage(provider.Message{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartToolUse, CallID: "tool_0", Name: "lookup", Args: json.RawMessage(`{"q":"value"}`)},
+			{Type: provider.PartToolResult, CallID: "tool_0", Name: "lookup", Ok: true, Content: `{"answer":1}`},
+		},
+		Continuations: []provider.Continuation{{
+			Kind: provider.ContinuationGoogle,
+			Data: continuationData,
+		}},
+	}, newFunctionRegistry())
+	if len(contents) != 2 || contents[1].Parts[0].FunctionResponse == nil {
+		t.Fatalf("unexpected contents: %+v", contents)
+	}
+	if got := contents[1].Parts[0].FunctionResponse; got.ID != "" || got.Name != "lookup" {
+		t.Fatalf("synthetic id must not become a native Gemini id: %+v", got)
 	}
 }
 
@@ -407,7 +531,7 @@ func TestContentsForMessageImagePart(t *testing.T) {
 			{Type: provider.PartText, Text: "看图"},
 			{Type: provider.PartImage, MIME: "image/png", Data: []byte("png")},
 		},
-	}, map[string]string{})
+	}, newFunctionRegistry())
 	data, err := json.Marshal(contents)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +549,7 @@ func TestContentsForMessageAudioPart(t *testing.T) {
 			{Type: provider.PartText, Text: "听一下"},
 			{Type: provider.PartAudio, MIME: "audio/wav", Data: []byte("wav")},
 		},
-	}, map[string]string{})
+	}, newFunctionRegistry())
 	data, err := json.Marshal(contents)
 	if err != nil {
 		t.Fatal(err)

@@ -846,12 +846,23 @@ func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutput
 		return nil, store.ErrNotFound
 	}
 	segments := store.AssistantOutputSegments(in.Parts)
-	if len(segments) == 0 {
+	state := store.CloneProviderState(in.ProviderState)
+	segments = store.EnsureProviderStateAssistantSegment(segments, state)
+	if len(segments) == 0 && !store.ValidProviderState(state) {
 		return &store.AppendTurnOutputResult{}, nil
 	}
 	now := time.Now()
 	maxIndex, _ := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
 	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, in.Interrupted, now)
+	if store.ValidProviderState(state) {
+		target := lastAssistantMessageLocked(messages)
+		if target == nil {
+			target = m.latestAssistantMessageForTurnLocked(turn.SessionID, turn.ID)
+		}
+		if target != nil {
+			target.ProviderState = state
+		}
+	}
 	turn.UpdatedAt = now
 	m.sessions[turn.SessionID].LastActivityAt = now
 	out := make([]*store.Message, 0, len(messages))
@@ -2018,7 +2029,7 @@ func conversationTurnFromMem(turn *store.Turn, messages []*store.Message, fileCh
 		out.FileChanges = append(out.FileChanges, cloneTurnFileChange(change, false))
 	}
 	for _, msg := range messages {
-		if msg.TurnID != turn.ID {
+		if msg.TurnID != turn.ID || store.IsProtocolOnlyMessage(msg) {
 			continue
 		}
 		out.Messages = append(out.Messages, cloneMessage(msg))
@@ -2080,6 +2091,28 @@ func (m *Memstore) appendTurnOutputSegmentsLocked(turn *store.Turn, maxIndex int
 		out = append(out, msg)
 	}
 	return out
+}
+
+func lastAssistantMessageLocked(messages []*store.Message) *store.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i] != nil && messages[i].Role == store.RoleAssistant {
+			return messages[i]
+		}
+	}
+	return nil
+}
+
+func (m *Memstore) latestAssistantMessageForTurnLocked(sessionID, turnID string) *store.Message {
+	var latest *store.Message
+	for _, msg := range m.messages[sessionID] {
+		if msg == nil || msg.TurnID != turnID || msg.Role != store.RoleAssistant {
+			continue
+		}
+		if latest == nil || msg.TurnIndex > latest.TurnIndex {
+			latest = msg
+		}
+	}
+	return latest
 }
 
 func (m *Memstore) EventsAfter(_ context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -2216,6 +2249,7 @@ func cloneMessage(msg *store.Message) *store.Message {
 	cp := *msg
 	cp.Parts = store.CloneContentParts(msg.Parts)
 	cp.Metadata = append([]byte(nil), msg.Metadata...)
+	cp.ProviderState = store.CloneProviderState(msg.ProviderState)
 	return &cp
 }
 

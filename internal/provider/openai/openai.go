@@ -171,6 +171,11 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	finish := provider.FinishStop
+	continuation := chatMessage{Role: "assistant"}
+	var responseText strings.Builder
+	var responseReasoning strings.Builder
+	var responseReasoningContent strings.Builder
+	toolIndexes := map[int]int{}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
@@ -178,7 +183,19 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
+			continuation.Content = responseText.String()
+			continuation.Reasoning = responseReasoning.String()
+			continuation.ReasoningContent = responseReasoningContent.String()
+			done := provider.Chunk{Done: true, Finish: finish}
+			if encoded, err := json.Marshal(continuation); err == nil &&
+				(responseText.Len() > 0 ||
+					responseReasoning.Len() > 0 ||
+					responseReasoningContent.Len() > 0 ||
+					len(continuation.ReasoningDetails) > 0 ||
+					len(continuation.ToolCalls) > 0) {
+				done.Continuation = &provider.Continuation{Kind: provider.ContinuationOpenAIChat, Data: encoded}
+			}
+			emit(ctx, out, done)
 			return nil
 		}
 		var frame chatStreamFrame
@@ -192,7 +209,16 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			}
 		}
 		for _, choice := range frame.Choices {
+			responseReasoning.WriteString(choice.Delta.Reasoning)
+			responseReasoningContent.WriteString(choice.Delta.ReasoningContent)
+			for _, detail := range choice.Delta.ReasoningDetails {
+				continuation.ReasoningDetails = append(
+					continuation.ReasoningDetails,
+					append(json.RawMessage(nil), detail...),
+				)
+			}
 			if choice.Delta.Content != "" {
+				responseText.WriteString(choice.Delta.Content)
 				if !emit(ctx, out, provider.Chunk{Part: provider.PartText, Delta: choice.Delta.Content}) {
 					return ctx.Err()
 				}
@@ -203,6 +229,20 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				}
 			}
 			for _, call := range choice.Delta.ToolCalls {
+				target, ok := toolIndexes[call.Index]
+				if !ok {
+					target = len(continuation.ToolCalls)
+					toolIndexes[call.Index] = target
+					continuation.ToolCalls = append(continuation.ToolCalls, chatToolCall{Type: "function"})
+				}
+				stored := &continuation.ToolCalls[target]
+				if call.ID != "" {
+					stored.ID = call.ID
+				}
+				if call.Function.Name != "" {
+					stored.Function.Name = call.Function.Name
+				}
+				stored.Function.Arguments += call.Function.Arguments
 				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
 					Index:     call.Index,
 					CallID:    call.ID,
@@ -337,10 +377,13 @@ type chatStreamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string            `json:"role"`
+	Content          any               `json:"content"`
+	Reasoning        string            `json:"reasoning,omitempty"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
+	ReasoningDetails []json.RawMessage `json:"reasoning_details,omitempty"`
+	ToolCalls        []chatToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string            `json:"tool_call_id,omitempty"`
 }
 
 type chatContentPart struct {
@@ -390,10 +433,10 @@ type chatStreamFrame struct {
 }
 
 type chatStreamDelta struct {
-	Content          string                `json:"content"`
-	Reasoning        string                `json:"reasoning"`
-	ReasoningContent string                `json:"reasoning_content"`
-	ReasoningDetails []chatReasoningDetail `json:"reasoning_details"`
+	Content          string            `json:"content"`
+	Reasoning        string            `json:"reasoning"`
+	ReasoningContent string            `json:"reasoning_content"`
+	ReasoningDetails []json.RawMessage `json:"reasoning_details"`
 	ToolCalls        []struct {
 		Index    int    `json:"index"`
 		ID       string `json:"id"`
@@ -404,7 +447,7 @@ type chatStreamDelta struct {
 	} `json:"tool_calls"`
 }
 
-type chatReasoningDetail struct {
+type chatReasoningDetailText struct {
 	Text    string `json:"text"`
 	Summary string `json:"summary"`
 }
@@ -424,7 +467,11 @@ func (d chatStreamDelta) reasoningDeltas() []string {
 	}
 	appendUnique(d.ReasoningContent)
 	appendUnique(d.Reasoning)
-	for _, detail := range d.ReasoningDetails {
+	for _, raw := range d.ReasoningDetails {
+		var detail chatReasoningDetailText
+		if json.Unmarshal(raw, &detail) != nil {
+			continue
+		}
 		appendUnique(detail.Text)
 		appendUnique(detail.Summary)
 	}
@@ -497,6 +544,19 @@ func messageText(msg provider.Message) string {
 }
 
 func chatMessagesFor(msg provider.Message) []chatMessage {
+	if segments := provider.SplitMessage(msg); len(segments) > 1 {
+		var out []chatMessage
+		for _, segment := range segments {
+			out = append(out, chatMessagesFor(segment)...)
+		}
+		return out
+	}
+	if continuation := provider.ContinuationFor(msg, provider.ContinuationOpenAIChat); msg.Role == provider.RoleAssistant && continuation != nil {
+		var replay chatMessage
+		if json.Unmarshal(continuation.Data, &replay) == nil && replay.Role == "assistant" {
+			return []chatMessage{replay}
+		}
+	}
 	if len(msg.Parts) == 0 {
 		return []chatMessage{{Role: string(msg.Role), Content: msg.Text}}
 	}
@@ -506,13 +566,20 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 	}
 	var out []chatMessage
 	var text strings.Builder
+	var reasoning strings.Builder
 	var calls []chatToolCall
 	flushToolCalls := func() {
 		if len(calls) == 0 {
 			return
 		}
-		out = append(out, chatMessage{Role: "assistant", Content: text.String(), ToolCalls: calls})
+		out = append(out, chatMessage{
+			Role:             "assistant",
+			Content:          text.String(),
+			ReasoningContent: reasoning.String(),
+			ToolCalls:        calls,
+		})
 		text.Reset()
+		reasoning.Reset()
 		calls = nil
 	}
 	flushText := func() {
@@ -526,6 +593,8 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 		switch part.Type {
 		case "", provider.PartText:
 			text.WriteString(part.Text)
+		case provider.PartThought:
+			reasoning.WriteString(part.Text)
 		case provider.PartToolUse:
 			args := string(part.Args)
 			if args == "" {

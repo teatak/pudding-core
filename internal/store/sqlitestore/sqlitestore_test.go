@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -1190,6 +1191,142 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	}
 	if len(evs) != 2 || evs[1].Kind != event.TurnCompleted || evs[1].AssistantMessageID != msgs[1].ID {
 		t.Fatalf("final event should point at first appended output: %+v", evs)
+	}
+}
+
+func TestAppendTurnOutputPersistsHiddenProviderState(t *testing.T) {
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	state := &store.ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"cipher"}]`),
+	}
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID:        "turn_1",
+		Parts:         store.TextPart("done"),
+		ProviderState: state,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_1",
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertHiddenState := func(messages []*store.Message) {
+		t.Helper()
+		if len(messages) != 2 || messages[1].ProviderState == nil ||
+			string(messages[1].ProviderState.Data) != string(state.Data) {
+			t.Fatalf("provider state missing: %+v", messages)
+		}
+		if len(messages[1].Metadata) != 0 {
+			t.Fatalf("hidden provider state must not create public metadata: %s", messages[1].Metadata)
+		}
+		encoded, err := json.Marshal(messages[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), "cipher") ||
+			strings.Contains(string(encoded), "_provider_state") ||
+			strings.Contains(string(encoded), `"metadata"`) {
+			t.Fatalf("provider state leaked through public JSON: %s", encoded)
+		}
+	}
+
+	messages, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHiddenState(messages)
+
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	messages, err = reopened.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHiddenState(messages)
+}
+
+func TestAppendTurnOutputPreservesStateOnlyContinuationAfterToolResult(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	firstState := &store.ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"first"}]`),
+	}
+	secondState := &store.ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"second"}]`),
+	}
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts: []store.ContentPart{{
+			Type:   store.ContentPartToolUse,
+			CallID: "call_1",
+			Name:   "builtin_time_get_current",
+			Args:   json.RawMessage(`{}`),
+		}},
+		ProviderState: firstState,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts: []store.ContentPart{{
+			Type:    store.ContentPartToolResult,
+			CallID:  "call_1",
+			Name:    "builtin_time_get_current",
+			Content: `{"time":"now"}`,
+			Ok:      true,
+		}},
+		ProviderState: secondState,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("messages = %+v, want user, tool use, tool result, state anchor", messages)
+	}
+	if got := string(messages[1].ProviderState.Data); got != string(firstState.Data) {
+		t.Fatalf("first provider state was overwritten: %s", got)
+	}
+	if messages[3].Role != store.RoleAssistant || !store.IsProtocolOnlyMessage(messages[3]) ||
+		string(messages[3].ProviderState.Data) != string(secondState.Data) {
+		t.Fatalf("state-only continuation was not anchored separately: %+v", messages[3])
+	}
+
+	turn, err := st.GetConversationTurn(context.Background(), "sess_1", "turn_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Messages) != 3 {
+		t.Fatalf("conversation turn leaked protocol-only anchor: %+v", turn.Messages)
+	}
+	for _, message := range turn.Messages {
+		if store.IsProtocolOnlyMessage(message) {
+			t.Fatalf("conversation turn contains protocol-only message: %+v", message)
+		}
 	}
 }
 

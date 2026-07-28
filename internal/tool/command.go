@@ -153,7 +153,7 @@ func commandInvocation(args commandRunArgs) (string, []string, string) {
 	if runtime.GOOS == "windows" {
 		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", args.Command}, "powershell"
 	}
-	return "/bin/sh", []string{"-lc", args.Command}, "sh"
+	return "/bin/sh", []string{"-c", args.Command}, "sh"
 }
 
 func commandApprovalDetails(call Call) (map[string]any, error) {

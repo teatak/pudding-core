@@ -279,6 +279,66 @@ func TestThinkingBlockSkipped(t *testing.T) {
 	}
 }
 
+func TestContinuationReplaysThinkingRedactionAndToolUse(t *testing.T) {
+	out := make(chan provider.Chunk, 12)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`+"\n\n"+
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}`+"\n\n"+
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed-state"}}`+"\n\n"+
+			`data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"redacted-cipher"}}`+"\n\n"+
+			`data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_1","name":"lookup","input":{}}}`+"\n\n"+
+			`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"value\"}"}}`+"\n\n"+
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`+"\n\n"+
+			`data: {"type":"message_stop"}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil || continuation.Kind != provider.ContinuationAnthropic {
+		t.Fatalf("missing anthropic continuation: %+v", continuation)
+	}
+
+	messages := messagesFor(provider.Message{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartThought, Text: "display-only summary"},
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "lookup", Args: json.RawMessage(`{"q":"value"}`)},
+			{Type: provider.PartToolResult, CallID: "call_1", Name: "lookup", Ok: true, Content: `{"answer":1}`},
+		},
+		Continuations: []provider.Continuation{*continuation},
+	})
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want 2: %+v", len(messages), messages)
+	}
+	blocks, ok := messages[0].Content.([]contentBlock)
+	if !ok || len(blocks) != 3 {
+		t.Fatalf("assistant continuation changed: %#v", messages[0].Content)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "private reasoning" || blocks[0].Signature != "signed-state" {
+		t.Fatalf("thinking block changed: %+v", blocks[0])
+	}
+	if blocks[1].Type != "redacted_thinking" || blocks[1].Data != "redacted-cipher" {
+		t.Fatalf("redacted block changed: %+v", blocks[1])
+	}
+	if blocks[2].Type != "tool_use" ||
+		blocks[2].ID != "call_1" ||
+		blocks[2].Name != "lookup" ||
+		string(blocks[2].Input) != `{"q":"value"}` {
+		t.Fatalf("tool block changed: %+v", blocks[2])
+	}
+	results, ok := messages[1].Content.([]contentBlock)
+	if !ok || len(results) != 1 || results[0].Type != "tool_result" || results[0].ToolUseID != "call_1" {
+		t.Fatalf("tool result changed: %#v", messages[1].Content)
+	}
+}
+
 func TestErrorEventEmitsErr(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

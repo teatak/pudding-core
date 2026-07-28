@@ -843,6 +843,28 @@ type ProjectSessionGroup = {
   lastActivity: number;
 };
 
+type SessionGroupActivity = "running" | "completed" | undefined;
+
+function isSessionTurnRunning(
+  session: Session,
+  runningTurns: Record<string, string | undefined>,
+  turnPhases: ReturnType<typeof useOverlayStore.getState>["turnPhases"],
+) {
+  return session.running || Boolean(runningTurns[session.id]) || isTurnPhaseActive(turnPhases[session.id]);
+}
+
+function sessionGroupActivity(
+  sessions: Session[],
+  runningTurns: Record<string, string | undefined>,
+  turnPhases: ReturnType<typeof useOverlayStore.getState>["turnPhases"],
+  completedSessions: Record<string, boolean | undefined>,
+): SessionGroupActivity {
+  if (sessions.some((session) => isSessionTurnRunning(session, runningTurns, turnPhases))) {
+    return "running";
+  }
+  return sessions.some((session) => completedSessions[session.id]) ? "completed" : undefined;
+}
+
 // 面板三段:新建 / 列表 / 脚部。四边间距由外层容器(aside / popover)统一给 8px,
 // 内部不再叠加水平 margin,保证两种形态边缘视觉一致。
 function RailPanel({
@@ -870,6 +892,9 @@ function RailPanel({
 }: RailPanelProps) {
   const { t } = useI18n();
   const navigate = useNavigate({ from: "/" });
+  const completedSessions = useOverlayStore((state) => state.completedSessions);
+  const runningTurns = useOverlayStore((state) => state.runningTurns);
+  const turnPhases = useOverlayStore((state) => state.turnPhases);
   const [draggingSessionID, setDraggingSessionID] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<SessionDropTarget | null>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -1184,6 +1209,9 @@ function RailPanel({
                       data-session-drop-group="pinned"
                     >
                       <CollapsibleSessionGroupLabel
+                        activity={pinnedCollapsed
+                          ? sessionGroupActivity(pinnedSessions, runningTurns, turnPhases, completedSessions)
+                          : undefined}
                         collapsed={pinnedCollapsed}
                         icon="pinned"
                         label={t("session.pinned")}
@@ -1230,6 +1258,9 @@ function RailPanel({
                     <Collapsible asChild open={!chatCollapsed}>
                       <SidebarGroup className="px-2 py-0">
                         <CollapsibleSessionGroupLabel
+                          activity={chatCollapsed
+                            ? sessionGroupActivity(chatSessions, runningTurns, turnPhases, completedSessions)
+                            : undefined}
                           collapsed={chatCollapsed}
                           icon="chat"
                           label={t("session.chats")}
@@ -1262,11 +1293,15 @@ function RailPanel({
                   ) : null}
                   {projectGroups.map((group) => {
                     const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
+                    const hasSessions = group.sessions.length > 0;
                     return (
                       <Collapsible key={group.key} asChild open={!projectCollapsed}>
                         <SidebarGroup className="px-2 py-0">
                           <CollapsibleSessionGroupLabel
                             active={draftActive && draftProjectID === group.projectID}
+                            activity={projectCollapsed
+                              ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
+                              : undefined}
                             actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
                             collapsed={projectCollapsed}
                             icon="project"
@@ -1275,28 +1310,30 @@ function RailPanel({
                             onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
                             onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
                           />
-                          <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                            <SidebarGroupContent className="pt-0.5">
-                              <SessionItems
-                                deletePending={deletePending}
-                                selectedSessionID={selectedSessionID}
-                                sessions={group.sessions}
-                                showEmptyState={false}
-                                draggingSessionID={draggingSessionID}
-                                dropIndex={null}
-                                showEmptyDropTarget={false}
-                                onDelete={onDelete}
-                                onOpenSplit={onOpenSplit}
-                                onPinChange={onPinChange}
-                                onPointerDragCancel={clearDragState}
-                                onPointerDragEnd={handlePointerDrop}
-                                onPointerDragMove={handlePointerDragMove}
-                                onPointerDragStart={handlePointerDragStart}
-                                onRename={onRename}
-                                onSelect={onSelect}
-                              />
-                            </SidebarGroupContent>
-                          </CollapsibleContent>
+                          {hasSessions ? (
+                            <CollapsibleContent className="pudding-session-group-content overflow-hidden">
+                              <SidebarGroupContent className="pt-0.5">
+                                <SessionItems
+                                  deletePending={deletePending}
+                                  selectedSessionID={selectedSessionID}
+                                  sessions={group.sessions}
+                                  showEmptyState={false}
+                                  draggingSessionID={draggingSessionID}
+                                  dropIndex={null}
+                                  showEmptyDropTarget={false}
+                                  onDelete={onDelete}
+                                  onOpenSplit={onOpenSplit}
+                                  onPinChange={onPinChange}
+                                  onPointerDragCancel={clearDragState}
+                                  onPointerDragEnd={handlePointerDrop}
+                                  onPointerDragMove={handlePointerDragMove}
+                                  onPointerDragStart={handlePointerDragStart}
+                                  onRename={onRename}
+                                  onSelect={onSelect}
+                                />
+                              </SidebarGroupContent>
+                            </CollapsibleContent>
+                          ) : null}
                         </SidebarGroup>
                       </Collapsible>
                     );
@@ -1454,6 +1491,7 @@ function SessionDragPreview({
 
 function CollapsibleSessionGroupLabel({
   active = false,
+  activity,
   collapsed,
   icon,
   label,
@@ -1463,6 +1501,7 @@ function CollapsibleSessionGroupLabel({
   onToggle,
 }: {
   active?: boolean;
+  activity?: SessionGroupActivity;
   collapsed: boolean;
   icon: "chat" | "pinned" | "project";
   label: string;
@@ -1471,6 +1510,7 @@ function CollapsibleSessionGroupLabel({
   onAction?: () => void;
   onToggle: () => void;
 }) {
+  const { t } = useI18n();
   const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : collapsed ? FolderClosed : FolderOpen;
   return (
     <SidebarGroupLabel
@@ -1501,6 +1541,21 @@ function CollapsibleSessionGroupLabel({
           )}
         />
       </button>
+      {activity ? (
+        <span
+          aria-label={activity === "running" ? t("session.processing") : t("session.completed")}
+          className="flex shrink-0 items-center gap-1 px-1 text-xs text-sidebar-foreground/55"
+        >
+          {activity === "running" ? (
+            <>
+              <Spinner className="size-3" />
+              <span className="whitespace-nowrap">{t("session.processing")}</span>
+            </>
+          ) : (
+            <span aria-hidden="true" className="size-2 rounded-full bg-blue-500" />
+          )}
+        </span>
+      ) : null}
       {actions}
       {onAction ? (
         <Tooltip>
@@ -1630,7 +1685,7 @@ function SessionItems({
           <SessionItem
             completed={Boolean(completedSessions[session.id])}
             deletePending={deletePending}
-            running={session.running || Boolean(runningTurns[session.id]) || isTurnPhaseActive(turnPhases[session.id])}
+            running={isSessionTurnRunning(session, runningTurns, turnPhases)}
             selected={session.id === selectedSessionID}
             session={session}
             suppressInteractiveState={Boolean(draggingSessionID)}

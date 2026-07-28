@@ -49,6 +49,67 @@ func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memsto
 	return eng, ms, hub, sess.ID
 }
 
+func TestTurnPartAccumulatorSeparatesMissingToolIDsAcrossProviderCalls(t *testing.T) {
+	var parts turnPartAccumulator
+	parts.BeginProviderCall(0)
+	firstID, _, _ := parts.AppendTool(provider.ToolCallChunk{
+		Index:     0,
+		Name:      "first_tool",
+		ArgsDelta: `{"first":true}`,
+	})
+	if firstID != "tool_0" {
+		t.Fatalf("first synthetic call id = %q, want tool_0", firstID)
+	}
+	parts.AppendToolResult(tool.Result{
+		CallID:  firstID,
+		Name:    "first_tool",
+		Ok:      true,
+		Content: `{"ok":true}`,
+	})
+
+	parts.BeginProviderCall(1)
+	secondID, _, _ := parts.AppendTool(provider.ToolCallChunk{
+		Index:     0,
+		Name:      "second_tool",
+		ArgsDelta: `{"second":true}`,
+	})
+	if secondID != "tool_1_0" {
+		t.Fatalf("second synthetic call id = %q, want tool_1_0", secondID)
+	}
+	calls := parts.PendingToolCalls()
+	if len(calls) != 1 || calls[0].CallID != secondID || calls[0].Name != "second_tool" {
+		t.Fatalf("pending calls = %+v, want only second provider call", calls)
+	}
+	if got := string(calls[0].Args); got != `{"second":true}` {
+		t.Fatalf("second args = %s", got)
+	}
+}
+
+func TestTurnPartAccumulatorMergesLateToolCallIDByProviderIndex(t *testing.T) {
+	var parts turnPartAccumulator
+	parts.BeginProviderCall(0)
+	parts.AppendTool(provider.ToolCallChunk{
+		Index:     0,
+		Name:      "lookup",
+		ArgsDelta: `{"q":`,
+	})
+	parts.AppendTool(provider.ToolCallChunk{
+		Index:     0,
+		CallID:    "call_late",
+		ArgsDelta: `"value"}`,
+	})
+
+	if len(parts.parts) != 1 {
+		t.Fatalf("parts = %+v, want one merged tool call", parts.parts)
+	}
+	if got := parts.parts[0].CallID; got != "call_late" {
+		t.Fatalf("call id = %q, want call_late", got)
+	}
+	if got := string(parts.Parts()[0].Args); got != `{"q":"value"}` {
+		t.Fatalf("args = %s", got)
+	}
+}
+
 // mapResolver 按 profile 名路由到不同 client,服务多 provider 路由测试。
 type mapResolver map[string]provider.Client
 
@@ -856,6 +917,10 @@ doneDrain:
 	if !hasProviderPart(last.Parts, provider.PartToolUse) || !hasProviderPart(last.Parts, provider.PartToolResult) {
 		t.Fatalf("second provider call missing tool history: %+v", last.Parts)
 	}
+	continuation := provider.ContinuationFor(last, provider.ContinuationGoogle)
+	if continuation == nil || string(continuation.Data) != `[{"thoughtSignature":"signed-state"}]` {
+		t.Fatalf("second provider call missing native continuation: %+v", last.Continuations)
+	}
 	if len(runner.calls) != 1 || runner.calls[0].Name != tool.TimeGetCurrent || string(runner.calls[0].Args) != `{"timezone":"Asia/Singapore"}` {
 		t.Fatalf("tool call not executed correctly: %+v", runner.calls)
 	}
@@ -869,12 +934,130 @@ doneDrain:
 	if msgs[1].Kind != store.MessageKindToolUse || msgs[1].Role != store.RoleAssistant {
 		t.Fatalf("tool_use should be assistant message: %+v", msgs[1])
 	}
+	if msgs[1].ProviderState == nil || msgs[1].ProviderState.Kind != provider.ContinuationGoogle {
+		t.Fatalf("tool_use should retain hidden provider state: %+v", msgs[1].ProviderState)
+	}
+	encodedMessage, err := json.Marshal(msgs[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encodedMessage, []byte("signed-state")) {
+		t.Fatalf("provider state leaked through message JSON: %s", encodedMessage)
+	}
 	if msgs[2].Kind != store.MessageKindToolResult || msgs[2].Role != store.RoleTool {
 		t.Fatalf("tool_result should be tool message: %+v", msgs[2])
 	}
 	parts := msgs[2].Parts
 	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" || parts[0].SummaryKind != tool.SummaryReturnedFields || parts[0].SummaryCount != 1 {
 		t.Fatalf("tool_result part wrong: %+v", parts)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "谢谢"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(client.requests) != 3 {
+		t.Fatalf("want 3 provider calls after second turn, got %d", len(client.requests))
+	}
+	var replayed bool
+	for _, message := range client.requests[2].Messages {
+		if continuation := provider.ContinuationFor(message, provider.ContinuationGoogle); continuation != nil &&
+			string(continuation.Data) == `[{"thoughtSignature":"signed-state"}]` {
+			replayed = true
+		}
+	}
+	if !replayed {
+		t.Fatalf("native continuation was not replayed across turns: %+v", client.requests[2].Messages)
+	}
+}
+
+func TestSubmitPreservesStateOnlyContinuationAfterToolResult(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &stateOnlyToolLoopClient{}
+	runner := &recordingToolRunner{
+		defs: []provider.ToolDef{{
+			Name:        tool.TimeGetCurrent,
+			Description: "Get time",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+			Capability:  store.ModeChat,
+		}},
+		result: tool.Result{Ok: true, Content: `{"iso":"2026-06-21T12:00:00+08:00"}`},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_state_only"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "state only", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture",
+		Protocol:    "google",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "现在几点"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	messages, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 || messages[1].ProviderState == nil || messages[3].ProviderState == nil {
+		page, _ := ms.ListTurnsPage(ctx, sid, "", 0)
+		events, _ := ms.EventsAfter(ctx, sid, 0, 0)
+		var turnError string
+		if page != nil && len(page.Turns) > 0 {
+			turnError = page.Turns[0].Error
+		}
+		labels := make([]string, 0, len(messages))
+		for _, message := range messages {
+			labels = append(labels, fmt.Sprintf("%s:%s:%s", message.Role, message.Kind, message.Text))
+		}
+		t.Fatalf("provider states were not anchored separately: messages=%v turnError=%q events=%+v requests=%d runner=%+v",
+			labels, turnError, events, len(client.requests), runner.calls)
+	}
+	if got := string(messages[1].ProviderState.Data); got != `[{"thoughtSignature":"first"}]` {
+		t.Fatalf("first provider state = %s", got)
+	}
+	if got := string(messages[3].ProviderState.Data); got != `[{"thoughtSignature":"second"}]` {
+		t.Fatalf("second provider state = %s", got)
+	}
+	turn, err := ms.GetConversationTurn(ctx, sid, messages[0].TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Messages) != 3 {
+		t.Fatalf("conversation turn leaked state-only anchor: %+v", turn.Messages)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "谢谢"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(client.requests) != 3 {
+		t.Fatalf("provider requests = %d, want 3", len(client.requests))
+	}
+	var replayed []string
+	for _, message := range client.requests[2].Messages {
+		for _, continuation := range message.Continuations {
+			if continuation.Kind == provider.ContinuationGoogle {
+				replayed = append(replayed, string(continuation.Data))
+			}
+		}
+	}
+	want := []string{
+		`[{"thoughtSignature":"first"}]`,
+		`[{"thoughtSignature":"second"}]`,
+	}
+	if !sameStrings(replayed, want) {
+		t.Fatalf("replayed provider state = %v, want %v", replayed, want)
 	}
 }
 
@@ -3617,9 +3800,58 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 			Name:      tool.TimeGetCurrent,
 			ArgsDelta: `{"timezone":"Asia/Singapore"}`,
 		}}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+		out <- provider.Chunk{
+			Continuation: &provider.Continuation{
+				Kind: provider.ContinuationGoogle,
+				Data: json.RawMessage(`[{"thoughtSignature":"signed-state"}]`),
+			},
+			Done:   true,
+			Finish: provider.FinishToolCalls,
+		}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "工具结果已收到"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type stateOnlyToolLoopClient struct {
+	requests []provider.Request
+}
+
+func (c *stateOnlyToolLoopClient) Name() string { return "state-only-tool-loop" }
+
+func (c *stateOnlyToolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 3)
+	switch len(c.requests) {
+	case 1:
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_time",
+			Name:      tool.TimeGetCurrent,
+			ArgsDelta: `{}`,
+		}}
+		out <- provider.Chunk{
+			Continuation: &provider.Continuation{
+				Kind: provider.ContinuationGoogle,
+				Data: json.RawMessage(`[{"thoughtSignature":"first"}]`),
+			},
+			Done:   true,
+			Finish: provider.FinishToolCalls,
+		}
+	case 2:
+		out <- provider.Chunk{
+			Continuation: &provider.Continuation{
+				Kind: provider.ContinuationGoogle,
+				Data: json.RawMessage(`[{"thoughtSignature":"second"}]`),
+			},
+			Done:   true,
+			Finish: provider.FinishStop,
+		}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "不客气"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)

@@ -63,6 +63,62 @@ func TestReadSSEReasoningVariants(t *testing.T) {
 	}
 }
 
+func TestChatContinuationReplaysStructuredReasoningAndToolCall(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"choices":[{"delta":{"reasoning":"plain ","reasoning_content":"alias ","reasoning_details":[{"type":"reasoning.encrypted","data":"cipher","id":"reasoning-1","format":"anthropic-claude-v1","index":0}]}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"visible ","signature":"sig","id":"reasoning-2","format":"anthropic-claude-v1","index":1}],"tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{\"q\""}}]}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"value\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n"+
+			"data: [DONE]\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil || continuation.Kind != provider.ContinuationOpenAIChat {
+		t.Fatalf("missing chat continuation: %+v", continuation)
+	}
+
+	messages := chatMessagesFor(provider.Message{
+		Role: provider.RoleAssistant,
+		Parts: []provider.Part{
+			{Type: provider.PartThought, Text: "display-only summary"},
+			{Type: provider.PartToolUse, CallID: "call_1", Name: "lookup", Args: json.RawMessage(`{"q":"value"}`)},
+			{Type: provider.PartToolResult, CallID: "call_1", Name: "lookup", Ok: true, Content: `{"answer":1}`},
+		},
+		Continuations: []provider.Continuation{*continuation},
+	})
+	if len(messages) != 2 {
+		t.Fatalf("got %d replay messages, want 2: %+v", len(messages), messages)
+	}
+	assistant := messages[0]
+	if assistant.Role != "assistant" ||
+		assistant.Reasoning != "plain " ||
+		assistant.ReasoningContent != "alias " ||
+		len(assistant.ReasoningDetails) != 2 ||
+		len(assistant.ToolCalls) != 1 {
+		t.Fatalf("assistant continuation changed: %+v", assistant)
+	}
+	if got := string(assistant.ReasoningDetails[0]); got != `{"type":"reasoning.encrypted","data":"cipher","id":"reasoning-1","format":"anthropic-claude-v1","index":0}` {
+		t.Fatalf("encrypted reasoning changed: %s", got)
+	}
+	if got := string(assistant.ReasoningDetails[1]); got != `{"type":"reasoning.text","text":"visible ","signature":"sig","id":"reasoning-2","format":"anthropic-claude-v1","index":1}` {
+		t.Fatalf("signed reasoning changed: %s", got)
+	}
+	if call := assistant.ToolCalls[0]; call.ID != "call_1" || call.Function.Name != "lookup" || call.Function.Arguments != `{"q":"value"}` {
+		t.Fatalf("tool call changed: %+v", call)
+	}
+	if messages[1].Role != "tool" || messages[1].ToolCallID != "call_1" || messages[1].Content != `{"answer":1}` {
+		t.Fatalf("tool result changed: %+v", messages[1])
+	}
+}
+
 func TestReadSSEUsageChunk(t *testing.T) {
 	out := make(chan provider.Chunk, 4)
 	err := readSSE(context.Background(), strings.NewReader(

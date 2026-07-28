@@ -230,24 +230,23 @@ function renderTranscriptPart({
 function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
   const out: RenderTurnPart[] = [];
   let processParts: TurnPartVM[] = [];
-  let runIndex = 0;
+  let fallbackRunIndex = 0;
 
   const flush = () => {
-    if (processParts.length > 1) {
-      out.push({
-        hiddenParts: processParts,
-        key: `process-compact:${runIndex}:${processParts[0]?.key || 0}`,
-        type: "process_compact",
-      });
-      runIndex += 1;
-    } else {
-      out.push(...processParts);
+    if (processParts.length === 0) {
+      return;
     }
+    const firstPartKey = processParts[0]?.key || `run-${fallbackRunIndex++}`;
+    out.push({
+      hiddenParts: processParts,
+      key: `process-compact:${firstPartKey}`,
+      type: "process_compact",
+    });
     processParts = [];
   };
 
   for (const part of parts) {
-    if (!isProcessPart(part) || shouldKeepProcessPartVisible(part)) {
+    if (!isProcessPart(part)) {
       flush();
       out.push(part);
       continue;
@@ -260,16 +259,6 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
 
 function isProcessPart(part: TurnPartVM) {
   return part.type === "thought" || part.type === "tool_use";
-}
-
-function shouldKeepProcessPartVisible(part: TurnPartVM) {
-  if (part.type === "thought") {
-    return Boolean(part.active);
-  }
-  if (part.type === "tool_use") {
-    return Boolean(part.active);
-  }
-  return false;
 }
 
 function PartIcon({ icon: Icon }: { icon: LucideIcon }) {
@@ -730,20 +719,33 @@ function ProcessCompactPart({
   renderPart: (part: TurnPartVM, index: number) => ReactNode;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
-  const label = processCompactLabel(hiddenParts, t);
+  const activePart = currentProcessPart(hiddenParts);
+  const activeTool = activePart?.type === "tool_use" ? activePart : undefined;
+  const elapsed = useElapsedDuration(activeTool?.phase === "running" ? activeTool.phaseUpdatedAt : undefined, locale);
+  const title = processCompactTitle(hiddenParts, activePart, elapsed, t);
+  const Icon = title.failed ? CircleAlert : ListChecks;
   return (
     <details className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
       <summary
-        className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
+        className="inline-grid h-6 max-w-full cursor-default list-none grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
         tabIndex={-1}
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
-        <PartIcon icon={ListChecks} />
+        {title.active ? (
+          <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
+            <Spinner className="size-3.5" />
+          </span>
+        ) : (
+          <PartIcon icon={Icon} />
+        )}
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 truncate">{label}</span>
+          <span className="min-w-0 truncate">
+            <span>{title.label}</span>
+            {title.summary ? <span className="text-muted-foreground/50"> · {title.summary}</span> : null}
+          </span>
           <span className="shrink-0 text-muted-foreground/50">
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </span>
@@ -752,6 +754,65 @@ function ProcessCompactPart({
       {open ? <div className="min-w-0 max-w-full">{hiddenParts.map(renderPart)}</div> : null}
     </details>
   );
+}
+
+function currentProcessPart(parts: TurnPartVM[]) {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if ((part.type === "thought" || part.type === "tool_use") && part.active) {
+      return part;
+    }
+  }
+  return undefined;
+}
+
+function processCompactTitle(
+  parts: TurnPartVM[],
+  activePart: ReturnType<typeof currentProcessPart>,
+  elapsed: string,
+  t: (key: string) => string,
+) {
+  if (activePart?.type === "thought") {
+    return { active: true, failed: false, label: t("transcript.thinking"), summary: "" };
+  }
+  if (activePart?.type === "tool_use") {
+    const result = formatToolResult(activePart.resultContent);
+    const baseTitle = toolDisplayName(activePart.name || activePart.resultName || "", t("transcript.tool"), t);
+    if (activePart.dotPhase === "awaiting_followup") {
+      return {
+        active: true,
+        failed: false,
+        label: baseTitle,
+        summary: t("transcript.phaseAwaitingFollowup"),
+      };
+    }
+    if (activePart.dotPhase === "streaming_tool_args" && activePart.phase !== "streaming_args") {
+      return {
+        active: true,
+        failed: false,
+        label: t("transcript.toolPreparingName").replace("{name}", baseTitle),
+        summary: "",
+      };
+    }
+    if (activePart.dotPhase === "executing_tool" && activePart.phase !== "running") {
+      return {
+        active: true,
+        failed: false,
+        label: t("transcript.toolRunningName").replace("{name}", baseTitle),
+        summary: elapsed,
+      };
+    }
+    const title = toolTitle(activePart, result, baseTitle, elapsed, t);
+    return { active: true, failed: false, ...title };
+  }
+
+  const failed = parts.some((part) => part.type === "tool_use" && toolFailed(part));
+  return {
+    active: false,
+    failed,
+    label: processCompactLabel(parts, t),
+    summary: failed ? t("transcript.processHasErrors") : "",
+  };
 }
 
 function processCompactLabel(parts: TurnPartVM[], t: (key: string) => string) {

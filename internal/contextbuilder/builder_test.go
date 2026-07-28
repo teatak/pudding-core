@@ -3,6 +3,7 @@ package contextbuilder
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -572,6 +573,255 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 	}
 	if req.Messages[2].Role != provider.RoleUser || len(req.Messages[2].Parts) != 2 || req.Messages[2].Parts[0].Type != provider.PartText || req.Messages[2].Parts[1].Type != provider.PartImage {
 		t.Fatalf("tool image should replay as user image: %+v", req.Messages)
+	}
+}
+
+func TestBuildReplaysProviderStateOnlyForMatchingProviderAndModel(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:       "s1",
+		Provider: "openai",
+		Model:    "gpt-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	begin, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "hello",
+		Mode:            store.ModeChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &store.ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     provider.ContinuationOpenAIResponses,
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"cipher"}]`),
+	}
+	if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID:        begin.Turn.ID,
+		Parts:         store.TextPart("done"),
+		ProviderState: state,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: begin.Turn.ID,
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil).BuildForProvider(ctx, "s1", "openai", "gpt-test", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("unexpected messages: %+v", req.Messages)
+	}
+	continuation := provider.ContinuationFor(req.Messages[1], provider.ContinuationOpenAIResponses)
+	if continuation == nil || string(continuation.Data) != string(state.Data) {
+		t.Fatalf("matching state was not replayed: %+v", req.Messages[1].Continuations)
+	}
+
+	req, err = New(ms, nil).BuildForProvider(ctx, "s1", "openai", "other-model", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 || len(req.Messages[1].Continuations) != 0 {
+		t.Fatalf("state must not cross model boundary: %+v", req.Messages)
+	}
+	req, err = New(ms, nil).BuildForProvider(ctx, "s1", "anthropic", "gpt-test", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 || len(req.Messages[1].Continuations) != 0 {
+		t.Fatalf("state must not cross provider boundary: %+v", req.Messages)
+	}
+	codeMessage := &store.Message{Parts: []store.ContentPart{{
+		Type:   store.ContentPartToolUse,
+		Name:   tool.CommandRun,
+		CallID: "call_code",
+	}}}
+	if providerStateAllowedForMode(codeMessage, store.ModeChat) {
+		t.Fatal("code tool continuation must not replay after a mode downgrade")
+	}
+	if !providerStateAllowedForMode(codeMessage, store.ModeCode) {
+		t.Fatal("code tool continuation should replay in code mode")
+	}
+}
+
+func TestBuildDropsEntireContinuationChainAfterModeDowngrade(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         "s1",
+		Provider:   "openai",
+		Model:      "gpt-test",
+		ActiveMode: store.ModeCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	begin, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "turn1",
+		UserMessageID:   "user1",
+		ClientMessageID: "client1",
+		UserText:        "run it",
+		Provider:        "openai",
+		Model:           "gpt-test",
+		Mode:            store.ModeCode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: begin.Turn.ID,
+		Parts: []store.ContentPart{{
+			Type:   store.ContentPartToolUse,
+			Name:   tool.CommandRun,
+			CallID: "call1",
+			Args:   json.RawMessage(`{"command":"pwd"}`),
+		}},
+		ProviderState: &store.ProviderState{
+			Provider: "openai",
+			Model:    "gpt-test",
+			Kind:     provider.ContinuationOpenAIResponses,
+			Data:     json.RawMessage(`[{"type":"function_call","call_id":"call1","name":"builtin_command_run","arguments":"{\"command\":\"pwd\"}"}]`),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: begin.Turn.ID,
+		Parts: []store.ContentPart{
+			{
+				Type:    store.ContentPartToolResult,
+				Name:    tool.CommandRun,
+				CallID:  "call1",
+				Ok:      true,
+				Content: "/tmp",
+			},
+			{Type: store.ContentPartText, Text: "done"},
+		},
+		ProviderState: &store.ProviderState{
+			Provider: "openai",
+			Model:    "gpt-test",
+			Kind:     provider.ContinuationOpenAIResponses,
+			Data:     json.RawMessage(`[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]`),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: begin.Turn.ID,
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil).BuildForProvider(ctx, "s1", "openai", "gpt-test", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range req.Messages {
+		if len(message.Continuations) > 0 {
+			t.Fatalf("mode downgrade must drop the entire native continuation chain: %+v", req.Messages)
+		}
+	}
+}
+
+func TestBuildUsesCurrentToolDefinitionsForProviderStateReplay(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         "s1",
+		Provider:   "openai",
+		Model:      "gpt-test",
+		ActiveMode: store.ModeWork,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	begin, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "turn1",
+		UserMessageID:   "user1",
+		ClientMessageID: "client1",
+		UserText:        "use custom app",
+		Provider:        "openai",
+		Model:           "gpt-test",
+		Mode:            store.ModeWork,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const customTool = "custom_app_action"
+	if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: begin.Turn.ID,
+		Parts: []store.ContentPart{{
+			Type:   store.ContentPartToolUse,
+			Name:   customTool,
+			CallID: "call1",
+			Args:   json.RawMessage(`{"value":"ok"}`),
+		}},
+		ProviderState: &store.ProviderState{
+			Provider: "openai",
+			Model:    "gpt-test",
+			Kind:     provider.ContinuationOpenAIResponses,
+			Data:     json.RawMessage(`[{"type":"function_call","call_id":"call1","name":"custom_app_action","arguments":"{\"value\":\"ok\"}"}]`),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: begin.Turn.ID,
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := New(ms, nil)
+	req, err := builder.BuildForProviderWithTools(
+		ctx,
+		"s1",
+		"openai",
+		"gpt-test",
+		string(store.ModeWork),
+		[]provider.ToolDef{{Name: customTool, Capability: store.ModeWork}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 || len(req.Messages[1].Continuations) != 1 ||
+		len(req.Messages[1].Parts) != 1 || req.Messages[1].Parts[0].Name != customTool {
+		t.Fatalf("callable custom app state must replay: %+v", req.Messages)
+	}
+
+	req, err = builder.BuildForProviderWithTools(
+		ctx,
+		"s1",
+		"openai",
+		"gpt-test",
+		string(store.ModeWork),
+		[]provider.ToolDef{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range req.Messages {
+		if len(message.Continuations) > 0 {
+			t.Fatalf("disabled app state must not replay: %+v", req.Messages)
+		}
+		for _, part := range message.Parts {
+			if part.Type == provider.PartToolUse && part.Name == customTool {
+				t.Fatalf("disabled app tool call must not replay: %+v", req.Messages)
+			}
+		}
 	}
 }
 

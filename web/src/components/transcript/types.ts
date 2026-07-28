@@ -21,6 +21,7 @@ export type UserInputVM = {
 export type AssistantOutputVM =
   | {
       duration?: string;
+      error?: string;
       kind: "canonical";
       messages: Message[];
       model?: TurnModelVM;

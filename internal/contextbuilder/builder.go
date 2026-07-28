@@ -1,6 +1,7 @@
 // Package contextbuilder 把 canonical messages 组装为 provider 输入。
-// context 只来自 canonical messages(AGENTS.md 硬约束 8);thought 只给用户历史回看,
-// 跨 turn 组装时剥离,不把陈旧推理喂回模型。
+// context 只来自 canonical messages(AGENTS.md 硬约束 8)。可见内容使用统一
+// canonical parts；provider 原生续接状态仅在 provider/profile、model 匹配,
+// 且其中引用的工具仍在本轮可调用时原样重放。
 package contextbuilder
 
 import (
@@ -54,15 +55,59 @@ func New(s store.Store, prompts PromptSource, opts ...Option) *Builder {
 // Build 在 user message 已落库之后调用,因此 current input 已包含在
 // canonical messages 里,不需要单独拼接。
 func (b *Builder) Build(ctx context.Context, sessionID, model string, mode string, configs ...provider.ModelConfig) (provider.Request, error) {
+	sess, err := b.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	return b.build(ctx, sess, strings.TrimSpace(sess.Provider), model, mode, nil, configs...)
+}
+
+// BuildForProvider 使用本轮实际解析出的 provider/profile 构建请求。Engine
+// 必须走这个入口，不能依赖 session 快照中可能尚未同步的 provider 字段。
+func (b *Builder) BuildForProvider(
+	ctx context.Context,
+	sessionID, providerName, model, mode string,
+	configs ...provider.ModelConfig,
+) (provider.Request, error) {
+	sess, err := b.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	return b.build(ctx, sess, providerName, model, mode, nil, configs...)
+}
+
+// BuildForProviderWithTools 使用本轮实际可调用的工具定义构建请求。传入空切片
+// 表示本轮不允许调用工具；这也会阻止已经禁用的 App 工具状态被跨 turn 重放。
+func (b *Builder) BuildForProviderWithTools(
+	ctx context.Context,
+	sessionID, providerName, model, mode string,
+	defs []provider.ToolDef,
+	configs ...provider.ModelConfig,
+) (provider.Request, error) {
+	sess, err := b.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	allowedTools := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		allowedTools[def.Name] = struct{}{}
+	}
+	return b.build(ctx, sess, providerName, model, mode, allowedTools, configs...)
+}
+
+func (b *Builder) build(
+	ctx context.Context,
+	sess *store.Session,
+	providerName, model, mode string,
+	allowedTools map[string]struct{},
+	configs ...provider.ModelConfig,
+) (provider.Request, error) {
+	sessionID := sess.ID
 	msgs, err := b.store.ListMessages(ctx, sessionID, 0)
 	if err != nil {
 		return provider.Request{}, err
 	}
 	msgs = EffectiveMessages(msgs)
-	sess, err := b.store.GetSession(ctx, sessionID)
-	if err != nil {
-		return provider.Request{}, err
-	}
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
@@ -95,22 +140,30 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 		Messages: make([]provider.Message, 0, len(msgs)),
 	}
 	var assistantParts []provider.Part
+	var assistantContinuations []provider.Continuation
+	assistantContinuationsAllowed := true
 	flushAssistant := func() {
-		if len(assistantParts) == 0 {
+		if len(assistantParts) == 0 && len(assistantContinuations) == 0 {
 			return
 		}
+		if !assistantContinuationsAllowed {
+			assistantContinuations = nil
+		}
 		req.Messages = append(req.Messages, provider.Message{
-			Role:  provider.RoleAssistant,
-			Text:  textFromProviderParts(assistantParts),
-			Parts: cloneProviderParts(assistantParts),
+			Role:          provider.RoleAssistant,
+			Text:          textFromProviderParts(assistantParts),
+			Parts:         cloneProviderParts(assistantParts),
+			Continuations: cloneContinuations(assistantContinuations),
 		})
 		assistantParts = nil
+		assistantContinuations = nil
+		assistantContinuationsAllowed = true
 	}
 	for _, m := range msgs {
 		switch m.Role {
 		case store.RoleUser:
 			flushAssistant()
-			parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
+			parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 		case store.RoleSystem:
 			flushAssistant()
@@ -125,16 +178,29 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 		case store.RoleAssistant, store.RoleTool:
 			if isToolAttachmentMessage(m) {
 				flushAssistant()
-				parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
+				parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
 				if len(parts) > 0 {
 					req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 				}
 				continue
 			}
-			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, cfg)...)
+			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)...)
+			if !providerStateAllowedForTools(m, currentMode, allowedTools) {
+				assistantContinuationsAllowed = false
+				assistantContinuations = nil
+			}
+			if m.Role == store.RoleAssistant &&
+				assistantContinuationsAllowed &&
+				providerStateMatches(m.ProviderState, providerName, model) &&
+				providerStateAllowedForTools(m, currentMode, allowedTools) {
+				assistantContinuations = append(assistantContinuations, provider.Continuation{
+					Kind: m.ProviderState.Kind,
+					Data: append(json.RawMessage(nil), m.ProviderState.Data...),
+				})
+			}
 		case store.RoleSummary:
 			flushAssistant()
-			parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
+			parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
 			if len(parts) > 0 {
 				req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: textFromProviderParts(parts), Parts: parts})
 			}
@@ -144,6 +210,51 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	}
 	flushAssistant()
 	return req, nil
+}
+
+func providerStateMatches(state *store.ProviderState, providerName, model string) bool {
+	return store.ValidProviderState(state) &&
+		strings.TrimSpace(state.Provider) == strings.TrimSpace(providerName) &&
+		strings.TrimSpace(state.Model) == strings.TrimSpace(model)
+}
+
+func providerStateAllowedForMode(msg *store.Message, mode store.AgentMode) bool {
+	return providerStateAllowedForTools(msg, mode, nil)
+}
+
+func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allowedTools map[string]struct{}) bool {
+	if msg == nil {
+		return false
+	}
+	for _, part := range msg.Parts {
+		switch part.Type {
+		case store.ContentPartToolUse, store.ContentPartToolResult:
+			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func toolAllowedForRequest(mode store.AgentMode, name string, allowedTools map[string]struct{}) bool {
+	if allowedTools != nil {
+		_, ok := allowedTools[name]
+		return ok
+	}
+	return tool.NameAllowedForMode(mode, name)
+}
+
+func cloneContinuations(in []provider.Continuation) []provider.Continuation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]provider.Continuation, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Data = append(json.RawMessage(nil), in[i].Data...)
+	}
+	return out
 }
 
 func appendProjectDirectories(system prompt.Output, projectDirs []string) prompt.Output {
@@ -292,7 +403,13 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 	return prompt.Assemble(prompt.Input{Mode: mode}), nil
 }
 
-func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mode store.AgentMode, cfg provider.ModelConfig) []provider.Part {
+func (b *Builder) providerParts(
+	sessionID string,
+	parts []store.ContentPart,
+	mode store.AgentMode,
+	allowedTools map[string]struct{},
+	cfg provider.ModelConfig,
+) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
 	voiceAudioInline := false
 	for _, part := range parts {
@@ -333,7 +450,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			continue
 		case store.ContentPartToolUse:
 			flushReferences()
-			if !tool.NameAllowedForMode(mode, part.Name) {
+			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{
@@ -344,7 +461,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			})
 		case store.ContentPartToolResult:
 			flushReferences()
-			if !tool.NameAllowedForMode(mode, part.Name) {
+			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{

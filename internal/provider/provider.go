@@ -100,10 +100,101 @@ const (
 )
 
 type Message struct {
-	Role  Role
-	Text  string
-	Parts []Part
+	Role          Role
+	Text          string
+	Parts         []Part
+	Continuations []Continuation
 }
+
+// Continuation carries provider-native response state that must be replayed
+// without rewriting. The engine keeps it in memory during a tool loop and
+// persists it as hidden canonical message metadata for later turns.
+type Continuation struct {
+	Kind string
+	Data json.RawMessage
+}
+
+// ContinuationFor returns the first provider-native continuation of kind.
+func ContinuationFor(msg Message, kind string) *Continuation {
+	for i := range msg.Continuations {
+		if msg.Continuations[i].Kind == kind {
+			return &msg.Continuations[i]
+		}
+	}
+	return nil
+}
+
+// SplitMessage separates one mixed current-turn message into the assistant and
+// tool-result messages required by provider wire protocols. Continuations are
+// assigned to assistant segments in model-call order.
+func SplitMessage(msg Message) []Message {
+	if len(msg.Continuations) == 0 || len(msg.Parts) == 0 {
+		return []Message{msg}
+	}
+	hasToolResult := false
+	for _, part := range msg.Parts {
+		if part.Type == PartToolResult {
+			hasToolResult = true
+			break
+		}
+	}
+	if !hasToolResult {
+		return []Message{msg}
+	}
+
+	out := make([]Message, 0, len(msg.Continuations)*2)
+	role := RoleAssistant
+	current := make([]Part, 0, len(msg.Parts))
+	assistantIndex := 0
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		segment := Message{
+			Role:  role,
+			Parts: append([]Part(nil), current...),
+		}
+		if role == RoleAssistant && assistantIndex < len(msg.Continuations) {
+			continuation := msg.Continuations[assistantIndex]
+			continuation.Data = append(json.RawMessage(nil), continuation.Data...)
+			segment.Continuations = []Continuation{continuation}
+		}
+		if role == RoleAssistant {
+			assistantIndex++
+		}
+		out = append(out, segment)
+		current = current[:0]
+	}
+	for _, part := range msg.Parts {
+		partRole := RoleAssistant
+		if part.Type == PartToolResult {
+			partRole = RoleUser
+		}
+		if partRole != role {
+			flush()
+			role = partRole
+		}
+		current = append(current, part)
+	}
+	flush()
+	for assistantIndex < len(msg.Continuations) {
+		continuation := msg.Continuations[assistantIndex]
+		continuation.Data = append(json.RawMessage(nil), continuation.Data...)
+		out = append(out, Message{
+			Role:          RoleAssistant,
+			Continuations: []Continuation{continuation},
+		})
+		assistantIndex++
+	}
+	return out
+}
+
+const (
+	ContinuationOpenAIChat      = "openai_chat"
+	ContinuationOpenAIResponses = "openai_responses"
+	ContinuationGoogle          = "google"
+	ContinuationAnthropic       = "anthropic"
+)
 
 type ToolDef struct {
 	Name        string
@@ -200,13 +291,14 @@ func (u UsageInfo) Empty() bool {
 // Chunk 是模型流的最小单元:Delta 增量文本;Done 正常收尾;Err 异常终止。
 // Done 与 Err 之后不得再有 chunk。
 type Chunk struct {
-	Part   PartType
-	Delta  string
-	Tool   *ToolCallChunk
-	Usage  *UsageInfo
-	Done   bool
-	Finish FinishReason
-	Err    error
+	Part         PartType
+	Delta        string
+	Tool         *ToolCallChunk
+	Usage        *UsageInfo
+	Continuation *Continuation
+	Done         bool
+	Finish       FinishReason
+	Err          error
 }
 
 func FloatOption(opts map[string]any, names ...string) (float64, bool) {

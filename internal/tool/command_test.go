@@ -83,6 +83,19 @@ func TestCommandRunExecutesShellPipeline(t *testing.T) {
 	}
 }
 
+func TestCommandInvocationDoesNotUseLoginShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell invocation")
+	}
+	executable, args, shell := commandInvocation(commandRunArgs{Command: "printf ok"})
+	if executable != "/bin/sh" || shell != "sh" {
+		t.Fatalf("unexpected shell invocation: executable=%q shell=%q", executable, shell)
+	}
+	if len(args) != 2 || args[0] != "-c" || args[1] != "printf ok" {
+		t.Fatalf("command must use a non-login shell: %q", args)
+	}
+}
+
 func TestCommandRunRequiresCommandInput(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range []map[string]any{

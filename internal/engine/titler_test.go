@@ -56,6 +56,36 @@ func TestGenerateTitleIgnoresThoughtChunks(t *testing.T) {
 	}
 }
 
+func TestTitlerConfigUsesIndependentLowReasoningBudget(t *testing.T) {
+	base := provider.ModelConfig{
+		ProviderOptions: &provider.ModelProviderOptions{
+			OpenAI: map[string]any{
+				"reasoning_effort":      "high",
+				"max_completion_tokens": 8192,
+			},
+			Google: map[string]any{
+				"thinking": map[string]any{"budget": 8192},
+			},
+			Anthropic: map[string]any{
+				"thinking": map[string]any{"budget_tokens": 8192},
+			},
+		},
+	}
+	cfg := titlerConfig(base)
+	if got, ok := cfg.MaxOutputTokens(); !ok || got != titlerMaxOutputTokens {
+		t.Fatalf("max output tokens = %d, %v", got, ok)
+	}
+	if got, _ := provider.StringOption(cfg.OpenAIOptions(), "reasoning_effort"); got != "low" {
+		t.Fatalf("OpenAI reasoning effort = %q", got)
+	}
+	if _, ok := cfg.GoogleOptions()["thinking"]; ok {
+		t.Fatalf("Google thinking config leaked into title request: %+v", cfg.GoogleOptions())
+	}
+	if _, ok := cfg.AnthropicOptions()["thinking"]; ok {
+		t.Fatalf("Anthropic thinking config leaked into title request: %+v", cfg.AnthropicOptions())
+	}
+}
+
 func TestProvisionalTitleFromText(t *testing.T) {
 	tests := map[string]string{
 		"你好啊，帮我看下这个问题。第二句不用": "你好啊，帮我看下这个问题",

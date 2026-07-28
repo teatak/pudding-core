@@ -30,16 +30,30 @@ func EstimateRequest(req provider.Request) RequestEstimate {
 func EstimateMessagesTokens(messages []provider.Message) int {
 	total := 0
 	for _, msg := range messages {
-		total += messageTokenOverhead
-		if len(msg.Parts) == 0 {
-			total += EstimateTextTokens(msg.Text)
-			continue
-		}
-		for _, part := range msg.Parts {
-			total += estimatePartTokens(part)
+		for _, segment := range provider.SplitMessage(msg) {
+			total += messageTokenOverhead + estimateMessageTokens(segment)
 		}
 	}
 	return total
+}
+
+func estimateMessageTokens(msg provider.Message) int {
+	contentTokens := 0
+	if len(msg.Parts) == 0 {
+		contentTokens = EstimateTextTokens(msg.Text)
+	} else {
+		for _, part := range msg.Parts {
+			contentTokens += estimatePartTokens(part)
+		}
+	}
+	continuationTokens := 0
+	for _, continuation := range msg.Continuations {
+		continuationTokens += EstimateTextTokens(string(continuation.Data))
+	}
+	if continuationTokens > contentTokens {
+		return continuationTokens
+	}
+	return contentTokens
 }
 
 func EstimateToolsTokens(tools []provider.ToolDef) int {

@@ -1,8 +1,9 @@
 // Package anthropic implements the Anthropic Messages API streaming
 // protocol(POST /v1/messages,stream: true)。
 //
-// 边界与 openai / google 实现一致(AGENTS.md 硬约束 9 / 17):只产模型流、
-// 无跨 turn 状态、不做流级重试;终止 chunk 阻塞发送。
+// 边界与 openai / google 实现一致(AGENTS.md 硬约束 9 / 17):只产模型流和
+// provider-native continuation、不在 client 内保存状态、不做流级重试;
+// 终止 chunk 阻塞发送。
 package anthropic
 
 import (
@@ -115,6 +116,9 @@ type message struct {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 	Source    *contentSource  `json:"source,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
@@ -194,16 +198,21 @@ type streamEvent struct {
 	} `json:"message"`
 
 	ContentBlock *struct {
-		Type  string          `json:"type"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
+		Type      string          `json:"type"`
+		Text      string          `json:"text"`
+		Thinking  string          `json:"thinking"`
+		Signature string          `json:"signature"`
+		Data      string          `json:"data"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Input     json.RawMessage `json:"input"`
 	} `json:"content_block"`
 
 	Delta *struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
+		Signature   string `json:"signature"`
 		PartialJSON string `json:"partial_json"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
@@ -232,6 +241,14 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	sawStop := false
 	finish := provider.FinishStop
 	var usage provider.UsageInfo
+	var responseBlocks []contentBlock
+	toolInputs := map[int]*strings.Builder{}
+	ensureBlock := func(index int) *contentBlock {
+		for len(responseBlocks) <= index {
+			responseBlocks = append(responseBlocks, contentBlock{})
+		}
+		return &responseBlocks[index]
+	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -252,8 +269,20 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			}
 		case "content_block_start":
 			if event.ContentBlock != nil {
+				block := ensureBlock(event.Index)
+				*block = contentBlock{
+					Type:      event.ContentBlock.Type,
+					Text:      event.ContentBlock.Text,
+					Thinking:  event.ContentBlock.Thinking,
+					Signature: event.ContentBlock.Signature,
+					Data:      event.ContentBlock.Data,
+					ID:        event.ContentBlock.ID,
+					Name:      event.ContentBlock.Name,
+					Input:     append(json.RawMessage(nil), event.ContentBlock.Input...),
+				}
 				if event.ContentBlock.Type == "tool_use" {
 					blockCalls[event.Index] = event.ContentBlock.ID
+					toolInputs[event.Index] = &strings.Builder{}
 					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
 						Index:  event.Index,
 						CallID: event.ContentBlock.ID,
@@ -269,14 +298,21 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			}
 			switch event.Delta.Type {
 			case "text_delta":
+				ensureBlock(event.Index).Text += event.Delta.Text
 				if event.Delta.Text != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartText, Delta: event.Delta.Text}) {
 					return ctx.Err()
 				}
 			case "thinking_delta":
+				ensureBlock(event.Index).Thinking += event.Delta.Thinking
 				if event.Delta.Thinking != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: event.Delta.Thinking}) {
 					return ctx.Err()
 				}
+			case "signature_delta":
+				ensureBlock(event.Index).Signature += event.Delta.Signature
 			case "input_json_delta":
+				if builder := toolInputs[event.Index]; builder != nil {
+					builder.WriteString(event.Delta.PartialJSON)
+				}
 				if event.Delta.PartialJSON != "" && !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
 					Index:     event.Index,
 					CallID:    blockCalls[event.Index],
@@ -332,10 +368,22 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	if !sawStop {
 		return errors.New("anthropic: stream ended without message_stop")
 	}
+	for index, builder := range toolInputs {
+		if builder == nil || builder.Len() == 0 {
+			continue
+		}
+		if raw := json.RawMessage(builder.String()); json.Valid(raw) {
+			ensureBlock(index).Input = append(json.RawMessage(nil), raw...)
+		}
+	}
 	if !usage.Empty() && !emitChunk(ctx, out, provider.Chunk{Usage: &usage}) {
 		return ctx.Err()
 	}
-	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
+	done := provider.Chunk{Done: true, Finish: finish}
+	if data, err := json.Marshal(responseBlocks); err == nil && len(responseBlocks) > 0 {
+		done.Continuation = &provider.Continuation{Kind: provider.ContinuationAnthropic, Data: data}
+	}
+	out <- done // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil
 }
 
@@ -365,9 +413,22 @@ func messageText(msg provider.Message) string {
 }
 
 func messagesFor(msg provider.Message) []message {
+	if segments := provider.SplitMessage(msg); len(segments) > 1 {
+		var out []message
+		for _, segment := range segments {
+			out = append(out, messagesFor(segment)...)
+		}
+		return out
+	}
 	role := "user"
 	if msg.Role == provider.RoleAssistant {
 		role = "assistant"
+	}
+	if continuation := provider.ContinuationFor(msg, provider.ContinuationAnthropic); role == "assistant" && continuation != nil {
+		var blocks []contentBlock
+		if json.Unmarshal(continuation.Data, &blocks) == nil && len(blocks) > 0 {
+			return []message{{Role: role, Content: blocks}}
+		}
 	}
 	if len(msg.Parts) == 0 {
 		return []message{{Role: role, Content: msg.Text}}

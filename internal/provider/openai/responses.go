@@ -69,10 +69,11 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		return nil, errors.New("openai responses: base url is required")
 	}
 	body := responsesRequest{
-		Model:  req.Model,
-		Stream: true,
-		Store:  boolPtr(false),
-		Input:  make([]responsesInputMessage, 0, len(req.Messages)),
+		Model:   req.Model,
+		Stream:  true,
+		Store:   boolPtr(false),
+		Include: []string{"reasoning.encrypted_content"},
+		Input:   make([]responsesInputMessage, 0, len(req.Messages)),
 	}
 	opts := req.Config.OpenAIOptions()
 	if v, ok := provider.FloatOption(opts, "temperature"); ok {
@@ -123,6 +124,8 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sawTool := false
+	callIDs := map[string]string{}
+	var responseItems []json.RawMessage
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
@@ -151,20 +154,37 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 				}
 			}
 		case "response.output_item.added":
-			if frame.Item.Type == "function_call" {
+			var item responsesOutputItem
+			if json.Unmarshal(frame.Item, &item) != nil {
+				continue
+			}
+			if item.Type == "function_call" {
 				sawTool = true
+				callID := item.CallID
+				if callID == "" {
+					callID = item.ID
+				}
+				callIDs[item.ID] = callID
 				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
-					CallID: frame.Item.ID,
-					Name:   frame.Item.Name,
+					CallID: callID,
+					Name:   item.Name,
 				}}) {
 					return ctx.Err()
 				}
 			}
+		case "response.output_item.done":
+			if len(frame.Item) > 0 {
+				responseItems = append(responseItems, append(json.RawMessage(nil), frame.Item...))
+			}
 		case "response.function_call_arguments.delta":
 			sawTool = true
 			if frame.Delta != "" {
+				callID := callIDs[frame.ItemID]
+				if callID == "" {
+					callID = frame.ItemID
+				}
 				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
-					CallID:    frame.ItemID,
+					CallID:    callID,
 					ArgsDelta: frame.Delta,
 				}}) {
 					return ctx.Err()
@@ -175,13 +195,20 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 			if sawTool {
 				finish = provider.FinishToolCalls
 			}
+			if len(responseItems) == 0 && len(frame.Response.Output) > 0 {
+				responseItems = cloneResponseItems(frame.Response.Output)
+			}
 			if frame.Response.Usage != nil {
 				usage := responsesUsageInfo(*frame.Response.Usage)
 				if !usage.Empty() && !emit(ctx, out, provider.Chunk{Usage: &usage}) {
 					return ctx.Err()
 				}
 			}
-			emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
+			done := provider.Chunk{Done: true, Finish: finish}
+			if encoded, err := json.Marshal(responseItems); err == nil && len(responseItems) > 0 {
+				done.Continuation = &provider.Continuation{Kind: provider.ContinuationOpenAIResponses, Data: encoded}
+			}
+			emit(ctx, out, done)
 			return nil
 		case "response.failed":
 			if frame.Response.Error.Message != "" {
@@ -224,6 +251,7 @@ type responsesRequest struct {
 	Temperature     *float64                `json:"temperature,omitempty"`
 	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
 	Reasoning       *responsesReasoning     `json:"reasoning,omitempty"`
+	Include         []string                `json:"include,omitempty"`
 }
 
 type responsesReasoning struct {
@@ -238,6 +266,18 @@ type responsesInputMessage struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Output    string `json:"output,omitempty"`
+	Raw       string `json:"-"`
+}
+
+func (m responsesInputMessage) MarshalJSON() ([]byte, error) {
+	if m.Raw != "" {
+		if !json.Valid([]byte(m.Raw)) {
+			return nil, errors.New("openai responses: invalid continuation item")
+		}
+		return []byte(m.Raw), nil
+	}
+	type alias responsesInputMessage
+	return json.Marshal(alias(m))
 }
 
 type responsesContentPart struct {
@@ -260,14 +300,10 @@ type responsesTool struct {
 }
 
 type responsesStreamFrame struct {
-	Type   string `json:"type"`
-	Delta  string `json:"delta"`
-	ItemID string `json:"item_id"`
-	Item   struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-		Name string `json:"name"`
-	} `json:"item"`
+	Type     string          `json:"type"`
+	Delta    string          `json:"delta"`
+	ItemID   string          `json:"item_id"`
+	Item     json.RawMessage `json:"item"`
 	Response struct {
 		Error struct {
 			Message string `json:"message"`
@@ -275,11 +311,29 @@ type responsesStreamFrame struct {
 		IncompleteDetails struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
-		Usage *responsesUsage `json:"usage,omitempty"`
+		Usage  *responsesUsage   `json:"usage,omitempty"`
+		Output []json.RawMessage `json:"output,omitempty"`
 	} `json:"response"`
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+func cloneResponseItems(items []json.RawMessage) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		if len(item) > 0 {
+			out = append(out, append(json.RawMessage(nil), item...))
+		}
+	}
+	return out
+}
+
+type responsesOutputItem struct {
+	ID     string `json:"id"`
+	CallID string `json:"call_id"`
+	Type   string `json:"type"`
+	Name   string `json:"name"`
 }
 
 type responsesUsage struct {
@@ -303,6 +357,27 @@ func responsesUsageInfo(u responsesUsage) provider.UsageInfo {
 }
 
 func responsesInputsFor(msg provider.Message) []responsesInputMessage {
+	if segments := provider.SplitMessage(msg); len(segments) > 1 {
+		var out []responsesInputMessage
+		for _, segment := range segments {
+			out = append(out, responsesInputsFor(segment)...)
+		}
+		return out
+	}
+	if continuation := provider.ContinuationFor(msg, provider.ContinuationOpenAIResponses); msg.Role == provider.RoleAssistant && continuation != nil {
+		var items []json.RawMessage
+		if json.Unmarshal(continuation.Data, &items) == nil && len(items) > 0 {
+			out := make([]responsesInputMessage, 0, len(items))
+			for _, item := range items {
+				if len(item) > 0 {
+					out = append(out, responsesInputMessage{Raw: string(item)})
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
 	if len(msg.Parts) == 0 {
 		return []responsesInputMessage{{Role: string(msg.Role), Content: msg.Text}}
 	}

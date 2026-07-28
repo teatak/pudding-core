@@ -1,8 +1,9 @@
 // Package google implements the Gemini native streaming protocol
 // (generateContent / streamGenerateContent, v1beta)。
 //
-// 边界与 openai 实现一致(AGENTS.md 硬约束 9 / 17):只产模型流、
-// 无跨 turn 状态、不做流级重试;终止 chunk 阻塞发送。
+// 边界与 openai 实现一致(AGENTS.md 硬约束 9 / 17):只产模型流和
+// provider-native continuation、不在 client 内保存状态、不做流级重试;
+// 终止 chunk 阻塞发送。
 package google
 
 import (
@@ -111,16 +112,31 @@ type thinkingConfig struct {
 }
 
 type content struct {
-	Role  string `json:"role,omitempty"`
-	Parts []part `json:"parts"`
+	Role     string            `json:"role,omitempty"`
+	Parts    []part            `json:"parts"`
+	rawParts []json.RawMessage `json:"-"`
+}
+
+func (c content) MarshalJSON() ([]byte, error) {
+	parts := any(c.Parts)
+	if len(c.rawParts) > 0 {
+		parts = c.rawParts
+	}
+	return json.Marshal(struct {
+		Role  string `json:"role,omitempty"`
+		Parts any    `json:"parts"`
+	}{
+		Role:  c.Role,
+		Parts: parts,
+	})
 }
 
 type part struct {
 	Text string `json:"text,omitempty"`
-	// Thought 标记 3.x thinking 摘要帧,不属于答案正文,解析时跳过。
-	// 同帧可能携带 thoughtSignature(加密推理签名,多轮工具调用才需要回传,
-	// text-only 阶段忽略);字段缺省序列化时不发出,新老协议同一形状。
+	// Thought 标记 thinking 摘要帧,不属于答案正文。thoughtSignature 是
+	// opaque 的原生续接状态,当前 turn 的工具循环必须保留在原 part。
 	Thought          bool              `json:"thought,omitempty"`
+	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
 	InlineData       *inlineData       `json:"inlineData,omitempty"`
@@ -132,11 +148,13 @@ type inlineData struct {
 }
 
 type functionCall struct {
+	ID   string          `json:"id,omitempty"`
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
 type functionResponse struct {
+	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name"`
 	Response json.RawMessage `json:"response,omitempty"`
 }
@@ -396,7 +414,7 @@ func scalarListValue(value any) []any {
 type streamFrame struct {
 	Candidates []struct {
 		Content struct {
-			Parts []part `json:"parts"`
+			Parts []streamPart `json:"parts"`
 		} `json:"content"`
 		FinishReason string `json:"finishReason"`
 	} `json:"candidates"`
@@ -404,6 +422,16 @@ type streamFrame struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
 	UsageMetadata *usageMetadata `json:"usageMetadata"`
+}
+
+type streamPart struct {
+	part
+	raw json.RawMessage
+}
+
+func (p *streamPart) UnmarshalJSON(data []byte) error {
+	p.raw = append(p.raw[:0], data...)
+	return json.Unmarshal(data, &p.part)
 }
 
 type usageMetadata struct {
@@ -421,6 +449,14 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	sawFinish := false
 	finish := provider.FinishStop
 	var latestUsage *usageMetadata
+	var responseParts []json.RawMessage
+	appendResponsePart := func(raw json.RawMessage) {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("{}")) {
+			return
+		}
+		responseParts = append(responseParts, append(json.RawMessage(nil), trimmed...))
+	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -439,7 +475,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			latestUsage = &cp
 		}
 		for _, cand := range frame.Candidates {
-			for partIndex, p := range cand.Content.Parts {
+			for partIndex, streamPart := range cand.Content.Parts {
+				p := streamPart.part
+				appendResponsePart(streamPart.raw)
 				if p.Thought {
 					if p.Text != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: p.Text}) {
 						return ctx.Err()
@@ -455,6 +493,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 					finish = provider.FinishToolCalls
 					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
 						Index:     partIndex,
+						CallID:    p.FunctionCall.ID,
 						Name:      p.FunctionCall.Name,
 						ArgsDelta: string(p.FunctionCall.Args),
 					}}) {
@@ -488,7 +527,11 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			return ctx.Err()
 		}
 	}
-	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
+	done := provider.Chunk{Done: true, Finish: finish}
+	if data, err := json.Marshal(responseParts); err == nil && len(responseParts) > 0 {
+		done.Continuation = &provider.Continuation{Kind: provider.ContinuationGoogle, Data: data}
+	}
+	out <- done // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil
 }
 
@@ -537,17 +580,84 @@ func messageText(msg provider.Message) string {
 
 func contentsForMessages(messages []provider.Message) []content {
 	var out []content
-	toolNames := map[string]string{}
+	registry := newFunctionRegistry()
 	for _, msg := range messages {
-		out = append(out, contentsForMessage(msg, toolNames)...)
+		out = append(out, contentsForMessage(msg, registry)...)
 	}
 	return out
 }
 
-func contentsForMessage(msg provider.Message, toolNames map[string]string) []content {
+type functionRegistry struct {
+	names     map[string]string
+	nativeIDs map[string]struct{}
+}
+
+func newFunctionRegistry() *functionRegistry {
+	return &functionRegistry{
+		names:     make(map[string]string),
+		nativeIDs: make(map[string]struct{}),
+	}
+}
+
+func (r *functionRegistry) remember(callID, name string, native bool) {
+	if r == nil || callID == "" {
+		return
+	}
+	if name != "" {
+		r.names[callID] = name
+	}
+	if native {
+		r.nativeIDs[callID] = struct{}{}
+	}
+}
+
+func (r *functionRegistry) name(callID string) string {
+	if r == nil {
+		return ""
+	}
+	return r.names[callID]
+}
+
+func (r *functionRegistry) nativeID(callID string) string {
+	if r == nil || callID == "" {
+		return ""
+	}
+	if _, ok := r.nativeIDs[callID]; ok {
+		return callID
+	}
+	return ""
+}
+
+func contentsForMessage(msg provider.Message, registry *functionRegistry) []content {
+	if segments := provider.SplitMessage(msg); len(segments) > 1 {
+		var out []content
+		for _, segment := range segments {
+			out = append(out, contentsForMessage(segment, registry)...)
+		}
+		return out
+	}
 	role := "user"
 	if msg.Role == provider.RoleAssistant {
 		role = "model"
+	}
+	if continuation := provider.ContinuationFor(msg, provider.ContinuationGoogle); role == "model" && continuation != nil {
+		var rawParts []json.RawMessage
+		if json.Unmarshal(continuation.Data, &rawParts) == nil && len(rawParts) > 0 {
+			parts := make([]part, 0, len(rawParts))
+			for _, raw := range rawParts {
+				var p part
+				if json.Unmarshal(raw, &p) != nil {
+					continue
+				}
+				parts = append(parts, p)
+				if p.FunctionCall != nil {
+					registry.remember(p.FunctionCall.ID, p.FunctionCall.Name, p.FunctionCall.ID != "")
+				}
+			}
+			if len(parts) > 0 {
+				return []content{{Role: role, Parts: parts, rawParts: rawParts}}
+			}
+		}
 	}
 	if len(msg.Parts) == 0 {
 		return []content{{Role: role, Parts: []part{{Text: msg.Text}}}}
@@ -576,9 +686,7 @@ func contentsForMessage(msg provider.Message, toolNames map[string]string) []con
 			if len(args) == 0 {
 				args = json.RawMessage(`{}`)
 			}
-			if p.CallID != "" && p.Name != "" {
-				toolNames[p.CallID] = p.Name
-			}
+			registry.remember(p.CallID, p.Name, false)
 			parts = append(parts, part{FunctionCall: &functionCall{
 				Name: p.Name,
 				Args: append(json.RawMessage(nil), args...),
@@ -587,7 +695,7 @@ func contentsForMessage(msg provider.Message, toolNames map[string]string) []con
 			flush(role)
 			name := p.Name
 			if name == "" {
-				name = toolNames[p.CallID]
+				name = registry.name(p.CallID)
 			}
 			response, err := json.Marshal(map[string]any{
 				"ok":      p.Ok,
@@ -597,6 +705,7 @@ func contentsForMessage(msg provider.Message, toolNames map[string]string) []con
 				response = json.RawMessage(`{"ok":false,"content":"failed to encode tool result"}`)
 			}
 			parts = append(parts, part{FunctionResponse: &functionResponse{
+				ID:       registry.nativeID(p.CallID),
 				Name:     name,
 				Response: response,
 			}})
