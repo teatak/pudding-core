@@ -850,7 +850,11 @@ function isSessionTurnRunning(
   runningTurns: Record<string, string | undefined>,
   turnPhases: ReturnType<typeof useOverlayStore.getState>["turnPhases"],
 ) {
-  return session.running || Boolean(runningTurns[session.id]) || isTurnPhaseActive(turnPhases[session.id]);
+  const phase = turnPhases[session.id];
+  if (phase && !isTurnPhaseActive(phase)) {
+    return false;
+  }
+  return session.running || Boolean(runningTurns[session.id]) || isTurnPhaseActive(phase);
 }
 
 function sessionGroupActivity(
@@ -1541,21 +1545,6 @@ function CollapsibleSessionGroupLabel({
           )}
         />
       </button>
-      {activity ? (
-        <span
-          aria-label={activity === "running" ? t("session.processing") : t("session.completed")}
-          className="flex shrink-0 items-center gap-1 px-1 text-xs text-sidebar-foreground/55"
-        >
-          {activity === "running" ? (
-            <>
-              <Spinner className="size-3" />
-              <span className="whitespace-nowrap">{t("session.processing")}</span>
-            </>
-          ) : (
-            <span aria-hidden="true" className="size-2 rounded-full bg-blue-500" />
-          )}
-        </span>
-      ) : null}
       {actions}
       {onAction ? (
         <Tooltip>
@@ -1574,6 +1563,18 @@ function CollapsibleSessionGroupLabel({
           </TooltipTrigger>
           <TooltipContent side="right">{actionLabel || label}</TooltipContent>
         </Tooltip>
+      ) : null}
+      {activity ? (
+        <span
+          aria-label={activity === "running" ? t("session.processing") : t("session.completed")}
+          className="flex size-6 shrink-0 items-center justify-center text-sidebar-foreground/55"
+        >
+          {activity === "running" ? (
+            <Spinner className="size-3" />
+          ) : (
+            <span aria-hidden="true" className="size-2 rounded-full bg-blue-500" />
+          )}
+        </span>
       ) : null}
     </SidebarGroupLabel>
   );
@@ -2049,9 +2050,8 @@ function SessionItem({
             )}
           >
             {running ? (
-              <span className="flex items-center gap-1 whitespace-nowrap">
+              <span aria-label={t("session.processing")} className="flex items-center justify-center">
                 <Spinner className="size-3" />
-                {t("session.processing")}
               </span>
             ) : session.backgroundProcessCount > 0 ? (
               <span

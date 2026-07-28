@@ -236,6 +236,11 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
     if (processParts.length === 0) {
       return;
     }
+    if (processParts.length === 1) {
+      out.push(processParts[0]);
+      processParts = [];
+      return;
+    }
     const firstPartKey = processParts[0]?.key || `run-${fallbackRunIndex++}`;
     out.push({
       hiddenParts: processParts,

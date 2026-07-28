@@ -435,22 +435,32 @@ func messagesFor(msg provider.Message) []message {
 	}
 	var out []message
 	var blocks []contentBlock
-	flushBlocks := func(flushRole string) {
+	blockRole := role
+	flushBlocks := func() {
 		if len(blocks) == 0 {
 			return
 		}
-		out = append(out, message{Role: flushRole, Content: blocks})
+		out = append(out, message{Role: blockRole, Content: blocks})
 		blocks = nil
+	}
+	appendBlock := func(targetRole string, block contentBlock) {
+		if len(blocks) > 0 && blockRole != targetRole {
+			flushBlocks()
+		}
+		if len(blocks) == 0 {
+			blockRole = targetRole
+		}
+		blocks = append(blocks, block)
 	}
 	for _, part := range msg.Parts {
 		switch part.Type {
 		case "", provider.PartText:
 			if part.Text != "" {
-				blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
+				appendBlock(role, contentBlock{Type: "text", Text: part.Text})
 			}
 		case provider.PartImage:
 			if len(part.Data) > 0 {
-				blocks = append(blocks, contentBlock{
+				appendBlock(role, contentBlock{
 					Type: "image",
 					Source: &contentSource{
 						Type:      "base64",
@@ -464,24 +474,22 @@ func messagesFor(msg provider.Message) []message {
 			if len(args) == 0 {
 				args = json.RawMessage(`{}`)
 			}
-			blocks = append(blocks, contentBlock{
+			appendBlock(role, contentBlock{
 				Type:  "tool_use",
 				ID:    part.CallID,
 				Name:  part.Name,
 				Input: append(json.RawMessage(nil), args...),
 			})
 		case provider.PartToolResult:
-			flushBlocks(role)
-			blocks = append(blocks, contentBlock{
+			appendBlock("user", contentBlock{
 				Type:      "tool_result",
 				ToolUseID: part.CallID,
 				Content:   part.Content,
 				IsError:   !part.Ok,
 			})
-			flushBlocks("user")
 		}
 	}
-	flushBlocks(role)
+	flushBlocks()
 	if len(out) == 0 {
 		out = append(out, message{Role: role, Content: msg.Text})
 	}

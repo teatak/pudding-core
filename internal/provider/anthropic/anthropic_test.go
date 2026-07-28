@@ -173,8 +173,10 @@ func TestRequestShapeWithToolHistory(t *testing.T) {
 		Model: "claude-opus-4-8",
 		Messages: []provider.Message{
 			{Role: provider.RoleAssistant, Parts: []provider.Part{
-				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
-				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "first", Args: json.RawMessage(`{"value":1}`)},
+				{Type: provider.PartToolUse, CallID: "call_2", Name: "second", Args: json.RawMessage(`{"value":2}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "first", Ok: true, Content: `{"result":1}`},
+				{Type: provider.PartToolResult, CallID: "call_2", Name: "second", Ok: true, Content: `{"result":2}`},
 			}},
 		},
 	})
@@ -190,20 +192,24 @@ func TestRequestShapeWithToolHistory(t *testing.T) {
 		t.Fatalf("roles wrong: %+v", gotBody.Messages)
 	}
 	assistantBlocks, ok := gotBody.Messages[0].Content.([]any)
-	if !ok || len(assistantBlocks) != 1 {
+	if !ok || len(assistantBlocks) != 2 {
 		t.Fatalf("assistant content wrong: %+v", gotBody.Messages[0].Content)
 	}
-	toolUse := assistantBlocks[0].(map[string]any)
-	if toolUse["type"] != "tool_use" || toolUse["id"] != "call_1" || toolUse["name"] != "builtin_time_get_current" {
-		t.Fatalf("tool_use block wrong: %+v", toolUse)
+	for i, callID := range []string{"call_1", "call_2"} {
+		toolUse := assistantBlocks[i].(map[string]any)
+		if toolUse["type"] != "tool_use" || toolUse["id"] != callID {
+			t.Fatalf("tool_use block %d wrong: %+v", i, toolUse)
+		}
 	}
 	userBlocks, ok := gotBody.Messages[1].Content.([]any)
-	if !ok || len(userBlocks) != 1 {
+	if !ok || len(userBlocks) != 2 {
 		t.Fatalf("user content wrong: %+v", gotBody.Messages[1].Content)
 	}
-	toolResult := userBlocks[0].(map[string]any)
-	if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "call_1" || toolResult["content"] != `{"iso":"now"}` {
-		t.Fatalf("tool_result block wrong: %+v", toolResult)
+	for i, callID := range []string{"call_1", "call_2"} {
+		toolResult := userBlocks[i].(map[string]any)
+		if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != callID {
+			t.Fatalf("tool_result block %d wrong: %+v", i, toolResult)
+		}
 	}
 }
 
