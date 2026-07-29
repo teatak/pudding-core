@@ -162,7 +162,7 @@ export function ProviderSettings({
               return (
                 <Item
                   key={profile.id}
-                  className="group min-h-16 flex-nowrap rounded-xl bg-card px-4 py-3 hover:bg-accent/50"
+                  className="group min-h-16 flex-nowrap rounded-xl bg-card px-4 py-3 hover:bg-control-hover active:bg-control-active"
                   role="listitem"
                   variant="outline"
                 >

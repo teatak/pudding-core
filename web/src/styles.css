@@ -29,6 +29,9 @@
     --color-git-deleted: var(--git-deleted);
     --color-git-renamed: var(--git-renamed);
     --color-git-conflicted: var(--git-conflicted);
+    --color-control-hover: var(--control-hover-background);
+    --color-control-active: var(--control-active-background);
+    --color-control-selected: var(--control-selected-background);
     --color-control-disabled: var(--control-disabled);
     --color-secondary-hover: var(--secondary-hover);
     --color-primary-hover: var(--primary-hover);
@@ -95,7 +98,7 @@
     --sidebar-foreground: oklch(0.18 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-hover-background: oklch(0.94 0 0);
+    --sidebar-hover-background: oklch(0.92 0 0);
     --sidebar-active-background: var(--sidebar-hover-background);
     --sidebar-active-border: oklch(0.76 0 0);
     --sidebar-accent: var(--sidebar-hover-background);
@@ -176,7 +179,7 @@
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
-    --floating-hover: var(--sidebar-hover-background);
+    --floating-hover: var(--control-hover-background);
     --floating-active: var(--floating-hover);
     --floating-selected: var(--floating-hover);
     --menu-item-gap: 0.25rem;
@@ -581,7 +584,7 @@ html[data-shell] :where(
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.25 0 0);
-    --floating-hover: var(--sidebar-hover-background);
+    --floating-hover: var(--control-hover-background);
     --floating-active: var(--floating-hover);
     --floating-selected: var(--floating-hover);
     --menu-outline: oklch(1 0 0 / 10%);
@@ -641,6 +644,14 @@ html[data-shell] :where(
 [data-slot="button"][data-variant="outline"]:active:not(:disabled),
 [data-slot="button"][data-variant="secondary"]:active:not(:disabled) {
     background-color: var(--control-active-background);
+}
+
+[data-slot="select-trigger"]:hover:not([data-disabled]) {
+    background-color: var(--control-hover-background);
+}
+
+[data-slot="select-trigger"][data-state="open"]:not([data-disabled]) {
+    background-color: var(--control-selected-background);
 }
 
 [data-slot="sidebar-menu-button"]:hover:not(:disabled) {
@@ -750,6 +761,21 @@ html[data-agent-console-resizing="true"] webview {
     font-weight: 400;
 }
 
+:is(
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="context-menu-item"],
+    [data-slot="context-menu-checkbox-item"],
+    [data-slot="context-menu-radio-item"],
+    [data-slot="context-menu-sub-trigger"],
+    [data-slot="select-item"],
+    [data-slot="command-item"]
+):is(:hover, :focus, [data-highlighted]) {
+    background-color: var(--floating-hover);
+}
+
 [data-slot="dropdown-menu-item"]:active,
 [data-slot="dropdown-menu-checkbox-item"]:active,
 [data-slot="dropdown-menu-radio-item"]:active,
@@ -813,6 +839,10 @@ html[data-agent-console-resizing="true"] webview {
 [data-slot="context-menu-item"][data-variant="destructive"]:is(:hover, :focus, [data-highlighted]) {
     background-color: var(--dropdown-destructive-hover);
     color: var(--destructive-foreground);
+}
+
+.pudding-composer-suggestion {
+    --muted: var(--control-hover-background);
 }
 
 .pudding-rail-toggle [data-slot="button"],

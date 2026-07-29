@@ -183,8 +183,8 @@ function ProjectRow({ locale, project, token }: { locale: string; project: Proje
   return (
     <article
       className={cn(
-        "group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3 hover:bg-muted/30",
-        actionsOverlayOpen && "bg-muted/30",
+        "group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3 hover:bg-control-hover active:bg-control-active",
+        actionsOverlayOpen && "bg-control-hover",
       )}
     >
       <div className="flex min-w-0 items-start gap-3">

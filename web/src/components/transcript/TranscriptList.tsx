@@ -12,6 +12,7 @@ const SCROLL_END_THRESHOLD_PX = 8;
 const ANCHOR_RESTORE_EPSILON_PX = 0.75;
 const BOTTOM_STICK_STABILIZE_FRAMES = 4;
 const CONTENT_STICK_STABILIZE_FRAMES = 2;
+const JUMP_LATEST_ANIMATION_MS = 180;
 const VIEWPORT_ANCHOR_MAX_TOP_RATIO = 0.7;
 const VIEWPORT_ANCHOR_MIN_TOP_RATIO = 0.3;
 const VIEWPORT_ANCHOR_TARGET_RATIO = 0.5;
@@ -78,6 +79,8 @@ export const TranscriptList = memo(function TranscriptList({
   const pointerScrollIntentUntilRef = useRef(0);
   const previousFirstTurnKeyRef = useRef<string | null>(null);
   const resizeAnchorRef = useRef<ResizeAnchor | null>(null);
+  const smoothJumpRafRef = useRef<number | null>(null);
+  const smoothJumpRef = useRef(false);
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
   const firstTurnKey = turns[0]?.key ?? "";
 
@@ -107,6 +110,14 @@ export const TranscriptList = memo(function TranscriptList({
     if (stickRafRef.current !== null) {
       window.cancelAnimationFrame(stickRafRef.current);
       stickRafRef.current = null;
+    }
+  }, []);
+
+  const cancelSmoothJump = useCallback(() => {
+    smoothJumpRef.current = false;
+    if (smoothJumpRafRef.current !== null) {
+      window.cancelAnimationFrame(smoothJumpRafRef.current);
+      smoothJumpRafRef.current = null;
     }
   }, []);
 
@@ -170,16 +181,51 @@ export const TranscriptList = memo(function TranscriptList({
   }, [scrollElement]);
 
   const disableAutoStick = useCallback(() => {
+    cancelSmoothJump();
     autoStickRef.current = false;
     syncViewportScrollbar(false);
     cancelScheduledStick();
-  }, [cancelScheduledStick, syncViewportScrollbar]);
+  }, [cancelScheduledStick, cancelSmoothJump, syncViewportScrollbar]);
 
-  const scrollToLatest = useCallback(() => {
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
     if (!scrollElement) {
       return;
     }
     releaseViewportResizeAnchor();
+    const nextScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    if (behavior === "smooth" && distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
+      cancelScheduledStick();
+      cancelSmoothJump();
+      smoothJumpRef.current = true;
+      autoStickRef.current = false;
+      const startScrollTop = scrollElement.scrollTop;
+      const startedAt = performance.now();
+      programmaticScrollIgnoreUntilRef.current = startedAt + JUMP_LATEST_ANIMATION_MS + 120;
+      const tick = (now: number) => {
+        if (!smoothJumpRef.current) {
+          smoothJumpRafRef.current = null;
+          return;
+        }
+        const progress = Math.min(1, (now - startedAt) / JUMP_LATEST_ANIMATION_MS);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const targetScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+        scrollElement.scrollTop = startScrollTop + (targetScrollTop - startScrollTop) * eased;
+        lastScrollTopRef.current = scrollElement.scrollTop;
+        if (progress < 1 && distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
+          smoothJumpRafRef.current = window.requestAnimationFrame(tick);
+          return;
+        }
+        scrollElement.scrollTop = targetScrollTop;
+        lastScrollTopRef.current = targetScrollTop;
+        smoothJumpRef.current = false;
+        smoothJumpRafRef.current = null;
+        autoStickRef.current = true;
+        setLatestState(true);
+      };
+      smoothJumpRafRef.current = window.requestAnimationFrame(tick);
+      return;
+    }
+    cancelSmoothJump();
     if (distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
       markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
       const sentinel = latestSentinelRef.current;
@@ -192,7 +238,7 @@ export const TranscriptList = memo(function TranscriptList({
     lastScrollTopRef.current = scrollElement.scrollTop;
     autoStickRef.current = true;
     setLatestState(true);
-  }, [releaseViewportResizeAnchor, scrollElement, setLatestState]);
+  }, [cancelScheduledStick, cancelSmoothJump, releaseViewportResizeAnchor, scrollElement, setLatestState]);
 
   const syncPinnedBottom = useCallback(() => {
     if (!scrollElement) {
@@ -358,6 +404,9 @@ export const TranscriptList = memo(function TranscriptList({
   const handleContentResize = useCallback(() => {
     // ResizeObserver runs before paint. Compensate synchronously so pinned disclosures
     // visually grow upward instead of rendering first and snapping on the next frame.
+    if (smoothJumpRef.current) {
+      return;
+    }
     if (autoStickRef.current) {
       syncPinnedBottom();
       return;
@@ -404,14 +453,14 @@ export const TranscriptList = memo(function TranscriptList({
       return;
     }
     initialScrollSessionRef.current = sessionID;
-    window.requestAnimationFrame(scrollToLatest);
+    window.requestAnimationFrame(() => scrollToLatest());
   }, [scrollElement, scrollToLatest, sessionID, turns.length]);
 
   useEffect(() => {
     if (jumpLatestSignal <= 0) {
       return;
     }
-    window.requestAnimationFrame(scrollToLatest);
+    window.requestAnimationFrame(() => scrollToLatest("smooth"));
   }, [jumpLatestSignal, scrollToLatest]);
 
   useEffect(() => {
@@ -435,6 +484,16 @@ export const TranscriptList = memo(function TranscriptList({
       const isProgrammaticScroll = performance.now() < programmaticScrollIgnoreUntilRef.current;
       const hasPointerScrollIntent = performance.now() < pointerScrollIntentUntilRef.current;
       lastScrollTopRef.current = nextScrollTop;
+
+      if (smoothJumpRef.current) {
+        if (bottomDistance <= SCROLL_END_THRESHOLD_PX) {
+          cancelSmoothJump();
+          autoStickRef.current = true;
+          setLatestState(true);
+        }
+        historyLoader.check();
+        return;
+      }
 
       if (!isProgrammaticScroll && hasPointerScrollIntent && movingUp) {
         releaseViewportResizeAnchor();
@@ -482,6 +541,7 @@ export const TranscriptList = memo(function TranscriptList({
     };
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY !== 0) {
+        cancelSmoothJump();
         releaseViewportResizeAnchor();
         userScrollSeqRef.current += 1;
       }
@@ -500,11 +560,13 @@ export const TranscriptList = memo(function TranscriptList({
         disableAutoStick();
         historyLoader.request();
       } else if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End" || event.key === " ") {
+        cancelSmoothJump();
         releaseViewportResizeAnchor();
         userScrollSeqRef.current += 1;
       }
     };
     const beginPointerScroll = () => {
+      cancelSmoothJump();
       pointerScrollIntentUntilRef.current = Number.POSITIVE_INFINITY;
       cancelScheduledStick();
     };
@@ -560,6 +622,7 @@ export const TranscriptList = memo(function TranscriptList({
     };
   }, [
     cancelScheduledStick,
+    cancelSmoothJump,
     disableAutoStick,
     historyLoader.check,
     historyLoader.request,
@@ -574,6 +637,9 @@ export const TranscriptList = memo(function TranscriptList({
     const handleViewportResize = () => {
       if (scrollElement) {
         lastClientHeightRef.current = scrollElement.clientHeight;
+      }
+      if (smoothJumpRef.current) {
+        return;
       }
       if (autoStickRef.current) {
         syncPinnedBottom();
@@ -614,17 +680,19 @@ export const TranscriptList = memo(function TranscriptList({
     disclosureOpenStateRef.current.clear();
     clearPendingHistoryAnchor();
     releaseViewportResizeAnchor();
+    cancelSmoothJump();
     autoStickRef.current = true;
     setLatestState(true);
-  }, [clearPendingHistoryAnchor, historyLoader.reset, releaseViewportResizeAnchor, sessionID, setLatestState]);
+  }, [cancelSmoothJump, clearPendingHistoryAnchor, historyLoader.reset, releaseViewportResizeAnchor, sessionID, setLatestState]);
 
   useEffect(() => {
     return () => {
       cancelScheduledStick();
+      cancelSmoothJump();
       clearPendingHistoryAnchor();
       releaseViewportResizeAnchor();
     };
-  }, [cancelScheduledStick, clearPendingHistoryAnchor, releaseViewportResizeAnchor]);
+  }, [cancelScheduledStick, cancelSmoothJump, clearPendingHistoryAnchor, releaseViewportResizeAnchor]);
 
   if (turns.length === 0) {
     return null;

@@ -2,7 +2,6 @@ import { Trash2, Undo2 } from "@/components/icons";
 
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -40,6 +39,7 @@ export function CanvasLibraryMenuSections({
     <SavedCanvasItemRow
       key={entry.id}
       entry={entry}
+      startLayout={startLayout}
       onOpen={() => {
         onOpenSaved(entry);
         onDismiss();
@@ -51,6 +51,7 @@ export function CanvasLibraryMenuSections({
     <ClosedCanvasItemRow
       key={entry.id}
       entry={entry}
+      startLayout={startLayout}
       onRemove={() => onRemoveClosed(entry)}
       onRestore={() => {
         onRestoreClosed(entry);
@@ -60,27 +61,25 @@ export function CanvasLibraryMenuSections({
   ));
   if (startLayout) {
     return (
-      <div className="mx-auto mt-6 grid max-w-md min-w-0 grid-cols-1 gap-2 text-left">
+      <div className="mt-7 grid min-w-0 grid-cols-1 gap-5 text-left">
         {savedItems.length > 0 ? (
-          <Card className="min-w-0 gap-1.5 py-2" size="sm">
-            <CardHeader className="min-h-7 items-center px-3">
-              <CardTitle className="text-[13px] font-medium text-muted-foreground">{t("canvas.savedWidgets")}</CardTitle>
-            </CardHeader>
-            <CardContent className="max-h-56 overflow-y-auto px-0">{savedRows}</CardContent>
-          </Card>
+          <section className="min-w-0">
+            <div className="flex h-7 items-center px-1 text-xs font-medium text-muted-foreground">
+              {t("canvas.savedWidgets")}
+            </div>
+            <div className="grid max-h-56 gap-1 overflow-y-auto">{savedRows}</div>
+          </section>
         ) : null}
         {closedItems.length > 0 ? (
-          <Card className="min-w-0 gap-1.5 py-2" size="sm">
-            <CardHeader className="min-h-7 items-center px-3">
-              <CardTitle className="text-[13px] font-medium text-muted-foreground">{t("canvas.recentClosed")}</CardTitle>
-              <CardAction className="self-center">
-                <Button className="-mr-1 px-1 font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
-                  {t("canvas.clearRecentClosed")}
-                </Button>
-              </CardAction>
-            </CardHeader>
-            <CardContent className="max-h-56 overflow-y-auto px-0">{closedRows}</CardContent>
-          </Card>
+          <section className="min-w-0">
+            <div className="flex h-7 items-center px-1 text-xs font-medium text-muted-foreground">
+              <span>{t("canvas.recentClosed")}</span>
+              <Button className="-mr-1 ml-auto px-1 font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
+                {t("canvas.clearRecentClosed")}
+              </Button>
+            </div>
+            <div className="grid max-h-56 gap-1 overflow-y-auto">{closedRows}</div>
+          </section>
         ) : null}
       </div>
     );
@@ -110,11 +109,11 @@ export function CanvasLibraryMenuSections({
   );
 }
 
-function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasItem; onOpen: () => void; onRemove: () => void }) {
+function SavedCanvasItemRow({ entry, onOpen, onRemove, startLayout }: { entry: SavedCanvasItem; onOpen: () => void; onRemove: () => void; startLayout: boolean }) {
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className="group/saved mx-1 flex h-8 min-w-0 items-center rounded-md pr-2 hover:bg-accent focus-within:bg-accent">
+    <div className={cn("group/saved mx-1 flex min-w-0 items-center rounded-md pr-2", startLayout ? "h-9 hover:bg-control-hover focus-within:bg-control-hover" : "h-8 hover:bg-accent focus-within:bg-accent")}>
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onOpen}>
         <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
@@ -128,11 +127,11 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasIte
   );
 }
 
-function ClosedCanvasItemRow({ entry, onRemove, onRestore }: { entry: ClosedCanvasItem; onRemove: () => void; onRestore: () => void }) {
+function ClosedCanvasItemRow({ entry, onRemove, onRestore, startLayout }: { entry: ClosedCanvasItem; onRemove: () => void; onRestore: () => void; startLayout: boolean }) {
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className="group/closed mx-1 flex h-8 min-w-0 items-center rounded-md pr-2 hover:bg-accent focus-within:bg-accent">
+    <div className={cn("group/closed mx-1 flex min-w-0 items-center rounded-md pr-2", startLayout ? "h-9 hover:bg-control-hover focus-within:bg-control-hover" : "h-8 hover:bg-accent focus-within:bg-accent")}>
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onRestore}>
         <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>

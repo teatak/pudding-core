@@ -253,7 +253,7 @@ export function VoiceSettings({ token }: { token: string }) {
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
       <Collapsible className={SETTINGS_CARD_CLASS} open={runtimeOpen} onOpenChange={setRuntimeOpen}>
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-muted/35">
+        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-control-hover active:bg-control-active">
           <span className="grid min-w-0 gap-0.5">
             <span className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.runtime")}</span>
             <span className="text-xs leading-5 text-muted-foreground">{t("settings.voice.restartRequired")}</span>

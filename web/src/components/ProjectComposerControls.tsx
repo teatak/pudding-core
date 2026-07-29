@@ -133,7 +133,7 @@ function ProjectApprovalControl({
             <button
               key={mode}
               aria-label={t("composer.projectApproval")}
-              className="relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
+              className="relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
               type="button"
               onClick={() => {
                 if (mode !== value) {

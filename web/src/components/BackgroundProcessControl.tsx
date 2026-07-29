@@ -82,7 +82,7 @@ export function BackgroundProcessControl({ token, sessionID }: { token: string; 
             <Collapsible open={recentOpen} onOpenChange={setRecentOpen}>
               <CollapsibleTrigger asChild>
                 <button
-                  className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-control-hover hover:text-foreground active:bg-control-active"
                   type="button"
                 >
                   <ChevronRight className={cn("size-3.5 transition-transform", recentOpen && "rotate-90")} />
@@ -148,7 +148,7 @@ function BackgroundProcessRow({
   const output = logsQuery.data?.output.map((chunk) => chunk.content).join("") ?? "";
   const status = processStatus(process, t);
   return (
-    <div className="rounded-md hover:bg-muted/60">
+    <div className="rounded-md hover:bg-control-hover">
       <div className="flex min-w-0 items-center gap-1">
         <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" type="button" onClick={onToggle}>
           <span

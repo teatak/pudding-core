@@ -158,6 +158,7 @@ function renderTranscriptPart({
   part,
   partKey,
   sessionID,
+  showActivitySpinner = false,
   showReasoningContent,
   showRawToolInfo,
   token,
@@ -167,6 +168,7 @@ function renderTranscriptPart({
   part: RenderTurnPart;
   partKey: string;
   sessionID?: string;
+  showActivitySpinner?: boolean;
   showReasoningContent: boolean;
   showRawToolInfo: boolean;
   token: string;
@@ -182,6 +184,7 @@ function renderTranscriptPart({
           key={partKey}
           active={part.active}
           defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          showActivitySpinner={showActivitySpinner}
           showContent={showReasoningContent}
           text={part.text}
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
@@ -196,6 +199,7 @@ function renderTranscriptPart({
           defaultOpen={disclosure?.isOpen(disclosureKey) || false}
           part={part}
           sessionID={sessionID}
+          showActivitySpinner={showActivitySpinner}
           showRawInfo={showRawToolInfo}
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
         />
@@ -208,7 +212,7 @@ function renderTranscriptPart({
           key={partKey}
           defaultOpen={disclosure?.isOpen(disclosureKey) || false}
           hiddenParts={part.hiddenParts}
-          renderPart={(hiddenPart, hiddenIndex) => {
+          renderPart={(hiddenPart, hiddenIndex, childShowsActivitySpinner) => {
             const hiddenKey = hiddenPart.key || `${hiddenPart.type}:${hiddenIndex}`;
             return renderTranscriptPart({
               disclosure,
@@ -216,6 +220,7 @@ function renderTranscriptPart({
               part: hiddenPart,
               partKey: hiddenKey,
               sessionID,
+              showActivitySpinner: childShowsActivitySpinner,
               showReasoningContent,
               showRawToolInfo,
               token,
@@ -270,6 +275,17 @@ function PartIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
       <Icon aria-hidden="true" className="size-3.5" />
+    </span>
+  );
+}
+
+function ProcessActivityIcon({ active, icon }: { active: boolean; icon: LucideIcon }) {
+  if (!active) {
+    return <PartIcon icon={icon} />;
+  }
+  return (
+    <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
+      <Spinner className="size-3.5" />
     </span>
   );
 }
@@ -634,12 +650,14 @@ function isImageAttachment(mime: string | undefined, name: string) {
 function ThoughtPart({
   active = false,
   defaultOpen,
+  showActivitySpinner = false,
   showContent = true,
   text,
   onOpenChange,
 }: {
   active?: boolean;
   defaultOpen: boolean;
+  showActivitySpinner?: boolean;
   showContent?: boolean;
   text: string;
   onOpenChange?: (open: boolean) => void;
@@ -689,7 +707,7 @@ function ThoughtPart({
         onClick={handleThoughtSummaryClick}
         onKeyDown={handleThoughtSummaryKeyDown}
       >
-        <PartIcon icon={Lightbulb} />
+        <ProcessActivityIcon active={showActivitySpinner} icon={Lightbulb} />
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
           {canShowContent ? (
@@ -721,7 +739,7 @@ function ProcessCompactPart({
 }: {
   defaultOpen: boolean;
   hiddenParts: TurnPartVM[];
-  renderPart: (part: TurnPartVM, index: number) => ReactNode;
+  renderPart: (part: TurnPartVM, index: number, showActivitySpinner: boolean) => ReactNode;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
@@ -739,13 +757,7 @@ function ProcessCompactPart({
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
-        {title.active ? (
-          <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
-            <Spinner className="size-3.5" />
-          </span>
-        ) : (
-          <PartIcon icon={Icon} />
-        )}
+        <ProcessActivityIcon active={title.active && !open} icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 truncate">
             <span>{title.label}</span>
@@ -756,7 +768,11 @@ function ProcessCompactPart({
           </span>
         </span>
       </summary>
-      {open ? <div className="min-w-0 max-w-full">{hiddenParts.map(renderPart)}</div> : null}
+      {open ? (
+        <div className="min-w-0 max-w-full">
+          {hiddenParts.map((part, index) => renderPart(part, index, part === activePart))}
+        </div>
+      ) : null}
     </details>
   );
 }
@@ -983,12 +999,14 @@ function ToolUsePart({
   defaultOpen,
   part,
   sessionID,
+  showActivitySpinner = false,
   showRawInfo,
   onOpenChange,
 }: {
   defaultOpen: boolean;
   part: Extract<TurnPartVM, { type: "tool_use" }>;
   sessionID?: string;
+  showActivitySpinner?: boolean;
   showRawInfo: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -1013,7 +1031,7 @@ function ToolUsePart({
   if (!showDetails) {
     return (
       <div className={cn("grid h-6 w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5]", toneClass)}>
-        <PartIcon icon={Icon} />
+        <ProcessActivityIcon active={showActivitySpinner} icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
           {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
@@ -1034,7 +1052,7 @@ function ToolUsePart({
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
-        <PartIcon icon={Icon} />
+        <ProcessActivityIcon active={showActivitySpinner} icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
           {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}

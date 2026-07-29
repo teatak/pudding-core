@@ -52,7 +52,7 @@ export function ComposerMentionMenu({
   return (
     <div
       className={cn(
-        "pudding-composer-suggestion absolute bottom-full z-40 w-[min(18rem,calc(100%-2rem))] overflow-hidden rounded-t-lg border border-b-0 bg-card text-sm text-card-foreground",
+        "pudding-composer-suggestion absolute bottom-full z-40 w-[min(16rem,calc(100%-2rem))] overflow-hidden rounded-t-lg border border-b-0 bg-card text-sm text-card-foreground",
         align === "start" ? "left-4" : "left-16",
       )}
       role="listbox"

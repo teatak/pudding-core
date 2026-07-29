@@ -7,6 +7,7 @@ import {
   FolderClosed,
   FolderCog,
   FolderOpen,
+  History,
   MessageSquareText,
   Package,
   PanelLeft,
@@ -1515,7 +1516,7 @@ function CollapsibleSessionGroupLabel({
   onToggle: () => void;
 }) {
   const { t } = useI18n();
-  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : collapsed ? FolderClosed : FolderOpen;
+  const Icon = icon === "pinned" ? Pin : icon === "chat" ? History : collapsed ? FolderClosed : FolderOpen;
   return (
     <SidebarGroupLabel
       data-active={active}

@@ -2422,7 +2422,7 @@ function SkillRows({
         <Item
           key={skill.path}
           asChild
-          className="relative items-start gap-3 rounded-none border-0 px-3 py-2.5 hover:bg-muted/35"
+          className="relative items-start gap-3 rounded-none border-0 px-3 py-2.5 hover:bg-control-hover active:bg-control-active"
         >
           <button type="button" onClick={() => onSkillSelect?.(skill)}>
             {index > 0 ? <span aria-hidden="true" className="absolute inset-x-3 top-0 border-t border-border/70" /> : null}
