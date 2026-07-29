@@ -382,7 +382,13 @@ export function Mascot({
 
   useLayoutEffect(() => {
     const updateMetrics = () => {
+      metricsFrame = 0;
       readMetrics();
+    };
+    let metricsFrame = 0;
+    const scheduleMetricsUpdate = () => {
+      if (metricsFrame) return;
+      metricsFrame = window.requestAnimationFrame(updateMetrics);
     };
 
     updateMetrics();
@@ -390,17 +396,18 @@ export function Mascot({
     if (!motionEnabled) {
       return;
     }
-    const resizeObserver = new ResizeObserver(updateMetrics);
+    const resizeObserver = new ResizeObserver(scheduleMetricsUpdate);
     if (rootRef.current) resizeObserver.observe(rootRef.current);
     if (rootRef.current?.parentElement) resizeObserver.observe(rootRef.current.parentElement);
-    window.addEventListener("resize", updateMetrics, { passive: true });
-    window.addEventListener("scroll", updateMetrics, { capture: true, passive: true });
+    window.addEventListener("resize", scheduleMetricsUpdate, { passive: true });
+    window.addEventListener("scroll", scheduleMetricsUpdate, { capture: true, passive: true });
 
     if (!pointerTracking) {
       return () => {
         resizeObserver.disconnect();
-        window.removeEventListener("resize", updateMetrics);
-        window.removeEventListener("scroll", updateMetrics, { capture: true });
+        if (metricsFrame) window.cancelAnimationFrame(metricsFrame);
+        window.removeEventListener("resize", scheduleMetricsUpdate);
+        window.removeEventListener("scroll", scheduleMetricsUpdate, { capture: true });
       };
     }
     const onPointerMove = (event: PointerEvent) => {
@@ -424,10 +431,11 @@ export function Mascot({
         window.cancelAnimationFrame(headShakeRafRef.current);
         headShakeRafRef.current = 0;
       }
+      if (metricsFrame) window.cancelAnimationFrame(metricsFrame);
       window.removeEventListener("pointermove", onPointerMove, { capture: true });
       resizeObserver.disconnect();
-      window.removeEventListener("resize", updateMetrics);
-      window.removeEventListener("scroll", updateMetrics, { capture: true });
+      window.removeEventListener("resize", scheduleMetricsUpdate);
+      window.removeEventListener("scroll", scheduleMetricsUpdate, { capture: true });
     };
   }, [motionEnabled, pointerTracking]);
 

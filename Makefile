@@ -2,7 +2,10 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
+.PHONY: test schema-check tidy clean embed brand-assets language-servers language-servers-ready desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
+
+brand-assets:
+	@bash scripts/render-brand-assets.sh
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:

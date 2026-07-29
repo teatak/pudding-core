@@ -3,6 +3,7 @@ import { useWatch, type Control, type UseFormRegisterReturn } from "react-hook-f
 import type { LucideIcon } from "@/components/icons";
 
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
+import { composerSuggestionPanelClassName } from "@/components/composerControlStyles";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { Textarea } from "@/components/ui/textarea";
@@ -124,7 +125,10 @@ function SlashCommandMenu({
   return (
     <div
       ref={listRef}
-      className="pudding-composer-suggestion absolute bottom-full left-16 z-40 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-b-0 bg-card p-1 text-sm text-card-foreground"
+      className={cn(
+        "absolute bottom-full left-16 z-40 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto p-1 text-sm",
+        composerSuggestionPanelClassName,
+      )}
       role="listbox"
     >
       {commands.map((command, index) => (
@@ -134,8 +138,8 @@ function SlashCommandMenu({
           aria-selected={index === selectedIndex}
           aria-label={`${command.label} ${command.description}`}
           className={cn(
-            "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-muted",
-            index === selectedIndex && "bg-muted text-foreground",
+            "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-control-hover active:bg-control-active",
+            index === selectedIndex && "bg-control-hover text-foreground",
           )}
           role="option"
           type="button"

@@ -156,7 +156,7 @@ export function ModelReasoningPicker({
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[12rem]",
+            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-transparent py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[12rem]",
             composerControlStateClassName,
             visibleModel ? "pl-1" : "pl-2",
             className,
@@ -173,7 +173,7 @@ export function ModelReasoningPicker({
           <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
             <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
             {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
-            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0">{reasoningLabel}</span> : null}
+            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
         </Button>

@@ -4,7 +4,6 @@ import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
 
 import { CanvasLibraryMenuSections } from "./WorkspaceSurfaceControls";
 
@@ -41,7 +40,7 @@ export function WorkspaceEmpty({
 }) {
   const { t } = useI18n();
   return (
-    <div className="h-full overflow-y-auto bg-[var(--workspace-background)]">
+    <div className="pudding-workspace-empty h-full overflow-y-auto bg-[var(--workspace-background)]">
       <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="w-full max-w-lg -translate-y-[3vh]">
           <div className="flex items-center gap-3 px-1 text-left">
@@ -53,7 +52,10 @@ export function WorkspaceEmpty({
               <span className="text-xs text-muted-foreground">{t("workspace.startDescription")}</span>
             </span>
           </div>
-          <div className={cn("mt-5 grid gap-2", hasProject ? "grid-cols-3" : "grid-cols-2")}>
+          <div
+            className="pudding-workspace-empty-actions mt-5 grid gap-2"
+            data-has-project={hasProject}
+          >
             {hasProject ? (
               <Button
                 className="h-11 justify-start gap-2 rounded-lg border border-[var(--workspace-border)] bg-[var(--workspace-segment-background)] px-3 text-sm font-medium text-foreground shadow-none hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground active:bg-[var(--workspace-tab-active-background)] [&_svg]:size-4"

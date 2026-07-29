@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react";
 
-// rail 折叠态由用户偏好控制。右侧工作区内的布局变化不得影响 SessionRail。
+import { useIsMobile } from "@/hooks/use-mobile";
+
+// 用户偏好持久化；窄窗口仅临时强制折叠，不覆盖该偏好。
 const KEY = "pudding.railCollapsed";
 
 let pref = localStorage.getItem(KEY) === "1";
+let responsiveCollapsed = false;
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -16,15 +19,38 @@ export function setRailCollapsed(next: boolean) {
   notify();
 }
 
+export function setRailResponsiveCollapsed(next: boolean) {
+  if (responsiveCollapsed === next) {
+    return;
+  }
+  responsiveCollapsed = next;
+  notify();
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 export function useRailCollapsed() {
-  return useSyncExternalStore(
+  const preferredCollapsed = useSyncExternalStore(
     subscribe,
     () => pref,
     () => pref,
+  );
+  const forcedCollapsed = useSyncExternalStore(
+    subscribe,
+    () => responsiveCollapsed,
+    () => responsiveCollapsed,
+  );
+  const narrowWindow = useIsMobile();
+  return preferredCollapsed || forcedCollapsed || narrowWindow;
+}
+
+export function useRailResponsiveCollapsed() {
+  return useSyncExternalStore(
+    subscribe,
+    () => responsiveCollapsed,
+    () => responsiveCollapsed,
   );
 }

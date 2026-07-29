@@ -1,5 +1,5 @@
 import { FileDiff, X } from "@/components/icons";
-import { useEffect, useRef, useState, type UIEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type UIEvent } from "react";
 
 import { useI18n } from "@/i18n";
 import { turnFileDiffChanges } from "@/lib/turnFileChanges";
@@ -15,6 +15,7 @@ export function ProjectFileTabs({
   active,
   activeTurnDiffID,
   dirtyKeys,
+  leadingAction,
   tabs,
   turnDiffTabs,
   onActivate,
@@ -27,6 +28,7 @@ export function ProjectFileTabs({
   active?: ProjectTab;
   activeTurnDiffID?: string;
   dirtyKeys: ReadonlySet<string>;
+  leadingAction?: ReactNode;
   tabs: ProjectTab[];
   turnDiffTabs: FilePreview[];
   onActivate: (selection: ProjectTab) => void;
@@ -46,7 +48,7 @@ export function ProjectFileTabs({
     if (hideScrollTimerRef.current) clearTimeout(hideScrollTimerRef.current);
   }, []);
 
-  if (tabs.length === 0 && turnDiffTabs.length === 0) return null;
+  if (tabs.length === 0 && turnDiffTabs.length === 0 && !leadingAction) return null;
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
@@ -63,11 +65,17 @@ export function ProjectFileTabs({
   };
 
   return (
-    <div className="relative h-(--workspace-subtoolbar-h) shrink-0 bg-[var(--workspace-file-tabs-background)]">
-      <div
-        className="pudding-project-file-tabs flex h-full items-stretch overflow-x-auto overscroll-x-contain"
-        onScroll={handleScroll}
-      >
+    <div className="flex h-(--workspace-subtoolbar-h) shrink-0 bg-[var(--workspace-file-tabs-background)]">
+      {leadingAction ? (
+        <div className="h-full shrink-0 border-r border-[var(--workspace-border)]">
+          {leadingAction}
+        </div>
+      ) : null}
+      <div className="relative min-w-0 flex-1">
+        <div
+          className="pudding-project-file-tabs flex h-full items-stretch overflow-x-auto overscroll-x-contain"
+          onScroll={handleScroll}
+        >
         {tabs.map((tab, index) => {
           const key = projectTabKey(tab);
           const selected = key === activeKey;
@@ -170,15 +178,16 @@ export function ProjectFileTabs({
             </ProjectVirtualTabContextMenu>
           );
         })}
+        </div>
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-[var(--workspace-tab-border)] transition-opacity duration-150",
+            scrolling ? "opacity-100" : "opacity-0",
+          )}
+          style={{ left: scrollIndicator.left, width: scrollIndicator.width }}
+        />
       </div>
-      <span
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-[var(--workspace-tab-border)] transition-opacity duration-150",
-          scrolling ? "opacity-100" : "opacity-0",
-        )}
-        style={{ left: scrollIndicator.left, width: scrollIndicator.width }}
-      />
     </div>
   );
 }

@@ -306,6 +306,26 @@ html[data-workspace-resizing] .workspace-split-pane {
     height: 0;
 }
 
+.pudding-workspace-empty {
+    container-type: inline-size;
+}
+
+.pudding-workspace-empty-actions {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+@container (min-width: 26.25rem) {
+    .pudding-workspace-empty-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 32.5rem) {
+    .pudding-workspace-empty-actions[data-has-project="true"] {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
 html[data-shell] input,
 html[data-shell] textarea,
 html[data-shell] [contenteditable="true"],
@@ -878,7 +898,7 @@ html[data-agent-console-resizing="true"] webview {
     width: clamp(
         min(380px, 50%),
         var(--agent-console-dock-width),
-        min(640px, calc(100% - min(320px, 50%)))
+        min(640px, calc(100% - min(380px, 50%)))
     ) !important;
 }
 
@@ -1939,21 +1959,28 @@ html[data-agent-console-resizing="true"] webview {
 
 .pudding-vditor-host .vditor-ir .vditor-reset > table {
   box-sizing: border-box;
-  display: grid;
-  grid-template-columns: repeat(
-    var(--pudding-vditor-table-columns, 1),
-    minmax(8rem, auto)
-  );
+  display: table;
   width: 100%;
   max-width: 100%;
   margin: 0.8rem 0;
-  overflow-x: auto;
-  overflow-y: hidden;
   border: 1px solid color-mix(in oklch, var(--border), transparent 30%);
   border-radius: 0.5rem;
   border-collapse: separate;
   border-spacing: 0;
   background: var(--workspace-file-editor-background);
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  > table[data-pudding-vditor-table-layout="grid"] {
+  display: grid;
+  grid-template-columns: repeat(
+    var(--pudding-vditor-table-columns),
+    minmax(8rem, auto)
+  );
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .pudding-vditor-host .vditor-ir .vditor-reset > table tr,
@@ -1962,8 +1989,17 @@ html[data-agent-console-resizing="true"] webview {
   background: transparent;
 }
 
-.pudding-vditor-host .vditor-ir .vditor-reset > table > :is(thead, tbody),
-.pudding-vditor-host .vditor-ir .vditor-reset > table > :is(thead, tbody) > tr {
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  > table[data-pudding-vditor-table-layout="grid"]
+  > :is(thead, tbody),
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  > table[data-pudding-vditor-table-layout="grid"]
+  > :is(thead, tbody)
+  > tr {
   display: contents;
 }
 

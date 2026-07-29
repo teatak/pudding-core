@@ -10,6 +10,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { AppIcon } from "@/components/AppIcon";
 import { BuiltinAppIcon } from "@/components/AppIdentity";
 import { IdentityIcon } from "@/components/IdentityIcon";
+import { composerSuggestionPanelClassName } from "@/components/composerControlStyles";
 import { type ComposerMentionReference } from "@/components/composerMentionReferences";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -52,7 +53,8 @@ export function ComposerMentionMenu({
   return (
     <div
       className={cn(
-        "pudding-composer-suggestion absolute bottom-full z-40 w-[min(16rem,calc(100%-2rem))] rounded-t-lg border border-b-0 bg-card text-sm text-card-foreground after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-card after:content-['']",
+        "absolute bottom-full z-40 w-[min(16rem,calc(100%-2rem))] text-sm",
+        composerSuggestionPanelClassName,
         align === "start" ? "left-4" : "left-16",
       )}
       role="listbox"
@@ -78,8 +80,8 @@ export function ComposerMentionMenu({
                   ref={index === selectedIndex ? selectedRef : undefined}
                   aria-selected={index === selectedIndex}
                   className={cn(
-                    "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-muted",
-                    index === selectedIndex && "bg-muted text-foreground",
+                    "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-control-hover active:bg-control-active",
+                    index === selectedIndex && "bg-control-hover text-foreground",
                   )}
                   role="option"
                   type="button"

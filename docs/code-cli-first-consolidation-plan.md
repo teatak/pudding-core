@@ -78,7 +78,9 @@ M2 后剩余主要缺口:
 
 - `command` 是唯一命令入口,模型不能提供 shell executable 或启动参数。
 - `auto` 使用 shell AST 拆分静态命令段并逐段应用负面风险规则;未知命令名本身不触发审批。
-- Unix 使用 `/bin/sh -lc`;Windows 后续使用 PowerShell 非交互模式。
+- Unix 命令固定使用 `/bin/sh -c`;macOS daemon 启动时只捕获一次用户交互式登录
+  shell 的受控环境快照,不会在每次命令执行时加载登录配置。Windows 后续使用 PowerShell
+  非交互模式。
 - 安全管道、简单复合命令和 Project 内重定向可自动执行;变量展开、命令替换等
   无法可靠静态审阅的结构降级为审批。
 - approval 展示完整 command、cwd、env key、timeout 与风险说明。

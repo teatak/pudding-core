@@ -287,7 +287,7 @@ function Ring({ current, estimate, tone }: { current: number; estimate: number; 
   const estimateOffset = circumference - (Math.min(100, estimate) / 100) * circumference;
   const showEstimate = estimate > current + 0.3;
   return (
-    <svg aria-hidden="true" className="size-[18px] -rotate-90" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="size-4 -rotate-90" viewBox="0 0 24 24">
       <circle className="stroke-muted-foreground/30" cx="12" cy="12" fill="none" r={radius} strokeWidth="2.4" />
       {showEstimate ? (
         <circle

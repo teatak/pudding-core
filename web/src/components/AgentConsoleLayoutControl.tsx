@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { PanelLeft, PanelRight, PictureInPicture2 } from "@/components/icons";
 
 import {
@@ -27,6 +29,8 @@ const icons = {
 export function AgentConsoleLayoutControl() {
   const { t } = useI18n();
   const mode = useAgentConsoleMode();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const Icon = icons[mode];
   const options: Array<{ value: AgentConsoleMode; label: string }> = [
     { value: "floating", label: t("agentConsole.floating") },
@@ -35,8 +39,23 @@ export function AgentConsoleLayoutControl() {
   ];
 
   return (
-    <DropdownMenu>
-      <Tooltip>
+    <DropdownMenu
+      open={menuOpen}
+      onOpenChange={(open) => {
+        setMenuOpen(open);
+        if (open) {
+          setTooltipOpen(false);
+        }
+      }}
+    >
+      <Tooltip
+        open={tooltipOpen}
+        onOpenChange={(open) => {
+          if (!menuOpen) {
+            setTooltipOpen(open);
+          }
+        }}
+      >
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
@@ -52,7 +71,11 @@ export function AgentConsoleLayoutControl() {
         </TooltipTrigger>
         <TooltipContent side="bottom">{t("agentConsole.layout")}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent
+        align="end"
+        className="w-44"
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
         <DropdownMenuRadioGroup
           value={mode}
           onValueChange={(value) => setAgentConsoleMode(value as AgentConsoleMode)}

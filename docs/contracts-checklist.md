@@ -124,9 +124,12 @@ executable。cwd 必须位于当前 Project/turn grant 授权目录中;前台默
 审批。常规 Git `clone/fetch/pull` 与依赖下载自动允许。安全的自定义环境和后台命令沿用
 同一套风险判断,不额外强制审批。
 
-命令环境的 `PATH` 在 desktop daemon 原有值后补充 Homebrew 与常见用户工具链目录;
-direct/sandbox runner 均必须按这份合并后的 `PATH` 解析可执行文件,不能依赖 Electron
-进程启动时的精简 `PATH`。
+macOS desktop daemon 启动时通过用户交互式登录 shell 捕获一次开发环境快照,仅保留
+`PATH`、工具链目录、证书和 SSH Agent socket 等受控白名单变量;捕获失败或超时则
+回退到 daemon 进程环境。Agent 命令仍由固定的 `/bin/sh -c` 执行,不会为每条命令
+重复加载用户 shell 配置。`PATH` 还会补充 Homebrew 与常见用户工具链目录;
+direct/sandbox runner 均必须按这份合并后的环境解析可执行文件,不能依赖 Electron
+进程启动时的精简环境。
 
 `ask` 和 `auto` 下,低风险前台与后台 CLI 默认在当前 Project 或 session 临时工作区
 沙箱中运行;风险命令经用户批准后,仅该次原始调用绕过 CLI 沙箱。`full` 不套 CLI

@@ -239,9 +239,9 @@ func runGit(ctx context.Context, dir string, stdoutLimit int, args ...string) gi
 func runGitInput(ctx context.Context, dir string, stdoutLimit int, input []byte, args ...string) gitExecResult {
 	gitArgs := []string{"--no-pager", "-c", "core.fsmonitor=false", "-c", "color.ui=false"}
 	gitArgs = append(gitArgs, args...)
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
-	cmd.Dir = dir
-	cmd.Env, _ = commandEnvironment(map[string]string{
+	stdout := newTruncatingBuffer(stdoutLimit)
+	stderr := newTruncatingBuffer(gitStderrLimitBytes)
+	env, err := commandEnvironment(map[string]string{
 		"GIT_ATTR_NOSYSTEM":   "1",
 		"GIT_OPTIONAL_LOCKS":  "0",
 		"GIT_PAGER":           "cat",
@@ -251,8 +251,16 @@ func runGitInput(ctx context.Context, dir string, stdoutLimit int, input []byte,
 		"NO_COLOR":            "1",
 		"PAGER":               "cat",
 	})
-	stdout := newTruncatingBuffer(stdoutLimit)
-	stderr := newTruncatingBuffer(gitStderrLimitBytes)
+	if err != nil {
+		return gitExecResult{stdout: stdout, stderr: stderr, err: err}
+	}
+	executable, err := resolveExecutableFromEnv("git", dir, env)
+	if err != nil {
+		return gitExecResult{stdout: stdout, stderr: stderr, err: err}
+	}
+	cmd := exec.CommandContext(ctx, executable, gitArgs...)
+	cmd.Dir = dir
+	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if input != nil {

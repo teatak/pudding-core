@@ -54,6 +54,7 @@ import {
 } from "@/components/ComposerAttachments";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
+import { composerShellClassName } from "@/components/composerControlStyles";
 import { ComposerTextArea, parseSlashSubmitCommand, type ComposerTextAreaHandle, type SlashCommand, type SlashSubmitCommand } from "@/components/ComposerTextArea";
 import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
@@ -1007,7 +1008,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           ) : null}
           <div
             className={cn(
-              "pudding-composer-shell relative rounded-[18px] border border-border/70 bg-card transition-shadow",
+              composerShellClassName,
               micActive && "is-mic-active",
             )}
           >

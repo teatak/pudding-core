@@ -25,7 +25,7 @@ func TestCommandEnvironmentIncludesDesktopToolchainPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pathValue := sandboxEnvValue(env, "PATH")
+	pathValue := executableEnvValue(env, "PATH")
 	parts := filepath.SplitList(pathValue)
 	if len(parts) == 0 || parts[0] != os.Getenv("PATH") {
 		t.Fatalf("original PATH must remain first: %q", pathValue)
@@ -68,6 +68,31 @@ func TestDirectCommandRunnerResolvesExecutableFromCommandEnvironment(t *testing.
 	}
 	if string(output) != "resolved" {
 		t.Fatalf("output = %q, want resolved", output)
+	}
+}
+
+func TestResolveExecutableFromEnvDoesNotFallBackToProcessPATH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX executable")
+	}
+	processBin := t.TempDir()
+	executable := filepath.Join(processBin, "pudding-process-path-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", processBin)
+
+	if _, err := resolveExecutableFromEnv("pudding-process-path-fixture", t.TempDir(), []string{"PATH=" + t.TempDir()}); err == nil {
+		t.Fatal("expected supplied command environment to exclude the process PATH")
+	}
+}
+
+func TestCompareVersionNamesUsesNumericOrder(t *testing.T) {
+	if compareVersionNames("v20.18.0", "v9.22.1") <= 0 {
+		t.Fatal("expected Node 20 to sort before Node 9")
+	}
+	if compareVersionNames("v20.10.0", "v20.9.0") <= 0 {
+		t.Fatal("expected Node 20.10 to sort before Node 20.9")
 	}
 }
 

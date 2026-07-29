@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -357,6 +359,22 @@ func TestAppMCPStdioEnvDoesNotInheritDaemonSecrets(t *testing.T) {
 	}
 	if got := appMCPEnvValue(env, "PATH"); got == "" {
 		t.Fatal("App MCP PATH is empty")
+	}
+}
+
+func TestAppMCPResolveCommandUsesSuppliedEnvironmentOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX executable")
+	}
+	processBin := t.TempDir()
+	executable := filepath.Join(processBin, "pudding-mcp-path-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", processBin)
+
+	if _, err := appMCPResolveCommand("pudding-mcp-path-fixture", []string{"PATH=" + t.TempDir()}); err == nil {
+		t.Fatal("expected supplied MCP environment to exclude the daemon process PATH")
 	}
 }
 

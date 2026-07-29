@@ -14,9 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -872,24 +870,7 @@ func appMCPStdioEnv(extra map[string]string) ([]string, error) {
 }
 
 func appMCPResolveCommand(command string, env []string) (string, error) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return "", errors.New("stdio mcp endpoint command is required")
-	}
-	if strings.ContainsRune(command, os.PathSeparator) {
-		return command, nil
-	}
-	pathValue := appMCPEnvValue(env, "PATH")
-	for _, dir := range filepath.SplitList(pathValue) {
-		candidate := filepath.Join(dir, command)
-		if appMCPExecutable(candidate) {
-			return candidate, nil
-		}
-	}
-	if found, err := exec.LookPath(command); err == nil {
-		return found, nil
-	}
-	return "", fmt.Errorf("stdio mcp command %q was not found in PATH", command)
+	return resolveExecutableFromEnv(command, "", env)
 }
 
 func appMCPEnvValue(env []string, key string) string {
@@ -900,14 +881,6 @@ func appMCPEnvValue(env []string, key string) string {
 		}
 	}
 	return ""
-}
-
-func appMCPExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	return info.Mode()&0o111 != 0
 }
 
 type appMCPRPCMessage struct {

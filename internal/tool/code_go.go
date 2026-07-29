@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -44,6 +43,13 @@ func defaultGoServerResolver(languageRoot string) (lsp.ServerSpec, error) {
 
 func resolveGoServer(languageRoot, bundledExecutable string) (lsp.ServerSpec, error) {
 	const server = "gopls"
+	env, err := commandEnvironment(map[string]string{
+		"GOPROXY":     "off",
+		"GOTOOLCHAIN": "local",
+	})
+	if err != nil {
+		return lsp.ServerSpec{}, err
+	}
 	executable := bundledExecutable
 	checked := make([]string, 0, 2)
 	if executable != "" {
@@ -51,8 +57,7 @@ func resolveGoServer(languageRoot, bundledExecutable string) (lsp.ServerSpec, er
 	}
 	if executable == "" {
 		checked = append(checked, "PATH:gopls")
-		var err error
-		executable, err = exec.LookPath(server)
+		executable, err = resolveExecutableFromEnv(server, languageRoot, env)
 		if err != nil {
 			return lsp.ServerSpec{}, &languageServerUnavailableError{
 				language: "go",
@@ -62,19 +67,12 @@ func resolveGoServer(languageRoot, bundledExecutable string) (lsp.ServerSpec, er
 			}
 		}
 	}
-	executable, err := filepath.Abs(executable)
+	executable, err = filepath.Abs(executable)
 	if err != nil {
 		return lsp.ServerSpec{}, err
 	}
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
-	}
-	env, err := commandEnvironment(map[string]string{
-		"GOPROXY":     "off",
-		"GOTOOLCHAIN": "local",
-	})
-	if err != nil {
-		return lsp.ServerSpec{}, err
 	}
 	return lsp.ServerSpec{
 		Key:     lsp.ProcessKey{LanguageRoot: languageRoot, ServerKind: server},

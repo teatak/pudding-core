@@ -51,6 +51,7 @@ export function ProjectFileViewer({
   reveal,
   selection,
   sessionID,
+  showFilesAction = false,
   tabs,
   turnDiffTabs,
   token,
@@ -63,6 +64,7 @@ export function ProjectFileViewer({
   onReference,
   onRequestClose,
   onReveal,
+  onShowFiles,
 }: {
   active: boolean;
   activeTurnDiff?: FilePreview;
@@ -72,6 +74,7 @@ export function ProjectFileViewer({
   reveal?: ProjectEditorReveal;
   selection?: ProjectTab;
   sessionID: string;
+  showFilesAction?: boolean;
   tabs: ProjectTab[];
   turnDiffTabs: FilePreview[];
   token: string;
@@ -84,6 +87,7 @@ export function ProjectFileViewer({
   onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
   onRequestClose: (keys: string[]) => void;
   onReveal: (selection: ProjectSelection) => void;
+  onShowFiles?: () => void;
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -293,6 +297,16 @@ export function ProjectFileViewer({
         active={selection}
         activeTurnDiffID={activeTurnDiff?.id}
         dirtyKeys={dirtyKeys}
+        leadingAction={showFilesAction ? (
+          <button
+            aria-label={t("project.browserFiles")}
+            className="inline-flex h-full w-8 items-center justify-center text-muted-foreground hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground"
+            type="button"
+            onClick={onShowFiles}
+          >
+            <Folders className="size-4" />
+          </button>
+        ) : undefined}
         tabs={tabs}
         turnDiffTabs={turnDiffTabs}
         onActivate={onActivate}
@@ -425,13 +439,26 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    let resizeFrame = 0;
     const updateSize = () => {
-      setViewportSize({ height: viewport.clientHeight, width: viewport.clientWidth });
+      resizeFrame = 0;
+      const height = viewport.clientHeight;
+      const width = viewport.clientWidth;
+      setViewportSize((current) =>
+        current.height === height && current.width === width ? current : { height, width },
+      );
     };
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
+    const scheduleSizeUpdate = () => {
+      if (resizeFrame) return;
+      resizeFrame = window.requestAnimationFrame(updateSize);
+    };
+    scheduleSizeUpdate();
+    const observer = new ResizeObserver(scheduleSizeUpdate);
     observer.observe(viewport);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+    };
   }, []);
 
   const fitScale = useMemo(() => {
@@ -445,6 +472,7 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
       ),
     );
   }, [imageSize.height, imageSize.width, viewportSize.height, viewportSize.width]);
+  const layoutReady = Boolean(viewportSize.width && viewportSize.height && imageSize.width && imageSize.height);
   const scale = zoomMode === "fit" ? fitScale : customScale;
   const imageWidth = imageSize.width * scale;
   const imageHeight = imageSize.height * scale;
@@ -521,8 +549,8 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
         <div
           className="flex min-h-full min-w-full items-center justify-center p-6"
           style={{
-            height: imageSize.height ? Math.max(viewportSize.height, imageHeight + 48) : undefined,
-            width: imageSize.width ? Math.max(viewportSize.width, imageWidth + 48) : undefined,
+            height: layoutReady ? Math.max(viewportSize.height, imageHeight + 48) : undefined,
+            width: layoutReady ? Math.max(viewportSize.width, imageWidth + 48) : undefined,
           }}
         >
           <img
@@ -531,10 +559,9 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
             draggable={false}
             src={src}
             style={{
-              height: imageSize.height ? imageHeight : undefined,
-              maxHeight: imageSize.height ? "none" : "100%",
-              maxWidth: imageSize.width ? "none" : "100%",
-              width: imageSize.width ? imageWidth : undefined,
+              height: layoutReady ? imageHeight : 0,
+              visibility: layoutReady ? "visible" : "hidden",
+              width: layoutReady ? imageWidth : 0,
             }}
             onError={() => setFailed(true)}
             onLoad={(event) => {

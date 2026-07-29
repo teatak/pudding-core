@@ -291,6 +291,45 @@ func TestTypeScriptServerResolverPrefersProjectLocalBinary(t *testing.T) {
 	}
 }
 
+func TestLanguageServersResolveFromCapturedEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture uses a POSIX file mode")
+	}
+	binDir := t.TempDir()
+	gopls := filepath.Join(binDir, "gopls")
+	typeScriptServer := filepath.Join(binDir, typeScriptServerKind)
+	for _, executable := range []string{gopls, typeScriptServer} {
+		writeCodeTestFile(t, executable, "#!/bin/sh\nexit 0\n")
+		if err := os.Chmod(executable, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setCommandEnvironmentSnapshotForTest(t, []string{"PATH=" + binDir})
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	goRoot := t.TempDir()
+	goSpec, err := resolveGoServer(goRoot, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedGopls, err := filepath.EvalSymlinks(gopls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if goSpec.Command != resolvedGopls {
+		t.Fatalf("gopls command = %q, want %q", goSpec.Command, resolvedGopls)
+	}
+
+	typeScriptRoot := t.TempDir()
+	typeScriptSpec, err := resolveTypeScriptServer(typeScriptRoot, typeScriptRoot, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typeScriptSpec.Command != typeScriptServer {
+		t.Fatalf("TypeScript command = %q, want %q", typeScriptSpec.Command, typeScriptServer)
+	}
+}
+
 func TestCodeLanguageForTypeScriptAndJavaScriptPaths(t *testing.T) {
 	tests := map[string]string{
 		"app.ts":  "typescript",

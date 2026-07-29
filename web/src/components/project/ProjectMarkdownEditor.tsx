@@ -476,6 +476,7 @@ function scheduleTableLayout(editor: Vditor) {
         1,
       );
       table.style.setProperty("--pudding-vditor-table-columns", String(columnCount));
+      table.dataset.puddingVditorTableLayout = "grid";
     });
   });
 }

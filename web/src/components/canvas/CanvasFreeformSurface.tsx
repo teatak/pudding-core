@@ -76,17 +76,24 @@ export function CanvasFreeformSurface({
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
+    let resizeFrame = 0;
     const update = () => {
+      resizeFrame = 0;
       const rect = element.getBoundingClientRect();
-      setContainerSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setContainerSize((current) => (current.w === w && current.h === h ? current : { w, h }));
     };
-    update();
-    const observer = new ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (resizeFrame) return;
+      resizeFrame = window.requestAnimationFrame(update);
+    };
+    scheduleUpdate();
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(element);
-    window.addEventListener("resize", update);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", update);
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
       document.body.style.userSelect = "";
       document.body.style.webkitUserSelect = "";
     };

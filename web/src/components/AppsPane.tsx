@@ -1481,7 +1481,7 @@ function CatalogAppItem({
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
-    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 hover:bg-muted">
+    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 hover:bg-control-hover active:bg-control-active">
       <button className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden text-left" type="button" onClick={onSelect}>
         <div className="relative shrink-0">
           <AppIcon icon={icon} size="lg" src={iconSrc} />

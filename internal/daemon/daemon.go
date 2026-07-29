@@ -110,6 +110,14 @@ func Start(opts Options) (*Daemon, error) {
 	if opts.MobileLAN {
 		lanURLs = lanURLsFor(ln.Addr().String())
 	}
+	environmentCtx, cancelEnvironment := context.WithTimeout(context.Background(), 5*time.Second)
+	environment, environmentErr := tool.CaptureCommandEnvironment(environmentCtx)
+	cancelEnvironment()
+	if environmentErr != nil {
+		slog.Warn("daemon: user development environment unavailable; using process environment", "err", environmentErr)
+	} else if environment.Supported {
+		slog.Info("daemon: user development environment captured", "shell", environment.Shell, "variables", environment.VariableCount)
+	}
 
 	token, err := loadOrCreateToken(home.TokenPath(dir))
 	if err != nil {

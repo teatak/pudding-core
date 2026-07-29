@@ -46,6 +46,7 @@ import type { Project, Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
+import { PuddingWordmark } from "@/components/PuddingWordmark";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { Spinner } from "@/components/Spinner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -105,7 +106,11 @@ import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
-import { setRailCollapsed, useRailCollapsed } from "@/state/railStore";
+import {
+  setRailCollapsed,
+  useRailCollapsed,
+  useRailResponsiveCollapsed,
+} from "@/state/railStore";
 
 const popoverAlignNudgePx = 3;
 const dragAutoScrollEdgePx = 44;
@@ -180,9 +185,16 @@ export function SessionRail({
   const runningTurns = useOverlayStore((state) => state.runningTurns);
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
+  const responsiveCollapsed = useRailResponsiveCollapsed();
   const isMobile = useIsMobile();
   const hover = useHoverPopover();
   const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    if (!collapsed) {
+      hover.close();
+    }
+  }, [collapsed]);
 
   useEffect(
     () =>
@@ -516,7 +528,7 @@ export function SessionRail({
                 tabIndex={-1}
                 variant="ghost"
                 onClick={() => {
-                  if (isMobile) {
+                  if (isMobile || responsiveCollapsed) {
                     hover.toggle();
                     return;
                   }
@@ -548,7 +560,7 @@ export function SessionRail({
             align="start"
             alignOffset={popoverAlignOffset}
             className={cn(
-              "flex w-[260px] flex-col !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] border-0 ring-0 outline-none",
+              "flex w-[260px] flex-col gap-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] border-0 ring-0 outline-none",
               isMobile
                 ? "h-[min(48rem,calc(100svh-var(--toolbar-h)-1rem))] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(260px,calc(100vw-1rem))]"
                 : "h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)]",
@@ -569,6 +581,9 @@ export function SessionRail({
               }
             }}
           >
+            <div className="flex h-10 shrink-0 items-center px-3">
+              <PuddingWordmark />
+            </div>
             {renderPanel()}
           </PopoverContent>
         ) : null}
@@ -609,6 +624,9 @@ export function SessionRail({
             className="h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
             style={{ paddingLeft: "var(--traffic-inset)" }}
           />
+          <div className="flex h-10 shrink-0 items-center px-3">
+            <PuddingWordmark />
+          </div>
           {renderPanel()}
         </div>
       </aside>
@@ -699,8 +717,10 @@ function sessionActivityTime(session: Session) {
 // 立即 hover 弹出 — 压制到鼠标离开触发器一次后恢复。
 function useHoverPopover(closeDelay = 160) {
   const [open, setOpen] = useState(false);
+  const openRef = useRef(false);
   const closeTimer = useRef<number | null>(null);
   const closePausedRef = useRef(false);
+  const pinnedRef = useRef(false);
   const ignoreOutsideUntilRef = useRef(0);
   const suppressRef = useRef(false);
 
@@ -711,6 +731,11 @@ function useHoverPopover(closeDelay = 160) {
     }
   }
 
+  function updateOpen(next: boolean) {
+    openRef.current = next;
+    setOpen(next);
+  }
+
   return {
     open,
     openNow() {
@@ -718,22 +743,30 @@ function useHoverPopover(closeDelay = 160) {
         return;
       }
       cancelClose();
-      setOpen(true);
+      updateOpen(true);
     },
     close() {
       cancelClose();
-      setOpen(false);
+      pinnedRef.current = false;
+      updateOpen(false);
     },
     toggle() {
-      setOpen((value) => !value);
+      cancelClose();
+      if (openRef.current && pinnedRef.current) {
+        pinnedRef.current = false;
+        updateOpen(false);
+        return;
+      }
+      pinnedRef.current = true;
+      updateOpen(true);
     },
     scheduleClose() {
       suppressRef.current = false; // 鼠标离开过一次,恢复 hover 弹出
-      if (closePausedRef.current) {
+      if (closePausedRef.current || pinnedRef.current) {
         return;
       }
       cancelClose();
-      closeTimer.current = window.setTimeout(() => setOpen(false), closeDelay);
+      closeTimer.current = window.setTimeout(() => updateOpen(false), closeDelay);
     },
     cancelClose,
     setClosePaused(paused: boolean) {
@@ -757,7 +790,10 @@ function useHoverPopover(closeDelay = 160) {
       suppressRef.current = true;
     },
     handleOpenChange(next: boolean) {
-      setOpen(next);
+      if (!next) {
+        pinnedRef.current = false;
+      }
+      updateOpen(next);
     },
   };
 }

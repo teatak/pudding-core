@@ -46,7 +46,10 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
-import { composerAttachmentRemoveStateClassName } from "@/components/composerControlStyles";
+import {
+  composerAttachmentRemoveStateClassName,
+  composerShellClassName,
+} from "@/components/composerControlStyles";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -1310,7 +1313,7 @@ function DraftComposer({
             ) : null}
             <div
               className={cn(
-                "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card transition-shadow",
+                composerShellClassName,
                 draftVoiceInputActive && "is-mic-active",
               )}
             >

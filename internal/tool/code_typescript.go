@@ -3,7 +3,6 @@ package tool
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -55,20 +54,24 @@ func defaultTypeScriptServerResolver(languageRoot, projectRoot string) (lsp.Serv
 }
 
 func resolveTypeScriptServer(languageRoot, projectRoot, bundledExecutable string) (lsp.ServerSpec, error) {
+	env, err := commandEnvironment(nil)
+	if err != nil {
+		return lsp.ServerSpec{}, err
+	}
 	checked := make([]string, 0)
 	if bundledExecutable != "" {
 		checked = append(checked, "bundled:"+bundledExecutable)
-		return typeScriptServerSpec(bundledExecutable, languageRoot)
+		return typeScriptServerSpec(bundledExecutable, languageRoot, env)
 	}
 	for _, candidate := range typeScriptServerCandidates(languageRoot, projectRoot) {
 		checked = append(checked, candidate)
 		if !isExecutableFile(candidate) {
 			continue
 		}
-		return typeScriptServerSpec(candidate, languageRoot)
+		return typeScriptServerSpec(candidate, languageRoot, env)
 	}
 	checked = append(checked, "PATH:"+typeScriptServerKind)
-	executable, err := exec.LookPath(typeScriptServerKind)
+	executable, err := resolveExecutableFromEnv(typeScriptServerKind, languageRoot, env)
 	if err != nil {
 		return lsp.ServerSpec{}, &languageServerUnavailableError{
 			language: "typescript",
@@ -81,7 +84,7 @@ func resolveTypeScriptServer(languageRoot, projectRoot, bundledExecutable string
 	if err != nil {
 		return lsp.ServerSpec{}, err
 	}
-	return typeScriptServerSpec(filepath.Clean(executable), languageRoot)
+	return typeScriptServerSpec(filepath.Clean(executable), languageRoot, env)
 }
 
 func typeScriptServerCandidates(languageRoot, projectRoot string) []string {
@@ -116,17 +119,13 @@ func isExecutableFile(path string) bool {
 	return runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0
 }
 
-func typeScriptServerSpec(executable, languageRoot string) (lsp.ServerSpec, error) {
-	env, err := commandEnvironment(nil)
-	if err != nil {
-		return lsp.ServerSpec{}, err
-	}
+func typeScriptServerSpec(executable, languageRoot string, env []string) (lsp.ServerSpec, error) {
 	command := executable
 	args := []string{"--stdio"}
 	if runtime.GOOS == "windows" {
 		extension := strings.ToLower(filepath.Ext(executable))
 		if extension == ".cmd" || extension == ".bat" {
-			command = strings.TrimSpace(os.Getenv("COMSPEC"))
+			command = strings.TrimSpace(executableEnvValue(env, "COMSPEC"))
 			if command == "" {
 				command = "cmd.exe"
 			}

@@ -39,7 +39,8 @@ import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { useAgentConsoleMode, type AgentConsoleMode } from "@/state/agentConsoleStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
-import { useRailCollapsed } from "@/state/railStore";
+import { setRailResponsiveCollapsed, useRailCollapsed } from "@/state/railStore";
+import { useMaxWidth } from "@/hooks/use-mobile";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
@@ -47,6 +48,12 @@ import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 type StageSize = {
   width: number;
   height: number;
+};
+
+type StageBreakpoint = {
+  initialized: boolean;
+  narrow: boolean;
+  railCollapsed: boolean;
 };
 
 type FloatingFrame = StageSize & {
@@ -67,8 +74,11 @@ const consoleMinimumWidth = 380;
 const consoleMinimumHeight = 320;
 const floatingDefaultWidth = consoleMinimumWidth;
 const floatingDefaultHeight = 560;
-const workspaceMinimumWidth = 320;
+const workspaceMinimumWidth = 380;
 const dockMaximumWidth = 640;
+const dockedLayoutMinimumWidth = 800;
+const sessionRailWidth = 268;
+const workspaceAutoCloseWidth = 960;
 const dockRatioStorageKey = "pudding.agentConsoleDockRatio";
 const dockRatioFallback = 0.4;
 const floatingResizeHandleStyles: NonNullable<RndProps["resizeHandleStyles"]> = {
@@ -151,10 +161,19 @@ export function App() {
   const workspaceOpen = useWorkspaceOpen();
   const agentConsoleMode = useAgentConsoleMode();
   const railCollapsed = useRailCollapsed();
+  const workspaceDockNarrow = useMaxWidth(dockedLayoutMinimumWidth + sessionRailWidth);
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null);
-  const [stageSize, setStageSize] = useState<StageSize>({ width: 0, height: 0 });
+  const [stageSize, setStageSize] = useState<StageSize>({
+    width: 0,
+    height: 0,
+  });
+  const [stageBreakpoint, setStageBreakpoint] = useState<StageBreakpoint>({
+    initialized: false,
+    narrow: false,
+    railCollapsed,
+  });
   const [consoleInteracting, setConsoleInteracting] = useState(false);
   const [dockRatio, setDockRatio] = useState(readDockRatio);
   const [floatingFrame, setFloatingFrame] = useState<FloatingFrame>({
@@ -172,6 +191,8 @@ export function App() {
   const dockResizeCleanupRef = useRef<(() => void) | null>(null);
   const floatingDragCleanupRef = useRef<(() => void) | null>(null);
   const floatingResizeCleanupRef = useRef<(() => void) | null>(null);
+  const workspaceAutoCloseNarrowRef = useRef(false);
+  const previousWorkspaceOpenRef = useRef(workspaceOpen);
   const previewTokenRef = useRef(token);
 
   const appsActive = view === "apps";
@@ -181,12 +202,59 @@ export function App() {
   const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
   const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
   const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
+  const workspaceDocked = effectiveWorkspaceOpen && agentConsoleMode !== "floating";
+  const stageMeasurementMatchesLayout =
+    stageBreakpoint.initialized &&
+    stageBreakpoint.railCollapsed === railCollapsed;
+  const workspaceAutoCloseNarrow =
+    workspaceDocked &&
+    railCollapsed &&
+    stageMeasurementMatchesLayout &&
+    stageBreakpoint.narrow;
   const consoleDisplayMode: ConsoleDisplayMode = effectiveWorkspaceOpen ? agentConsoleMode : "full";
   const activeSessionIDs = (
     standaloneViewActive
       ? []
       : [selectedSessionID, showSplit ? splitSessionID : undefined]
   ).filter((sessionID): sessionID is string => Boolean(sessionID));
+
+  useLayoutEffect(() => {
+    setRailResponsiveCollapsed(workspaceDocked && workspaceDockNarrow);
+  }, [workspaceDockNarrow, workspaceDocked]);
+
+  useEffect(
+    () => () => {
+      setRailResponsiveCollapsed(false);
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const wasOpen = previousWorkspaceOpenRef.current;
+    previousWorkspaceOpenRef.current = workspaceOpen;
+    if (!wasOpen && workspaceOpen) {
+      // 用户或显式资源操作在当前窄区重新打开后，本轮不再自动关回去。
+      workspaceAutoCloseNarrowRef.current = true;
+    }
+  }, [workspaceOpen]);
+
+  useLayoutEffect(() => {
+    if (!stageMeasurementMatchesLayout) {
+      return;
+    }
+    if (!stageBreakpoint.narrow) {
+      workspaceAutoCloseNarrowRef.current = false;
+      return;
+    }
+    if (workspaceAutoCloseNarrow && !workspaceAutoCloseNarrowRef.current) {
+      workspaceAutoCloseNarrowRef.current = true;
+      setWorkspaceOpen(false);
+    }
+  }, [
+    stageBreakpoint.narrow,
+    stageMeasurementMatchesLayout,
+    workspaceAutoCloseNarrow,
+  ]);
 
   useEffect(() => {
     saveLastAppRoute({
@@ -210,20 +278,67 @@ export function App() {
   }, [token]);
 
   useLayoutEffect(() => {
+    if (!stageNode) {
+      return;
+    }
+    let frame = 0;
+    const measure = () => {
+      const narrow =
+        Math.round(stageNode.getBoundingClientRect().width) <= workspaceAutoCloseWidth;
+      setStageBreakpoint((current) => {
+        if (
+          current.initialized &&
+          current.narrow === narrow &&
+          current.railCollapsed === railCollapsed
+        ) {
+          return current;
+        }
+        return {
+          initialized: true,
+          narrow,
+          railCollapsed,
+        };
+      });
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(stageNode);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [railCollapsed, stageNode]);
+
+  useLayoutEffect(() => {
     if (!stageNode || consoleDisplayMode !== "floating") {
       return;
     }
-    const update = () => {
+    let frame = 0;
+    const measure = () => {
       const rect = stageNode.getBoundingClientRect();
-      setStageSize({
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      });
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setStageSize((current) => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
     };
-    update();
-    const observer = new ResizeObserver(update);
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(stageNode);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [consoleDisplayMode, stageNode]);
 
   useEffect(() => {
@@ -579,7 +694,7 @@ export function App() {
       : "0.75rem";
   const hiddenWorkspaceWidth =
     agentConsoleMode === "dock-left" || agentConsoleMode === "dock-right"
-      ? "calc(100% - clamp(min(380px, 50%), var(--agent-console-dock-width), min(640px, calc(100% - min(320px, 50%)))) - 1px)"
+      ? "calc(100% - clamp(min(380px, 50%), var(--agent-console-dock-width), min(640px, calc(100% - min(380px, 50%)))) - 1px)"
       : "100%";
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,

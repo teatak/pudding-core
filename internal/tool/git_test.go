@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -367,6 +368,27 @@ func runGitTest(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func TestRunGitResolvesFromCapturedEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture uses a POSIX shell")
+	}
+	binDir := t.TempDir()
+	gitExecutable := filepath.Join(binDir, "git")
+	if err := os.WriteFile(gitExecutable, []byte("#!/bin/sh\nprintf snapshot-git\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setCommandEnvironmentSnapshotForTest(t, []string{"PATH=" + binDir})
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	result := runGit(context.Background(), t.TempDir(), 1024, "status")
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if got := result.stdout.String(); got != "snapshot-git" {
+		t.Fatalf("stdout = %q, want snapshot-git", got)
 	}
 }
 

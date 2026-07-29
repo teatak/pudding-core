@@ -156,6 +156,7 @@ app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) {
     return;
   }
+  setApplicationIcon();
   shellLocale = normalizeNativeLocale(process.env.PUDDING_LOCALE || app.getLocale());
   updateApplicationMenu();
   try {
@@ -359,6 +360,27 @@ function createTray() {
   appTray.setToolTip(nativeAppName());
   updateTrayMenu();
   return appTray;
+}
+
+function setApplicationIcon() {
+  if (process.platform !== "darwin" || !app.dock) {
+    return;
+  }
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, "AppIcon.png") : "",
+    path.join(repoRoot, "assets", "macos", "AppIcon.png"),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) {
+      app.dock.setIcon(image);
+      return;
+    }
+  }
+  console.warn("[electron] application icon not found");
 }
 
 function updateTrayMenu() {

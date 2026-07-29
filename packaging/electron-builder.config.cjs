@@ -50,6 +50,7 @@ module.exports = {
     "package.json",
   ],
   extraResources: [
+    { from: "assets/macos/AppIcon.png", to: "AppIcon.png" },
     { from: "assets/macos/TrayTemplate.png", to: "TrayTemplate.png" },
     { from: "packaging/macos/zh-Hans.lproj", to: "zh-Hans.lproj" },
     { from: "packaging/macos/zh-Hant.lproj", to: "zh-Hant.lproj" },

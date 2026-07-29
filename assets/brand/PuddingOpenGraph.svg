@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Pudding — Local-first AI workspace">
+  <defs>
+    <linearGradient id="icon-surface" x1="0.12" y1="0.04" x2="0.88" y2="0.96">
+      <stop offset="0" stop-color="#7168FF"/>
+      <stop offset="0.48" stop-color="#584CFF"/>
+      <stop offset="1" stop-color="#4638E5"/>
+    </linearGradient>
+    <radialGradient id="icon-soft-light" cx="0.28" cy="0.12" r="0.82">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="icon-depth" cx="0.82" cy="0.9" r="0.72">
+      <stop offset="0" stop-color="#24168E" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#24168E" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="icon-plate">
+      <rect width="280" height="280" rx="67"/>
+    </clipPath>
+  </defs>
+  <rect width="1200" height="630" fill="#F7F7FB"/>
+  <circle cx="1130" cy="74" r="280" fill="#EFEDFF"/>
+  <circle cx="116" cy="602" r="210" fill="#EFEDFF"/>
+
+  <g transform="translate(104 175)">
+    <g clip-path="url(#icon-plate)">
+      <rect width="280" height="280" fill="url(#icon-surface)"/>
+      <rect width="280" height="280" fill="url(#icon-soft-light)"/>
+      <rect width="280" height="280" fill="url(#icon-depth)"/>
+    </g>
+    <rect
+      x="0.5"
+      y="0.5"
+      width="279"
+      height="279"
+      rx="66.5"
+      fill="none"
+      stroke="#FFFFFF"
+      stroke-opacity="0.13"
+    />
+    <path transform="translate(32.5 30) scale(1.85)" fill="#FFFFFF" fill-rule="evenodd" d="
+      M39 14H65
+      C91 14 107 29 107 51
+      C107 73 91 88 65 88H44
+      C42.5 88 41.5 89 40.5 90.5
+      L29 105
+      C27 108 25 110 22 110
+      C19 110 17 107.5 17 104V38
+      C17 24 27 14 39 14Z
+      M47 35H67
+      C78 35 85 41 85 51
+      C85 61 78 67 67 67H47
+      C42 67 39 64 39 59V43
+      C39 38 42 35 47 35Z"/>
+  </g>
+
+  <text x="452" y="301" fill="#17152C"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+    font-size="126" font-weight="760" letter-spacing="-5">Pudding</text>
+  <text x="460" y="377" fill="#656176"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+    font-size="39" font-weight="500">Local-first AI workspace</text>
+  <rect x="460" y="419" width="92" height="8" rx="4" fill="#584CFF"/>
+</svg>

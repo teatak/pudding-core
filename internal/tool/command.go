@@ -185,49 +185,9 @@ func commandApprovalDetails(call Call) (map[string]any, error) {
 	return details, nil
 }
 
-func commandEnvironment(custom map[string]string) ([]string, error) {
-	type envValue struct {
-		key   string
-		value string
-	}
-	values := make(map[string]envValue)
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !allowedCommandEnvKey(key) {
-			continue
-		}
-		values[strings.ToUpper(key)] = envValue{key: key, value: value}
-	}
-	for key, value := range custom {
-		key = strings.TrimSpace(key)
-		if !validCommandEnvKey(key) {
-			return nil, errors.New("env keys must match [A-Za-z_][A-Za-z0-9_]*")
-		}
-		if strings.ContainsRune(value, 0) {
-			return nil, errors.New("env values must not contain NUL bytes")
-		}
-		values[strings.ToUpper(key)] = envValue{key: key, value: value}
-	}
-	path := values["PATH"]
-	path.key = "PATH"
-	path.value = mergedExecutablePATH(path.value)
-	values["PATH"] = path
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		value := values[key]
-		out = append(out, value.key+"="+value.value)
-	}
-	return out, nil
-}
-
 func allowedCommandEnvKey(key string) bool {
 	switch strings.ToUpper(strings.TrimSpace(key)) {
-	case "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "DEVELOPER_DIR", "SDKROOT", "XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOENV", "GOFLAGS", "JAVA_HOME", "VIRTUAL_ENV", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "PIP_CERT":
+	case "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "DEVELOPER_DIR", "SDKROOT", "XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOENV", "GOFLAGS", "JAVA_HOME", "VIRTUAL_ENV", "CARGO_HOME", "RUSTUP_HOME", "PNPM_HOME", "NVM_DIR", "PYENV_ROOT", "RBENV_ROOT", "MISE_DATA_DIR", "VOLTA_HOME", "BUN_INSTALL", "SSH_AUTH_SOCK", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "PIP_CERT":
 		return true
 	default:
 		return false

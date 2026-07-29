@@ -48,6 +48,16 @@ type NameRequest =
 
 type DiscardRequest = { id: number; keys: string[]; sessionID: string };
 type ResourceClipboard = { mode: "copy" | "cut"; sessionID: string; target: ProjectEntryTarget };
+type ProjectSurfaceMode = "wide" | "compact" | "narrow";
+
+const compactProjectWidth = 520;
+const narrowProjectWidth = 420;
+
+function resolveProjectSurfaceMode(width: number): ProjectSurfaceMode {
+  if (width < narrowProjectWidth) return "narrow";
+  if (width < compactProjectWidth) return "compact";
+  return "wide";
+}
 
 export function ProjectBrowserSurface({
   active,
@@ -87,8 +97,32 @@ export function ProjectBrowserSurface({
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [surfaceMode, setSurfaceMode] = useState<ProjectSurfaceMode>("wide");
+  const [narrowPane, setNarrowPane] = useState<"tree" | "viewer">("tree");
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const searchRevealSerial = useRef(0);
   const resizeCursorCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    let frame = 0;
+    const measure = () => {
+      const nextMode = resolveProjectSurfaceMode(surface.clientWidth);
+      setSurfaceMode((current) => current === nextMode ? current : nextMode);
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(surface);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
 
   useEffect(
     () => () => resizeCursorCleanupRef.current?.(),
@@ -128,6 +162,8 @@ export function ProjectBrowserSurface({
   });
   const roots = rootsQuery.data?.roots || [];
   const activeTurnDiff = turnDiffTabs.find((preview) => preview.id === activeTurnDiffID);
+  const narrow = surfaceMode === "narrow";
+  const compact = surfaceMode !== "wide";
   const activeTurnChanges = useMemo(
     () => turnFileDiffChanges(activeTurnDiff?.fileChanges || []),
     [activeTurnDiff?.fileChanges],
@@ -216,6 +252,10 @@ export function ProjectBrowserSurface({
     }
   }, [activeTurnDiffSelection?.path, activeTurnDiffSelection?.rootID]);
   useEffect(() => {
+    if (!narrow) return;
+    setNarrowPane(activeTurnDiff || workspace.selected ? "viewer" : "tree");
+  }, [activeTurnDiff?.id, narrow, sessionID, workspace.activeKey]);
+  useEffect(() => {
     setNameRequest(undefined);
     setDeleteTarget(undefined);
     setPendingCloseKeys([]);
@@ -243,6 +283,7 @@ export function ProjectBrowserSurface({
     if (selection) {
       onDeactivateTurnDiff();
       workspace.openPreview(selection);
+      setNarrowPane("viewer");
       setEditorReveal(fileReveal.line && fileReveal.line > 0 ? {
         column: fileReveal.column,
         key: projectSelectionKey(selection),
@@ -508,6 +549,7 @@ export function ProjectBrowserSurface({
     const selection = { rootID: match.rootID, path: match.path };
     onDeactivateTurnDiff();
     workspace.openPreview(selection);
+    setNarrowPane("viewer");
     searchRevealSerial.current += 1;
     setEditorReveal({
       key: projectSelectionKey(selection),
@@ -519,122 +561,142 @@ export function ProjectBrowserSurface({
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
-  return (
-    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}>
-      <ResizablePanelGroup
-        className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
-        defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
-        disableCursor
-        id="project-browser-layout"
-        orientation="horizontal"
-        onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout)}
-      >
-        <ResizablePanel id="tree" className="min-w-0" minSize={180} maxSize="45%">
-          <ProjectSidebar
-            filesAction={(
-              <button
-                aria-label={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
-                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-
-                type="button"
-                onClick={() => setSearchOpen((current) => !current)}
-              >
-                {searchOpen ? <X className="size-3.5" /> : <Search className="size-3.5" />}
-              </button>
-            )}
-            files={(
-              searchOpen ? <ProjectSearch
-                roots={roots}
-                sessionID={sessionID}
-                token={token}
-                onClose={() => setSearchOpen(false)}
-                onOpen={openSearchMatch}
-              /> : <ProjectTree
-                active={active}
-                canPaste={resourceClipboard?.sessionID === sessionID}
-                error={rootsQuery.error}
-                expandedKeys={workspace.expandedKeys}
-                gitStatuses={gitStatuses}
-                loading={rootsQuery.isLoading}
-                roots={roots}
-                selected={activeTurnDiff ? activeTurnDiffSelection : workspace.selected}
-                sessionID={sessionID}
-                token={token}
-                onCopyAbsolutePath={copyAbsolutePath}
-                onCopyEntry={copyEntry}
-                onCopyPath={copyPath}
-                onCreate={(target, type) => setNameRequest({ mode: type === "dir" ? "newFolder" : "newFile", target })}
-                onCutEntry={cutEntry}
-                onDelete={setDeleteTarget}
-                onDuplicate={duplicateEntry}
-                onMove={moveEntry}
-                onOpenPinned={(selection) => {
-                  onDeactivateTurnDiff();
-                  workspace.openPinned(selection);
-                }}
-                onOpenPreview={(selection) => {
-                  onDeactivateTurnDiff();
-                  workspace.openPreview(selection);
-                }}
-                onOpenTerminal={openEntryTerminal}
-                onPaste={pasteEntry}
-                onReference={referenceEntry}
-                onRename={requestRename}
-                onRevealInFinder={revealEntry}
-                onToggle={workspace.toggleDirectory}
-              />
-            )}
-            git={(
-              <ProjectGitSection
-                dirtyRootIDs={dirtyRootIDs}
-                repositories={gitRepositories}
-                sessionID={sessionID}
-                token={token}
-                onOpenDiff={(selection, pinned) => {
-                  onDeactivateTurnDiff();
-                  workspace.openGitDiff(selection, pinned);
-                }}
-              />
-            )}
-          />
-        </ResizablePanel>
-        <ResizableHandle
-          className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize"
-          onPointerDownCapture={(event) => {
-            if (event.button === 0) startProjectBrowserResize(event.pointerId);
+  const projectSidebar = (
+    <ProjectSidebar
+      filesAction={(
+        <button
+          aria-label={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
+          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+          type="button"
+          onClick={() => setSearchOpen((current) => !current)}
+        >
+          {searchOpen ? <X className="size-3.5" /> : <Search className="size-3.5" />}
+        </button>
+      )}
+      files={(
+        searchOpen ? <ProjectSearch
+          roots={roots}
+          sessionID={sessionID}
+          token={token}
+          onClose={() => setSearchOpen(false)}
+          onOpen={openSearchMatch}
+        /> : <ProjectTree
+          active={active}
+          canPaste={resourceClipboard?.sessionID === sessionID}
+          error={rootsQuery.error}
+          expandedKeys={workspace.expandedKeys}
+          gitStatuses={gitStatuses}
+          loading={rootsQuery.isLoading}
+          roots={roots}
+          selected={activeTurnDiff ? activeTurnDiffSelection : workspace.selected}
+          sessionID={sessionID}
+          token={token}
+          onCopyAbsolutePath={copyAbsolutePath}
+          onCopyEntry={copyEntry}
+          onCopyPath={copyPath}
+          onCreate={(target, type) => setNameRequest({ mode: type === "dir" ? "newFolder" : "newFile", target })}
+          onCutEntry={cutEntry}
+          onDelete={setDeleteTarget}
+          onDuplicate={duplicateEntry}
+          onMove={moveEntry}
+          onOpenPinned={(selection) => {
+            onDeactivateTurnDiff();
+            workspace.openPinned(selection);
+            setNarrowPane("viewer");
+          }}
+          onOpenPreview={(selection) => {
+            onDeactivateTurnDiff();
+            workspace.openPreview(selection);
+            setNarrowPane("viewer");
+          }}
+          onOpenTerminal={openEntryTerminal}
+          onPaste={pasteEntry}
+          onReference={referenceEntry}
+          onRename={requestRename}
+          onRevealInFinder={revealEntry}
+          onToggle={workspace.toggleDirectory}
+        />
+      )}
+      git={(
+        <ProjectGitSection
+          dirtyRootIDs={dirtyRootIDs}
+          repositories={gitRepositories}
+          sessionID={sessionID}
+          token={token}
+          onOpenDiff={(selection, pinned) => {
+            onDeactivateTurnDiff();
+            workspace.openGitDiff(selection, pinned);
+            setNarrowPane("viewer");
           }}
         />
-        <ResizablePanel id="viewer" className="min-w-0" minSize={280}>
-          <ProjectFileViewer
-            active={active}
-            activeTurnDiff={activeTurnDiff}
-            absolutePath={selectedAbsolutePath}
-            dirtyKeys={dirtyKeys}
-            discardRequest={discardRequest}
-            reveal={editorReveal}
-            selection={activeTurnDiff ? undefined : workspace.selected}
-            sessionID={sessionID}
-            tabs={workspace.tabs}
-            turnDiffTabs={turnDiffTabs}
-            token={token}
-            onActivate={(selection) => {
-              onDeactivateTurnDiff();
-              workspace.activate(selection);
+      )}
+    />
+  );
+  const projectViewer = (
+    <ProjectFileViewer
+      active={active}
+      activeTurnDiff={activeTurnDiff}
+      absolutePath={selectedAbsolutePath}
+      dirtyKeys={dirtyKeys}
+      discardRequest={discardRequest}
+      reveal={editorReveal}
+      selection={activeTurnDiff ? undefined : workspace.selected}
+      sessionID={sessionID}
+      showFilesAction={narrow}
+      tabs={workspace.tabs}
+      turnDiffTabs={turnDiffTabs}
+      token={token}
+      onActivate={(selection) => {
+        onDeactivateTurnDiff();
+        workspace.activate(selection);
+      }}
+      onActivateTurnDiff={onActivateTurnDiff}
+      onCloseTurnDiffs={onCloseTurnDiffs}
+      onDirtyChange={setDirty}
+      onOpenPreview={(selection) => {
+        onDeactivateTurnDiff();
+        workspace.openPreview(selection);
+      }}
+      onPin={workspace.pinTab}
+      onReference={referenceSelection}
+      onRequestClose={requestClose}
+      onReveal={workspace.reveal}
+      onShowFiles={() => setNarrowPane("tree")}
+    />
+  );
+  return (
+    <div
+      ref={surfaceRef}
+      aria-hidden={!active}
+      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}
+    >
+      {narrow ? (
+        <div className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]">
+          {narrowPane === "tree" ? projectSidebar : projectViewer}
+        </div>
+      ) : (
+        <ResizablePanelGroup
+          className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
+          defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
+          disableCursor
+          id="project-browser-layout"
+          orientation="horizontal"
+          onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout)}
+        >
+          <ResizablePanel id="tree" className="min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
+            {projectSidebar}
+          </ResizablePanel>
+          <ResizableHandle
+            className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize"
+            onPointerDownCapture={(event) => {
+              if (event.button === 0) startProjectBrowserResize(event.pointerId);
             }}
-            onActivateTurnDiff={onActivateTurnDiff}
-            onCloseTurnDiffs={onCloseTurnDiffs}
-            onDirtyChange={setDirty}
-            onOpenPreview={(selection) => {
-              onDeactivateTurnDiff();
-              workspace.openPreview(selection);
-            }}
-            onPin={workspace.pinTab}
-            onReference={referenceSelection}
-            onRequestClose={requestClose}
-            onReveal={workspace.reveal}
           />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          <ResizablePanel id="viewer" className="min-w-0" minSize={compact ? 240 : 280}>
+            {projectViewer}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       <ProjectNameDialog
         initialName={nameRequest?.mode === "rename" ? nameRequest.target.name : ""}

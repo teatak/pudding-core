@@ -49,7 +49,7 @@ function WorkspaceActivityRow({
   return (
     <button
       aria-label={`${t("workspace.openArtifact")}: ${title}`}
-      className="no-drag-region group flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-1.5 pr-2 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="no-drag-region group flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-1.5 pr-2 text-left transition-colors hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       title={`${title} · ${detail}`}
       type="button"
       onClick={onOpen}
