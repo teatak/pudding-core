@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 5
+	currentSchemaVersion  = 6
 )
 
 var (
@@ -180,6 +180,35 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	6: func(tx *sql.Tx) error {
+		exists, err := tableColumnExists(tx, "turn_file_changes", "origin")
+		if err != nil || exists {
+			return err
+		}
+		_, err = tx.Exec(`
+			ALTER TABLE turn_file_changes
+				ADD COLUMN origin TEXT NOT NULL DEFAULT 'structured';
+		`)
+		return err
+	},
+}
+
+func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func prepareSchema(db *sql.DB, path string) error {
@@ -206,6 +235,11 @@ func prepareSchema(db *sql.DB, path string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV5Contract); err == nil {
+				if err := setSchemaVersion(db, 5); err != nil {
+					return err
+				}
+				version = 5
 			} else if err := validateSchema(db, schemaV4Contract); err == nil {
 				if err := setSchemaVersion(db, 4); err != nil {
 					return err
@@ -395,9 +429,15 @@ var schemaV4Contract = extendSchemaContract(schemaV3Contract, map[string][]strin
 	"browser_history": {"id", "url", "title", "favicon_url", "visited_at", "created_at", "updated_at"},
 }, "browser_history_visited_at")
 
-var currentSchemaContract = extendSchemaContract(schemaV4Contract, map[string][]string{
+var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]string{
 	"usage_calibrations": {"provider", "model", "sample_count", "input_ratio_ewma", "last_estimated_input_tokens", "last_actual_input_tokens", "updated_at"},
 })
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV5Contract, nil)
+	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
+	return out
+}()
 
 func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
 	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}

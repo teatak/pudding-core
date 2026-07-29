@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS turn_file_changes (
     path          TEXT    NOT NULL,
     original_path TEXT    NOT NULL DEFAULT '',
     kind          TEXT    NOT NULL,
+    origin        TEXT    NOT NULL DEFAULT 'structured',
     additions     INTEGER NOT NULL DEFAULT 0,
     deletions     INTEGER NOT NULL DEFAULT 0,
     binary        INTEGER NOT NULL DEFAULT 0,

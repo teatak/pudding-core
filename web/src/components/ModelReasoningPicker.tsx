@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown } from "@/components/icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight } from "@/components/icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   listProviders,
   updateSession,
-  type ProviderModel,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -14,25 +13,21 @@ import { BrandIcon } from "@/components/BrandIcons";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuRadioItem as DropdownMenuRadioItem,
-  AppDropdownMenuSeparator as DropdownMenuSeparator,
-  AppDropdownMenuSubContent as DropdownMenuSubContent,
-  AppDropdownMenuSubTrigger as DropdownMenuSubTrigger,
 } from "@/components/AppMenu";
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import {
   defaultReasoningEffortForSelection,
   reasoningEffortOptionsForSelection,
 } from "@/components/ReasoningEffortChip";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
-  DropdownMenuSub,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
@@ -63,6 +58,7 @@ export function ModelReasoningPicker({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const reasoningMenu = useHoverSubmenu();
 
   const providersQuery = useQuery({
     queryKey: queryKeys.providers(),
@@ -129,15 +125,20 @@ export function ModelReasoningPicker({
   const knownDefaultReasoning = defaultReasoningEffort && reasoningOptions.includes(defaultReasoningEffort) ? defaultReasoningEffort : undefined;
   const displayReasoning = selectedReasoning === "auto" && knownDefaultReasoning ? knownDefaultReasoning : selectedReasoning;
 
-  const [expanded, setExpanded] = useState(selectedProvider);
+  const [viewedProfileID, setViewedProfileID] = useState(selectedProvider);
   useEffect(() => {
     if (open) {
-      const expandedProfile = selectableProfiles.some((profile) => profile.id === selectedProvider)
+      const initialProfile = selectableProfiles.some((profile) => profile.id === selectedProvider)
         ? selectedProvider
         : selectableProfiles[0]?.id || "";
-      setExpanded(expandedProfile);
+      setViewedProfileID(initialProfile);
     }
   }, [open, selectedProvider, selectableProfiles]);
+  const viewedProfile = selectableProfiles.find((profile) => profile.id === viewedProfileID);
+  const profilePaneHeight = Math.min(
+    Math.max(selectableProfiles.length * 34 + 12, 160),
+    320,
+  );
 
   useEffect(() => {
     if (!providersQuery.isSuccess) {
@@ -151,8 +152,16 @@ export function ModelReasoningPicker({
   const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${displayReasoning}`) : "";
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          reasoningMenu.close();
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
           className={cn(
@@ -177,10 +186,11 @@ export function ModelReasoningPicker({
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
         align="end"
-        className="w-44"
+        className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[19rem] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0"
+        collisionPadding={8}
         side="top"
         sideOffset={8}
         onCloseAutoFocus={(event) => {
@@ -189,73 +199,175 @@ export function ModelReasoningPicker({
         }}
       >
         {reasoningOptions.length > 0 ? (
-          <>
-            <DropdownMenuLabel>{t("provider.reasoningEffort")}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={displayReasoning} onValueChange={(next) => onReasoningChange(next === "auto" ? "" : next)}>
-              {reasoningOptions.map((item) => (
-                <DropdownMenuRadioItem key={item} className="h-7 text-xs" value={item}>
-                  {t(`provider.reasoningEffort.${item}`)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-          </>
+          <div className="shrink-0 border-b border-border/70 p-1.5">
+            <DropdownMenu
+              modal={false}
+              open={reasoningMenu.open}
+              onOpenChange={reasoningMenu.setOpen}
+            >
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex h-8 w-full items-center rounded-md px-2 text-left text-[13px] hover:bg-control-hover active:bg-control-active data-[state=open]:bg-control-hover"
+                  type="button"
+                  onPointerEnter={reasoningMenu.openFromHover}
+                  onPointerLeave={reasoningMenu.closeFromHover}
+                >
+                  <span className="text-muted-foreground">{t("provider.reasoningEffort")}</span>
+                  <span className="ml-auto">{reasoningLabel}</span>
+                  <ChevronRight className="ml-2 size-3.5 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="w-28 min-w-28"
+                collisionPadding={8}
+                side="right"
+                sideOffset={6}
+                onPointerEnter={reasoningMenu.cancelClose}
+                onPointerLeave={reasoningMenu.closeFromHover}
+              >
+                <DropdownMenuRadioGroup
+                  value={displayReasoning}
+                  onValueChange={(next) => {
+                    onReasoningChange(next === "auto" ? "" : next);
+                    reasoningMenu.close();
+                  }}
+                >
+                  {reasoningOptions.map((item) => (
+                    <DropdownMenuRadioItem key={item} className="h-7 text-xs" value={item}>
+                      {t(`provider.reasoningEffort.${item}`)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         ) : null}
-        <DropdownMenuLabel>{t("session.model")}</DropdownMenuLabel>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-8 min-w-0" >
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent alignOffset={-164} className="w-56 max-w-[calc(100vw-2rem)] p-2">
-            {providersQuery.isLoading ? (
-              <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
-            ) : selectableProfiles.length === 0 ? (
-              <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
-            ) : (
-              <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
+        {providersQuery.isLoading ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+            <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+          </div>
+        ) : selectableProfiles.length === 0 ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+            <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+          </div>
+        ) : selectableProfiles.length === 1 ? (
+          <div
+            className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
+            style={{ height: profilePaneHeight }}
+          >
+            <ProfileModels
+              currentModel={currentModelAvailable ? selectedModel : ""}
+              isCurrentProfile={currentModelAvailable}
+              profile={selectableProfiles[0]}
+              onPick={(model) => {
+                const profile = selectableProfiles[0];
+                if (session) {
+                  patchMutation.mutate({ provider: profile.id, model });
+                  return;
+                }
+                onChange?.({ provider: profile.id, model });
+                setOpen(false);
+              }}
+            />
+          </div>
+        ) : (
+          <div
+            className="grid min-h-0 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
+            style={{ height: profilePaneHeight }}
+          >
+            <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1.5">
+              <div className="grid gap-0.5">
                 {selectableProfiles.map((profile) => {
-                  const profileSelected = currentModelAvailable && selectedProvider === profile.id;
+                  const viewed = viewedProfileID === profile.id;
+                  const current = currentModelAvailable && selectedProvider === profile.id;
                   return (
-                    <AccordionItem key={profile.id} className="not-last:border-b-0" value={profile.id}>
-                      <AccordionTrigger
-                        aria-current={profileSelected ? "true" : undefined}
-                        className={cn(
-                          "min-w-0 items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:ml-2 [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70",
-                          profileSelected && "text-foreground",
-                        )}
-
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <RoundBrandIcon name={providerBrandKey(profile)} />
-                          <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
-                          {profileSelected ? <span className="size-2 shrink-0 rounded-full bg-success/85" /> : null}
-                        </span>
-                      </AccordionTrigger>
-                      <AccordionContent className="pb-0">
-                        <ProfileModels
-                          currentModel={currentModelAvailable && selectedProvider === profile.id ? selectedModel : ""}
-                          isCurrentProfile={currentModelAvailable && selectedProvider === profile.id}
-                          profile={profile}
-                          onPick={(model) => {
-                            if (session) {
-                              patchMutation.mutate({ provider: profile.id, model });
-                              return;
-                            }
-                            onChange?.({ provider: profile.id, model });
-                            setOpen(false);
-                          }}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
+                    <button
+                      key={profile.id}
+                      aria-current={viewed ? "true" : undefined}
+                      className={cn(
+                        "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-control-hover hover:text-foreground active:bg-control-active",
+                        viewed && "bg-control-hover text-foreground",
+                      )}
+                      type="button"
+                      onClick={() => {
+                        reasoningMenu.close();
+                        setViewedProfileID(profile.id);
+                      }}
+                    >
+                      <RoundBrandIcon name={providerBrandKey(profile)} />
+                      <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
+                      {current ? <span className="size-1.5 shrink-0 rounded-full bg-success" /> : null}
+                    </button>
                   );
                 })}
-              </Accordion>
-            )}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              </div>
+            </div>
+            <div className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
+              {viewedProfile ? (
+                <ProfileModels
+                  currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
+                  isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
+                  profile={viewedProfile}
+                  onPick={(model) => {
+                    if (session) {
+                      patchMutation.mutate({ provider: viewedProfile.id, model });
+                      return;
+                    }
+                    onChange?.({ provider: viewedProfile.id, model });
+                    setOpen(false);
+                  }}
+                />
+              ) : (
+                <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
+}
+
+function useHoverSubmenu() {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+  const close = useCallback(() => {
+    clearTimer();
+    setOpen(false);
+  }, [clearTimer]);
+  const openFromHover = useCallback(() => {
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      setOpen(true);
+      timerRef.current = null;
+    }, 80);
+  }, [clearTimer]);
+  const closeFromHover = useCallback(() => {
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      timerRef.current = null;
+    }, 180);
+  }, [clearTimer]);
+
+  useEffect(() => clearTimer, [clearTimer]);
+
+  return {
+    cancelClose: clearTimer,
+    close,
+    closeFromHover,
+    open,
+    openFromHover,
+    setOpen,
+  };
 }
 
 function RoundBrandIcon({
@@ -299,7 +411,7 @@ function ProfileModels({
         return (
           <button
             key={model}
-            className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md py-1.5 pr-2.5 pl-5 text-left text-[13px] hover:bg-accent"
+            className="flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] hover:bg-control-hover active:bg-control-active"
 
             type="button"
             onClick={() => onPick(model)}

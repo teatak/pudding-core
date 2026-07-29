@@ -16,7 +16,7 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 	writeTestFile(t, root, "node_modules/ignored.js", "before\n")
 
 	tracker := New()
-	if err := tracker.EnsureBaseline("turn_1", []string{root}); err != nil {
+	if err := tracker.BeginCall("turn_1", "call_1", []string{root}, nil, store.FileChangeOriginCommandObserved); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, root, "modify.txt", "after\n")
@@ -28,6 +28,9 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 	}
 	writeTestFile(t, root, "added.txt", "new\n")
 	writeTestFile(t, root, "node_modules/ignored.js", "after\n")
+	if err := tracker.EndCall("turn_1", "call_1"); err != nil {
+		t.Fatal(err)
+	}
 
 	changes, err := tracker.Finish("turn_1")
 	if err != nil {
@@ -52,23 +55,36 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 	if change := byPath["new-name.txt"]; change.Kind != store.FileChangeRenamed || change.OriginalPath != "old-name.txt" {
 		t.Fatalf("renamed change = %+v", change)
 	}
+	for _, change := range changes {
+		if change.Origin != store.FileChangeOriginCommandObserved {
+			t.Fatalf("origin = %q, change = %+v", change.Origin, change)
+		}
+	}
 }
 
-func TestTrackerAddsNewRootsBeforeTheyAreUsed(t *testing.T) {
+func TestTrackerAccumulatesCallsAcrossRoots(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
 	writeTestFile(t, first, "first.txt", "one\n")
 	writeTestFile(t, second, "second.txt", "two\n")
 
 	tracker := New()
-	if err := tracker.EnsureBaseline("turn_2", []string{first}); err != nil {
+	firstPath := filepath.Join(first, "first.txt")
+	if err := tracker.BeginCall("turn_2", "call_first", []string{first, second}, []string{firstPath}, store.FileChangeOriginStructured); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, first, "first.txt", "changed\n")
-	if err := tracker.EnsureBaseline("turn_2", []string{first, second}); err != nil {
+	if err := tracker.EndCall("turn_2", "call_first"); err != nil {
+		t.Fatal(err)
+	}
+	secondPath := filepath.Join(second, "second.txt")
+	if err := tracker.BeginCall("turn_2", "call_second", []string{first, second}, []string{secondPath}, store.FileChangeOriginStructured); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, second, "second.txt", "changed\n")
+	if err := tracker.EndCall("turn_2", "call_second"); err != nil {
+		t.Fatal(err)
+	}
 
 	changes, err := tracker.Finish("turn_2")
 	if err != nil {
@@ -76,6 +92,11 @@ func TestTrackerAddsNewRootsBeforeTheyAreUsed(t *testing.T) {
 	}
 	if len(changes) != 2 {
 		t.Fatalf("changes = %+v", changes)
+	}
+	for _, change := range changes {
+		if change.Origin != store.FileChangeOriginStructured {
+			t.Fatalf("origin = %q, change = %+v", change.Origin, change)
+		}
 	}
 }
 
@@ -85,13 +106,22 @@ func TestTrackerPairsDuplicateRenamesDeterministically(t *testing.T) {
 	writeTestFile(t, root, "b.txt", "same\n")
 
 	tracker := New()
-	if err := tracker.EnsureBaseline("turn_rename", []string{root}); err != nil {
+	targets := []string{
+		filepath.Join(root, "a.txt"),
+		filepath.Join(root, "b.txt"),
+		filepath.Join(root, "c.txt"),
+		filepath.Join(root, "d.txt"),
+	}
+	if err := tracker.BeginCall("turn_rename", "call_rename", []string{root}, targets, store.FileChangeOriginStructured); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(filepath.Join(root, "a.txt"), filepath.Join(root, "c.txt")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(filepath.Join(root, "b.txt"), filepath.Join(root, "d.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.EndCall("turn_rename", "call_rename"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,10 +139,13 @@ func TestTrackerTreatsRemovedRootAsDeletedFiles(t *testing.T) {
 	writeTestFile(t, root, "main.go", "package main\n")
 
 	tracker := New()
-	if err := tracker.EnsureBaseline("turn_removed_root", []string{root}); err != nil {
+	if err := tracker.BeginCall("turn_removed_root", "call_remove", []string{root}, nil, store.FileChangeOriginCommandObserved); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.EndCall("turn_removed_root", "call_remove"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,7 +170,8 @@ func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
 	}
 
 	tracker := New()
-	if err := tracker.EnsureBaseline("turn_non_text", []string{root}); err != nil {
+	targets := []string{binaryPath, largePath}
+	if err := tracker.BeginCall("turn_non_text", "call_non_text", []string{root}, targets, store.FileChangeOriginStructured); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(binaryPath, []byte{0, 1, 3}, 0o644); err != nil {
@@ -146,6 +180,9 @@ func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
 	large := make([]byte, maxSnapshotContentBytes+2)
 	large[len(large)-1] = 1
 	if err := os.WriteFile(largePath, large, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.EndCall("turn_non_text", "call_non_text"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,6 +202,35 @@ func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
 	}
 	if change := byPath["large.txt"]; !change.TooLarge || change.OldContent != "" || change.NewContent != "" {
 		t.Fatalf("large change = %+v", change)
+	}
+}
+
+func TestTrackerStructuredCallExcludesUnownedExternalChanges(t *testing.T) {
+	root := t.TempDir()
+	ownedPath := filepath.Join(root, "owned.txt")
+	externalPath := filepath.Join(root, "external.txt")
+	writeTestFile(t, root, "owned.txt", "before\n")
+	writeTestFile(t, root, "external.txt", "before\n")
+
+	tracker := New()
+	if err := tracker.BeginCall("turn_scoped", "call_scoped", []string{root}, []string{ownedPath}, store.FileChangeOriginStructured); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "owned.txt", "tool change\n")
+	writeTestFile(t, root, "external.txt", "outside change\n")
+	if err := tracker.EndCall("turn_scoped", "call_scoped"); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := tracker.Finish("turn_scoped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Path != "owned.txt" || changes[0].Origin != store.FileChangeOriginStructured {
+		t.Fatalf("changes = %+v", changes)
+	}
+	if content, err := os.ReadFile(externalPath); err != nil || string(content) != "outside change\n" {
+		t.Fatalf("external file = %q, err = %v", content, err)
 	}
 }
 

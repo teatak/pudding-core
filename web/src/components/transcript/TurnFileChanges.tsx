@@ -18,6 +18,30 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
   sessionID: string;
   turnID: string;
 }) {
+  const { t } = useI18n();
+  const structuredChanges = changes.filter((change) => change.origin !== "command_observed");
+  const commandChanges = changes.filter((change) => change.origin === "command_observed");
+
+  return (
+    <div className="grid min-w-0 gap-2">
+      <FileChangeCards changes={structuredChanges} sessionID={sessionID} turnID={turnID} />
+      {commandChanges.length > 0 ? (
+        <div className="grid min-w-0 gap-1.5">
+          <div className="px-1 text-xs text-muted-foreground">
+            {t("transcript.turnFilesCommandObserved")}
+          </div>
+          <FileChangeCards changes={commandChanges} sessionID={sessionID} turnID={turnID} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FileChangeCards({ changes, sessionID, turnID }: {
+  changes: TurnFileChange[];
+  sessionID: string;
+  turnID: string;
+}) {
   const diffChanges = turnFileDiffChanges(changes);
   const resourceChanges = turnFileResourceChanges(changes);
 

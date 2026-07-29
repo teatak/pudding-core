@@ -48,12 +48,22 @@ var ignoredDirectories = map[string]struct{}{
 
 type Tracker struct {
 	mu    sync.Mutex
-	turns map[string]*turnSnapshot
+	turns map[string]*turnState
 }
 
-type turnSnapshot struct {
-	roots    []string
-	baseline map[fileKey]fileSnapshot
+type turnState struct {
+	calls   map[string]callSnapshot
+	initial map[fileKey]fileSnapshot
+	final   map[fileKey]fileSnapshot
+	touched map[fileKey]struct{}
+	origins map[fileKey]store.FileChangeOrigin
+}
+
+type callSnapshot struct {
+	roots   []string
+	targets []string
+	origin  store.FileChangeOrigin
+	before  map[fileKey]fileSnapshot
 }
 
 type fileKey struct {
@@ -70,69 +80,91 @@ type fileSnapshot struct {
 }
 
 func New() *Tracker {
-	return &Tracker{turns: make(map[string]*turnSnapshot)}
+	return &Tracker{turns: make(map[string]*turnState)}
 }
 
-// EnsureBaseline captures each newly authorized root before a Code tool can
-// mutate it. Repeated calls are cheap once the root belongs to this turn.
-func (t *Tracker) EnsureBaseline(turnID string, roots []string) error {
+// BeginCall captures the files a single tool call may mutate. Empty targets
+// mean the complete authorized project scope, used for foreground commands.
+func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin) error {
 	turnID = strings.TrimSpace(turnID)
-	if turnID == "" {
+	callID = strings.TrimSpace(callID)
+	if turnID == "" || callID == "" {
 		return nil
 	}
 	roots = normalizeRoots(roots)
 	if len(roots) == 0 {
 		return nil
 	}
-
-	t.mu.Lock()
-	tracked := t.turns[turnID]
-	existing := make(map[string]struct{})
-	if tracked != nil {
-		for _, root := range tracked.roots {
-			existing[root] = struct{}{}
-		}
-	}
-	t.mu.Unlock()
-
-	missing := make([]string, 0, len(roots))
-	for _, root := range roots {
-		if _, ok := existing[root]; !ok {
-			missing = append(missing, root)
-		}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	baseline, err := snapshotRoots(missing)
+	targets = normalizeTargets(roots, targets)
+	before, err := snapshotScope(roots, targets)
 	if err != nil {
 		return err
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	tracked = t.turns[turnID]
+	tracked := t.turns[turnID]
 	if tracked == nil {
-		tracked = &turnSnapshot{baseline: make(map[fileKey]fileSnapshot)}
+		tracked = newTurnState()
 		t.turns[turnID] = tracked
 	}
-	known := make(map[string]struct{}, len(tracked.roots))
-	for _, root := range tracked.roots {
-		known[root] = struct{}{}
+	tracked.calls[callID] = callSnapshot{
+		roots:   roots,
+		targets: targets,
+		origin:  store.NormalizeFileChangeOrigin(origin),
+		before:  before,
 	}
-	for _, root := range missing {
-		if _, ok := known[root]; ok {
-			continue
+	return nil
+}
+
+// EndCall captures the same scope after the tool returns and folds its net
+// mutations into the turn. It does not attribute changes outside this call.
+func (t *Tracker) EndCall(turnID, callID string) error {
+	turnID = strings.TrimSpace(turnID)
+	callID = strings.TrimSpace(callID)
+	t.mu.Lock()
+	tracked := t.turns[turnID]
+	if tracked == nil {
+		t.mu.Unlock()
+		return nil
+	}
+	call, ok := tracked.calls[callID]
+	if ok {
+		delete(tracked.calls, callID)
+	}
+	t.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	after, err := snapshotScope(call.roots, call.targets)
+	if err != nil {
+		return err
+	}
+	changed := changedFileKeys(call.before, after)
+	if len(changed) == 0 {
+		return nil
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tracked = t.turns[turnID]
+	if tracked == nil {
+		return nil
+	}
+	for _, key := range changed {
+		if _, seen := tracked.touched[key]; !seen {
+			tracked.touched[key] = struct{}{}
+			if file, exists := call.before[key]; exists {
+				tracked.initial[key] = file
+			}
 		}
-		tracked.roots = append(tracked.roots, root)
-		known[root] = struct{}{}
-	}
-	for key, file := range baseline {
-		if _, ok := tracked.baseline[key]; !ok {
-			tracked.baseline[key] = file
+		if file, exists := after[key]; exists {
+			tracked.final[key] = file
+		} else {
+			delete(tracked.final, key)
 		}
+		tracked.origins[key] = mergeOrigin(tracked.origins[key], call.origin)
 	}
-	sort.Strings(tracked.roots)
 	return nil
 }
 
@@ -142,20 +174,68 @@ func (t *Tracker) Finish(turnID string) ([]store.TurnFileChangeInput, error) {
 	tracked := t.turns[turnID]
 	delete(t.turns, turnID)
 	t.mu.Unlock()
-	if tracked == nil || len(tracked.roots) == 0 {
+	if tracked == nil || len(tracked.touched) == 0 {
 		return nil, nil
 	}
-	after, err := snapshotRoots(tracked.roots)
-	if err != nil {
-		return nil, err
+	changes := compareSnapshots(tracked.initial, tracked.final)
+	for i := range changes {
+		key := fileKey{root: changes[i].RootPath, path: changes[i].Path}
+		origin := tracked.origins[key]
+		if changes[i].Kind == store.FileChangeRenamed {
+			oldKey := fileKey{root: changes[i].RootPath, path: changes[i].OriginalPath}
+			origin = mergeOrigin(origin, tracked.origins[oldKey])
+		}
+		changes[i].Origin = store.NormalizeFileChangeOrigin(origin)
 	}
-	return compareSnapshots(tracked.baseline, after), nil
+	return changes, nil
 }
 
 func (t *Tracker) Discard(turnID string) {
 	t.mu.Lock()
 	delete(t.turns, strings.TrimSpace(turnID))
 	t.mu.Unlock()
+}
+
+func newTurnState() *turnState {
+	return &turnState{
+		calls:   make(map[string]callSnapshot),
+		initial: make(map[fileKey]fileSnapshot),
+		final:   make(map[fileKey]fileSnapshot),
+		touched: make(map[fileKey]struct{}),
+		origins: make(map[fileKey]store.FileChangeOrigin),
+	}
+}
+
+func mergeOrigin(current, next store.FileChangeOrigin) store.FileChangeOrigin {
+	if current == store.FileChangeOriginCommandObserved || next == store.FileChangeOriginCommandObserved {
+		return store.FileChangeOriginCommandObserved
+	}
+	return store.FileChangeOriginStructured
+}
+
+func changedFileKeys(before, after map[fileKey]fileSnapshot) []fileKey {
+	keys := make(map[fileKey]struct{}, len(before)+len(after))
+	for key, file := range before {
+		if next, ok := after[key]; !ok || file.digest != next.digest {
+			keys[key] = struct{}{}
+		}
+	}
+	for key, file := range after {
+		if previous, ok := before[key]; !ok || file.digest != previous.digest {
+			keys[key] = struct{}{}
+		}
+	}
+	out := make([]fileKey, 0, len(keys))
+	for key := range keys {
+		out = append(out, key)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].root != out[j].root {
+			return out[i].root < out[j].root
+		}
+		return out[i].path < out[j].path
+	})
+	return out
 }
 
 func normalizeRoots(roots []string) []string {
@@ -201,6 +281,121 @@ func normalizeRoots(roots []string) []string {
 		}
 	}
 	return out
+}
+
+func normalizeTargets(roots, targets []string) []string {
+	normalized := make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, raw := range targets {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || !filepath.IsAbs(raw) {
+			continue
+		}
+		_, target, _, err := projectpath.Resolve(roots, raw, true, true)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		normalized = append(normalized, target)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if len(normalized[i]) != len(normalized[j]) {
+			return len(normalized[i]) < len(normalized[j])
+		}
+		return normalized[i] < normalized[j]
+	})
+	out := make([]string, 0, len(normalized))
+	for _, target := range normalized {
+		nested := false
+		for _, parent := range out {
+			if projectpath.Inside(target, parent) {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+func snapshotScope(roots, targets []string) (map[fileKey]fileSnapshot, error) {
+	if len(targets) == 0 {
+		return snapshotRoots(roots)
+	}
+	out := make(map[fileKey]fileSnapshot)
+	remainingContentBytes := int64(maxSnapshotTotalContentBytes)
+	for _, target := range targets {
+		root := containingRoot(roots, target)
+		if root == "" {
+			continue
+		}
+		if err := snapshotPath(out, root, target, &remainingContentBytes); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func containingRoot(roots []string, path string) string {
+	for _, root := range roots {
+		if projectpath.Inside(path, root) {
+			return root
+		}
+	}
+	return ""
+}
+
+func snapshotPath(out map[fileKey]fileSnapshot, root, target string, remainingContentBytes *int64) error {
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		relative, err := filepath.Rel(root, target)
+		if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return nil
+		}
+		if file, ok := readSnapshotFile(target, remainingContentBytes); ok {
+			out[fileKey{root: root, path: filepath.ToSlash(relative)}] = file
+		}
+		return nil
+	}
+	return filepath.WalkDir(target, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if path == target && errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			if path == target {
+				return walkErr
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			if path != target {
+				if _, ignored := ignoredDirectories[entry.Name()]; ignored {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return nil
+		}
+		file, ok := readSnapshotFile(path, remainingContentBytes)
+		if ok {
+			out[fileKey{root: root, path: filepath.ToSlash(relative)}] = file
+		}
+		return nil
+	})
 }
 
 func snapshotRoots(roots []string) (map[fileKey]fileSnapshot, error) {

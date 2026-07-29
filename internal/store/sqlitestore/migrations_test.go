@@ -21,6 +21,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		3: "c996914be5b56acc17bd448f3e8d498405ce9392d79248f14550fb1bb46829f1",
 		4: "e38283316dd223f2f94183fcd94122e36e5d1ec39d5db578744846055391af59",
 		5: "76313b2ba7212b51e772206fa1877c4471a084f787b244096108f242e856ca3f",
+		6: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -117,6 +118,47 @@ func TestOpenMigratesVersionFourUsageCalibration(t *testing.T) {
 	}
 	if calibration.SampleCount != 0 || calibration.InputRatioEWMA != 1 {
 		t.Fatalf("new calibration table returned %+v", calibration)
+	}
+}
+
+func TestOpenMigratesVersionFiveFileChangeOrigins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		ALTER TABLE turn_file_changes DROP COLUMN origin;
+		PRAGMA user_version = 5;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	version, err := schemaVersion(reopened.db)
+	if err != nil || version != currentSchemaVersion {
+		t.Fatalf("schema version = %d err=%v, want %d", version, err, currentSchemaVersion)
+	}
+	var defaultOrigin string
+	if err := reopened.db.QueryRow(`
+		SELECT dflt_value
+		FROM pragma_table_info('turn_file_changes')
+		WHERE name = 'origin'
+	`).Scan(&defaultOrigin); err != nil {
+		t.Fatal(err)
+	}
+	if defaultOrigin != "'structured'" {
+		t.Fatalf("origin default = %q, want 'structured'", defaultOrigin)
 	}
 }
 

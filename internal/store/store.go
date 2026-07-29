@@ -1582,19 +1582,31 @@ type FinishTurnInput struct {
 }
 
 type FileChangeKind string
+type FileChangeOrigin string
 
 const (
 	FileChangeAdded    FileChangeKind = "added"
 	FileChangeModified FileChangeKind = "modified"
 	FileChangeDeleted  FileChangeKind = "deleted"
 	FileChangeRenamed  FileChangeKind = "renamed"
+
+	FileChangeOriginStructured      FileChangeOrigin = "structured"
+	FileChangeOriginCommandObserved FileChangeOrigin = "command_observed"
 )
+
+func NormalizeFileChangeOrigin(origin FileChangeOrigin) FileChangeOrigin {
+	if origin == FileChangeOriginCommandObserved {
+		return origin
+	}
+	return FileChangeOriginStructured
+}
 
 type TurnFileChangeInput struct {
 	RootPath     string
 	Path         string
 	OriginalPath string
 	Kind         FileChangeKind
+	Origin       FileChangeOrigin
 	Additions    int
 	Deletions    int
 	Binary       bool
@@ -1606,22 +1618,23 @@ type TurnFileChangeInput struct {
 }
 
 type TurnFileChange struct {
-	ID           string         `json:"id"`
-	SessionID    string         `json:"sessionID"`
-	TurnID       string         `json:"turnID"`
-	RootPath     string         `json:"rootPath"`
-	Path         string         `json:"path"`
-	OriginalPath string         `json:"originalPath,omitempty"`
-	Kind         FileChangeKind `json:"kind"`
-	Additions    int            `json:"additions"`
-	Deletions    int            `json:"deletions"`
-	Binary       bool           `json:"binary"`
-	TooLarge     bool           `json:"tooLarge"`
-	OldSize      int64          `json:"oldSize"`
-	NewSize      int64          `json:"newSize"`
-	OldContent   string         `json:"oldContent,omitempty"`
-	NewContent   string         `json:"newContent,omitempty"`
-	CreatedAt    time.Time      `json:"createdAt"`
+	ID           string           `json:"id"`
+	SessionID    string           `json:"sessionID"`
+	TurnID       string           `json:"turnID"`
+	RootPath     string           `json:"rootPath"`
+	Path         string           `json:"path"`
+	OriginalPath string           `json:"originalPath,omitempty"`
+	Kind         FileChangeKind   `json:"kind"`
+	Origin       FileChangeOrigin `json:"origin"`
+	Additions    int              `json:"additions"`
+	Deletions    int              `json:"deletions"`
+	Binary       bool             `json:"binary"`
+	TooLarge     bool             `json:"tooLarge"`
+	OldSize      int64            `json:"oldSize"`
+	NewSize      int64            `json:"newSize"`
+	OldContent   string           `json:"oldContent,omitempty"`
+	NewContent   string           `json:"newContent,omitempty"`
+	CreatedAt    time.Time        `json:"createdAt"`
 }
 
 type AppendTurnOutputInput struct {

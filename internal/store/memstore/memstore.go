@@ -808,6 +808,7 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 		m.fileChanges[turn.ID] = append(m.fileChanges[turn.ID], &store.TurnFileChange{
 			ID: store.NewID("change"), SessionID: turn.SessionID, TurnID: turn.ID,
 			RootPath: rootPath, Path: path, OriginalPath: strings.TrimSpace(input.OriginalPath), Kind: input.Kind,
+			Origin:    store.NormalizeFileChangeOrigin(input.Origin),
 			Additions: input.Additions, Deletions: input.Deletions, Binary: input.Binary, TooLarge: input.TooLarge,
 			OldSize: input.OldSize, NewSize: input.NewSize, OldContent: input.OldContent, NewContent: input.NewContent,
 			CreatedAt: now,

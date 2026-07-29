@@ -10,7 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const turnFileChangeSummaryColumns = `id,session_id,turn_id,root_path,path,original_path,kind,additions,deletions,binary,too_large,old_size,new_size,created_at`
+const turnFileChangeSummaryColumns = `id,session_id,turn_id,root_path,path,original_path,kind,origin,additions,deletions,binary,too_large,old_size,new_size,created_at`
 
 func insertTurnFileChangesTx(ctx context.Context, tx *sql.Tx, turn *store.Turn, changes []store.TurnFileChangeInput, now time.Time) error {
 	for _, change := range changes {
@@ -20,9 +20,10 @@ func insertTurnFileChangesTx(ctx context.Context, tx *sql.Tx, turn *store.Turn, 
 			continue
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO turn_file_changes(
-			id,session_id,turn_id,root_path,path,original_path,kind,additions,deletions,binary,too_large,old_size,new_size,old_content,new_content,created_at
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			id,session_id,turn_id,root_path,path,original_path,kind,origin,additions,deletions,binary,too_large,old_size,new_size,old_content,new_content,created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			store.NewID("change"), turn.SessionID, turn.ID, rootPath, path, strings.TrimSpace(change.OriginalPath), change.Kind,
+			store.NormalizeFileChangeOrigin(change.Origin),
 			change.Additions, change.Deletions, boolInt(change.Binary), boolInt(change.TooLarge), change.OldSize, change.NewSize,
 			change.OldContent, change.NewContent, unixMS(now),
 		)
@@ -76,17 +77,19 @@ type rowScanner interface {
 
 func scanTurnFileChangeSummary(scanner rowScanner) (*store.TurnFileChange, error) {
 	var change store.TurnFileChange
-	var kind string
+	var kind, origin string
 	var binary, tooLarge int
 	var createdAt int64
 	err := scanner.Scan(
 		&change.ID, &change.SessionID, &change.TurnID, &change.RootPath, &change.Path, &change.OriginalPath, &kind,
+		&origin,
 		&change.Additions, &change.Deletions, &binary, &tooLarge, &change.OldSize, &change.NewSize, &createdAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	change.Kind = store.FileChangeKind(kind)
+	change.Origin = store.NormalizeFileChangeOrigin(store.FileChangeOrigin(origin))
 	change.Binary = binary != 0
 	change.TooLarge = tooLarge != 0
 	change.CreatedAt = timeFromMS(createdAt)
@@ -95,11 +98,12 @@ func scanTurnFileChangeSummary(scanner rowScanner) (*store.TurnFileChange, error
 
 func scanTurnFileChangeDetail(scanner rowScanner) (*store.TurnFileChange, error) {
 	var change store.TurnFileChange
-	var kind string
+	var kind, origin string
 	var binary, tooLarge int
 	var createdAt int64
 	err := scanner.Scan(
 		&change.ID, &change.SessionID, &change.TurnID, &change.RootPath, &change.Path, &change.OriginalPath, &kind,
+		&origin,
 		&change.Additions, &change.Deletions, &binary, &tooLarge, &change.OldSize, &change.NewSize, &createdAt,
 		&change.OldContent, &change.NewContent,
 	)
@@ -107,6 +111,7 @@ func scanTurnFileChangeDetail(scanner rowScanner) (*store.TurnFileChange, error)
 		return nil, err
 	}
 	change.Kind = store.FileChangeKind(kind)
+	change.Origin = store.NormalizeFileChangeOrigin(store.FileChangeOrigin(origin))
 	change.Binary = binary != 0
 	change.TooLarge = tooLarge != 0
 	change.CreatedAt = timeFromMS(createdAt)

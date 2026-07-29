@@ -2984,7 +2984,7 @@ func TestCallTrackedToolCapturesCommandFileChanges(t *testing.T) {
 	}
 	eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
 	result := eng.callTrackedTool(context.Background(), "sess_changes", "turn_changes", store.ModeCode, tool.Call{
-		CallID: "call_changes", Name: tool.CommandRun, ProjectDirs: []string{root},
+		CallID: "call_changes", Name: tool.CommandRun, Args: json.RawMessage(`{"scope":"project","command":"printf changed"}`), ProjectDirs: []string{root},
 	})
 	if !result.Ok {
 		t.Fatalf("result = %+v", result)
@@ -3015,10 +3015,13 @@ func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), nil)
-	if err := eng.turnFiles.EnsureBaseline("turn_failed_changes", []string{root}); err != nil {
+	if err := eng.turnFiles.BeginCall("turn_failed_changes", "call_failed_changes", []string{root}, []string{path}, store.FileChangeOriginStructured); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("package new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.turnFiles.EndCall("turn_failed_changes", "call_failed_changes"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -555,6 +555,7 @@ export const turnFileChange = z.object({
   path: z.string(),
   originalPath: z.string().optional(),
   kind: z.enum(["added", "modified", "deleted", "renamed"]),
+  origin: z.enum(["structured", "command_observed"]).default("structured"),
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),
   binary: z.boolean(),
