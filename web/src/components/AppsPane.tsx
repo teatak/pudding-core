@@ -277,6 +277,7 @@ export function AppsPane({ token }: { token: string }) {
       }),
     [appsQuery.data?.apps, t],
   );
+  const builtinApps = useMemo(() => apps.filter((app) => app.source === "builtin"), [apps]);
   const allInstalledApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
   const installedByID = useMemo(() => new Map(allInstalledApps.map((app) => [app.id, app])), [allInstalledApps]);
   const catalogApps = useMemo(
@@ -544,7 +545,12 @@ export function AppsPane({ token }: { token: string }) {
         }
       />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid w-full max-w-3xl gap-8 px-6 pt-4 pb-10">
+        <div
+          className={cn(
+            "mx-auto grid w-full px-6 pt-4 pb-10",
+            detailApp || detailCatalogApp ? "max-w-3xl gap-8" : "max-w-6xl gap-7",
+          )}
+        >
           {detailApp ? (
             <AppDetail
               app={detailApp}
@@ -610,32 +616,54 @@ export function AppsPane({ token }: { token: string }) {
             </div>
           ) : (
             <>
-              <section className="grid gap-4">
-                <div className="flex items-center justify-between border-b pb-4">
-                  <h2 className="text-xl font-semibold tracking-normal">{t("apps.installedShort")}</h2>
+              {builtinApps.length > 0 ? (
+                <section className="grid gap-3">
+                  <div className="border-b pb-3">
+                    <h2 className="text-lg font-semibold tracking-normal">{t("apps.builtinTitle")}</h2>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap gap-2">
+                    {builtinApps.map((app) => (
+                      <ManagedAppTile
+                        key={app.id}
+                        app={app}
+                        token={token}
+                        onSelect={() => setDetailAppID(app.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              <section className="grid gap-3">
+                <div className="flex items-center justify-between gap-4 border-b pb-3">
+                  <h2 className="text-lg font-semibold tracking-normal">{t("apps.installedTitle")}</h2>
                   <Button
+                    className="shrink-0 rounded-full"
                     size="sm"
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     onClick={() => setMCPConfigEditor({})}
                   >
                     <Plus className="size-3.5" />
                     {t("apps.mcpAppAdd")}
                   </Button>
                 </div>
-                <div className="flex min-w-0 flex-wrap gap-x-1 gap-y-4">
-                  {apps.map((app) => (
-                    <ManagedAppTile
-                      key={app.id}
-                      app={app}
-                      token={token}
-                      onSelect={() => setDetailAppID(app.id)}
-                    />
-                  ))}
-                </div>
+                {allInstalledApps.length > 0 ? (
+                  <div className="flex min-w-0 flex-wrap gap-2">
+                    {allInstalledApps.map((app) => (
+                      <ManagedAppTile
+                        key={app.id}
+                        app={app}
+                        token={token}
+                        onSelect={() => setDetailAppID(app.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyLine>{t("apps.noInstalled")}</EmptyLine>
+                )}
               </section>
-              <section className="grid gap-4">
-                <div className="flex items-center justify-between gap-4 border-b pb-4">
+              <section className="grid gap-3">
+                <div className="flex items-center justify-between gap-4 border-b pb-3">
                   <h2 className="text-lg font-semibold tracking-normal">{t("apps.availableTitle")}</h2>
                   {upgradeTargets.length > 0 ? (
                     <Button
@@ -659,7 +687,7 @@ export function AppsPane({ token }: { token: string }) {
                     {t("apps.loadFailed")}
                   </div>
                 ) : catalogApps.length > 0 ? (
-                  <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-x-8 gap-y-5">
+                  <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-x-6 gap-y-2">
                     {catalogApps.map((app) => {
                       const installed = installedByID.get(appRegistryLocalID(app));
                       const release =
@@ -1264,12 +1292,12 @@ function ManagedAppTile({
   const iconSrc = app.source === "installed" ? appIconURL(token, app) : undefined;
   return (
     <button
-      className="group grid w-16 justify-items-center gap-1 text-center"
+      className="group grid min-h-20 w-20 min-w-0 shrink-0 content-center justify-items-center gap-1.5 rounded-lg px-1 py-2 text-center transition-colors hover:bg-control-hover active:bg-control-active"
       type="button"
       onClick={onSelect}
     >
-      <span className="relative grid size-9 place-items-center transition-transform group-hover:scale-105">
-        <AppIdentityIcon app={app} iconSrc={iconSrc} size="lg" />
+      <span className="relative shrink-0">
+        <AppIdentityIcon app={app} iconSrc={iconSrc} size="xl" />
         <span
           aria-hidden="true"
           className={cn(
@@ -1279,8 +1307,10 @@ function ManagedAppTile({
         />
         <span className="sr-only">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
       </span>
-      <span className={cn("w-full truncate text-xs", app.enabled ? "text-muted-foreground" : "text-muted-foreground/60")}>
-        {name}
+      <span className="w-full min-w-0">
+        <span className={cn("block truncate text-xs leading-5", app.enabled ? "text-foreground/80" : "text-muted-foreground/60")}>
+          {name}
+        </span>
       </span>
     </button>
   );
@@ -1481,35 +1511,37 @@ function CatalogAppItem({
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
-    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 hover:bg-control-hover active:bg-control-active">
-      <button className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden text-left" type="button" onClick={onSelect}>
-        <div className="relative shrink-0">
-          <AppIcon icon={icon} size="lg" src={iconSrc} />
-          {upgradeAvailable ? (
-            <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-background bg-destructive" />
-          ) : null}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-            <h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
-            {release.version ? <span className="shrink-0 text-xs text-muted-foreground">v{release.version}</span> : null}
-            {previewAvailable ? <Badge variant="secondary">{t("apps.previewAvailable")}</Badge> : null}
+    <div className="min-w-0 border-b border-border/60 pb-2">
+      <section className="flex min-h-24 min-w-0 items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-control-hover active:bg-control-active">
+        <button className="flex min-w-0 flex-1 items-center gap-3 self-stretch overflow-hidden text-left" type="button" onClick={onSelect}>
+          <div className="relative shrink-0">
+            <AppIcon icon={icon} size="xl" src={iconSrc} />
+            {upgradeAvailable ? (
+              <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-background bg-destructive" />
+            ) : null}
           </div>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">{description || t("apps.noDescription")}</p>
-        </div>
-      </button>
-      <Button
-        className="h-8 shrink-0 rounded-full px-4"
-        disabled={installDisabled || installing || installedCurrentOrNewer}
-        size="xs"
-        type="button"
-        variant="outline"
-        onClick={onInstall}
-      >
-        {installing ? <Spinner className="size-3.5" /> : upgradeAvailable ? <Download className="size-3.5" /> : null}
-        {installedCurrentOrNewer ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
-      </Button>
-    </section>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+              <h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
+              {release.version ? <span className="shrink-0 text-xs text-muted-foreground">v{release.version}</span> : null}
+              {previewAvailable ? <Badge variant="secondary">{t("apps.previewAvailable")}</Badge> : null}
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{description || t("apps.noDescription")}</p>
+          </div>
+        </button>
+        <Button
+          className="h-8 shrink-0 rounded-full px-3"
+          disabled={installDisabled || installing || installedCurrentOrNewer}
+          size="xs"
+          type="button"
+          variant="outline"
+          onClick={onInstall}
+        >
+          {installing ? <Spinner className="size-3.5" /> : upgradeAvailable ? <Download className="size-3.5" /> : null}
+          {installedCurrentOrNewer ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
+        </Button>
+      </section>
+    </div>
   );
 }
 
