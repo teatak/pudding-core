@@ -1,6 +1,7 @@
 import { Plus } from "@/components/icons";
 
 import { Spinner } from "@/components/Spinner";
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,8 @@ export function ComposerAddButton({
       aria-label={label}
       className={cn(
         "rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground",
-        active && "bg-muted text-foreground",
+        composerControlStateClassName,
+        active && "bg-control-active text-foreground",
       )}
       size="icon"
       type="button"

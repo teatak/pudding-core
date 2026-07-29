@@ -16,11 +16,13 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 export function SessionAudioControls({
   audioInputSupported,
@@ -503,7 +505,10 @@ export function AudioControlButtons({
             aria-disabled={outputDisabled}
             aria-label={outputLabel}
             aria-pressed={outputActive}
-            className="rounded-full"
+            className={cn(
+              "rounded-full",
+              !outputActive && composerControlStateClassName,
+            )}
             size="icon"
             type="button"
             variant={outputActive ? "default" : "ghost"}
@@ -549,7 +554,11 @@ function AudioInputButton({
           aria-disabled={disabled}
           aria-label={label}
           aria-pressed={active}
-          className={grouped ? "relative overflow-hidden" : "relative overflow-hidden rounded-full"}
+          className={cn(
+            "relative overflow-hidden",
+            !grouped && "rounded-full",
+            !active && composerControlStateClassName,
+          )}
           size="icon"
           type="button"
           variant={active ? "default" : grouped ? "outline" : "ghost"}

@@ -18,6 +18,7 @@ import {
   AppDropdownMenuSubContent as DropdownMenuSubContent,
   AppDropdownMenuSubTrigger as DropdownMenuSubTrigger,
 } from "@/components/AppMenu";
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import {
   defaultReasoningEffortForSelection,
@@ -155,8 +156,9 @@ export function ModelReasoningPicker({
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-6 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent sm:max-w-[12rem] dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
-            visibleModel ? "pl-0.5" : "pl-2",
+            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[12rem]",
+            composerControlStateClassName,
+            visibleModel ? "pl-1" : "pl-2",
             className,
           )}
           size="sm"

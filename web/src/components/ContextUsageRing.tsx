@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { getSessionUsage, type SessionUsage } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -35,7 +36,10 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
       <PopoverTrigger asChild>
         <Button
           aria-label={t("usage.contextWindow")}
-          className="relative rounded-full text-muted-foreground"
+          className={cn(
+            "relative rounded-full text-muted-foreground",
+            composerControlStateClassName,
+          )}
           size="icon"
           type="button"
           variant="ghost"

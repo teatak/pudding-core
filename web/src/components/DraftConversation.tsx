@@ -46,6 +46,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
+import { composerAttachmentRemoveStateClassName } from "@/components/composerControlStyles";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -1491,11 +1492,14 @@ function DraftLocalFolderChip({
       </button>
       <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          "absolute top-3 right-2 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          composerAttachmentRemoveStateClassName,
+        )}
         type="button"
         onClick={onRemove}
       >
-        <X className="size-3" />
+        <X className="size-2.5" />
       </button>
     </div>
   );
@@ -1552,12 +1556,15 @@ function DraftAttachmentChip({
         ) : null}
         <button
           aria-label={removeLabel}
-          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+          className={cn(
+            "absolute top-1 right-1 z-10 grid size-4 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
+            composerAttachmentRemoveStateClassName,
+          )}
           disabled={locked}
           type="button"
           onClick={onRemove}
         >
-          <X className="size-3" />
+          <X className="size-2.5" />
         </button>
       </div>
     );
@@ -1591,7 +1598,10 @@ function DraftAttachmentChip({
       </span>
       <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+        className={cn(
+          "absolute top-3 right-2 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
+          composerAttachmentRemoveStateClassName,
+        )}
         disabled={locked}
         type="button"
         onClick={(event) => {
@@ -1599,7 +1609,7 @@ function DraftAttachmentChip({
           onRemove();
         }}
       >
-        <X className="size-3" />
+        <X className="size-2.5" />
       </button>
     </div>
   );

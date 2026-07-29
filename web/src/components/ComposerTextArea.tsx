@@ -134,7 +134,7 @@ function SlashCommandMenu({
           aria-selected={index === selectedIndex}
           aria-label={`${command.label} ${command.description}`}
           className={cn(
-            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-muted",
+            "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-muted",
             index === selectedIndex && "bg-muted text-foreground",
           )}
           role="option"

@@ -7,6 +7,7 @@ import { getProject, updateProject, type Project } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -115,7 +116,10 @@ function ProjectApprovalControl({
       <PopoverTrigger asChild>
         <Button
           aria-label={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
-          className="pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal"
+          className={cn(
+            "pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal",
+            composerControlStateClassName,
+          )}
           disabled={!project || busy}
           size="sm"
 
@@ -133,7 +137,7 @@ function ProjectApprovalControl({
             <button
               key={mode}
               aria-label={t("composer.projectApproval")}
-              className="relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
+              className="relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
               type="button"
               onClick={() => {
                 if (mode !== value) {

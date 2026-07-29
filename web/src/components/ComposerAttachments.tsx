@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 
 import type { ProjectReference } from "@/api/client";
 import { Spinner } from "@/components/Spinner";
+import { composerAttachmentRemoveStateClassName } from "@/components/composerControlStyles";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import type { LocalFolderPath } from "@/lib/localFolders";
@@ -97,7 +98,7 @@ function LocalFolderChip({
 }) {
   return (
     <div
-      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
+      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm transition-colors hover:bg-control-hover"
 
     >
       <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
@@ -107,11 +108,14 @@ function LocalFolderChip({
       </button>
       <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          "absolute top-3 right-2 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          composerAttachmentRemoveStateClassName,
+        )}
         type="button"
         onClick={onRemove}
       >
-        <X className="size-3" />
+        <X className="size-2.5" />
       </button>
     </div>
   );
@@ -144,11 +148,14 @@ function ProjectReferenceChip({
       </span>
       <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          "absolute top-3 right-2 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          composerAttachmentRemoveStateClassName,
+        )}
         type="button"
         onClick={onRemove}
       >
-        <X className="size-3" />
+        <X className="size-2.5" />
       </button>
     </div>
   );
@@ -180,7 +187,7 @@ function ComposerAttachmentChip({
       <div
         className={cn(
           "group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
-          item.status === "error" ? "border-destructive/40" : "border-border/70",
+          item.status === "error" ? "border-destructive/40" : "border-border/70 hover:border-foreground/25",
         )}
       >
         <button
@@ -202,11 +209,14 @@ function ComposerAttachmentChip({
         ) : null}
         <button
           aria-label={removeLabel}
-          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className={cn(
+            "absolute top-1 right-1 z-10 grid size-4 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+            composerAttachmentRemoveStateClassName,
+          )}
           type="button"
           onClick={onRemove}
         >
-          <X className="size-3" />
+          <X className="size-2.5" />
         </button>
       </div>
     );
@@ -215,7 +225,7 @@ function ComposerAttachmentChip({
     <div
       className={cn(
         "relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm",
-        item.attachment?.sourcePath && "cursor-pointer",
+        item.attachment?.sourcePath && "cursor-pointer transition-colors hover:bg-control-hover",
         item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
 
@@ -240,14 +250,17 @@ function ComposerAttachmentChip({
       </span>
       <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          "absolute top-3 right-2 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          composerAttachmentRemoveStateClassName,
+        )}
         type="button"
         onClick={(event) => {
           event.stopPropagation();
           onRemove();
         }}
       >
-        <X className="size-3" />
+        <X className="size-2.5" />
       </button>
     </div>
   );
@@ -337,4 +350,3 @@ export function revokeAttachmentPreview(item: ComposerAttachment) {
     URL.revokeObjectURL(item.previewURL);
   }
 }
-

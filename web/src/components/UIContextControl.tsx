@@ -1,5 +1,6 @@
 import { SquareMousePointer } from "@/components/icons";
 
+import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
@@ -29,6 +30,7 @@ export function UIContextControl({
           aria-pressed={enabled}
           className={cn(
             "relative rounded-full",
+            composerControlStateClassName,
             enabled ? "text-muted-foreground" : "text-muted-foreground/45",
           )}
           size="icon"
