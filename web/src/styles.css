@@ -74,7 +74,7 @@
     --popover-foreground: oklch(0.18 0 0);
     --primary: oklch(0.205 0 0);
     --primary-foreground: oklch(0.985 0 0);
-    --primary-hover: color-mix(in oklch, var(--primary), black 8%);
+    --primary-hover: color-mix(in oklch, var(--primary), white 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 14%);
     --markdown-link: oklch(0.5 0.2 258);
     --markdown-link-hover: color-mix(in oklch, var(--markdown-link), var(--foreground) 16%);
@@ -672,8 +672,14 @@ html[data-shell] :where(
     background-color: var(--control-hover-background);
 }
 
-[data-slot="select-trigger"][data-state="open"]:not([data-disabled]) {
-    background-color: var(--control-selected-background);
+[data-slot="select-scroll-up-button"],
+[data-slot="select-scroll-down-button"] {
+    cursor: pointer;
+}
+
+[data-slot="select-scroll-up-button"]:hover,
+[data-slot="select-scroll-down-button"]:hover {
+    background-color: var(--accent);
 }
 
 [data-slot="sidebar-menu-button"]:hover:not(:disabled) {
@@ -760,7 +766,6 @@ html[data-agent-console-resizing="true"] webview {
     [data-slot="dropdown-menu-sub-content"],
     [data-slot="context-menu-content"],
     [data-slot="context-menu-sub-content"],
-    [data-slot="select-content"],
     [data-slot="popover-content"]
 ) {
     --popover: var(--floating-surface);
@@ -818,7 +823,6 @@ html[data-agent-console-resizing="true"] webview {
     [data-slot="context-menu-checkbox-item"],
     [data-slot="context-menu-radio-item"],
     [data-slot="context-menu-sub-trigger"],
-    [data-slot="select-item"],
     [data-slot="command-item"]
 ) + :is(
     [data-slot="dropdown-menu-item"],
@@ -829,7 +833,6 @@ html[data-agent-console-resizing="true"] webview {
     [data-slot="context-menu-checkbox-item"],
     [data-slot="context-menu-radio-item"],
     [data-slot="context-menu-sub-trigger"],
-    [data-slot="select-item"],
     [data-slot="command-item"]
 ) {
     margin-top: var(--menu-item-gap);

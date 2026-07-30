@@ -84,6 +84,26 @@ func TestListProjectsReturnsEmptyArrayForSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestCreateProjectAllowsEmptyDirectoryList(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/projects", map[string]any{
+		"name":     "Empty project",
+		"rootDirs": []string{},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	payload := decodeJSON[struct {
+		Name     string          `json:"name"`
+		RootDirs json.RawMessage `json:"rootDirs"`
+	}](t, resp)
+	if payload.Name != "Empty project" || string(payload.RootDirs) != "[]" {
+		t.Fatalf("unexpected project response: name=%q rootDirs=%s", payload.Name, payload.RootDirs)
+	}
+}
+
 func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
 	ms := memstore.New()
 	homeDir := t.TempDir()

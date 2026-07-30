@@ -13,6 +13,13 @@ export function AppToaster() {
         error: <OctagonXIcon className="size-4" />,
         loading: <Spinner className="size-4" />,
       }}
+      toastOptions={{
+        classNames: {
+          toast: "cn-toast",
+          content: "min-w-0 flex-1",
+          description: "min-w-0 max-w-full",
+        },
+      }}
     />
   );
 }

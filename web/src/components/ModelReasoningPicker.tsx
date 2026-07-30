@@ -93,12 +93,58 @@ export function ModelReasoningPicker({
       }
       return updateSession(token, session.id, body);
     },
-    onSuccess: async (updated) => {
+    onMutate: async (body) => {
+      if (!session) {
+        return {};
+      }
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.session(session.id) }),
+      ]);
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      const previousSession = queryClient.getQueryData<Session>(queryKeys.session(session.id));
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) =>
+        previous
+          ? {
+              sessions: previous.sessions.map((item) =>
+                item.id === session.id ? { ...item, ...body } : item,
+              ),
+            }
+          : previous,
+      );
+      queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
+        previous ? { ...previous, ...body } : previous,
+      );
+      return { previousSession, previousSessions, sessionID: session.id };
+    },
+    onError: (_error, _body, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
+      }
+      if (context?.previousSession && context.sessionID) {
+        queryClient.setQueryData(queryKeys.session(context.sessionID), context.previousSession);
+      }
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) =>
+        previous
+          ? {
+              sessions: previous.sessions.map((item) =>
+                item.id === updated.id ? updated : item,
+              ),
+            }
+          : previous,
+      );
+      queryClient.setQueryData(queryKeys.session(updated.id), updated);
       if (updated.provider && updated.model) {
         onResolvedChange?.(resolveSelection(updated.provider, updated.model));
       }
-      setOpen(false);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+    onSettled: (_data, _error, _body, context) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      if (context?.sessionID) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(context.sessionID) });
+      }
     },
   });
 
@@ -135,9 +181,14 @@ export function ModelReasoningPicker({
     }
   }, [open, selectedProvider, selectableProfiles]);
   const viewedProfile = selectableProfiles.find((profile) => profile.id === viewedProfileID);
+  const longestModelList = selectableProfiles.reduce(
+    (longest, profile) =>
+      Math.max(longest, profile.models.filter((model) => model.id).length),
+    0,
+  );
   const profilePaneHeight = Math.min(
-    Math.max(selectableProfiles.length * 34 + 12, 160),
-    320,
+    Math.max(Math.max(selectableProfiles.length, longestModelList) * 34 + 12, 160),
+    360,
   );
 
   useEffect(() => {
@@ -150,6 +201,7 @@ export function ModelReasoningPicker({
   const activeBrand = visibleModel ? providerBrandKey(activeProfile) || selectedProvider : "";
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
   const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${displayReasoning}`) : "";
+  const triggerLabel = reasoningLabel ? `${label} · ${reasoningLabel}` : label;
 
   return (
     <Popover
@@ -163,15 +215,15 @@ export function ModelReasoningPicker({
     >
       <PopoverTrigger asChild>
         <Button
-          aria-label={t("session.model")}
+          aria-label={`${t("session.model")}: ${triggerLabel}`}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-transparent py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[12rem]",
+            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-transparent py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[10.5rem]",
             composerControlStateClassName,
             visibleModel ? "pl-1" : "pl-2",
             className,
           )}
           size="sm"
-
+          title={triggerLabel}
           variant="ghost"
         >
           {visibleModel ? (
@@ -263,6 +315,8 @@ export function ModelReasoningPicker({
               onPick={(model) => {
                 const profile = selectableProfiles[0];
                 if (session) {
+                  reasoningMenu.close();
+                  setOpen(false);
                   patchMutation.mutate({ provider: profile.id, model });
                   return;
                 }
@@ -311,6 +365,8 @@ export function ModelReasoningPicker({
                   profile={viewedProfile}
                   onPick={(model) => {
                     if (session) {
+                      reasoningMenu.close();
+                      setOpen(false);
                       patchMutation.mutate({ provider: viewedProfile.id, model });
                       return;
                     }

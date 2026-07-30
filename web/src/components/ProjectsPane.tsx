@@ -5,13 +5,21 @@ import { toast } from "sonner";
 
 import { createProject, listProjects, type Project } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { AppSelectContent } from "@/components/AppSelectContent";
 import { PageHeader } from "@/components/PageHeader";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
 
@@ -118,12 +126,15 @@ export function ProjectsPane({ token }: { token: string }) {
                 <SelectTrigger aria-label={t("project.sortLabel")} className="w-40">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="updated-desc">{t("project.sortUpdated")}</SelectItem>
-                  <SelectItem value="created-desc">{t("project.sortCreated")}</SelectItem>
-                  <SelectItem value="name-asc">{t("project.sortNameAsc")}</SelectItem>
-                  <SelectItem value="name-desc">{t("project.sortNameDesc")}</SelectItem>
-                </SelectContent>
+                <AppSelectContent>
+                  <SelectGroup>
+                    <SelectLabel>{t("project.sortLabel")}</SelectLabel>
+                    <SelectItem value="updated-desc">{t("project.sortUpdated")}</SelectItem>
+                    <SelectItem value="created-desc">{t("project.sortCreated")}</SelectItem>
+                    <SelectItem value="name-asc">{t("project.sortNameAsc")}</SelectItem>
+                    <SelectItem value="name-desc">{t("project.sortNameDesc")}</SelectItem>
+                  </SelectGroup>
+                </AppSelectContent>
               </Select>
               <Button className="shrink-0" type="button" onClick={() => setAdding(true)}>
                 <FolderPlus className="size-4" />

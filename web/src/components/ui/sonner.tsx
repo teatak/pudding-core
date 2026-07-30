@@ -1,3 +1,5 @@
+"use client"
+
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
@@ -37,8 +39,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast: "cn-toast",
-          content: "min-w-0 flex-1",
-          description: "min-w-0 max-w-full",
         },
       }}
       {...props}
