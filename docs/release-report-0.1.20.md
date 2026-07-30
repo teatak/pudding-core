@@ -23,6 +23,7 @@ canonical 数据改写或索引重建。
 - 允许创建暂未关联目录的项目，并新增 API 回归测试。
 - App 包缓存改为以内容哈希作为缓存键，避免包内容更新后继续显示旧数据。
 - 改进 Toast 长文本布局、菜单弹层与 Select 滚动交互，并统一部分 hover/active 样式。
+- 收紧 Composer turn 进度提示宽度，强化完成态颜色并缩小处理中 spinner。
 - 更新 Radix UI、Lucide 和 shadcn 依赖，移除重复的独立 Radix 包声明。
 
 ## 影响范围
@@ -90,6 +91,7 @@ canonical 数据改写或索引重建。
 
 - Invalidate cached App packages by content hash when package contents change.
 - Standardize Select popovers, scrolling controls, toast layout, and interaction states.
+- Make Composer turn progress more compact with clearer completed and in-progress states.
 - Update Radix UI, Lucide, and shadcn dependencies while removing duplicate package declarations.
 
 ### Reliability and Compatibility

@@ -20,7 +20,7 @@ export function ComposerTurnProgress({ progress }: { progress: ActiveTurnPlan })
         <HoverCardTrigger asChild>
           <div
             aria-label={t("composer.planProgressAria").replace("{progress}", label)}
-            className="pointer-events-auto flex h-9 w-full max-w-[min(32rem,calc(100%-2rem))] items-center gap-2.5 rounded-lg border border-border/70 bg-popover/95 px-3 text-xs text-popover-foreground shadow-sm backdrop-blur outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="pointer-events-auto flex h-9 w-fit max-w-[min(24rem,calc(100%-2rem))] items-center gap-2.5 rounded-lg border border-border/70 bg-popover/95 px-3 text-xs text-popover-foreground shadow-sm backdrop-blur outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             role="status"
             tabIndex={0}
           >
@@ -72,9 +72,9 @@ function PlanStep({ active, index, step }: { active: boolean; index: number; ste
     <div className={cn("flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5", active && "bg-muted")}>
       <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
         {step.status === "completed" ? (
-          <CircleCheck className="size-4 text-muted-foreground" data-icon-weight="subtle" />
+          <CircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" data-icon-weight="subtle" />
         ) : step.status === "in_progress" ? (
-          <Spinner className="size-4 text-foreground" />
+          <Spinner className="size-3 text-muted-foreground" />
         ) : (
           <Circle className="size-4 text-muted-foreground" data-icon-weight="subtle" />
         )}
