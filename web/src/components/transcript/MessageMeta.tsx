@@ -91,13 +91,13 @@ export function MessageMeta({
                 });
               }}
             >
-              {copied ? <Check className="text-success" /> : <Copy />}
+              {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
             </Button>
             {uiContext ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="grid size-5 place-items-center text-muted-foreground">
-                    <SquareMousePointer className="size-3.5" />
+                  <span className="-mr-1.5 grid size-6 place-items-center text-muted-foreground">
+                    <SquareMousePointer className="size-3" />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
