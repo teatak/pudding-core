@@ -1418,7 +1418,10 @@ export function getAppSkill(token: string, appID: string, path: string): Promise
   return request(token, `/app-skills/${skillPath}`, appSkillDetail);
 }
 
-export function appIconURL(token: string, app: { id: string; icon?: { svg?: string } }): string | undefined {
+export function appIconURL(
+  token: string,
+  app: { id: string; icon?: { svg?: string }; packageSHA256?: string },
+): string | undefined {
   const raw = app.icon?.svg?.trim().replace(/^\.\//, "");
   if (!raw) {
     return undefined;
@@ -1427,7 +1430,12 @@ export function appIconURL(token: string, app: { id: string; icon?: { svg?: stri
     return undefined;
   }
   const path = `${app.id}/${raw}`.split("/").map(encodeURIComponent).join("/");
-  return apiURL(`/app-assets/${path}?token=${encodeURIComponent(token)}`);
+  const params = new URLSearchParams({ token });
+  const packageSHA256 = app.packageSHA256?.trim();
+  if (packageSHA256) {
+    params.set("v", packageSHA256);
+  }
+  return apiURL(`/app-assets/${path}?${params.toString()}`);
 }
 
 export function listSkills(token: string): Promise<{ skills: Skill[] }> {

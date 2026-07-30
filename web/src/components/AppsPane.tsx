@@ -88,7 +88,7 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
+import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
 import { AppIdentityIcon, BuiltinAppIcon, appDisplayDescription, appDisplayName } from "@/components/AppIdentity";
 import { Spinner } from "@/components/Spinner";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
@@ -1347,8 +1347,8 @@ function AppDetail({
   const { locale, t } = useI18n();
   const endpoints = Object.entries(app.endpoints || {}).sort(([a], [b]) => a.localeCompare(b));
   const skills = (app.skills || []) as AppSkillItems;
-  const icon = mergeAppIconSpec(app.icon, catalogApp?.icon);
-  const iconSrc = appIconURL(token, app) || (catalogApp ? appRegistryIconURL(catalogApp, OFFICIAL_APP_REGISTRY) : undefined);
+  const icon = app.icon;
+  const iconSrc = appIconURL(token, app);
   const title = appDetailName(catalogApp ? appRegistryTitle(catalogApp, locale) : appDisplayName(app, t));
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || appDisplayDescription(app, t);
   const authMethods = appAuthMethods(app);
@@ -1508,8 +1508,8 @@ function CatalogAppItem({
   const upgradeAvailable = installed ? needsAppUpgrade(installed, release) : false;
   const installedCurrentOrNewer = Boolean(installed) && !upgradeAvailable;
   const previewAvailable = showPreviewVersions && isPreviewRelease(release);
-  const icon = mergeAppIconSpec(installed?.icon, app.icon);
-  const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
+  const icon = installed ? installed.icon : app.icon;
+  const iconSrc = installed ? appIconURL(token, installed) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
     <div className="min-w-0 border-b border-border/60 pb-2">

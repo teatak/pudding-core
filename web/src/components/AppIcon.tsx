@@ -109,25 +109,6 @@ function fetchThemedAppIconSVG(src: string) {
   return request;
 }
 
-export function mergeAppIconSpec(primary: AppIconSpec | undefined, fallback: AppIconSpec | undefined): AppIconSpec | undefined {
-  if (!primary) {
-    return fallback;
-  }
-  if (!fallback) {
-    return primary;
-  }
-  return {
-    ...fallback,
-    ...primary,
-    background: hasThemeValue(primary.background) ? primary.background : fallback.background,
-    color: hasThemeValue(primary.color) ? primary.color : fallback.color,
-  };
-}
-
-function hasThemeValue(value: AppIconSpec["color"] | AppIconSpec["background"]): boolean {
-  return Boolean(value?.light || value?.dark);
-}
-
 function appIconCSSVariables(icon: AppIconSpec | undefined): CSSProperties | undefined {
   const style: CSSProperties & Record<string, string> = {};
   const colorLight = icon?.color?.light || icon?.color?.dark || "";
