@@ -364,7 +364,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         baseURLEditable: true,
         dynamicModels: true,
         models: [],
-        profileName: "BuzzHive OpenAI",
+        profileName: "BuzzHive",
       },
       {
         id: "openai-responses",
