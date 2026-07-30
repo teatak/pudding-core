@@ -4,7 +4,7 @@
 
 对比基线：`v0.1.19`（`6ef9e7c0`）
 
-审查范围：`v0.1.19..93a715e0` 的 3 个功能提交，以及后续 `0.1.20` 发版准备提交
+审查范围：`v0.1.19..de2dd764`
 
 ## 发版结论
 
@@ -24,6 +24,7 @@ canonical 数据改写或索引重建。
 - App 包缓存改为以内容哈希作为缓存键，避免包内容更新后继续显示旧数据。
 - 改进 Toast 长文本布局、菜单弹层与 Select 滚动交互，并统一部分 hover/active 样式。
 - 收紧 Composer turn 进度提示宽度，强化完成态颜色并缩小处理中 spinner。
+- 简化上下文 token 数量格式化逻辑，统一使用紧凑的 `k` / `m` 单位展示。
 - 更新 Radix UI、Lucide 和 shadcn 依赖，移除重复的独立 Radix 包声明。
 
 ## 影响范围
@@ -34,6 +35,7 @@ canonical 数据改写或索引重建。
 | 模型选择 | 中 | 使用乐观更新并支持失败回滚，选择器尺寸与提示更完整。 |
 | 项目管理 | 低 | 支持无目录项目，并调整排序菜单。 |
 | App 缓存 | 低 | 包内容变化时以哈希失效缓存。 |
+| 上下文用量 | 低 | token 数量改用统一的紧凑单位展示，不改变实际统计值。 |
 | 前端依赖 | 中 | Radix UI、Lucide 与 shadcn 更新，生产构建和桌面测试已覆盖。 |
 | SQLite | 无 | schema 保持 v6，无 migration。 |
 | 既有运行数据 | 无 | 不改写消息、会话、turn、项目或搜索索引。 |
@@ -45,6 +47,7 @@ canonical 数据改写或索引重建。
 - 本次没有新增或修改 schema、migration、FTS、索引或数据库初始化逻辑。
 - transcript disclosure 属于前端本地 UI 状态，不写入 canonical messages 或 SQLite。
 - App 包缓存键、Select 组件和模型选择器更新均不改变运行数据格式。
+- token 数量格式化仅影响前端显示，不改变 context usage 数据或计算逻辑。
 - 从 `0.1.19` 升级到 `0.1.20` 不触发数据库备份或迁移。
 - `0.1.20` 与 `0.1.19` 共用 schema v6；若仅从数据库格式考虑，可直接回退。
 
@@ -92,6 +95,7 @@ canonical 数据改写或索引重建。
 - Invalidate cached App packages by content hash when package contents change.
 - Standardize Select popovers, scrolling controls, toast layout, and interaction states.
 - Make Composer turn progress more compact with clearer completed and in-progress states.
+- Use consistent compact `k` and `m` units for context token counts.
 - Update Radix UI, Lucide, and shadcn dependencies while removing duplicate package declarations.
 
 ### Reliability and Compatibility
