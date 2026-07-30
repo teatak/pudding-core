@@ -383,12 +383,14 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
 
 export function partsFromMessages(messages: Message[]): TurnPartVM[] {
   return withPartKeys(
-    mergeToolParts(
-      messages.flatMap((message) =>
-        message.parts.flatMap((part) => {
-          const viewPart = partFromContentPart(part);
-          return viewPart ? [viewPart] : [];
-        }),
+    dedupeAttachmentParts(
+      mergeToolParts(
+        messages.flatMap((message) =>
+          message.parts.flatMap((part) => {
+            const viewPart = partFromContentPart(part);
+            return viewPart ? [viewPart] : [];
+          }),
+        ),
       ),
     ),
   );
@@ -415,55 +417,57 @@ export function partsFromOverlay(
   const lastThoughtIndex = findLastOverlayPartIndex(overlayParts, "thought");
   const lastToolIndex = findLastOverlayPartIndex(overlayParts, "tool");
   const hasTextPart = overlayParts.some((part) => part.type === "text");
-  return withPartKeys([
-    ...overlayParts.flatMap((part, index): TurnPartVM[] => {
-      if (part.type === "text") {
-        return [{ type: "text", text: part.text }];
-      }
-      if (part.type === "thought") {
-        return [{ type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text }];
-      }
-      if (part.type === "approval") {
-        return [{
-          type: "approval",
-          active: activePhaseName === "awaiting_approval" && !part.status,
-          approvalID: part.approvalID,
-          approvalKind: part.approvalKind,
-          payload: part.payload,
-          reason: part.reason,
-          risk: part.risk,
-          sessionID: part.sessionID,
-          status: part.status,
-          title: part.title,
-        }];
-      }
-      const active =
-        index === lastToolIndex &&
-        (activePhaseName === "streaming_tool_args" ||
-          activePhaseName === "executing_tool" ||
-          activePhaseName === "awaiting_followup");
-      return [
-        {
-          type: "tool_use",
-          active,
-          argsText: part.argsText,
-          dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
-          id: part.callID,
-          liveStderr: part.liveStderr,
-          liveStdout: part.liveStdout,
-          name: part.name,
-          phase: part.phase,
-          phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
-          resultContent: part.resultContent,
-          resultOk: part.resultOk,
-          summaryCount: part.summaryCount,
-          summaryKind: part.summaryKind,
-        },
-        ...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })),
-      ];
-    }),
-    ...(hasTextPart ? [] : partsFromText(streamedText)),
-  ]);
+  return withPartKeys(
+    dedupeAttachmentParts([
+      ...overlayParts.flatMap((part, index): TurnPartVM[] => {
+        if (part.type === "text") {
+          return [{ type: "text", text: part.text }];
+        }
+        if (part.type === "thought") {
+          return [{ type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text }];
+        }
+        if (part.type === "approval") {
+          return [{
+            type: "approval",
+            active: activePhaseName === "awaiting_approval" && !part.status,
+            approvalID: part.approvalID,
+            approvalKind: part.approvalKind,
+            payload: part.payload,
+            reason: part.reason,
+            risk: part.risk,
+            sessionID: part.sessionID,
+            status: part.status,
+            title: part.title,
+          }];
+        }
+        const active =
+          index === lastToolIndex &&
+          (activePhaseName === "streaming_tool_args" ||
+            activePhaseName === "executing_tool" ||
+            activePhaseName === "awaiting_followup");
+        return [
+          {
+            type: "tool_use",
+            active,
+            argsText: part.argsText,
+            dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
+            id: part.callID,
+            liveStderr: part.liveStderr,
+            liveStdout: part.liveStdout,
+            name: part.name,
+            phase: part.phase,
+            phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
+            resultContent: part.resultContent,
+            resultOk: part.resultOk,
+            summaryCount: part.summaryCount,
+            summaryKind: part.summaryKind,
+          },
+          ...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })),
+        ];
+      }),
+      ...(hasTextPart ? [] : partsFromText(streamedText)),
+    ]),
+  );
 }
 
 export function toolPhaseDot(phase: Extract<TurnPartVM, { type: "tool_use" }>["phase"]): TurnPhaseState["phase"] {
@@ -494,6 +498,7 @@ function partFromContentPart(part: ContentPart): TurnPartVM | null {
       return { type: "tool_use", args: part.args, id: part.id, name: part.name };
     case "tool_result":
       return {
+        attachments: part.attachments,
         type: "tool_result",
         content: part.content,
         id: part.id,
@@ -547,11 +552,27 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
           summaryKind: part.summaryKind,
         });
       }
+      out.push(...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })));
       continue;
     }
     out.push(part);
   }
   return out;
+}
+
+function dedupeAttachmentParts(parts: TurnPartVM[]): TurnPartVM[] {
+  const seen = new Set<string>();
+  return parts.filter((part) => {
+    if (part.type !== "attachment") {
+      return true;
+    }
+    const key = part.attachment.attachmentKey || part.attachment.url || part.attachment.id;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function withPartKeys(parts: TurnPartVM[]) {

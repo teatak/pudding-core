@@ -434,6 +434,7 @@ type ContentPart struct {
 	Content             string          `json:"content,omitempty"`
 	SummaryKind         string          `json:"summaryKind,omitempty"`
 	SummaryCount        int             `json:"summaryCount,omitempty"`
+	Attachments         []Attachment    `json:"attachments,omitempty"`
 	AttachmentKey       string          `json:"attachmentKey,omitempty"`
 	URL                 string          `json:"url,omitempty"`
 	Path                string          `json:"path,omitempty"`
@@ -468,6 +469,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Content         string          `json:"content,omitempty"`
 		SummaryKind     string          `json:"summaryKind,omitempty"`
 		SummaryCount    *int            `json:"summaryCount,omitempty"`
+		Attachments     []Attachment    `json:"attachments,omitempty"`
 		AttachmentKey   string          `json:"attachmentKey,omitempty"`
 		URL             string          `json:"url,omitempty"`
 		Path            string          `json:"path,omitempty"`
@@ -522,6 +524,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 	if p.Type == ContentPartToolResult {
 		out.Ok = &p.Ok
 		out.SummaryKind = p.SummaryKind
+		out.Attachments = NormalizeAttachments(p.Attachments)
 		if p.SummaryKind != "" {
 			out.SummaryCount = &p.SummaryCount
 		}
@@ -848,23 +851,25 @@ func NormalizeAttachments(attachments []Attachment) []Attachment {
 func AttachmentsFromParts(parts []ContentPart) []Attachment {
 	out := make([]Attachment, 0, len(parts))
 	for _, part := range NormalizeContentParts(parts) {
-		if part.Type != ContentPartAttachment {
-			continue
+		if part.Type == ContentPartToolResult {
+			out = append(out, part.Attachments...)
 		}
-		out = append(out, Attachment{
-			ID:              part.CallID,
-			Name:            part.Name,
-			AttachmentKey:   part.AttachmentKey,
-			URL:             part.URL,
-			MIME:            part.MIME,
-			Size:            part.Size,
-			Origin:          part.Origin,
-			SourcePath:      part.SourcePath,
-			CreatedAt:       part.AttachmentCreatedAt,
-			AudioTranscript: part.AudioTranscript,
-		})
+		if part.Type == ContentPartAttachment {
+			out = append(out, Attachment{
+				ID:              part.CallID,
+				Name:            part.Name,
+				AttachmentKey:   part.AttachmentKey,
+				URL:             part.URL,
+				MIME:            part.MIME,
+				Size:            part.Size,
+				Origin:          part.Origin,
+				SourcePath:      part.SourcePath,
+				CreatedAt:       part.AttachmentCreatedAt,
+				AudioTranscript: part.AudioTranscript,
+			})
+		}
 	}
-	return NormalizeAttachments(out)
+	return dedupeAttachments(out)
 }
 
 func RemoveAttachmentPartsByOrigin(parts []ContentPart, origin string) ([]ContentPart, []Attachment, bool) {
@@ -876,6 +881,17 @@ func RemoveAttachmentPartsByOrigin(parts []ContentPart, origin string) ([]Conten
 	next := make([]ContentPart, 0, len(parts))
 	removed := make([]Attachment, 0)
 	for _, part := range parts {
+		if part.Type == ContentPartToolResult {
+			kept := make([]Attachment, 0, len(part.Attachments))
+			for _, item := range part.Attachments {
+				if item.Origin == origin {
+					removed = append(removed, item)
+					continue
+				}
+				kept = append(kept, item)
+			}
+			part.Attachments = kept
+		}
 		if part.Type == ContentPartAttachment && part.Origin == origin {
 			removed = append(removed, Attachment{
 				ID:              part.CallID,
@@ -893,7 +909,29 @@ func RemoveAttachmentPartsByOrigin(parts []ContentPart, origin string) ([]Conten
 		}
 		next = append(next, part)
 	}
-	return NormalizeContentParts(next), NormalizeAttachments(removed), len(removed) > 0
+	removed = dedupeAttachments(removed)
+	return NormalizeContentParts(next), removed, len(removed) > 0
+}
+
+func dedupeAttachments(attachments []Attachment) []Attachment {
+	attachments = NormalizeAttachments(attachments)
+	out := make([]Attachment, 0, len(attachments))
+	seen := make(map[string]struct{}, len(attachments))
+	for _, item := range attachments {
+		key := item.AttachmentKey
+		if key == "" {
+			key = item.URL
+		}
+		if key == "" {
+			key = item.ID
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func NormalizeLocalFolders(folders []LocalFolder) []LocalFolder {
@@ -1071,6 +1109,9 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 		if part.Args != nil {
 			cp.Args = append(json.RawMessage(nil), part.Args...)
 		}
+		if part.Attachments != nil {
+			cp.Attachments = append([]Attachment(nil), part.Attachments...)
+		}
 		if part.Schema != nil {
 			cp.Schema = append(json.RawMessage(nil), part.Schema...)
 		}
@@ -1132,6 +1173,11 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 	for _, part := range parts {
 		if part.Type == "" {
 			part.Type = ContentPartText
+		}
+		if part.Type == ContentPartToolResult {
+			part.Attachments = NormalizeAttachments(part.Attachments)
+		} else {
+			part.Attachments = nil
 		}
 		if part.Type != ContentPartUIContext {
 			part.Surface, part.Resource, part.SelectionText = "", "", ""

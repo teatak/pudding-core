@@ -110,6 +110,7 @@ export type TurnPartVM =
       type: "tool_use";
     }
   | {
+      attachments?: Attachment[];
       content?: string;
       id?: string;
       key?: string;

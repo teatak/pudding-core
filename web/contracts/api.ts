@@ -508,6 +508,7 @@ export const contentPart = z.discriminatedUnion("type", [
     content: z.string().optional(),
     summaryKind: z.string().optional(),
     summaryCount: z.number().optional(),
+    attachments: z.array(attachment).optional(),
   }),
   z.object({
     type: z.literal("form_result"),

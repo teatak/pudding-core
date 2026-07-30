@@ -72,18 +72,19 @@ function PlanStep({ active, index, step }: { active: boolean; index: number; ste
     <div className={cn("flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5", active && "bg-muted")}>
       <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
         {step.status === "completed" ? (
-          <CircleCheckBig className="size-4 text-emerald-600 dark:text-emerald-400" data-icon-weight="subtle" />
+          <CircleCheckBig className="size-4 text-muted-foreground" data-icon-weight="subtle" />
         ) : step.status === "in_progress" ? (
-          <Spinner className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+          <Spinner className="size-3.5 text-foreground" />
         ) : (
-          <Circle className="size-3.5 text-muted-foreground/35" data-icon-weight="subtle" />
+          <Circle className="size-3.5 text-muted-foreground" data-icon-weight="subtle" />
         )}
       </span>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
       <span
         className={cn(
           "min-w-0 flex-1 break-words text-xs [overflow-wrap:anywhere]",
-          !active && "text-muted-foreground",
+          step.status === "completed" && "text-muted-foreground",
+          step.status === "pending" && "text-foreground",
         )}
       >
         {step.step}

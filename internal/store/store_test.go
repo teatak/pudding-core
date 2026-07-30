@@ -37,6 +37,15 @@ func TestNormalizeProjectUpdateAllowsClearingDirectories(t *testing.T) {
 }
 
 func TestToolResultPartMarshalsFalseOK(t *testing.T) {
+	displayAttachment := Attachment{
+		ID:            "att_photo",
+		Name:          "photo.jpg",
+		AttachmentKey: "sessions/sess_1/blobs/photo.jpg",
+		URL:           "/sessions/sess_1/attachments/blobs/photo.jpg",
+		MIME:          "image/jpeg",
+		Size:          4,
+		Origin:        "tool",
+	}
 	data, err := json.Marshal(ContentPart{
 		Type:         ContentPartToolResult,
 		CallID:       "call_1",
@@ -45,6 +54,7 @@ func TestToolResultPartMarshalsFalseOK(t *testing.T) {
 		Content:      `{"ok":false}`,
 		SummaryKind:  "returned_items",
 		SummaryCount: 0,
+		Attachments:  []Attachment{displayAttachment},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +64,9 @@ func TestToolResultPartMarshalsFalseOK(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"summaryKind":"returned_items"`) || !strings.Contains(string(data), `"summaryCount":0`) {
 		t.Fatalf("tool_result must preserve protocol summary, got %s", data)
+	}
+	if !strings.Contains(string(data), `"attachments":[`) || !strings.Contains(string(data), displayAttachment.AttachmentKey) {
+		t.Fatalf("tool_result must preserve display attachments, got %s", data)
 	}
 }
 
@@ -68,6 +81,26 @@ func TestNonToolResultPartOmitsOK(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"ok":`) {
 		t.Fatalf("non tool_result should omit ok, got %s", data)
+	}
+}
+
+func TestAttachmentsFromPartsDeduplicatesToolDisplayAndContextAttachment(t *testing.T) {
+	item := Attachment{
+		ID:            "att_photo",
+		Name:          "photo.jpg",
+		AttachmentKey: "sessions/sess_1/blobs/photo.jpg",
+		URL:           "/sessions/sess_1/attachments/blobs/photo.jpg",
+		MIME:          "image/jpeg",
+		Size:          4,
+		Origin:        "tool",
+	}
+	parts := []ContentPart{
+		{Type: ContentPartToolResult, CallID: "call_1", Attachments: []Attachment{item}},
+		AttachmentPart(item),
+	}
+	got := AttachmentsFromParts(parts)
+	if len(got) != 1 || got[0].AttachmentKey != item.AttachmentKey {
+		t.Fatalf("unexpected attachments: %+v", got)
 	}
 }
 

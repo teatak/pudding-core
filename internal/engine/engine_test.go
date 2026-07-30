@@ -1724,7 +1724,15 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 			}},
 		},
 	}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(runner))
+	eng := New(
+		ms,
+		hub,
+		mapResolver{"capture": client},
+		ms,
+		WithAttachmentHome(home),
+		WithTools(runner),
+		WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}),
+	)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:         sid,
@@ -1733,6 +1741,9 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 		Model:      "vision-model",
 		ActiveMode: store.ModeWork,
 		ModeLease:  store.ModeLeaseSession,
+		LoadedAppIDs: []string{
+			app.BuiltinCaptureID,
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1746,11 +1757,30 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sub, cancelSub := hub.Subscribe(sid)
+	defer cancelSub()
 
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "拍个照片给我展示一下"}); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
+	var resultEvent event.Event
+	var receivedEvents []event.Event
+	for {
+		select {
+		case ev := <-sub:
+			receivedEvents = append(receivedEvents, ev)
+			if ev.Kind == event.TurnTool && ev.Phase == "ok" && ev.Name == tool.CameraCapture {
+				resultEvent = ev
+			}
+		default:
+			goto doneDisplayDrain
+		}
+	}
+doneDisplayDrain:
+	if len(resultEvent.Attachments) != 1 || resultEvent.Attachments[0].AttachmentKey != "sessions/sess_display_photo/blobs/photo.jpg" {
+		t.Fatalf("camera result event should expose display attachment: result=%+v received=%+v", resultEvent, receivedEvents)
+	}
 
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
@@ -1766,6 +1796,10 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 	}
 	if len(msgs) != 4 || msgs[2].Kind != store.MessageKindToolResult {
 		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	if len(msgs[2].Parts) != 1 || len(msgs[2].Parts[0].Attachments) != 1 ||
+		msgs[2].Parts[0].Attachments[0].AttachmentKey != "sessions/sess_display_photo/blobs/photo.jpg" {
+		t.Fatalf("display-only tool attachment should be canonical tool result output: %+v", msgs[2].Parts)
 	}
 	for _, part := range msgs[2].Parts {
 		if part.Type == store.ContentPartAttachment {

@@ -302,7 +302,7 @@ function mergeToolAttachments(current: Attachment[] | undefined, incoming: Attac
 }
 
 function toolAttachmentIdentity(attachment: Attachment) {
-  return attachment.id || attachment.attachmentKey || attachment.url;
+  return attachment.attachmentKey || attachment.url || attachment.id;
 }
 
 function upsertApprovalPart(

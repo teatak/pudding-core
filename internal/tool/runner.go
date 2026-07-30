@@ -28,10 +28,11 @@ const (
 )
 
 type Result struct {
-	CallID      string
-	Name        string
-	Ok          bool
-	Content     string
+	CallID  string
+	Name    string
+	Ok      bool
+	Content string
+	// Attachments are user-visible tool artifacts persisted with the tool result.
 	Attachments []store.Attachment
 	// ContextAttachments are appended to canonical turn output and replayed to the model.
 	ContextAttachments []store.Attachment

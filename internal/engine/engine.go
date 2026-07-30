@@ -1962,7 +1962,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Content:      result.Content,
 			SummaryKind:  result.SummaryKind,
 			SummaryCount: result.SummaryCount,
-			Attachments:  eventAttachmentsFromStore(result.ContextAttachments),
+			Attachments:  eventAttachmentsFromStore(result.Attachments),
 		})
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
@@ -2619,6 +2619,7 @@ func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
 		Content:      result.Content,
 		SummaryKind:  result.SummaryKind,
 		SummaryCount: result.SummaryCount,
+		Attachments:  store.NormalizeAttachments(result.Attachments),
 	})
 }
 

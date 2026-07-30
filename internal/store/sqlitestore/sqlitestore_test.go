@@ -1217,6 +1217,44 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	}
 }
 
+func TestAppendTurnOutputPersistsToolResultDisplayAttachments(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	item := store.Attachment{
+		ID:            "att_photo",
+		Name:          "photo.jpg",
+		AttachmentKey: "sessions/sess_1/blobs/photo.jpg",
+		URL:           "/sessions/sess_1/attachments/blobs/photo.jpg",
+		MIME:          "image/jpeg",
+		Size:          4,
+		Origin:        "tool",
+	}
+
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts: []store.ContentPart{{
+			Type:        store.ContentPartToolResult,
+			CallID:      "call_1",
+			Name:        "builtin_camera_capture",
+			Content:     `{"ok":true}`,
+			Ok:          true,
+			Attachments: []store.Attachment{item},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || len(msgs[1].Parts) != 1 || len(msgs[1].Parts[0].Attachments) != 1 ||
+		msgs[1].Parts[0].Attachments[0].AttachmentKey != item.AttachmentKey {
+		t.Fatalf("tool result display attachment was not persisted: %+v", msgs)
+	}
+}
+
 func TestAppendTurnOutputPersistsHiddenProviderState(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "sess_1")
