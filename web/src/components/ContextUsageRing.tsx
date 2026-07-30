@@ -345,55 +345,19 @@ function formatNumber(value: number, locale: string, maximumFractionDigits = 0) 
 }
 
 function formatTokens(value: number, locale: string) {
-  if (!locale.startsWith("zh")) {
-    const abs = Math.abs(value);
-    if (abs >= 1_000_000_000) {
-      return `${(value / 1_000_000_000).toFixed(2)}B`;
-    }
-    if (abs >= 1_000_000) {
-      return `${(value / 1_000_000).toFixed(2)}M`;
-    }
-    if (abs >= 1_000) {
-      const scaled = value / 1_000;
-      return `${scaled.toFixed(scaled >= 10 ? 0 : 1).replace(/\.0$/, "")}K`;
-    }
-    return formatNumber(value, locale);
-  }
-
   const abs = Math.abs(value);
-  const units = tokenUnits(locale);
-  for (const unit of units) {
-    if (abs >= unit.divisor) {
-      const scaled = value / unit.divisor;
-      const scaledAbs = Math.abs(scaled);
-      const maximumFractionDigits = locale.startsWith("zh")
-        ? scaledAbs >= 100
-          ? 0
-          : scaledAbs >= 10
-            ? 1
-            : 2
-        : unit.divisor >= 1_000_000
-          ? 2
-          : scaledAbs >= 10
-            ? 0
-            : 1;
-      return `${formatNumber(scaled, locale, maximumFractionDigits)}${unit.suffix}`;
-    }
-  }
-  return formatNumber(value, locale);
-}
-
-function tokenUnits(locale: string) {
-  if (locale.startsWith("zh")) {
-    const traditional = locale === "zh-TW";
-    return [
-      { divisor: 100_000_000, suffix: traditional ? "億" : "亿" },
-      { divisor: 10_000, suffix: traditional ? "萬" : "万" },
-    ];
-  }
-  return [
+  const units = [
     { divisor: 1_000_000_000, suffix: "B" },
     { divisor: 1_000_000, suffix: "M" },
     { divisor: 1_000, suffix: "K" },
   ];
+  for (const unit of units) {
+    if (abs >= unit.divisor) {
+      const scaled = value / unit.divisor;
+      const scaledAbs = Math.abs(scaled);
+      const maximumFractionDigits = scaledAbs >= 100 ? 0 : scaledAbs >= 10 ? 1 : 2;
+      return `${formatNumber(scaled, locale, maximumFractionDigits)}${unit.suffix}`;
+    }
+  }
+  return formatNumber(value, locale);
 }
