@@ -66,19 +66,17 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   );
   const disclosure = useMemo(
     () => ({
+      hasState: (key: string) =>
+        Object.prototype.hasOwnProperty.call(disclosureByKeyRef.current, `${sessionIDRef.current}:${key}`),
       isOpen: (key: string) => Boolean(disclosureByKeyRef.current[`${sessionIDRef.current}:${key}`]),
       setOpen: (key: string, open: boolean) => {
         const scopedKey = `${sessionIDRef.current}:${key}`;
         setDisclosureByKey((previous) => {
-          if (Boolean(previous[scopedKey]) === open) {
+          if (Object.prototype.hasOwnProperty.call(previous, scopedKey) && previous[scopedKey] === open) {
             return previous;
           }
-          if (!open) {
-            const next = { ...previous };
-            delete next[scopedKey];
-            return next;
-          }
-          return { ...previous, [scopedKey]: true };
+          // Keep explicit false values so a streamed parent group cannot reopen after the user closes it.
+          return { ...previous, [scopedKey]: open };
         });
       },
     }),

@@ -68,6 +68,7 @@ export type TurnModelVM = {
 };
 
 export type TurnDisclosureState = {
+  hasState: (key: string) => boolean;
   isOpen: (key: string) => boolean;
   setOpen: (key: string, open: boolean) => void;
 };

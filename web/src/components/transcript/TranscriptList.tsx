@@ -322,7 +322,7 @@ export const TranscriptList = memo(function TranscriptList({
 
   const handleDisclosureOpenChange = useCallback(
     (key: string, open: boolean) => {
-      if (!disclosure || disclosure.isOpen(key) === open) {
+      if (!disclosure || (disclosure.hasState(key) && disclosure.isOpen(key) === open)) {
         return;
       }
 
@@ -362,6 +362,7 @@ export const TranscriptList = memo(function TranscriptList({
       return undefined;
     }
     return {
+      hasState: disclosure.hasState,
       isOpen: disclosure.isOpen,
       setOpen: handleDisclosureOpenChange,
     };

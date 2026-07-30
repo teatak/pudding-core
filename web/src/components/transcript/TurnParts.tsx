@@ -136,6 +136,7 @@ export function TurnParts({
         return renderTranscriptPart({
           disclosure,
           disclosureKey,
+          disclosureRootKey: turnID,
           part,
           partKey,
           sessionID,
@@ -155,6 +156,7 @@ function isTurnPlanPart(part: TurnPartVM) {
 function renderTranscriptPart({
   disclosure,
   disclosureKey,
+  disclosureRootKey,
   part,
   partKey,
   sessionID,
@@ -165,6 +167,7 @@ function renderTranscriptPart({
 }: {
   disclosure?: TurnDisclosureState;
   disclosureKey: string;
+  disclosureRootKey: string;
   part: RenderTurnPart;
   partKey: string;
   sessionID?: string;
@@ -197,26 +200,35 @@ function renderTranscriptPart({
         <ToolUsePart
           key={partKey}
           defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          rawDefaultOpen={disclosure?.isOpen(`${disclosureKey}:raw`) || false}
           part={part}
           sessionID={sessionID}
           showActivitySpinner={showActivitySpinner}
           showRawInfo={showRawToolInfo}
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+          onRawOpenChange={(open) => disclosure?.setOpen(`${disclosureKey}:raw`, open)}
         />
       );
     case "tool_result":
       return null;
-    case "process_compact":
+    case "process_compact": {
+      const groupHasState = disclosure?.hasState(disclosureKey) || false;
+      const childIsOpen =
+        disclosure &&
+        part.hiddenParts.some((hiddenPart, hiddenIndex) =>
+          disclosure.isOpen(childDisclosureKey(disclosureRootKey, hiddenPart, hiddenIndex)),
+        );
       return (
         <ProcessCompactPart
           key={partKey}
-          defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          defaultOpen={(disclosure?.isOpen(disclosureKey) || false) || (!groupHasState && Boolean(childIsOpen))}
           hiddenParts={part.hiddenParts}
           renderPart={(hiddenPart, hiddenIndex, childShowsActivitySpinner) => {
             const hiddenKey = hiddenPart.key || `${hiddenPart.type}:${hiddenIndex}`;
             return renderTranscriptPart({
               disclosure,
-              disclosureKey: `${disclosureKey}:${hiddenKey}`,
+              disclosureKey: childDisclosureKey(disclosureRootKey, hiddenPart, hiddenIndex),
+              disclosureRootKey,
               part: hiddenPart,
               partKey: hiddenKey,
               sessionID,
@@ -229,7 +241,13 @@ function renderTranscriptPart({
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
         />
       );
+    }
   }
+}
+
+function childDisclosureKey(rootKey: string, part: TurnPartVM, index: number) {
+  // Do not include the compact parent key: streaming can move this part into or out of a compact group.
+  return `${rootKey}:${part.key || `${part.type}:${index}`}`;
 }
 
 function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
@@ -246,7 +264,11 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
       processParts = [];
       return;
     }
-    const firstPartKey = processParts[0]?.key || `run-${fallbackRunIndex++}`;
+    const firstTool = processParts.find(
+      (part): part is Extract<TurnPartVM, { type: "tool_use" }> => part.type === "tool_use" && Boolean(part.id),
+    );
+    // Tool call IDs stay stable across live updates and the final canonical message.
+    const firstPartKey = firstTool?.key || processParts[0]?.key || `run-${fallbackRunIndex++}`;
     out.push({
       hiddenParts: processParts,
       key: `process-compact:${firstPartKey}`,
@@ -997,18 +1019,22 @@ function processToolGroupLabel(group: ProcessToolGroup, t: (key: string) => stri
 
 function ToolUsePart({
   defaultOpen,
+  rawDefaultOpen,
   part,
   sessionID,
   showActivitySpinner = false,
   showRawInfo,
   onOpenChange,
+  onRawOpenChange,
 }: {
   defaultOpen: boolean;
+  rawDefaultOpen: boolean;
   part: Extract<TurnPartVM, { type: "tool_use" }>;
   sessionID?: string;
   showActivitySpinner?: boolean;
   showRawInfo: boolean;
   onOpenChange?: (open: boolean) => void;
+  onRawOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
@@ -1079,8 +1105,10 @@ function ToolUsePart({
           {showRawInfo ? (
             <RawToolDataCard
               args={args}
+              defaultOpen={rawDefaultOpen}
               result={liveResult?.text || ""}
               toolName={toolName}
+              onOpenChange={onRawOpenChange}
             />
           ) : null}
         </div>
@@ -2037,18 +2065,38 @@ function rawToolCopyText(toolName: string, args: string, result: string, t: (key
   return lines.join("\n").trim();
 }
 
-function RawToolDataCard({ args, result, toolName }: { args: string; result: string; toolName: string }) {
+function RawToolDataCard({
+  args,
+  defaultOpen,
+  result,
+  toolName,
+  onOpenChange,
+}: {
+  args: string;
+  defaultOpen: boolean;
+  result: string;
+  toolName: string;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(
+    defaultOpen,
+    onOpenChange,
+  );
   const copyText = rawToolCopyText(toolName, args, result, t);
   return (
     <div className="group/raw-data relative min-w-0 max-w-full">
       <details
         className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
         open={open}
-        onToggle={(event) => setOpen(event.currentTarget.open)}
+        onToggle={handleToggle}
       >
-        <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 pr-8 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden" tabIndex={-1}>
+        <summary
+          className="flex h-8 cursor-default list-none items-center gap-1 px-2 pr-8 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+          tabIndex={-1}
+          onClick={handleSummaryClick}
+          onKeyDown={handleSummaryKeyDown}
+        >
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           <span>{t("transcript.codeRawData")}</span>
         </summary>
