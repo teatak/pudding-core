@@ -591,7 +591,7 @@ function MetaIconButton({
       <TooltipTrigger asChild>
         <Button
           aria-label={label}
-          className="-mr-1.5 size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+          className="-mr-3 size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
           disabled={disabled}
           size="icon-xs"
           type="button"

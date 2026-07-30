@@ -73,7 +73,8 @@ export function MessageMeta({
             <Button
               aria-label={t("common.copy")}
               className={cn(
-                "-mr-1.5 size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
+                "size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
+                uiContext ? "-mr-3" : "-mr-1.5",
                 align === "start" && "-ml-1",
               )}
               size="icon-xs"
@@ -95,7 +96,7 @@ export function MessageMeta({
             {uiContext ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="-mr-1.5 grid size-5 place-items-center text-muted-foreground">
+                  <span className="grid size-5 place-items-center text-muted-foreground">
                     <SquareMousePointer className="size-3.5" />
                   </span>
                 </TooltipTrigger>
