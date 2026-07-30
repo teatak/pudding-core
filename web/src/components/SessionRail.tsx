@@ -5,7 +5,7 @@ import {
   ChevronRight,
   Ellipsis,
   FolderClosed,
-  FolderCog,
+  Folders,
   FolderOpen,
   History,
   MessageSquareText,
@@ -1197,7 +1197,7 @@ function RailPanel({
                     });
                   }}
                 >
-                  <FolderCog />
+                  <Folders />
                   <span>{t("project.manage")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>

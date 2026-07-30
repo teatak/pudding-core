@@ -42,7 +42,7 @@ export const listProjectsResponse = z.object({
 
 export const createProjectRequest = z.object({
   name: z.string().optional(),
-  rootDirs: z.array(z.string()).min(1),
+  rootDirs: z.array(z.string()),
   approvalMode: approvalMode.optional(),
 });
 
@@ -555,6 +555,7 @@ export const turnFileChange = z.object({
   path: z.string(),
   originalPath: z.string().optional(),
   kind: z.enum(["added", "modified", "deleted", "renamed"]),
+  // command_observed remains readable for rows produced before structured-only tracking.
   origin: z.enum(["structured", "command_observed"]).default("structured"),
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),

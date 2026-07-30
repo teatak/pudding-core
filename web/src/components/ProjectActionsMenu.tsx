@@ -162,10 +162,11 @@ export function ProjectActionsMenu({
   };
   const saveProject = () => {
     const nextName = name.trim();
-    if (!nextName || directoryPaths.length === 0) return;
+    if (!nextName) return;
     const projects =
       queryClient.getQueryData<{ projects: Project[] }>(queryKeys.projects())?.projects || [];
     if (
+      directoryPaths.length > 0 &&
       projects.some(
         (entry) =>
           entry.id !== project.id &&
@@ -266,7 +267,6 @@ export function ProjectActionsMenu({
         open={editOpen}
         submitDisabled={
           !name.trim() ||
-          directoryPaths.length === 0 ||
           (name.trim() === project.name &&
             normalizedDirectoryList(directoryPaths) === normalizedDirectoryList(project.rootDirs))
         }

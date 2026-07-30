@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, FolderCog, FolderPlus, Search } from "@/components/icons";
+import { FolderClosed, FolderPlus, Folders, Search } from "@/components/icons";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
-import { cn } from "@/lib/utils";
 
 type ProjectSort = "updated-desc" | "created-desc" | "name-asc" | "name-desc";
 
@@ -81,11 +80,14 @@ export function ProjectsPane({ token }: { token: string }) {
 
   function submitProject() {
     const projectName = name.trim();
-    if (!projectName || rootDirs.length === 0) {
+    if (!projectName) {
       return;
     }
     const normalizedPaths = normalizedDirectorySet(rootDirs);
-    if (projects.some((project) => normalizedDirectorySet(project.rootDirs) === normalizedPaths)) {
+    if (
+      rootDirs.length > 0 &&
+      projects.some((project) => normalizedDirectorySet(project.rootDirs) === normalizedPaths)
+    ) {
       toast.error(t("project.alreadyExists"));
       return;
     }
@@ -95,7 +97,7 @@ export function ProjectsPane({ token }: { token: string }) {
   return (
     <main className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
-        icon={<FolderCog />}
+        icon={<Folders />}
         title={t("project.manage")}
       />
       <div className="min-h-0 flex-1 overflow-auto">
@@ -123,8 +125,8 @@ export function ProjectsPane({ token }: { token: string }) {
                   <SelectItem value="name-desc">{t("project.sortNameDesc")}</SelectItem>
                 </SelectContent>
               </Select>
-              <Button className="shrink-0" size="sm" type="button" onClick={() => setAdding(true)}>
-                <FolderPlus className="size-3.5" />
+              <Button className="shrink-0" type="button" onClick={() => setAdding(true)}>
+                <FolderPlus className="size-4" />
                 {t("project.add")}
               </Button>
             </div>
@@ -158,7 +160,7 @@ export function ProjectsPane({ token }: { token: string }) {
         isPending={createMutation.isPending}
         name={name}
         open={adding}
-        submitDisabled={!name.trim() || rootDirs.length === 0}
+        submitDisabled={!name.trim()}
         submitLabel={t("project.add")}
         title={t("project.add")}
         onChooseDirectories={() => void chooseDirectories()}
@@ -179,14 +181,8 @@ export function ProjectsPane({ token }: { token: string }) {
 
 function ProjectRow({ locale, project, token }: { locale: string; project: Project; token: string }) {
   const { t } = useI18n();
-  const [actionsOverlayOpen, setActionsOverlayOpen] = useState(false);
   return (
-    <article
-      className={cn(
-        "group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3 hover:bg-control-hover active:bg-control-active",
-        actionsOverlayOpen && "bg-control-hover",
-      )}
-    >
+    <article className="group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3">
       <div className="flex min-w-0 items-start gap-3">
         <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
           <FolderClosed className="size-4.5" />
@@ -202,7 +198,6 @@ function ProjectRow({ locale, project, token }: { locale: string; project: Proje
           alwaysVisible
           project={project}
           token={token}
-          onOverlayOpenChange={setActionsOverlayOpen}
         />
       </div>
       <div className="grid gap-1 pl-12">

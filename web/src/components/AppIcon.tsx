@@ -66,12 +66,17 @@ export function AppIcon({
 
   return (
     <IdentityIcon
-      className={cn("pudding-app-icon", className)}
+      className={cn(
+        "pudding-app-icon",
+        src && !hasIconBackground && "bg-transparent",
+        className,
+      )}
       contentClassName={cn(icon ? "object-contain" : "object-cover")}
       data-has-background={hasIconBackground ? "true" : undefined}
       data-has-color={hasIconColor ? "true" : undefined}
       data-light-background={needsAppIconLightBorder(icon) ? "true" : undefined}
       fallback="app"
+      fallbackClassName="bg-muted"
       fit={icon ? "contain" : "cover"}
       size={size}
       src={src && !hasIconColor ? src : undefined}
@@ -141,52 +146,13 @@ function appIconCSSVariables(icon: AppIconSpec | undefined): CSSProperties | und
 }
 
 function needsAppIconLightBorder(icon: AppIconSpec | undefined): boolean {
-  return isLightCSSColor(icon?.background?.light || icon?.background?.dark);
-}
-
-function isLightCSSColor(value: string | undefined): boolean {
-  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "");
-  if (!normalized) {
-    return false;
-  }
-  if (normalized === "white") {
-    return true;
-  }
-  const rgb = parseCSSRGB(normalized);
-  if (!rgb) {
-    return false;
-  }
-  const [red, green, blue, alpha] = rgb;
-  const composited = [red, green, blue].map((channel) => channel * alpha + 255 * (1 - alpha));
-  const luminance = composited.reduce((sum, channel, index) => {
-    const normalizedChannel = channel / 255;
-    const linear = normalizedChannel <= 0.04045
-      ? normalizedChannel / 12.92
-      : ((normalizedChannel + 0.055) / 1.055) ** 2.4;
-    return sum + linear * [0.2126, 0.7152, 0.0722][index];
-  }, 0);
-  return luminance >= 0.82;
-}
-
-function parseCSSRGB(value: string): [number, number, number, number] | null {
-  const hex = value.match(/^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i)?.[1];
-  if (hex) {
-    const expanded = hex.length <= 4 ? [...hex].map((character) => character + character).join("") : hex;
-    return [
-      Number.parseInt(expanded.slice(0, 2), 16),
-      Number.parseInt(expanded.slice(2, 4), 16),
-      Number.parseInt(expanded.slice(4, 6), 16),
-      expanded.length === 8 ? Number.parseInt(expanded.slice(6, 8), 16) / 255 : 1,
-    ];
-  }
-  const rgb = value.match(/^rgba?\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)(?:,(\d*(?:\.\d+)?))?\)$/);
-  if (!rgb) {
-    return null;
-  }
-  return [
-    Math.min(255, Number(rgb[1])),
-    Math.min(255, Number(rgb[2])),
-    Math.min(255, Number(rgb[3])),
-    rgb[4] === undefined || rgb[4] === "" ? 1 : Math.min(1, Number(rgb[4])),
-  ];
+  const background = icon?.background?.light?.trim().toLowerCase().replace(/\s+/g, "");
+  return (
+    background === "white" ||
+    background === "#fff" ||
+    background === "#ffffff" ||
+    background === "#ffffffff" ||
+    background === "rgb(255,255,255)" ||
+    background === "rgba(255,255,255,1)"
+  );
 }

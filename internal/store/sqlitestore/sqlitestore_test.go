@@ -97,6 +97,26 @@ func TestSessionProjectPersists(t *testing.T) {
 	}
 }
 
+func TestProjectWithoutDirectoriesPersists(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	project := &store.Project{
+		ID:           "proj_empty",
+		Name:         "Empty project",
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := st.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != project.Name || len(got.RootDirs) != 0 {
+		t.Fatalf("empty project not persisted: %+v", got)
+	}
+}
+
 func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()

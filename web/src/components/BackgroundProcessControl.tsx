@@ -152,7 +152,7 @@ function BackgroundProcessRow({
   const output = logsQuery.data?.output.map((chunk) => chunk.content).join("") ?? "";
   const status = processStatus(process, t);
   return (
-    <div className="rounded-md hover:bg-control-hover">
+    <div className="rounded-md hover:bg-item-hover focus-within:bg-item-hover">
       <div className="flex min-w-0 items-center gap-1">
         <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" type="button" onClick={onToggle}>
           <span

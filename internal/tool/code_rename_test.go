@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/lsp"
-	"github.com/teatak/pudding-core/internal/store"
 )
 
 func TestCodeRenameAppliesAllReferencesAtomically(t *testing.T) {
@@ -49,8 +48,7 @@ func TestCodeRenameAppliesAllReferencesAtomically(t *testing.T) {
 	}}
 	runner := testCodeRunner(service)
 	var trackedTargets []string
-	var trackedOrigin store.FileChangeOrigin
-	ctx := WithMutationTrackingSink(context.Background(), func(targets []string, origin store.FileChangeOrigin) {
+	ctx := WithMutationTrackingSink(context.Background(), func(targets []string) {
 		content, err := os.ReadFile(source)
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +57,6 @@ func TestCodeRenameAppliesAllReferencesAtomically(t *testing.T) {
 			t.Fatal("mutation tracking was reported after the rename was applied")
 		}
 		trackedTargets = append([]string(nil), targets...)
-		trackedOrigin = origin
 	})
 	result := runner.Call(ctx, Call{
 		SessionID:   "session_rename",
@@ -88,9 +85,6 @@ func TestCodeRenameAppliesAllReferencesAtomically(t *testing.T) {
 	}
 	if len(trackedTargets) != 1 || trackedTargets[0] != source {
 		t.Fatalf("tracked targets = %v, want [%s]", trackedTargets, source)
-	}
-	if trackedOrigin != store.FileChangeOriginStructured {
-		t.Fatalf("tracked origin = %q, want %q", trackedOrigin, store.FileChangeOriginStructured)
 	}
 }
 

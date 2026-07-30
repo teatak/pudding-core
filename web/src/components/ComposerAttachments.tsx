@@ -98,7 +98,7 @@ function LocalFolderChip({
 }) {
   return (
     <div
-      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm transition-colors hover:bg-control-hover"
+      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm transition-colors hover:bg-item-hover focus-within:bg-item-hover"
 
     >
       <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
@@ -225,7 +225,8 @@ function ComposerAttachmentChip({
     <div
       className={cn(
         "relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm",
-        item.attachment?.sourcePath && "cursor-pointer transition-colors hover:bg-control-hover",
+        item.attachment?.sourcePath &&
+          "cursor-pointer transition-colors hover:bg-item-hover focus-within:bg-item-hover",
         item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
 

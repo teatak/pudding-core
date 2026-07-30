@@ -13,10 +13,16 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 	writeTestFile(t, root, "modify.txt", "before\n")
 	writeTestFile(t, root, "delete.txt", "remove\n")
 	writeTestFile(t, root, "old-name.txt", "same\n")
-	writeTestFile(t, root, "node_modules/ignored.js", "before\n")
 
 	tracker := New()
-	if err := tracker.BeginCall("turn_1", "call_1", []string{root}, nil, store.FileChangeOriginCommandObserved); err != nil {
+	targets := []string{
+		filepath.Join(root, "modify.txt"),
+		filepath.Join(root, "delete.txt"),
+		filepath.Join(root, "old-name.txt"),
+		filepath.Join(root, "new-name.txt"),
+		filepath.Join(root, "added.txt"),
+	}
+	if err := tracker.BeginCall("turn_1", "call_1", []string{root}, targets); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, root, "modify.txt", "after\n")
@@ -27,7 +33,6 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, root, "added.txt", "new\n")
-	writeTestFile(t, root, "node_modules/ignored.js", "after\n")
 	if err := tracker.EndCall("turn_1", "call_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +61,7 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 		t.Fatalf("renamed change = %+v", change)
 	}
 	for _, change := range changes {
-		if change.Origin != store.FileChangeOriginCommandObserved {
+		if change.Origin != store.FileChangeOriginStructured {
 			t.Fatalf("origin = %q, change = %+v", change.Origin, change)
 		}
 	}
@@ -70,7 +75,7 @@ func TestTrackerAccumulatesCallsAcrossRoots(t *testing.T) {
 
 	tracker := New()
 	firstPath := filepath.Join(first, "first.txt")
-	if err := tracker.BeginCall("turn_2", "call_first", []string{first, second}, []string{firstPath}, store.FileChangeOriginStructured); err != nil {
+	if err := tracker.BeginCall("turn_2", "call_first", []string{first, second}, []string{firstPath}); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, first, "first.txt", "changed\n")
@@ -78,7 +83,7 @@ func TestTrackerAccumulatesCallsAcrossRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondPath := filepath.Join(second, "second.txt")
-	if err := tracker.BeginCall("turn_2", "call_second", []string{first, second}, []string{secondPath}, store.FileChangeOriginStructured); err != nil {
+	if err := tracker.BeginCall("turn_2", "call_second", []string{first, second}, []string{secondPath}); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, second, "second.txt", "changed\n")
@@ -112,7 +117,7 @@ func TestTrackerPairsDuplicateRenamesDeterministically(t *testing.T) {
 		filepath.Join(root, "c.txt"),
 		filepath.Join(root, "d.txt"),
 	}
-	if err := tracker.BeginCall("turn_rename", "call_rename", []string{root}, targets, store.FileChangeOriginStructured); err != nil {
+	if err := tracker.BeginCall("turn_rename", "call_rename", []string{root}, targets); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(filepath.Join(root, "a.txt"), filepath.Join(root, "c.txt")); err != nil {
@@ -134,27 +139,39 @@ func TestTrackerPairsDuplicateRenamesDeterministically(t *testing.T) {
 	}
 }
 
-func TestTrackerTreatsRemovedRootAsDeletedFiles(t *testing.T) {
+func TestTrackerEmptyAndRootTargetsDoNotScanProject(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "main.go", "package main\n")
 
 	tracker := New()
-	if err := tracker.BeginCall("turn_removed_root", "call_remove", []string{root}, nil, store.FileChangeOriginCommandObserved); err != nil {
+	if err := tracker.BeginCall("turn_empty", "call_empty", []string{root}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(root); err != nil {
+	writeTestFile(t, root, "main.go", "package changed\n")
+	if err := tracker.EndCall("turn_empty", "call_empty"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tracker.EndCall("turn_removed_root", "call_remove"); err != nil {
-		t.Fatal(err)
-	}
-
-	changes, err := tracker.Finish("turn_removed_root")
+	changes, err := tracker.Finish("turn_empty")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 1 || changes[0].Kind != store.FileChangeDeleted || changes[0].Path != "main.go" {
-		t.Fatalf("changes = %+v", changes)
+	if len(changes) != 0 {
+		t.Fatalf("empty targets scanned project: %+v", changes)
+	}
+
+	if err := tracker.BeginCall("turn_root", "call_root", []string{root}, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "main.go", "package changed_again\n")
+	if err := tracker.EndCall("turn_root", "call_root"); err != nil {
+		t.Fatal(err)
+	}
+	changes, err = tracker.Finish("turn_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("project-root target scanned project: %+v", changes)
 	}
 }
 
@@ -171,7 +188,7 @@ func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
 
 	tracker := New()
 	targets := []string{binaryPath, largePath}
-	if err := tracker.BeginCall("turn_non_text", "call_non_text", []string{root}, targets, store.FileChangeOriginStructured); err != nil {
+	if err := tracker.BeginCall("turn_non_text", "call_non_text", []string{root}, targets); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(binaryPath, []byte{0, 1, 3}, 0o644); err != nil {
@@ -213,7 +230,7 @@ func TestTrackerStructuredCallExcludesUnownedExternalChanges(t *testing.T) {
 	writeTestFile(t, root, "external.txt", "before\n")
 
 	tracker := New()
-	if err := tracker.BeginCall("turn_scoped", "call_scoped", []string{root}, []string{ownedPath}, store.FileChangeOriginStructured); err != nil {
+	if err := tracker.BeginCall("turn_scoped", "call_scoped", []string{root}, []string{ownedPath}); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, root, "owned.txt", "tool change\n")
@@ -231,6 +248,78 @@ func TestTrackerStructuredCallExcludesUnownedExternalChanges(t *testing.T) {
 	}
 	if content, err := os.ReadFile(externalPath); err != nil || string(content) != "outside change\n" {
 		t.Fatalf("external file = %q, err = %v", content, err)
+	}
+}
+
+func TestTrackerUsesCallBoundaryInsteadOfFinishWorkspaceState(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	writeTestFile(t, root, "main.go", "user before call\n")
+
+	tracker := New()
+	if err := tracker.BeginCall("turn_boundary", "call_boundary", []string{root}, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "main.go", "structured result\n")
+	if err := tracker.EndCall("turn_boundary", "call_boundary"); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "main.go", "user after call\n")
+
+	changes, err := tracker.Finish("turn_boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].OldContent != "user before call\n" || changes[0].NewContent != "structured result\n" {
+		t.Fatalf("call-boundary changes = %+v", changes)
+	}
+}
+
+func TestTrackerExplicitDirectoryIncludesGeneratedResources(t *testing.T) {
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	writeTestFile(t, root, "dist/app.js", "before\n")
+	writeTestFile(t, root, "dist/assets/icon.svg", "<svg />\n")
+
+	tracker := New()
+	if err := tracker.BeginCall("turn_dist", "call_dist", []string{root}, []string{dist}); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "dist/app.js", "after\n")
+	writeTestFile(t, root, "dist/assets/new.svg", "<svg>new</svg>\n")
+	if err := tracker.EndCall("turn_dist", "call_dist"); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := tracker.Finish("turn_dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 || changes[0].Path != "dist/app.js" || changes[1].Path != "dist/assets/new.svg" {
+		t.Fatalf("generated resource changes = %+v", changes)
+	}
+}
+
+func TestTrackerDiscardPreventsLateCallStateLeak(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	writeTestFile(t, root, "main.go", "package main\n")
+
+	tracker := New()
+	if err := tracker.BeginCall("turn_discard", "call_discard", []string{root}, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	tracker.Discard("turn_discard")
+	writeTestFile(t, root, "main.go", "package changed\n")
+	if err := tracker.EndCall("turn_discard", "call_discard"); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := tracker.Finish("turn_discard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("discarded turn leaked changes: %+v", changes)
 	}
 }
 

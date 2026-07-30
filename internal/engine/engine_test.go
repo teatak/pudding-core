@@ -2968,7 +2968,7 @@ func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	}
 }
 
-func TestCallTrackedToolCapturesCommandFileChanges(t *testing.T) {
+func TestCallTrackedToolDoesNotAttributeCommandFileChanges(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
 	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
@@ -2993,7 +2993,7 @@ func TestCallTrackedToolCapturesCommandFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 1 || changes[0].Path != "main.go" || changes[0].OldContent != "package old\n" || changes[0].NewContent != "package new\n" {
+	if len(changes) != 0 {
 		t.Fatalf("changes = %+v", changes)
 	}
 }
@@ -3015,7 +3015,7 @@ func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), nil)
-	if err := eng.turnFiles.BeginCall("turn_failed_changes", "call_failed_changes", []string{root}, []string{path}, store.FileChangeOriginStructured); err != nil {
+	if err := eng.turnFiles.BeginCall("turn_failed_changes", "call_failed_changes", []string{root}, []string{path}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("package new\n"), 0o644); err != nil {

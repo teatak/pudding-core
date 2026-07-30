@@ -271,10 +271,13 @@ func NormalizeProject(project *Project) error {
 	project.Name = strings.TrimSpace(project.Name)
 	project.RootDirs = NormalizeProjectDirs(project.RootDirs)
 	project.ApprovalMode = NormalizeApprovalMode(project.ApprovalMode)
-	if project.ID == "" || len(project.RootDirs) == 0 {
+	if project.ID == "" {
 		return ErrInvalidProject
 	}
 	if project.Name == "" {
+		if len(project.RootDirs) == 0 {
+			return ErrInvalidProject
+		}
 		project.Name = localFolderName(project.RootDirs[0])
 	}
 	return nil
@@ -287,9 +290,6 @@ func NormalizeProjectUpdate(upd *ProjectUpdate) error {
 	}
 	if upd.RootDirs != nil {
 		dirs := NormalizeProjectDirs(*upd.RootDirs)
-		if len(dirs) == 0 {
-			return ErrInvalidProject
-		}
 		upd.RootDirs = &dirs
 	}
 	if upd.ApprovalMode != nil {
@@ -1590,7 +1590,9 @@ const (
 	FileChangeDeleted  FileChangeKind = "deleted"
 	FileChangeRenamed  FileChangeKind = "renamed"
 
-	FileChangeOriginStructured      FileChangeOrigin = "structured"
+	FileChangeOriginStructured FileChangeOrigin = "structured"
+	// FileChangeOriginCommandObserved is retained only for reading rows written
+	// by schema v6 clients. New turn tracking never emits this origin.
 	FileChangeOriginCommandObserved FileChangeOrigin = "command_observed"
 )
 

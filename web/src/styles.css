@@ -33,6 +33,7 @@
     --color-control-active: var(--control-active-background);
     --color-control-selected: var(--control-selected-background);
     --color-control-disabled: var(--control-disabled);
+    --color-item-hover: var(--item-hover-background);
     --color-secondary-hover: var(--secondary-hover);
     --color-primary-hover: var(--primary-hover);
     --color-primary-active: var(--primary-active);
@@ -139,6 +140,7 @@
     --control-active-background: oklch(0.905 0 0);
     --control-selected-background: oklch(0.89 0 0);
     --control-selected-border: oklch(0.76 0 0);
+    --item-hover-background: color-mix(in oklch, var(--card), var(--control-hover-background) 45%);
     --workspace-background: var(--background);
     --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: var(--workspace-background);
@@ -1217,7 +1219,7 @@ html[data-agent-console-resizing="true"] webview {
 }
 
 .pudding-app-icon[data-light-background="true"] {
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .dark .pudding-app-icon[data-has-background="true"] {

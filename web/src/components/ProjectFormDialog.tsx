@@ -157,15 +157,17 @@ export function ProjectFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(680px,calc(100svh-2rem))] sm:max-w-xl">
+      <DialogContent className="max-h-[min(680px,calc(100svh-2rem))] gap-5 p-6 sm:max-w-xl [&>[data-slot=dialog-close]]:top-3 [&>[data-slot=dialog-close]]:right-3">
         <form className="contents" onSubmit={submit}>
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className="sr-only">{description}</DialogDescription>
+          <DialogHeader className="pr-8">
+            <DialogTitle className="text-xl leading-tight font-semibold">{title}</DialogTitle>
+            <DialogDescription className="text-base leading-relaxed">
+              {description}
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
+          <div className="grid min-h-0 gap-4 overflow-y-auto">
             <label className="grid gap-1.5">
-              <span className="sr-only">{t("project.name")}</span>
+              <span className="text-sm font-medium">{t("project.name")}</span>
               <div className="flex overflow-hidden rounded-lg border focus-within:border-ring">
                 <span className="grid w-11 shrink-0 place-items-center border-r text-muted-foreground">
                   <FolderClosed className="size-4" />
@@ -191,6 +193,7 @@ export function ProjectFormDialog({
               <div
                 className={cn(
                   "relative overflow-hidden rounded-lg border",
+                  directoryPaths.length === 0 && "border-dashed",
                   dropActive && "border-primary bg-accent/40",
                 )}
                 onDragEnter={handleDragEnter}
@@ -198,68 +201,84 @@ export function ProjectFormDialog({
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
               >
-                {directoryPaths.map((path, index) => (
-                  <div
-                    key={path}
-                    ref={(element) => {
-                      if (element) {
-                        directoryRowsRef.current.set(path, element);
-                      } else {
-                        directoryRowsRef.current.delete(path);
-                      }
-                    }}
-                    className="flex min-w-0 items-center gap-2 border-b px-3 py-2.5"
-                  >
-                    <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
-                    {directoryPaths.length > 1 && index === 0 ? (
-                      <span className="shrink-0 rounded-md border px-2 py-0.5 text-xs text-muted-foreground">
-                        {t("project.primaryDirectory")}
-                      </span>
-                    ) : null}
-                    {directoryPaths.length > 1 && index > 0 ? (
-                      <Button
-                        className="h-7 shrink-0 px-2 text-xs"
-                        disabled={isPending}
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          captureDirectoryRects();
-                          onDirectoryPathsChange([
-                            path,
-                            ...directoryPaths.filter((entry) => entry !== path),
-                          ]);
-                        }}
-                      >
-                        {t("project.makePrimaryDirectory")}
-                      </Button>
-                    ) : null}
-                    <Button
-                      aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
-                      disabled={isPending}
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        onDirectoryPathsChange(directoryPaths.filter((entry) => entry !== path))
-                      }
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                ))}
-                <div className="p-1">
-                  <Button
-                    className="h-9 w-full justify-start rounded-md px-2"
+                {directoryPaths.length === 0 ? (
+                  <button
+                    className="flex min-h-28 w-full flex-col items-center justify-center gap-2 bg-transparent px-4 py-5 text-center text-sm transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
                     disabled={isPending}
                     type="button"
-                    variant="ghost"
                     onClick={onChooseDirectories}
                   >
-                    <FolderPlus className="size-4" />
-                    {t("project.addFolder")}
-                  </Button>
-                </div>
+                    <span className="grid size-10 place-items-center text-muted-foreground">
+                      <FolderPlus className="size-5" />
+                    </span>
+                    <span className="font-medium">{t("project.addFolder")}</span>
+                    <span className="max-w-sm text-xs leading-5 font-normal text-muted-foreground">
+                      {t("project.addFolderEmptyDescription")}
+                    </span>
+                  </button>
+                ) : (
+                  <>
+                    {directoryPaths.map((path, index) => (
+                      <div
+                        key={path}
+                        ref={(element) => {
+                          if (element) {
+                            directoryRowsRef.current.set(path, element);
+                          } else {
+                            directoryRowsRef.current.delete(path);
+                          }
+                        }}
+                        className="flex min-w-0 items-center gap-2 border-b px-3 py-2.5"
+                      >
+                        <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
+                        {directoryPaths.length > 1 && index === 0 ? (
+                          <span className="shrink-0 rounded-md border px-2 py-0.5 text-xs text-muted-foreground">
+                            {t("project.primaryDirectory")}
+                          </span>
+                        ) : null}
+                        {directoryPaths.length > 1 && index > 0 ? (
+                          <Button
+                            className="h-7 shrink-0 px-2 text-xs"
+                            disabled={isPending}
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              captureDirectoryRects();
+                              onDirectoryPathsChange([
+                                path,
+                                ...directoryPaths.filter((entry) => entry !== path),
+                              ]);
+                            }}
+                          >
+                            {t("project.makePrimaryDirectory")}
+                          </Button>
+                        ) : null}
+                        <Button
+                          aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
+                          disabled={isPending}
+                          size="icon-xs"
+                          type="button"
+                          variant="ghost"
+                          onClick={() =>
+                            onDirectoryPathsChange(directoryPaths.filter((entry) => entry !== path))
+                          }
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    ))}
+                    <button
+                      className="flex h-11 w-full items-center justify-start gap-1.5 bg-transparent px-3 text-sm font-medium transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                      disabled={isPending}
+                      type="button"
+                      onClick={onChooseDirectories}
+                    >
+                      <FolderPlus className="size-4 shrink-0" />
+                      {t("project.addFolder")}
+                    </button>
+                  </>
+                )}
                 {dropActive ? (
                   <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-md bg-background/95 px-4 text-center text-sm font-medium">
                     {t("project.folderDropHint")}
@@ -268,7 +287,7 @@ export function ProjectFormDialog({
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="mx-0 mb-0 rounded-none border-0 bg-transparent p-0">
             <Button
               disabled={isPending}
               type="button"

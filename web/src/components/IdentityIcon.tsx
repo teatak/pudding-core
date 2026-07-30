@@ -71,6 +71,7 @@ export function IdentityIcon({
   className,
   contentClassName,
   fallback = "brand",
+  fallbackClassName,
   fit = "contain",
   radius = "auto",
   shape = "rounded",
@@ -84,6 +85,7 @@ export function IdentityIcon({
   className?: string;
   contentClassName?: string;
   fallback?: IdentityIconFallback;
+  fallbackClassName?: string;
   fit?: "contain" | "cover";
   radius?: IdentityIconRadius;
   shape?: IdentityIconShape;
@@ -108,6 +110,7 @@ export function IdentityIcon({
         sizeClassByToken[size],
         shape === "circle" ? "rounded-full" : identityIconRadiusClass(size, radius),
         className,
+        fallbackVisible && fallbackClassName,
       )}
       data-slot="identity-icon"
       style={style}

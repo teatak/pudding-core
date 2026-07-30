@@ -74,7 +74,6 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
     <IdentityIcon
       aria-hidden="true"
       className={`pudding-app-icon ${builtinAppIconClass(appID)}`}
-      data-light-background="true"
       size={size}
     >
       <Icon className="size-[64%]" />

@@ -2233,18 +2233,18 @@ func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call to
 func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
 	tracked := false
 	if mode == store.ModeCode && e.turnFiles != nil && len(call.ProjectDirs) > 0 {
-		ctx = tool.WithMutationTrackingSink(ctx, func(targets []string, origin store.FileChangeOrigin) {
+		ctx = tool.WithMutationTrackingSink(ctx, func(targets []string) {
 			if tracked {
 				return
 			}
-			if err := e.turnFiles.BeginCall(turnID, call.CallID, call.ProjectDirs, targets, origin); err != nil {
+			if err := e.turnFiles.BeginCall(turnID, call.CallID, call.ProjectDirs, targets); err != nil {
 				slog.Warn("engine: capture dynamic tool file baseline failed", "turnID", turnID, "callID", call.CallID, "tool", call.Name, "err", err)
 				return
 			}
 			tracked = true
 		})
 		if mutation, ok := tool.MutationTrackingForCall(call); ok {
-			if err := e.turnFiles.BeginCall(turnID, call.CallID, call.ProjectDirs, mutation.Targets, mutation.Origin); err != nil {
+			if err := e.turnFiles.BeginCall(turnID, call.CallID, call.ProjectDirs, mutation.Targets); err != nil {
 				slog.Warn("engine: capture tool file baseline failed", "turnID", turnID, "callID", call.CallID, "tool", call.Name, "err", err)
 			} else {
 				tracked = true

@@ -4,34 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-
-	"github.com/teatak/pudding-core/internal/store"
 )
 
-// ProjectMutationTracking describes the filesystem scope a completed tool call
-// may attribute to the current turn.
+// ProjectMutationTracking describes the exact project paths a structured tool
+// owns for the duration of one call.
 type ProjectMutationTracking struct {
 	Targets []string
-	Origin  store.FileChangeOrigin
 }
 
-type mutationTrackingSink func(targets []string, origin store.FileChangeOrigin)
+type mutationTrackingSink func(targets []string)
 
 type mutationTrackingSinkContextKey struct{}
 
 // WithMutationTrackingSink lets tools report an exact mutation scope once it
 // becomes known during execution, before any filesystem writes occur.
-func WithMutationTrackingSink(ctx context.Context, sink func(targets []string, origin store.FileChangeOrigin)) context.Context {
+func WithMutationTrackingSink(ctx context.Context, sink func(targets []string)) context.Context {
 	if sink == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, mutationTrackingSinkContextKey{}, mutationTrackingSink(sink))
 }
 
-func reportMutationTracking(ctx context.Context, targets []string, origin store.FileChangeOrigin) {
+func reportMutationTracking(ctx context.Context, targets []string) {
 	sink, _ := ctx.Value(mutationTrackingSinkContextKey{}).(mutationTrackingSink)
 	if sink != nil && len(targets) > 0 {
-		sink(targets, origin)
+		sink(targets)
 	}
 }
 
@@ -52,16 +49,10 @@ type mutationCopyArgs struct {
 }
 
 // MutationTrackingForCall resolves only paths explicitly owned by a structured
-// write. Foreground commands intentionally use the complete authorized project
-// scope because their mutations cannot be known before execution.
+// write. Commands are deliberately excluded: their filesystem effects remain
+// visible in workspace Git state but are not attributed to the current turn.
 func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 	switch call.Name {
-	case CommandRun:
-		args, err := decodeCommandRunArgs(call.Args)
-		if err != nil || args.Background {
-			return ProjectMutationTracking{}, false
-		}
-		return ProjectMutationTracking{Origin: store.FileChangeOriginCommandObserved}, true
 	case FilePatch:
 		args, argumentErr := decodeFilePatchArgs(call.Args)
 		if argumentErr != nil || strings.TrimSpace(args.Scope) != managedScopeProject || len(args.Files) == 0 {
@@ -118,7 +109,6 @@ func structuredMutationTracking(targets []string) (ProjectMutationTracking, bool
 	}
 	return ProjectMutationTracking{
 		Targets: targets,
-		Origin:  store.FileChangeOriginStructured,
 	}, true
 }
 

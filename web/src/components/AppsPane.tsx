@@ -152,6 +152,7 @@ type AppRegistryItem = {
   version?: string;
   description?: LocalizedText;
   icon?: AppIconSpec;
+  icon_sha256?: string;
   manifest?: string;
   package?: string;
   package_sha256?: string;
@@ -1255,7 +1256,7 @@ function appRegistryIconURL(item: AppRegistryItem, registryURL: string) {
     return undefined;
   }
   const url = new URL(raw, registryURL);
-  const cacheKey = item.package_sha256 || item.version || item.id;
+  const cacheKey = item.icon_sha256 || item.package_sha256 || item.version || item.id;
   if (cacheKey) {
     url.searchParams.set("v", cacheKey);
   }
@@ -1512,7 +1513,7 @@ function CatalogAppItem({
 
   return (
     <div className="min-w-0 border-b border-border/60 pb-2">
-      <section className="flex min-h-24 min-w-0 items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-control-hover active:bg-control-active">
+      <section className="flex min-h-24 min-w-0 items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-item-hover focus-within:bg-item-hover">
         <button className="flex min-w-0 flex-1 items-center gap-3 self-stretch overflow-hidden text-left" type="button" onClick={onSelect}>
           <div className="relative shrink-0">
             <AppIcon icon={icon} size="xl" src={iconSrc} />

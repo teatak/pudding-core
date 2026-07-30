@@ -2,10 +2,39 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"strings"
 	"testing"
 )
+
+func TestNormalizeProjectAllowsNamedProjectWithoutDirectories(t *testing.T) {
+	project := &Project{ID: "project_empty", Name: "  Empty project  "}
+	if err := NormalizeProject(project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "Empty project" || len(project.RootDirs) != 0 {
+		t.Fatalf("unexpected normalized project: %+v", project)
+	}
+}
+
+func TestNormalizeProjectRejectsUnnamedProjectWithoutDirectories(t *testing.T) {
+	project := &Project{ID: "project_empty"}
+	if err := NormalizeProject(project); !errors.Is(err, ErrInvalidProject) {
+		t.Fatalf("expected ErrInvalidProject, got %v", err)
+	}
+}
+
+func TestNormalizeProjectUpdateAllowsClearingDirectories(t *testing.T) {
+	dirs := []string{}
+	update := ProjectUpdate{RootDirs: &dirs}
+	if err := NormalizeProjectUpdate(&update); err != nil {
+		t.Fatal(err)
+	}
+	if update.RootDirs == nil || len(*update.RootDirs) != 0 {
+		t.Fatalf("unexpected normalized update: %+v", update)
+	}
+}
 
 func TestToolResultPartMarshalsFalseOK(t *testing.T) {
 	data, err := json.Marshal(ContentPart{

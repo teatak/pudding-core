@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
-
-	"github.com/teatak/pudding-core/internal/store"
 )
 
 func TestMutationTrackingForCall(t *testing.T) {
@@ -18,14 +16,12 @@ func TestMutationTrackingForCall(t *testing.T) {
 		name        string
 		call        Call
 		wantOK      bool
-		wantOrigin  store.FileChangeOrigin
 		wantTargets []string
 	}{
 		{
-			name:       "foreground command observes project",
-			call:       Call{Name: CommandRun, Args: json.RawMessage(`{"scope":"project","command":"touch changed.txt"}`), ProjectDirs: []string{root}},
-			wantOK:     true,
-			wantOrigin: store.FileChangeOriginCommandObserved,
+			name:   "foreground command is not attributed",
+			call:   Call{Name: CommandRun, Args: json.RawMessage(`{"scope":"project","command":"touch changed.txt"}`), ProjectDirs: []string{root}},
+			wantOK: false,
 		},
 		{
 			name:   "background command is not finalized with the call",
@@ -36,14 +32,12 @@ func TestMutationTrackingForCall(t *testing.T) {
 			name:        "write owns one project path",
 			call:        Call{Name: FileWrite, Args: json.RawMessage(`{"scope":"project","path":"dir/file.txt","content":"new"}`), ProjectDirs: []string{root}},
 			wantOK:      true,
-			wantOrigin:  store.FileChangeOriginStructured,
 			wantTargets: []string{filepath.Join(resolvedRoot, "dir", "file.txt")},
 		},
 		{
 			name:        "copy owns only destination",
 			call:        Call{Name: FileCopy, Args: json.RawMessage(`{"scope":"project","from_path":"source.txt","to_path":"copy.txt"}`), ProjectDirs: []string{root}},
 			wantOK:      true,
-			wantOrigin:  store.FileChangeOriginStructured,
 			wantTargets: []string{filepath.Join(resolvedRoot, "copy.txt")},
 		},
 		{
@@ -61,9 +55,6 @@ func TestMutationTrackingForCall(t *testing.T) {
 			}
 			if !ok {
 				return
-			}
-			if got.Origin != test.wantOrigin {
-				t.Fatalf("origin = %q, want %q", got.Origin, test.wantOrigin)
 			}
 			if len(got.Targets) != len(test.wantTargets) {
 				t.Fatalf("targets = %v, want %v", got.Targets, test.wantTargets)

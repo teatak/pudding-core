@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/lsp"
-	"github.com/teatak/pudding-core/internal/store"
 )
 
 const (
@@ -132,7 +131,7 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	for _, file := range files {
 		mutatedPaths = append(mutatedPaths, file.Path)
 	}
-	reportMutationTracking(ctx, mutatedPaths, store.FileChangeOriginStructured)
+	reportMutationTracking(ctx, mutatedPaths)
 
 	patchArgs, err := json.Marshal(filePatchArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {

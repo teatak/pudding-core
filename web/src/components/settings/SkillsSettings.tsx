@@ -140,7 +140,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
   const iconURL = skillIconURL(token, skill);
   return (
     <Item
-      className="group min-h-16 min-w-0 max-w-full flex-nowrap overflow-hidden rounded-xl bg-card px-4 py-3 hover:bg-control-hover active:bg-control-active"
+      className="group min-h-16 min-w-0 max-w-full flex-nowrap overflow-hidden rounded-xl bg-card px-4 py-3"
       role="listitem"
       variant="outline"
     >

@@ -24,46 +24,23 @@ const (
 	maxSnapshotTotalContentBytes = 64 << 20
 )
 
-var ignoredDirectories = map[string]struct{}{
-	".cache":        {},
-	".git":          {},
-	".gradle":       {},
-	".mypy_cache":   {},
-	".next":         {},
-	".nuxt":         {},
-	".pytest_cache": {},
-	".ruff_cache":   {},
-	".tox":          {},
-	".turbo":        {},
-	".venv":         {},
-	"__pycache__":   {},
-	"build":         {},
-	"coverage":      {},
-	"dist":          {},
-	"node_modules":  {},
-	"target":        {},
-	"vendor":        {},
-	"venv":          {},
-}
-
 type Tracker struct {
 	mu    sync.Mutex
 	turns map[string]*turnState
 }
 
 type turnState struct {
-	calls   map[string]callSnapshot
+	calls   map[string]*callSnapshot
 	initial map[fileKey]fileSnapshot
 	final   map[fileKey]fileSnapshot
 	touched map[fileKey]struct{}
-	origins map[fileKey]store.FileChangeOrigin
 }
 
 type callSnapshot struct {
 	roots   []string
 	targets []string
-	origin  store.FileChangeOrigin
 	before  map[fileKey]fileSnapshot
+	ready   bool
 }
 
 type fileKey struct {
@@ -83,9 +60,10 @@ func New() *Tracker {
 	return &Tracker{turns: make(map[string]*turnState)}
 }
 
-// BeginCall captures the files a single tool call may mutate. Empty targets
-// mean the complete authorized project scope, used for foreground commands.
-func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin) error {
+// BeginCall captures only the explicit paths owned by one structured tool call.
+// Empty, invalid, or project-root targets are ignored and never expand into a
+// whole-project scan.
+func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string) error {
 	turnID = strings.TrimSpace(turnID)
 	callID = strings.TrimSpace(callID)
 	if turnID == "" || callID == "" {
@@ -96,24 +74,39 @@ func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string, orig
 		return nil
 	}
 	targets = normalizeTargets(roots, targets)
-	before, err := snapshotScope(roots, targets)
-	if err != nil {
-		return err
+	if len(targets) == 0 {
+		return nil
 	}
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	tracked := t.turns[turnID]
 	if tracked == nil {
 		tracked = newTurnState()
 		t.turns[turnID] = tracked
 	}
-	tracked.calls[callID] = callSnapshot{
+	call := &callSnapshot{
 		roots:   roots,
 		targets: targets,
-		origin:  store.NormalizeFileChangeOrigin(origin),
-		before:  before,
 	}
+	tracked.calls[callID] = call
+	t.mu.Unlock()
+
+	before, err := snapshotScope(roots, targets)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	current := t.turns[turnID]
+	if current != tracked || current.calls[callID] != call {
+		return err
+	}
+	if err != nil {
+		delete(current.calls, callID)
+		if len(current.calls) == 0 && len(current.touched) == 0 {
+			delete(t.turns, turnID)
+		}
+		return err
+	}
+	call.before = before
+	call.ready = true
 	return nil
 }
 
@@ -129,41 +122,40 @@ func (t *Tracker) EndCall(turnID, callID string) error {
 		return nil
 	}
 	call, ok := tracked.calls[callID]
-	if ok {
-		delete(tracked.calls, callID)
-	}
 	t.mu.Unlock()
-	if !ok {
+	if !ok || !call.ready {
 		return nil
 	}
 	after, err := snapshotScope(call.roots, call.targets)
 	if err != nil {
+		t.mu.Lock()
+		if current := t.turns[turnID]; current == tracked && current.calls[callID] == call {
+			delete(current.calls, callID)
+		}
+		t.mu.Unlock()
 		return err
 	}
 	changed := changedFileKeys(call.before, after)
-	if len(changed) == 0 {
-		return nil
-	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	tracked = t.turns[turnID]
-	if tracked == nil {
+	current := t.turns[turnID]
+	if current != tracked || current.calls[callID] != call {
 		return nil
 	}
+	delete(current.calls, callID)
 	for _, key := range changed {
-		if _, seen := tracked.touched[key]; !seen {
-			tracked.touched[key] = struct{}{}
+		if _, seen := current.touched[key]; !seen {
+			current.touched[key] = struct{}{}
 			if file, exists := call.before[key]; exists {
-				tracked.initial[key] = file
+				current.initial[key] = file
 			}
 		}
 		if file, exists := after[key]; exists {
-			tracked.final[key] = file
+			current.final[key] = file
 		} else {
-			delete(tracked.final, key)
+			delete(current.final, key)
 		}
-		tracked.origins[key] = mergeOrigin(tracked.origins[key], call.origin)
 	}
 	return nil
 }
@@ -179,13 +171,7 @@ func (t *Tracker) Finish(turnID string) ([]store.TurnFileChangeInput, error) {
 	}
 	changes := compareSnapshots(tracked.initial, tracked.final)
 	for i := range changes {
-		key := fileKey{root: changes[i].RootPath, path: changes[i].Path}
-		origin := tracked.origins[key]
-		if changes[i].Kind == store.FileChangeRenamed {
-			oldKey := fileKey{root: changes[i].RootPath, path: changes[i].OriginalPath}
-			origin = mergeOrigin(origin, tracked.origins[oldKey])
-		}
-		changes[i].Origin = store.NormalizeFileChangeOrigin(origin)
+		changes[i].Origin = store.FileChangeOriginStructured
 	}
 	return changes, nil
 }
@@ -198,19 +184,11 @@ func (t *Tracker) Discard(turnID string) {
 
 func newTurnState() *turnState {
 	return &turnState{
-		calls:   make(map[string]callSnapshot),
+		calls:   make(map[string]*callSnapshot),
 		initial: make(map[fileKey]fileSnapshot),
 		final:   make(map[fileKey]fileSnapshot),
 		touched: make(map[fileKey]struct{}),
-		origins: make(map[fileKey]store.FileChangeOrigin),
 	}
-}
-
-func mergeOrigin(current, next store.FileChangeOrigin) store.FileChangeOrigin {
-	if current == store.FileChangeOriginCommandObserved || next == store.FileChangeOriginCommandObserved {
-		return store.FileChangeOriginCommandObserved
-	}
-	return store.FileChangeOriginStructured
 }
 
 func changedFileKeys(before, after map[fileKey]fileSnapshot) []fileKey {
@@ -291,8 +269,11 @@ func normalizeTargets(roots, targets []string) []string {
 		if raw == "" || !filepath.IsAbs(raw) {
 			continue
 		}
-		_, target, _, err := projectpath.Resolve(roots, raw, true, true)
+		root, target, _, err := projectpath.Resolve(roots, raw, true, true)
 		if err != nil {
+			continue
+		}
+		if filepath.Clean(target) == filepath.Clean(root) {
 			continue
 		}
 		if _, ok := seen[target]; ok {
@@ -325,7 +306,7 @@ func normalizeTargets(roots, targets []string) []string {
 
 func snapshotScope(roots, targets []string) (map[fileKey]fileSnapshot, error) {
 	if len(targets) == 0 {
-		return snapshotRoots(roots)
+		return map[fileKey]fileSnapshot{}, nil
 	}
 	out := make(map[fileKey]fileSnapshot)
 	remainingContentBytes := int64(maxSnapshotTotalContentBytes)
@@ -379,11 +360,6 @@ func snapshotPath(out map[fileKey]fileSnapshot, root, target string, remainingCo
 			return nil
 		}
 		if entry.IsDir() {
-			if path != target {
-				if _, ignored := ignoredDirectories[entry.Name()]; ignored {
-					return filepath.SkipDir
-				}
-			}
 			return nil
 		}
 		relative, err := filepath.Rel(root, path)
@@ -396,48 +372,6 @@ func snapshotPath(out map[fileKey]fileSnapshot, root, target string, remainingCo
 		}
 		return nil
 	})
-}
-
-func snapshotRoots(roots []string) (map[fileKey]fileSnapshot, error) {
-	out := make(map[fileKey]fileSnapshot)
-	remainingContentBytes := int64(maxSnapshotTotalContentBytes)
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				// A tool may intentionally remove the project root. Treat a missing
-				// root as an empty after-snapshot so baseline files become deletions.
-				if path == root && errors.Is(walkErr, os.ErrNotExist) {
-					return nil
-				}
-				if path == root {
-					return walkErr
-				}
-				return nil
-			}
-			if entry.IsDir() {
-				if path != root {
-					if _, ignored := ignoredDirectories[entry.Name()]; ignored {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			}
-			relative, err := filepath.Rel(root, path)
-			if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-				return nil
-			}
-			file, ok := readSnapshotFile(path, &remainingContentBytes)
-			if !ok {
-				return nil
-			}
-			out[fileKey{root: root, path: filepath.ToSlash(relative)}] = file
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }
 
 func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, bool) {
