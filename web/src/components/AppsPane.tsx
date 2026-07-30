@@ -990,8 +990,11 @@ async function fetchAppPackage(item: AppRegistryItem, registryURL: string, relea
   if (!target?.package) {
     throw new Error("app package is missing");
   }
-  const packageURL = new URL(target.package, registryURL).href;
-  const response = await fetch(packageURL, { cache: "reload" });
+  const packageURL = new URL(target.package, registryURL);
+  if (target.package_sha256) {
+    packageURL.searchParams.set("v", target.package_sha256);
+  }
+  const response = await fetch(packageURL.href, { cache: "reload" });
   if (!response.ok) {
     throw new Error(`app package request failed: ${response.status}`);
   }
