@@ -33,6 +33,7 @@ export {
   Circle,
   CircleAlert,
   CircleCheck,
+  CircleCheckBig,
   CircleCheckIcon,
   CircleDashed,
   CircleX,
