@@ -1,6 +1,6 @@
 # Unicorn AI Mobile：App 与 Skill 架构设计
 
-> 状态：产品与技术设计草案  
+> 状态：产品与技术设计草案
 > 平台：iOS-first，Android 持续验证并后续发布  
 > 定位：Unicorn 面向酒店行业的可定制 AI Worker 手机端
 
