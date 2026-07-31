@@ -47,9 +47,10 @@ import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import { PuddingWordmark } from "@/components/PuddingWordmark";
-import { SessionSearchDialog } from "@/components/SessionSearchDialog";
+import { SessionSearchDialog, type SessionSearchSelection } from "@/components/SessionSearchDialog";
 import { Spinner } from "@/components/Spinner";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { requestTranscriptTurnReveal } from "@/state/transcriptRevealStore";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -447,6 +448,13 @@ export function SessionRail({
     });
   }
 
+  function selectSearchResult(selection: SessionSearchSelection) {
+    if (selection.turnID) {
+      requestTranscriptTurnReveal(selection.sessionID, selection.turnID, selection.messageRole);
+    }
+    selectSession(selection.sessionID);
+  }
+
   function renderPanel(compactWordmarkGap = false) {
     return (
       <RailPanel
@@ -579,7 +587,7 @@ export function SessionRail({
       sessions={sessions}
       token={token}
       onOpenChange={setSearchOpen}
-      onSelect={selectSession}
+      onSelect={selectSearchResult}
     />
   );
 

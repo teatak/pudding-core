@@ -80,7 +80,7 @@ function CanonicalAssistantOutput({
     return <CompactMarker message={compactMessage} sessionID={sessionID} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
   }
   return (
-    <div className="group flex min-w-0 flex-col">
+    <div className="group flex min-w-0 flex-col" data-transcript-message-role="assistant">
       <div className="selectable-text min-w-0 text-sm leading-6">
         {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
         {assistant.error ? (
@@ -130,7 +130,10 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
           .replace("{source}", String(sourceCount))
           .replace("{tail}", String(tailCount));
   return (
-    <div className="selectable-text my-1 overflow-hidden rounded-lg border border-border/70 bg-background text-sm">
+    <div
+      className="selectable-text my-1 overflow-hidden rounded-lg border border-border/70 bg-background text-sm"
+      data-transcript-message-role="assistant"
+    >
       <div className="flex min-h-11 min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 text-muted-foreground">
         <Archive className="size-3.5 shrink-0" />
         <span className="shrink-0 font-medium text-foreground">{t("transcript.compactMark")}</span>

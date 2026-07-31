@@ -478,7 +478,7 @@ function ProjectRow({
           <h2 className="truncate font-medium">{project.name}</h2>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>
-              {formatProjectUpdatedAt(project.lastActivityAt || project.updatedAt, locale, t)}
+              {formatProjectActivityAt(project.lastActivityAt || project.updatedAt, locale, t)}
             </span>
             {project.rootDirs.length !== 1 ? (
               <span>
@@ -538,7 +538,7 @@ function compareProjects(left: Project, right: Project, sort: ProjectSort, local
   return new Date(rightValue).getTime() - new Date(leftValue).getTime();
 }
 
-function formatProjectUpdatedAt(value: string, locale: string, t: (key: string) => string) {
+function formatProjectActivityAt(value: string, locale: string, t: (key: string) => string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
@@ -546,10 +546,10 @@ function formatProjectUpdatedAt(value: string, locale: string, t: (key: string) 
   const now = new Date();
   const elapsed = now.getTime() - date.getTime();
   if (elapsed >= -60_000 && elapsed < 60_000) {
-    return t("project.updatedJustNow");
+    return t("project.activityJustNow");
   }
   if (elapsed >= 0 && elapsed < 60 * 60_000) {
-    return t("project.updatedMinutesAgo").replace(
+    return t("project.activityMinutesAgo").replace(
       "{count}",
       String(Math.max(1, Math.floor(elapsed / 60_000))),
     );
@@ -559,17 +559,14 @@ function formatProjectUpdatedAt(value: string, locale: string, t: (key: string) 
     minute: "2-digit",
   }).format(date);
   if (isSameCalendarDay(date, now)) {
-    return t("project.updatedToday").replace("{time}", time);
+    return t("project.activityToday").replace("{time}", time);
   }
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (isSameCalendarDay(date, yesterday)) {
-    return t("project.updatedYesterday").replace("{time}", time);
+    return t("project.activityYesterday").replace("{time}", time);
   }
-  return t("project.updatedAt").replace(
-    "{date}",
-    new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date),
-  );
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function isSameCalendarDay(left: Date, right: Date) {

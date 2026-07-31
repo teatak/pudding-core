@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
+import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
+
 import { TranscriptTurn } from "./TranscriptTurn";
 import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 
@@ -17,6 +19,8 @@ const VIEWPORT_ANCHOR_MAX_TOP_RATIO = 0.7;
 const VIEWPORT_ANCHOR_MIN_TOP_RATIO = 0.3;
 const VIEWPORT_ANCHOR_TARGET_RATIO = 0.5;
 const POINTER_SCROLL_SETTLE_MS = 800;
+const TURN_REVEAL_CLEAR_MS = 2400;
+const TURN_REVEAL_TOP_RATIO = 0.38;
 
 type HistoryLoadState = "idle" | "loading" | "settling";
 type DisclosureOpenState = { openedAtLatest: boolean; userScrollSeq: number };
@@ -34,6 +38,7 @@ export const TranscriptList = memo(function TranscriptList({
   onAssistantRevealComplete,
   onLatestChange,
   onLoadHistory,
+  onTurnRevealComplete,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSteer,
@@ -41,6 +46,7 @@ export const TranscriptList = memo(function TranscriptList({
   scrollElement,
   sessionID,
   token,
+  turnReveal,
   turns,
 }: {
   disclosure?: TurnDisclosureState;
@@ -51,6 +57,7 @@ export const TranscriptList = memo(function TranscriptList({
   onAssistantRevealComplete?: (turnID: string) => void;
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
+  onTurnRevealComplete?: (serial: number) => void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
@@ -58,6 +65,7 @@ export const TranscriptList = memo(function TranscriptList({
   scrollElement: HTMLDivElement | null;
   sessionID: string;
   token: string;
+  turnReveal?: TranscriptTurnReveal;
   turns: TranscriptTurnVM[];
 }) {
   const autoStickRef = useRef(true);
@@ -69,6 +77,9 @@ export const TranscriptList = memo(function TranscriptList({
   const latestSentinelRef = useRef<HTMLDivElement | null>(null);
   const listElementRef = useRef<HTMLDivElement | null>(null);
   const programmaticScrollIgnoreUntilRef = useRef(0);
+  const revealedMessageElementsRef = useRef<HTMLElement[]>([]);
+  const revealedTurnSerialRef = useRef(0);
+  const revealClearTimerRef = useRef<number | null>(null);
   const stickRafRef = useRef<number | null>(null);
   const stickRunRef = useRef(0);
   const userScrollSeqRef = useRef(0);
@@ -81,7 +92,9 @@ export const TranscriptList = memo(function TranscriptList({
   const resizeAnchorRef = useRef<ResizeAnchor | null>(null);
   const smoothJumpRafRef = useRef<number | null>(null);
   const smoothJumpRef = useRef(false);
+  const turnRevealRef = useRef(turnReveal);
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
+  turnRevealRef.current = turnReveal;
   const firstTurnKey = turns[0]?.key ?? "";
 
   const syncViewportScrollbar = useCallback(
@@ -453,9 +466,12 @@ export const TranscriptList = memo(function TranscriptList({
     if (!scrollElement || turns.length === 0 || initialScrollSessionRef.current === sessionID) {
       return;
     }
+    if (turnReveal) {
+      return;
+    }
     initialScrollSessionRef.current = sessionID;
     window.requestAnimationFrame(() => scrollToLatest());
-  }, [scrollElement, scrollToLatest, sessionID, turns.length]);
+  }, [scrollElement, scrollToLatest, sessionID, turnReveal, turns.length]);
 
   useEffect(() => {
     if (jumpLatestSignal <= 0) {
@@ -682,9 +698,74 @@ export const TranscriptList = memo(function TranscriptList({
     clearPendingHistoryAnchor();
     releaseViewportResizeAnchor();
     cancelSmoothJump();
-    autoStickRef.current = true;
-    setLatestState(true);
+    const locatingTurn = Boolean(turnRevealRef.current);
+    autoStickRef.current = !locatingTurn;
+    setLatestState(!locatingTurn);
   }, [cancelSmoothJump, clearPendingHistoryAnchor, historyLoader.reset, releaseViewportResizeAnchor, sessionID, setLatestState]);
+
+  useLayoutEffect(() => {
+    if (
+      !scrollElement ||
+      !turnReveal ||
+      revealedTurnSerialRef.current === turnReveal.serial
+    ) {
+      return;
+    }
+    const turnElement = scrollElement.querySelector<HTMLElement>(
+      `[data-transcript-turn-id="${CSS.escape(turnReveal.turnID)}"]`,
+    );
+    if (!turnElement) {
+      return;
+    }
+    cancelScheduledStick();
+    cancelSmoothJump();
+    disableAutoStick();
+    markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
+    const viewportRect = scrollElement.getBoundingClientRect();
+    const elementTop = turnElement.getBoundingClientRect().top - viewportRect.top;
+    scrollElement.scrollTop += elementTop - scrollElement.clientHeight * TURN_REVEAL_TOP_RATIO;
+    lastScrollTopRef.current = scrollElement.scrollTop;
+    initialScrollSessionRef.current = sessionID;
+    revealedTurnSerialRef.current = turnReveal.serial;
+    setLatestState(false);
+
+    if (revealClearTimerRef.current !== null) {
+      window.clearTimeout(revealClearTimerRef.current);
+    }
+    for (const element of revealedMessageElementsRef.current) {
+      element.removeAttribute("data-transcript-turn-reveal");
+    }
+    const roleElements = turnReveal.messageRole
+      ? Array.from(
+          turnElement.querySelectorAll<HTMLElement>(
+            `[data-transcript-message-role="${turnReveal.messageRole}"]`,
+          ),
+        )
+      : [];
+    const revealElements = roleElements.length > 0 ? roleElements : [turnElement];
+    revealedMessageElementsRef.current = revealElements;
+    for (const element of revealElements) {
+      element.setAttribute("data-transcript-turn-reveal", "true");
+    }
+    revealClearTimerRef.current = window.setTimeout(() => {
+      for (const element of revealElements) {
+        element.removeAttribute("data-transcript-turn-reveal");
+      }
+      revealedMessageElementsRef.current = [];
+      revealClearTimerRef.current = null;
+    }, TURN_REVEAL_CLEAR_MS);
+    onTurnRevealComplete?.(turnReveal.serial);
+  }, [
+    cancelScheduledStick,
+    cancelSmoothJump,
+    disableAutoStick,
+    onTurnRevealComplete,
+    scrollElement,
+    sessionID,
+    setLatestState,
+    turnReveal,
+    turns,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -692,6 +773,13 @@ export const TranscriptList = memo(function TranscriptList({
       cancelSmoothJump();
       clearPendingHistoryAnchor();
       releaseViewportResizeAnchor();
+      if (revealClearTimerRef.current !== null) {
+        window.clearTimeout(revealClearTimerRef.current);
+      }
+      for (const element of revealedMessageElementsRef.current) {
+        element.removeAttribute("data-transcript-turn-reveal");
+      }
+      revealedMessageElementsRef.current = [];
     };
   }, [cancelScheduledStick, cancelSmoothJump, clearPendingHistoryAnchor, releaseViewportResizeAnchor]);
 

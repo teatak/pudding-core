@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useScopedSelectAll } from "@/hooks/useScopedSelectAll";
 import { useI18n } from "@/i18n";
+import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
 import { TranscriptList } from "./TranscriptList";
 import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
@@ -27,6 +28,7 @@ export function TranscriptView({
   onJumpLatest,
   onLatestChange,
   onLoadHistory,
+  onTurnRevealComplete,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSteer,
@@ -35,6 +37,7 @@ export function TranscriptView({
   showJumpLatest,
   submitError,
   token,
+  turnReveal,
   turns,
 }: {
   disclosure?: TurnDisclosureState;
@@ -52,6 +55,7 @@ export function TranscriptView({
   onJumpLatest: () => void;
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
+  onTurnRevealComplete?: (serial: number) => void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
@@ -60,6 +64,7 @@ export function TranscriptView({
   showJumpLatest: boolean;
   submitError?: string | null;
   token: string;
+  turnReveal?: TranscriptTurnReveal;
   turns: TranscriptTurnVM[];
 }) {
   const { t } = useI18n();
@@ -104,6 +109,7 @@ export function TranscriptView({
             onAssistantRevealComplete={onAssistantRevealComplete}
             onLatestChange={onLatestChange}
             onLoadHistory={onLoadHistory}
+            onTurnRevealComplete={onTurnRevealComplete}
             onQueuedCancel={onQueuedCancel}
             onQueuedEditStart={onQueuedEditStart}
             onQueuedSteer={onQueuedSteer}
@@ -111,6 +117,7 @@ export function TranscriptView({
             scrollElement={viewportNode}
             sessionID={sessionID}
             token={token}
+            turnReveal={turnReveal}
             turns={turns}
           />
           {submitError ? (

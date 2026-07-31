@@ -135,6 +135,7 @@
     --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
+    --transcript-reveal-accent: oklch(0.61 0.25 285);
     --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
     --control-hover-background: oklch(0.945 0 0);
     --control-active-background: oklch(0.905 0 0);
@@ -561,6 +562,7 @@ html[data-shell] :where(
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
+    --transcript-reveal-accent: oklch(0.75 0.17 285);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --control-hover-background: oklch(0.3 0 0);
@@ -2296,4 +2298,31 @@ html[data-agent-console-resizing="true"] webview {
 /* 末行不带底边,避免与 wrapper 圆角边框叠出双线 */
 .pudding-markdown tr:last-child td {
   @apply border-b-0;
+}
+
+@keyframes pudding-transcript-turn-reveal {
+  0%,
+  45% {
+    background-color: color-mix(in oklab, var(--transcript-reveal-accent) 22%, transparent);
+    box-shadow: 0 0 0 0.625rem color-mix(in oklab, var(--transcript-reveal-accent) 22%, transparent);
+    outline-color: color-mix(in oklab, var(--transcript-reveal-accent) 55%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0.625rem transparent;
+    outline-color: transparent;
+  }
+}
+
+.pudding-transcript-viewport [data-transcript-turn-reveal="true"] {
+  border-radius: 0.75rem;
+  outline: 1px solid transparent;
+  outline-offset: 0.625rem;
+  animation: pudding-transcript-turn-reveal 2.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pudding-transcript-viewport [data-transcript-turn-reveal="true"] {
+    animation-duration: 0.01ms;
+  }
 }

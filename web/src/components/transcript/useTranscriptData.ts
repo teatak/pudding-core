@@ -41,6 +41,7 @@ export function useTranscriptData({
     loadHistory,
     messages,
     query: turnsQuery,
+    revealTurn,
     turnDurationByID,
     turns,
   } = useTranscriptTurns(token, sessionID);
@@ -144,6 +145,7 @@ export function useTranscriptData({
     isLoadingHistory,
     loadHistory,
     pendingUsers,
+    revealTurn,
     transcript,
     turnsQuery,
     steerQueued,

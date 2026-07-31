@@ -6,6 +6,7 @@ import { searchSessionMessages, type Message, type Project, type Session } from 
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import { SessionModeIcon } from "@/components/SessionModeIcon";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
@@ -13,12 +14,19 @@ import { cn } from "@/lib/utils";
 
 const searchDelayMs = 180;
 const maxVisibleResults = 50;
+const maxRecentResults = 8;
 
 type SearchResult = {
   session: Session;
   project?: Project;
   message?: Message;
   score: number;
+};
+
+export type SessionSearchSelection = {
+  messageRole?: "assistant" | "user";
+  sessionID: string;
+  turnID?: string;
 };
 
 export function SessionSearchDialog({
@@ -34,12 +42,13 @@ export function SessionSearchDialog({
   sessions: Session[];
   token: string;
   onOpenChange: (open: boolean) => void;
-  onSelect: (sessionID: string) => void;
+  onSelect: (selection: SessionSearchSelection) => void;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultListRef = useRef<HTMLDivElement | null>(null);
   const sessionIDs = useMemo(() => sessions.map((session) => session.id).sort(), [sessions]);
   const normalizedQuery = normalizeSearchText(query);
@@ -94,8 +103,22 @@ export function SessionSearchDialog({
     if (!result) {
       return;
     }
-    onSelect(result.session.id);
+    onSelect({
+      messageRole:
+        result.message?.role === "assistant" || result.message?.role === "user"
+          ? result.message.role
+          : undefined,
+      sessionID: result.session.id,
+      turnID: result.message?.turnID || undefined,
+    });
     onOpenChange(false);
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setDebouncedQuery("");
+    setActiveIndex(0);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -136,6 +159,7 @@ export function SessionSearchDialog({
         <div className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
           <Search className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Input
+            ref={searchInputRef}
             autoFocus
             aria-label={t("rail.searchPlaceholder")}
             className="h-full rounded-none border-0 bg-transparent px-0 text-base shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent md:text-base"
@@ -151,7 +175,7 @@ export function SessionSearchDialog({
         </div>
         <div ref={resultListRef} className="min-h-0 overflow-y-auto p-2" role="listbox">
           <div className="px-3 pt-2.5 pb-1.5 text-sm font-medium text-muted-foreground">
-            {t("rail.searchSection")}
+            {t(normalizedQuery ? "rail.searchResultsSection" : "rail.searchRecentSection")}
           </div>
           {results.length > 0 ? (
             <div className="space-y-0.5">
@@ -213,8 +237,17 @@ export function SessionSearchDialog({
               <Spinner className="size-5" />
             </div>
           ) : (
-            <div className="flex h-28 items-center justify-center text-sm text-muted-foreground">
-              {messageSearch.isError && normalizedQuery ? t("rail.searchFailed") : t("rail.searchEmpty")}
+            <div className="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+              <span>
+                {messageSearch.isError && normalizedQuery
+                  ? t("rail.searchFailed")
+                  : t(normalizedQuery ? "rail.searchEmpty" : "rail.searchNoSessions")}
+              </span>
+              {normalizedQuery ? (
+                <Button size="sm" type="button" variant="outline" onClick={clearSearch}>
+                  {t("rail.searchClear")}
+                </Button>
+              ) : null}
             </div>
           )}
         </div>
@@ -273,7 +306,7 @@ function buildSearchResults(
       }
       return sessionActivityTime(right.session) - sessionActivityTime(left.session);
     })
-    .slice(0, maxVisibleResults);
+    .slice(0, normalizedQuery ? maxVisibleResults : maxRecentResults);
 }
 
 function normalizeSearchText(value: string) {

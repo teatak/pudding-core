@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { getSettings, type ContentPart } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -8,6 +8,10 @@ import type { TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
 import { transcriptDisplaySettings } from "@/lib/appSettings";
 import { useOverlayStore } from "@/state/overlayStore";
+import {
+  consumeTranscriptTurnReveal,
+  useTranscriptTurnReveal,
+} from "@/state/transcriptRevealStore";
 
 type TranscriptProps = {
   token: string;
@@ -21,8 +25,9 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
+  const turnReveal = useTranscriptTurnReveal(sessionID);
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
-  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, steerQueued, transcript, turnsQuery, updateQueued } =
+  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, revealTurn, steerQueued, transcript, turnsQuery, updateQueued } =
     useTranscriptData({
       sessionID,
       sessionRunning,
@@ -84,6 +89,25 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   );
 
   const handleAssistantRevealComplete = useCallback((turnID: string) => markAssistantRevealed(turnID), [markAssistantRevealed]);
+  const handleTurnRevealComplete = useCallback(
+    (serial: number) => consumeTranscriptTurnReveal(sessionID, serial),
+    [sessionID],
+  );
+
+  useEffect(() => {
+    if (!turnReveal || !turnsQuery.isSuccess) {
+      return;
+    }
+    let active = true;
+    void revealTurn(turnReveal.turnID).then((found) => {
+      if (active && !found) {
+        consumeTranscriptTurnReveal(sessionID, turnReveal.serial);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [revealTurn, sessionID, turnReveal, turnsQuery.isSuccess]);
 
   useLayoutEffect(() => {
     const previous = turnVMsRef.current;
@@ -129,11 +153,13 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       showJumpLatest={!isAtLatest}
       submitError={submitError}
       token={token}
+      turnReveal={turnReveal}
       turns={transcript.turnVMs}
       onAssistantRevealComplete={handleAssistantRevealComplete}
       onJumpLatest={handleJumpLatest}
       onLatestChange={handleLatestChange}
       onLoadHistory={loadHistory}
+      onTurnRevealComplete={handleTurnRevealComplete}
       onQueuedCancel={cancelQueued}
       onQueuedEditStart={startQueuedEdit}
       onQueuedSteer={runningTurnID ? guideQueued : undefined}

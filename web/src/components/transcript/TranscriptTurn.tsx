@@ -39,7 +39,7 @@ function TranscriptTurnView({
   const sequenceAssistants = turn.sequence?.filter((item) => item.kind === "assistant").map((item) => item.assistant) || [];
   const metaAssistant = sequenceAssistants.at(-1) || turn.assistant;
   return (
-    <div className="grid min-w-0 gap-3" data-transcript-turn-id={anchorTurnID}>
+    <div className="pudding-transcript-turn grid min-w-0 gap-3" data-transcript-turn-id={anchorTurnID}>
       {turn.user ? (
         <div className="min-w-0">
           <UserInput
@@ -120,6 +120,7 @@ function TurnGuide({ attachmentLabel, label, user }: { attachmentLabel: string; 
     <div
       aria-label={label}
       className="pudding-user-message ml-auto flex max-w-[min(82%,42rem)] min-w-0 items-start gap-2 overflow-hidden rounded-[14px] rounded-br-[5px] border-0 px-3.5 py-2 text-left text-sm leading-6 shadow-none"
+      data-transcript-message-role="user"
     >
       <CornerDownLeft className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <div className="min-w-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
