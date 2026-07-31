@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Folders, Globe, PanelRightClose, Plus, SquareTerminal } from "@/components/icons";
+import { Folders, Globe, Plus, SquareTerminal } from "@/components/icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -94,12 +94,14 @@ type WorkspacePaneProps = {
   token: string;
   sessionID?: string;
   secondarySessionID?: string;
+  reserveTopRightActions?: 0 | 1 | 2;
 };
 
 export const WorkspacePane = memo(function WorkspacePane({
   token,
   sessionID,
   secondarySessionID,
+  reserveTopRightActions = 0,
 }: WorkspacePaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -981,28 +983,16 @@ export const WorkspacePane = memo(function WorkspacePane({
 
   return (
     <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
-      <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-40 flex h-(--toolbar-h) items-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t("workspace.close")}
-              aria-pressed="true"
-              className="no-drag-region pointer-events-auto"
-              size="icon-sm"
-              tabIndex={-1}
-              type="button"
-              variant="ghost"
-              onClick={() => setWorkspaceOpen(false)}
-            >
-              <PanelRightClose />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent align="end" side="bottom">
-            {t("workspace.close")}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+0.375rem)] pl-(--workspace-toolbar-pl)">
+      <div
+        className={cn(
+          "relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pl-(--workspace-toolbar-pl)",
+          reserveTopRightActions === 2
+            ? "pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+var(--toolbar-icon-button-size)+0.875rem)]"
+            : reserveTopRightActions === 1
+              ? "pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+0.375rem)]"
+              : "pr-(--workspace-toolbar-pr)",
+        )}
+      >
         <WorkspaceResourceTabs
             activeBrowserTabID={activeBrowserTabID}
             activeCanvasItemID={activeCanvasItem?.id}

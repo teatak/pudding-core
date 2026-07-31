@@ -1,8 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import { useIsMobile } from "@/hooks/use-mobile";
-
-// 用户偏好持久化；窄窗口仅临时强制折叠，不覆盖该偏好。
+// 用户偏好持久化；响应式折叠由 App 根据「左栏 + Chat」区域宽度派生。
 const KEY = "pudding.railCollapsed";
 
 let pref = localStorage.getItem(KEY) === "1";
@@ -43,8 +41,7 @@ export function useRailCollapsed() {
     () => responsiveCollapsed,
     () => responsiveCollapsed,
   );
-  const narrowWindow = useIsMobile();
-  return preferredCollapsed || forcedCollapsed || narrowWindow;
+  return preferredCollapsed || forcedCollapsed;
 }
 
 export function useRailResponsiveCollapsed() {

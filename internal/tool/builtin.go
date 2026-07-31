@@ -529,7 +529,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CameraCapture,
-			Description: "Take one photo from the local camera and return a displayable attachment URL. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
+			Description: "Take one photo from the local camera. The result is displayed automatically in the current conversation and includes displayMarkdown for explicitly showing the same photo again. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},

@@ -66,43 +66,45 @@ export function MessageMeta({
         align === "end" && "justify-end",
       )}
     >
-      <div className="flex items-center gap-2">
-        {actions}
+      <div className="flex items-center gap-1">
+        <div className={cn("flex items-center", align === "start" && "w-4 justify-center")}>
+          {actions}
+          {hideStandardDetails ? null : (
+            <>
+              <Button
+                aria-label={t("common.copy")}
+                className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+                size="icon-xs"
+                tabIndex={-1}
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  void navigator.clipboard.writeText(text).then(() => {
+                    setCopied(true);
+                    if (resetTimer.current) {
+                      window.clearTimeout(resetTimer.current);
+                    }
+                    resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+                  });
+                }}
+              >
+                {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+              </Button>
+              {uiContext ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="grid size-6 place-items-center text-muted-foreground">
+                      <SquareMousePointer className="size-3" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </>
+          )}
+        </div>
         {hideStandardDetails ? null : (
-          <>
-            <Button
-              aria-label={t("common.copy")}
-              className={cn(
-                "size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
-                uiContext ? "-mr-3" : "-mr-1.5",
-                align === "start" && "-ml-1",
-              )}
-              size="icon-xs"
-              tabIndex={-1}
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                void navigator.clipboard.writeText(text).then(() => {
-                  setCopied(true);
-                  if (resetTimer.current) {
-                    window.clearTimeout(resetTimer.current);
-                  }
-                  resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
-                });
-              }}
-            >
-              {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
-            </Button>
-            {uiContext ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="-mr-1.5 grid size-6 place-items-center text-muted-foreground">
-                    <SquareMousePointer className="size-3" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
-              </Tooltip>
-            ) : null}
+          <div className="flex items-center gap-2">
             <span>{formatClock(createdAt)}</span>
             {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
             {model ? (
@@ -111,7 +113,7 @@ export function MessageMeta({
                 <ModelPill model={model} />
               </>
             ) : null}
-          </>
+          </div>
         )}
       </div>
       {persistentStatus}

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Ellipsis, Trash, X } from "@/components/icons";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   deleteSession,
@@ -54,10 +54,9 @@ type ChatPaneProps = {
   sessionID: string | undefined;
   draftActive?: boolean;
   draftProjectID?: string;
-  headerActions?: ReactNode;
   headerDragHandle?: boolean;
   reserveTopLeftInset?: boolean;
-  reserveTopRightAction?: boolean;
+  reserveTopRightActions?: 0 | 1 | 2;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: "primary" | "split";
@@ -68,10 +67,9 @@ export function ChatPane({
   sessionID,
   draftActive = false,
   draftProjectID,
-  headerActions,
   headerDragHandle = false,
   reserveTopLeftInset = true,
-  reserveTopRightAction = false,
+  reserveTopRightActions = 0,
   role,
 }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
@@ -153,10 +151,12 @@ export function ChatPane({
     ...(isPrimary && railCollapsed && reserveTopLeftInset
       ? { paddingLeft: "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))" }
       : {}),
-    ...(reserveTopRightAction
+    ...(reserveTopRightActions > 0
       ? {
           paddingRight:
-            "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + 0.5rem)",
+            reserveTopRightActions === 2
+              ? "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + var(--toolbar-icon-button-size) + 1rem)"
+              : "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + 0.5rem)",
         }
       : {}),
   };
@@ -251,7 +251,6 @@ export function ChatPane({
         </div>
         <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
           {selectedSession ? <SessionAppsControl session={selectedSession} token={token} /> : null}
-          {isPrimary ? headerActions : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>

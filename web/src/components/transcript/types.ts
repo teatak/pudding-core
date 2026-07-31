@@ -92,6 +92,7 @@ export type TurnPartVM =
     }
   | {
       active?: boolean;
+      attachments?: Attachment[];
       args?: unknown;
       argsText?: string;
       dotPhase?: TurnPhaseState["phase"];

@@ -42,18 +42,22 @@ func (r *BuiltinRunner) cameraCapture(ctx context.Context, call Call) Result {
 		return toolJSONError(out, "attachment_store_failed", err.Error())
 	}
 	stored.Origin = attachment.OriginTool
+	displayMarkdown := "![Camera photo](" + stored.URL + ")"
 	out.Ok = true
 	out.Attachments = []store.Attachment{stored}
 	out.Content = jsonString(map[string]any{
-		"ok":            true,
-		"mime":          mime,
-		"size":          len(photo.Data),
-		"attachmentKey": stored.AttachmentKey,
-		"url":           stored.URL,
-		"exportTool":    AttachmentExport,
-		"exportHint":    attachmentExportToolHint,
+		"ok":                      true,
+		"mime":                    mime,
+		"size":                    len(photo.Data),
+		"attachmentKey":           stored.AttachmentKey,
+		"url":                     stored.URL,
+		"displayedInConversation": true,
+		"displayMarkdown":         displayMarkdown,
+		"displayHint":             "The photo is already displayed with this tool result. Reuse displayMarkdown exactly only when the user asks to show it again; do not append tokens or guess a filesystem path.",
+		"exportTool":              AttachmentExport,
+		"exportHint":              attachmentExportToolHint,
 	})
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 7
+	out.SummaryCount = 10
 	return out
 }

@@ -98,7 +98,7 @@ function TranscriptTurnView({
             <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
           ) : null}
           {metaAssistant ? (
-            <div className="-mt-2">
+            <div className="-mt-3">
               <AssistantOutputMeta assistant={metaAssistant} />
             </div>
           ) : null}

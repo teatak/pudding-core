@@ -21,9 +21,9 @@ export const workspaceLayout = {
   maxPercent: 99,
   minChatPx: chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx,
   maxChatPx: 920,
-  minWorkspacePx: 320,
+  minWorkspacePx: 380,
   drawerBreakpointPx:
-    chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + 320,
+    chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + 380,
   drawerWidthPx: 560,
   railAutoCollapsePx:
     chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + sessionRailLayout.expandedWidthPx,

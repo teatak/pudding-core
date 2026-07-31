@@ -104,6 +104,9 @@ function TerminalPane({
     let disposed = false;
     let reconnectTimer = 0;
     let reconnectAttempt = 0;
+    let resizeFrame = 0;
+    let lastSentColumns = 0;
+    let lastSentRows = 0;
     const terminal = new XTerm({
       allowProposedApi: false,
       cols: initialDimensionsRef.current.columns,
@@ -132,7 +135,7 @@ function TerminalPane({
       terminal.write(`\r\n\x1b[90m[${exitLabelRef.current}${suffix}]\x1b[0m\r\n`);
     };
 
-    const sendResize = () => {
+    const sendResize = (force = false) => {
       if (!activeRef.current || disposed) {
         return;
       }
@@ -142,9 +145,21 @@ function TerminalPane({
         return;
       }
       const socket = socketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
+      if (
+        socket?.readyState === WebSocket.OPEN &&
+        (force || terminal.cols !== lastSentColumns || terminal.rows !== lastSentRows)
+      ) {
         socket.send(JSON.stringify({ type: "resize", columns: terminal.cols, rows: terminal.rows }));
+        lastSentColumns = terminal.cols;
+        lastSentRows = terminal.rows;
       }
+    };
+    const scheduleResize = () => {
+      globalThis.cancelAnimationFrame(resizeFrame);
+      resizeFrame = globalThis.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        sendResize();
+      });
     };
 
     const connect = () => {
@@ -159,7 +174,9 @@ function TerminalPane({
           terminal.reset();
         }
         reconnectAttempt = 0;
-        globalThis.requestAnimationFrame(sendResize);
+        lastSentColumns = 0;
+        lastSentRows = 0;
+        globalThis.requestAnimationFrame(() => sendResize(true));
       });
       socket.addEventListener("message", (event) => {
         if (event.data instanceof ArrayBuffer) {
@@ -200,7 +217,7 @@ function TerminalPane({
         socket.send(JSON.stringify({ type: "input", data }));
       }
     });
-    const resizeObserver = new ResizeObserver(() => globalThis.requestAnimationFrame(sendResize));
+    const resizeObserver = new ResizeObserver(scheduleResize);
     resizeObserver.observe(container);
 
     if (runningRef.current) {
@@ -212,6 +229,7 @@ function TerminalPane({
     return () => {
       disposed = true;
       window.clearTimeout(reconnectTimer);
+      globalThis.cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
       dataSubscription.dispose();
       socketRef.current?.close();

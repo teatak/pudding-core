@@ -36,6 +36,16 @@ func TestBuiltinCameraCaptureRoutesAttachment(t *testing.T) {
 	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
 	}
+	if payload["displayedInConversation"] != true {
+		t.Fatalf("camera result should declare automatic conversation display: %+v", payload)
+	}
+	wantMarkdown := "![Camera photo](" + res.Attachments[0].URL + ")"
+	if payload["displayMarkdown"] != wantMarkdown || payload["displayHint"] == "" {
+		t.Fatalf("missing conversation display contract: %+v", payload)
+	}
+	if res.SummaryKind != SummaryReturnedFields || res.SummaryCount != 10 {
+		t.Fatalf("unexpected camera summary: kind=%s count=%d", res.SummaryKind, res.SummaryCount)
+	}
 	path, ok, err := attachment.NewService(home).Path("sess_camera", res.Attachments[0].AttachmentKey)
 	if err != nil || !ok {
 		t.Fatalf("stored camera photo missing: ok=%v err=%v", ok, err)

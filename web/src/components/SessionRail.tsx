@@ -91,7 +91,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
@@ -186,7 +185,6 @@ export function SessionRail({
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
   const responsiveCollapsed = useRailResponsiveCollapsed();
-  const isMobile = useIsMobile();
   const hover = useHoverPopover();
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -212,7 +210,7 @@ export function SessionRail({
           openSettingsDialog();
         }
       }),
-    [hover, isMobile, navigate],
+    [hover, navigate],
   );
 
   const sessionsQuery = useQuery({
@@ -413,9 +411,6 @@ export function SessionRail({
         return next;
       },
     });
-    if (isMobile) {
-      hover.close();
-    }
   }
 
   function openProjectDraft(projectID: string) {
@@ -429,9 +424,6 @@ export function SessionRail({
         return next;
       },
     });
-    if (isMobile) {
-      hover.close();
-    }
   }
 
   function selectSession(id: string) {
@@ -453,12 +445,9 @@ export function SessionRail({
         return next;
       },
     });
-    if (isMobile) {
-      hover.close();
-    }
   }
 
-  function renderPanel() {
+  function renderPanel(compactWordmarkGap = false) {
     return (
       <RailPanel
         appsActive={appsActive}
@@ -472,6 +461,7 @@ export function SessionRail({
         selectedSessionID={selectedSessionID}
         sessions={sessions}
         token={token}
+        compactWordmarkGap={compactWordmarkGap}
         onSearch={openSessionSearch}
         onCreate={openNewSession}
         onDelete={(id) => deleteMutation.mutate(id)}
@@ -494,9 +484,6 @@ export function SessionRail({
               return next;
             },
           });
-          if (isMobile) {
-            hover.close();
-          }
         }}
         onPinChange={changePinned}
         onRefetch={() => {
@@ -528,7 +515,7 @@ export function SessionRail({
                 tabIndex={-1}
                 variant="ghost"
                 onClick={() => {
-                  if (isMobile || responsiveCollapsed) {
+                  if (responsiveCollapsed) {
                     hover.toggle();
                     return;
                   }
@@ -539,12 +526,12 @@ export function SessionRail({
                   collapse(false);
                 }}
                 onMouseEnter={() => {
-                  if (!isMobile && collapsed) {
+                  if (collapsed) {
                     hover.openNow();
                   }
                 }}
                 onMouseLeave={() => {
-                  if (!isMobile && collapsed) {
+                  if (collapsed) {
                     hover.scheduleClose();
                   }
                 }}
@@ -559,16 +546,11 @@ export function SessionRail({
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className={cn(
-              "flex w-[260px] flex-col gap-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] border-0 ring-0 outline-none",
-              isMobile
-                ? "h-[min(48rem,calc(100svh-var(--toolbar-h)-1rem))] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(260px,calc(100vw-1rem))]"
-                : "h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)]",
-            )}
+            className="flex h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col gap-0 border-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] ring-0 outline-none"
             side="bottom"
-            sideOffset={isMobile ? 8 : 11}
-            onMouseEnter={isMobile ? undefined : hover.cancelClose}
-            onMouseLeave={isMobile ? undefined : hover.scheduleClose}
+            sideOffset={11}
+            onMouseEnter={hover.cancelClose}
+            onMouseLeave={hover.scheduleClose}
             onFocusOutside={(event) => event.preventDefault()}
             onInteractOutside={(event) => {
               const target = event.target as HTMLElement | null;
@@ -627,7 +609,7 @@ export function SessionRail({
           <div className="flex h-10 shrink-0 items-center px-3">
             <PuddingWordmark />
           </div>
-          {renderPanel()}
+          {renderPanel(true)}
         </div>
       </aside>
       {searchDialog}
@@ -711,8 +693,8 @@ function sessionActivityTime(session: Session) {
   return new Date(session.lastActivityAt || session.createdAt).getTime();
 }
 
-// hover 开合 + 点击钉住:面板内一旦发生点击(如打开主题/语言下拉),
-// 鼠标离开不再自动关闭,直到 popover 真正关闭。
+// hover 开合；关闭态点击会钉住打开，hover 已经打开时点击则立即关闭。
+// 面板内一旦打开主题/语言等浮层，鼠标离开不再自动关闭。
 // suppress:收起边栏的动作刚结束时鼠标恰好停在触发器原位,此时不应
 // 立即 hover 弹出 — 压制到鼠标离开触发器一次后恢复。
 function useHoverPopover(closeDelay = 160) {
@@ -752,7 +734,7 @@ function useHoverPopover(closeDelay = 160) {
     },
     toggle() {
       cancelClose();
-      if (openRef.current && pinnedRef.current) {
+      if (openRef.current) {
         pinnedRef.current = false;
         updateOpen(false);
         return;
@@ -862,6 +844,7 @@ type RailPanelProps = {
   onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
+  compactWordmarkGap?: boolean;
 };
 
 type SessionDropGroup = "pinned" | "unpinned";
@@ -930,6 +913,7 @@ function RailPanel({
   onRename,
   onOverlayOpenChange,
   onRefetch,
+  compactWordmarkGap = false,
 }: RailPanelProps) {
   const { t } = useI18n();
   const navigate = useNavigate({ from: "/" });
@@ -1162,7 +1146,12 @@ function RailPanel({
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-          <SidebarHeader className="px-2 py-2">
+          <SidebarHeader
+            className={cn(
+              "px-2 pb-2",
+              compactWordmarkGap ? "pt-0" : "pt-2",
+            )}
+          >
             <SidebarMenu
               className="gap-0.5"
               onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-header-action]")}

@@ -450,7 +450,7 @@ export function ProviderProfileEditorDialog({
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("provider.models")}</Label>
                   <div className="flex gap-2">
-                    <Popover open={candidatePopoverOpen} onOpenChange={setCandidatePopoverOpen}>
+                    <Popover modal open={candidatePopoverOpen} onOpenChange={setCandidatePopoverOpen}>
                       <PopoverAnchor asChild>
                         <Button disabled={!editingID || candidatesLoading} size="sm" type="button" variant="ghost" onClick={() => void loadCandidates()}>
                           {t("provider.loadCandidates")}

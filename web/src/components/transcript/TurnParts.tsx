@@ -205,6 +205,7 @@ function renderTranscriptPart({
           sessionID={sessionID}
           showActivitySpinner={showActivitySpinner}
           showRawInfo={showRawToolInfo}
+          token={token}
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
           onRawOpenChange={(open) => disclosure?.setOpen(`${disclosureKey}:raw`, open)}
         />
@@ -278,6 +279,11 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
   };
 
   for (const part of parts) {
+    if (part.type === "tool_use" && toolAttachmentsRenderInside(part.name || part.resultName)) {
+      flush();
+      out.push(part);
+      continue;
+    }
     if (!isProcessPart(part)) {
       flush();
       out.push(part);
@@ -449,6 +455,7 @@ export function partsFromOverlay(
           {
             type: "tool_use",
             active,
+            attachments: part.attachments,
             argsText: part.argsText,
             dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
             id: part.callID,
@@ -462,7 +469,9 @@ export function partsFromOverlay(
             summaryCount: part.summaryCount,
             summaryKind: part.summaryKind,
           },
-          ...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })),
+          ...(toolAttachmentsRenderInside(part.name)
+            ? []
+            : (part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment }))),
         ];
       }),
       ...(hasTextPart ? [] : partsFromText(streamedText)),
@@ -534,6 +543,7 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
       if (typeof index === "number" && existing?.type === "tool_use") {
         out[index] = {
           ...existing,
+          attachments: part.attachments,
           resultContent: part.content,
           resultName: part.name,
           resultOk: part.ok,
@@ -543,6 +553,7 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
       } else {
         out.push({
           type: "tool_use",
+          attachments: part.attachments,
           id: part.id,
           name: part.name,
           resultContent: part.content,
@@ -552,12 +563,19 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
           summaryKind: part.summaryKind,
         });
       }
-      out.push(...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })));
+      const toolName = existing?.type === "tool_use" ? existing.name || part.name : part.name;
+      if (!toolAttachmentsRenderInside(toolName)) {
+        out.push(...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })));
+      }
       continue;
     }
     out.push(part);
   }
   return out;
+}
+
+function toolAttachmentsRenderInside(name: string | undefined) {
+  return name === "builtin_attachment_read_image";
 }
 
 function dedupeAttachmentParts(parts: TurnPartVM[]): TurnPartVM[] {
@@ -1045,6 +1063,7 @@ function ToolUsePart({
   sessionID,
   showActivitySpinner = false,
   showRawInfo,
+  token,
   onOpenChange,
   onRawOpenChange,
 }: {
@@ -1054,6 +1073,7 @@ function ToolUsePart({
   sessionID?: string;
   showActivitySpinner?: boolean;
   showRawInfo: boolean;
+  token: string;
   onOpenChange?: (open: boolean) => void;
   onRawOpenChange?: (open: boolean) => void;
 }) {
@@ -1065,8 +1085,9 @@ function ToolUsePart({
   const toolName = part.name || part.resultName || "";
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
   const codeTool = isCodeToolName(toolName);
+  const imageInspectionTool = toolAttachmentsRenderInside(toolName);
   const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_session";
-  const showDetails = codeTool || showRawInfo;
+  const showDetails = codeTool || imageInspectionTool || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
@@ -1110,6 +1131,7 @@ function ToolUsePart({
       </summary>
       <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
         <div className="grid min-w-0 max-w-full gap-2">
+          {imageInspectionTool ? <ToolAttachmentImagePreview attachments={part.attachments || []} token={token} /> : null}
           {codeTool ? (
             <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
               <CodeToolDetails
@@ -1135,6 +1157,38 @@ function ToolUsePart({
         </div>
       </div>
     </details>
+  );
+}
+
+function ToolAttachmentImagePreview({
+  attachments,
+  token,
+}: {
+  attachments: NonNullable<Extract<TurnPartVM, { type: "tool_use" }>["attachments"]>;
+  token: string;
+}) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const images = attachments
+    .filter((attachment) => isImageAttachment(attachment.mime, attachment.name))
+    .map((attachment): ImageLightboxItem => ({
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      url: attachmentResourceURL(attachment, token),
+    }));
+
+  if (images.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      <div className="flex min-w-0 flex-wrap gap-2">
+        {images.map((image, index) => (
+          <MarkdownImageCard key={image.id || image.url} image={image} onOpen={() => setOpenIndex(index)} />
+        ))}
+      </div>
+      <ImageLightbox images={images} openIndex={openIndex} onOpenIndexChange={setOpenIndex} />
+    </>
   );
 }
 
