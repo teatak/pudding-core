@@ -2849,7 +2849,6 @@ func TestSearchMessagesInSessionReturnsAllHitsInConversationOrder(t *testing.T) 
 
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
 		"query": "assistant",
-		"limit": 3,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
@@ -2869,7 +2868,6 @@ func TestSearchMessagesInSessionReturnsAllHitsInConversationOrder(t *testing.T) 
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
 		"query": "assistant 2",
-		"limit": 10,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
@@ -2883,11 +2881,55 @@ func TestSearchMessagesInSessionReturnsAllHitsInConversationOrder(t *testing.T) 
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
+		"query": "not present anywhere",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200 for no matches, got %d", resp.StatusCode)
+	}
+	result = decodeJSON[searchResponse](t, resp)
+	if len(result.Messages) != 0 {
+		t.Fatalf("no-match search returned %+v", result.Messages)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
 		"query": "",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("empty query must return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestSearchMessagesInSessionDoesNotTruncateLongConversation(t *testing.T) {
+	type searchResponse struct {
+		Messages []store.Message `json:"messages"`
+	}
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	const sessionID = "sess_search_long"
+	const matchCount = 125
+	if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= matchCount; i++ {
+		appendAPITestTurn(t, st, sessionID, i)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sessionID+"/messages/search", map[string]any{
+		"query": "assistant",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	result := decodeJSON[searchResponse](t, resp)
+	if len(result.Messages) != matchCount {
+		t.Fatalf("search returned %d matches, want %d", len(result.Messages), matchCount)
+	}
+	if got, want := result.Messages[0].Text, "assistant 1"; got != want {
+		t.Fatalf("first match = %q, want %q", got, want)
+	}
+	if got, want := result.Messages[len(result.Messages)-1].Text, "assistant 125"; got != want {
+		t.Fatalf("last match = %q, want %q", got, want)
 	}
 }
 

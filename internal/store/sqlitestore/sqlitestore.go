@@ -1660,17 +1660,24 @@ func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput)
 			visibleClause = ` AND m.role IN (?, ?) AND m.kind IN (?, ?)`
 			args = append(args, store.RoleUser, store.RoleAssistant, store.MessageKindText, store.MessageKindSummary)
 		}
-		args = append(args, limit)
+		limitClause := " LIMIT ?"
+		if in.NoLimit {
+			limitClause = ""
+		} else {
+			args = append(args, limit)
+		}
 		rows, err := tx.QueryContext(ctx,
 			`SELECT `+messageSelectColumnsAliasM+`
 			FROM messages m
 			WHERE m.session_id=? AND instr(lower(m.text), lower(?)) > 0`+visibleClause+`
-			ORDER BY m.created_at DESC, m.rowid DESC
-			LIMIT ?`,
+			ORDER BY m.created_at DESC, m.rowid DESC`+limitClause,
 			args...,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("sqlite: search exact messages: %w", err)
+		}
+		if in.NoLimit {
+			limit = 0
 		}
 		return collectSearchMessages(rows, nil, nil, limit)
 	}
@@ -1787,9 +1794,9 @@ func searchLiteralMessagesTx(ctx context.Context, tx *sql.Tx, sessionID, query s
 func collectSearchMessages(rows *sql.Rows, out []*store.Message, seen map[string]struct{}, limit int) ([]*store.Message, error) {
 	defer rows.Close()
 	if seen == nil {
-		seen = make(map[string]struct{}, limit)
+		seen = make(map[string]struct{}, max(0, limit))
 	}
-	for rows.Next() && len(out) < limit {
+	for rows.Next() && (limit <= 0 || len(out) < limit) {
 		msg, err := scanMessage(rows)
 		if err != nil {
 			return nil, err

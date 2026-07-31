@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -669,6 +670,48 @@ func TestSearchMessagesExactUsesCompleteQuery(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].ID != "msg_search_exact_1" {
 		t.Fatalf("visible transcript exact search returned %+v", hits)
+	}
+}
+
+func TestSearchMessagesExactNoLimitReturnsLongConversation(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	const sessionID = "sess_search_exact_unlimited"
+	const matchCount = 125
+	createTestSession(t, st, sessionID)
+	for i := 1; i <= matchCount; i++ {
+		turnID := fmt.Sprintf("turn_search_exact_unlimited_%03d", i)
+		if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+			SessionID:       sessionID,
+			TurnID:          turnID,
+			UserMessageID:   fmt.Sprintf("msg_search_exact_unlimited_%03d", i),
+			ClientMessageID: fmt.Sprintf("client_search_exact_unlimited_%03d", i),
+			UserText:        fmt.Sprintf("needle %03d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+			TurnID:         turnID,
+			Status:         store.TurnCompleted,
+			AssistantParts: store.TextPart("done"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID:             sessionID,
+		Query:                 "needle",
+		Literal:               true,
+		Exact:                 true,
+		VisibleTranscriptOnly: true,
+		NoLimit:               true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != matchCount {
+		t.Fatalf("search returned %d matches, want %d", len(hits), matchCount)
 	}
 }
 

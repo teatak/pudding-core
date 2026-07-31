@@ -1880,10 +1880,11 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 		return nil, nil
 	}
 	limit := in.Limit
-	if limit <= 0 {
+	unlimited := in.Exact && in.NoLimit
+	if !unlimited && limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
+	if !unlimited && limit > 100 {
 		limit = 100
 	}
 	needles := []string{strings.ToLower(query)}
@@ -1893,7 +1894,7 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 		queryTerms = searchtext.QueryTerms(query)
 	}
 	out := make([]*store.Message, 0)
-	for i := len(m.messages[sessionID]) - 1; i >= 0 && len(out) < limit; i-- {
+	for i := len(m.messages[sessionID]) - 1; i >= 0 && (unlimited || len(out) < limit); i-- {
 		msg := m.messages[sessionID][i]
 		if in.VisibleTranscriptOnly {
 			visibleRole := msg.Role == store.RoleUser || msg.Role == store.RoleAssistant

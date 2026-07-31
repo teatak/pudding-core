@@ -724,6 +724,9 @@ type MessageSearchInput struct {
 	Exact bool
 	// VisibleTranscriptOnly restricts results to user/assistant text shown as transcript messages.
 	VisibleTranscriptOnly bool
+	// NoLimit returns every exact match. It is reserved for explicitly scoped,
+	// local conversation search; broader search surfaces must remain bounded.
+	NoLimit bool
 }
 
 func TextPart(text string) []ContentPart {

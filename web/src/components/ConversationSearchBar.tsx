@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Search, X } from "@/components/icons";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { searchMessagesInSession, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 
 const SEARCH_DELAY_MS = 180;
-const SEARCH_LIMIT = 100;
 const EMPTY_SEARCH_STATE: TranscriptSearchState = { terms: [] };
 
 type ConversationSearchMatch = {
@@ -69,7 +68,7 @@ export function ConversationSearchBar({
 
   const searchQuery = useQuery({
     queryKey: queryKeys.conversationSearch(sessionID, debouncedQuery),
-    queryFn: () => searchMessagesInSession(token, sessionID, { query: debouncedQuery, limit: SEARCH_LIMIT }),
+    queryFn: () => searchMessagesInSession(token, sessionID, { query: debouncedQuery }),
     enabled: Boolean(open && token && sessionID && debouncedQuery),
     retry: false,
   });
@@ -116,10 +115,25 @@ export function ConversationSearchBar({
     });
   }, [matches, normalizedQuery, onSearchChange, resultsReady, sessionID, terms]);
 
-  function close() {
+  const close = useCallback(() => {
     onSearchChange(EMPTY_SEARCH_STATE);
     onOpenChange(false);
-  }
+  }, [onOpenChange, onSearchChange]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) {
+        return;
+      }
+      event.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [close, open]);
 
   function activate(nextIndex: number) {
     if (matches.length === 0) {
@@ -142,10 +156,6 @@ export function ConversationSearchBar({
       activate(activeIndex + (event.shiftKey ? -1 : 1));
       return;
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-    }
   }
 
   const failed = Boolean(
@@ -156,6 +166,13 @@ export function ConversationSearchBar({
   );
   const resultCount = matches.length;
   const resultPosition = resultCount > 0 && activeIndex >= 0 ? activeIndex + 1 : 0;
+  const statusLabel = failed
+    ? t("conversationSearch.failed")
+    : normalizedQuery && resultsReady && resultCount === 0
+      ? t("conversationSearch.noResults")
+      : t("conversationSearch.count")
+          .replace("{current}", String(resultPosition))
+          .replace("{total}", String(resultCount));
 
   if (!open) {
     return null;
@@ -224,11 +241,7 @@ export function ConversationSearchBar({
           <ArrowDown />
         </Button>
         <span className="ml-auto px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
-          {failed
-            ? t("conversationSearch.failed")
-            : t("conversationSearch.count")
-                .replace("{current}", String(resultPosition))
-                .replace("{total}", String(resultCount))}
+          {statusLabel}
         </span>
       </div>
     </div>

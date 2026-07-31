@@ -25,7 +25,6 @@ type sessionMessageSearchRequest struct {
 
 type scopedMessageSearchRequest struct {
 	Query string `json:"query"`
-	Limit int    `json:"limit"`
 }
 
 func (s *Server) searchMessagesInSession(c *cart.Context) error {
@@ -42,14 +41,13 @@ func (s *Server) searchMessagesInSession(c *cart.Context) error {
 	if query == "" {
 		return badRequest(c, "query is required")
 	}
-	limit := messageSearchLimit(req.Limit)
 	hits, err := s.store.SearchMessages(c.Request.Context(), store.MessageSearchInput{
 		SessionID:             sessionID,
 		Query:                 query,
-		Limit:                 limit,
 		Literal:               true,
 		Exact:                 true,
 		VisibleTranscriptOnly: true,
+		NoLimit:               true,
 	})
 	if errors.Is(err, store.ErrHistorySearchUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "history_search_unavailable"})
@@ -58,7 +56,7 @@ func (s *Server) searchMessagesInSession(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	messages := filterSearchableMessages(hits, limit)
+	messages := filterSearchableMessages(hits, 0)
 	slices.Reverse(messages)
 	c.JSON(http.StatusOK, map[string]any{
 		"messages":   messages,
@@ -150,7 +148,11 @@ func messageSearchLimit(limit int) int {
 }
 
 func filterSearchableMessages(hits []*store.Message, limit int) []*store.Message {
-	messages := make([]*store.Message, 0, min(len(hits), limit))
+	capacity := len(hits)
+	if limit > 0 {
+		capacity = min(capacity, limit)
+	}
+	messages := make([]*store.Message, 0, capacity)
 	for _, message := range hits {
 		if message.Role != store.RoleUser && message.Role != store.RoleAssistant {
 			continue
@@ -159,7 +161,7 @@ func filterSearchableMessages(hits []*store.Message, limit int) []*store.Message
 			continue
 		}
 		messages = append(messages, message)
-		if len(messages) >= limit {
+		if limit > 0 && len(messages) >= limit {
 			break
 		}
 	}
