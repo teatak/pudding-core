@@ -582,6 +582,13 @@ export const searchSessionMessagesResponse = z.object({
   matchTerms: z.array(z.string()),
 });
 
+export const searchMessagesInSessionRequest = z.object({
+  query: z.string().trim().min(1),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+export const searchMessagesInSessionResponse = searchSessionMessagesResponse;
+
 export const conversationTurn = z.object({
   id: z.string(),
   sessionID: z.string(),

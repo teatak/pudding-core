@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { getSettings, type ContentPart } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { TranscriptView } from "@/components/transcript/TranscriptView";
-import type { TranscriptTurnVM } from "@/components/transcript/types";
+import type { TranscriptSearchState, TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
 import { transcriptDisplaySettings } from "@/lib/appSettings";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -17,10 +17,19 @@ type TranscriptProps = {
   token: string;
   sessionID: string;
   sessionRunning?: boolean;
+  searchSlot: "primary" | "split";
+  searchState: TranscriptSearchState;
   submitError?: string | null;
 };
 
-export function Transcript({ token, sessionID, sessionRunning = false, submitError }: TranscriptProps) {
+export function Transcript({
+  searchSlot,
+  searchState,
+  sessionID,
+  sessionRunning = false,
+  submitError,
+  token,
+}: TranscriptProps) {
   const [disclosureByKey, setDisclosureByKey] = useState<Record<string, boolean>>({});
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
@@ -109,6 +118,13 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
     };
   }, [revealTurn, sessionID, turnReveal, turnsQuery.isSuccess]);
 
+  useEffect(() => {
+    if (!searchState.target || !turnsQuery.isSuccess) {
+      return;
+    }
+    void revealTurn(searchState.target.turnID);
+  }, [revealTurn, searchState.target, turnsQuery.isSuccess]);
+
   useLayoutEffect(() => {
     const previous = turnVMsRef.current;
     const next = transcript.turnVMs;
@@ -149,6 +165,8 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       isPending={turnsQuery.isPending}
       jumpLatestSignal={jumpLatestSignal}
       newMessageCount={newMessageCount}
+      searchSlot={searchSlot}
+      searchState={searchState}
       sessionID={sessionID}
       showJumpLatest={!isAtLatest}
       submitError={submitError}

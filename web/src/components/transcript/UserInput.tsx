@@ -276,7 +276,10 @@ export const UserInput = memo(function UserInput({
                   </div>
                 ) : null}
                 {(!formResult && user.text) || showASRIndicator ? (
-                  <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+                  <div
+                    className="min-w-0 max-w-full [overflow-wrap:anywhere]"
+                    data-transcript-message-id={user.messageID}
+                  >
                     {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
                     {!formResult ? user.text : null}
                   </div>

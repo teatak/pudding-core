@@ -9,6 +9,7 @@ export type UserInputVM = {
   clientMessageID?: string;
   createdAt?: string;
   interrupted?: boolean;
+  messageID?: string;
   pending?: boolean;
   status?: "submitting" | "queued" | "editing" | "steering" | "steered";
   text: string;
@@ -73,8 +74,20 @@ export type TurnDisclosureState = {
   setOpen: (key: string, open: boolean) => void;
 };
 
+export type TranscriptSearchTarget = {
+  messageID: string;
+  occurrenceIndex: number;
+  role: "assistant" | "user";
+  turnID: string;
+};
+
+export type TranscriptSearchState = {
+  target?: TranscriptSearchTarget;
+  terms: string[];
+};
+
 export type TurnPartVM =
-  | { key?: string; type: "text"; text: string }
+  | { key?: string; messageID?: string; type: "text"; text: string }
   | { attachment: Attachment; key?: string; type: "attachment" }
   | { active?: boolean; key?: string; text: string; type: "thought" }
   | {

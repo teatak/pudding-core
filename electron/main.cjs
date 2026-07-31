@@ -494,6 +494,12 @@ function updateApplicationMenu() {
       { label: nativeMenuText("pasteAndMatchStyle"), role: "pasteAndMatchStyle" },
       { label: nativeMenuText("delete"), role: "delete" },
       { label: nativeMenuText("selectAll"), role: "selectAll" },
+      { type: "separator" },
+      {
+        accelerator: "CmdOrCtrl+F",
+        label: nativeMenuText("searchConversation"),
+        click: () => sendDesktopMenuCommand("search-conversation"),
+      },
     ],
   });
 

@@ -1888,13 +1888,20 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 	}
 	needles := []string{strings.ToLower(query)}
 	queryTerms := []string(nil)
-	if in.Literal {
+	if in.Literal && !in.Exact {
 		needles = strings.Fields(strings.ToLower(query))
 		queryTerms = searchtext.QueryTerms(query)
 	}
 	out := make([]*store.Message, 0)
 	for i := len(m.messages[sessionID]) - 1; i >= 0 && len(out) < limit; i-- {
 		msg := m.messages[sessionID][i]
+		if in.VisibleTranscriptOnly {
+			visibleRole := msg.Role == store.RoleUser || msg.Role == store.RoleAssistant
+			visibleKind := msg.Kind == store.MessageKindText || msg.Kind == store.MessageKindSummary
+			if !visibleRole || !visibleKind {
+				continue
+			}
+		}
 		text := strings.ToLower(msg.Text)
 		literalMatched := true
 		for _, needle := range needles {
@@ -1904,7 +1911,7 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 			}
 		}
 		tokenMatched := false
-		if in.Literal && len(queryTerms) > 0 {
+		if in.Literal && !in.Exact && len(queryTerms) > 0 {
 			indexedTerms := make(map[string]struct{})
 			for _, term := range searchtext.Terms(msg.Text) {
 				indexedTerms[term] = struct{}{}

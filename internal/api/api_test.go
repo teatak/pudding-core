@@ -2812,6 +2812,85 @@ func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
 	}
 }
 
+func TestSearchMessagesInSessionReturnsAllHitsInConversationOrder(t *testing.T) {
+	type searchResponse struct {
+		Messages   []store.Message `json:"messages"`
+		MatchTerms []string        `json:"matchTerms"`
+	}
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	for _, sessionID := range []string{"sess_search_current", "sess_search_other"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i <= 3; i++ {
+			appendAPITestTurn(t, st, sessionID, i)
+		}
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_current",
+		TurnID:          "turn_search_current_thought",
+		UserMessageID:   "msg_search_current_thought_user",
+		ClientMessageID: "client_search_current_thought",
+		UserText:        "unrelated",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_search_current_thought",
+		Status: store.TurnCompleted,
+		AssistantParts: []store.ContentPart{{
+			Type: store.ContentPartThought,
+			Text: "assistant hidden thought",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
+		"query": "assistant",
+		"limit": 3,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	result := decodeJSON[searchResponse](t, resp)
+	if got, want := messageValueLabels(result.Messages), []string{"assistant:assistant 1", "assistant:assistant 2", "assistant:assistant 3"}; !sameStringValues(got, want) {
+		t.Fatalf("unexpected scoped search hits: got %v want %v", got, want)
+	}
+	for _, message := range result.Messages {
+		if message.SessionID != "sess_search_current" {
+			t.Fatalf("search escaped path session scope: %+v", message)
+		}
+	}
+	if len(result.MatchTerms) != 1 || result.MatchTerms[0] != "assistant" {
+		t.Fatalf("unexpected search highlight terms: %+v", result.MatchTerms)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
+		"query": "assistant 2",
+		"limit": 10,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	result = decodeJSON[searchResponse](t, resp)
+	if got, want := messageValueLabels(result.Messages), []string{"assistant:assistant 2"}; !sameStringValues(got, want) {
+		t.Fatalf("scoped search must use the complete literal query: got %v want %v", got, want)
+	}
+	if len(result.MatchTerms) != 1 || result.MatchTerms[0] != "assistant 2" {
+		t.Fatalf("unexpected exact highlight terms: %+v", result.MatchTerms)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_search_current/messages/search", map[string]any{
+		"query": "",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty query must return 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestListTurnsPagination(t *testing.T) {
 	srv, st := newTestServer(t)
 	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {

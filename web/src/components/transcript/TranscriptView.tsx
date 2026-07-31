@@ -10,7 +10,12 @@ import { useI18n } from "@/i18n";
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
 import { TranscriptList } from "./TranscriptList";
-import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
+import type {
+  TranscriptDisplaySettings,
+  TranscriptSearchState,
+  TranscriptTurnVM,
+  TurnDisclosureState,
+} from "./types";
 
 export function TranscriptView({
   disclosure,
@@ -33,6 +38,8 @@ export function TranscriptView({
   onQueuedEditStart,
   onQueuedSteer,
   onQueuedSave,
+  searchSlot,
+  searchState,
   sessionID,
   showJumpLatest,
   submitError,
@@ -60,6 +67,8 @@ export function TranscriptView({
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
+  searchSlot: "primary" | "split";
+  searchState: TranscriptSearchState;
   sessionID: string;
   showJumpLatest: boolean;
   submitError?: string | null;
@@ -115,6 +124,8 @@ export function TranscriptView({
             onQueuedSteer={onQueuedSteer}
             onQueuedSave={onQueuedSave}
             scrollElement={viewportNode}
+            searchSlot={searchSlot}
+            searchState={searchState}
             sessionID={sessionID}
             token={token}
             turnReveal={turnReveal}

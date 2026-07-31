@@ -17,6 +17,8 @@ import {
   listProjectsResponse,
   listQueuedInputsResponse,
   listSessionsResponse,
+  searchMessagesInSessionRequest,
+  searchMessagesInSessionResponse,
   searchSessionMessagesRequest,
   searchSessionMessagesResponse,
   listTurnsResponse,
@@ -347,6 +349,22 @@ export function searchSessionMessages(
     method: "POST",
     body: JSON.stringify(searchSessionMessagesRequest.parse(body)),
   });
+}
+
+export function searchMessagesInSession(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof searchMessagesInSessionRequest>,
+): Promise<{ messages: Message[]; matchTerms: string[] }> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/messages/search`,
+    searchMessagesInSessionResponse,
+    {
+      method: "POST",
+      body: JSON.stringify(searchMessagesInSessionRequest.parse(body)),
+    },
+  );
 }
 
 export function listProjects(token: string): Promise<{ projects: Project[] }> {

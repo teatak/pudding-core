@@ -720,6 +720,10 @@ type MessageSearchInput struct {
 	Limit     int
 	// Literal treats Query as user-entered text instead of an FTS expression.
 	Literal bool
+	// Exact restricts literal search to the complete case-insensitive query.
+	Exact bool
+	// VisibleTranscriptOnly restricts results to user/assistant text shown as transcript messages.
+	VisibleTranscriptOnly bool
 }
 
 func TextPart(text string) []ContentPart {

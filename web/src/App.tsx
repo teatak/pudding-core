@@ -685,12 +685,7 @@ export function App() {
   } as CSSProperties;
   const chatOccupiesStageTopRight =
     consoleDisplayMode === "full" ||
-    consoleDisplayMode === "dock-right" ||
-    (
-      consoleDisplayMode === "floating" &&
-      floatingAnchor.horizontal === "right" &&
-      floatingAnchor.vertical === "top"
-    );
+    consoleDisplayMode === "dock-right";
   const workspaceOccupiesStageTopRight = consoleDisplayMode !== "dock-right";
   const stageToolbarActionCount: 0 | 1 | 2 =
     !canUseWorkspace

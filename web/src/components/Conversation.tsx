@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 import type { Session } from "@/api/client";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
+import { ConversationSearchBar } from "@/components/ConversationSearchBar";
 import { Transcript } from "@/components/Transcript";
+import type { TranscriptSearchState } from "@/components/transcript/types";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
@@ -13,10 +15,25 @@ import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 // 同一条内容列,等宽对齐由结构保证。
 //   - 顶部遮罩在这里(Conversation 在 header 之下,故 top-0 即贴 toolbar 下沿);
 //   - 底部遮罩随 Composer(其高度随输入变化),放在 Composer 内,但宽度同样走 ChatColumn。
-export function Conversation({ token, session }: { token: string; session: Session }) {
+export function Conversation({
+  searchFocusSignal,
+  searchOpen,
+  searchSlot,
+  session,
+  token,
+  onSearchOpenChange,
+}: {
+  searchFocusSignal: number;
+  searchOpen: boolean;
+  searchSlot: "primary" | "split";
+  session: Session;
+  token: string;
+  onSearchOpenChange: (open: boolean) => void;
+}) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [dragMode, setDragMode] = useState<"files" | "project_reference" | null>(null);
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
+  const [searchState, setSearchState] = useState<TranscriptSearchState>({ terms: [] });
   const droppedFilesNonceRef = useRef(0);
 
   const resetDragState = useCallback(() => {
@@ -109,8 +126,23 @@ export function Conversation({ token, session }: { token: string; session: Sessi
           <div className="h-6 bg-gradient-to-b from-background to-transparent" />
         </ChatColumn>
       </div>
-      <Transcript token={token} sessionID={session.id} sessionRunning={session.running} submitError={submitError} />
+      <Transcript
+        searchSlot={searchSlot}
+        searchState={searchState}
+        sessionID={session.id}
+        sessionRunning={session.running}
+        submitError={submitError}
+        token={token}
+      />
       <Composer droppedFiles={droppedFiles} token={token} session={session} onSubmitError={setSubmitError} />
+      <ConversationSearchBar
+        focusSignal={searchFocusSignal}
+        open={searchOpen}
+        sessionID={session.id}
+        token={token}
+        onOpenChange={onSearchOpenChange}
+        onSearchChange={setSearchState}
+      />
       <ChatDropOverlay mode={dragMode} />
     </div>
   );

@@ -1624,7 +1624,7 @@ func (s *Store) GetMessage(ctx context.Context, sessionID string, messageID stri
 }
 
 func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput) ([]*store.Message, error) {
-	if !in.Literal && !historySearchAvailable() {
+	if !in.Literal && !in.Exact && !historySearchAvailable() {
 		return nil, store.ErrHistorySearchUnavailable
 	}
 	sessionID := strings.TrimSpace(in.SessionID)
@@ -1652,6 +1652,27 @@ func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput)
 	defer tx.Rollback()
 	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
+	}
+	if in.Exact {
+		visibleClause := ""
+		args := []any{sessionID, query}
+		if in.VisibleTranscriptOnly {
+			visibleClause = ` AND m.role IN (?, ?) AND m.kind IN (?, ?)`
+			args = append(args, store.RoleUser, store.RoleAssistant, store.MessageKindText, store.MessageKindSummary)
+		}
+		args = append(args, limit)
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+messageSelectColumnsAliasM+`
+			FROM messages m
+			WHERE m.session_id=? AND instr(lower(m.text), lower(?)) > 0`+visibleClause+`
+			ORDER BY m.created_at DESC, m.rowid DESC
+			LIMIT ?`,
+			args...,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: search exact messages: %w", err)
+		}
+		return collectSearchMessages(rows, nil, nil, limit)
 	}
 	if in.Literal {
 		return searchLiteralMessagesTx(ctx, tx, sessionID, query, limit)

@@ -4,7 +4,7 @@ type DirectoryPickerOptions = {
   title?: string;
 };
 
-export type DesktopMenuCommand = "new-session" | "search-sessions" | "settings";
+export type DesktopMenuCommand = "new-session" | "search-conversation" | "search-sessions" | "settings";
 export type DesktopEditorCommand = "copy" | "cut" | "delete" | "paste" | "pasteAndMatchStyle" | "redo" | "selectAll" | "undo";
 
 export type DesktopEditorContextMenuRequest = {

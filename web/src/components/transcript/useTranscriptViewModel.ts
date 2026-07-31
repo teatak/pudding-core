@@ -407,6 +407,7 @@ function userFromMessage(userMessage: Message): UserInputVM {
     createdAt: userMessage.createdAt,
     interrupted: userMessage.interrupted,
     localFolders: localFoldersFromContentParts(userMessage.parts),
+    messageID: userMessage.id,
     projectReferences: projectReferencesFromContentParts(userMessage.parts),
     parts: userMessage.parts,
     text: textFromContentParts(userMessage.parts),

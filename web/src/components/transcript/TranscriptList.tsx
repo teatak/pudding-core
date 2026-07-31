@@ -3,7 +3,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
 import { TranscriptTurn } from "./TranscriptTurn";
-import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
+import type {
+  TranscriptDisplaySettings,
+  TranscriptSearchState,
+  TranscriptSearchTarget,
+  TranscriptTurnVM,
+  TurnDisclosureState,
+} from "./types";
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_BOTTOM_PX = 36;
@@ -44,6 +50,8 @@ export const TranscriptList = memo(function TranscriptList({
   onQueuedSteer,
   onQueuedSave,
   scrollElement,
+  searchSlot,
+  searchState,
   sessionID,
   token,
   turnReveal,
@@ -63,12 +71,16 @@ export const TranscriptList = memo(function TranscriptList({
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   scrollElement: HTMLDivElement | null;
+  searchSlot: "primary" | "split";
+  searchState: TranscriptSearchState;
   sessionID: string;
   token: string;
   turnReveal?: TranscriptTurnReveal;
   turns: TranscriptTurnVM[];
 }) {
   const autoStickRef = useRef(true);
+  const activeSearchElementsRef = useRef<HTMLElement[]>([]);
+  const activeSearchTargetRef = useRef("");
   const disclosureOpenStateRef = useRef(new Map<string, DisclosureOpenState>());
   const initialScrollSessionRef = useRef("");
   const isAtLatestRef = useRef(true);
@@ -96,6 +108,10 @@ export const TranscriptList = memo(function TranscriptList({
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
   turnRevealRef.current = turnReveal;
   const firstTurnKey = turns[0]?.key ?? "";
+  const searchRenderVersion = useMemo(
+    () => turns.map((turn) => turn.key).join("\u0000"),
+    [turns],
+  );
 
   const syncViewportScrollbar = useCallback(
     (atLatest: boolean) => {
@@ -767,6 +783,96 @@ export const TranscriptList = memo(function TranscriptList({
     turns,
   ]);
 
+  useLayoutEffect(() => {
+    for (const element of activeSearchElementsRef.current) {
+      element.removeAttribute("data-transcript-search-active");
+    }
+    activeSearchElementsRef.current = [];
+    const target = searchState.target;
+    if (!scrollElement || !target) {
+      activeSearchTargetRef.current = "";
+      return;
+    }
+    const turnElement = scrollElement.querySelector<HTMLElement>(
+      `[data-transcript-turn-id="${CSS.escape(target.turnID)}"]`,
+    );
+    if (!turnElement) {
+      return;
+    }
+    const messageElements = Array.from(
+      turnElement.querySelectorAll<HTMLElement>(
+        `[data-transcript-message-id="${CSS.escape(target.messageID)}"]`,
+      ),
+    );
+    const roleElements = Array.from(
+      turnElement.querySelectorAll<HTMLElement>(`[data-transcript-message-role="${target.role}"]`),
+    );
+    const activeElements = messageElements.length > 0
+      ? messageElements
+      : roleElements.length > 0
+        ? roleElements
+        : [turnElement];
+    activeSearchElementsRef.current = activeElements;
+    for (const element of activeElements) {
+      element.setAttribute("data-transcript-search-active", "true");
+    }
+    const targetKey = `${target.messageID}:${target.occurrenceIndex}`;
+    if (activeSearchTargetRef.current === targetKey) {
+      return;
+    }
+    cancelScheduledStick();
+    cancelSmoothJump();
+    disableAutoStick();
+    markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
+    const viewportRect = scrollElement.getBoundingClientRect();
+    const activeRange = transcriptSearchTargetRange(scrollElement, target, searchState.terms);
+    const targetRect = activeRange?.getBoundingClientRect() || activeElements[0]?.getBoundingClientRect() || turnElement.getBoundingClientRect();
+    const elementTop = targetRect.top - viewportRect.top;
+    scrollElement.scrollTop += elementTop - scrollElement.clientHeight * TURN_REVEAL_TOP_RATIO;
+    lastScrollTopRef.current = scrollElement.scrollTop;
+    initialScrollSessionRef.current = sessionID;
+    activeSearchTargetRef.current = targetKey;
+    setLatestState(false);
+  }, [
+    cancelScheduledStick,
+    cancelSmoothJump,
+    disableAutoStick,
+    scrollElement,
+    searchState.target,
+    searchState.terms,
+    searchRenderVersion,
+    sessionID,
+    setLatestState,
+  ]);
+
+  useLayoutEffect(() => {
+    const names = transcriptSearchHighlightNames(searchSlot);
+    clearTranscriptSearchHighlights(names);
+    if (!scrollElement || searchState.terms.length === 0) {
+      return;
+    }
+    const registry = transcriptHighlightRegistry();
+    const HighlightConstructor = transcriptHighlightConstructor();
+    if (!registry || !HighlightConstructor) {
+      return;
+    }
+    ensureTranscriptSearchHighlightStyles();
+    const messageRoots = Array.from(
+      scrollElement.querySelectorAll<HTMLElement>("[data-transcript-message-id]"),
+    );
+    const matchRanges = messageRoots.flatMap((root) => textMatchRanges(root, searchState.terms));
+    const activeRange = searchState.target
+      ? transcriptSearchTargetRange(scrollElement, searchState.target, searchState.terms)
+      : undefined;
+    if (matchRanges.length > 0) {
+      registry.set(names.matches, new HighlightConstructor(...matchRanges));
+    }
+    if (activeRange) {
+      registry.set(names.active, new HighlightConstructor(activeRange));
+    }
+    return () => clearTranscriptSearchHighlights(names);
+  }, [scrollElement, searchRenderVersion, searchSlot, searchState.target, searchState.terms]);
+
   useEffect(() => {
     return () => {
       cancelScheduledStick();
@@ -779,9 +885,14 @@ export const TranscriptList = memo(function TranscriptList({
       for (const element of revealedMessageElementsRef.current) {
         element.removeAttribute("data-transcript-turn-reveal");
       }
+      for (const element of activeSearchElementsRef.current) {
+        element.removeAttribute("data-transcript-search-active");
+      }
+      clearTranscriptSearchHighlights(transcriptSearchHighlightNames(searchSlot));
       revealedMessageElementsRef.current = [];
+      activeSearchElementsRef.current = [];
     };
-  }, [cancelScheduledStick, cancelSmoothJump, clearPendingHistoryAnchor, releaseViewportResizeAnchor]);
+  }, [cancelScheduledStick, cancelSmoothJump, clearPendingHistoryAnchor, releaseViewportResizeAnchor, searchSlot]);
 
   if (turns.length === 0) {
     return null;
@@ -813,6 +924,120 @@ export const TranscriptList = memo(function TranscriptList({
     </div>
   );
 });
+
+type TranscriptHighlightNames = {
+  active: string;
+  matches: string;
+};
+
+type TranscriptHighlightRegistry = {
+  delete: (name: string) => boolean;
+  set: (name: string, highlight: object) => void;
+};
+
+type TranscriptHighlightConstructor = new (...ranges: Range[]) => object;
+const TRANSCRIPT_SEARCH_HIGHLIGHT_STYLE_ID = "pudding-conversation-search-highlight-styles";
+
+function transcriptSearchHighlightNames(slot: "primary" | "split"): TranscriptHighlightNames {
+  return {
+    active: `pudding-conversation-search-active-${slot}`,
+    matches: `pudding-conversation-search-match-${slot}`,
+  };
+}
+
+function transcriptHighlightRegistry(): TranscriptHighlightRegistry | undefined {
+  return (CSS as unknown as { highlights?: TranscriptHighlightRegistry }).highlights;
+}
+
+function transcriptHighlightConstructor(): TranscriptHighlightConstructor | undefined {
+  return (globalThis as unknown as { Highlight?: TranscriptHighlightConstructor }).Highlight;
+}
+
+function clearTranscriptSearchHighlights(names: TranscriptHighlightNames) {
+  const registry = transcriptHighlightRegistry();
+  registry?.delete(names.matches);
+  registry?.delete(names.active);
+}
+
+function ensureTranscriptSearchHighlightStyles() {
+  let style = document.getElementById(TRANSCRIPT_SEARCH_HIGHLIGHT_STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = TRANSCRIPT_SEARCH_HIGHLIGHT_STYLE_ID;
+    document.head.append(style);
+  }
+  style.textContent = `
+    ::highlight(pudding-conversation-search-match-primary),
+    ::highlight(pudding-conversation-search-match-split) {
+      color: inherit;
+      background-color: oklch(0.88 0.14 88 / 0.72);
+    }
+    ::highlight(pudding-conversation-search-active-primary),
+    ::highlight(pudding-conversation-search-active-split) {
+      color: white;
+      background-color: var(--transcript-reveal-accent);
+    }
+    .dark ::highlight(pudding-conversation-search-match-primary),
+    .dark ::highlight(pudding-conversation-search-match-split) {
+      background-color: oklch(0.72 0.13 82 / 0.48);
+    }
+    .dark ::highlight(pudding-conversation-search-active-primary),
+    .dark ::highlight(pudding-conversation-search-active-split) {
+      color: oklch(0.16 0 0);
+      background-color: var(--transcript-reveal-accent);
+    }
+  `;
+}
+
+function transcriptSearchTargetRange(
+  scrollElement: HTMLElement,
+  target: TranscriptSearchTarget,
+  terms: string[],
+) {
+  const roots = Array.from(
+    scrollElement.querySelectorAll<HTMLElement>(
+      `[data-transcript-message-id="${CSS.escape(target.messageID)}"]`,
+    ),
+  );
+  const ranges = roots.flatMap((root) => textMatchRanges(root, terms));
+  return ranges[target.occurrenceIndex];
+}
+
+function textMatchRanges(root: HTMLElement, terms: string[]) {
+  const normalizedTerms = Array.from(
+    new Set(terms.map((term) => term.toLocaleLowerCase()).filter(Boolean)),
+  ).sort((left, right) => right.length - left.length);
+  if (normalizedTerms.length === 0) {
+    return [];
+  }
+  const ranges: Range[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const text = node.textContent || "";
+    const normalizedText = text.toLocaleLowerCase();
+    const occupied: Array<{ end: number; start: number }> = [];
+    for (const term of normalizedTerms) {
+      let start = normalizedText.indexOf(term);
+      while (start >= 0) {
+        const end = start + term.length;
+        if (
+          end <= text.length &&
+          !occupied.some((range) => start < range.end && end > range.start)
+        ) {
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          ranges.push(range);
+          occupied.push({ end, start });
+        }
+        start = normalizedText.indexOf(term, start + Math.max(1, term.length));
+      }
+    }
+    node = walker.nextNode();
+  }
+  return ranges;
+}
 
 function useHistoryLoadController({
   getScrollElement,

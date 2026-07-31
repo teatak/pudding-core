@@ -178,7 +178,7 @@ function renderTranscriptPart({
 }) {
   switch (part.type) {
     case "text":
-      return <MarkdownBody key={partKey} text={part.text} token={token} />;
+      return <MarkdownBody key={partKey} messageID={part.messageID} text={part.text} token={token} />;
     case "attachment":
       return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
     case "thought":
@@ -392,9 +392,14 @@ export function partsFromMessages(messages: Message[]): TurnPartVM[] {
     dedupeAttachmentParts(
       mergeToolParts(
         messages.flatMap((message) =>
-          message.parts.flatMap((part) => {
+          message.parts.flatMap((part): TurnPartVM[] => {
             const viewPart = partFromContentPart(part);
-            return viewPart ? [viewPart] : [];
+            if (!viewPart) {
+              return [];
+            }
+            return viewPart.type === "text"
+              ? [{ ...viewPart, messageID: message.id }]
+              : [viewPart];
           }),
         ),
       ),
@@ -1220,6 +1225,7 @@ type MarkdownImageItem = ImageLightboxItem & {
 export function MarkdownBody({
   allowHtmlImages = true,
   enableMermaid = false,
+  messageID,
   onResolvedLinkClick,
   resolveImageURL,
   resolveLinkURL,
@@ -1228,6 +1234,7 @@ export function MarkdownBody({
 }: {
   allowHtmlImages?: boolean;
   enableMermaid?: boolean;
+  messageID?: string;
   onResolvedLinkClick?: (href: string) => boolean;
   resolveImageURL?: (raw: string) => string;
   resolveLinkURL?: (raw: string) => string;
@@ -1358,7 +1365,10 @@ export function MarkdownBody({
 
   return (
     <>
-      <div className={cn("pudding-markdown py-1.5", hasHtmlImage && "pudding-markdown-html-images")}>
+      <div
+        className={cn("pudding-markdown py-1.5", hasHtmlImage && "pudding-markdown-html-images")}
+        data-transcript-message-id={messageID}
+      >
         {segments.map((segment, index) => {
           if (segment.type === "image") {
             return (

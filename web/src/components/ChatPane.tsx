@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Ellipsis, Trash, X } from "@/components/icons";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   deleteSession,
@@ -39,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import { onDesktopMenuCommand } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
@@ -48,6 +49,8 @@ import {
   useWorkspaceActivities,
 } from "@/state/workspaceActivityStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
+
+type ChatPaneRole = "primary" | "split";
 
 type ChatPaneProps = {
   token: string;
@@ -59,8 +62,10 @@ type ChatPaneProps = {
   reserveTopRightActions?: 0 | 1 | 2;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
-  role: "primary" | "split";
+  role: ChatPaneRole;
 };
+
+let activeChatPaneRole: ChatPaneRole = "primary";
 
 export function ChatPane({
   token,
@@ -78,6 +83,8 @@ export function ChatPane({
   const railCollapsed = useRailCollapsed();
   const workspaceOpen = useWorkspaceOpen();
   const clearSession = useOverlayStore((state) => state.clearSession);
+  const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
+  const [conversationSearchFocusSignal, setConversationSearchFocusSignal] = useState(0);
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
@@ -160,6 +167,53 @@ export function ChatPane({
         }
       : {}),
   };
+  const openConversationSearch = useCallback(() => {
+    if (!selectedSession) {
+      return;
+    }
+    activeChatPaneRole = role;
+    setConversationSearchOpen(true);
+    setConversationSearchFocusSignal((signal) => signal + 1);
+  }, [role, selectedSession]);
+
+  useEffect(() => {
+    setConversationSearchOpen(false);
+  }, [selectedSession?.id]);
+
+  useEffect(
+    () => () => {
+      if (activeChatPaneRole === role) {
+        activeChatPaneRole = "primary";
+      }
+    },
+    [role],
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        activeChatPaneRole !== role ||
+        !selectedSession ||
+        event.altKey ||
+        (!event.metaKey && !event.ctrlKey) ||
+        event.key.toLowerCase() !== "f"
+      ) {
+        return;
+      }
+      event.preventDefault();
+      openConversationSearch();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    const unsubscribeMenu = onDesktopMenuCommand((command) => {
+      if (command === "search-conversation" && activeChatPaneRole === role) {
+        openConversationSearch();
+      }
+    });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      unsubscribeMenu();
+    };
+  }, [openConversationSearch, role, selectedSession]);
 
   useEffect(() => {
     if (workspaceOpen && selectedSession && workspaceActivities.length > 0) {
@@ -221,7 +275,16 @@ export function ChatPane({
   }, [draftActive, isPrimary, navigate, selectedSession, sessionID, sessions, sessionsQuery.isSuccess]);
 
   return (
-    <section className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
+    <section
+      className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden"
+      data-chat-pane-role={role}
+      onFocusCapture={() => {
+        activeChatPaneRole = role;
+      }}
+      onPointerDownCapture={() => {
+        activeChatPaneRole = role;
+      }}
+    >
       <header
         className={cn(
           "pudding-chat-pane-header flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-(--toolbar-edge-inset)",
@@ -240,6 +303,7 @@ export function ChatPane({
                 session={selectedSession}
                 onDelete={() => deleteMutation.mutate(selectedSession.id)}
                 onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
+                onSearch={openConversationSearch}
               />
               <HeaderStatus session={selectedSession} />
             </>
@@ -281,7 +345,14 @@ export function ChatPane({
         {showDraft ? (
           <DraftConversation token={token} projectID={draftProjectID} />
         ) : selectedSession ? (
-          <Conversation token={token} session={selectedSession} />
+          <Conversation
+            searchFocusSignal={conversationSearchFocusSignal}
+            searchOpen={conversationSearchOpen}
+            searchSlot={role}
+            session={selectedSession}
+            token={token}
+            onSearchOpenChange={setConversationSearchOpen}
+          />
         ) : sessionsPending ? (
           <LoadingState />
         ) : (
@@ -298,12 +369,14 @@ function HeaderSessionTitle({
   deletePending,
   onRename,
   onDelete,
+  onSearch,
 }: {
   session: Session;
   renamePending: boolean;
   deletePending: boolean;
   onRename: (title: string) => void;
   onDelete: () => void;
+  onSearch: () => void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
@@ -458,6 +531,9 @@ function HeaderSessionTitle({
                 startEditing();
               }}
             >
+              <DropdownMenuItem onSelect={onSearch}>
+                {t("conversationSearch.open")}
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => {
                 editAfterMenuCloseRef.current = true;
               }}>

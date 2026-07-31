@@ -190,6 +190,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/turns/:turnID/file-changes/:changeID").GET(s.getTurnFileChange)
+	app.Route("/sessions/:id/messages/search").POST(s.searchMessagesInSession)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/processes").GET(s.listBackgroundProcesses)
 	app.Route("/sessions/:id/processes/:processID").GET(s.getBackgroundProcess).DELETE(s.stopBackgroundProcess)

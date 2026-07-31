@@ -603,6 +603,75 @@ func TestSearchMessagesLiteralSupportsShortCJKTerms(t *testing.T) {
 	}
 }
 
+func TestSearchMessagesExactUsesCompleteQuery(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_search_exact")
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_exact",
+		TurnID:          "turn_search_exact_1",
+		UserMessageID:   "msg_search_exact_1",
+		ClientMessageID: "client_search_exact_1",
+		UserText:        "alpha beta",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_search_exact_1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("done"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_exact",
+		TurnID:          "turn_search_exact_2",
+		UserMessageID:   "msg_search_exact_2",
+		ClientMessageID: "client_search_exact_2",
+		UserText:        "alpha middle beta",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID: "sess_search_exact",
+		Query:     "ALPHA BETA",
+		Limit:     10,
+		Literal:   true,
+		Exact:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "msg_search_exact_1" {
+		t.Fatalf("exact search returned %+v", hits)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_search_exact_2",
+		Status: store.TurnCompleted,
+		AssistantParts: []store.ContentPart{{
+			Type: store.ContentPartThought,
+			Text: "alpha beta hidden thought",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err = st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID:             "sess_search_exact",
+		Query:                 "ALPHA BETA",
+		Limit:                 10,
+		Literal:               true,
+		Exact:                 true,
+		VisibleTranscriptOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "msg_search_exact_1" {
+		t.Fatalf("visible transcript exact search returned %+v", hits)
+	}
+}
+
 func TestSearchMessagesLiteralSupportsUnspacedMixedTerms(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
