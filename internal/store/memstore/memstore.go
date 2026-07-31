@@ -83,7 +83,7 @@ func (m *Memstore) GetProject(_ context.Context, id string) (*store.Project, err
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return cloneProject(p), nil
+	return m.projectWithActivityLocked(p), nil
 }
 
 func (m *Memstore) ListProjects(_ context.Context) ([]*store.Project, error) {
@@ -91,11 +91,12 @@ func (m *Memstore) ListProjects(_ context.Context) ([]*store.Project, error) {
 	defer m.mu.Unlock()
 	out := make([]*store.Project, 0, len(m.projects))
 	for _, p := range m.projects {
-		out = append(out, cloneProject(p))
+		out = append(out, m.projectWithActivityLocked(p))
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
-			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		left, right := projectActivityAt(out[i]), projectActivityAt(out[j])
+		if !left.Equal(right) {
+			return left.After(right)
 		}
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
@@ -122,7 +123,7 @@ func (m *Memstore) UpdateProject(_ context.Context, id string, upd store.Project
 		p.ApprovalMode = *upd.ApprovalMode
 	}
 	p.UpdatedAt = time.Now()
-	return cloneProject(p), nil
+	return m.projectWithActivityLocked(p), nil
 }
 
 func (m *Memstore) DeleteProject(_ context.Context, id string) error {
@@ -276,6 +277,27 @@ func cloneProject(p *store.Project) *store.Project {
 	cp := *p
 	cp.RootDirs = append([]string(nil), p.RootDirs...)
 	return &cp
+}
+
+func (m *Memstore) projectWithActivityLocked(project *store.Project) *store.Project {
+	cloned := cloneProject(project)
+	for _, session := range m.sessions {
+		if session.ProjectID != project.ID {
+			continue
+		}
+		if cloned.LastActivityAt == nil || session.LastActivityAt.After(*cloned.LastActivityAt) {
+			value := session.LastActivityAt
+			cloned.LastActivityAt = &value
+		}
+	}
+	return cloned
+}
+
+func projectActivityAt(project *store.Project) time.Time {
+	if project.LastActivityAt != nil {
+		return *project.LastActivityAt
+	}
+	return project.UpdatedAt
 }
 
 func cloneSession(s *store.Session) *store.Session {

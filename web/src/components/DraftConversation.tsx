@@ -609,6 +609,7 @@ function DraftComposer({
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.turns(created.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(created.id) }),
@@ -1162,6 +1163,7 @@ function DraftComposer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
       clearDraft();
       return created;
     },
@@ -1356,6 +1358,7 @@ function DraftComposer({
             ) : null}
             <div className="px-4 pt-4 pb-2">
               <Textarea
+                autoFocus
                 data-composer-text-input="true"
                 className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
                 placeholder={t("composer.messagePlaceholder")}

@@ -26,6 +26,7 @@ export type DesktopUpdateState = {
 
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
+  getHomeDirectory?: () => Promise<string>;
   getUpdateState?: () => Promise<DesktopUpdateState>;
   setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
   activateUpdate?: () => Promise<boolean>;
@@ -75,6 +76,18 @@ export async function revealDesktopPath(path: string) {
     return await bridge.revealPath(clean);
   } catch {
     return false;
+  }
+}
+
+export async function getDesktopHomeDirectory() {
+  const bridge = desktopBridge();
+  if (!bridge?.getHomeDirectory) {
+    return "";
+  }
+  try {
+    return String(await bridge.getHomeDirectory()).trim();
+  } catch {
+    return "";
   }
 }
 

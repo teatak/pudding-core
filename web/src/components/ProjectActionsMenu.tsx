@@ -31,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
+import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuSub, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
@@ -39,12 +40,14 @@ import { cn } from "@/lib/utils";
 
 export function ProjectActionsMenu({
   alwaysVisible = false,
+  homeDirectory = "",
   project,
   surface = "default",
   token,
   onOverlayOpenChange,
 }: {
   alwaysVisible?: boolean;
+  homeDirectory?: string;
   project: Project;
   surface?: "default" | "sidebar";
   token: string;
@@ -189,21 +192,23 @@ export function ProjectActionsMenu({
     <>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button
             aria-label={t("project.actions")}
             className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-md opacity-0 group-hover/project-label:opacity-100 data-[state=open]:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:outline-hidden",
+              "opacity-0 group-hover/project-label:opacity-100 data-[state=open]:opacity-100 focus-visible:opacity-100",
               surface === "sidebar"
                 ? "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground focus-visible:ring-ring",
+                : "data-[state=open]:bg-muted",
               alwaysVisible && "opacity-100",
             )}
             data-project-actions-open={menuOpen}
+            size={surface === "sidebar" ? "icon-xs" : "icon"}
             type="button"
+            variant="ghost"
             onClick={(event) => event.stopPropagation()}
           >
             <Ellipsis className="size-3.5" />
-          </button>
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48 space-y-1">
           {project.rootDirs.length === 1 ? (
@@ -262,6 +267,7 @@ export function ProjectActionsMenu({
       <ProjectFormDialog
         description={t("project.editDescription")}
         directoryPaths={directoryPaths}
+        homeDirectory={homeDirectory}
         isPending={editMutation.isPending}
         name={name}
         open={editOpen}

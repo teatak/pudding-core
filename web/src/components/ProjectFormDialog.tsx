@@ -21,12 +21,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
+import { displayUserPath } from "@/lib/displayPath";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { cn } from "@/lib/utils";
 
 export function ProjectFormDialog({
   description,
   directoryPaths,
+  homeDirectory,
   isPending,
   name,
   open,
@@ -41,6 +43,7 @@ export function ProjectFormDialog({
 }: {
   description: string;
   directoryPaths: string[];
+  homeDirectory: string;
   isPending: boolean;
   name: string;
   open: boolean;
@@ -165,28 +168,23 @@ export function ProjectFormDialog({
               {description}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid min-h-0 gap-4 overflow-y-auto">
+          <div className="-m-1 grid min-h-0 gap-4 overflow-y-auto p-1">
             <label className="grid gap-1.5">
               <span className="text-sm font-medium">{t("project.name")}</span>
-              <div className="flex overflow-hidden rounded-lg border focus-within:border-ring">
-                <span className="grid w-11 shrink-0 place-items-center border-r text-muted-foreground">
-                  <FolderClosed className="size-4" />
-                </span>
-                <Input
-                  autoFocus
-                  className="h-10 rounded-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-                  disabled={isPending}
-                  maxLength={120}
-                  placeholder={t("project.namePlaceholder")}
-                  value={name}
-                  onChange={(event) => onNameChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                    }
-                  }}
-                />
-              </div>
+              <Input
+                autoFocus
+                className="h-10"
+                disabled={isPending}
+                maxLength={120}
+                placeholder={t("project.namePlaceholder")}
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                  }
+                }}
+              />
             </label>
             <div className="grid gap-2">
               <span className="text-sm font-medium">{t("project.directories")}</span>
@@ -203,15 +201,15 @@ export function ProjectFormDialog({
               >
                 {directoryPaths.length === 0 ? (
                   <button
-                    className="flex min-h-28 w-full flex-col items-center justify-center gap-2 bg-transparent px-4 py-5 text-center text-sm transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                    className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 bg-transparent px-4 py-3 text-center text-sm transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
                     disabled={isPending}
                     type="button"
                     onClick={onChooseDirectories}
                   >
-                    <span className="grid size-10 place-items-center text-muted-foreground">
-                      <FolderPlus className="size-5" />
+                    <span className="flex items-center gap-2 font-medium">
+                      <FolderPlus className="size-4" />
+                      {t("project.addFolder")}
                     </span>
-                    <span className="font-medium">{t("project.addFolder")}</span>
                     <span className="max-w-sm text-xs leading-5 font-normal text-muted-foreground">
                       {t("project.addFolderEmptyDescription")}
                     </span>
@@ -231,7 +229,9 @@ export function ProjectFormDialog({
                         className="flex min-w-0 items-center gap-2 border-b px-3 py-2.5"
                       >
                         <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {displayUserPath(path, homeDirectory)}
+                        </span>
                         {directoryPaths.length > 1 && index === 0 ? (
                           <span className="shrink-0 rounded-md border px-2 py-0.5 text-xs text-muted-foreground">
                             {t("project.primaryDirectory")}

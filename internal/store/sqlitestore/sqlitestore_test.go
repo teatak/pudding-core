@@ -117,6 +117,45 @@ func TestProjectWithoutDirectoriesPersists(t *testing.T) {
 	}
 }
 
+func TestProjectsUseLatestSessionActivity(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	older := &store.Project{ID: "proj_older", Name: "Older"}
+	if err := st.CreateProject(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	newer := &store.Project{ID: "proj_newer", Name: "Newer"}
+	if err := st.CreateProject(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	session := &store.Session{
+		ID:        "sess_activity",
+		Provider:  "mock",
+		Model:     "mock",
+		ProjectID: older.ID,
+	}
+	if err := st.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := st.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 || projects[0].ID != older.ID {
+		t.Fatalf("projects not sorted by session activity: %+v", projects)
+	}
+	if projects[0].LastActivityAt == nil ||
+		projects[0].LastActivityAt.UnixMilli() != session.LastActivityAt.UnixMilli() {
+		t.Fatalf("last activity = %v, want %v", projects[0].LastActivityAt, session.LastActivityAt)
+	}
+	if projects[1].LastActivityAt != nil {
+		t.Fatalf("project without sessions has activity: %v", projects[1].LastActivityAt)
+	}
+}
+
 func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()

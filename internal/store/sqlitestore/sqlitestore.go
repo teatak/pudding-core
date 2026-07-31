@@ -121,14 +121,21 @@ func (s *Store) GetProject(ctx context.Context, id string) (*store.Project, erro
 func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects ORDER BY updated_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
+		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id)
+		FROM projects p
+		ORDER BY COALESCE(
+			(SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id),
+			p.updated_at
+		) DESC, p.created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]*store.Project, 0)
 	for rows.Next() {
-		project, err := scanProject(rows)
+		project, err := scanProjectWithLastActivity(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -2094,8 +2101,12 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 }
 
 func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects WHERE id=?`, id)
-	project, err := scanProject(row)
+	row := s.db.QueryRowContext(ctx, `
+		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
+		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id)
+		FROM projects p
+		WHERE p.id=?`, id)
+	project, err := scanProjectWithLastActivity(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -2333,6 +2344,32 @@ func scanProject(row messageScanner) (*store.Project, error) {
 	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
 	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
 	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	return &project, nil
+}
+
+func scanProjectWithLastActivity(row messageScanner) (*store.Project, error) {
+	var project store.Project
+	var rootDirs string
+	var created, updated int64
+	var lastActivity sql.NullInt64
+	if err := row.Scan(
+		&project.ID,
+		&project.Name,
+		&rootDirs,
+		&project.ApprovalMode,
+		&created,
+		&updated,
+		&lastActivity,
+	); err != nil {
+		return nil, err
+	}
+	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
+	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
+	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	if lastActivity.Valid {
+		value := timeFromMS(lastActivity.Int64)
+		project.LastActivityAt = &value
+	}
 	return &project, nil
 }
 

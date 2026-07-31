@@ -236,6 +236,13 @@ app.on("before-quit", (event) => {
     });
 });
 
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    console.info(`[electron] received ${signal}, requesting graceful shutdown`);
+    app.quit();
+  });
+}
+
 nativeTheme.on("updated", () => {
   broadcastThemeState();
 });
@@ -963,6 +970,11 @@ ipcMain.handle("pudding:desktop:reveal-path", async (event, rawPath) => {
   }
   shell.showItemInFolder(target);
   return true;
+});
+
+ipcMain.handle("pudding:desktop:get-home-directory", (event) => {
+  assertTrustedSender(event);
+  return os.homedir();
 });
 
 ipcMain.handle("pudding:desktop:editor-context-menu", (event, request) => {

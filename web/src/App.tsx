@@ -1,4 +1,4 @@
-import { useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { PanelRightClose, PanelRightOpen } from "@/components/icons";
 import {
   useEffect,
@@ -37,7 +37,7 @@ import {
 } from "@/lib/layoutConstants";
 import { resolveCenteredLayoutPresentation } from "@/lib/centeredLayout";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
-import { saveLastAppRoute } from "@/lib/route";
+import { saveLastAppRoute, type AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { useAgentConsoleMode, type AgentConsoleMode } from "@/state/agentConsoleStore";
@@ -146,6 +146,7 @@ function readToolbarHeightPx() {
 
 export function App() {
   const token = useToken();
+  const navigate = useNavigate();
   const {
     session: selectedSessionID,
     draft,
@@ -213,6 +214,19 @@ export function App() {
     workspaceDockRequested && centeredLayout.workspaceOverlay;
   const workspaceDocked =
     workspaceDockRequested && !workspaceOverlay;
+
+  function openProjectDraft(projectID: string) {
+    void navigate({
+      to: "/",
+      search: (prev) => {
+        const next = { ...(prev as AppSearch), draft: "1", project: projectID };
+        delete next.session;
+        delete next.split;
+        delete next.view;
+        return next;
+      },
+    });
+  }
   const consoleDisplayMode: ConsoleDisplayMode =
     effectiveWorkspaceOpen && !workspaceOverlay ? agentConsoleMode : "full";
   const activeSessionIDs = (
@@ -767,7 +781,7 @@ export function App() {
   const standalonePane = appsActive
     ? <AppsPane token={token} />
     : projectsActive
-      ? <ProjectsPane token={token} />
+      ? <ProjectsPane token={token} onOpenProjectDraft={openProjectDraft} />
       : null;
 
   const workspaceSurface = (

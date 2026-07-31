@@ -95,6 +95,8 @@ type Project struct {
 	ApprovalMode ApprovalMode `json:"approvalMode"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
+	// LastActivityAt 由项目下会话的 LastActivityAt 最大值派生，不落 projects 表。
+	LastActivityAt *time.Time `json:"lastActivityAt,omitempty"`
 }
 
 type ProjectUpdate struct {

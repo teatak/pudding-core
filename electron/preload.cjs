@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
       return "";
     }
   },
+  getHomeDirectory: () => ipcRenderer.invoke("pudding:desktop:get-home-directory"),
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   revealPath: (path) => ipcRenderer.invoke("pudding:desktop:reveal-path", path),
   showEditorContextMenu: (request) => ipcRenderer.invoke("pudding:desktop:editor-context-menu", request),

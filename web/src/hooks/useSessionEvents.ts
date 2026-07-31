@@ -473,14 +473,17 @@ function syncAudioBindingsFromEvent(queryClient: QueryClient, event: SessionEven
 function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent) {
   if (event.kind === "turn.started") {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString(), running: true });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
     return;
   }
   if (isTurnTerminalEvent(event)) {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString(), running: false });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
     return;
   }
   if (event.kind === "input.queued" || event.kind === "input.steered") {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
     return;
   }
   if (event.kind === "session.titled") {

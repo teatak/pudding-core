@@ -33,6 +33,7 @@ export const project = z.object({
   approvalMode,
   createdAt: z.string(),
   updatedAt: z.string(),
+  lastActivityAt: z.string().optional(),
 });
 export type Project = z.infer<typeof project>;
 
