@@ -58,6 +58,7 @@ export function ModelReasoningPicker({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const restoreComposerFocusOnCloseRef = useRef(false);
   const reasoningMenu = useHoverSubmenu();
 
   const providersQuery = useQuery({
@@ -207,6 +208,9 @@ export function ModelReasoningPicker({
     <Popover
       open={open}
       onOpenChange={(next) => {
+        if (next) {
+          restoreComposerFocusOnCloseRef.current = false;
+        }
         setOpen(next);
         if (!next) {
           reasoningMenu.close();
@@ -247,7 +251,10 @@ export function ModelReasoningPicker({
         sideOffset={8}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          onAfterClose?.();
+          if (restoreComposerFocusOnCloseRef.current) {
+            restoreComposerFocusOnCloseRef.current = false;
+            onAfterClose?.();
+          }
         }}
       >
         {reasoningOptions.length > 0 ? (
@@ -316,11 +323,13 @@ export function ModelReasoningPicker({
                 const profile = selectableProfiles[0];
                 if (session) {
                   reasoningMenu.close();
+                  restoreComposerFocusOnCloseRef.current = true;
                   setOpen(false);
                   patchMutation.mutate({ provider: profile.id, model });
                   return;
                 }
                 onChange?.({ provider: profile.id, model });
+                restoreComposerFocusOnCloseRef.current = true;
                 setOpen(false);
               }}
             />
@@ -366,11 +375,13 @@ export function ModelReasoningPicker({
                   onPick={(model) => {
                     if (session) {
                       reasoningMenu.close();
+                      restoreComposerFocusOnCloseRef.current = true;
                       setOpen(false);
                       patchMutation.mutate({ provider: viewedProfile.id, model });
                       return;
                     }
                     onChange?.({ provider: viewedProfile.id, model });
+                    restoreComposerFocusOnCloseRef.current = true;
                     setOpen(false);
                   }}
                 />
@@ -460,7 +471,7 @@ function ProfileModels({
   }
 
   return (
-    <div className="grid gap-0.5 py-0.5">
+    <div className="grid gap-0.5">
       {models.map((model) => {
         const selected = isCurrentProfile && currentModel === model;
         const label = formatModelLabel(model);
