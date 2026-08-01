@@ -17,6 +17,7 @@ import { AppsPane } from "@/components/AppsPane";
 import { AppToaster } from "@/components/AppToaster";
 import { ChatPane } from "@/components/ChatPane";
 import { EditorTypographyProvider } from "@/components/EditorTypographyProvider";
+import { ProjectCreateDialog } from "@/components/ProjectCreateDialog";
 import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -158,7 +159,7 @@ export function App() {
   const workspaceOpen = useWorkspaceOpen();
   const agentConsoleMode = useAgentConsoleMode();
   const railCollapsed = useRailCollapsed();
-  const [projectCreateRequested, setProjectCreateRequested] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [layoutNode, setLayoutNode] = useState<HTMLDivElement | null>(null);
@@ -230,18 +231,7 @@ export function App() {
   }
 
   function openProjectCreate() {
-    setProjectCreateRequested(true);
-    void navigate({
-      to: "/",
-      search: (prev) => {
-        const next = { ...(prev as AppSearch), view: "projects" as const };
-        delete next.session;
-        delete next.split;
-        delete next.draft;
-        delete next.project;
-        return next;
-      },
-    });
+    setProjectCreateOpen(true);
   }
   const consoleDisplayMode: ConsoleDisplayMode =
     effectiveWorkspaceOpen && !workspaceOverlay ? agentConsoleMode : "full";
@@ -794,9 +784,7 @@ export function App() {
     : projectsActive
       ? (
           <ProjectsPane
-            createRequested={projectCreateRequested}
             token={token}
-            onCreateRequestHandled={() => setProjectCreateRequested(false)}
             onOpenProjectDraft={openProjectDraft}
           />
         )
@@ -1004,6 +992,12 @@ export function App() {
             </div>
           </div>
         </div>
+        <ProjectCreateDialog
+          open={projectCreateOpen}
+          token={token}
+          onCreated={openProjectDraft}
+          onOpenChange={setProjectCreateOpen}
+        />
         <SettingsDialog token={token} showTrigger={false} />
         <AppToaster />
       </TooltipProvider>

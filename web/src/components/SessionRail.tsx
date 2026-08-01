@@ -74,6 +74,7 @@ import {
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import {
   DropdownMenu,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -1082,6 +1083,7 @@ function RailPanel({
     unpinnedSessions.filter((session) => Boolean(session.projectID)),
   );
   const projectGroups = sortProjectGroups(groupedProjects, projectSortMode, customProjectOrder);
+  const projectNamesByID = new Map(projects.map((project) => [project.id, project.name]));
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
   const draggedSession = draggingSessionID
     ? displayedSessions.find((session) => session.id === draggingSessionID)
@@ -1520,6 +1522,7 @@ function RailPanel({
                         <SidebarGroupContent className="pt-0.5">
                           <SessionItems
                             deletePending={deletePending}
+                            projectNamesByID={projectNamesByID}
                             selectedSessionID={selectedSessionID}
                             sessions={pinnedSessions}
                             showEmptyState={false}
@@ -1569,6 +1572,7 @@ function RailPanel({
                           <SidebarGroupContent className={cn("pt-0.5", isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
                             <SessionItems
                               deletePending={deletePending}
+                              projectNamesByID={projectNamesByID}
                               selectedSessionID={selectedSessionID}
                               sessions={chatSessions}
                               showEmptyState={sessions.length === 0}
@@ -1651,6 +1655,7 @@ function RailPanel({
                                       <SidebarGroupContent className="pt-0.5">
                                         <SessionItems
                                           deletePending={deletePending}
+                                          projectNamesByID={projectNamesByID}
                                           selectedSessionID={selectedSessionID}
                                           sessions={group.sessions}
                                           showEmptyState={false}
@@ -1970,20 +1975,15 @@ function ProjectSortHeader({
           />
         </button>
         <DropdownMenu open={open} onOpenChange={setOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label={`${t("project.sortLabel")}：${modeLabel}`}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  type="button"
-                >
-                  <ArrowUpDown className="size-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="right">{`${t("project.sortLabel")}：${modeLabel}`}</TooltipContent>
-          </Tooltip>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label={`${t("project.sortLabel")}：${modeLabel}`}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              type="button"
+            >
+              <ArrowUpDown className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuRadioGroup
               value={mode}
@@ -2036,6 +2036,7 @@ function RailProjectActionsMenu({ project, token }: { project: Project; token: s
 }
 type SessionItemsProps = {
   sessions: Session[];
+  projectNamesByID: ReadonlyMap<string, string>;
   selectedSessionID: string | undefined;
   deletePending: boolean;
   showEmptyState?: boolean;
@@ -2077,6 +2078,7 @@ function SessionListError({ onRefetch }: { onRefetch: () => void }) {
 
 function SessionItems({
   sessions,
+  projectNamesByID,
   selectedSessionID,
   deletePending,
   showEmptyState = true,
@@ -2128,6 +2130,7 @@ function SessionItems({
           <SessionItem
             completed={Boolean(completedSessions[session.id])}
             deletePending={deletePending}
+            projectName={session.projectID ? projectNamesByID.get(session.projectID) : undefined}
             running={isSessionTurnRunning(session, runningTurns, turnPhases)}
             selected={session.id === selectedSessionID}
             session={session}
@@ -2189,6 +2192,7 @@ function SessionDropIndicator({ active }: { active: boolean }) {
 
 type SessionItemProps = {
   session: Session;
+  projectName?: string;
   selected: boolean;
   running: boolean;
   completed: boolean;
@@ -2207,6 +2211,7 @@ type SessionItemProps = {
 
 function SessionItem({
   session,
+  projectName,
   selected,
   running,
   completed,
@@ -2537,6 +2542,15 @@ function SessionItem({
                 startEditing();
               }}
             >
+              {projectName ? (
+                <>
+                  <DropdownMenuLabel className="flex min-h-7 max-w-64 items-center gap-1.5 px-1.5 py-1 text-[13px] font-normal">
+                    <FolderClosed className="size-3.5 shrink-0" />
+                    <span className="min-w-0 truncate">{projectName}</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <DropdownMenuItem onSelect={() => onPinChange(!session.pinned)}>
                 <Pin className="rotate-45" />
                 {session.pinned ? t("session.unpin") : t("session.pin")}

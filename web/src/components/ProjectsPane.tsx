@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, FolderPlus, MessageSquarePlus, Search, X } from "@/components/icons";
+import { FolderClosed, FolderPlus, Folders, Search, X } from "@/components/icons";
 import {
   useEffect,
   useMemo,
@@ -19,7 +19,6 @@ import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectGroup,
@@ -39,14 +38,10 @@ type ProjectSort = "updated-desc" | "created-desc" | "name-asc" | "name-desc";
 const projectToolsThreshold = 6;
 
 export function ProjectsPane({
-  createRequested = false,
   token,
-  onCreateRequestHandled,
   onOpenProjectDraft,
 }: {
-  createRequested?: boolean;
   token: string;
-  onCreateRequestHandled?: () => void;
   onOpenProjectDraft: (projectID: string) => void;
 }) {
   const { locale, t } = useI18n();
@@ -57,14 +52,6 @@ export function ProjectsPane({
   const [homeDirectory, setHomeDirectory] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<ProjectSort>("updated-desc");
-
-  useEffect(() => {
-    if (!createRequested) {
-      return;
-    }
-    setAdding(true);
-    onCreateRequestHandled?.();
-  }, [createRequested, onCreateRequestHandled]);
 
   useEffect(() => {
     let current = true;
@@ -154,6 +141,7 @@ export function ProjectsPane({
   return (
     <main className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
+        icon={<Folders aria-hidden="true" />}
         title={t("project.manage")}
       />
       <div className="min-h-0 flex-1 overflow-auto">
@@ -231,7 +219,7 @@ export function ProjectsPane({
                 </div>
               </div>
               {visibleProjects.length > 0 ? (
-                <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {visibleProjects.map((project) => (
                     <ProjectRow
                       key={project.id}
@@ -481,8 +469,14 @@ function ProjectRow({
   const { t } = useI18n();
   const newConversationLabel = t("project.newConversation");
   return (
-    <article className="group/project-label grid gap-2 rounded-xl border border-border/70 px-4 py-2.5 transition-colors hover:border-border">
-      <div className="flex min-w-0 items-center gap-3">
+    <article className="group/project-label relative grid gap-2 rounded-xl border border-border/70 px-4 py-2.5 transition-colors hover:border-border hover:bg-accent/25">
+      <button
+        aria-label={`${newConversationLabel}：${project.name}`}
+        className="absolute inset-0 cursor-pointer rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        type="button"
+        onClick={() => onOpenProjectDraft(project.id)}
+      />
+      <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
         <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
           <FolderClosed className="size-4" />
         </div>
@@ -499,21 +493,7 @@ function ProjectRow({
             ) : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={newConversationLabel}
-                size="icon"
-                type="button"
-                variant="ghost"
-                onClick={() => onOpenProjectDraft(project.id)}
-              >
-                <MessageSquarePlus className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{newConversationLabel}</TooltipContent>
-          </Tooltip>
+        <div className="pointer-events-auto relative z-20 flex shrink-0 items-center gap-1">
           <ProjectActionsMenu
             alwaysVisible
             homeDirectory={homeDirectory}
@@ -523,7 +503,7 @@ function ProjectRow({
         </div>
       </div>
       {project.rootDirs.length > 0 ? (
-        <div className="grid gap-1 pt-0.5 pl-11">
+        <div className="pointer-events-none relative z-10 grid gap-1 pt-0.5 pl-11">
           {project.rootDirs.map((path) => (
             <div key={path} className="truncate text-xs text-muted-foreground/80">
               {displayUserPath(path, homeDirectory)}

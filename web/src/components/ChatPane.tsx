@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, Trash, X } from "@/components/icons";
+import { Ellipsis, FolderClosed, Trash, X } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   deleteSession,
+  listProjects,
   listSessions,
   updateSession,
   type Session,
@@ -147,6 +148,15 @@ export function ChatPane({
   const isPrimary = role === "primary";
   const showDraft = isPrimary && !sessionID;
   const sessionsPending = sessionsQuery.isPending;
+  const headerProjectID = showDraft ? draftProjectID : selectedSession?.projectID;
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => listProjects(token),
+    enabled: Boolean(token && headerProjectID),
+  });
+  const headerProjectName = projectsQuery.data?.projects.find(
+    (project) => project.id === headerProjectID,
+  )?.name;
   const headerTitle = showDraft
     ? t("session.create")
     : selectedSession
@@ -175,6 +185,20 @@ export function ChatPane({
     setConversationSearchOpen(true);
     setConversationSearchFocusSignal((signal) => signal + 1);
   }, [role, selectedSession]);
+
+  const openProjects = useCallback(() => {
+    void navigate({
+      to: "/",
+      search: (previous) => {
+        const next = { ...(previous as AppSearch), view: "projects" as const };
+        delete next.session;
+        delete next.split;
+        delete next.draft;
+        delete next.project;
+        return next;
+      },
+    });
+  }, [navigate]);
 
   useEffect(() => {
     setConversationSearchOpen(false);
@@ -299,18 +323,30 @@ export function ChatPane({
               <HeaderSessionTitle
                 key={selectedSession.id}
                 deletePending={deleteMutation.isPending}
+                projectName={headerProjectName}
                 renamePending={renameMutation.isPending}
                 session={selectedSession}
                 onDelete={() => deleteMutation.mutate(selectedSession.id)}
+                onOpenProject={openProjects}
                 onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
                 onSearch={openConversationSearch}
               />
               <HeaderStatus session={selectedSession} />
             </>
           ) : (
-            <span className="inline-flex h-7 min-w-0 max-w-full items-center truncate rounded-md border border-transparent px-2 text-sm font-normal leading-6">
-              {headerTitle}
-            </span>
+            <div className="no-drag-region relative z-30 inline-flex h-8 min-w-0 max-w-full items-center gap-1 overflow-visible text-sm font-normal">
+              {headerProjectName ? (
+                <>
+                  <HeaderLeadingIcon>
+                    <FolderClosed aria-hidden="true" />
+                  </HeaderLeadingIcon>
+                  <HeaderProjectLink name={headerProjectName} onClick={openProjects} />
+                </>
+              ) : null}
+              <span className="inline-flex h-7 min-w-0 items-center truncate rounded-md border border-transparent px-2 leading-6">
+                {headerTitle}
+              </span>
+            </div>
           )}
         </div>
         <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
@@ -365,17 +401,21 @@ export function ChatPane({
 
 function HeaderSessionTitle({
   session,
+  projectName,
   renamePending,
   deletePending,
   onRename,
   onDelete,
+  onOpenProject,
   onSearch,
 }: {
   session: Session;
+  projectName?: string;
   renamePending: boolean;
   deletePending: boolean;
   onRename: (title: string) => void;
   onDelete: () => void;
+  onOpenProject: () => void;
   onSearch: () => void;
 }) {
   const { t } = useI18n();
@@ -449,17 +489,20 @@ function HeaderSessionTitle({
         editing ? "flex w-full" : "inline-flex",
       )}
     >
-      <span
-        aria-label={t(`mode.${session.activeMode}`)}
-        className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-foreground/80!"
-        role="img"
-      >
-        <SessionModeIcon mode={session.activeMode} />
-      </span>
+      <HeaderLeadingIcon label={projectName ? undefined : t(`mode.${session.activeMode}`)}>
+        {projectName ? (
+          <FolderClosed aria-hidden="true" />
+        ) : (
+          <SessionModeIcon mode={session.activeMode} />
+        )}
+      </HeaderLeadingIcon>
+      {projectName ? (
+        <HeaderProjectLink name={projectName} onClick={onOpenProject} />
+      ) : null}
       <div
         className={cn(
           "relative grid h-7 min-w-0 max-w-full items-center",
-          editing ? "shrink" : "overflow-hidden",
+          editing ? cn("shrink", !projectName && "-ml-2") : "overflow-visible",
         )}
         style={editing && editWidth ? { width: `min(${editWidth}px, 100%)` } : undefined}
       >
@@ -497,7 +540,10 @@ function HeaderSessionTitle({
           <button
             type="button"
             aria-label={t("session.rename")}
-            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-0 text-left font-medium leading-6 select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            className={cn(
+              "col-start-1 row-start-1 inline-flex h-7 min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left font-medium leading-6 select-none hover:bg-accent focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+              projectName ? "w-full" : "-ml-2 w-[calc(100%+1rem)]",
+            )}
 
             onDoubleClick={startEditing}
           >
@@ -565,6 +611,33 @@ function HeaderSessionTitle({
         </AlertDialog>
       )}
     </div>
+  );
+}
+
+function HeaderProjectLink({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <span className="flex min-w-0 max-w-56 shrink items-center gap-1 font-medium">
+      <button
+        className="no-drag-region pointer-events-auto -ml-2 h-(--toolbar-icon-button-size) min-w-0 max-w-full truncate rounded-md pr-2 pl-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        type="button"
+        onClick={onClick}
+      >
+        {name}
+      </button>
+      <span className="shrink-0 text-muted-foreground">/</span>
+    </span>
+  );
+}
+
+function HeaderLeadingIcon({ children, label }: { children: React.ReactNode; label?: string }) {
+  return (
+    <span
+      aria-label={label}
+      className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-foreground/80!"
+      role={label ? "img" : undefined}
+    >
+      {children}
+    </span>
   );
 }
 

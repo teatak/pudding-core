@@ -549,7 +549,7 @@ export function AppsPane({ token }: { token: string }) {
         <div
           className={cn(
             "mx-auto grid w-full px-6 pt-4 pb-10",
-            detailApp || detailCatalogApp ? "max-w-3xl gap-8" : "max-w-6xl gap-7",
+            detailApp || detailCatalogApp ? "max-w-3xl gap-8" : "max-w-5xl gap-7",
           )}
         >
           {detailApp ? (
@@ -688,7 +688,7 @@ export function AppsPane({ token }: { token: string }) {
                     {t("apps.loadFailed")}
                   </div>
                 ) : catalogApps.length > 0 ? (
-                  <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-x-6 gap-y-2">
+                  <div className="grid w-full grid-cols-1 gap-x-6 gap-y-2 md:grid-cols-2">
                     {catalogApps.map((app) => {
                       const installed = installedByID.get(appRegistryLocalID(app));
                       const release =

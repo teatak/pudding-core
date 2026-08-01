@@ -1,8 +1,11 @@
 export function displayUserPath(rawPath: string, rawHomeDirectory: string) {
   const path = rawPath.trim();
   const homeDirectory = trimTrailingSeparators(rawHomeDirectory.trim());
-  if (!path || !homeDirectory) {
+  if (!path) {
     return rawPath;
+  }
+  if (!homeDirectory) {
+    return "";
   }
 
   const normalizedPath = path.replaceAll("\\", "/");
