@@ -279,6 +279,12 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
   };
 
   for (const part of parts) {
+    // Approval parts drive the composer approval panel and never render in the
+    // transcript. Keep them transparent here so an approval cannot split the
+    // surrounding reasoning and tool activity into separate compact rows.
+    if (part.type === "approval") {
+      continue;
+    }
     if (part.type === "tool_use" && toolAttachmentsRenderInside(part.name || part.resultName)) {
       flush();
       out.push(part);

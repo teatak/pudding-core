@@ -1,4 +1,4 @@
-export type OAuthClient = "desktop" | "mobile"
+export type OAuthClient = "desktop" | "desktop_dev" | "mobile"
 export type OAuthFlow = "authorize" | "install"
 
 export type OAuthTransactionRecord = {
@@ -19,6 +19,7 @@ export type OAuthTransactionRecord = {
 
 export const CLIENT_SCHEMES: Record<OAuthClient, string> = {
   desktop: "pudding",
+  desktop_dev: "pudding-dev",
   mobile: "pudding-mobile",
 }
 
@@ -26,7 +27,7 @@ export const START_TTL_MS = 10 * 60 * 1000
 export const REDEEM_TTL_MS = 5 * 60 * 1000
 
 export function isOAuthClient(value: string): value is OAuthClient {
-  return value === "desktop" || value === "mobile"
+  return value === "desktop" || value === "desktop_dev" || value === "mobile"
 }
 
 export function isOAuthFlow(value: string): value is OAuthFlow {

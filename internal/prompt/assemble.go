@@ -214,6 +214,33 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 		if loaded[id] {
 			fmt.Fprintf(&b, "  - Status: loaded for this session.\n")
 		}
+		for _, connection := range connections {
+			if connection == nil || connection.AppID != id || app.ViewConnection(connection).ReauthorizationRequired {
+				continue
+			}
+			connectionID := strings.TrimSpace(connection.ID)
+			if connectionID == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "  - Connection `%s`", connectionID)
+			if name := strings.TrimSpace(connection.Name); name != "" && name != connectionID {
+				fmt.Fprintf(&b, " (%s)", name)
+			}
+			if methodID := strings.TrimSpace(connection.Auth.MethodID); methodID != "" {
+				fmt.Fprintf(&b, ": auth method `%s`", methodID)
+			} else if authType := strings.TrimSpace(connection.Auth.Type); authType != "" {
+				fmt.Fprintf(&b, ": auth type `%s`", authType)
+			}
+			if variant := strings.TrimSpace(connection.Auth.Variant); variant != "" {
+				fmt.Fprintf(&b, ", variant `%s`", variant)
+			}
+			if connection.Account != nil {
+				if login := strings.TrimSpace(connection.Account.Login); login != "" {
+					fmt.Fprintf(&b, ", account `%s`", login)
+				}
+			}
+			b.WriteByte('\n')
+		}
 		skillID, skillDescription := defaultAppSkill(item)
 		if skillID != "" {
 			fmt.Fprintf(&b, "  - Default skill `%s`", skillID)
@@ -283,7 +310,7 @@ func appRequiresConnection(def *app.Definition) bool {
 func appConnectionCounts(connections []*app.Connection) map[string]int {
 	out := map[string]int{}
 	for _, conn := range connections {
-		if conn == nil {
+		if conn == nil || app.ViewConnection(conn).ReauthorizationRequired {
 			continue
 		}
 		if appID := strings.TrimSpace(conn.AppID); appID != "" {

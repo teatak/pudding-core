@@ -26,8 +26,10 @@ import (
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/githubapp"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/mobileauth"
+	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/terminal"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -56,6 +58,8 @@ type Server struct {
 	browserClosedTabs map[string]map[string]struct{}
 	oauthMu           sync.Mutex
 	oauth             map[string]oauthStartState
+	oauthBroker       *oauthbroker.Client
+	github            *githubapp.Client
 }
 
 type voiceController interface {
@@ -68,7 +72,21 @@ type voiceController interface {
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}}
+	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
+}
+
+func (s *Server) WithOAuthBroker(client *oauthbroker.Client) *Server {
+	if client != nil {
+		s.oauthBroker = client
+	}
+	return s
+}
+
+func (s *Server) WithGitHubClient(client *githubapp.Client) *Server {
+	if client != nil {
+		s.github = client
+	}
+	return s
 }
 
 func (s *Server) WithApps(apps appService) *Server {
@@ -257,6 +275,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/project/resources/:rootID/*path").GET(s.getProjectResource)
 	app.Route("/projects").GET(s.listProjects).POST(s.createProject)
 	app.Route("/projects/:id").GET(s.getProject).PATCH(s.patchProject).DELETE(s.deleteProject)
+	app.Route("/projects/:id/app-bindings").GET(s.listProjectAppBindings).POST(s.putProjectAppBinding)
+	app.Route("/projects/:id/app-bindings/:bindingID").DELETE(s.deleteProjectAppBinding)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings).DELETE(s.resetSettings)
 	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig).DELETE(s.resetAudioConfig)
 	app.Route("/settings/audio/runtime").GET(s.getAudioRuntime)
@@ -288,7 +308,9 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/app-skills/*path").GET(s.getAppSkill)
 	app.Route("/app-connections").GET(s.listAppConnections)
 	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
+	app.Route("/app-connections/:id/github/repositories").GET(s.listGitHubConnectionRepositories)
 	app.Route("/app-oauth/start").POST(s.startAppOAuth)
+	app.Route("/app-oauth/complete").POST(s.completeAppOAuth)
 	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
 	public.Route("/desktop/health").GET(desktopHealth(token))
 	app.Route("/usage/daily").GET(s.getDailyUsage)

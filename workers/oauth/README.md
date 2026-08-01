@@ -28,8 +28,9 @@ The current Pudding GitHub App uses the public `x-t.top` callback:
 4. The Worker validates state, exchanges the final code for a user token,
    verifies the accessible installation, and stores the response only for the
    five-minute device handoff window.
-5. The result page opens either `pudding://` or `pudding-mobile://` with an
-   opaque single-use ticket.
+5. The result page opens `pudding://`, `pudding-dev://`, or
+   `pudding-mobile://` according to the fixed client allowlist, with an opaque
+   single-use ticket.
 6. The client posts that ticket and its verifier to
    `POST https://x-t.top/oauth/redeem`. Successful redemption deletes the
    transaction.

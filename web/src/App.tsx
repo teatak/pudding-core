@@ -18,6 +18,7 @@ import { AppToaster } from "@/components/AppToaster";
 import { ChatPane } from "@/components/ChatPane";
 import { EditorTypographyProvider } from "@/components/EditorTypographyProvider";
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog";
+import { OAuthReturnHandler } from "@/components/OAuthReturnHandler";
 import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -957,6 +958,7 @@ export function App() {
   return (
     <EditorTypographyProvider token={token}>
       <TooltipProvider delayDuration={250}>
+        <OAuthReturnHandler token={token} />
         <div className="relative flex h-full overflow-hidden">
           <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
           <div

@@ -713,6 +713,20 @@ func (s *Server) deleteAppConnection(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	connection, err := cfg.GetAppConnection(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	if connection.AppID == "github" && connection.Auth.Type == app.AuthTypeOAuth2 && connection.Auth.Variant == app.GitHubAppAuthVariant && strings.TrimSpace(connection.Auth.AccessToken) != "" {
+		if err := s.oauthBroker.Revoke(c.Request.Context(), "github", connection.Auth.AccessToken); err != nil {
+			return s.fail(c, err)
+		}
+	}
+	if s.store != nil {
+		if err := s.store.DeleteProjectAppBindingsByConnection(c.Request.Context(), id); err != nil {
+			return s.fail(c, err)
+		}
+	}
 	if err := cfg.DeleteAppConnection(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}

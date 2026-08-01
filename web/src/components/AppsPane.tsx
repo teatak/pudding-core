@@ -128,7 +128,7 @@ import {
   needsAppUpgrade,
   selectAppInstallRelease,
 } from "@/lib/appVersions";
-import { onOAuthConnected, openExternalURL } from "@/lib/desktopBridge";
+import { openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 
@@ -229,6 +229,7 @@ const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oa
 const OFFICIAL_APP_REGISTRY =
   import.meta.env.VITE_PUDDING_APP_REGISTRY_URL ||
   "https://teatak.github.io/pudding-hub/apps/registry.json";
+const GITHUB_APP_ACCESS_SETTINGS_URL = "https://x-t.top/oauth/providers/github/install";
 const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function AppsPane({ token }: { token: string }) {
@@ -342,16 +343,6 @@ export function AppsPane({ token }: { token: string }) {
   }, [selectedSkill, selectedSkillQuery.data]);
   const detailConnections = detailApp ? connections.filter((conn) => conn.appID === detailApp.id) : [];
   const loadFailed = appsQuery.isError || connectionsQuery.isError;
-
-  useEffect(() => {
-    return onOAuthConnected(() => {
-      toast.success(t("apps.oauthConnected"));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
-      void queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey[0] === "apps" && query.queryKey[2] === "mcp",
-      });
-    });
-  }, [queryClient, t]);
 
   useEffect(() => {
     if (detailAppID && !apps.some((app) => app.id === detailAppID)) {
@@ -1453,6 +1444,25 @@ function AppDetail({
             ) : (
               <EmptyLine>{t("apps.noConnections")}</EmptyLine>
             )}
+            {app.id === "github" && authMethods.some((method) => normalizeAuthType(method.type) === "oauth2") ? (
+              <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5">
+                <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{t("apps.githubAccessTitle")}</div>
+                  <div className="text-xs leading-5 text-muted-foreground">{t("apps.githubAccessDescription")}</div>
+                </div>
+                <Button
+                  className="shrink-0"
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void openExternalURL(GITHUB_APP_ACCESS_SETTINGS_URL)}
+                >
+                  <Settings2 className="size-3.5" />
+                  {t("apps.githubAccessAction")}
+                </Button>
+              </div>
+            ) : null}
           </DetailSection>
         ) : null}
 
@@ -2635,12 +2645,12 @@ function ConnectionRow({
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{name}</span>
           {authLabel ? (
-            <Badge className={cn(connection.tokenSet && "text-success")} variant="outline">
-              {authLabel}
+            <Badge className={cn(connection.tokenSet && !connection.reauthorizationRequired && "text-success")} variant="outline">
+              {connection.reauthorizationRequired ? t("apps.reauthorizationRequired") : authLabel}
             </Badge>
           ) : null}
         </div>
-        {connection.header ? <div className="truncate text-xs text-muted-foreground">{connection.header}</div> : null}
+        {connection.account?.login ? <div className="truncate text-xs text-muted-foreground">@{connection.account.login}</div> : connection.header ? <div className="truncate text-xs text-muted-foreground">{connection.header}</div> : null}
       </div>
       <Button aria-label={t("apps.editConnection")} className="size-7 shrink-0" size="icon-xs" type="button" variant="ghost" onClick={() => onEdit(connection)}>
         <Pencil className="size-3.5" />
@@ -3326,6 +3336,9 @@ function connectionAuthBadgeLabel(connection: AppConnection, methods: AppAuthMet
     return "PAT";
   }
   const type = normalizeAuthType(method?.type || connection.authType);
+  if (connection.appID === "github" && connection.authMethodID === "github-app") {
+    return "GitHub App";
+  }
   if (type === "none") {
     return "";
   }

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/oauthbroker"
 )
 
 const appOAuthStateTTL = 10 * time.Minute
@@ -43,6 +45,7 @@ type oauthStartState struct {
 	Fields         map[string]string
 	EndpointURLs   map[string]string
 	RedirectURI    string
+	Verifier       string
 	CreatedAt      time.Time
 }
 
@@ -59,6 +62,13 @@ type startAppOAuthResp struct {
 	AuthorizationURL string `json:"authorizationURL"`
 }
 
+type completeAppOAuthReq struct {
+	Provider string `json:"provider"`
+	Ticket   string `json:"ticket"`
+	State    string `json:"state"`
+	Error    string `json:"error"`
+}
+
 type appOAuthTokenResp struct {
 	AccessToken           string `json:"access_token"`
 	RefreshToken          string `json:"refresh_token"`
@@ -71,14 +81,6 @@ type appOAuthTokenResp struct {
 }
 
 var appOAuthProviders = map[string]appOAuthProvider{
-	"github": {
-		AppID:                 "github",
-		ClientID:              "Ov23li6YcOqhzvGBD9s4",
-		AuthorizeURL:          "https://github.com/login/oauth/authorize",
-		ExchangeURL:           "https://oauth.x-t.top/github/exchange",
-		Scopes:                []string{"read:user", "repo", "read:org"},
-		DefaultConnectionName: "GitHub",
-	},
 	"gmail": {
 		AppID:        "gmail",
 		ClientID:     "226317408426-s2jpl76do0qegl9vesjn1osrkbos1t9o.apps.googleusercontent.com",
@@ -121,8 +123,8 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if providerID == "" {
 		providerID = appID
 	}
-	provider, ok := appOAuthProviders[providerID]
-	if !ok {
+	provider, legacyProvider := appOAuthProviders[providerID]
+	if providerID != "github" && !legacyProvider {
 		return badRequest(c, "oauth provider is not configured for app")
 	}
 	cfg, ok := s.appConnectionConfig(c)
@@ -174,15 +176,40 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if name == "" {
+	if name == "" && providerID == "github" {
+		name = "GitHub"
+	} else if name == "" {
 		name = provider.DefaultConnectionName
-	}
-	redirectURI := provider.RedirectURI
-	if redirectURI == "" {
-		redirectURI = localOAuthCallbackURL(c.Request, providerID)
 	}
 	if connectionID == "" {
 		connectionID = nextAppOAuthConnectionID(appID, connections)
+	}
+	redirectURI := ""
+	verifier := ""
+	authorizationURL := ""
+	if providerID == "github" {
+		verifier, err = randomOAuthState()
+		if err != nil {
+			return s.fail(c, err)
+		}
+		challengeBytes := sha256.Sum256([]byte(verifier))
+		started, err := s.oauthBroker.Start(c.Request.Context(), oauthbroker.StartRequest{
+			Provider: "github", Client: appOAuthBrokerClient(), ClientState: state, Flow: "install",
+			Challenge: base64.RawURLEncoding.EncodeToString(challengeBytes[:]),
+		})
+		if err != nil {
+			return s.fail(c, err)
+		}
+		authorizationURL = started.AuthorizationURL
+	} else {
+		redirectURI = provider.RedirectURI
+		if redirectURI == "" {
+			redirectURI = localOAuthCallbackURL(c.Request, providerID)
+		}
+		authorizationURL, err = buildAppOAuthAuthorizeURL(provider, redirectURI, state)
+		if err != nil {
+			return s.fail(c, err)
+		}
 	}
 	s.rememberOAuthState(state, oauthStartState{
 		Provider:       providerID,
@@ -193,19 +220,20 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		Fields:         fields,
 		EndpointURLs:   endpointURLs,
 		RedirectURI:    redirectURI,
+		Verifier:       verifier,
 		CreatedAt:      time.Now(),
 	})
-	authURL, err := buildAppOAuthAuthorizeURL(provider, redirectURI, state)
-	if err != nil {
-		return s.fail(c, err)
-	}
-	c.JSON(http.StatusOK, startAppOAuthResp{AuthorizationURL: authURL})
+	c.JSON(http.StatusOK, startAppOAuthResp{AuthorizationURL: authorizationURL})
 	return nil
 }
 
 func (s *Server) appOAuthCallback(c *cart.Context) error {
 	providerID, _ := c.Param("provider")
 	providerID = strings.TrimSpace(providerID)
+	provider, configured := appOAuthProviders[providerID]
+	if !configured {
+		return oauthHTML(c, http.StatusBadRequest, "Authorization failed", "Provider is not configured.")
+	}
 	errorCode := strings.TrimSpace(c.Request.URL.Query().Get("error"))
 	if errorCode != "" {
 		return oauthHTML(c, http.StatusBadRequest, "Authorization failed", errorCode)
@@ -218,10 +246,6 @@ func (s *Server) appOAuthCallback(c *cart.Context) error {
 	start, ok := s.takeOAuthState(state)
 	if !ok || start.Provider != providerID {
 		return oauthHTML(c, http.StatusBadRequest, "Authorization expired", "Please return to Pudding and try again.")
-	}
-	provider, ok := appOAuthProviders[providerID]
-	if !ok {
-		return oauthHTML(c, http.StatusBadRequest, "Authorization failed", "Provider is not configured.")
 	}
 	token, err := exchangeAppOAuthCode(c.Request, provider, code, start.RedirectURI)
 	if err != nil {
@@ -257,6 +281,85 @@ func (s *Server) appOAuthCallback(c *cart.Context) error {
 		return oauthHTML(c, http.StatusInternalServerError, "Authorization failed", err.Error())
 	}
 	return oauthSuccessHTML(c, providerID)
+}
+
+func (s *Server) completeAppOAuth(c *cart.Context) error {
+	var req completeAppOAuthReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	providerID := strings.TrimSpace(req.Provider)
+	state := strings.TrimSpace(req.State)
+	start, ok := s.takeOAuthState(state)
+	if !ok || start.Provider != providerID || providerID != "github" || start.Verifier == "" {
+		return badRequest(c, "oauth authorization expired")
+	}
+	if errorCode := strings.TrimSpace(req.Error); errorCode != "" {
+		return badRequest(c, "github authorization was cancelled: "+errorCode)
+	}
+	if strings.TrimSpace(req.Ticket) == "" {
+		return badRequest(c, "oauth ticket is required")
+	}
+	token, err := s.oauthBroker.Redeem(c.Request.Context(), req.Ticket, start.Verifier)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	account, err := s.github.Account(c.Request.Context(), token.AccessToken)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	cfg, ok := s.appConnectionConfig(c)
+	if !ok {
+		return nil
+	}
+	connections, err := cfg.ListAppConnections(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	targetID := start.ConnectionID
+	name := strings.TrimSpace(start.ConnectionName)
+	for _, connection := range connections {
+		if connection == nil || connection.AppID != "github" || connection.Auth.Type != app.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID || connection.ID == targetID {
+			continue
+		}
+		targetID = connection.ID
+		if strings.TrimSpace(connection.Name) != "" {
+			name = connection.Name
+		}
+		break
+	}
+	if name == "" || name == "GitHub" {
+		name = "GitHub · " + account.Login
+	}
+	auth := app.Auth{
+		MethodID:     start.AuthMethodID,
+		Type:         app.AuthTypeOAuth2,
+		Variant:      app.GitHubAppAuthVariant,
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		Scopes:       oauthScopes(token.Scope),
+	}
+	if token.ExpiresIn > 0 {
+		auth.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+	}
+	if token.RefreshTokenExpiresIn > 0 {
+		auth.RefreshExpiresAt = time.Now().Add(time.Duration(token.RefreshTokenExpiresIn) * time.Second)
+	}
+	connection := &app.Connection{
+		ID: targetID, Name: name, AppID: start.AppID, Fields: start.Fields, EndpointURLs: start.EndpointURLs,
+		Account: &app.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL},
+		Auth:    auth,
+	}
+	if err := cfg.PutAppConnection(c.Request.Context(), connection); err != nil {
+		return s.fail(c, err)
+	}
+	updated, err := cfg.GetAppConnection(c.Request.Context(), targetID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, app.ViewConnection(updated))
+	return nil
 }
 
 func buildAppOAuthAuthorizeURL(provider appOAuthProvider, redirectURI, state string) (string, error) {
@@ -435,6 +538,13 @@ func appOAuthReturnScheme() string {
 		return scheme
 	}
 	return "pudding"
+}
+
+func appOAuthBrokerClient() string {
+	if appOAuthReturnScheme() == "pudding-dev" {
+		return "desktop_dev"
+	}
+	return "desktop"
 }
 
 func validURLScheme(scheme string) bool {

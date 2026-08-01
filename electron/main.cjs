@@ -145,6 +145,7 @@ const updateManager = new UpdateManager({
 
 if (hasSingleInstanceLock) {
   registerOAuthReturnProtocol();
+  captureOAuthReturnArgs(process.argv);
 }
 
 app.on("open-url", (event, rawURL) => {
@@ -176,7 +177,8 @@ app.whenReady().then(async () => {
   }
 });
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, commandLine) => {
+  captureOAuthReturnArgs(commandLine);
   const window = getMainWindow();
   if (window && !window.isDestroyed()) {
     showMainWindow(window);
@@ -729,15 +731,31 @@ function registerOAuthReturnProtocol() {
   if (!oauthReturnScheme) {
     return;
   }
+  if (process.platform === "darwin" && process.defaultApp && oauthReturnScheme === "pudding-dev") {
+    console.info("[electron] using macOS pudding-dev OAuth relay");
+    return;
+  }
   try {
+    let registered = false;
     if (process.defaultApp) {
       const scriptPath = path.resolve(process.argv[1] || path.join(repoRoot, "electron", "main.cjs"));
-      app.setAsDefaultProtocolClient(oauthReturnScheme, process.execPath, [scriptPath]);
+      registered = app.setAsDefaultProtocolClient(oauthReturnScheme, process.execPath, [scriptPath]);
     } else {
-      app.setAsDefaultProtocolClient(oauthReturnScheme);
+      registered = app.setAsDefaultProtocolClient(oauthReturnScheme);
+    }
+    if (!registered) {
+      console.warn(`[electron] oauth return protocol registration failed scheme=${oauthReturnScheme}`);
     }
   } catch (error) {
     console.warn("[electron] register oauth return protocol failed", error);
+  }
+}
+
+function captureOAuthReturnArgs(args) {
+  for (const value of Array.isArray(args) ? args : []) {
+    if (typeof value === "string" && value.startsWith(`${oauthReturnScheme}://`)) {
+      handleOAuthReturnURL(value);
+    }
   }
 }
 
@@ -781,7 +799,12 @@ function oauthReturnPayload(rawURL) {
     if (url.protocol !== `${oauthReturnScheme}:` || url.hostname !== "oauth" || !url.pathname.startsWith("/connected/")) {
       return null;
     }
-    return { provider: decodeURIComponent(url.pathname.slice("/connected/".length)) };
+    return {
+      provider: decodeURIComponent(url.pathname.slice("/connected/".length)),
+      ticket: url.searchParams.get("ticket") || "",
+      state: url.searchParams.get("state") || "",
+      error: url.searchParams.get("error") || "",
+    };
   } catch {
     return null;
   }

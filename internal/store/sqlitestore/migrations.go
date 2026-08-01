@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 6
+	currentSchemaVersion  = 7
 )
 
 var (
@@ -188,6 +188,29 @@ var schemaMigrations = map[int]schemaMigration{
 		_, err = tx.Exec(`
 			ALTER TABLE turn_file_changes
 				ADD COLUMN origin TEXT NOT NULL DEFAULT 'structured';
+		`)
+		return err
+	},
+	7: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS project_app_bindings (
+				id TEXT PRIMARY KEY,
+				project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+				app_id TEXT NOT NULL,
+				connection_id TEXT NOT NULL,
+				resource_type TEXT NOT NULL,
+				resource_id TEXT NOT NULL,
+				resource_name TEXT NOT NULL,
+				metadata TEXT NOT NULL DEFAULT '{}',
+				is_primary INTEGER NOT NULL DEFAULT 0,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				UNIQUE(project_id, app_id, resource_type, resource_id)
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS project_app_bindings_primary
+				ON project_app_bindings(project_id, app_id) WHERE is_primary = 1;
+			CREATE INDEX IF NOT EXISTS project_app_bindings_connection
+				ON project_app_bindings(connection_id);
 		`)
 		return err
 	},
@@ -434,7 +457,9 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 var currentSchemaContract = func() schemaContract {
-	out := extendSchemaContract(schemaV5Contract, nil)
+	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"project_app_bindings": {"id", "project_id", "app_id", "connection_id", "resource_type", "resource_id", "resource_name", "metadata", "is_primary", "created_at", "updated_at"},
+	}, "project_app_bindings_primary", "project_app_bindings_connection")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	return out
 }()

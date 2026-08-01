@@ -220,13 +220,46 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 				}},
 			},
 		},
-		AppConnections: []*app.Connection{{ID: "github-main", AppID: "github"}},
+		AppConnections: []*app.Connection{
+			{
+				ID: "github-main", Name: "GitHub · octocat", AppID: "github",
+				Account: &app.ConnectionAccount{Login: "octocat"},
+				Auth:    app.Auth{MethodID: app.GitHubAppAuthMethodID, Type: app.AuthTypeOAuth2, Variant: app.GitHubAppAuthVariant},
+			},
+			{
+				ID: "github-pat", Name: "GitHub PAT", AppID: "github",
+				Auth: app.Auth{MethodID: "github-pat", Type: app.AuthTypeBearer},
+			},
+		},
 	})
 	if strings.Contains(out.SystemInstruction, "Status: not connected") {
 		t.Fatalf("connected app should not be marked unavailable:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") || strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") {
 		t.Fatalf("connected app should expose only compact loading metadata:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Connection `github-main` (GitHub · octocat): auth method `github-app`, variant `github_app`, account `octocat`") {
+		t.Fatalf("connected app should expose non-secret auth routing metadata:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Connection `github-pat` (GitHub PAT): auth method `github-pat`") {
+		t.Fatalf("connected app should distinguish PAT routing metadata:\n%s", out.SystemInstruction)
+	}
+}
+
+func TestAssembleTreatsLegacyGitHubOAuthAsDisconnected(t *testing.T) {
+	out := Assemble(Input{
+		Mode: "work",
+		Apps: []*app.Definition{{
+			ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work",
+			Auth: &app.AuthConfig{Required: true},
+		}},
+		AppConnections: []*app.Connection{{
+			ID: "github-main", AppID: "github",
+			Auth: app.Auth{MethodID: "github-oauth", Type: app.AuthTypeOAuth2, Variant: app.GitHubAppAuthVariant, AccessToken: "legacy-token"},
+		}},
+	})
+	if !strings.Contains(out.SystemInstruction, "Status: not connected") {
+		t.Fatalf("legacy GitHub OAuth must require reauthorization:\n%s", out.SystemInstruction)
 	}
 }
 

@@ -53,4 +53,9 @@ PUDDING_DAEMON_BIN="$PWD/bin/puddingd" \
 PUDDING_DAEMON_ADDR="127.0.0.1:$DEV_PORT" \
 PUDDING_DEV_URL="http://127.0.0.1:$VITE_PORT" \
 PUDDING_OAUTH_RETURN_SCHEME="pudding-dev" \
+node scripts/register-dev-oauth-protocol.cjs || exit 1
+PUDDING_DAEMON_BIN="$PWD/bin/puddingd" \
+PUDDING_DAEMON_ADDR="127.0.0.1:$DEV_PORT" \
+PUDDING_DEV_URL="http://127.0.0.1:$VITE_PORT" \
+PUDDING_OAUTH_RETURN_SCHEME="pudding-dev" \
 npm --prefix web run desktop:dev

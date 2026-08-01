@@ -44,7 +44,7 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 			ConnectionID: "github-main",
 			EndpointName: "github_rest",
 			Endpoint:     app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
-			Auth:         app.Auth{Type: "bearer", Token: "gh-token"},
+			Auth:         app.Auth{MethodID: "github-pat", Type: "bearer", Token: "gh-token"},
 		}}),
 	)
 	res := runner.Call(context.Background(), Call{
@@ -56,7 +56,7 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 		t.Fatalf("rest request should succeed: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["status"] != float64(200) || payload["endpoint"] != "github_rest" {
+	if payload["status"] != float64(200) || payload["endpoint"] != "github_rest" || payload["connection"] != "github-main" || payload["auth_method"] != "github-pat" || payload["auth_type"] != "bearer" {
 		t.Fatalf("unexpected result: %+v", payload)
 	}
 	if res.SummaryKind != SummaryReturnedItems || res.SummaryCount != 1 {

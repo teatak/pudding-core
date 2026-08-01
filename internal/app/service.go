@@ -9,22 +9,35 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/oauthbroker"
 )
 
 var (
-	ErrInvalidID          = errors.New("app: invalid id")
-	ErrInvalidMCPOverride = errors.New("app: invalid mcp override")
-	ErrNotFound           = errors.New("app: not found")
-	ErrAlreadyExists      = errors.New("app: already exists")
-	ErrBuiltinApp         = errors.New("app: builtin app cannot be uninstalled")
-	ErrDisabled           = errors.New("app: disabled")
-	ErrEnablementConfig   = errors.New("app: enablement config unavailable")
+	ErrInvalidID                         = errors.New("app: invalid id")
+	ErrInvalidMCPOverride                = errors.New("app: invalid mcp override")
+	ErrNotFound                          = errors.New("app: not found")
+	ErrAlreadyExists                     = errors.New("app: already exists")
+	ErrBuiltinApp                        = errors.New("app: builtin app cannot be uninstalled")
+	ErrDisabled                          = errors.New("app: disabled")
+	ErrEnablementConfig                  = errors.New("app: enablement config unavailable")
+	ErrConnectionReauthorizationRequired = errors.New("app: connection reauthorization required")
 )
 
 type ConnectionSource interface {
 	ListAppConnections(ctx context.Context) ([]*Connection, error)
+}
+
+type ConnectionStore interface {
+	ConnectionSource
+	GetAppConnection(ctx context.Context, id string) (*Connection, error)
+	PutAppConnection(ctx context.Context, connection *Connection) error
+}
+
+type ProjectConnectionSource interface {
+	ResolveSessionAppConnection(ctx context.Context, sessionID, appID string) (string, bool, error)
 }
 
 type EnablementSource interface {
@@ -33,9 +46,12 @@ type EnablementSource interface {
 }
 
 type ConnectionChoice struct {
-	ID    string `json:"id"`
-	Name  string `json:"name,omitempty"`
-	AppID string `json:"appID"`
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	AppID        string `json:"appID"`
+	AuthType     string `json:"authType,omitempty"`
+	AuthMethodID string `json:"authMethodID,omitempty"`
+	AuthVariant  string `json:"authVariant,omitempty"`
 }
 
 type EndpointResolveError struct {
@@ -65,20 +81,40 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
-	appsRoot    string
-	connections ConnectionSource
-	enablement  EnablementSource
-	runtime     RuntimeSource
-	packageMu   sync.RWMutex
+	appsRoot           string
+	connections        ConnectionSource
+	enablement         EnablementSource
+	runtime            RuntimeSource
+	packageMu          sync.RWMutex
+	authMu             sync.Mutex
+	connectionStore    ConnectionStore
+	projectConnections ProjectConnectionSource
+	oauthBroker        *oauthbroker.Client
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
 	service := &Service{
 		appsRoot:    home.AppsPath(homeDir),
 		connections: connections,
+		oauthBroker: oauthbroker.New("", nil),
 	}
+	service.connectionStore, _ = connections.(ConnectionStore)
 	service.enablement, _ = connections.(EnablementSource)
 	return service
+}
+
+func (s *Service) WithProjectConnections(source ProjectConnectionSource) *Service {
+	if s != nil {
+		s.projectConnections = source
+	}
+	return s
+}
+
+func (s *Service) WithOAuthBroker(client *oauthbroker.Client) *Service {
+	if s != nil && client != nil {
+		s.oauthBroker = client
+	}
+	return s
 }
 
 func (s *Service) WithRuntimeSource(source RuntimeSource) *Service {
@@ -631,7 +667,17 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			continue
 		}
 		endpointSeen = true
-		if connectionRef == "" {
+		effectiveConnectionRef := connectionRef
+		if s.projectConnections != nil {
+			projectConnectionID, bound, err := s.projectConnections.ResolveSessionAppConnection(ctx, sessionID, def.ID)
+			if err != nil {
+				return nil, err
+			}
+			if bound {
+				effectiveConnectionRef = projectConnectionID
+			}
+		}
+		if effectiveConnectionRef == "" {
 			if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
 				matches = append(matches, binding)
 				continue
@@ -642,7 +688,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 				continue
 			}
 			allChoices = append(allChoices, viewConnectionChoice(conn))
-			if connectionRef != "" && !connectionMatches(conn, connectionRef) {
+			if effectiveConnectionRef != "" && !connectionMatches(conn, effectiveConnectionRef) {
 				continue
 			}
 			matches = append(matches, endpointBindingForConnection(def, endpointName, endpoint, conn))
@@ -662,13 +708,88 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 		}
 		return nil, &EndpointResolveError{Reason: reason, Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	case 1:
-		return matches[0], nil
+		return s.readyEndpointBinding(ctx, matches[0])
 	default:
 		if len(allChoices) == 0 {
 			return nil, &EndpointResolveError{Reason: "endpoint_ambiguous", Endpoint: endpointName}
 		}
 		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	}
+}
+
+func (s *Service) ReadyConnection(ctx context.Context, id string) (*Connection, error) {
+	if s == nil || s.connectionStore == nil {
+		return nil, errors.New("app connection store unavailable")
+	}
+	connection, err := s.connectionStore.GetAppConnection(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	return s.refreshConnectionIfNeeded(ctx, connection)
+}
+
+func (s *Service) readyEndpointBinding(ctx context.Context, binding *EndpointBinding) (*EndpointBinding, error) {
+	if binding == nil || binding.ConnectionID == "" || s.connectionStore == nil {
+		return binding, nil
+	}
+	connection, err := s.ReadyConnection(ctx, binding.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	out := *binding
+	out.Auth = CloneAuth(connection.Auth)
+	out.ConnectionFields = cloneStringMap(connection.Fields)
+	return &out, nil
+}
+
+func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Connection) (*Connection, error) {
+	if connection == nil || connection.AppID != "github" || connection.Auth.Type != AuthTypeOAuth2 {
+		return CloneConnection(connection), nil
+	}
+	if githubAppReauthorizationRequired(connection) {
+		return nil, ErrConnectionReauthorizationRequired
+	}
+	if connection.Auth.ExpiresAt.IsZero() || time.Now().Add(2*time.Minute).Before(connection.Auth.ExpiresAt) {
+		return CloneConnection(connection), nil
+	}
+	if strings.TrimSpace(connection.Auth.RefreshToken) == "" {
+		return nil, ErrConnectionReauthorizationRequired
+	}
+
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	current, err := s.connectionStore.GetAppConnection(ctx, connection.ID)
+	if err != nil {
+		return nil, err
+	}
+	if githubAppReauthorizationRequired(current) {
+		return nil, ErrConnectionReauthorizationRequired
+	}
+	if current.Auth.ExpiresAt.IsZero() || time.Now().Add(2*time.Minute).Before(current.Auth.ExpiresAt) {
+		return current, nil
+	}
+	token, err := s.oauthBroker.Refresh(ctx, "github", current.Auth.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("refresh github connection %q: %w", current.ID, err)
+	}
+	current.Auth.AccessToken = token.AccessToken
+	if token.RefreshToken != "" {
+		current.Auth.RefreshToken = token.RefreshToken
+	}
+	current.Auth.TokenType = token.TokenType
+	current.Auth.ExpiresAt = expiryFromDuration(token.ExpiresIn)
+	current.Auth.RefreshExpiresAt = expiryFromDuration(token.RefreshTokenExpiresIn)
+	if err := s.connectionStore.PutAppConnection(ctx, current); err != nil {
+		return nil, err
+	}
+	return s.connectionStore.GetAppConnection(ctx, current.ID)
+}
+
+func expiryFromDuration(seconds int64) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(time.Duration(seconds) * time.Second)
 }
 
 func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*EndpointBinding, error) {
@@ -704,7 +825,14 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 				continue
 			}
 			for _, conn := range appConnections {
-				out = append(out, endpointBindingForConnection(def, endpointName, endpoint, conn))
+				ready, err := s.refreshConnectionIfNeeded(ctx, conn)
+				if err != nil {
+					if errors.Is(err, ErrConnectionReauthorizationRequired) {
+						continue
+					}
+					return nil, err
+				}
+				out = append(out, endpointBindingForConnection(def, endpointName, endpoint, ready))
 			}
 		}
 	}
@@ -810,7 +938,14 @@ func viewConnectionChoice(conn *Connection) ConnectionChoice {
 	if conn == nil {
 		return ConnectionChoice{}
 	}
-	return ConnectionChoice{ID: conn.ID, Name: strings.TrimSpace(conn.Name), AppID: conn.AppID}
+	return ConnectionChoice{
+		ID:           conn.ID,
+		Name:         strings.TrimSpace(conn.Name),
+		AppID:        conn.AppID,
+		AuthType:     conn.Auth.Type,
+		AuthMethodID: conn.Auth.MethodID,
+		AuthVariant:  conn.Auth.Variant,
+	}
 }
 
 func dedupeConnectionChoices(in []ConnectionChoice) []ConnectionChoice {

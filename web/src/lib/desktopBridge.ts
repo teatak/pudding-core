@@ -31,13 +31,20 @@ type ElectronDesktopBridge = {
   setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
   activateUpdate?: () => Promise<boolean>;
   onMenuCommand?: (listener: (command: DesktopMenuCommand) => void) => () => void;
-  onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
+  onOAuthConnected?: (listener: (payload: OAuthReturnPayload) => void) => () => void;
   onUpdateState?: (listener: (state: DesktopUpdateState) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   revealPath?: (path: string) => Promise<boolean>;
   showEditorContextMenu?: (request: DesktopEditorContextMenuRequest) => Promise<DesktopEditorCommand | null>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
   setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
+};
+
+export type OAuthReturnPayload = {
+  provider?: string;
+  ticket?: string;
+  state?: string;
+  error?: string;
 };
 
 type NativePathFile = File & { path?: string };
@@ -103,7 +110,7 @@ export async function showDesktopEditorContextMenu(request: DesktopEditorContext
   }
 }
 
-export function onOAuthConnected(listener: (payload: { provider?: string }) => void) {
+export function onOAuthConnected(listener: (payload: OAuthReturnPayload) => void) {
   const bridge = desktopBridge();
   if (!bridge?.onOAuthConnected) {
     return () => {};

@@ -1,5 +1,20 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
+const oauthReturnListeners = new Set();
+const pendingOAuthReturnPayloads = [];
+ipcRenderer.on("pudding:oauth:connected", (_event, payload) => {
+  if (oauthReturnListeners.size === 0) {
+    pendingOAuthReturnPayloads.push(payload);
+    if (pendingOAuthReturnPayloads.length > 8) {
+      pendingOAuthReturnPayloads.shift();
+    }
+    return;
+  }
+  for (const listener of oauthReturnListeners) {
+    listener(payload);
+  }
+});
+
 contextBridge.exposeInMainWorld("puddingElectronTheme", {
   getState: () => ipcRenderer.invoke("pudding:theme:get"),
   setTheme: (theme) => ipcRenderer.invoke("pudding:theme:set", theme),
@@ -49,9 +64,11 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
     return () => ipcRenderer.off("pudding:desktop:menu-command", wrapped);
   },
   onOAuthConnected: (listener) => {
-    const wrapped = (_event, payload) => listener(payload);
-    ipcRenderer.on("pudding:oauth:connected", wrapped);
-    return () => ipcRenderer.off("pudding:oauth:connected", wrapped);
+    oauthReturnListeners.add(listener);
+    for (const payload of pendingOAuthReturnPayloads.splice(0)) {
+      listener(payload);
+    }
+    return () => oauthReturnListeners.delete(listener);
   },
   pickDirectories: (options) => ipcRenderer.invoke("pudding:desktop:pick-directories", options),
 });

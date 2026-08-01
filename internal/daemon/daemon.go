@@ -149,7 +149,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	apps := appsvc.NewService(dir, cfg)
+	apps := appsvc.NewService(dir, cfg).WithProjectConnections(st)
 	skills := skillsvc.NewService(dir)
 	browserService, err := newBrowserService(dir, st)
 	if err != nil {

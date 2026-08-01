@@ -2,13 +2,18 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/oauthbroker"
 )
 
 type fakeConnectionStore struct {
@@ -21,6 +26,33 @@ func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection,
 		out = append(out, CloneConnection(item))
 	}
 	return out, nil
+}
+
+func (f fakeConnectionStore) GetAppConnection(_ context.Context, id string) (*Connection, error) {
+	item := f.items[id]
+	if item == nil {
+		return nil, ErrNotFound
+	}
+	return CloneConnection(item), nil
+}
+
+func (f fakeConnectionStore) PutAppConnection(_ context.Context, connection *Connection) error {
+	if connection == nil || connection.ID == "" {
+		return ErrNotFound
+	}
+	f.items[connection.ID] = CloneConnection(connection)
+	return nil
+}
+
+type fixedProjectConnectionSource struct {
+	connectionID string
+}
+
+func (f fixedProjectConnectionSource) ResolveSessionAppConnection(_ context.Context, sessionID, appID string) (string, bool, error) {
+	if sessionID == "session-1" && appID == "github" && f.connectionID != "" {
+		return f.connectionID, true, nil
+	}
+	return "", false, nil
 }
 
 type fakeAppConfig struct {
@@ -331,14 +363,22 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	homeDir := writeTestApp(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
-		"github-work":     {ID: "github-work", Name: "Work", AppID: "github"},
-		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github"},
+		"github-work":     {ID: "github-work", Name: "Work", AppID: "github", Auth: Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant}},
+		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github", Auth: Auth{MethodID: "github-pat", Type: AuthTypeBearer}},
 	}})
 
 	_, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
 	var resolveErr *EndpointResolveError
 	if !errors.As(err, &resolveErr) || resolveErr.Reason != "connection_required" || len(resolveErr.Connections) != 2 {
 		t.Fatalf("expected connection choice error, got %#v", err)
+	}
+	for _, choice := range resolveErr.Connections {
+		if choice.ID == "github-work" && (choice.AuthMethodID != GitHubAppAuthMethodID || choice.AuthVariant != GitHubAppAuthVariant) {
+			t.Fatalf("GitHub App choice is missing auth metadata: %+v", choice)
+		}
+		if choice.ID == "github-personal" && (choice.AuthMethodID != "github-pat" || choice.AuthType != AuthTypeBearer) {
+			t.Fatalf("PAT choice is missing auth metadata: %+v", choice)
+		}
 	}
 
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "Personal")
@@ -347,6 +387,79 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	}
 	if binding.ConnectionID != "github-personal" {
 		t.Fatalf("unexpected binding: %+v", binding)
+	}
+}
+
+func TestResolveEndpointUsesProjectConnectionBinding(t *testing.T) {
+	homeDir := writeTestApp(t)
+	connections := fakeConnectionStore{items: map[string]*Connection{
+		"github-work":     {ID: "github-work", Name: "Work", AppID: "github", Auth: Auth{Type: AuthTypeBearer, Token: "work-token"}},
+		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github", Auth: Auth{Type: AuthTypeBearer, Token: "personal-token"}},
+	}}
+	svc := NewService(homeDir, connections).WithProjectConnections(fixedProjectConnectionSource{connectionID: "github-work"})
+
+	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "github-personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.ConnectionID != "github-work" || binding.Auth.Token != "work-token" {
+		t.Fatalf("project binding was not authoritative: %+v", binding)
+	}
+}
+
+func TestLegacyGitHubOAuthRequiresReauthorization(t *testing.T) {
+	connections := fakeConnectionStore{items: map[string]*Connection{
+		"github-main": {
+			ID: "github-main", AppID: "github",
+			Auth: Auth{MethodID: "github-oauth", Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "legacy-token"},
+		},
+	}}
+	svc := NewService(t.TempDir(), connections)
+
+	if _, err := svc.ReadyConnection(context.Background(), "github-main"); !errors.Is(err, ErrConnectionReauthorizationRequired) {
+		t.Fatalf("err=%v", err)
+	}
+	view := ViewConnection(connections.items["github-main"])
+	if !view.ReauthorizationRequired || view.TokenSet {
+		t.Fatalf("legacy connection view=%+v", view)
+	}
+}
+
+func TestReadyConnectionRefreshesGitHubAppToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/refresh" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["provider"] != "github" || body["refresh_token"] != "refresh-old" {
+			t.Fatalf("body=%+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","token_type":"bearer","expires_in":28800,"refresh_token_expires_in":15811200}`))
+	}))
+	t.Cleanup(server.Close)
+	connections := fakeConnectionStore{items: map[string]*Connection{
+		"github-main": {
+			ID: "github-main", AppID: "github",
+			Auth: Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "access-old", RefreshToken: "refresh-old", ExpiresAt: time.Now().Add(time.Minute)},
+		},
+	}}
+	svc := NewService(t.TempDir(), connections).WithOAuthBroker(oauthbroker.New(server.URL, server.Client()))
+
+	ready, err := svc.ReadyConnection(context.Background(), "github-main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready.Auth.AccessToken != "access-new" || ready.Auth.RefreshToken != "refresh-new" || !ready.Auth.ExpiresAt.After(time.Now().Add(7*time.Hour)) {
+		t.Fatalf("ready=%+v", ready.Auth)
+	}
+	stored := connections.items["github-main"]
+	if stored.Auth.AccessToken != "access-new" || stored.Auth.RefreshToken != "refresh-new" {
+		t.Fatalf("stored=%+v", stored.Auth)
 	}
 }
 

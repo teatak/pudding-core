@@ -18,47 +18,49 @@ import (
 )
 
 type Memstore struct {
-	mu             sync.Mutex
-	sessions       map[string]*store.Session
-	projects       map[string]*store.Project
-	turns          map[string]*store.Turn
-	fileChanges    map[string][]*store.TurnFileChange // turnID → root/path order
-	messages       map[string][]*store.Message        // sessionID → 时间升序
-	queued         map[string][]*store.QueuedInput
-	usage          map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	ucalibration   map[usageCalibrationKey]*store.UsageCalibrationStat
-	susage         map[string]*store.SessionUsageStat        // sessionID → session stats
-	canvas         map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
-	closed         map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
-	savedCanvas    map[string]*store.SavedCanvasItem         // id → globally saved canvas item
-	browser        map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
-	browserHistory map[string]*store.BrowserHistoryEntry     // id → global browser history
-	events         map[string][]event.Event                  // sessionID → seq 升序
-	seq            map[string]int64
-	settings       map[string]string
-	profiles       map[string]*store.ProviderProfile
+	mu                 sync.Mutex
+	sessions           map[string]*store.Session
+	projects           map[string]*store.Project
+	projectAppBindings map[string]*store.ProjectAppBinding
+	turns              map[string]*store.Turn
+	fileChanges        map[string][]*store.TurnFileChange // turnID → root/path order
+	messages           map[string][]*store.Message        // sessionID → 时间升序
+	queued             map[string][]*store.QueuedInput
+	usage              map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	ucalibration       map[usageCalibrationKey]*store.UsageCalibrationStat
+	susage             map[string]*store.SessionUsageStat        // sessionID → session stats
+	canvas             map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
+	closed             map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
+	savedCanvas        map[string]*store.SavedCanvasItem         // id → globally saved canvas item
+	browser            map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	browserHistory     map[string]*store.BrowserHistoryEntry     // id → global browser history
+	events             map[string][]event.Event                  // sessionID → seq 升序
+	seq                map[string]int64
+	settings           map[string]string
+	profiles           map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:       make(map[string]*store.Session),
-		projects:       make(map[string]*store.Project),
-		turns:          make(map[string]*store.Turn),
-		fileChanges:    make(map[string][]*store.TurnFileChange),
-		messages:       make(map[string][]*store.Message),
-		queued:         make(map[string][]*store.QueuedInput),
-		usage:          make(map[usageKey]*store.UsageHourlyStat),
-		ucalibration:   make(map[usageCalibrationKey]*store.UsageCalibrationStat),
-		susage:         make(map[string]*store.SessionUsageStat),
-		canvas:         make(map[string]*store.CanvasItem),
-		closed:         make(map[string]*store.ClosedCanvasItem),
-		savedCanvas:    make(map[string]*store.SavedCanvasItem),
-		browser:        make(map[string]map[string]*store.BrowserState),
-		browserHistory: make(map[string]*store.BrowserHistoryEntry),
-		events:         make(map[string][]event.Event),
-		seq:            make(map[string]int64),
-		settings:       make(map[string]string),
-		profiles:       make(map[string]*store.ProviderProfile),
+		sessions:           make(map[string]*store.Session),
+		projects:           make(map[string]*store.Project),
+		projectAppBindings: make(map[string]*store.ProjectAppBinding),
+		turns:              make(map[string]*store.Turn),
+		fileChanges:        make(map[string][]*store.TurnFileChange),
+		messages:           make(map[string][]*store.Message),
+		queued:             make(map[string][]*store.QueuedInput),
+		usage:              make(map[usageKey]*store.UsageHourlyStat),
+		ucalibration:       make(map[usageCalibrationKey]*store.UsageCalibrationStat),
+		susage:             make(map[string]*store.SessionUsageStat),
+		canvas:             make(map[string]*store.CanvasItem),
+		closed:             make(map[string]*store.ClosedCanvasItem),
+		savedCanvas:        make(map[string]*store.SavedCanvasItem),
+		browser:            make(map[string]map[string]*store.BrowserState),
+		browserHistory:     make(map[string]*store.BrowserHistoryEntry),
+		events:             make(map[string][]event.Event),
+		seq:                make(map[string]int64),
+		settings:           make(map[string]string),
+		profiles:           make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -133,12 +135,124 @@ func (m *Memstore) DeleteProject(_ context.Context, id string) error {
 		return store.ErrNotFound
 	}
 	delete(m.projects, id)
+	for bindingID, binding := range m.projectAppBindings {
+		if binding.ProjectID == id {
+			delete(m.projectAppBindings, bindingID)
+		}
+	}
 	for _, session := range m.sessions {
 		if session.ProjectID == id {
 			session.ProjectID = ""
 		}
 	}
 	return nil
+}
+
+func (m *Memstore) ListProjectAppBindings(_ context.Context, projectID string) ([]*store.ProjectAppBinding, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	out := make([]*store.ProjectAppBinding, 0)
+	for _, binding := range m.projectAppBindings {
+		if binding.ProjectID == projectID {
+			out = append(out, cloneProjectAppBinding(binding))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Primary != out[j].Primary {
+			return out[i].Primary
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (m *Memstore) PutProjectAppBinding(_ context.Context, binding *store.ProjectAppBinding) error {
+	if err := store.NormalizeProjectAppBinding(binding); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[binding.ProjectID]; !ok {
+		return store.ErrNotFound
+	}
+	now := time.Now()
+	if existing := m.projectAppBindings[binding.ID]; existing != nil {
+		binding.CreatedAt = existing.CreatedAt
+	} else {
+		binding.CreatedAt = now
+	}
+	binding.UpdatedAt = now
+	if binding.Primary {
+		for _, existing := range m.projectAppBindings {
+			if existing.ProjectID == binding.ProjectID && existing.AppID == binding.AppID {
+				existing.Primary = false
+				existing.UpdatedAt = now
+			}
+		}
+	}
+	m.projectAppBindings[binding.ID] = cloneProjectAppBinding(binding)
+	return nil
+}
+
+func (m *Memstore) DeleteProjectAppBinding(_ context.Context, projectID, bindingID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	binding := m.projectAppBindings[bindingID]
+	if binding == nil || binding.ProjectID != projectID {
+		return store.ErrNotFound
+	}
+	delete(m.projectAppBindings, bindingID)
+	return nil
+}
+
+func (m *Memstore) DeleteProjectAppBindingsByConnection(_ context.Context, connectionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	type projectApp struct{ projectID, appID string }
+	affected := make(map[projectApp]struct{})
+	for bindingID, binding := range m.projectAppBindings {
+		if binding.ConnectionID == connectionID {
+			if binding.Primary {
+				affected[projectApp{projectID: binding.ProjectID, appID: binding.AppID}] = struct{}{}
+			}
+			delete(m.projectAppBindings, bindingID)
+		}
+	}
+	now := time.Now()
+	for key := range affected {
+		var promote *store.ProjectAppBinding
+		for _, binding := range m.projectAppBindings {
+			if binding.ProjectID != key.projectID || binding.AppID != key.appID {
+				continue
+			}
+			if promote == nil || binding.CreatedAt.Before(promote.CreatedAt) {
+				promote = binding
+			}
+		}
+		if promote != nil {
+			promote.Primary = true
+			promote.UpdatedAt = now
+		}
+	}
+	return nil
+}
+
+func (m *Memstore) ResolveSessionAppConnection(_ context.Context, sessionID, appID string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session := m.sessions[sessionID]
+	if session == nil {
+		return "", false, store.ErrNotFound
+	}
+	for _, binding := range m.projectAppBindings {
+		if binding.ProjectID == session.ProjectID && binding.AppID == appID && binding.Primary {
+			return binding.ConnectionID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
@@ -298,6 +412,20 @@ func projectActivityAt(project *store.Project) time.Time {
 		return *project.LastActivityAt
 	}
 	return project.UpdatedAt
+}
+
+func cloneProjectAppBinding(binding *store.ProjectAppBinding) *store.ProjectAppBinding {
+	if binding == nil {
+		return nil
+	}
+	out := *binding
+	if len(binding.Metadata) > 0 {
+		out.Metadata = make(map[string]string, len(binding.Metadata))
+		for key, value := range binding.Metadata {
+			out.Metadata[key] = value
+		}
+	}
+	return &out
 }
 
 func cloneSession(s *store.Session) *store.Session {

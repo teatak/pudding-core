@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,8 +29,10 @@ import (
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/githubapp"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/mobileauth"
+	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
@@ -171,6 +172,29 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg, engine.WithAttachmentHome(homeDir))
 	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	return srv, ms, cfg
+}
+
+func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*httptest.Server, store.Store, *config.Manager) {
+	t.Helper()
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	cfg := config.NewManager(homeDir)
+	if err := cfg.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	writeOAuthTestApps(t, homeDir)
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg, engine.WithAttachmentHome(homeDir))
+	brokerClient := oauthbroker.New(broker.URL, broker.Client())
+	apps := appsvc.NewService(homeDir, cfg).WithProjectConnections(ms).WithOAuthBroker(brokerClient)
+	server := New(eng, ms, cfg, hub).
+		WithHome(homeDir).
+		WithApps(apps).
+		WithOAuthBroker(brokerClient).
+		WithGitHubClient(githubapp.New(github.URL, github.Client()))
+	srv := httptest.NewServer(server.Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
 }
@@ -593,10 +617,10 @@ name: GitHub
 auth:
   required: true
   methods:
-    - id: github-oauth
+    - id: github-app
       type: oauth2
       provider: github
-      label: GitHub OAuth
+      label: GitHub App
       default: true
     - id: github-pat
       type: bearer
@@ -697,8 +721,63 @@ endpoints:
 	}
 }
 
-func TestStartAppOAuth(t *testing.T) {
-	srv, _, cfg := newConfigTestServer(t)
+func TestGitHubAppOAuthAndProjectRepositoryBinding(t *testing.T) {
+	var clientState, challenge string
+	redeemAccessToken := "github-user-token"
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		switch r.URL.Path {
+		case "/oauth/start":
+			if body["provider"] != "github" || body["client"] != "desktop" || body["flow"] != "install" {
+				t.Fatalf("unexpected start body: %+v", body)
+			}
+			clientState, challenge = body["client_state"], body["challenge"]
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"authorization_url":"https://github.com/login/oauth/authorize?client_id=github-app"}`))
+		case "/oauth/redeem":
+			verifier := body["verifier"]
+			sum := sha256.Sum256([]byte(verifier))
+			if body["ticket"] != "transaction.secret" || base64.RawURLEncoding.EncodeToString(sum[:]) != challenge {
+				t.Fatalf("unexpected redemption body: %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": redeemAccessToken, "refresh_token": "github-refresh-token", "token_type": "bearer",
+				"expires_in": int64(28800), "refresh_token_expires_in": int64(15811200),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(broker.Close)
+
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accessToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if accessToken != "github-user-token" && accessToken != "github-user-token-2" {
+			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			if accessToken == "github-user-token-2" {
+				_, _ = w.Write([]byte(`{"id":43,"login":"hubot","name":"Hubot","avatar_url":"https://avatars.example/43"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"id":42,"login":"octocat","name":"The Octocat","avatar_url":"https://avatars.example/42"}`))
+			}
+		case "/user/installations":
+			_, _ = w.Write([]byte(`{"installations":[{"id":11,"html_url":"https://github.com/settings/installations/11","account":{"id":7,"login":"teatak","type":"Organization"}}]}`))
+		case "/user/installations/11/repositories":
+			_, _ = w.Write([]byte(`{"repositories":[{"id":99,"name":"pudding-core","full_name":"teatak/pudding-core","private":true,"html_url":"https://github.com/teatak/pudding-core","default_branch":"main"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(github.Close)
+
+	srv, st, cfg := newGitHubAppTestServer(t, broker, github)
 	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -717,57 +796,140 @@ func TestStartAppOAuth(t *testing.T) {
 	if u.Host != "github.com" || u.Path != "/login/oauth/authorize" {
 		t.Fatalf("unexpected auth url: %s", payload.AuthorizationURL)
 	}
-	q := u.Query()
-	if q.Get("client_id") == "" || q.Get("state") == "" {
-		t.Fatalf("missing auth params: %s", payload.AuthorizationURL)
-	}
-	if got, want := q.Get("client_id"), "Ov23li6YcOqhzvGBD9s4"; got != want {
-		t.Fatalf("client_id = %q, want %q", got, want)
-	}
-	srvURL, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, port, err := net.SplitHostPort(srvURL.Host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := q.Get("redirect_uri"), "http://localhost:"+port+"/oauth/callback/github"; got != want {
-		t.Fatalf("redirect_uri = %q, want %q", got, want)
-	}
-	if got, want := q.Get("scope"), "read:user repo read:org"; got != want {
-		t.Fatalf("scope = %q, want %q", got, want)
-	}
-	if got, want := q.Get("response_type"), "code"; got != want {
-		t.Fatalf("response_type = %q, want %q", got, want)
+	if u.Query().Get("client_id") != "github-app" || clientState == "" || challenge == "" {
+		t.Fatalf("missing GitHub App OAuth values: url=%s state=%q challenge=%q", payload.AuthorizationURL, clientState, challenge)
 	}
 
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "github-work",
-		Name:  "Work",
-		AppID: "github",
-		Auth:  appsvc.Auth{MethodID: "github-oauth", Type: "oauth2", AccessToken: "old-token"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{
-		"appID":          "github",
-		"connectionID":   "github-work",
-		"connectionName": "Work GitHub",
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+		"provider": "github",
+		"ticket":   "transaction.secret",
+		"state":    clientState,
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("reauth status = %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("complete status = %d body=%s", resp.StatusCode, body)
 	}
-	payload = decodeJSON[struct {
-		AuthorizationURL string `json:"authorizationURL"`
-	}](t, resp)
-	u, err = url.Parse(payload.AuthorizationURL)
+	connectionView := decodeJSON[appsvc.ConnectionView](t, resp)
+	if connectionView.ID != "github-main" || connectionView.Account == nil || connectionView.Account.ID != "42" || connectionView.Account.Login != "octocat" || connectionView.ReauthorizationRequired {
+		t.Fatalf("unexpected connection view: %+v", connectionView)
+	}
+	connection, err := cfg.GetAppConnection(context.Background(), connectionView.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Query().Get("state") == q.Get("state") || u.Query().Get("state") == "" {
-		t.Fatalf("reauth should create a fresh state: %s", payload.AuthorizationURL)
+	if connection.Auth.MethodID != appsvc.GitHubAppAuthMethodID || connection.Auth.Variant != appsvc.GitHubAppAuthVariant || connection.Auth.AccessToken != "github-user-token" || connection.Auth.RefreshToken != "github-refresh-token" {
+		t.Fatalf("unexpected stored connection: %+v", connection)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("second start status = %d", resp.StatusCode)
+	}
+	_ = decodeJSON[struct {
+		AuthorizationURL string `json:"authorizationURL"`
+	}](t, resp)
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+		"provider": "github", "ticket": "transaction.secret", "state": clientState,
+	})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("second complete status = %d", resp.StatusCode)
+	}
+	secondView := decodeJSON[appsvc.ConnectionView](t, resp)
+	connections, err := cfg.ListAppConnections(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondView.ID != "github-main" || len(connections) != 1 {
+		t.Fatalf("same account should reuse connection: view=%+v connections=%+v", secondView, connections)
+	}
+
+	redeemAccessToken = "github-user-token-2"
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("different account start status = %d", resp.StatusCode)
+	}
+	_ = decodeJSON[struct {
+		AuthorizationURL string `json:"authorizationURL"`
+	}](t, resp)
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+		"provider": "github", "ticket": "transaction.secret", "state": clientState,
+	})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("different account complete status = %d", resp.StatusCode)
+	}
+	thirdView := decodeJSON[appsvc.ConnectionView](t, resp)
+	connections, err = cfg.ListAppConnections(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thirdView.ID != "github-2" || thirdView.Account == nil || thirdView.Account.ID != "43" || len(connections) != 2 {
+		t.Fatalf("different account should create another connection: view=%+v connections=%+v", thirdView, connections)
+	}
+
+	ctx := context.Background()
+	project := &store.Project{ID: "proj_github", Name: "GitHub project", RootDirs: []string{t.TempDir()}, ApprovalMode: store.ApprovalAuto}
+	if err := st.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_github", ProjectID: project.ID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/github-main/github/repositories", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("repositories status = %d", resp.StatusCode)
+	}
+	repositories := decodeJSON[struct {
+		Installations []githubapp.Installation `json:"installations"`
+	}](t, resp)
+	if len(repositories.Installations) != 1 || len(repositories.Installations[0].Repositories) != 1 {
+		t.Fatalf("unexpected repositories: %+v", repositories)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/projects/"+project.ID+"/app-bindings", map[string]any{
+		"appID": "github", "connectionID": "github-main", "resourceType": "repository", "resourceID": "99", "metadata": map[string]string{"rootDir": project.RootDirs[0]},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		resp.Body.Close()
+		t.Fatalf("binding status = %d", resp.StatusCode)
+	}
+	binding := decodeJSON[store.ProjectAppBinding](t, resp)
+	if binding.ResourceName != "teatak/pudding-core" || !binding.Primary || binding.Metadata["installationID"] != "11" {
+		t.Fatalf("unexpected binding: %+v", binding)
+	}
+	resolved, ok, err := st.ResolveSessionAppConnection(ctx, "sess_github", "github")
+	if err != nil || !ok || resolved != "github-main" {
+		t.Fatalf("resolved=%q ok=%v err=%v", resolved, ok, err)
+	}
+}
+
+func TestStartGitHubAppOAuthUsesDevelopmentClient(t *testing.T) {
+	t.Setenv("PUDDING_OAUTH_RETURN_SCHEME", "pudding-dev")
+	client := ""
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		client = body["client"]
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"authorization_url":"https://github.com/login/oauth/authorize"}`))
+	}))
+	t.Cleanup(broker.Close)
+	github := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(github.Close)
+	srv, _, _ := newGitHubAppTestServer(t, broker, github)
+
+	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || client != "desktop_dev" {
+		t.Fatalf("status=%d client=%q", resp.StatusCode, client)
 	}
 }
 
@@ -1377,7 +1539,7 @@ func TestAppOAuthCallbackReturnsHTML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(data); !strings.Contains(got, "<h1>Authorization failed</h1>") {
+	if got := string(data); !strings.Contains(got, "<h1>Authorization failed</h1>") || !strings.Contains(got, "Provider is not configured.") {
 		t.Fatalf("unexpected body: %q", got)
 	}
 }

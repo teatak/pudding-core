@@ -105,6 +105,11 @@ import {
   listTerminalsResponse,
   startAppOAuthRequest,
   startAppOAuthResponse,
+  completeAppOAuthRequest,
+  githubConnectionRepositoriesResponse,
+  listProjectAppBindingsResponse,
+  projectAppBinding,
+  putProjectAppBindingRequest,
   terminal,
   webToolsConfig,
   type AppConnection,
@@ -147,6 +152,7 @@ import {
   type ProviderModel,
   type ProviderProfile,
   type Project,
+  type ProjectAppBinding,
   type ProjectBrowserRoot,
   type ProjectEntryMutation,
   type ProjectFile,
@@ -1431,6 +1437,52 @@ export function startAppOAuth(
   });
 }
 
+export function completeAppOAuth(
+  token: string,
+  body: z.infer<typeof completeAppOAuthRequest>,
+): Promise<AppConnection> {
+  return request(token, "/app-oauth/complete", appConnection, {
+    method: "POST",
+    body: JSON.stringify(completeAppOAuthRequest.parse(body)),
+  });
+}
+
+export function listGitHubConnectionRepositories(token: string, connectionID: string) {
+  return request(
+    token,
+    `/app-connections/${encodeURIComponent(connectionID)}/github/repositories`,
+    githubConnectionRepositoriesResponse,
+  );
+}
+
+export function listProjectAppBindings(token: string, projectID: string) {
+  return request(
+    token,
+    `/projects/${encodeURIComponent(projectID)}/app-bindings`,
+    listProjectAppBindingsResponse,
+  );
+}
+
+export function putProjectAppBinding(
+  token: string,
+  projectID: string,
+  body: z.infer<typeof putProjectAppBindingRequest>,
+): Promise<ProjectAppBinding> {
+  return request(token, `/projects/${encodeURIComponent(projectID)}/app-bindings`, projectAppBinding, {
+    method: "POST",
+    body: JSON.stringify(putProjectAppBindingRequest.parse(body)),
+  });
+}
+
+export async function deleteProjectAppBinding(token: string, projectID: string, bindingID: string): Promise<void> {
+  await request(
+    token,
+    `/projects/${encodeURIComponent(projectID)}/app-bindings/${encodeURIComponent(bindingID)}`,
+    z.null(),
+    { method: "DELETE" },
+  );
+}
+
 export function getAppSkill(token: string, appID: string, path: string): Promise<AppSkillDetail> {
   const skillPath = `${appID}/${path}`.split("/").map(encodeURIComponent).join("/");
   return request(token, `/app-skills/${skillPath}`, appSkillDetail);
@@ -1547,5 +1599,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectAppBinding, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };
