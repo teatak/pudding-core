@@ -158,6 +158,7 @@ export function App() {
   const workspaceOpen = useWorkspaceOpen();
   const agentConsoleMode = useAgentConsoleMode();
   const railCollapsed = useRailCollapsed();
+  const [projectCreateRequested, setProjectCreateRequested] = useState(false);
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [layoutNode, setLayoutNode] = useState<HTMLDivElement | null>(null);
@@ -223,6 +224,21 @@ export function App() {
         delete next.session;
         delete next.split;
         delete next.view;
+        return next;
+      },
+    });
+  }
+
+  function openProjectCreate() {
+    setProjectCreateRequested(true);
+    void navigate({
+      to: "/",
+      search: (prev) => {
+        const next = { ...(prev as AppSearch), view: "projects" as const };
+        delete next.session;
+        delete next.split;
+        delete next.draft;
+        delete next.project;
         return next;
       },
     });
@@ -776,7 +792,14 @@ export function App() {
   const standalonePane = appsActive
     ? <AppsPane token={token} />
     : projectsActive
-      ? <ProjectsPane token={token} onOpenProjectDraft={openProjectDraft} />
+      ? (
+          <ProjectsPane
+            createRequested={projectCreateRequested}
+            token={token}
+            onCreateRequestHandled={() => setProjectCreateRequested(false)}
+            onOpenProjectDraft={openProjectDraft}
+          />
+        )
       : null;
 
   const workspaceSurface = (
@@ -957,6 +980,7 @@ export function App() {
               draftActive={draftActive}
               selectedSessionID={standaloneViewActive ? undefined : selectedSessionID}
               token={token}
+              onCreateProject={openProjectCreate}
             />
             <div
               ref={setStageNode}

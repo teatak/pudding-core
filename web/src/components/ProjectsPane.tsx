@@ -39,10 +39,14 @@ type ProjectSort = "updated-desc" | "created-desc" | "name-asc" | "name-desc";
 const projectToolsThreshold = 6;
 
 export function ProjectsPane({
+  createRequested = false,
   token,
+  onCreateRequestHandled,
   onOpenProjectDraft,
 }: {
+  createRequested?: boolean;
   token: string;
+  onCreateRequestHandled?: () => void;
   onOpenProjectDraft: (projectID: string) => void;
 }) {
   const { locale, t } = useI18n();
@@ -53,6 +57,14 @@ export function ProjectsPane({
   const [homeDirectory, setHomeDirectory] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<ProjectSort>("updated-desc");
+
+  useEffect(() => {
+    if (!createRequested) {
+      return;
+    }
+    setAdding(true);
+    onCreateRequestHandled?.();
+  }, [createRequested, onCreateRequestHandled]);
 
   useEffect(() => {
     let current = true;

@@ -6,10 +6,9 @@ import {
   ChevronRight,
   Ellipsis,
   FolderClosed,
+  FolderPlus,
   Folders,
   FolderOpen,
-  GripVertical,
-  History,
   MessageSquareText,
   Package,
   PanelLeft,
@@ -176,11 +175,13 @@ export function SessionRail({
   selectedSessionID,
   activeSessionIDs = [],
   draftActive,
+  onCreateProject,
 }: {
   token: string;
   selectedSessionID: string | undefined;
   activeSessionIDs?: string[];
   draftActive: boolean;
+  onCreateProject: () => void;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
@@ -350,12 +351,15 @@ export function SessionRail({
     return Math.max(0, ...sessions.filter((session) => session.id !== sessionID).map((session) => session.pinnedOrder)) + 1;
   }
 
-  function changePinned(id: string, pinned: boolean, pinnedOrder?: number) {
-    pinMutation.mutate({
+  function changePinned(id: string, pinned: boolean, pinnedOrder?: number): Promise<void> {
+    return pinMutation.mutateAsync({
       id,
       pinned,
       pinnedOrder: pinned ? pinnedOrder ?? nextPinnedOrder(id) : 0,
-    });
+    }).then(
+      () => undefined,
+      () => undefined,
+    );
   }
 
   const deleteMutation = useMutation({
@@ -434,6 +438,11 @@ export function SessionRail({
     });
   }
 
+  function openProjectCreate() {
+    hover.close();
+    onCreateProject();
+  }
+
   function selectSession(id: string) {
     void navigate({
       to: "/",
@@ -479,6 +488,7 @@ export function SessionRail({
         compactWordmarkGap={compactWordmarkGap}
         onSearch={openSessionSearch}
         onCreate={openNewSession}
+        onCreateProject={openProjectCreate}
         onDelete={(id) => deleteMutation.mutate(id)}
         onCreateProjectSession={openProjectDraft}
         onRename={async (id, title) => {
@@ -706,9 +716,13 @@ function sortProjectGroups(
   mode: ProjectSortMode,
   customOrder: string[],
 ) {
-  if (mode === "name") {
+  if (mode === "name" || mode === "name-desc") {
     return [...groups].sort((left, right) =>
-      left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }),
+      (mode === "name" ? left.label : right.label).localeCompare(
+        mode === "name" ? right.label : left.label,
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      ),
     );
   }
   if (mode === "custom") {
@@ -861,7 +875,9 @@ function readProjectSortMode(): ProjectSortMode {
   }
   try {
     const stored = window.localStorage.getItem(projectSortModeStorageKey);
-    return stored === "name" || stored === "custom" ? stored : "activity";
+    return stored === "name" || stored === "name-desc" || stored === "custom"
+      ? stored
+      : "activity";
   } catch {
     return "activity";
   }
@@ -932,12 +948,13 @@ type RailPanelProps = {
   draftProjectID?: string;
   deletePending: boolean;
   onCreate: () => void;
+  onCreateProject: () => void;
   onSearch: () => void;
   onCreateProjectSession: (projectID: string) => void;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
-  onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
+  onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
@@ -951,11 +968,11 @@ type SessionDropTarget = {
   index: number;
 };
 
-type ProjectSortMode = "activity" | "name" | "custom";
+type ProjectSortMode = "activity" | "name" | "name-desc" | "custom";
 
 type ProjectDropTarget = {
-  key: string;
-  position: "before" | "after";
+  index: number;
+  top: number;
 };
 
 type ProjectSessionGroup = {
@@ -1008,6 +1025,7 @@ function RailPanel({
   draftProjectID,
   deletePending,
   onCreate,
+  onCreateProject,
   onSearch,
   onCreateProjectSession,
   onSelect,
@@ -1037,14 +1055,27 @@ function RailPanel({
   const [customProjectOrder, setCustomProjectOrder] = useState<string[]>(() => readCustomProjectOrder());
   const [draggingProjectKey, setDraggingProjectKey] = useState<string | null>(null);
   const [projectDropTarget, setProjectDropTarget] = useState<ProjectDropTarget | null>(null);
+  const [optimisticPinnedOrder, setOptimisticPinnedOrder] = useState<string[] | null>(null);
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
-  const unpinnedSessions = sortSessionsByActivity(sessions.filter((session) => !session.pinned));
+  const optimisticPinnedIndexes = optimisticPinnedOrder === null
+    ? null
+    : new Map(optimisticPinnedOrder.map((sessionID, index) => [sessionID, index]));
+  const displayedSessions = optimisticPinnedIndexes === null
+    ? sessions
+    : sessions.map((session) => {
+        const optimisticIndex = optimisticPinnedIndexes.get(session.id);
+        if (optimisticIndex !== undefined) {
+          return { ...session, pinned: true, pinnedOrder: optimisticIndex + 1 };
+        }
+        return session.pinned ? { ...session, pinned: false, pinnedOrder: 0 } : session;
+      });
+  const pinnedSessions = sortPinnedSessions(displayedSessions.filter((session) => session.pinned));
+  const unpinnedSessions = sortSessionsByActivity(displayedSessions.filter((session) => !session.pinned));
   const chatSessions = unpinnedSessions.filter((session) => !session.projectID);
   const groupedProjects = groupProjectSessions(
     projects,
@@ -1052,10 +1083,13 @@ function RailPanel({
   );
   const projectGroups = sortProjectGroups(groupedProjects, projectSortMode, customProjectOrder);
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
-  const draggedSession = draggingSessionID ? sessions.find((session) => session.id === draggingSessionID) : undefined;
+  const draggedSession = draggingSessionID
+    ? displayedSessions.find((session) => session.id === draggingSessionID)
+    : undefined;
   const isDraggingPinned = Boolean(draggedSession?.pinned);
   const pinnedCollapsed = collapsedGroups.has("pinned");
   const chatCollapsed = collapsedGroups.has("chat");
+  const projectsCollapsed = collapsedGroups.has("projects");
   const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
   const overlayHoldIDsRef = useRef(new Set<string>());
 
@@ -1100,47 +1134,72 @@ function RailPanel({
     setProjectDropTarget(null);
   }
 
-  function handleProjectDragOver(event: ReactDragEvent<HTMLElement>, key: string) {
-    if (!draggingProjectKey || draggingProjectKey === key) {
+  function resolveProjectDropTarget(
+    container: HTMLElement,
+    clientY: number,
+    sourceKey: string,
+  ): ProjectDropTarget {
+    const containerRect = container.getBoundingClientRect();
+    const projectRows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-project-group-key]"),
+    ).filter((row) => row.dataset.projectGroupKey !== sourceKey);
+    const nextRowIndex = projectRows.findIndex((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    const index = nextRowIndex < 0 ? projectRows.length : nextRowIndex;
+    const anchorRect = projectRows[index]?.getBoundingClientRect();
+    const lastRect = projectRows.at(-1)?.getBoundingClientRect();
+
+    return {
+      index,
+      top: anchorRect
+        ? anchorRect.top - containerRect.top
+        : lastRect
+          ? lastRect.bottom - containerRect.top
+          : 0,
+    };
+  }
+
+  function handleProjectDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    if (!draggingProjectKey) {
       return;
     }
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    const rect = event.currentTarget.getBoundingClientRect();
-    const nextTarget: ProjectDropTarget = {
-      key,
-      position: event.clientY < rect.top + rect.height / 2 ? "before" : "after",
-    };
+    const nextTarget = resolveProjectDropTarget(
+      event.currentTarget,
+      event.clientY,
+      draggingProjectKey,
+    );
     setProjectDropTarget((previous) =>
-      previous?.key === nextTarget.key && previous.position === nextTarget.position
+      previous?.index === nextTarget.index && Math.abs(previous.top - nextTarget.top) < 0.5
         ? previous
         : nextTarget,
     );
   }
 
-  function handleProjectDragLeave(event: ReactDragEvent<HTMLElement>, key: string) {
+  function handleProjectDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
     const relatedTarget = event.relatedTarget;
     if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
       return;
     }
-    setProjectDropTarget((previous) => (previous?.key === key ? null : previous));
+    setProjectDropTarget(null);
   }
 
-  function handleProjectDrop(event: ReactDragEvent<HTMLElement>, key: string) {
+  function handleProjectDrop(event: ReactDragEvent<HTMLDivElement>) {
     event.preventDefault();
     const sourceKey = draggingProjectKey || event.dataTransfer.getData("text/plain");
-    const position = projectDropTarget?.key === key ? projectDropTarget.position : "before";
-    if (!sourceKey || sourceKey === key) {
+    if (!sourceKey) {
       clearProjectDragState();
       return;
     }
+    const target = resolveProjectDropTarget(event.currentTarget, event.clientY, sourceKey);
     const order = projectGroups.map((group) => group.key).filter((groupKey) => groupKey !== sourceKey);
-    const targetIndex = order.indexOf(key);
-    if (targetIndex < 0) {
-      clearProjectDragState();
-      return;
-    }
-    order.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceKey);
+    order.splice(Math.min(target.index, order.length), 0, sourceKey);
     setCustomProjectOrder(order);
     writeCustomProjectOrder(order);
     clearProjectDragState();
@@ -1280,7 +1339,7 @@ function RailPanel({
   }
 
   function handlePointerDragStart(sessionID: string, clientX: number, clientY: number) {
-    const session = sessions.find((item) => item.id === sessionID);
+    const session = displayedSessions.find((item) => item.id === sessionID);
     dragPreviewPointRef.current = { x: clientX, y: clientY };
     setDraggingSessionID(sessionID);
     setDragPreview({
@@ -1297,16 +1356,34 @@ function RailPanel({
     setDragTarget(findDropTarget(clientX, clientY));
   }
 
+  function releaseOptimisticPinnedOrder(expectedOrder: string[]) {
+    setOptimisticPinnedOrder((current) => {
+      if (
+        current?.length === expectedOrder.length &&
+        current.every((sessionID, index) => sessionID === expectedOrder[index])
+      ) {
+        return null;
+      }
+      return current;
+    });
+  }
+
   function handlePointerDrop(sessionID: string, clientX: number, clientY: number) {
     const target = findDropTarget(clientX, clientY);
-    const session = sessions.find((item) => item.id === sessionID);
+    const session = displayedSessions.find((item) => item.id === sessionID);
     if (!session) {
       clearDragState();
       return;
     }
     if (!target || target.group !== "pinned") {
       if (session.pinned) {
-        onPinChange(session.id, false, 0);
+        const nextOrder = pinnedSessions
+          .filter((item) => item.id !== sessionID)
+          .map((item) => item.id);
+        setOptimisticPinnedOrder(nextOrder);
+        void onPinChange(session.id, false, 0).finally(() => {
+          releaseOptimisticPinnedOrder(nextOrder);
+        });
       }
       clearDragState();
       return;
@@ -1319,11 +1396,17 @@ function RailPanel({
       { ...session, pinned: true },
       ...pinnedWithoutDragged.slice(insertIndex),
     ];
-    nextPinned.forEach((item, index) => {
+    const nextOrder = nextPinned.map((item) => item.id);
+    setOptimisticPinnedOrder(nextOrder);
+    const updates = nextPinned.flatMap((item, index) => {
       const pinnedOrder = index + 1;
       if (!item.pinned || item.pinnedOrder !== pinnedOrder || item.id === sessionID) {
-        onPinChange(item.id, true, pinnedOrder);
+        return [onPinChange(item.id, true, pinnedOrder)];
       }
+      return [];
+    });
+    void Promise.all(updates).finally(() => {
+      releaseOptimisticPinnedOrder(nextOrder);
     });
     clearDragState();
   }
@@ -1508,63 +1591,93 @@ function RailPanel({
                     </Collapsible>
                   ) : null}
                   {projectGroups.length > 0 ? (
-                    <ProjectSortHeader mode={projectSortMode} onModeChange={changeProjectSortMode} />
-                  ) : null}
-                  {projectGroups.map((group) => {
-                    const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
-                    const hasSessions = group.sessions.length > 0;
-                    return (
-                      <Collapsible key={group.key} asChild open={!projectCollapsed}>
-                        <SidebarGroup className="px-2 py-0">
-                          <CollapsibleSessionGroupLabel
-                            active={draftActive && draftProjectID === group.projectID}
-                            activity={projectCollapsed
-                              ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
-                              : undefined}
-                            actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
-                            collapsed={projectCollapsed}
-                            icon="project"
-                            label={group.label}
-                            reorderable={projectSortMode === "custom"}
-                            dragging={draggingProjectKey === group.key}
-                            dropPosition={projectDropTarget?.key === group.key ? projectDropTarget.position : undefined}
-                            actionLabel={t("session.create")}
-                            onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
-                            onDragEnd={clearProjectDragState}
-                            onDragLeave={(event) => handleProjectDragLeave(event, group.key)}
-                            onDragOver={(event) => handleProjectDragOver(event, group.key)}
-                            onDragStart={(event) => handleProjectDragStart(event, group.key)}
-                            onDrop={(event) => handleProjectDrop(event, group.key)}
-                            onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
-                          />
-                          {hasSessions ? (
-                            <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                              <SidebarGroupContent className="pt-0.5">
-                                <SessionItems
-                                  deletePending={deletePending}
-                                  selectedSessionID={selectedSessionID}
-                                  sessions={group.sessions}
-                                  showEmptyState={false}
-                                  draggingSessionID={draggingSessionID}
-                                  dropIndex={null}
-                                  showEmptyDropTarget={false}
-                                  onDelete={onDelete}
-                                  onOpenSplit={onOpenSplit}
-                                  onPinChange={onPinChange}
-                                  onPointerDragCancel={clearDragState}
-                                  onPointerDragEnd={handlePointerDrop}
-                                  onPointerDragMove={handlePointerDragMove}
-                                  onPointerDragStart={handlePointerDragStart}
-                                  onRename={onRename}
-                                  onSelect={onSelect}
-                                />
-                              </SidebarGroupContent>
-                            </CollapsibleContent>
+                    <Collapsible open={!projectsCollapsed}>
+                      <ProjectSortHeader
+                        collapsed={projectsCollapsed}
+                        mode={projectSortMode}
+                        onCreateProject={onCreateProject}
+                        onModeChange={changeProjectSortMode}
+                        onToggle={() => toggleGroupCollapsed("projects")}
+                      />
+                      <CollapsibleContent
+                        className="pudding-session-group-content overflow-hidden"
+                        style={draggingProjectKey ? { overflow: "visible" } : undefined}
+                      >
+                        <div
+                          className="relative -my-2 flex flex-col gap-0.5 py-2"
+                          onDragLeave={handleProjectDragLeave}
+                          onDragOver={handleProjectDragOver}
+                          onDrop={handleProjectDrop}
+                        >
+                          {projectDropTarget ? (
+                            <span
+                              aria-hidden="true"
+                              className="pointer-events-none absolute right-4 left-4 z-20 h-px -translate-y-1/2 bg-primary"
+                              style={{ top: projectDropTarget.top }}
+                            />
                           ) : null}
-                        </SidebarGroup>
-                      </Collapsible>
-                    );
-                  })}
+                          {projectGroups.map((group) => {
+                            const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
+                            const hasSessions = group.sessions.length > 0;
+                            return (
+                              <Collapsible
+                                key={group.key}
+                                asChild
+                                open={draggingProjectKey ? false : !projectCollapsed}
+                              >
+                                <SidebarGroup
+                                  className="px-2 py-0"
+                                  data-project-group-key={group.key}
+                                >
+                                  <CollapsibleSessionGroupLabel
+                                    active={draftActive && draftProjectID === group.projectID}
+                                    activity={projectCollapsed
+                                      ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
+                                      : undefined}
+                                    actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
+                                    collapsed={projectCollapsed}
+                                    icon="project"
+                                    label={group.label}
+                                    reorderable={projectSortMode === "custom"}
+                                    dragging={draggingProjectKey === group.key}
+                                    actionLabel={t("session.create")}
+                                    onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
+                                    onDragEnd={clearProjectDragState}
+                                    onDragStart={(event) => handleProjectDragStart(event, group.key)}
+                                    onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
+                                  />
+                                  {hasSessions ? (
+                                    <CollapsibleContent className="pudding-session-group-content overflow-hidden">
+                                      <SidebarGroupContent className="pt-0.5">
+                                        <SessionItems
+                                          deletePending={deletePending}
+                                          selectedSessionID={selectedSessionID}
+                                          sessions={group.sessions}
+                                          showEmptyState={false}
+                                          draggingSessionID={draggingSessionID}
+                                          dropIndex={null}
+                                          showEmptyDropTarget={false}
+                                          onDelete={onDelete}
+                                          onOpenSplit={onOpenSplit}
+                                          onPinChange={onPinChange}
+                                          onPointerDragCancel={clearDragState}
+                                          onPointerDragEnd={handlePointerDrop}
+                                          onPointerDragMove={handlePointerDragMove}
+                                          onPointerDragStart={handlePointerDragStart}
+                                          onRename={onRename}
+                                          onSelect={onSelect}
+                                        />
+                                      </SidebarGroupContent>
+                                    </CollapsibleContent>
+                                  ) : null}
+                                </SidebarGroup>
+                              </Collapsible>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ) : null}
                 </div>
               </>
             )}
@@ -1726,13 +1839,9 @@ function CollapsibleSessionGroupLabel({
   actionLabel,
   reorderable = false,
   dragging = false,
-  dropPosition,
   onAction,
   onDragEnd,
-  onDragLeave,
-  onDragOver,
   onDragStart,
-  onDrop,
   onToggle,
 }: {
   active?: boolean;
@@ -1744,17 +1853,13 @@ function CollapsibleSessionGroupLabel({
   actionLabel?: string;
   reorderable?: boolean;
   dragging?: boolean;
-  dropPosition?: "before" | "after";
   onAction?: () => void;
   onDragEnd?: () => void;
-  onDragLeave?: (event: ReactDragEvent<HTMLElement>) => void;
-  onDragOver?: (event: ReactDragEvent<HTMLElement>) => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-  onDrop?: (event: ReactDragEvent<HTMLElement>) => void;
   onToggle: () => void;
 }) {
   const { t } = useI18n();
-  const Icon = icon === "pinned" ? Pin : icon === "chat" ? History : collapsed ? FolderClosed : FolderOpen;
+  const Icon = collapsed ? FolderClosed : FolderOpen;
   return (
     <SidebarGroupLabel
       data-active={active}
@@ -1762,46 +1867,24 @@ function CollapsibleSessionGroupLabel({
       className={cn(
         "group/project-label relative h-8 min-h-8 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         icon === "project" && "font-normal text-sidebar-foreground!",
+        icon !== "project" && "font-normal text-sidebar-foreground/45!",
         dragging && "opacity-45",
         active && "text-sidebar-accent-foreground",
       )}
-      onDragLeave={onDragLeave}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
     >
-      {dropPosition ? (
-        <span
-          aria-hidden="true"
-          className={cn(
-            "pointer-events-none absolute right-2 left-2 z-10 h-0.5 rounded-full bg-primary",
-            dropPosition === "before" ? "top-0" : "bottom-0",
-          )}
-        />
-      ) : null}
       <button
-        className={cn(
-          "group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring",
-          reorderable && "cursor-grab active:cursor-grabbing",
-        )}
+        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
         draggable={reorderable}
         type="button"
         onDragEnd={onDragEnd}
         onDragStart={onDragStart}
         onClick={onToggle}
       >
-        <span className="relative size-4 shrink-0">
+        {icon === "project" ? (
           <Icon
-            className={cn(
-              "absolute inset-0 size-4 transition-opacity",
-              icon === "project" ? "text-sidebar-foreground/80" : "text-sidebar-foreground/60",
-              icon === "pinned" && "rotate-45",
-              reorderable && "group-hover/project-label:opacity-0 group-has-[:focus-visible]/project-label:opacity-0",
-            )}
+            className="size-4 shrink-0 text-sidebar-foreground/80"
           />
-          {reorderable ? (
-            <GripVertical className="absolute inset-0 size-4 text-sidebar-foreground/70 opacity-0 transition-opacity group-hover/project-label:opacity-100 group-has-[:focus-visible]/project-label:opacity-100" />
-          ) : null}
-        </span>
+        ) : null}
         <span className="min-w-0 truncate">{label}</span>
         <ChevronRight
           className={cn(
@@ -1846,11 +1929,17 @@ function CollapsibleSessionGroupLabel({
 }
 
 function ProjectSortHeader({
+  collapsed,
   mode,
+  onCreateProject,
   onModeChange,
+  onToggle,
 }: {
+  collapsed: boolean;
   mode: ProjectSortMode;
+  onCreateProject: () => void;
   onModeChange: (mode: ProjectSortMode) => void;
+  onToggle: () => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1860,20 +1949,33 @@ function ProjectSortHeader({
       ? t("project.sortRecentUsage")
       : mode === "name"
         ? t("project.sortNameAsc")
-        : t("project.sortCustom");
+        : mode === "name-desc"
+          ? t("project.sortNameDesc")
+          : t("project.sortCustom");
 
   return (
     <SidebarGroup className="px-2 py-0">
-      <SidebarGroupLabel className="h-8 min-h-8 gap-2 px-2 text-sm text-sidebar-foreground/60">
-        <Folders className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{t("project.manage")}</span>
+      <SidebarGroupLabel className="group/project-section h-8 min-h-8 gap-1 px-0 text-sm font-normal text-sidebar-foreground/45! hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground">
+        <button
+          className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-1 rounded-md px-2 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
+          type="button"
+          onClick={onToggle}
+        >
+          <span className="min-w-0 truncate">{t("project.manage")}</span>
+          <ChevronRight
+            className={cn(
+              "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
+              !collapsed && "rotate-90",
+            )}
+          />
+        </button>
         <DropdownMenu open={open} onOpenChange={setOpen}>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label={`${t("project.sortLabel")}：${modeLabel}`}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                   type="button"
                 >
                   <ArrowUpDown className="size-3.5" />
@@ -1882,7 +1984,7 @@ function ProjectSortHeader({
             </TooltipTrigger>
             <TooltipContent side="right">{`${t("project.sortLabel")}：${modeLabel}`}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" side="right" sideOffset={6}>
+          <DropdownMenuContent align="end">
             <DropdownMenuRadioGroup
               value={mode}
               onValueChange={(value) => onModeChange(value as ProjectSortMode)}
@@ -1893,12 +1995,28 @@ function ProjectSortHeader({
               <DropdownMenuRadioItem value="name">
                 {t("project.sortNameAsc")}
               </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="name-desc">
+                {t("project.sortNameDesc")}
+              </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="custom">
                 {t("project.sortCustom")}
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("project.add")}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              type="button"
+              onClick={onCreateProject}
+            >
+              <FolderPlus className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{t("project.add")}</TooltipContent>
+        </Tooltip>
       </SidebarGroupLabel>
     </SidebarGroup>
   );

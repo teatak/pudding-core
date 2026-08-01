@@ -82,7 +82,6 @@ export {
   GitFork,
   Globe,
   Grid2X2,
-  GripVertical,
   Hand,
   Hash,
   History,
