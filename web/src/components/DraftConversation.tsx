@@ -69,6 +69,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
+import { useStableImeTextAreaHeight } from "@/hooks/useStableImeTextAreaHeight";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
@@ -814,6 +815,7 @@ function DraftComposer({
     });
   }, [scheduleMascotInputGaze]);
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
+  const stableImeHeight = useStableImeTextAreaHeight(textAreaRef);
   useEffect(() => {
     return () => {
       if (mascotGazeRafRef.current) {
@@ -1233,6 +1235,7 @@ function DraftComposer({
     textField.ref(node);
   };
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
+    stableImeHeight.onBlur();
     textField.onBlur(event);
     mentions.close();
     setTextFocused(false);
@@ -1367,8 +1370,14 @@ function DraftComposer({
                 ref={setTextAreaRef}
                 onBlur={handleTextBlur}
                 onChange={handleTextChange}
-                onCompositionEnd={ime.onCompositionEnd}
-                onCompositionStart={ime.onCompositionStart}
+                onCompositionEnd={(event) => {
+                  stableImeHeight.onCompositionEnd(event);
+                  ime.onCompositionEnd();
+                }}
+                onCompositionStart={(event) => {
+                  stableImeHeight.onCompositionStart(event);
+                  ime.onCompositionStart();
+                }}
                 onClick={handleTextCursorUpdate}
                 onFocus={handleTextFocus}
                 onKeyDown={handleTextKeyDown}

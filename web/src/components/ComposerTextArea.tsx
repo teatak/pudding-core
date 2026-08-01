@@ -6,6 +6,7 @@ import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { composerSuggestionPanelClassName } from "@/components/composerControlStyles";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
+import { useStableImeTextAreaHeight } from "@/hooks/useStableImeTextAreaHeight";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { ComposerMentionActionID, ComposerMentionReference } from "@/components/composerMentionReferences";
@@ -243,6 +244,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
 
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
+  const stableImeHeight = useStableImeTextAreaHeight(textAreaRef);
 
   const prevCanSendRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
@@ -299,6 +301,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
   };
 
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
+    stableImeHeight.onBlur();
     textField.onBlur(event);
     mentions.close();
     setTextFocused(false);
@@ -433,8 +436,14 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         ref={setTextAreaRef}
         onBlur={handleTextBlur}
         onChange={handleTextChange}
-        onCompositionEnd={ime.onCompositionEnd}
-        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={(event) => {
+          stableImeHeight.onCompositionEnd(event);
+          ime.onCompositionEnd();
+        }}
+        onCompositionStart={(event) => {
+          stableImeHeight.onCompositionStart(event);
+          ime.onCompositionStart();
+        }}
         onClick={handleTextCursorUpdate}
         onFocus={handleTextFocus}
         onKeyDown={handleTextKeyDown}

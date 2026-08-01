@@ -1347,6 +1347,9 @@ function AppDetail({
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || appDisplayDescription(app, t);
   const authMethods = appAuthMethods(app);
   const canManageConnections = appCanManageConnections(app);
+  const hasGitHubAppConnection = app.id === "github" && connections.some(
+    (connection) => connection.authMethodID === "github-app" && !connection.reauthorizationRequired,
+  );
   const installedIsPreview = Boolean(
     app.version &&
       catalogApp &&
@@ -1444,7 +1447,7 @@ function AppDetail({
             ) : (
               <EmptyLine>{t("apps.noConnections")}</EmptyLine>
             )}
-            {app.id === "github" && authMethods.some((method) => normalizeAuthType(method.type) === "oauth2") ? (
+            {hasGitHubAppConnection ? (
               <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5">
                 <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
