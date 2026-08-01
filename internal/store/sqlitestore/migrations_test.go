@@ -163,6 +163,60 @@ func TestOpenMigratesVersionFiveFileChangeOrigins(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesVersionSixProjectAppBindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	project := &store.Project{ID: "proj_v6", Name: "Existing project", ApprovalMode: store.ApprovalAuto}
+	if err := st.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_v6", ProjectID: project.ID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		DROP TABLE project_app_bindings;
+		PRAGMA user_version = 6;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	version, err := schemaVersion(reopened.db)
+	if err != nil || version != currentSchemaVersion {
+		t.Fatalf("schema version = %d err=%v, want %d", version, err, currentSchemaVersion)
+	}
+	if _, err := reopened.GetProject(ctx, project.ID); err != nil {
+		t.Fatalf("existing project lost during migration: %v", err)
+	}
+	if _, err := reopened.GetSession(ctx, "sess_v6"); err != nil {
+		t.Fatalf("existing session lost during migration: %v", err)
+	}
+	bindings, err := reopened.ListProjectAppBindings(ctx, project.ID)
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("project app bindings = %+v err=%v, want empty", bindings, err)
+	}
+	backups, err := filepath.Glob(path + ".backup-v6-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("migration backups = %v err=%v, want one", backups, err)
+	}
+}
+
 func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
