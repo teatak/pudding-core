@@ -521,7 +521,7 @@ export const TranscriptList = memo(function TranscriptList({
       lastScrollTopRef.current = nextScrollTop;
 
       if (smoothJumpRef.current) {
-        if (bottomDistance <= SCROLL_END_THRESHOLD_PX) {
+        if (bottomDistance <= ANCHOR_RESTORE_EPSILON_PX) {
           cancelSmoothJump();
           autoStickRef.current = true;
           setLatestState(true);
