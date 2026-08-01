@@ -112,6 +112,14 @@ export function TranscriptView({
           <TranscriptList
             disclosure={disclosure}
             displaySettings={displaySettings}
+            footer={
+              submitError ? (
+                <Alert className="min-w-0" variant="destructive">
+                  <CircleAlert className="h-3.5 w-3.5" />
+                  <AlertDescription className="min-w-0 overflow-hidden break-words">{submitError}</AlertDescription>
+                </Alert>
+              ) : null
+            }
             hasMoreHistory={hasMoreHistory}
             isLoadingHistory={isLoadingHistory}
             jumpLatestSignal={jumpLatestSignal}
@@ -131,12 +139,6 @@ export function TranscriptView({
             turnReveal={turnReveal}
             turns={turns}
           />
-          {submitError ? (
-            <Alert className="mt-4 min-w-0" variant="destructive">
-              <CircleAlert className="h-3.5 w-3.5" />
-              <AlertDescription className="min-w-0 overflow-hidden break-words">{submitError}</AlertDescription>
-            </Alert>
-          ) : null}
         </ChatColumn>
       </div>
       {isFetchingNextPage ? (
@@ -151,10 +153,11 @@ export function TranscriptView({
           aria-label={jumpLatestLabel}
           className={
             newMessageCount > 0
-              ? "absolute right-5 bottom-5 z-20 h-9 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
-              : "absolute right-5 bottom-5 z-20 rounded-full border border-border bg-card shadow-md hover:bg-muted"
+              ? "absolute right-5 z-40 h-9 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
+              : "absolute right-5 z-40 rounded-full border border-border bg-card shadow-md hover:bg-muted"
           }
           size={newMessageCount > 0 ? "default" : "icon"}
+          style={{ bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)" }}
           type="button"
           variant={newMessageCount > 0 ? "default" : "ghost"}
           onClick={onJumpLatest}

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
@@ -38,6 +38,7 @@ type PointerGesture = { pointerID: number; startY: number };
 export const TranscriptList = memo(function TranscriptList({
   disclosure,
   displaySettings,
+  footer,
   hasMoreHistory,
   isLoadingHistory,
   jumpLatestSignal,
@@ -59,6 +60,7 @@ export const TranscriptList = memo(function TranscriptList({
 }: {
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
+  footer?: ReactNode;
   hasMoreHistory: boolean;
   isLoadingHistory: boolean;
   jumpLatestSignal: number;
@@ -535,10 +537,10 @@ export const TranscriptList = memo(function TranscriptList({
         historyLoader.request();
       }
 
-      // autoStick is user intent, not a geometric guess. IME preedit, composer
-      // field-sizing, content collapse, and Chromium caret correction can all
-      // move scrollTop without a user scroll gesture. Preserve the intent and
-      // repair the geometry instead of treating every upward scroll as detach.
+      // autoStick is user intent, not a geometric guess. IME preedit, the
+      // composer bottom spacer, content collapse, and Chromium caret correction
+      // can all move scrollTop without a user scroll gesture. Preserve the intent
+      // and repair the geometry instead of treating every upward scroll as detach.
       if (autoStickRef.current) {
         if (viewportHeightChanged || bottomDistance > ANCHOR_RESTORE_EPSILON_PX) {
           syncPinnedBottom();
@@ -894,7 +896,7 @@ export const TranscriptList = memo(function TranscriptList({
     };
   }, [cancelScheduledStick, cancelSmoothJump, clearPendingHistoryAnchor, releaseViewportResizeAnchor, searchSlot]);
 
-  if (turns.length === 0) {
+  if (turns.length === 0 && !footer) {
     return null;
   }
 
@@ -920,7 +922,15 @@ export const TranscriptList = memo(function TranscriptList({
           turn={turn}
         />
       ))}
-      <div ref={latestSentinelRef} aria-hidden="true" className="scroll-mb-0" style={{ height: LIST_BOTTOM_SPACER_PX }} />
+      {footer}
+      <div
+        ref={latestSentinelRef}
+        aria-hidden="true"
+        className="scroll-mb-0"
+        style={{
+          height: `calc(${LIST_BOTTOM_SPACER_PX}px + var(--pudding-composer-overlay-height, 0px))`,
+        }}
+      />
     </div>
   );
 });

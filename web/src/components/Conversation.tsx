@@ -1,5 +1,5 @@
 import { Paperclip, Upload } from "@/components/icons";
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
 import { ChatColumn } from "@/components/ChatColumn";
@@ -11,10 +11,9 @@ import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 
-// 会话体:收口正文(Transcript)+ 输入框(Composer)+ 顶部遮罩,三者共用 ChatColumn
-// 同一条内容列,等宽对齐由结构保证。
-//   - 顶部遮罩在这里(Conversation 在 header 之下,故 top-0 即贴 toolbar 下沿);
-//   - 底部遮罩随 Composer(其高度随输入变化),放在 Composer 内,但宽度同样走 ChatColumn。
+// 会话体:Transcript 的滚动视口始终铺满整列,Composer 作为底部浮层覆盖在其上。
+// Composer 的实测高度通过 CSS 变量提供给 Transcript 的底部占位,因此输入区变高时
+// 只改变 scrollHeight,不会再挤压滚动视口的 clientHeight。
 export function Conversation({
   searchFocusSignal,
   searchOpen,
@@ -35,6 +34,24 @@ export function Conversation({
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
   const [searchState, setSearchState] = useState<TranscriptSearchState>({ terms: [] });
   const droppedFilesNonceRef = useRef(0);
+  const conversationRef = useRef<HTMLDivElement | null>(null);
+  const composerOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const conversation = conversationRef.current;
+    const composerOverlay = composerOverlayRef.current;
+    if (!conversation || !composerOverlay) {
+      return;
+    }
+    const updateComposerInset = () => {
+      const nextHeight = Math.ceil(composerOverlay.getBoundingClientRect().height);
+      conversation.style.setProperty("--pudding-composer-overlay-height", `${nextHeight}px`);
+    };
+    updateComposerInset();
+    const observer = new ResizeObserver(updateComposerInset);
+    observer.observe(composerOverlay);
+    return () => observer.disconnect();
+  }, []);
 
   const resetDragState = useCallback(() => {
     setDragMode(null);
@@ -112,7 +129,8 @@ export function Conversation({
 
   return (
     <div
-      className="pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100"
+      ref={conversationRef}
+      className="pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background [--pudding-composer-mask-height:2.5rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100"
       data-file-drop-target=""
       data-pudding-drop-target="conversation"
       data-session-id={session.id}
@@ -134,7 +152,9 @@ export function Conversation({
         submitError={submitError}
         token={token}
       />
-      <Composer droppedFiles={droppedFiles} token={token} session={session} onSubmitError={setSubmitError} />
+      <div ref={composerOverlayRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30">
+        <Composer droppedFiles={droppedFiles} token={token} session={session} onSubmitError={setSubmitError} />
+      </div>
       <ConversationSearchBar
         focusSignal={searchFocusSignal}
         open={searchOpen}
@@ -153,7 +173,7 @@ function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null 
   return (
     <div
       className={
-        "pudding-drop-overlay pointer-events-none absolute inset-0 z-30 bg-primary/[0.055] backdrop-blur-[1px] transition-opacity dark:bg-primary/[0.08] " +
+        "pudding-drop-overlay pointer-events-none absolute inset-0 z-50 bg-primary/[0.055] backdrop-blur-[1px] transition-opacity dark:bg-primary/[0.08] " +
         (mode ? "opacity-100" : "opacity-0")
       }
     >

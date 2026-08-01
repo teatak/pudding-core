@@ -973,7 +973,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     <>
       <form
         className={cn(
-          "relative shrink-0 pb-4",
+          "pointer-events-none relative shrink-0 pb-4",
           showComposerTopStatus ? "pt-11" : "pt-2",
         )}
         onSubmit={form.handleSubmit(submitDraft)}
@@ -992,14 +992,21 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           </ChatColumn>
         </aside>
       ) : null}
-      {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
-          文字边缘外漏不归遮罩管——那是 WKWebView 字形渲染溢出,Transcript overflow-hidden 裁掉 */}
-      <div className="pointer-events-none absolute inset-x-0 -top-10">
-        <ChatColumn>
-          <div className="h-10 bg-gradient-to-t from-background to-transparent" />
+      {/* 正文可以滚到 Composer 后方,但只在 Composer 上方的固定区域渐隐。
+          Composer 本体至窗口底部保持不透明,避免底下的正文透出。 */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-0"
+        style={{ top: "calc(-1 * var(--pudding-composer-mask-height, 2.5rem))" }}
+      >
+        <ChatColumn className="flex h-full flex-col">
+          <div
+            className="shrink-0 bg-gradient-to-t from-background to-transparent"
+            style={{ height: "var(--pudding-composer-mask-height, 2.5rem)" }}
+          />
+          <div className="min-h-0 flex-1 bg-background" />
         </ChatColumn>
       </div>
-      <ChatColumn>
+      <ChatColumn className="pointer-events-auto relative z-10">
         <div ref={selectionGuardRef} className="relative">
           {pendingApproval ? (
             <ComposerApprovalBar approval={pendingApproval} token={token} />
