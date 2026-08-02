@@ -502,14 +502,14 @@ export function BrowserToolbar({
             value={selectedHistoryIndex >= 0 ? historyEntries[selectedHistoryIndex]?.id || "__none__" : "__none__"}
             onValueChange={(value) => setSelectedHistoryIndex(historyEntries.findIndex((entry) => entry.id === value))}
           >
-            <CommandList className="max-h-80">
+            <CommandList className="max-h-[22.25rem]">
               {historyEntries.length > 0 ? (
                 <CommandGroup heading={deferredHistorySearch ? t("browser.historyResults") : undefined}>
                   {historyEntries.map((entry, index) => (
                     <CommandItem
                       key={entry.id}
                       className={cn(
-                        "min-w-0 py-1.5 pr-1 [&>svg:last-child]:hidden",
+                        "h-10 min-w-0 py-1.5 pr-1 [&>svg:last-child]:hidden",
                         selectedHistoryIndex === index && "bg-muted text-foreground",
                       )}
                       value={entry.id}
