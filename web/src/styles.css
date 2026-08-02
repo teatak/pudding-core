@@ -919,6 +919,21 @@ html[data-agent-console-resizing="true"] webview {
     color: var(--rail-item-foreground);
 }
 
+.pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-top {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px);
+    mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px);
+}
+
+.pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-bottom {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
+}
+
+.pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-both {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
+}
+
 .pudding-session-rail {
     font-size: 0.875rem;
     letter-spacing: -0.006em;

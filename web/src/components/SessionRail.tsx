@@ -1057,6 +1057,7 @@ function RailPanel({
   const [draggingProjectKey, setDraggingProjectKey] = useState<string | null>(null);
   const [projectDropTarget, setProjectDropTarget] = useState<ProjectDropTarget | null>(null);
   const [optimisticPinnedOrder, setOptimisticPinnedOrder] = useState<string[] | null>(null);
+  const [contentFade, setContentFade] = useState({ top: false, bottom: false });
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
@@ -1210,6 +1211,25 @@ function RailPanel({
   useEffect(() => {
     onOverlayOpenChangeRef.current = onOverlayOpenChange;
   });
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => updateContentFade(container));
+    return () => window.cancelAnimationFrame(frame);
+  }, [collapsedGroups, isError, isLoading, projects.length, sessions.length]);
+
+  function updateContentFade(container: HTMLDivElement) {
+    const next = {
+      top: container.scrollTop > 1,
+      bottom: container.scrollTop + container.clientHeight < container.scrollHeight - 1,
+    };
+    setContentFade((previous) =>
+      previous.top === next.top && previous.bottom === next.bottom ? previous : next,
+    );
+  }
 
   const setOverlayHold = useCallback((id: string, open: boolean) => {
     const holds = overlayHoldIDsRef.current;
@@ -1494,8 +1514,18 @@ function RailPanel({
           </SidebarHeader>
           <SidebarContent
             ref={scrollContainerRef}
-            className="gap-0.5 pt-2 pb-2 overscroll-contain"
+            className={cn(
+              "gap-0.5 pt-2 pb-2 overscroll-contain",
+              contentFade.top && contentFade.bottom
+                ? "pudding-session-rail-content-fade-both"
+                : contentFade.top
+                  ? "pudding-session-rail-content-fade-top"
+                  : contentFade.bottom
+                    ? "pudding-session-rail-content-fade-bottom"
+                    : undefined,
+            )}
             onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-session-action]")}
+            onScroll={(event) => updateContentFade(event.currentTarget)}
           >
             {isLoading ? (
               <SessionListSkeleton />
