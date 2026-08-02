@@ -605,7 +605,7 @@ function BrowserEmptyState({
 
   return (
     <div className="absolute inset-0 z-[1] overflow-y-auto bg-[var(--workspace-chrome-background)]">
-      <div className="flex min-h-full items-start justify-center px-6 pt-[clamp(4rem,16vh,10rem)] pb-8">
+      <div className="flex min-h-full items-center justify-center px-6 py-8">
         <div className="w-full max-w-5xl text-center">
           {history.length > 0 ? (
             <div className="mx-auto max-w-[55rem]">

@@ -22,7 +22,6 @@ import { useEffect } from "react";
 import type { BrowserTab, Terminal } from "@/api/client";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
-import { builtinAppIconClass } from "@/components/AppIdentity";
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
 import type { CanvasItem } from "@/contracts/api";
@@ -42,11 +41,7 @@ function BrowserTabIcon({ faviconURL, pageURL }: { faviconURL?: string; pageURL:
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]",
-        builtinAppIconClass("browser"),
-        "!bg-transparent",
-      )}
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-transparent text-current"
     >
       <BrowserFavicon
         className="h-full w-full object-cover"
@@ -62,7 +57,7 @@ function TerminalTabIcon({ exited }: { exited: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-transparent text-[#11875D] dark:text-[#71D8B2]"
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-transparent text-current"
       data-exited={exited}
     >
       <SquareTerminal className="h-3.5 w-3.5" />
@@ -74,7 +69,7 @@ function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] })
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] text-blue-700 dark:text-blue-300"
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] text-current"
     >
       {kind === "diff" ? <FileDiff className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
     </span>
@@ -314,7 +309,7 @@ function SortableSurfaceTabButton({
     id: surfaceTabID(tab),
     disabled: closePending,
   });
-  const horizontalTransform = transform ? { ...transform, y: 0 } : null;
+  const horizontalTransform = transform ? { ...transform, y: 0, scaleX: 1, scaleY: 1 } : null;
 
   return (
     <button
@@ -325,7 +320,7 @@ function SortableSurfaceTabButton({
       aria-selected={selected}
       className={cn(
         workspaceTabClassName,
-        "group relative w-36 min-w-24 max-w-none shrink pr-6 pl-2 whitespace-nowrap",
+        "group relative w-max min-w-0 max-w-none shrink-0 px-2 whitespace-nowrap",
         selected && workspaceTabActiveClassName,
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
@@ -352,54 +347,63 @@ function SortableSurfaceTabButton({
         }
       }}
     >
-      {project ? (
-        <span className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center text-amber-700 dark:text-amber-300">
-          <Folders className="h-3.5 w-3.5" />
+      <span className="relative inline-flex size-(--workspace-toolbar-tab-icon) shrink-0">
+        <span
+          className={cn(
+            "inline-flex size-full items-center justify-center group-hover:opacity-0",
+            closePending && "opacity-0",
+          )}
+        >
+          {project ? (
+            <span className="inline-flex size-full items-center justify-center text-current">
+              <Folders className="h-3.5 w-3.5" />
+            </span>
+          ) : browser ? (
+            <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
+          ) : terminal ? (
+            <TerminalTabIcon exited={exited} />
+          ) : widget ? (
+            <CanvasKindIcon className="!bg-transparent !text-current" kind={widget.kind} size="xs" />
+          ) : (
+            <FilePreviewTabIcon kind={file?.kind || "file"} />
+          )}
         </span>
-      ) : browser ? (
-        <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
-      ) : terminal ? (
-        <TerminalTabIcon exited={exited} />
-      ) : widget ? (
-        <CanvasKindIcon className="!bg-transparent" kind={widget.kind} size="xs" />
-      ) : (
-        <FilePreviewTabIcon kind={file?.kind || "file"} />
-      )}
-      <span className="min-w-0 max-w-24 flex-1 truncate text-left">{label}</span>
-      <span
-        aria-label={
-          tab.kind === "browser"
-            ? t("browser.release")
-            : tab.kind === "project"
-              ? t("workspace.closeProject")
-              : tab.kind === "terminal"
-                ? t("terminal.close")
-                : tab.kind === "widget"
-                  ? t("canvas.delete")
-                  : t("canvas.filePreviewClose")
-        }
-        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20 group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
-        data-pending={closePending}
-        role="button"
-        tabIndex={-1}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (tab.kind === "browser") {
-            onCloseBrowser(tab.id);
-          } else if (tab.kind === "project") {
-            onCloseProject();
-          } else if (tab.kind === "terminal") {
-            onCloseTerminal(tab.id);
-          } else if (tab.kind === "file") {
-            onCloseFilePreview(tab.id);
-          } else {
-            onCloseCanvasItem(tab.id);
+        <span
+          aria-label={
+            tab.kind === "browser"
+              ? t("browser.release")
+              : tab.kind === "project"
+                ? t("workspace.closeProject")
+                : tab.kind === "terminal"
+                  ? t("terminal.close")
+                  : tab.kind === "widget"
+                    ? t("canvas.delete")
+                    : t("canvas.filePreviewClose")
           }
-        }}
-      >
-        {closePending ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
+          className="pointer-events-none absolute inset-0 z-10 inline-flex items-center justify-center rounded-[4px] bg-transparent opacity-0 hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20 group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+          data-pending={closePending}
+          role="button"
+          tabIndex={-1}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (tab.kind === "browser") {
+              onCloseBrowser(tab.id);
+            } else if (tab.kind === "project") {
+              onCloseProject();
+            } else if (tab.kind === "terminal") {
+              onCloseTerminal(tab.id);
+            } else if (tab.kind === "file") {
+              onCloseFilePreview(tab.id);
+            } else {
+              onCloseCanvasItem(tab.id);
+            }
+          }}
+        >
+          {closePending ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
+        </span>
       </span>
+      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
     </button>
   );
 }
