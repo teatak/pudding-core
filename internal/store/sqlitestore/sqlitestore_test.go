@@ -98,63 +98,6 @@ func TestSessionProjectPersists(t *testing.T) {
 	}
 }
 
-func TestProjectAppBindingsPersistAndRouteSession(t *testing.T) {
-	st, path := openTestStore(t)
-	ctx := context.Background()
-	project := &store.Project{ID: "proj_apps", Name: "Apps", ApprovalMode: store.ApprovalAuto}
-	if err := st.CreateProject(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateSession(ctx, &store.Session{ID: "sess_apps", ProjectID: project.ID, Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
-	first := &store.ProjectAppBinding{
-		ID: "binding_1", ProjectID: project.ID, AppID: "github", ConnectionID: "github-work",
-		ResourceType: "repository", ResourceID: "101", ResourceName: "acme/work", Metadata: map[string]string{"installationID": "11"}, Primary: true,
-	}
-	second := &store.ProjectAppBinding{
-		ID: "binding_2", ProjectID: project.ID, AppID: "github", ConnectionID: "github-personal",
-		ResourceType: "repository", ResourceID: "102", ResourceName: "octocat/personal", Primary: true,
-	}
-	if err := st.PutProjectAppBinding(ctx, first); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.PutProjectAppBinding(ctx, second); err != nil {
-		t.Fatal(err)
-	}
-	bindings, err := st.ListProjectAppBindings(ctx, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bindings) != 2 || bindings[0].ID != second.ID || !bindings[0].Primary || bindings[1].Primary || bindings[1].Metadata["installationID"] != "11" {
-		t.Fatalf("bindings=%+v", bindings)
-	}
-	connectionID, ok, err := st.ResolveSessionAppConnection(ctx, "sess_apps", "github")
-	if err != nil || !ok || connectionID != "github-personal" {
-		t.Fatalf("resolved=%q ok=%v err=%v", connectionID, ok, err)
-	}
-	if err := st.DeleteProjectAppBindingsByConnection(ctx, "github-personal"); err != nil {
-		t.Fatal(err)
-	}
-	connectionID, ok, err = st.ResolveSessionAppConnection(ctx, "sess_apps", "github")
-	if err != nil || !ok || connectionID != "github-work" {
-		t.Fatalf("promoted connection=%q ok=%v err=%v", connectionID, ok, err)
-	}
-
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	connectionID, ok, err = reopened.ResolveSessionAppConnection(ctx, "sess_apps", "github")
-	if err != nil || !ok || connectionID != "github-work" {
-		t.Fatalf("reopened connection=%q ok=%v err=%v", connectionID, ok, err)
-	}
-}
-
 func TestProjectWithoutDirectoriesPersists(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()

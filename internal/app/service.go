@@ -36,22 +36,19 @@ type ConnectionStore interface {
 	PutAppConnection(ctx context.Context, connection *Connection) error
 }
 
-type ProjectConnectionSource interface {
-	ResolveSessionAppConnection(ctx context.Context, sessionID, appID string) (string, bool, error)
-}
-
 type EnablementSource interface {
 	ListAppEnablement(ctx context.Context) (map[string]bool, error)
 	SetAppEnabled(ctx context.Context, id string, enabled bool) error
 }
 
 type ConnectionChoice struct {
-	ID           string `json:"id"`
-	Name         string `json:"name,omitempty"`
-	AppID        string `json:"appID"`
-	AuthType     string `json:"authType,omitempty"`
-	AuthMethodID string `json:"authMethodID,omitempty"`
-	AuthVariant  string `json:"authVariant,omitempty"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name,omitempty"`
+	AppID        string             `json:"appID"`
+	AuthType     string             `json:"authType,omitempty"`
+	AuthMethodID string             `json:"authMethodID,omitempty"`
+	AuthVariant  string             `json:"authVariant,omitempty"`
+	Account      *ConnectionAccount `json:"account,omitempty"`
 }
 
 type EndpointResolveError struct {
@@ -68,7 +65,7 @@ func (e *EndpointResolveError) Error() string {
 	switch e.Reason {
 	case "connection_required":
 		if len(e.Connections) > 1 {
-			return fmt.Sprintf("multiple connections are available for endpoint %q; choose one by connection name", e.Endpoint)
+			return fmt.Sprintf("multiple connections are available for endpoint %q; choose one by connection name and account identity, or ask the user when the intended connection is ambiguous", e.Endpoint)
 		}
 		return fmt.Sprintf("no connection is available for endpoint %q", e.Endpoint)
 	case "connection_not_found":
@@ -81,15 +78,14 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
-	appsRoot           string
-	connections        ConnectionSource
-	enablement         EnablementSource
-	runtime            RuntimeSource
-	packageMu          sync.RWMutex
-	authMu             sync.Mutex
-	connectionStore    ConnectionStore
-	projectConnections ProjectConnectionSource
-	oauthBroker        *oauthbroker.Client
+	appsRoot        string
+	connections     ConnectionSource
+	enablement      EnablementSource
+	runtime         RuntimeSource
+	packageMu       sync.RWMutex
+	authMu          sync.Mutex
+	connectionStore ConnectionStore
+	oauthBroker     *oauthbroker.Client
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
@@ -101,13 +97,6 @@ func NewService(homeDir string, connections ConnectionSource) *Service {
 	service.connectionStore, _ = connections.(ConnectionStore)
 	service.enablement, _ = connections.(EnablementSource)
 	return service
-}
-
-func (s *Service) WithProjectConnections(source ProjectConnectionSource) *Service {
-	if s != nil {
-		s.projectConnections = source
-	}
-	return s
 }
 
 func (s *Service) WithOAuthBroker(client *oauthbroker.Client) *Service {
@@ -667,17 +656,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			continue
 		}
 		endpointSeen = true
-		effectiveConnectionRef := connectionRef
-		if s.projectConnections != nil {
-			projectConnectionID, bound, err := s.projectConnections.ResolveSessionAppConnection(ctx, sessionID, def.ID)
-			if err != nil {
-				return nil, err
-			}
-			if bound {
-				effectiveConnectionRef = projectConnectionID
-			}
-		}
-		if effectiveConnectionRef == "" {
+		if connectionRef == "" {
 			if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
 				matches = append(matches, binding)
 				continue
@@ -688,7 +667,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 				continue
 			}
 			allChoices = append(allChoices, viewConnectionChoice(conn))
-			if effectiveConnectionRef != "" && !connectionMatches(conn, effectiveConnectionRef) {
+			if connectionRef != "" && !connectionMatches(conn, connectionRef) {
 				continue
 			}
 			matches = append(matches, endpointBindingForConnection(def, endpointName, endpoint, conn))
@@ -945,6 +924,7 @@ func viewConnectionChoice(conn *Connection) ConnectionChoice {
 		AuthType:     conn.Auth.Type,
 		AuthMethodID: conn.Auth.MethodID,
 		AuthVariant:  conn.Auth.Variant,
+		Account:      cloneConnectionAccount(conn.Account),
 	}
 }
 

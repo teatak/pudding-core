@@ -1242,6 +1242,7 @@ export const appConnection = z.object({
     login: z.string(),
     name: z.string().optional(),
     avatarURL: z.string().optional(),
+    type: z.string().optional(),
   }).optional(),
   reauthorizationRequired: z.boolean().optional(),
   header: z.string().optional(),
@@ -1309,62 +1310,6 @@ export const completeAppOAuthRequest = z.object({
   ticket: z.string().optional(),
   state: z.string().min(1),
   error: z.string().optional(),
-});
-
-export const githubRepository = z.object({
-  id: z.string(),
-  name: z.string(),
-  fullName: z.string(),
-  private: z.boolean(),
-  htmlURL: z.string().url(),
-  defaultBranch: z.string().optional(),
-});
-export type GitHubRepository = z.infer<typeof githubRepository>;
-
-export const githubInstallation = z.object({
-  id: z.string(),
-  account: z.object({
-    id: z.string(),
-    login: z.string(),
-    name: z.string().optional(),
-    avatarURL: z.string().optional(),
-    type: z.string().optional(),
-  }),
-  htmlURL: z.string().url(),
-  repositories: z.array(githubRepository),
-});
-export type GitHubInstallation = z.infer<typeof githubInstallation>;
-
-export const githubConnectionRepositoriesResponse = z.object({
-  account: appConnection.shape.account,
-  installations: z.array(githubInstallation),
-});
-
-export const projectAppBinding = z.object({
-  id: z.string(),
-  projectID: z.string(),
-  appID: z.string(),
-  connectionID: z.string(),
-  resourceType: z.string(),
-  resourceID: z.string(),
-  resourceName: z.string(),
-  metadata: z.record(z.string(), z.string()).optional(),
-  primary: z.boolean(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type ProjectAppBinding = z.infer<typeof projectAppBinding>;
-
-export const listProjectAppBindingsResponse = z.object({ bindings: z.array(projectAppBinding) });
-
-export const putProjectAppBindingRequest = z.object({
-  appID: z.string().min(1),
-  connectionID: z.string().min(1),
-  resourceType: z.string().min(1),
-  resourceID: z.string().min(1),
-  resourceName: z.string().optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
-  primary: z.boolean().optional(),
 });
 
 export const patchWebToolsRequest = z.object({

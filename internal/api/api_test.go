@@ -161,6 +161,10 @@ func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
 }
 
 func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
+	return newConfigTestServerWithGitHub(t, nil)
+}
+
+func newConfigTestServerWithGitHub(t *testing.T, github *githubapp.Client) (*httptest.Server, store.Store, *config.Manager) {
 	t.Helper()
 	ms := memstore.New()
 	homeDir := t.TempDir()
@@ -171,7 +175,11 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 	writeOAuthTestApps(t, homeDir)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg, engine.WithAttachmentHome(homeDir))
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
+	server := New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil))
+	if github != nil {
+		server.WithGitHubClient(github)
+	}
+	srv := httptest.NewServer(server.Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
 }
@@ -188,7 +196,7 @@ func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*htt
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg, engine.WithAttachmentHome(homeDir))
 	brokerClient := oauthbroker.New(broker.URL, broker.Client())
-	apps := appsvc.NewService(homeDir, cfg).WithProjectConnections(ms).WithOAuthBroker(brokerClient)
+	apps := appsvc.NewService(homeDir, cfg).WithOAuthBroker(brokerClient)
 	server := New(eng, ms, cfg, hub).
 		WithHome(homeDir).
 		WithApps(apps).
@@ -721,7 +729,7 @@ endpoints:
 	}
 }
 
-func TestGitHubAppOAuthAndProjectRepositoryBinding(t *testing.T) {
+func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	var clientState, challenge string
 	redeemAccessToken := "github-user-token"
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -767,17 +775,13 @@ func TestGitHubAppOAuthAndProjectRepositoryBinding(t *testing.T) {
 			} else {
 				_, _ = w.Write([]byte(`{"id":42,"login":"octocat","name":"The Octocat","avatar_url":"https://avatars.example/42"}`))
 			}
-		case "/user/installations":
-			_, _ = w.Write([]byte(`{"installations":[{"id":11,"html_url":"https://github.com/settings/installations/11","account":{"id":7,"login":"teatak","type":"Organization"}}]}`))
-		case "/user/installations/11/repositories":
-			_, _ = w.Write([]byte(`{"repositories":[{"id":99,"name":"pudding-core","full_name":"teatak/pudding-core","private":true,"html_url":"https://github.com/teatak/pudding-core","default_branch":"main"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(github.Close)
 
-	srv, st, cfg := newGitHubAppTestServer(t, broker, github)
+	srv, _, cfg := newGitHubAppTestServer(t, broker, github)
 	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -871,41 +875,21 @@ func TestGitHubAppOAuthAndProjectRepositoryBinding(t *testing.T) {
 		t.Fatalf("different account should create another connection: view=%+v connections=%+v", thirdView, connections)
 	}
 
-	ctx := context.Background()
-	project := &store.Project{ID: "proj_github", Name: "GitHub project", RootDirs: []string{t.TempDir()}, ApprovalMode: store.ApprovalAuto}
-	if err := st.CreateProject(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateSession(ctx, &store.Session{ID: "sess_github", ProjectID: project.ID, Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/github-main/github/repositories", nil)
+	resp = req(t, http.MethodPut, srv.URL+"/app-connections/github-main", map[string]string{
+		"appID":        "github",
+		"name":         "Work GitHub",
+		"authMethodID": "github-app",
+		"authType":     "oauth2",
+	})
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		t.Fatalf("repositories status = %d", resp.StatusCode)
+		t.Fatalf("rename GitHub App status = %d", resp.StatusCode)
 	}
-	repositories := decodeJSON[struct {
-		Installations []githubapp.Installation `json:"installations"`
-	}](t, resp)
-	if len(repositories.Installations) != 1 || len(repositories.Installations[0].Repositories) != 1 {
-		t.Fatalf("unexpected repositories: %+v", repositories)
+	renamedView := decodeJSON[appsvc.ConnectionView](t, resp)
+	if renamedView.Name != "Work GitHub" || renamedView.Account == nil || renamedView.Account.Login != "octocat" || renamedView.AuthVariant != appsvc.GitHubAppAuthVariant || renamedView.ReauthorizationRequired {
+		t.Fatalf("renamed GitHub App lost identity: %+v", renamedView)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/projects/"+project.ID+"/app-bindings", map[string]any{
-		"appID": "github", "connectionID": "github-main", "resourceType": "repository", "resourceID": "99", "metadata": map[string]string{"rootDir": project.RootDirs[0]},
-	})
-	if resp.StatusCode != http.StatusCreated {
-		resp.Body.Close()
-		t.Fatalf("binding status = %d", resp.StatusCode)
-	}
-	binding := decodeJSON[store.ProjectAppBinding](t, resp)
-	if binding.ResourceName != "teatak/pudding-core" || !binding.Primary || binding.Metadata["installationID"] != "11" {
-		t.Fatalf("unexpected binding: %+v", binding)
-	}
-	resolved, ok, err := st.ResolveSessionAppConnection(ctx, "sess_github", "github")
-	if err != nil || !ok || resolved != "github-main" {
-		t.Fatalf("resolved=%q ok=%v err=%v", resolved, ok, err)
-	}
 }
 
 func TestStartGitHubAppOAuthUsesDevelopmentClient(t *testing.T) {
@@ -934,7 +918,17 @@ func TestStartGitHubAppOAuthUsesDevelopmentClient(t *testing.T) {
 }
 
 func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
-	srv, _, _ := newConfigTestServer(t)
+	accountRequests := 0
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accountRequests++
+		if r.URL.Path != "/user" || r.Header.Get("Authorization") != "Bearer ghp_test" {
+			t.Fatalf("unexpected GitHub request: path=%s authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":42,"login":"octocat","name":"The Octocat","avatar_url":"https://avatars.example/42","type":"User"}`))
+	}))
+	t.Cleanup(github.Close)
+	srv, _, _ := newConfigTestServerWithGitHub(t, githubapp.New(github.URL, github.Client()))
 	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
 		"appID":        "github",
 		"name":         "GitHub PAT",
@@ -942,13 +936,29 @@ func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
 		"authType":     "bearer",
 		"token":        "ghp_test",
 	})
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	payload := decodeJSON[appsvc.ConnectionView](t, resp)
-	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet {
+	if payload.AuthMethodID != appsvc.GitHubPATAuthMethodID || payload.AuthType != "bearer" || !payload.TokenSet || payload.Account == nil || payload.Account.Login != "octocat" || payload.Account.Type != "User" {
 		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
+		"appID":        "github",
+		"name":         "Renamed connection",
+		"authMethodID": "github-pat",
+		"authType":     "bearer",
+		"token":        "ghp_test",
+	})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("rename status = %d", resp.StatusCode)
+	}
+	payload = decodeJSON[appsvc.ConnectionView](t, resp)
+	if payload.Name != "Renamed connection" || payload.Account == nil || payload.Account.Login != "octocat" || accountRequests != 1 {
+		t.Fatalf("renamed connection lost identity: payload=%+v accountRequests=%d", payload, accountRequests)
 	}
 }
 
@@ -1221,7 +1231,15 @@ func TestPutAppConnectionRequiresConnectionFields(t *testing.T) {
 }
 
 func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
-	srv, _, cfg := newConfigTestServer(t)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user" || r.Header.Get("Authorization") != "Bearer ghp_old" {
+			t.Fatalf("unexpected GitHub request: path=%s authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":44,"login":"legacy-user","type":"User"}`))
+	}))
+	t.Cleanup(github.Close)
+	srv, _, cfg := newConfigTestServerWithGitHub(t, githubapp.New(github.URL, github.Client()))
 	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
 		ID:    "github-legacy",
 		Name:  "Legacy GitHub",
@@ -1241,7 +1259,7 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	payload := decodeJSON[appsvc.ConnectionView](t, resp)
-	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet {
+	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet || payload.Account == nil || payload.Account.Login != "legacy-user" {
 		t.Fatalf("unexpected connection view: %+v", payload)
 	}
 }

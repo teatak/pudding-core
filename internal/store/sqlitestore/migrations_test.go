@@ -23,6 +23,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		5: "76313b2ba7212b51e772206fa1877c4471a084f787b244096108f242e856ca3f",
 		6: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 		7: "70e57320b3c594f4d1f6db147c78dfc21c3c2b7fda37ddc970c999c8d3a9dd07",
+		8: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -163,7 +164,7 @@ func TestOpenMigratesVersionFiveFileChangeOrigins(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesVersionSixProjectAppBindings(t *testing.T) {
+func TestOpenMigratesVersionSevenRemovesProjectAppBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
 	if err != nil {
@@ -182,10 +183,24 @@ func TestOpenMigratesVersionSixProjectAppBindings(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
-	if _, err := db.Exec(`
-		DROP TABLE project_app_bindings;
-		PRAGMA user_version = 6;
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schemaMigrations[7](tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO project_app_bindings(
+			id,project_id,app_id,connection_id,resource_type,resource_id,resource_name,metadata,is_primary,created_at,updated_at
+		) VALUES('binding_v7','proj_v6','github','github-main','repository','99','teatak/pudding-core','{}',1,1,1);
+		PRAGMA user_version = 7;
 	`); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -207,11 +222,14 @@ func TestOpenMigratesVersionSixProjectAppBindings(t *testing.T) {
 	if _, err := reopened.GetSession(ctx, "sess_v6"); err != nil {
 		t.Fatalf("existing session lost during migration: %v", err)
 	}
-	bindings, err := reopened.ListProjectAppBindings(ctx, project.ID)
-	if err != nil || len(bindings) != 0 {
-		t.Fatalf("project app bindings = %+v err=%v, want empty", bindings, err)
+	var tableCount int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='project_app_bindings'`).Scan(&tableCount); err != nil {
+		t.Fatal(err)
 	}
-	backups, err := filepath.Glob(path + ".backup-v6-*")
+	if tableCount != 0 {
+		t.Fatal("project_app_bindings table still exists")
+	}
+	backups, err := filepath.Glob(path + ".backup-v7-*")
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("migration backups = %v err=%v, want one", backups, err)
 	}

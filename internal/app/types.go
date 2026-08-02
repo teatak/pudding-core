@@ -30,6 +30,7 @@ const (
 	AuthTypeTokenExchange = "token_exchange"
 
 	GitHubAppAuthMethodID = "github-app"
+	GitHubPATAuthMethodID = "github-pat"
 	GitHubAppAuthVariant  = "github_app"
 )
 
@@ -199,6 +200,7 @@ type ConnectionAccount struct {
 	Login     string `json:"login" yaml:"login"`
 	Name      string `json:"name,omitempty" yaml:"name,omitempty"`
 	AvatarURL string `json:"avatarURL,omitempty" yaml:"avatar_url,omitempty"`
+	Type      string `json:"type,omitempty" yaml:"type,omitempty"`
 }
 
 type ConnectionView struct {

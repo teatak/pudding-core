@@ -29,27 +29,6 @@ CREATE TABLE IF NOT EXISTS projects (
     updated_at    INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS project_app_bindings (
-    id            TEXT PRIMARY KEY,
-    project_id    TEXT    NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    app_id        TEXT    NOT NULL,
-    connection_id TEXT    NOT NULL,
-    resource_type TEXT    NOT NULL,
-    resource_id   TEXT    NOT NULL,
-    resource_name TEXT    NOT NULL,
-    metadata      TEXT    NOT NULL DEFAULT '{}',
-    is_primary    INTEGER NOT NULL DEFAULT 0,
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    UNIQUE(project_id, app_id, resource_type, resource_id)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS project_app_bindings_primary
-    ON project_app_bindings(project_id, app_id) WHERE is_primary = 1;
-
-CREATE INDEX IF NOT EXISTS project_app_bindings_connection
-    ON project_app_bindings(connection_id);
-
 CREATE TABLE IF NOT EXISTS turns (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

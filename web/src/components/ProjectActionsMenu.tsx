@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, FolderCog, FolderMinus, GitBranch } from "@/components/icons";
+import { Ellipsis, FolderCog, FolderMinus } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -13,7 +13,6 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ProjectFormDialog } from "@/components/ProjectFormDialog";
-import { ProjectGitHubDialog } from "@/components/ProjectGitHubDialog";
 import { Spinner } from "@/components/Spinner";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
@@ -60,10 +59,9 @@ export function ProjectActionsMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [githubOpen, setGitHubOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const [directoryPaths, setDirectoryPaths] = useState(project.rootDirs);
-  const overlayOpen = menuOpen || editOpen || deleteOpen || githubOpen;
+  const overlayOpen = menuOpen || editOpen || deleteOpen;
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
     (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
@@ -259,10 +257,6 @@ export function ProjectActionsMenu({
             <FolderCog />
             {t("project.edit")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setGitHubOpen(true)}>
-            <GitBranch />
-            {t("project.githubTitle")}
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={deleteMutation.isPending} onSelect={() => setDeleteOpen(true)}>
             <FolderMinus />
@@ -296,7 +290,6 @@ export function ProjectActionsMenu({
         }}
         onSubmit={saveProject}
       />
-      <ProjectGitHubDialog open={githubOpen} project={project} token={token} onOpenChange={setGitHubOpen} />
       <AlertDialog open={deleteOpen} onOpenChange={(open) => !deleteMutation.isPending && setDeleteOpen(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>

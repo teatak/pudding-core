@@ -21,7 +21,6 @@ var (
 	ErrTurnRunning              = errors.New("store: session has a running turn")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
 	ErrInvalidProject           = errors.New("store: invalid project")
-	ErrInvalidProjectAppBinding = errors.New("store: invalid project app binding")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
@@ -104,49 +103,6 @@ type ProjectUpdate struct {
 	Name         *string       `json:"name"`
 	RootDirs     *[]string     `json:"rootDirs"`
 	ApprovalMode *ApprovalMode `json:"approvalMode"`
-}
-
-type ProjectAppBinding struct {
-	ID           string            `json:"id"`
-	ProjectID    string            `json:"projectID"`
-	AppID        string            `json:"appID"`
-	ConnectionID string            `json:"connectionID"`
-	ResourceType string            `json:"resourceType"`
-	ResourceID   string            `json:"resourceID"`
-	ResourceName string            `json:"resourceName"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-	Primary      bool              `json:"primary"`
-	CreatedAt    time.Time         `json:"createdAt"`
-	UpdatedAt    time.Time         `json:"updatedAt"`
-}
-
-func NormalizeProjectAppBinding(binding *ProjectAppBinding) error {
-	if binding == nil {
-		return ErrInvalidProjectAppBinding
-	}
-	binding.ID = strings.TrimSpace(binding.ID)
-	binding.ProjectID = strings.TrimSpace(binding.ProjectID)
-	binding.AppID = strings.TrimSpace(binding.AppID)
-	binding.ConnectionID = strings.TrimSpace(binding.ConnectionID)
-	binding.ResourceType = strings.TrimSpace(binding.ResourceType)
-	binding.ResourceID = strings.TrimSpace(binding.ResourceID)
-	binding.ResourceName = strings.TrimSpace(binding.ResourceName)
-	if binding.ID == "" || binding.ProjectID == "" || binding.AppID == "" || binding.ConnectionID == "" || binding.ResourceType == "" || binding.ResourceID == "" || binding.ResourceName == "" {
-		return ErrInvalidProjectAppBinding
-	}
-	cleanMetadata := make(map[string]string, len(binding.Metadata))
-	for key, value := range binding.Metadata {
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key != "" && value != "" {
-			cleanMetadata[key] = value
-		}
-	}
-	if len(cleanMetadata) == 0 {
-		cleanMetadata = nil
-	}
-	binding.Metadata = cleanMetadata
-	return nil
 }
 
 type AgentMode string
@@ -2178,11 +2134,6 @@ type Store interface {
 	ListProjects(ctx context.Context) ([]*Project, error)
 	UpdateProject(ctx context.Context, id string, upd ProjectUpdate) (*Project, error)
 	DeleteProject(ctx context.Context, id string) error
-	ListProjectAppBindings(ctx context.Context, projectID string) ([]*ProjectAppBinding, error)
-	PutProjectAppBinding(ctx context.Context, binding *ProjectAppBinding) error
-	DeleteProjectAppBinding(ctx context.Context, projectID, bindingID string) error
-	DeleteProjectAppBindingsByConnection(ctx context.Context, connectionID string) error
-	ResolveSessionAppConnection(ctx context.Context, sessionID, appID string) (string, bool, error)
 
 	CreateSession(ctx context.Context, s *Session) error
 	GetSession(ctx context.Context, id string) (*Session, error)

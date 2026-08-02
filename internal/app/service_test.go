@@ -44,17 +44,6 @@ func (f fakeConnectionStore) PutAppConnection(_ context.Context, connection *Con
 	return nil
 }
 
-type fixedProjectConnectionSource struct {
-	connectionID string
-}
-
-func (f fixedProjectConnectionSource) ResolveSessionAppConnection(_ context.Context, sessionID, appID string) (string, bool, error) {
-	if sessionID == "session-1" && appID == "github" && f.connectionID != "" {
-		return f.connectionID, true, nil
-	}
-	return "", false, nil
-}
-
 type fakeAppConfig struct {
 	fakeConnectionStore
 	enabled       map[string]bool
@@ -363,8 +352,16 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	homeDir := writeTestApp(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
-		"github-work":     {ID: "github-work", Name: "Work", AppID: "github", Auth: Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant}},
-		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github", Auth: Auth{MethodID: "github-pat", Type: AuthTypeBearer}},
+		"github-work": {
+			ID: "github-work", Name: "Work", AppID: "github",
+			Account: &ConnectionAccount{ID: "42", Login: "octocat", Name: "The Octocat", Type: "User"},
+			Auth:    Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant},
+		},
+		"github-personal": {
+			ID: "github-personal", Name: "Personal", AppID: "github",
+			Account: &ConnectionAccount{ID: "43", Login: "hubot", Name: "Hubot", Type: "User"},
+			Auth:    Auth{MethodID: GitHubPATAuthMethodID, Type: AuthTypeBearer},
+		},
 	}})
 
 	_, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
@@ -373,10 +370,10 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 		t.Fatalf("expected connection choice error, got %#v", err)
 	}
 	for _, choice := range resolveErr.Connections {
-		if choice.ID == "github-work" && (choice.AuthMethodID != GitHubAppAuthMethodID || choice.AuthVariant != GitHubAppAuthVariant) {
+		if choice.ID == "github-work" && (choice.AuthMethodID != GitHubAppAuthMethodID || choice.AuthVariant != GitHubAppAuthVariant || choice.Account == nil || choice.Account.Login != "octocat") {
 			t.Fatalf("GitHub App choice is missing auth metadata: %+v", choice)
 		}
-		if choice.ID == "github-personal" && (choice.AuthMethodID != "github-pat" || choice.AuthType != AuthTypeBearer) {
+		if choice.ID == "github-personal" && (choice.AuthMethodID != GitHubPATAuthMethodID || choice.AuthType != AuthTypeBearer || choice.Account == nil || choice.Account.Login != "hubot") {
 			t.Fatalf("PAT choice is missing auth metadata: %+v", choice)
 		}
 	}
@@ -387,23 +384,6 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	}
 	if binding.ConnectionID != "github-personal" {
 		t.Fatalf("unexpected binding: %+v", binding)
-	}
-}
-
-func TestResolveEndpointUsesProjectConnectionBinding(t *testing.T) {
-	homeDir := writeTestApp(t)
-	connections := fakeConnectionStore{items: map[string]*Connection{
-		"github-work":     {ID: "github-work", Name: "Work", AppID: "github", Auth: Auth{Type: AuthTypeBearer, Token: "work-token"}},
-		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github", Auth: Auth{Type: AuthTypeBearer, Token: "personal-token"}},
-	}}
-	svc := NewService(homeDir, connections).WithProjectConnections(fixedProjectConnectionSource{connectionID: "github-work"})
-
-	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "github-personal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.ConnectionID != "github-work" || binding.Auth.Token != "work-token" {
-		t.Fatalf("project binding was not authoritative: %+v", binding)
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 7
+	currentSchemaVersion  = 8
 )
 
 var (
@@ -214,6 +214,10 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	8: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DROP TABLE IF EXISTS project_app_bindings`)
+		return err
+	},
 }
 
 func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
@@ -406,8 +410,9 @@ func backupDatabaseBeforeMigration(db *sql.DB, path string, version int) error {
 }
 
 type schemaContract struct {
-	tables  map[string][]string
-	indexes []string
+	tables          map[string][]string
+	indexes         []string
+	forbiddenTables []string
 }
 
 var schemaV1Contract = schemaContract{
@@ -457,10 +462,9 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 var currentSchemaContract = func() schemaContract {
-	out := extendSchemaContract(schemaV5Contract, map[string][]string{
-		"project_app_bindings": {"id", "project_id", "app_id", "connection_id", "resource_type", "resource_id", "resource_name", "metadata", "is_primary", "created_at", "updated_at"},
-	}, "project_app_bindings_primary", "project_app_bindings_connection")
+	out := extendSchemaContract(schemaV5Contract, nil)
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
+	out.forbiddenTables = []string{"project_app_bindings"}
 	return out
 }()
 
@@ -499,6 +503,15 @@ func validateSchema(db *sql.DB, contract schemaContract) error {
 		}
 		if count == 0 {
 			return fmt.Errorf("missing index %s", index)
+		}
+	}
+	for _, table := range contract.forbiddenTables {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count); err != nil {
+			return fmt.Errorf("inspect removed table %s: %w", table, err)
+		}
+		if count != 0 {
+			return fmt.Errorf("removed table %s still exists", table)
 		}
 	}
 	return nil

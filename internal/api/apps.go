@@ -542,24 +542,38 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 			Password: req.Password,
 		},
 	}
+	sameExistingIdentity := existing != nil && existing.AppID == appID && sameAppConnectionAuthMethod(existing.Auth, method)
+	if sameExistingIdentity {
+		conn.Account = app.CloneConnection(existing).Account
+	}
 	if req.Token == "" && req.Password == "" {
-		if existing != nil {
-			if sameAppConnectionAuthMethod(existing.Auth, method) {
-				conn.Auth.Token = existing.Auth.Token
-				conn.Auth.AccessToken = existing.Auth.AccessToken
-				conn.Auth.RefreshToken = existing.Auth.RefreshToken
-				conn.Auth.TokenType = existing.Auth.TokenType
-				conn.Auth.ExpiresAt = existing.Auth.ExpiresAt
-				conn.Auth.Scopes = append([]string(nil), existing.Auth.Scopes...)
-				conn.Auth.Password = existing.Auth.Password
-				if conn.Auth.Username == "" {
-					conn.Auth.Username = existing.Auth.Username
-				}
+		if sameExistingIdentity {
+			conn.Auth.Token = existing.Auth.Token
+			conn.Auth.AccessToken = existing.Auth.AccessToken
+			conn.Auth.RefreshToken = existing.Auth.RefreshToken
+			conn.Auth.TokenType = existing.Auth.TokenType
+			conn.Auth.Variant = existing.Auth.Variant
+			conn.Auth.ExpiresAt = existing.Auth.ExpiresAt
+			conn.Auth.RefreshExpiresAt = existing.Auth.RefreshExpiresAt
+			conn.Auth.Scopes = append([]string(nil), existing.Auth.Scopes...)
+			conn.Auth.Password = existing.Auth.Password
+			if conn.Auth.Username == "" {
+				conn.Auth.Username = existing.Auth.Username
 			}
 		}
 	}
 	if err := validateAppConnectionAuth(conn.Auth); err != nil {
 		return badRequest(c, err.Error())
+	}
+	patTokenChanged := strings.TrimSpace(req.Token) != "" && (existing == nil || req.Token != existing.Auth.Token)
+	if appID == "github" && method.ID == app.GitHubPATAuthMethodID && (patTokenChanged || conn.Account == nil) {
+		account, err := s.github.Account(c.Request.Context(), conn.Auth.Token)
+		if err != nil {
+			return badRequest(c, "github account could not be verified: "+err.Error())
+		}
+		conn.Account = &app.ConnectionAccount{
+			ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type,
+		}
 	}
 	if err := cfg.PutAppConnection(c.Request.Context(), conn); err != nil {
 		return s.fail(c, err)
@@ -719,11 +733,6 @@ func (s *Server) deleteAppConnection(c *cart.Context) error {
 	}
 	if connection.AppID == "github" && connection.Auth.Type == app.AuthTypeOAuth2 && connection.Auth.Variant == app.GitHubAppAuthVariant && strings.TrimSpace(connection.Auth.AccessToken) != "" {
 		if err := s.oauthBroker.Revoke(c.Request.Context(), "github", connection.Auth.AccessToken); err != nil {
-			return s.fail(c, err)
-		}
-	}
-	if s.store != nil {
-		if err := s.store.DeleteProjectAppBindingsByConnection(c.Request.Context(), id); err != nil {
 			return s.fail(c, err)
 		}
 	}

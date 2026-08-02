@@ -123,8 +123,12 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if providerID == "" {
 		providerID = appID
 	}
+	githubAppFlow := providerID == "github" && method.ID == app.GitHubAppAuthMethodID
 	provider, legacyProvider := appOAuthProviders[providerID]
-	if providerID != "github" && !legacyProvider {
+	if providerID == "github" && !githubAppFlow {
+		return badRequest(c, "github oauth method is not supported")
+	}
+	if !githubAppFlow && !legacyProvider {
 		return badRequest(c, "oauth provider is not configured for app")
 	}
 	cfg, ok := s.appConnectionConfig(c)
@@ -176,7 +180,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if name == "" && providerID == "github" {
+	if name == "" && githubAppFlow {
 		name = "GitHub"
 	} else if name == "" {
 		name = provider.DefaultConnectionName
@@ -187,7 +191,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	redirectURI := ""
 	verifier := ""
 	authorizationURL := ""
-	if providerID == "github" {
+	if githubAppFlow {
 		verifier, err = randomOAuthState()
 		if err != nil {
 			return s.fail(c, err)
@@ -291,7 +295,7 @@ func (s *Server) completeAppOAuth(c *cart.Context) error {
 	providerID := strings.TrimSpace(req.Provider)
 	state := strings.TrimSpace(req.State)
 	start, ok := s.takeOAuthState(state)
-	if !ok || start.Provider != providerID || providerID != "github" || start.Verifier == "" {
+	if !ok || start.Provider != providerID || providerID != "github" || start.AuthMethodID != app.GitHubAppAuthMethodID || start.Verifier == "" {
 		return badRequest(c, "oauth authorization expired")
 	}
 	if errorCode := strings.TrimSpace(req.Error); errorCode != "" {
@@ -348,7 +352,7 @@ func (s *Server) completeAppOAuth(c *cart.Context) error {
 	}
 	connection := &app.Connection{
 		ID: targetID, Name: name, AppID: start.AppID, Fields: start.Fields, EndpointURLs: start.EndpointURLs,
-		Account: &app.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL},
+		Account: &app.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type},
 		Auth:    auth,
 	}
 	if err := cfg.PutAppConnection(c.Request.Context(), connection); err != nil {
