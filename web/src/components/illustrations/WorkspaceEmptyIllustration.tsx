@@ -20,38 +20,33 @@ export function WorkspaceEmptyIllustration() {
       />
       <path
         className="stroke-foreground"
-        d="M18 42h100M47 42v48"
+        d="M18 42h100M43 42v48"
         strokeLinecap="round"
         strokeOpacity={emptyStateIllustrationStrokeOpacity}
-        strokeWidth={emptyStateIllustrationStrokeWidth}
-      />
-      <path
-        className="stroke-foreground"
-        d="M28 32h1m8 0h1m8 0h1"
-        strokeLinecap="round"
-        strokeOpacity={emptyStateIllustrationDetailStrokeOpacity}
-        strokeWidth={emptyStateIllustrationStrokeWidth + 1}
-      />
-      <path
-        className="stroke-foreground"
-        d="M27 54h11M27 65h7"
-        strokeLinecap="round"
-        strokeOpacity={emptyStateIllustrationDetailStrokeOpacity}
         strokeWidth={emptyStateIllustrationStrokeWidth}
       />
       <rect
+        className="fill-foreground"
+        fillOpacity="0.12"
+        height="8"
+        rx="4"
+        width="15"
+        x="23"
+        y="50"
+      />
+      <rect
         className="fill-background stroke-foreground"
-        height="44"
-        rx="10"
+        height="46"
+        rx="12"
         strokeOpacity={emptyStateIllustrationStrokeOpacity}
         strokeWidth={emptyStateIllustrationStrokeWidth}
-        width="68"
-        x="58"
-        y="52"
+        width="64"
+        x="62"
+        y="51"
       />
       <path
         className="stroke-foreground"
-        d="M69 65h45M69 77h33M69 87h21"
+        d="M73 66h40M73 79h25"
         strokeLinecap="round"
         strokeOpacity={emptyStateIllustrationDetailStrokeOpacity}
         strokeWidth={emptyStateIllustrationStrokeWidth}
