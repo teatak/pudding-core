@@ -557,7 +557,7 @@ export const turnFileChange = z.object({
   path: z.string(),
   originalPath: z.string().optional(),
   kind: z.enum(["added", "modified", "deleted", "renamed"]),
-  // command_observed remains readable for rows produced before structured-only tracking.
+  // command_observed marks explicit targets observed around a foreground command.
   origin: z.enum(["structured", "command_observed"]).default("structured"),
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),

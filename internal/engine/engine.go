@@ -2244,7 +2244,7 @@ func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, 
 			tracked = true
 		})
 		if mutation, ok := tool.MutationTrackingForCall(call); ok {
-			if err := e.turnFiles.BeginCall(turnID, call.CallID, call.ProjectDirs, mutation.Targets); err != nil {
+			if err := e.turnFiles.BeginCallWithOrigin(turnID, call.CallID, call.ProjectDirs, mutation.Targets, mutation.Origin); err != nil {
 				slog.Warn("engine: capture tool file baseline failed", "turnID", turnID, "callID", call.CallID, "tool", call.Name, "err", err)
 			} else {
 				tracked = true

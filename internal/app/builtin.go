@@ -6,7 +6,6 @@ const (
 	BuiltinBrowserID        = "browser"
 	BuiltinSkillAuthoringID = "skill-authoring"
 	BuiltinAppAuthoringID   = "app-authoring"
-	BuiltinProjectFilesID   = "project-files"
 	BuiltinSourceControlID  = "source-control"
 	BuiltinCodeIntelID      = "code-intelligence"
 	BuiltinCaptureID        = "capture"
@@ -26,17 +25,6 @@ const (
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolSkillValidate     = "builtin_skill_validate"
 	toolAppSave           = "builtin_app_save"
-	toolFileList          = "builtin_file_list"
-	toolFileRead          = "builtin_file_read"
-	toolAttachmentExport  = "builtin_attachment_export"
-	toolFileStat          = "builtin_file_stat"
-	toolFileSearch        = "builtin_file_search"
-	toolFileSlice         = "builtin_file_slice"
-	toolFileWrite         = "builtin_file_write"
-	toolFilePatch         = "builtin_file_patch"
-	toolFileDelete        = "builtin_file_delete"
-	toolFileMove          = "builtin_file_move"
-	toolFileCopy          = "builtin_file_copy"
 	toolGitStatus         = "builtin_git_status"
 	toolGitDiff           = "builtin_git_diff"
 	toolGitLog            = "builtin_git_log"
@@ -162,31 +150,6 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 				Description: "Create or update a local Pudding App package.",
 				Path:        "skills/app-creator/SKILL.md",
 				Content:     builtinAppAuthoringInstructions,
-			},
-		},
-	},
-	{
-		definition: &Definition{
-			Kind:         KindApp,
-			ID:           BuiltinProjectFilesID,
-			Name:         "Project Files",
-			Description:  "Inspect and manage project files with structured file operations.",
-			Source:       SourceBuiltin,
-			Enabled:      true,
-			CanUninstall: false,
-			RequiredMode: "code",
-			Tools: []ToolRef{
-				{Name: toolFileList},
-				{Name: toolFileRead},
-				{Name: toolAttachmentExport},
-				{Name: toolFileStat},
-				{Name: toolFileSearch},
-				{Name: toolFileSlice},
-				{Name: toolFileWrite},
-				{Name: toolFilePatch},
-				{Name: toolFileDelete},
-				{Name: toolFileMove},
-				{Name: toolFileCopy},
 			},
 		},
 	},

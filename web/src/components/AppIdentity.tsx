@@ -1,4 +1,4 @@
-import { BookOpen, Folders, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "@/components/icons";
+import { BookOpen, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "@/components/icons";
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
@@ -21,9 +21,6 @@ export function appDisplayName(app: AppDefinition, t: Translate) {
   }
   if (app.id === "app-authoring") {
     return t("apps.builtin.appAuthoring.name");
-  }
-  if (app.id === "project-files") {
-    return t("apps.builtin.projectFiles.name");
   }
   if (app.id === "source-control") {
     return t("apps.builtin.sourceControl.name");
@@ -52,9 +49,6 @@ export function appDisplayDescription(app: AppDefinition, t: Translate) {
   }
   if (app.id === "app-authoring") {
     return t("apps.builtin.appAuthoring.desc");
-  }
-  if (app.id === "project-files") {
-    return t("apps.builtin.projectFiles.desc");
   }
   if (app.id === "source-control") {
     return t("apps.builtin.sourceControl.desc");
@@ -85,7 +79,6 @@ function builtinAppIcon(appID: string) {
   if (appID === "canvas") return PanelsTopLeft;
   if (appID === "skill-authoring") return BookOpen;
   if (appID === "app-authoring") return PackagePlus;
-  if (appID === "project-files") return Folders;
   if (appID === "source-control") return GitFork;
   if (appID === "code-intelligence") return SearchCode;
   if (appID === "capture") return ScanLine;
@@ -101,9 +94,6 @@ export function builtinAppIconClass(appID: string) {
   }
   if (appID === "app-authoring") {
     return "bg-[#EAF8F4] text-[#087F6D] shadow-none dark:bg-[#16A085]/16 dark:text-[#63D6C2]";
-  }
-  if (appID === "project-files") {
-    return "bg-[#FFF7E6] text-[#A45B00] shadow-none dark:bg-[#D88916]/16 dark:text-[#F4B95F]";
   }
   if (appID === "source-control") {
     return "bg-[#EDF7EE] text-[#247A38] shadow-none dark:bg-[#3AA657]/16 dark:text-[#79D58F]";

@@ -36,7 +36,7 @@ At runtime Pudding injects only the skills index (`name`, `description`, path/so
 
 1. Align on intent: confirm what problem the skill solves and what the user would normally say that should trigger it.
 2. Choose a name: use lowercase kebab-case with letters, numbers, and hyphens only.
-3. Ensure Code capability. When Project Files is listed in Available Apps, load it for direct Skill file management. If it is absent, explain that Project Files must be enabled before creating or updating a Skill; do not try to load the disabled App. The Skill Authoring App has already exposed the validation tool for this session.
+3. Ensure Code capability. Project file tools are already available in Code mode; do not load a Project Files App. The Skill Authoring App has already exposed the validation tool for this session.
 4. Inspect the existing Skill under `scope="skill"` when updating one.
 5. Write `SKILL.md` with YAML frontmatter plus concise operational instructions.
 6. Add `assets/icon.svg` by default unless the user explicitly says not to.

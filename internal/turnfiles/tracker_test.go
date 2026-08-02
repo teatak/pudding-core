@@ -105,6 +105,32 @@ func TestTrackerAccumulatesCallsAcrossRoots(t *testing.T) {
 	}
 }
 
+func TestTrackerMarksCommandObservedChanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "formatted.go")
+	writeTestFile(t, root, "formatted.go", "package main\n")
+
+	tracker := New()
+	if err := tracker.BeginCallWithOrigin(
+		"turn_command", "call_command", []string{root}, []string{path},
+		store.FileChangeOriginCommandObserved,
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "formatted.go", "package formatted\n")
+	if err := tracker.EndCall("turn_command", "call_command"); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := tracker.Finish("turn_command")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Path != "formatted.go" || changes[0].Origin != store.FileChangeOriginCommandObserved {
+		t.Fatalf("command-observed changes = %+v", changes)
+	}
+}
+
 func TestTrackerPairsDuplicateRenamesDeterministically(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "a.txt", "same\n")

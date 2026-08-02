@@ -20,6 +20,10 @@ var workCoreTools = map[string]bool{
 
 var codeCoreTools = map[string]bool{
 	CommandRun: true, CommandSession: true,
+	FileList: true, FileRead: true, AttachmentExport: true,
+	FileStat: true, FileSearch: true, FileSlice: true,
+	FileWrite: true, FilePatch: true, FileDelete: true,
+	FileMove: true, FileCopy: true,
 }
 
 // CoreDefinitionsForMode returns the fixed, always-available tool surface.

@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +14,9 @@ import (
 )
 
 const (
-	baselineSchemaVersion = 1
-	currentSchemaVersion  = 8
+	baselineSchemaVersion      = 1
+	currentSchemaLayoutVersion = 8
+	currentSchemaVersion       = 9
 )
 
 var (
@@ -218,6 +220,62 @@ var schemaMigrations = map[int]schemaMigration{
 		_, err := tx.Exec(`DROP TABLE IF EXISTS project_app_bindings`)
 		return err
 	},
+	9: func(tx *sql.Tx) error {
+		return removeLoadedAppID(tx, "project-files")
+	},
+}
+
+func removeLoadedAppID(tx *sql.Tx, removedID string) error {
+	rows, err := tx.Query(`SELECT id,loaded_app_ids FROM sessions`)
+	if err != nil {
+		return err
+	}
+	type sessionApps struct {
+		id  string
+		ids []string
+	}
+	updates := make([]sessionApps, 0)
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+			rows.Close()
+			return err
+		}
+		filtered := make([]string, 0, len(ids))
+		changed := false
+		for _, appID := range ids {
+			if strings.TrimSpace(appID) == removedID {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, appID)
+		}
+		if changed {
+			updates = append(updates, sessionApps{id: id, ids: store.NormalizeAppIDs(filtered)})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		raw, err := json.Marshal(update.ids)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE sessions SET loaded_app_ids=? WHERE id=?`, string(raw), update.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
@@ -258,10 +316,12 @@ func prepareSchema(db *sql.DB, path string) error {
 			version = currentSchemaVersion
 		} else {
 			if err := validateSchema(db, currentSchemaContract); err == nil {
-				if err := setSchemaVersion(db, currentSchemaVersion); err != nil {
+				// Version 9 is data-only and cannot be inferred from the schema.
+				// Stamp the latest identifiable layout so migration 9 still runs.
+				if err := setSchemaVersion(db, currentSchemaLayoutVersion); err != nil {
 					return err
 				}
-				version = currentSchemaVersion
+				version = currentSchemaLayoutVersion
 			} else if err := validateSchema(db, schemaV5Contract); err == nil {
 				if err := setSchemaVersion(db, 5); err != nil {
 					return err

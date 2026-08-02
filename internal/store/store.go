@@ -1646,8 +1646,8 @@ const (
 	FileChangeRenamed  FileChangeKind = "renamed"
 
 	FileChangeOriginStructured FileChangeOrigin = "structured"
-	// FileChangeOriginCommandObserved is retained only for reading rows written
-	// by schema v6 clients. New turn tracking never emits this origin.
+	// FileChangeOriginCommandObserved marks changes observed around a foreground
+	// command whose explicit write targets were statically identifiable.
 	FileChangeOriginCommandObserved FileChangeOrigin = "command_observed"
 )
 

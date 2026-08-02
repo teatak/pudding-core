@@ -116,6 +116,7 @@ export function useTranscriptViewModel({
         }
         const phaseForTurn = displayPhase?.turnID === turn.id ? displayPhase : undefined;
         const duration = turnDurationByID.get(turn.id);
+        const overlay = liveByTurnID.get(turn.id);
         const sequence: NonNullable<TranscriptTurnVM["sequence"]> = [];
         if (messageSegments.length === 0) {
           const outputs = visibleMessages.filter(isTurnOutputMessage);
@@ -140,7 +141,11 @@ export function useTranscriptViewModel({
               user: userFromMessage(segment.user),
             });
           }
-          if (segment.outputs.length > 0) {
+          // The live overlay is the current assistant segment after the latest
+          // guide. A turn refetch can already contain that segment's committed
+          // parts, so rendering both briefly duplicates thought/tool rows.
+          const currentLiveSegment = Boolean(overlay) && index === messageSegments.length - 1;
+          if (segment.outputs.length > 0 && !currentLiveSegment) {
             sequence.push({
               assistant: {
                 duration: index === messageSegments.length - 1 ? duration : undefined,
@@ -161,7 +166,6 @@ export function useTranscriptViewModel({
             user: userFromPending(pending, { pending: false }),
           });
         });
-        const overlay = liveByTurnID.get(turn.id);
         if (overlay) {
           usedLiveTurnIDs.add(overlay.turnID);
           sequence.push({

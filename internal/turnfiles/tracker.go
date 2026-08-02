@@ -34,12 +34,14 @@ type turnState struct {
 	initial map[fileKey]fileSnapshot
 	final   map[fileKey]fileSnapshot
 	touched map[fileKey]struct{}
+	origins map[fileKey]store.FileChangeOrigin
 }
 
 type callSnapshot struct {
 	roots   []string
 	targets []string
 	before  map[fileKey]fileSnapshot
+	origin  store.FileChangeOrigin
 	ready   bool
 }
 
@@ -64,6 +66,12 @@ func New() *Tracker {
 // Empty, invalid, or project-root targets are ignored and never expand into a
 // whole-project scan.
 func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string) error {
+	return t.BeginCallWithOrigin(turnID, callID, roots, targets, store.FileChangeOriginStructured)
+}
+
+// BeginCallWithOrigin captures explicit targets and records how the mutation
+// was attributed. It never expands an empty or project-root target.
+func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin) error {
 	turnID = strings.TrimSpace(turnID)
 	callID = strings.TrimSpace(callID)
 	if turnID == "" || callID == "" {
@@ -87,6 +95,7 @@ func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string) erro
 	call := &callSnapshot{
 		roots:   roots,
 		targets: targets,
+		origin:  store.NormalizeFileChangeOrigin(origin),
 	}
 	tracked.calls[callID] = call
 	t.mu.Unlock()
@@ -156,6 +165,7 @@ func (t *Tracker) EndCall(turnID, callID string) error {
 		} else {
 			delete(current.final, key)
 		}
+		current.origins[key] = mergeFileChangeOrigin(current.origins[key], call.origin)
 	}
 	return nil
 }
@@ -171,7 +181,13 @@ func (t *Tracker) Finish(turnID string) ([]store.TurnFileChangeInput, error) {
 	}
 	changes := compareSnapshots(tracked.initial, tracked.final)
 	for i := range changes {
-		changes[i].Origin = store.FileChangeOriginStructured
+		key := fileKey{root: changes[i].RootPath, path: changes[i].Path}
+		origin := tracked.origins[key]
+		if changes[i].Kind == store.FileChangeRenamed && changes[i].OriginalPath != "" {
+			original := fileKey{root: changes[i].RootPath, path: changes[i].OriginalPath}
+			origin = mergeFileChangeOrigin(origin, tracked.origins[original])
+		}
+		changes[i].Origin = store.NormalizeFileChangeOrigin(origin)
 	}
 	return changes, nil
 }
@@ -188,7 +204,15 @@ func newTurnState() *turnState {
 		initial: make(map[fileKey]fileSnapshot),
 		final:   make(map[fileKey]fileSnapshot),
 		touched: make(map[fileKey]struct{}),
+		origins: make(map[fileKey]store.FileChangeOrigin),
 	}
+}
+
+func mergeFileChangeOrigin(current, next store.FileChangeOrigin) store.FileChangeOrigin {
+	if current == store.FileChangeOriginCommandObserved || next == store.FileChangeOriginCommandObserved {
+		return store.FileChangeOriginCommandObserved
+	}
+	return store.FileChangeOriginStructured
 }
 
 func changedFileKeys(before, after map[fileKey]fileSnapshot) []fileKey {

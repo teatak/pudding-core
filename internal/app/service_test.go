@@ -101,8 +101,11 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 7 {
+	if len(defs) != 6 {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
+	}
+	if definitionByID(defs, "project-files") != nil {
+		t.Fatal("legacy Project Files App is still listed")
 	}
 	browser := definitionByID(defs, BuiltinBrowserID)
 	if browser == nil || browser.Source != SourceBuiltin || !browser.Enabled || browser.CanUninstall || browser.RequiredMode != "work" || browser.DefaultSkillID != BuiltinBrowserID {
@@ -130,7 +133,6 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		appID, requiredMode string
 		toolCount           int
 	}{
-		{BuiltinProjectFilesID, "code", 11},
 		{BuiltinSourceControlID, "code", 6},
 		{BuiltinCodeIntelID, "code", 5},
 		{BuiltinCaptureID, "chat", 2},
@@ -174,7 +176,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 7 {
+	if len(defs) != 6 {
 		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
 	}
 
@@ -184,7 +186,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	canvas := definitionByID(defs, "canvas")
-	if len(defs) != 8 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
+	if len(defs) != 7 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
 		t.Fatalf("unexpected runtime app definition: %+v", defs)
 	}
 	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
@@ -248,7 +250,7 @@ func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
 func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
 	for _, appID := range []string{
 		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinAppAuthoringID,
-		BuiltinProjectFilesID, BuiltinSourceControlID, BuiltinCodeIntelID, BuiltinCaptureID,
+		BuiltinSourceControlID, BuiltinCodeIntelID, BuiltinCaptureID,
 		RuntimeCanvasID,
 	} {
 		t.Run(appID, func(t *testing.T) {
@@ -257,6 +259,9 @@ func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
 				t.Fatalf("install reserved app id err = %v", err)
 			}
 		})
+	}
+	if IsReservedID("project-files") {
+		t.Fatal("removed Project Files App id must be reusable")
 	}
 }
 

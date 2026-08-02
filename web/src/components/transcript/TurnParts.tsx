@@ -319,7 +319,7 @@ function ProcessActivityIcon({ active, icon }: { active: boolean; icon: LucideIc
   }
   return (
     <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
-      <Spinner className="size-3.5" />
+      <Spinner className="size-3" />
     </span>
   );
 }

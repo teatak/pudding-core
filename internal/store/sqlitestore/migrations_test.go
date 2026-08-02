@@ -24,6 +24,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		6: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 		7: "70e57320b3c594f4d1f6db147c78dfc21c3c2b7fda37ddc970c999c8d3a9dd07",
 		8: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
+		9: "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -235,6 +236,45 @@ func TestOpenMigratesVersionSevenRemovesProjectAppBindings(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesVersionEightProjectFilesLoadedAppID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{
+		ID: "sess_project_files", Title: "legacy app", Provider: "mock", Model: "mock",
+		LoadedAppIDs: []string{"project-files", "browser"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`PRAGMA user_version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	session, err := reopened.GetSession(ctx, "sess_project_files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.LoadedAppIDs) != 1 || session.LoadedAppIDs[0] != "browser" {
+		t.Fatalf("loaded App ids after migration = %v", session.LoadedAppIDs)
+	}
+}
+
 func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
@@ -243,6 +283,7 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 	if err := st.CreateSession(context.Background(), &store.Session{
 		ID: "sess_baseline", Title: "baseline", Provider: "mock", Model: "mock",
+		LoadedAppIDs: []string{"project-files", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +317,9 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 	if session.Title != "baseline" {
 		t.Fatalf("session changed while stamping baseline: %+v", session)
+	}
+	if len(session.LoadedAppIDs) != 1 || session.LoadedAppIDs[0] != "browser" {
+		t.Fatalf("loaded App ids after unversioned migration = %v", session.LoadedAppIDs)
 	}
 }
 

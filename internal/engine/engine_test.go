@@ -1190,8 +1190,14 @@ func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	legacyCall := tool.Call{CallID: "load_project_files", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"project-files"}`)}
+	result, changed := eng.loadApp(ctx, sid, legacyCall, store.ModeCode)
+	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_unavailable"`) {
+		t.Fatalf("removed Project Files App did not return app_unavailable: %+v", result)
+	}
+
 	call := tool.Call{CallID: "load_browser", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"browser"}`)}
-	result, changed := eng.loadApp(ctx, sid, call, store.ModeChat)
+	result, changed = eng.loadApp(ctx, sid, call, store.ModeChat)
 	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
 		t.Fatalf("Chat loaded Browser: %+v", result)
 	}
@@ -1259,7 +1265,7 @@ func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 	}
 }
 
-func TestCommandToolsAreCodeCore(t *testing.T) {
+func TestCommandAndProjectFileToolsAreCodeCore(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
@@ -1278,7 +1284,12 @@ func TestCommandToolsAreCodeCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{tool.CommandRun, tool.CommandSession} {
+	for _, name := range []string{
+		tool.CommandRun, tool.CommandSession,
+		tool.FileList, tool.FileRead, tool.AttachmentExport, tool.FileStat,
+		tool.FileSearch, tool.FileSlice, tool.FileWrite, tool.FilePatch,
+		tool.FileDelete, tool.FileMove, tool.FileCopy,
+	} {
 		if !hasToolDef(codeDefs, name) {
 			t.Fatalf("Code Core missing %s", name)
 		}
@@ -1321,14 +1332,16 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{tool.FileList, tool.GitStatus, tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
+	if !hasToolDef(codeDefs, tool.FileList) {
+		t.Fatal("Code Core is missing project file tools")
+	}
+	for _, name := range []string{tool.GitStatus, tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
 		if hasToolDef(codeDefs, name) {
 			t.Fatalf("unloaded built-in App exposed %s", name)
 		}
 	}
 
 	loaded := []string{
-		app.BuiltinProjectFilesID,
 		app.BuiltinSourceControlID,
 		app.BuiltinCodeIntelID,
 		app.BuiltinCaptureID,
@@ -1637,13 +1650,12 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 	ctx := context.Background()
 	sid := "sess_image_tool"
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:           sid,
-		Title:        "image tool",
-		Provider:     "capture",
-		Model:        "vision-model",
-		ActiveMode:   store.ModeCode,
-		ModeLease:    store.ModeLeaseSession,
-		LoadedAppIDs: []string{app.BuiltinProjectFilesID},
+		ID:         sid,
+		Title:      "image tool",
+		Provider:   "capture",
+		Model:      "vision-model",
+		ActiveMode: store.ModeCode,
+		ModeLease:  store.ModeLeaseSession,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1825,13 +1837,12 @@ func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
 	ctx := context.Background()
 	sid := "sess_image_tool_unknown"
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:           sid,
-		Title:        "image tool",
-		Provider:     "capture",
-		Model:        "tool-model",
-		ActiveMode:   store.ModeCode,
-		ModeLease:    store.ModeLeaseSession,
-		LoadedAppIDs: []string{app.BuiltinProjectFilesID},
+		ID:         sid,
+		Title:      "image tool",
+		Provider:   "capture",
+		Model:      "tool-model",
+		ActiveMode: store.ModeCode,
+		ModeLease:  store.ModeLeaseSession,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2436,7 +2447,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("code tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
@@ -2510,7 +2521,7 @@ func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	if got := project.RootDirs; len(got) != 1 || got[0] != dir {
 		t.Fatalf("project dirs not stored: %+v", got)
 	}
-	if len(client.requests) != 2 || hasToolDef(client.requests[1].Tools, tool.FileRead) || !hasToolDef(client.requests[1].Tools, tool.CommandRun) || hasToolDef(client.requests[1].Tools, tool.FileList) {
+	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileRead) || !hasToolDef(client.requests[1].Tools, tool.CommandRun) || !hasToolDef(client.requests[1].Tools, tool.FileList) {
 		t.Fatalf("default project tools wrong after approval: %+v", client.requests)
 	}
 }
@@ -3002,7 +3013,7 @@ func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	}
 }
 
-func TestCallTrackedToolDoesNotAttributeCommandFileChanges(t *testing.T) {
+func TestCallTrackedToolDoesNotAttributeOpaqueCommandFileChanges(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
 	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
@@ -3028,6 +3039,37 @@ func TestCallTrackedToolDoesNotAttributeCommandFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(changes) != 0 {
+		t.Fatalf("changes = %+v", changes)
+	}
+}
+
+func TestCallTrackedToolAttributesExplicitCommandTarget(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingToolRunner{
+		result: tool.Result{Ok: true},
+		callFunc: func(tool.Call) {
+			if err := os.WriteFile(path, []byte("package new\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
+	result := eng.callTrackedTool(context.Background(), "sess_changes", "turn_changes", store.ModeCode, tool.Call{
+		CallID: "call_changes", Name: tool.CommandRun,
+		Args: json.RawMessage(`{"scope":"project","command":"printf changed > main.go"}`), ProjectDirs: []string{root},
+	})
+	if !result.Ok {
+		t.Fatalf("result = %+v", result)
+	}
+	changes, err := eng.turnFiles.Finish("turn_changes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Path != "main.go" || changes[0].Origin != store.FileChangeOriginCommandObserved {
 		t.Fatalf("changes = %+v", changes)
 	}
 }
@@ -4384,9 +4426,6 @@ func (c *projectDirGrantClient) Stream(_ context.Context, req provider.Request) 
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
-		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 3:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
 			CallID:    "call_file_list",
@@ -4464,9 +4503,6 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
 		args, _ := json.Marshal(map[string]any{
 			"scope": "project",
 			"files": []map[string]any{{"path": "notes.txt", "new_text": "new text\n"}},
@@ -4488,9 +4524,6 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
 			CallID:    "call_file_write",

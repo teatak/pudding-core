@@ -488,11 +488,11 @@ function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", outpu
           <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/terminal-copy:opacity-100" text={command} />
         </section>
       ) : null}
-      <section className="group/terminal-copy relative min-h-12 px-3 pt-1 pb-2 pr-10">
-        <pre ref={outputRef} className={cn("max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && !sandboxDenied && "text-destructive/90")}>
+      <section className="group/terminal-copy relative min-h-12 pt-1 pr-1 pb-2 pl-3">
+        <pre ref={outputRef} className={cn("max-h-72 overflow-auto pr-8 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && !sandboxDenied && "text-destructive/90")}>
           {terminalOutput || (output ? t("transcript.codeNoOutput") : t("transcript.codeRunning"))}
         </pre>
-        <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/terminal-copy:opacity-100" text={terminalOutput} />
+        <ToolHoverCopyButton className="absolute top-1.5 right-3 group-hover/terminal-copy:opacity-100" text={terminalOutput} />
       </section>
       {sandboxDenied ? <SandboxDeniedNotice t={t} /> : null}
       {diagnostics.length > 0 ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} /> : null}
