@@ -320,7 +320,7 @@ function SortableSurfaceTabButton({
       aria-selected={selected}
       className={cn(
         workspaceTabClassName,
-        "group relative w-max min-w-0 max-w-none shrink-0 px-2 whitespace-nowrap",
+        "group relative w-max min-w-0 max-w-32 shrink-0 px-2 whitespace-nowrap",
         selected && workspaceTabActiveClassName,
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}

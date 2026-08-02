@@ -96,6 +96,7 @@ class FakeWebContents extends EventEmitter {
     this.id = id;
     this.url = "about:blank";
     this.destroyed = false;
+    this.reloadCount = 0;
     this.debugger = new FakeDebugger(this);
   }
 
@@ -109,6 +110,20 @@ class FakeWebContents extends EventEmitter {
 
   getTitle() {
     return this.url;
+  }
+
+  reload() {
+    this.reloadCount += 1;
+    if (this.suppressReloadNavigationEvent) {
+      return;
+    }
+    const loaderID = `loader-native-reload-${this.reloadCount}`;
+    queueMicrotask(() => {
+      this.debugger.currentLoaderID = loaderID;
+      this.debugger.emit("message", {}, "Page.frameNavigated", {
+        frame: { id: "main", loaderId: loaderID, url: this.url },
+      });
+    });
   }
 
   setWindowOpenHandler(handler) {
@@ -824,23 +839,21 @@ test("reload ignores stale main-frame events until a new loader commits", async 
   const webContents = new FakeWebContents(52);
   await host.registerWebContents(required, webContents);
   await opening;
-  webContents.debugger.deferNavigationCommand = true;
-  webContents.debugger.suppressNavigationEvent = true;
+  webContents.suppressReloadNavigationEvent = true;
 
   let settled = false;
   const reload = host.reload({ sessionID: "session-reload", tabID: "tab-reload" }).finally(() => {
     settled = true;
   });
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(webContents.reloadCount, 1);
+  assert.equal(webContents.debugger.commands.some(({ method }) => method === "Page.reload"), false);
   webContents.debugger.emit("message", {}, "Page.frameNavigated", {
     frame: { id: "main", loaderId: "loader-current", url: "about:blank" },
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
 
-  webContents.debugger.resolveNavigationCommand();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
   webContents.debugger.emit("message", {}, "Page.frameNavigated", {
     frame: { id: "main", loaderId: "loader-reloaded", url: "about:blank" },
   });

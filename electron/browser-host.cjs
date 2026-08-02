@@ -101,7 +101,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
-    await this.requireWebContents(slot);
+    const webContents = await this.requireWebContents(slot);
     this.noteAutomationStart(slot, "reload");
     const reloadURL = normalizeURL(request.url, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
     const actualURL = normalizeURL(slot.committedURL, slot.fileRoots);
@@ -109,7 +109,12 @@ class BrowserHost {
       await this.runCommand(slot, () => this.navigate(slot, reloadURL));
     } else {
       await this.runCommand(slot, () =>
-        this.runNavigation(slot, () => this.sendCDP(slot, "Page.reload", { ignoreCache: false })),
+        this.runNavigation(slot, () => {
+          if (webContents.isDestroyed() || slot.webContents !== webContents) {
+            throw new Error("browser webview target not found");
+          }
+          webContents.reload();
+        }),
       );
     }
     return snapshot(slot);
