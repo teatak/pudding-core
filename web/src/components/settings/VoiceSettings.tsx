@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, RotateCcw, Trash } from "@/components/icons";
+import { ChevronRight, RefreshCw, RotateCcw, Trash } from "@/components/icons";
 import { useEffect, useState } from "react";
 
 import {
@@ -72,7 +72,7 @@ type VoiceToggleKey = "asrEnabled" | "asrSaveAudio" | "asrUseITN" | "aecEnabled"
 const VOICE_LANGUAGE_OPTIONS = ["zh", "en", "ja", "ko", "yue", "auto"];
 const VOICE_NS_LEVEL_OPTIONS = ["low", "moderate", "high", "very_high"];
 
-export function VoiceSettings({ token }: { token: string }) {
+export function VoiceSettings({ token, view = "general" }: { token: string; view?: "general" | "advanced" }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const initialConfig = queryClient.getQueryData<{ config: AudioConfig }>(queryKeys.audioConfig())?.config;
@@ -92,19 +92,22 @@ export function VoiceSettings({ token }: { token: string }) {
   const aboutQuery = useQuery({
     queryKey: queryKeys.desktopAbout(),
     queryFn: () => getDesktopAbout(token),
-    enabled: Boolean(token),
+    enabled: Boolean(token) && view === "advanced",
     refetchOnMount: "always",
   });
   const savedConfig = audioQuery.data?.config;
   const aboutSections = aboutQuery.data?.sections || [];
-  const runtimeReadOnlyRows = voiceRuntimeReadOnlyRows(aboutSections, audioQuery.data?.path || "-", savedConfig?.driver.type || "-");
+  const ttsReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "tts", ["backend"]);
+  const runtimeReadOnlyRows = [
+    ...voiceRuntimeReadOnlyRows(aboutSections, audioQuery.data?.path || "-", savedConfig?.driver.type || "-"),
+    ...ttsReadOnlyRows,
+  ];
   const asrReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr", ["engine", "model_path", "tokens_path", "provider"]);
   const vadReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr_vad", ["model_path", "window_size"]);
   const dspReadOnlyRows = [
     ...voiceSectionReadOnlyRows(aboutSections, "aec", ["model"], "aec"),
     ...voiceSectionReadOnlyRows(aboutSections, "ns", ["model"], "ns"),
   ];
-  const ttsReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "tts", ["backend"]);
 
   useEffect(() => {
     if (savedConfig && pendingSaveCount === 0) {
@@ -229,19 +232,32 @@ export function VoiceSettings({ token }: { token: string }) {
     saveVoiceForm(form);
   };
   const saving = pendingSaveCount > 0;
-  const disabled = audioQuery.isLoading || resetMutation.isPending;
+  const disabled = audioQuery.isLoading || audioQuery.isError || resetMutation.isPending;
   const clearDisabled = disabled || clearRecordingsMutation.isPending;
   const resetDisabled = disabled || saving || clearRecordingsMutation.isPending;
   const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
+  const audioLoadError = audioQuery.isError ? (
+    <Alert variant="destructive">
+      <AlertDescription className="flex items-center justify-between gap-3">
+        <span>{t("settings.voice.loadFailed")}</span>
+        <Button
+          disabled={audioQuery.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => void audioQuery.refetch()}
+        >
+          {audioQuery.isFetching ? <Spinner /> : <RefreshCw />}
+          {t("common.refresh")}
+        </Button>
+      </AlertDescription>
+    </Alert>
+  ) : null;
 
   if (!formHydrated) {
     return (
       <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
-        {audioQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
-          </Alert>
-        ) : (
+        {audioLoadError || (
           <div className="flex min-h-64 items-center justify-center">
             <Spinner className="size-5 text-muted-foreground" />
           </div>
@@ -252,7 +268,14 @@ export function VoiceSettings({ token }: { token: string }) {
 
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
-      <Collapsible className={SETTINGS_CARD_CLASS} open={runtimeOpen} onOpenChange={setRuntimeOpen}>
+      {audioLoadError}
+      {view === "general" ? (
+        <Alert>
+          <AlertDescription>{t("settings.voice.restartRequired")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {view === "advanced" ? <Collapsible className={SETTINGS_CARD_CLASS} open={runtimeOpen} onOpenChange={setRuntimeOpen}>
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-control-hover active:bg-control-active">
           <span className="grid min-w-0 gap-0.5">
             <span className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.runtime")}</span>
@@ -261,11 +284,7 @@ export function VoiceSettings({ token }: { token: string }) {
           <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", runtimeOpen && "rotate-90")} />
         </CollapsibleTrigger>
         <CollapsibleContent className="border-t border-border/70 p-3">
-          {audioQuery.isError ? (
-            <Alert variant="destructive">
-              <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
-            </Alert>
-          ) : audioQuery.isLoading ? (
+          {audioQuery.isLoading ? (
             <div className="grid gap-2">
               <Skeleton className="h-4 w-2/3" />
               <Skeleton className="h-4 w-1/2" />
@@ -279,13 +298,14 @@ export function VoiceSettings({ token }: { token: string }) {
             </dl>
           )}
         </CollapsibleContent>
-      </Collapsible>
+      </Collapsible> : null}
 
       <section className="grid gap-3">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.asr")}</h3>
         </div>
         <div className={SETTINGS_GROUP_CLASS}>
+          {view === "general" ? <>
           <SettingsToggleRow
             checked={form.asrEnabled}
             description={t("settings.voice.asrEnabledDesc")}
@@ -342,7 +362,8 @@ export function VoiceSettings({ token }: { token: string }) {
               </DialogSelectContent>
             </Select>
           </SettingsControlRow>
-          <SettingsNumberField
+          </> : null}
+          {view === "advanced" ? <SettingsNumberField
             description={t("settings.voice.asrNumThreadsDesc")}
             disabled={disabled}
             id="pudding-voice-asr-threads"
@@ -352,12 +373,12 @@ export function VoiceSettings({ token }: { token: string }) {
             value={form.asrNumThreads}
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, asrNumThreads: value }))}
-          />
-          <SettingsReadOnlyRows rows={asrReadOnlyRows} />
+          /> : null}
+          {view === "advanced" ? <SettingsReadOnlyRows rows={asrReadOnlyRows} /> : null}
         </div>
       </section>
 
-      <section className="grid gap-3">
+      {view === "advanced" ? <section className="grid gap-3">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.vad")}</h3>
         </div>
@@ -433,9 +454,9 @@ export function VoiceSettings({ token }: { token: string }) {
           />
           <SettingsReadOnlyRows rows={vadReadOnlyRows} />
         </div>
-      </section>
+      </section> : null}
 
-      <section className="grid gap-3">
+      {view === "advanced" ? <section className="grid gap-3">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.dsp")}</h3>
         </div>
@@ -483,9 +504,9 @@ export function VoiceSettings({ token }: { token: string }) {
           </SettingsControlRow>
           <SettingsReadOnlyRows rows={dspReadOnlyRows} />
         </div>
-      </section>
+      </section> : null}
 
-      <section className="grid gap-3">
+      {view === "general" ? <section className="grid gap-3">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.tts")}</h3>
         </div>
@@ -532,10 +553,9 @@ export function VoiceSettings({ token }: { token: string }) {
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, ttsSpeed: value }))}
           />
-          <SettingsReadOnlyRows rows={ttsReadOnlyRows} />
         </div>
-      </section>
-      <div className={SETTINGS_CARD_CLASS}>
+      </section> : null}
+      {view === "advanced" ? <div className={SETTINGS_CARD_CLASS}>
         <SettingsActionRow
           description={t("settings.voice.resetDefaultsDesc")}
           label={t("settings.voice.resetDefaults")}
@@ -551,8 +571,8 @@ export function VoiceSettings({ token }: { token: string }) {
             {t("settings.resetDefaults")}
           </Button>
         </SettingsActionRow>
-      </div>
-      <AlertDialog open={clearRecordingsOpen} onOpenChange={(open) => !open && setClearRecordingsOpen(false)}>
+      </div> : null}
+      {view === "general" ? <AlertDialog open={clearRecordingsOpen} onOpenChange={(open) => !open && setClearRecordingsOpen(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("settings.voice.asrClearAudioTitle")}</AlertDialogTitle>
@@ -569,7 +589,7 @@ export function VoiceSettings({ token }: { token: string }) {
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog> : null}
       <AlertDialog
         open={resetOpen}
         onOpenChange={(open) => {

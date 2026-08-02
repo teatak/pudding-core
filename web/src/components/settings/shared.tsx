@@ -114,6 +114,7 @@ export function SettingsNumberField({
 }
 
 export function SettingsToggleRow({
+  animate = true,
   checked,
   description,
   disabled,
@@ -122,6 +123,7 @@ export function SettingsToggleRow({
   pending = false,
   onChange,
 }: {
+  animate?: boolean;
   checked: boolean;
   description: string;
   disabled?: boolean;
@@ -150,6 +152,7 @@ export function SettingsToggleRow({
           checked={checked}
           disabled={disabled || pending}
           id={id}
+          className={cn(!animate && "transition-none [&_[data-slot=switch-thumb]]:transition-none")}
           onCheckedChange={onChange}
         />
       </span>

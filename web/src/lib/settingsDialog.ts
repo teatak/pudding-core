@@ -1,4 +1,12 @@
-export type SettingsSectionID = "usage" | "dialogue" | "voice" | "model" | "skills" | "tools" | "about";
+export type SettingsSectionID =
+  | "dialogue"
+  | "model"
+  | "voice"
+  | "skills"
+  | "tools"
+  | "usage"
+  | "advanced"
+  | "about";
 
 export type SettingsDialogOpenDetail = {
   section?: SettingsSectionID;

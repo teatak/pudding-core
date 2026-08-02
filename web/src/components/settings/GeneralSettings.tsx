@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw } from "@/components/icons";
+import { RefreshCw, RotateCcw } from "@/components/icons";
 import { useEffect, useMemo, useState } from "react";
 
 import { getSettings, getUserPrompt, putSettings, putUserPrompt, resetSettings } from "@/api/client";
@@ -44,9 +44,11 @@ import {
 export function GeneralSettings({
   token,
   onDirtyChange,
+  view = "general",
 }: {
   token: string;
   onDirtyChange: (dirty: boolean) => void;
+  view?: "general" | "advanced";
 }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -61,6 +63,7 @@ export function GeneralSettings({
   const [editorFontFamily, setEditorFontFamily] = useState("");
   const [editorFontSize, setEditorFontSize] = useState("12");
   const [editorLineHeight, setEditorLineHeight] = useState("20");
+  const [settingsTransitionsReady, setSettingsTransitionsReady] = useState(false);
   const [pendingSettingSaveCount, setPendingSettingSaveCount] = useState(0);
   const [pendingSettingCounts, setPendingSettingCounts] = useState<Record<string, number>>({});
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
@@ -74,7 +77,7 @@ export function GeneralSettings({
   const userPromptQuery = useQuery({
     queryKey: queryKeys.userPrompt(),
     queryFn: () => getUserPrompt(token),
-    enabled: Boolean(token),
+    enabled: Boolean(token) && view === "general",
   });
 
   const savedSettings = useMemo(() => settingsWithDefaults(settingsQuery.data?.settings), [settingsQuery.data?.settings]);
@@ -86,6 +89,9 @@ export function GeneralSettings({
     desktopUpdateState?.status === "installing";
 
   useEffect(() => {
+    if (view !== "advanced") {
+      return;
+    }
     let active = true;
     let receivedEvent = false;
     const unsubscribe = onDesktopUpdateState((state) => {
@@ -103,7 +109,7 @@ export function GeneralSettings({
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     if (userPromptQuery.isSuccess) {
@@ -116,6 +122,7 @@ export function GeneralSettings({
     if (!settingsQuery.isSuccess || pendingSettingSaveCount > 0) {
       return;
     }
+    setSettingsTransitionsReady(false);
     setTailTurns(savedSettings[SETTINGS_KEYS.compactTailInputTurns]);
     setAutoThreshold(savedSettings[SETTINGS_KEYS.compactAutoThresholdPercent]);
     setShowCompactSummary(savedSettings[SETTINGS_KEYS.showCompactSummary] !== "false");
@@ -125,6 +132,8 @@ export function GeneralSettings({
     setEditorFontFamily(savedSettings[SETTINGS_KEYS.editorFontFamily]);
     setEditorFontSize(savedSettings[SETTINGS_KEYS.editorFontSize]);
     setEditorLineHeight(savedSettings[SETTINGS_KEYS.editorLineHeight]);
+    const frameID = window.requestAnimationFrame(() => setSettingsTransitionsReady(true));
+    return () => window.cancelAnimationFrame(frameID);
   }, [pendingSettingSaveCount, savedSettings, settingsQuery.isSuccess]);
 
   const promptMutation = useMutation({
@@ -278,31 +287,43 @@ export function GeneralSettings({
   };
 
   const promptDirty = promptEdited && promptContent !== savedPrompt;
-  const settingsDisabled = settingsQuery.isLoading || resetMutation.isPending;
+  const settingsDisabled = settingsQuery.isLoading || settingsQuery.isError || resetMutation.isPending;
 
   useEffect(() => {
-    onDirtyChange(promptDirty);
-  }, [onDirtyChange, promptDirty]);
+    onDirtyChange(view === "general" && promptDirty);
+  }, [onDirtyChange, promptDirty, view]);
 
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
-      <section className="grid gap-4">
+      {view === "general" ? <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.personalization")}</h3>
           <p className="text-sm leading-6 text-muted-foreground">{t("settings.general.personalizationDesc")}</p>
         </div>
         {userPromptQuery.isError ? (
           <Alert variant="destructive">
-            <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{t("settings.general.loadFailed")}</span>
+              <Button
+                disabled={userPromptQuery.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void userPromptQuery.refetch()}
+              >
+                {userPromptQuery.isFetching ? <Spinner /> : <RefreshCw />}
+                {t("common.refresh")}
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
         <div className="grid gap-2">
           <div className="text-xs text-muted-foreground">{userPromptQuery.data?.path || "<home>/pudding.md"}</div>
           <Textarea
             className="min-h-48 resize-y font-mono text-sm leading-6"
-            disabled={userPromptQuery.isLoading}
+            disabled={userPromptQuery.isLoading || userPromptQuery.isError}
             placeholder={t("settings.general.personalizationPlaceholder")}
             value={promptContent}
             onChange={(event) => {
@@ -312,7 +333,7 @@ export function GeneralSettings({
           />
           <div className="flex justify-end">
             <Button
-              disabled={userPromptQuery.isLoading || promptMutation.isPending || !promptDirty}
+              disabled={userPromptQuery.isLoading || userPromptQuery.isError || promptMutation.isPending || !promptDirty}
               size="sm"
               type="button"
               onClick={() => promptMutation.mutate()}
@@ -322,9 +343,9 @@ export function GeneralSettings({
             </Button>
           </div>
         </div>
-      </section>
+      </section> : null}
 
-      <section className="grid gap-4">
+      {view === "general" ? <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.editor")}</h3>
         </div>
@@ -383,19 +404,33 @@ export function GeneralSettings({
             onChange={setEditorLineHeight}
           />
         </div>
-      </section>
+      </section> : null}
 
       <section className="grid gap-4">
         <div className="grid gap-2">
-          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.context")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>
+            {t(view === "general" ? "settings.general.display" : "settings.general.context")}
+          </h3>
         </div>
         {settingsQuery.isError ? (
           <Alert variant="destructive">
-            <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{t("settings.general.loadFailed")}</span>
+              <Button
+                disabled={settingsQuery.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void settingsQuery.refetch()}
+              >
+                {settingsQuery.isFetching ? <Spinner /> : <RefreshCw />}
+                {t("common.refresh")}
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
         <div className={SETTINGS_GROUP_CLASS}>
-          <SettingsNumberField
+          {view === "advanced" ? <SettingsNumberField
             description={t("settings.general.tailTurnsDesc")}
             disabled={settingsDisabled}
             id="pudding-compact-tail-turns"
@@ -405,8 +440,8 @@ export function GeneralSettings({
             value={tailTurns}
             onBlur={() => saveNumberSetting(SETTINGS_KEYS.compactTailInputTurns, tailTurns, setTailTurns, 1, 50)}
             onChange={setTailTurns}
-          />
-          <SettingsNumberField
+          /> : null}
+          {view === "advanced" ? <SettingsNumberField
             description={t("settings.general.autoThresholdDesc")}
             disabled={settingsDisabled}
             id="pudding-auto-compact-threshold"
@@ -419,8 +454,9 @@ export function GeneralSettings({
               saveNumberSetting(SETTINGS_KEYS.compactAutoThresholdPercent, autoThreshold, setAutoThreshold, 0, 100)
             }
             onChange={setAutoThreshold}
-          />
-          <SettingsToggleRow
+          /> : null}
+          {view === "general" ? <SettingsToggleRow
+            animate={settingsTransitionsReady}
             checked={showCompactSummary}
             description={t("settings.general.showCompactSummaryDesc")}
             disabled={settingsDisabled}
@@ -428,8 +464,9 @@ export function GeneralSettings({
             label={t("settings.general.showCompactSummary")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showCompactSummary])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showCompactSummary, next, setShowCompactSummary)}
-          />
-          <SettingsToggleRow
+          /> : null}
+          {view === "general" ? <SettingsToggleRow
+            animate={settingsTransitionsReady}
             checked={showReasoning}
             description={t("settings.general.showReasoningDesc")}
             disabled={settingsDisabled}
@@ -437,8 +474,9 @@ export function GeneralSettings({
             label={t("settings.general.showReasoning")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showReasoning])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
-          />
-          <SettingsToggleRow
+          /> : null}
+          {view === "advanced" ? <SettingsToggleRow
+            animate={settingsTransitionsReady}
             checked={showRawToolInfo}
             description={t("settings.general.showRawToolInfoDesc")}
             disabled={settingsDisabled}
@@ -446,11 +484,11 @@ export function GeneralSettings({
             label={t("settings.general.showRawToolInfo")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showRawToolInfo])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showRawToolInfo, next, setShowRawToolInfo)}
-          />
+          /> : null}
         </div>
       </section>
 
-      <section className="grid gap-4">
+      {view === "advanced" ? <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.developer")}</h3>
         </div>
@@ -469,6 +507,7 @@ export function GeneralSettings({
             onChange={(next) => previewUpdatesMutation.mutate(next)}
           />
           <SettingsToggleRow
+            animate={settingsTransitionsReady}
             checked={showPreviewAppVersions}
             description={t("settings.general.showPreviewAppVersionsDesc")}
             disabled={settingsDisabled}
@@ -480,9 +519,9 @@ export function GeneralSettings({
             }
           />
         </div>
-      </section>
+      </section> : null}
 
-      <div className={SETTINGS_CARD_CLASS}>
+      {view === "advanced" ? <div className={SETTINGS_CARD_CLASS}>
         <SettingsActionRow
           description={t("settings.general.resetDefaultsDesc")}
           label={t("settings.general.resetDefaults")}
@@ -498,7 +537,7 @@ export function GeneralSettings({
             {t("settings.resetDefaults")}
           </Button>
         </SettingsActionRow>
-      </div>
+      </div> : null}
 
       <AlertDialog
         open={resetOpen}

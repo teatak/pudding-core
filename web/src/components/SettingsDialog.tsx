@@ -5,6 +5,7 @@ import {
   Info,
   MessageSquareText,
   Settings,
+  Settings2,
   SlidersHorizontal,
   Sparkles,
   Wrench,
@@ -44,19 +45,80 @@ import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { SETTINGS_DIALOG_OPEN_EVENT, type SettingsDialogOpenDetail, type SettingsSectionID } from "@/lib/settingsDialog";
 import { cn } from "@/lib/utils";
 
-const SETTINGS_SECTIONS: Array<{
+type SettingsSection = {
   id: SettingsSectionID;
   icon: typeof MessageSquareText;
   labelKey: string;
-}> = [
-  { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
-  { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
-  { id: "voice", icon: AudioLines, labelKey: "settings.section.voice" },
-  { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
-  { id: "skills", icon: BookOpen, labelKey: "settings.section.skills" },
-  { id: "tools", icon: Wrench, labelKey: "settings.section.tools" },
-  { id: "about", icon: Info, labelKey: "settings.section.about" },
+  descriptionKey: string;
+};
+
+const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> = [
+  {
+    labelKey: "settings.group.common",
+    sections: [
+      {
+        id: "dialogue",
+        icon: SlidersHorizontal,
+        labelKey: "settings.section.dialogue",
+        descriptionKey: "settings.section.dialogue.desc",
+      },
+      {
+        id: "model",
+        icon: Sparkles,
+        labelKey: "settings.section.model",
+        descriptionKey: "settings.section.model.desc",
+      },
+      {
+        id: "voice",
+        icon: AudioLines,
+        labelKey: "settings.section.voice",
+        descriptionKey: "settings.section.voice.desc",
+      },
+    ],
+  },
+  {
+    labelKey: "settings.group.capabilities",
+    sections: [
+      {
+        id: "skills",
+        icon: BookOpen,
+        labelKey: "settings.section.skills",
+        descriptionKey: "settings.section.skills.desc",
+      },
+      {
+        id: "tools",
+        icon: Wrench,
+        labelKey: "settings.section.tools",
+        descriptionKey: "settings.section.tools.desc",
+      },
+    ],
+  },
+  {
+    labelKey: "settings.group.system",
+    sections: [
+      {
+        id: "usage",
+        icon: Activity,
+        labelKey: "settings.section.usage",
+        descriptionKey: "settings.section.usage.desc",
+      },
+      {
+        id: "advanced",
+        icon: Settings2,
+        labelKey: "settings.section.advanced",
+        descriptionKey: "settings.section.advanced.desc",
+      },
+      {
+        id: "about",
+        icon: Info,
+        labelKey: "settings.section.about",
+        descriptionKey: "settings.section.about.desc",
+      },
+    ],
+  },
 ];
+
+const SETTINGS_SECTIONS = SETTINGS_GROUPS.flatMap((group) => group.sections);
 
 type SettingsDialogProps = {
   token: string;
@@ -66,7 +128,7 @@ type SettingsDialogProps = {
 export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState<SettingsSectionID>("usage");
+  const [active, setActive] = useState<SettingsSectionID>("dialogue");
   const [activeDirty, setActiveDirty] = useState(false);
   const [createProviderNonce, setCreateProviderNonce] = useState(0);
   const {
@@ -90,7 +152,6 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
   const changeOpen = useCallback((nextOpen: boolean) => {
     if (nextOpen) {
       setActiveDirty(false);
-      setActive("usage");
       setOpen(true);
       return;
     }
@@ -105,7 +166,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
   useEffect(() => {
     const handleOpen = (event: Event) => {
       const detail = (event as CustomEvent<SettingsDialogOpenDetail>).detail || {};
-      const nextActive = detail.createProvider ? "model" : detail.section || "usage";
+      const nextActive = detail.createProvider ? "model" : detail.section || "dialogue";
       const showSettings = () => {
         setActiveDirty(false);
         setActive(nextActive);
@@ -161,15 +222,22 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
             </div>
             <main className="flex h-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-background">
               <SettingsTopNav active={active} onActiveChange={changeActive} />
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 bg-background/95">
-                <div className="flex items-center gap-2 px-4 sm:px-6">
+              <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border/70 bg-background/95 py-2">
+                <div className="grid gap-0.5 px-4 sm:px-6">
                   <h2 className="text-sm font-medium text-foreground">{t(activeSection.labelKey)}</h2>
+                  <p className="text-xs text-muted-foreground">{t(activeSection.descriptionKey)}</p>
                 </div>
               </header>
               <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pt-4 pb-5 sm:px-6 sm:pt-5 sm:pb-6">
                 {active === "usage" ? <UsageSettings token={token} /> : null}
                 {active === "dialogue" ? <GeneralSettings token={token} onDirtyChange={setActiveDirty} /> : null}
                 {active === "voice" ? <VoiceSettings token={token} /> : null}
+                {active === "advanced" ? (
+                  <div className="grid gap-8">
+                    <GeneralSettings token={token} view="advanced" onDirtyChange={setActiveDirty} />
+                    <VoiceSettings token={token} view="advanced" />
+                  </div>
+                ) : null}
                 {active === "model" ? (
                   <ProviderSettings
                     createNonce={createProviderNonce}
@@ -275,34 +343,36 @@ function SettingsSidebar({
   return (
     <Sidebar collapsible="none" className="flex shrink-0 border-r">
       <SidebarContent>
-        <SidebarGroup className="p-3">
-          <SidebarGroupLabel>{t("settings.title")}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              {SETTINGS_SECTIONS.map((section) => {
-                const Icon = section.icon;
-                const isActive = section.id === active;
-                return (
-                  <SidebarMenuItem key={section.id}>
-                    <SidebarMenuButton asChild className="cursor-default" isActive={isActive}>
-                      <a
-                        aria-current={isActive ? "page" : undefined}
-                        href={`#settings-${section.id}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          onActiveChange(section.id);
-                        }}
-                      >
-                        <Icon />
-                        <span>{t(section.labelKey)}</span>
-                      </a>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {SETTINGS_GROUPS.map((group) => (
+          <SidebarGroup key={group.labelKey} className="p-3 pb-0 last:pb-3">
+            <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-1">
+                {group.sections.map((section) => {
+                  const Icon = section.icon;
+                  const isActive = section.id === active;
+                  return (
+                    <SidebarMenuItem key={section.id}>
+                      <SidebarMenuButton asChild className="cursor-default" isActive={isActive}>
+                        <a
+                          aria-current={isActive ? "page" : undefined}
+                          href={`#settings-${section.id}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onActiveChange(section.id);
+                          }}
+                        >
+                          <Icon />
+                          <span>{t(section.labelKey)}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
     </Sidebar>
   );

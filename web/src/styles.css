@@ -697,10 +697,6 @@ html[data-shell] :where(
     background-color: var(--sidebar-active-background);
 }
 
-[data-slot="sidebar-group-label"]:hover {
-    background-color: var(--sidebar-hover-background);
-}
-
 [data-slot="sidebar-group-label"][data-active="true"] {
     background-color: var(--sidebar-active-background);
     box-shadow: none;

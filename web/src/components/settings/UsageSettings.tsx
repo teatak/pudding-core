@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { RefreshCw } from "@/components/icons";
 import {
   Bar,
   BarChart,
@@ -12,7 +13,9 @@ import {
 
 import { getDailyUsage, type DailyUsageStat } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -48,8 +51,18 @@ export function UsageSettings({ token }: { token: string }) {
       <section className="grid min-w-0 gap-5">
         {usageQuery.isError ? (
           <Alert variant="destructive">
-            <AlertDescription className="grid gap-2">
+            <AlertDescription className="flex items-center justify-between gap-3">
               <span>{t("settings.usage.loadFailed")}</span>
+              <Button
+                disabled={usageQuery.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void usageQuery.refetch()}
+              >
+                {usageQuery.isFetching ? <Spinner /> : <RefreshCw />}
+                {t("common.refresh")}
+              </Button>
             </AlertDescription>
           </Alert>
         ) : null}
