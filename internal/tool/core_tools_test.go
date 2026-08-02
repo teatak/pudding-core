@@ -66,18 +66,19 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 		FileList, FileRead, AttachmentExport, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
+		CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename,
 	} {
 		if !HasDefinition(first, name) {
 			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	for _, name := range []string{CodeDiagnostics, CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, AppSave} {
+	for _, name := range []string{CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, AppSave} {
 		if HasDefinition(first, name) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}
 	}
-	if len(first) > 30 {
-		t.Fatalf("Code Core tool count = %d, want <= 30", len(first))
+	if len(first) > 35 {
+		t.Fatalf("Code Core tool count = %d, want <= 35", len(first))
 	}
 }
 
@@ -121,8 +122,8 @@ func TestDefaultCodeToolSchemaReduction(t *testing.T) {
 	fullJSON, _ := json.Marshal(full)
 	reduction := 1 - float64(len(defaultJSON))/float64(len(fullJSON))
 	t.Logf("Code tool schema: core=%d tools/%d bytes full=%d tools/%d bytes reduction=%.1f%%", len(defaults), len(defaultJSON), len(full), len(fullJSON), reduction*100)
-	if reduction < 0.35 {
-		t.Fatalf("Code Core schema reduction %.1f%%, want >= 35%%", reduction*100)
+	if reduction < 0.25 {
+		t.Fatalf("Code Core schema reduction %.1f%%, want >= 25%%", reduction*100)
 	}
 }
 

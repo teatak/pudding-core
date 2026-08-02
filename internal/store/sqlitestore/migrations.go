@@ -221,7 +221,7 @@ var schemaMigrations = map[int]schemaMigration{
 		return err
 	},
 	9: func(tx *sql.Tx) error {
-		return removeLoadedAppIDs(tx, "project-files", "source-control")
+		return removeLoadedAppIDs(tx, "project-files", "source-control", "code-intelligence")
 	},
 }
 

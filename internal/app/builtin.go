@@ -6,7 +6,6 @@ const (
 	BuiltinBrowserID        = "browser"
 	BuiltinSkillAuthoringID = "skill-authoring"
 	BuiltinAppAuthoringID   = "app-authoring"
-	BuiltinCodeIntelID      = "code-intelligence"
 	BuiltinCaptureID        = "capture"
 )
 
@@ -24,11 +23,6 @@ const (
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolSkillValidate     = "builtin_skill_validate"
 	toolAppSave           = "builtin_app_save"
-	toolCodeSymbols       = "builtin_code_symbols"
-	toolCodeDefinition    = "builtin_code_definition"
-	toolCodeReferences    = "builtin_code_references"
-	toolCodeDiagnostics   = "builtin_code_diagnostics"
-	toolCodeRename        = "builtin_code_rename"
 	toolCameraCapture     = "builtin_camera_capture"
 	toolDesktopScreenshot = "builtin_desktop_screenshot"
 )
@@ -143,25 +137,6 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 				Description: "Create or update a local Pudding App package.",
 				Path:        "skills/app-creator/SKILL.md",
 				Content:     builtinAppAuthoringInstructions,
-			},
-		},
-	},
-	{
-		definition: &Definition{
-			Kind:         KindApp,
-			ID:           BuiltinCodeIntelID,
-			Name:         "Code Intelligence",
-			Description:  "Use language servers for symbols, references, diagnostics, and rename.",
-			Source:       SourceBuiltin,
-			Enabled:      true,
-			CanUninstall: false,
-			RequiredMode: "code",
-			Tools: []ToolRef{
-				{Name: toolCodeSymbols},
-				{Name: toolCodeDefinition},
-				{Name: toolCodeReferences},
-				{Name: toolCodeDiagnostics},
-				{Name: toolCodeRename},
 			},
 		},
 	},

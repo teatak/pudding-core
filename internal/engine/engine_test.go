@@ -1267,7 +1267,7 @@ func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 	}
 }
 
-func TestCommandAndProjectFileToolsAreCodeCore(t *testing.T) {
+func TestProjectAndCodeToolsAreCodeCore(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
@@ -1291,6 +1291,10 @@ func TestCommandAndProjectFileToolsAreCodeCore(t *testing.T) {
 		tool.FileList, tool.FileRead, tool.AttachmentExport, tool.FileStat,
 		tool.FileSearch, tool.FileSlice, tool.FileWrite, tool.FilePatch,
 		tool.FileDelete, tool.FileMove, tool.FileCopy,
+		tool.GitStatus, tool.GitDiff, tool.GitLog,
+		tool.GitStage, tool.GitUnstage, tool.GitCommit,
+		tool.CodeSymbols, tool.CodeDefinition, tool.CodeReferences,
+		tool.CodeDiagnostics, tool.CodeRename,
 	} {
 		if !hasToolDef(codeDefs, name) {
 			t.Fatalf("Code Core missing %s", name)
@@ -1334,21 +1338,18 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{tool.FileList, tool.GitStatus, tool.GitCommit} {
+	for _, name := range []string{tool.FileList, tool.GitStatus, tool.GitCommit, tool.CodeDiagnostics, tool.CodeRename} {
 		if !hasToolDef(codeDefs, name) {
 			t.Fatalf("Code Core is missing %s", name)
 		}
 	}
-	for _, name := range []string{tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
+	for _, name := range []string{tool.CameraCapture, tool.DesktopScreenshot} {
 		if hasToolDef(codeDefs, name) {
 			t.Fatalf("unloaded built-in App exposed %s", name)
 		}
 	}
 
-	loaded := []string{
-		app.BuiltinCodeIntelID,
-		app.BuiltinCaptureID,
-	}
+	loaded := []string{app.BuiltinCaptureID}
 	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}

@@ -245,7 +245,7 @@ func TestOpenMigratesVersionEightRemovedBuiltinLoadedAppIDs(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{
 		ID: "sess_removed_apps", Title: "legacy apps", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "source-control", "browser"},
+		LoadedAppIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 	if err := st.CreateSession(context.Background(), &store.Session{
 		ID: "sess_baseline", Title: "baseline", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "source-control", "browser"},
+		LoadedAppIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}

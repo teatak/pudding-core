@@ -101,7 +101,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 5 {
+	if len(defs) != 4 {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
 	}
 	if definitionByID(defs, "project-files") != nil {
@@ -129,17 +129,9 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 			t.Fatalf("read authoring skill %s: detail=%+v err=%v", tc.skillID, detail, err)
 		}
 	}
-	for _, tc := range []struct {
-		appID, requiredMode string
-		toolCount           int
-	}{
-		{BuiltinCodeIntelID, "code", 5},
-		{BuiltinCaptureID, "chat", 2},
-	} {
-		def := definitionByID(defs, tc.appID)
-		if def == nil || def.RequiredMode != tc.requiredMode || def.DefaultSkillID != "" || len(def.Skills) != 0 || len(def.Tools) != tc.toolCount {
-			t.Fatalf("unexpected tool-only builtin app %s: %+v", tc.appID, def)
-		}
+	capture := definitionByID(defs, BuiltinCaptureID)
+	if capture == nil || capture.RequiredMode != "chat" || capture.DefaultSkillID != "" || len(capture.Skills) != 0 || len(capture.Tools) != 2 {
+		t.Fatalf("unexpected Image Capture builtin App: %+v", capture)
 	}
 
 	updated, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, false)
@@ -175,7 +167,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 5 {
+	if len(defs) != 4 {
 		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
 	}
 
@@ -185,7 +177,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	canvas := definitionByID(defs, "canvas")
-	if len(defs) != 6 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
+	if len(defs) != 5 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
 		t.Fatalf("unexpected runtime app definition: %+v", defs)
 	}
 	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
@@ -249,7 +241,7 @@ func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
 func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
 	for _, appID := range []string{
 		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinAppAuthoringID,
-		BuiltinCodeIntelID, BuiltinCaptureID,
+		BuiltinCaptureID,
 		RuntimeCanvasID,
 	} {
 		t.Run(appID, func(t *testing.T) {
@@ -264,6 +256,9 @@ func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
 	}
 	if IsReservedID("source-control") {
 		t.Fatal("removed Source Control App id must be reusable")
+	}
+	if IsReservedID("code-intelligence") {
+		t.Fatal("removed Code Intelligence App id must be reusable")
 	}
 }
 

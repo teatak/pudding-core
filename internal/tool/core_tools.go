@@ -26,6 +26,8 @@ var codeCoreTools = map[string]bool{
 	FileMove: true, FileCopy: true,
 	GitStatus: true, GitDiff: true, GitLog: true,
 	GitStage: true, GitUnstage: true, GitCommit: true,
+	CodeSymbols: true, CodeDefinition: true, CodeReferences: true,
+	CodeDiagnostics: true, CodeRename: true,
 }
 
 // CoreDefinitionsForMode returns the fixed, always-available tool surface.

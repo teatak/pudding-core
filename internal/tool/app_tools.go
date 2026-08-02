@@ -16,11 +16,6 @@ var builtinAppTools = map[string]string{
 	BrowserScroll:     app.BuiltinBrowserID,
 	SkillValidate:     app.BuiltinSkillAuthoringID,
 	AppSave:           app.BuiltinAppAuthoringID,
-	CodeSymbols:       app.BuiltinCodeIntelID,
-	CodeDefinition:    app.BuiltinCodeIntelID,
-	CodeReferences:    app.BuiltinCodeIntelID,
-	CodeDiagnostics:   app.BuiltinCodeIntelID,
-	CodeRename:        app.BuiltinCodeIntelID,
 	CameraCapture:     app.BuiltinCaptureID,
 	DesktopScreenshot: app.BuiltinCaptureID,
 }
