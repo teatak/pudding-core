@@ -1190,14 +1190,16 @@ func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	legacyCall := tool.Call{CallID: "load_project_files", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"project-files"}`)}
-	result, changed := eng.loadApp(ctx, sid, legacyCall, store.ModeCode)
-	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_unavailable"`) {
-		t.Fatalf("removed Project Files App did not return app_unavailable: %+v", result)
+	for _, removedID := range []string{"project-files", "source-control"} {
+		legacyCall := tool.Call{CallID: "load_" + removedID, Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"` + removedID + `"}`)}
+		result, changed := eng.loadApp(ctx, sid, legacyCall, store.ModeCode)
+		if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_unavailable"`) {
+			t.Fatalf("removed %s App did not return app_unavailable: %+v", removedID, result)
+		}
 	}
 
 	call := tool.Call{CallID: "load_browser", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"browser"}`)}
-	result, changed = eng.loadApp(ctx, sid, call, store.ModeChat)
+	result, changed := eng.loadApp(ctx, sid, call, store.ModeChat)
 	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
 		t.Fatalf("Chat loaded Browser: %+v", result)
 	}
@@ -1332,17 +1334,18 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasToolDef(codeDefs, tool.FileList) {
-		t.Fatal("Code Core is missing project file tools")
+	for _, name := range []string{tool.FileList, tool.GitStatus, tool.GitCommit} {
+		if !hasToolDef(codeDefs, name) {
+			t.Fatalf("Code Core is missing %s", name)
+		}
 	}
-	for _, name := range []string{tool.GitStatus, tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
+	for _, name := range []string{tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
 		if hasToolDef(codeDefs, name) {
 			t.Fatalf("unloaded built-in App exposed %s", name)
 		}
 	}
 
 	loaded := []string{
-		app.BuiltinSourceControlID,
 		app.BuiltinCodeIntelID,
 		app.BuiltinCaptureID,
 	}
@@ -1372,6 +1375,58 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 		if hasToolDef(chatDefs, name) {
 			t.Fatalf("Chat mode exposed Code App tool %s", name)
 		}
+	}
+}
+
+func TestRuntimeAppLoadExposesToolOnNextProviderStep(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	runtimeApp := &app.Definition{
+		ID: "canvas", Name: "Canvas", Enabled: true, RequiredMode: "chat", Runtime: "desktop",
+	}
+	apps := &mutableAppSource{defs: []*app.Definition{runtimeApp}}
+	client := &runtimeAppSnapshotClient{apps: apps}
+	runner := &recordingToolRunner{
+		defs: []provider.ToolDef{{
+			Name: "canvas_table", Capability: store.ModeChat, AppID: "canvas",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		}},
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	eng := New(ms, event.NewHub(), mapResolver{"runtime-app-snapshot": client}, ms,
+		WithTools(runner), WithApps(apps))
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: "sess_runtime_app_snapshot", Title: "runtime App snapshot",
+		Provider: "runtime-app-snapshot", Model: "runtime-app-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "runtime-app-snapshot", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID: "runtime-app-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 2},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{
+		SessionID: "sess_runtime_app_snapshot", ClientMessageID: "runtime_app_1", Text: "生成表格",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, "sess_runtime_app_snapshot")
+	if len(client.requests) != 3 {
+		t.Fatalf("provider requests = %d, want 3", len(client.requests))
+	}
+	if hasToolDef(client.requests[0].Tools, "canvas_table") {
+		t.Fatal("Runtime App tool was visible before the App loaded")
+	}
+	if !hasToolDef(client.requests[1].Tools, "canvas_table") {
+		t.Fatal("Runtime App tool was not visible on the model step after App load")
+	}
+	if len(runner.calls) != 1 || runner.calls[0].Name != "canvas_table" {
+		t.Fatalf("Runtime App tool did not execute from provider-step snapshot: %+v", runner.calls)
 	}
 }
 
@@ -3749,7 +3804,7 @@ func TestSubmitUsesSessionReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestDeepSeekReasoningEffortMapsToProviderOptions(t *testing.T) {
+func TestDeepSeekReasoningEffortPassesStandardOpenAIOption(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
@@ -3805,6 +3860,47 @@ func TestDeepSeekReasoningEffortMapsToProviderOptions(t *testing.T) {
 		}
 	default:
 		t.Fatal("provider request was not captured")
+	}
+}
+
+func TestReasoningEffortUsesProtocolStandardValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		effort   string
+		assert   func(*testing.T, provider.ModelConfig)
+	}{
+		{
+			name:     "openai max",
+			protocol: "openai-compatible",
+			effort:   "max",
+			assert: func(t *testing.T, cfg provider.ModelConfig) {
+				if got, _ := provider.StringOption(cfg.OpenAIOptions(), "reasoning_effort"); got != "max" {
+					t.Fatalf("OpenAI reasoning effort = %q", got)
+				}
+			},
+		},
+		{
+			name:     "anthropic xhigh",
+			protocol: "anthropic",
+			effort:   "xhigh",
+			assert: func(t *testing.T, cfg provider.ModelConfig) {
+				outputConfig, _ := cfg.AnthropicOptions()["output_config"].(map[string]any)
+				if got, _ := provider.StringOption(outputConfig, "effort"); got != "xhigh" {
+					t.Fatalf("Anthropic reasoning effort = %q", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved := &resolvedModel{protocol: tt.protocol, config: provider.ModelConfig{}}
+			if err := resolved.applyReasoningEffort(tt.effort); err != nil {
+				t.Fatal(err)
+			}
+			tt.assert(t, resolved.config)
+		})
 	}
 }
 
@@ -4040,6 +4136,36 @@ func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan 
 type mutableAppSource struct {
 	defs         []*app.Definition
 	endpointApps map[string]string
+}
+
+type runtimeAppSnapshotClient struct {
+	apps     *mutableAppSource
+	requests []provider.Request
+}
+
+func (c *runtimeAppSnapshotClient) Name() string { return "runtime-app-snapshot" }
+
+func (c *runtimeAppSnapshotClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 3)
+	switch len(c.requests) {
+	case 1:
+		out <- appLoadChunk("call_canvas_load", "canvas")
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
+		// The App registry may disappear while the provider is deciding which of
+		// the tools it was offered to call. Execution must use that offered set.
+		c.apps.defs = nil
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_canvas_table", Name: "canvas_table", ArgsDelta: `{}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
 }
 
 func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, error) {
@@ -4460,9 +4586,6 @@ func (c *gitCommitApprovalClient) Stream(_ context.Context, req provider.Request
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- appLoadChunk("call_source_control_app", app.BuiltinSourceControlID)
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index: 0, CallID: "call_git_commit", Name: tool.GitCommit,
 			ArgsDelta: `{"scope":"project","message":"reviewed commit"}`,

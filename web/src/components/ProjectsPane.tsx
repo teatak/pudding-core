@@ -358,7 +358,7 @@ function ProjectEmptyState({
     <section className="flex min-h-full items-start justify-center px-6 pt-[clamp(3rem,8vh,6rem)] pb-16">
       <div className="grid w-full max-w-lg justify-items-center text-center">
         <ProjectEmptyIllustration />
-        <h2 className="mt-6 text-2xl font-semibold tracking-tight">{t("project.emptyTitle")}</h2>
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight">{t("project.emptyTitle")}</h2>
         <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
           {t("project.emptyDescription")}
         </p>

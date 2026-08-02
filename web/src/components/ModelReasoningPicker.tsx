@@ -245,7 +245,10 @@ export function ModelReasoningPicker({
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[19rem] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0"
+        className={cn(
+          "max-h-[min(28rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0",
+          selectableProfiles.length > 1 ? "w-[19rem]" : "w-[12rem]",
+        )}
         collisionPadding={8}
         side="top"
         sideOffset={8}

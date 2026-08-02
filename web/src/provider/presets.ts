@@ -15,6 +15,19 @@ export type ProviderPresetId =
 
 export type ProviderPresetProtocol = "openai-compatible" | "openai-responses" | "google" | "anthropic";
 
+export function providerProtocolDisplayName(protocol: ProviderPresetProtocol) {
+  switch (protocol) {
+    case "openai-compatible":
+      return "OpenAI";
+    case "openai-responses":
+      return "OpenAI Responses";
+    case "google":
+      return "Google";
+    case "anthropic":
+      return "Anthropic";
+  }
+}
+
 export type ProviderPresetVariant = {
   id: string;
   label: string;
@@ -24,6 +37,11 @@ export type ProviderPresetVariant = {
   baseURL: string;
   models: ProviderModel[];
   dynamicModels?: boolean;
+  supportsModelDiscovery?: boolean;
+  modelDiscovery?: {
+    protocol: ProviderPresetProtocol;
+    baseURL: string;
+  };
   baseURLEditable?: boolean;
   baseURLPlaceholder?: string;
   apiKeyOptional?: boolean;
@@ -94,13 +112,13 @@ const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
 );
 
 const OPENAI_MODELS = [
-  model("gpt-5.6-sol", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.6-terra", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.6-luna", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.6-sol", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.6-terra", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.6-luna", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
 ];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -179,6 +197,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         group: "standard",
         protocol: "anthropic",
         baseURL: "https://api.xiaomimimo.com/anthropic",
+        modelDiscovery: {
+          protocol: "openai-compatible",
+          baseURL: "https://api.xiaomimimo.com/v1",
+        },
         models: MIMO_ANTHROPIC_MODELS,
         profileName: "MiMo Anthropic",
       },
@@ -199,6 +221,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         group: "plan",
         protocol: "anthropic",
         baseURL: "https://token-plan-cn.xiaomimimo.com/anthropic",
+        modelDiscovery: {
+          protocol: "openai-compatible",
+          baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+        },
         models: MIMO_ANTHROPIC_MODELS,
         profileName: "MiMo Plan Anthropic",
       },
@@ -218,8 +244,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "google",
         baseURL: "https://generativelanguage.googleapis.com",
         models: [
-          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "medium" } } }),
-          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "high" } } }),
+          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true } } }),
+          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true } } }),
         ],
       },
     ],
@@ -542,6 +568,38 @@ export function providerPresetVariantForSelection(
   );
 }
 
+export function providerSupportsModelDiscovery(variant?: ProviderPresetVariant) {
+  return variant?.supportsModelDiscovery !== false;
+}
+
+export function providerModelDiscoveryForVariant(
+  preset: ProviderPreset,
+  variant: ProviderPresetVariant,
+  activeBaseURL = variant.baseURL,
+) {
+  if (variant.modelDiscovery) {
+    return variant.modelDiscovery;
+  }
+  if (variant.protocol === "anthropic") {
+    const group = providerPresetVariantGroup(variant);
+    const openAIVariant = preset.variants.find(
+      (candidate) =>
+        providerPresetVariantGroup(candidate) === group &&
+        (candidate.protocol === "openai-compatible" || candidate.protocol === "openai-responses"),
+    );
+    if (openAIVariant) {
+      return {
+        protocol: openAIVariant.protocol,
+        baseURL: openAIVariant.baseURL,
+      };
+    }
+  }
+  return {
+    protocol: variant.protocol,
+    baseURL: activeBaseURL,
+  };
+}
+
 export function mergeProviderModelCandidate(
   id: string,
   variant: ProviderPresetVariant | undefined,
@@ -566,6 +624,44 @@ export function mergeProviderModelCandidate(
     capabilities: globalModel.capabilities ? { ...globalModel.capabilities } : fallback.capabilities,
     limits: globalModel.limits ? { ...globalModel.limits } : undefined,
   };
+}
+
+export function providerModelDisplayName(id: string) {
+  const value = id.trim();
+  if (!value) {
+    return "";
+  }
+  const wordNames: Record<string, string> = {
+    api: "API",
+    claude: "Claude",
+    deepseek: "DeepSeek",
+    flash: "Flash",
+    gemini: "Gemini",
+    glm: "GLM",
+    gpt: "GPT",
+    kimi: "Kimi",
+    max: "Max",
+    mimo: "MiMo",
+    mini: "Mini",
+    nano: "Nano",
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+    pro: "Pro",
+    qwen: "Qwen",
+  };
+  return value
+    .replaceAll("_", "-")
+    .split("/")
+    .map((segment) => segment
+      .split("-")
+      .map((word) => {
+        const [base, suffix] = word.split(":", 2);
+        const normalized = wordNames[base.toLowerCase()]
+          || (/^v\d/i.test(base) ? `V${base.slice(1)}` : `${base.charAt(0).toUpperCase()}${base.slice(1)}`);
+        return suffix ? `${normalized} (${suffix.charAt(0).toUpperCase()}${suffix.slice(1)})` : normalized;
+      })
+      .join(" "))
+    .join(" / ");
 }
 
 function globalPresetModel(id: string, protocol: ProviderPresetProtocol): ProviderModel | undefined {
@@ -638,7 +734,7 @@ function randomToken(): string {
 }
 
 function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
-  const { openai, google, anthropic, ...rest } = patch;
+  const { openai, google, anthropic, displayName, ...rest } = patch;
   const maxOutputTokens = numericOption(openai?.max_output_tokens ?? openai?.max_completion_tokens ?? google?.maxOutputTokens ?? anthropic?.max_tokens);
   const maxToolLoops = numericOption(openai?.max_tool_loops);
   const cleanOpenAI = omitOptions(openai, ["max_output_tokens", "max_completion_tokens", "max_tool_loops"]);
@@ -646,6 +742,7 @@ function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
   const cleanAnthropic = omitOptions(anthropic, ["max_tokens", "max_output_tokens"]);
   return {
     id,
+    displayName: displayName?.trim() || providerModelDisplayName(id),
     ...rest,
     limits: maxOutputTokens || maxToolLoops ? { maxOutputTokens, maxToolLoops } : undefined,
     providerOptions: cleanProviderOptions({
@@ -659,12 +756,32 @@ function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
 function providerModelFromCandidate(id: string, protocol: ProviderPresetProtocol): ProviderModel {
   const capabilities = { tools: true };
   if (protocol === "anthropic") {
-    return { id, capabilities, providerOptions: { anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE } } };
+    return {
+      id,
+      displayName: providerModelDisplayName(id),
+      capabilities,
+      providerOptions: { anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE } },
+    };
   }
   if (protocol === "google") {
-    return { id, capabilities, providerOptions: { google: { temperature: DEFAULT_PRESET_TEMPERATURE, thinking: { include_thoughts: true, level: "low" } } } };
+    return {
+      id,
+      displayName: providerModelDisplayName(id),
+      capabilities,
+      providerOptions: {
+        google: {
+          temperature: DEFAULT_PRESET_TEMPERATURE,
+          thinking: { include_thoughts: true },
+        },
+      },
+    };
   }
-  return { id, capabilities, providerOptions: { openai: { temperature: DEFAULT_PRESET_TEMPERATURE } } };
+  return {
+    id,
+    displayName: providerModelDisplayName(id),
+    capabilities,
+    providerOptions: { openai: { temperature: DEFAULT_PRESET_TEMPERATURE } },
+  };
 }
 
 function numericOption(value: unknown) {

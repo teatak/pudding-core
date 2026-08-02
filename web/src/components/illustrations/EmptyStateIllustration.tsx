@@ -21,7 +21,7 @@ export function EmptyStateIllustration({
   return (
     <svg
       aria-hidden="true"
-      className={cn("h-28 w-36 overflow-visible text-foreground", className)}
+      className={cn("size-36 overflow-visible text-foreground", className)}
       fill="none"
       focusable="false"
       viewBox="0 0 144 112"

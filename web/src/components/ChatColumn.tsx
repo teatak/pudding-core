@@ -16,7 +16,7 @@ export function ChatColumn({
   innerRef?: Ref<HTMLDivElement>;
 }) {
   return (
-    <div ref={innerRef} className={cn("mx-auto w-[calc(100%-2.5rem)] max-w-3xl", className)}>
+    <div ref={innerRef} className={cn("mx-auto w-[calc(100%-2.5rem)] min-w-0 max-w-3xl", className)}>
       {children}
     </div>
   );

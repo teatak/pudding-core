@@ -1803,13 +1803,15 @@ function CodeBlock({
       >
         {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
       </Button>
-      {nonTabbableHighlighted ? (
-        <div dangerouslySetInnerHTML={{ __html: nonTabbableHighlighted }} />
-      ) : (
-        <pre data-lang={lang} tabIndex={-1}>
-          <code>{code}</code>
-        </pre>
-      )}
+      <div className="code-block-scroll">
+        {nonTabbableHighlighted ? (
+          <div dangerouslySetInnerHTML={{ __html: nonTabbableHighlighted }} />
+        ) : (
+          <pre data-lang={lang} tabIndex={-1}>
+            <code>{code}</code>
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

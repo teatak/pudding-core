@@ -73,12 +73,9 @@ export function reasoningEffortOptionsForSelection(selection: ResolvedModelSelec
     return [];
   }
   const options = ["auto", "low", "medium", "high"];
-  const openAIOptions = [...options, "xhigh"];
-  if (supportsDeepSeekReasoning(selection)) {
-    return selection.providerProtocol === "anthropic" ? ["auto", "high", "xhigh"] : openAIOptions;
-  }
-  if (supportsOpenAIReasoning(selection)) {
-    return openAIOptions;
+  const standardEffortOptions = [...options, "xhigh", "max"];
+  if (supportsStandardReasoning(selection)) {
+    return standardEffortOptions;
   }
   if (supportsGoogleThinking(selection)) {
     return options;
@@ -90,13 +87,10 @@ export function defaultReasoningEffortForSelection(selection: ResolvedModelSelec
   if (!selection) {
     return undefined;
   }
-  if (supportsDeepSeekReasoning(selection)) {
-    if (selection.providerProtocol === "anthropic") {
-      return normalizeDeepSeekReasoningValue(deepSeekAnthropicEffort(selection.modelConfig?.providerOptions?.anthropic));
-    }
-    return normalizeDeepSeekReasoningValue(selection.modelConfig?.providerOptions?.openai?.reasoning_effort);
+  if (selection.providerProtocol === "anthropic") {
+    return anthropicEffort(selection.modelConfig?.providerOptions?.anthropic);
   }
-  if (supportsOpenAIReasoning(selection)) {
+  if (supportsStandardReasoning(selection)) {
     const value = selection.modelConfig?.providerOptions?.openai?.reasoning_effort;
     return typeof value === "string" ? value : undefined;
   }
@@ -111,30 +105,19 @@ export function defaultReasoningEffortForSelection(selection: ResolvedModelSelec
   return undefined;
 }
 
-function supportsOpenAIReasoning(selection: ResolvedModelSelection) {
-  return selection.providerProtocol === "openai-compatible" || selection.providerProtocol === "openai-responses";
+function supportsStandardReasoning(selection: ResolvedModelSelection) {
+  return selection.providerProtocol === "openai-compatible"
+    || selection.providerProtocol === "openai-responses"
+    || selection.providerProtocol === "anthropic";
 }
 
-function supportsDeepSeekReasoning(selection: ResolvedModelSelection) {
-  if (selection.providerBrand !== "deepseek") {
-    return false;
-  }
-  return (selection.providerProtocol === "openai-compatible" || selection.providerProtocol === "anthropic") && /^deepseek-v4-/i.test(selection.model);
-}
-
-function deepSeekAnthropicEffort(options: Record<string, unknown> | undefined) {
+function anthropicEffort(options: Record<string, unknown> | undefined) {
   const outputConfig = options?.output_config;
   if (!outputConfig || typeof outputConfig !== "object" || Array.isArray(outputConfig)) {
     return undefined;
   }
-  return (outputConfig as Record<string, unknown>).effort;
-}
-
-function normalizeDeepSeekReasoningValue(value: unknown) {
-  if (value === "max") {
-    return "xhigh";
-  }
-  return typeof value === "string" ? value : undefined;
+  const effort = (outputConfig as Record<string, unknown>).effort;
+  return typeof effort === "string" ? effort : undefined;
 }
 
 function supportsGoogleThinking(selection: ResolvedModelSelection) {

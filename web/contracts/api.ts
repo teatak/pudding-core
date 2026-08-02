@@ -442,6 +442,7 @@ export const probeProviderModelsRequest = z.object({
   protocol: providerProtocol,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
+  brand: z.string().optional(),
 });
 
 export const attachment = z.object({

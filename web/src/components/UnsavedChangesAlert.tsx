@@ -29,10 +29,15 @@ export function UnsavedChangesAlert({
           <AlertDialogDescription>{t("common.unsavedChanges.description")}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.unsavedChanges.keepEditing")}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onDiscard}>
+          <AlertDialogAction variant="outline" onClick={onDiscard}>
             {t("common.unsavedChanges.discard")}
           </AlertDialogAction>
+          <AlertDialogCancel
+            className="hover:!bg-primary/80 dark:hover:!bg-primary/80"
+            variant="default"
+          >
+            {t("common.unsavedChanges.keepEditing")}
+          </AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

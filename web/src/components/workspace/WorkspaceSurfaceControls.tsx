@@ -61,10 +61,10 @@ export function CanvasLibraryMenuSections({
   ));
   if (startLayout) {
     return (
-      <div className="mt-7 grid min-w-0 grid-cols-1 gap-5 text-left">
+      <div className="mx-auto mt-8 grid w-full max-w-xl min-w-0 grid-cols-1 gap-4 border-t border-[var(--workspace-border)] pt-4 text-left">
         {savedItems.length > 0 ? (
           <section className="min-w-0">
-            <div className="flex h-7 items-center px-1 text-xs font-medium text-muted-foreground">
+            <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
               {t("canvas.savedWidgets")}
             </div>
             <div className="grid max-h-56 gap-1 overflow-y-auto">{savedRows}</div>
@@ -72,9 +72,9 @@ export function CanvasLibraryMenuSections({
         ) : null}
         {closedItems.length > 0 ? (
           <section className="min-w-0">
-            <div className="flex h-7 items-center px-1 text-xs font-medium text-muted-foreground">
+            <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
               <span>{t("canvas.recentClosed")}</span>
-              <Button className="-mr-1 ml-auto px-1 font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
+              <Button className="-mr-1 ml-auto px-1.5 font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
                 {t("canvas.clearRecentClosed")}
               </Button>
             </div>

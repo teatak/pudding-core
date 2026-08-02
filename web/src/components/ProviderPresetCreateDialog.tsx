@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus } from "@/components/icons";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   createProvider,
   createProviderRequest,
+  probeProviderModels,
   type ProviderProfile,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -13,6 +14,7 @@ import { Spinner } from "@/components/Spinner";
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +34,11 @@ import { cn } from "@/lib/utils";
 import {
   defaultProviderPresetVariant,
   generateProviderProfileID,
+  mergeProviderModelCandidate,
+  providerModelDisplayName,
+  providerModelDiscoveryForVariant,
   providerPresetProfileName,
+  providerSupportsModelDiscovery,
   providerPresetVariant,
   type ProviderPreset,
   type ProviderPresetVariant,
@@ -121,6 +127,11 @@ export function ProviderPresetCreateDialog({
   const [baseURL, setBaseURL] = useState("");
   const [profileID, setProfileID] = useState("");
   const [localError, setLocalError] = useState("");
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [candidateIDs, setCandidateIDs] = useState<string[]>([]);
+  const [selectedCandidateIDs, setSelectedCandidateIDs] = useState<string[]>([]);
+  const [candidateFilter, setCandidateFilter] = useState("");
+  const [verifiedModelCount, setVerifiedModelCount] = useState<number | null>(null);
   const initializedPresetIDRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -138,6 +149,11 @@ export function ProviderPresetCreateDialog({
     setBaseURL(initialVariant.baseURL);
     setProfileID(generateProviderProfileID(profiles, preset.id));
     setLocalError("");
+    setModelsLoading(false);
+    setCandidateIDs([]);
+    setSelectedCandidateIDs([]);
+    setCandidateFilter("");
+    setVerifiedModelCount(null);
   }, [open, preset, profiles]);
 
   const variant = preset ? providerPresetVariant(preset, variantID) : null;
@@ -147,22 +163,45 @@ export function ProviderPresetCreateDialog({
     : t("provider.quickCreateHint");
   const apiKeyRequired = variant ? !variant.apiKeyOptional : true;
   const activeBaseURL = variant?.baseURLEditable ? baseURL.trim() : variant?.baseURL || "";
-  const activeModels = variant?.dynamicModels ? [] : variant?.models || [];
+  const activeModels = variant?.dynamicModels
+    ? selectedCandidateIDs.map((id) => mergeProviderModelCandidate(id, variant, variant.protocol))
+    : variant?.models || [];
   const baseURLReady = !variant?.baseURLEditable || Boolean(activeBaseURL);
-  const canCreate = Boolean(preset && variant && profileID && baseURLReady && (!apiKeyRequired || apiKey.trim()));
+  const modelsReady = !variant?.dynamicModels || activeModels.length > 0;
+  const supportsModelDiscovery = variant
+    ? providerSupportsModelDiscovery(variant)
+    : false;
+  const canCreate = Boolean(preset && variant && profileID && baseURLReady && modelsReady && (!apiKeyRequired || apiKey.trim()));
+  const filteredCandidateIDs = useMemo(() => {
+    const query = candidateFilter.trim().toLowerCase();
+    return query
+      ? candidateIDs.filter((id) =>
+          id.toLowerCase().includes(query) || providerModelDisplayName(id).toLowerCase().includes(query),
+        )
+      : candidateIDs;
+  }, [candidateFilter, candidateIDs]);
   const initialVariant = preset ? defaultProviderPresetVariant(preset) : null;
   const dirty = Boolean(
     open &&
     preset &&
     initializedPresetIDRef.current === preset.id &&
-    (apiKey.trim() || variantID !== initialVariant?.id || (variant?.baseURLEditable && baseURL !== variant.baseURL)),
+    (apiKey.trim() || selectedCandidateIDs.length > 0 || variantID !== initialVariant?.id || (variant?.baseURLEditable && baseURL !== variant.baseURL)),
   );
+
+  const resetModelProbe = () => {
+    setCandidateIDs([]);
+    setSelectedCandidateIDs([]);
+    setCandidateFilter("");
+    setVerifiedModelCount(null);
+  };
+
   const unsavedChanges = useUnsavedChangesGuard(dirty);
   const handleVariantChange = (value: string) => {
     setVariantID(value);
     const nextVariant = preset ? providerPresetVariant(preset, value) : null;
     setBaseURL(nextVariant?.baseURL || "");
     setLocalError("");
+    resetModelProbe();
   };
   const openAPIKeyURL = () => {
     const url = preset?.apiKeyURL;
@@ -170,6 +209,49 @@ export function ProviderPresetCreateDialog({
       return;
     }
     void openExternalURL(url);
+  };
+
+  const verifyAndLoadModels = async () => {
+    if (!preset || !variant || !baseURLReady || (apiKeyRequired && !apiKey.trim())) {
+      setLocalError(apiKeyRequired && !apiKey.trim() ? t("provider.credentialRequired") : t("provider.baseURLRequired"));
+      return;
+    }
+    setModelsLoading(true);
+    setLocalError("");
+    try {
+      const discovery = providerModelDiscoveryForVariant(preset, variant, activeBaseURL);
+      const response = await probeProviderModels(token, {
+        brand: preset.id,
+        protocol: discovery.protocol,
+        baseURL: discovery.baseURL,
+        apiKey: apiKey.trim(),
+      });
+      const models = Array.from(new Set(response.models.map((id) => id.trim()).filter(Boolean)));
+      setVerifiedModelCount(models.length);
+      if (variant.dynamicModels) {
+        setCandidateIDs(models);
+        setSelectedCandidateIDs(models);
+        setCandidateFilter("");
+      }
+    } catch {
+      resetModelProbe();
+      setLocalError(t("provider.candidatesFailed"));
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  const toggleCandidate = (id: string, checked: boolean | "indeterminate") => {
+    setSelectedCandidateIDs((current) => {
+      if (checked === true) {
+        return current.includes(id) ? current : [...current, id];
+      }
+      return current.filter((item) => item !== id);
+    });
+  };
+
+  const selectAllFilteredCandidates = () => {
+    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidateIDs])));
   };
 
   const mutation = useMutation({
@@ -272,10 +354,11 @@ export function ProviderPresetCreateDialog({
                 id="provider-preset-base-url"
                 placeholder={variant.baseURLPlaceholder || "https://api.example.com/v1"}
                 value={baseURL}
-                onChange={(event) => {
-                  setBaseURL(event.target.value);
-                  setLocalError("");
-                }}
+              onChange={(event) => {
+                setBaseURL(event.target.value);
+                setLocalError("");
+                resetModelProbe();
+              }}
               />
             </Field>
           ) : null}
@@ -293,13 +376,110 @@ export function ProviderPresetCreateDialog({
               onChange={(event) => {
                 setAPIKey(event.target.value);
                 setLocalError("");
+                resetModelProbe();
               }}
             />
           </Field>
 
           {variant?.dynamicModels ? (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              {t("provider.dynamicModelsHint")}
+            <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="grid gap-0.5">
+                  <Label>{t("provider.models")}</Label>
+                  <span className="text-xs text-muted-foreground">{t("provider.dynamicModelsHint")}</span>
+                </div>
+                <Button
+                  disabled={modelsLoading || !baseURLReady || (apiKeyRequired && !apiKey.trim())}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void verifyAndLoadModels()}
+                >
+                  {modelsLoading ? <Spinner /> : null}
+                  {t("provider.testAndLoadModels")}
+                </Button>
+              </div>
+              {candidateIDs.length > 8 ? (
+                <Input
+                  autoComplete="off"
+                  placeholder={t("provider.filterCandidates")}
+                  value={candidateFilter}
+                  onChange={(event) => setCandidateFilter(event.target.value)}
+                />
+              ) : null}
+              {candidateIDs.length > 0 ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {t("provider.selectedAndTotalCount")
+                      .replace("{selected}", String(selectedCandidateIDs.length))
+                      .replace("{total}", String(candidateIDs.length))}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      disabled={filteredCandidateIDs.length === 0}
+                      size="xs"
+                      type="button"
+                      variant="ghost"
+                      onClick={selectAllFilteredCandidates}
+                    >
+                      {t("common.selectAll")}
+                    </Button>
+                    <Button
+                      disabled={selectedCandidateIDs.length === 0}
+                      size="xs"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setSelectedCandidateIDs([])}
+                    >
+                      {t("common.clear")}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {candidateIDs.length > 0 ? (
+                <div className="max-h-48 overflow-y-auto rounded-md border bg-background p-1">
+                  {filteredCandidateIDs.map((id) => (
+                    <label key={id} className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent">
+                      <Checkbox
+                        checked={selectedCandidateIDs.includes(id)}
+                        onCheckedChange={(checked) => toggleCandidate(id, checked)}
+                      />
+                      <span className="grid min-w-0 gap-0.5">
+                        <span className="truncate">{providerModelDisplayName(id)}</span>
+                        <span className="truncate font-mono text-xs text-muted-foreground">{id}</span>
+                      </span>
+                    </label>
+                  ))}
+                  {filteredCandidateIDs.length === 0 ? (
+                    <div className="px-2 py-6 text-center text-sm text-muted-foreground">{t("provider.candidatesNoMatch")}</div>
+                  ) : null}
+                </div>
+              ) : null}
+              {verifiedModelCount !== null ? (
+                <span className={cn("text-xs", verifiedModelCount > 0 ? "text-success" : "text-warning")}>
+                  {verifiedModelCount > 0
+                    ? t("provider.dynamicModelsLoaded").replace("{count}", String(verifiedModelCount))
+                    : t("provider.candidatesEmpty")}
+                </span>
+              ) : null}
+            </div>
+          ) : supportsModelDiscovery ? (
+            <div className="flex items-center gap-3">
+              <Button
+                disabled={modelsLoading || !baseURLReady || (apiKeyRequired && !apiKey.trim())}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void verifyAndLoadModels()}
+              >
+                {modelsLoading ? <Spinner /> : null}
+                {t("provider.testConnection")}
+              </Button>
+              {verifiedModelCount !== null ? (
+                <span className="text-xs text-success">
+                  {t("provider.connectionVerified").replace("{count}", String(verifiedModelCount))}
+                </span>
+              ) : null}
             </div>
           ) : null}
 

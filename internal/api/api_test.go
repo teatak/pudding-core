@@ -3413,6 +3413,21 @@ func TestProviderModelsProxy(t *testing.T) {
 		t.Fatalf("unexpected probed models: %+v", got)
 	}
 
+	buzzHiveUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"buzz-model"}]}`))
+	}))
+	defer buzzHiveUpstream.Close()
+	got = decodeJSON[map[string][]string](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
+		"brand": "buzzhive", "protocol": "google", "baseURL": buzzHiveUpstream.URL,
+	}))
+	if len(got["models"]) != 1 || got["models"][0] != "buzz-model" {
+		t.Fatalf("unexpected BuzzHive probed models: %+v", got)
+	}
+
 	resp = req(t, http.MethodGet, srv.URL+"/providers/nope/models", nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {

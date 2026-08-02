@@ -24,6 +24,8 @@ var codeCoreTools = map[string]bool{
 	FileStat: true, FileSearch: true, FileSlice: true,
 	FileWrite: true, FilePatch: true, FileDelete: true,
 	FileMove: true, FileCopy: true,
+	GitStatus: true, GitDiff: true, GitLog: true,
+	GitStage: true, GitUnstage: true, GitCommit: true,
 }
 
 // CoreDefinitionsForMode returns the fixed, always-available tool surface.

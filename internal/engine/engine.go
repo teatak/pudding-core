@@ -760,20 +760,8 @@ func (r *resolvedModel) applyReasoningEffort(value string) error {
 	}
 	target := r.reasoningTarget()
 	switch target {
-	case "deepseek-openai":
-		if r.config.ProviderOptions == nil {
-			r.config.ProviderOptions = &provider.ModelProviderOptions{}
-		}
-		if r.config.ProviderOptions.OpenAI == nil {
-			r.config.ProviderOptions.OpenAI = map[string]any{}
-		}
-		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
-			return nil
-		}
-		r.config.ProviderOptions.OpenAI["reasoning_effort"] = effort
-	case "deepseek-anthropic":
-		mapped, ok := deepSeekReasoningEffort(effort)
-		if !ok {
+	case "anthropic":
+		if !validStandardReasoningEffort(effort) {
 			return nil
 		}
 		if r.config.ProviderOptions == nil {
@@ -782,7 +770,12 @@ func (r *resolvedModel) applyReasoningEffort(value string) error {
 		if r.config.ProviderOptions.Anthropic == nil {
 			r.config.ProviderOptions.Anthropic = map[string]any{}
 		}
-		r.config.ProviderOptions.Anthropic["output_config"] = map[string]any{"effort": mapped}
+		outputConfig, _ := r.config.ProviderOptions.Anthropic["output_config"].(map[string]any)
+		if outputConfig == nil {
+			outputConfig = map[string]any{}
+		}
+		outputConfig["effort"] = effort
+		r.config.ProviderOptions.Anthropic["output_config"] = outputConfig
 	case "google":
 		if effort != "low" && effort != "medium" && effort != "high" {
 			return nil
@@ -802,7 +795,7 @@ func (r *resolvedModel) applyReasoningEffort(value string) error {
 		thinking["level"] = effort
 		r.config.ProviderOptions.Google["thinking"] = thinking
 	case "openai":
-		if effort != "none" && effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+		if !validOpenAIReasoningEffort(effort) {
 			return nil
 		}
 		if r.config.ProviderOptions == nil {
@@ -824,19 +817,13 @@ func (r *resolvedModel) applyReasoningEffort(value string) error {
 }
 
 func (r *resolvedModel) reasoningTarget() string {
-	if r.isDeepSeek() {
-		switch strings.TrimSpace(r.protocol) {
-		case "openai-compatible", "openai-responses":
-			return "deepseek-openai"
-		case "anthropic":
-			return "deepseek-anthropic"
-		}
-	}
 	switch strings.TrimSpace(r.protocol) {
 	case "google":
 		return "google"
 	case "openai-compatible", "openai-responses":
 		return "openai"
+	case "anthropic":
+		return "anthropic"
 	}
 	if r.config.ProviderOptions != nil {
 		if r.config.ProviderOptions.Google != nil {
@@ -845,41 +832,43 @@ func (r *resolvedModel) reasoningTarget() string {
 		if r.config.ProviderOptions.OpenAI != nil {
 			return "openai"
 		}
+		if r.config.ProviderOptions.Anthropic != nil {
+			return "anthropic"
+		}
 	}
 	return ""
 }
 
 func (r *resolvedModel) normalizeReasoningOptions() error {
-	if r == nil || !r.isDeepSeek() || r.config.ProviderOptions == nil {
+	if r == nil || r.config.ProviderOptions == nil {
 		return nil
 	}
 	switch r.reasoningTarget() {
-	case "deepseek-openai":
+	case "openai":
 		opts := r.config.ProviderOptions.OpenAI
 		if opts == nil {
 			return nil
 		}
-		_, hadThinking := opts["thinking"]
-		delete(opts, "thinking")
 		effort, _ := provider.StringOption(opts, "reasoning_effort")
 		if effort == "" {
-			if hadThinking {
-				return r.refreshConfigJSON()
-			}
 			return nil
 		}
-		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+		if !validOpenAIReasoningEffort(effort) {
 			delete(opts, "reasoning_effort")
 		}
-	case "deepseek-anthropic":
+	case "anthropic":
 		opts := r.config.ProviderOptions.Anthropic
-		outputConfig, _ := opts["output_config"].(map[string]any)
-		effort, _ := provider.StringOption(outputConfig, "effort")
-		mapped, ok := deepSeekReasoningEffort(effort)
-		if !ok {
+		if opts == nil {
 			return nil
 		}
-		opts["output_config"] = map[string]any{"effort": mapped}
+		outputConfig, _ := opts["output_config"].(map[string]any)
+		effort, _ := provider.StringOption(outputConfig, "effort")
+		if effort == "" {
+			return nil
+		}
+		if !validStandardReasoningEffort(effort) {
+			delete(outputConfig, "effort")
+		}
 	default:
 		return nil
 	}
@@ -895,21 +884,24 @@ func (r *resolvedModel) refreshConfigJSON() error {
 	return nil
 }
 
-func (r *resolvedModel) isDeepSeek() bool {
-	if r == nil {
+func validStandardReasoningEffort(effort string) bool {
+	switch strings.TrimSpace(effort) {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
 		return false
 	}
-	return strings.TrimSpace(r.providerBrand) == "deepseek" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.model)), "deepseek-v4-")
 }
 
-func deepSeekReasoningEffort(effort string) (string, bool) {
+func validOpenAIReasoningEffort(effort string) bool {
+	if validStandardReasoningEffort(effort) {
+		return true
+	}
 	switch strings.TrimSpace(effort) {
-	case "low", "medium", "high":
-		return "high", true
-	case "xhigh", "max":
-		return "max", true
+	case "none", "minimal":
+		return true
 	default:
-		return "", false
+		return false
 	}
 }
 
@@ -1898,11 +1890,11 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
 		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.AppID != "" && e.apps != nil {
-			if !e.appToolCallable(ctx, sessionID, definition.AppID, nextMode) {
-				result = e.appToolUnavailableResult(ctx, sessionID, call, definition.AppID)
-			} else {
-				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-			}
+			// The provider received this App tool in allowedTools after the App was
+			// loaded, enabled, and mode-checked. Treat that request as the authority
+			// for this model step instead of re-reading an ephemeral Runtime App
+			// registry immediately before execution.
+			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 		} else if tool.IsAppAPITool(call.Name) && e.apps != nil {
 			appID, resolved := e.appEndpointTarget(ctx, sessionID, call)
 			switch {
@@ -2345,9 +2337,12 @@ func (e *Engine) appToolUnavailableResult(ctx context.Context, sessionID string,
 	if err != nil {
 		payload["reason"] = "app_state_unavailable"
 		payload["message"] = err.Error()
-	} else if state, ok := states[appID]; !ok || !state.definition.Enabled {
+	} else if state, ok := states[appID]; !ok {
+		payload["reason"] = "app_unavailable"
+		payload["message"] = "the app is unavailable in the current runtime"
+	} else if !state.definition.Enabled {
 		payload["reason"] = "app_disabled"
-		payload["message"] = "the app is disabled or unavailable"
+		payload["message"] = "the app is disabled"
 	} else {
 		if state.definition.DefaultSkillID != "" {
 			payload["defaultSkillID"] = state.definition.DefaultSkillID

@@ -71,6 +71,7 @@ type probeProviderModelsReq struct {
 	Protocol string `json:"protocol"`
 	BaseURL  string `json:"baseURL"`
 	APIKey   string `json:"apiKey"`
+	Brand    string `json:"brand"`
 }
 
 type providerWriter interface {
@@ -246,6 +247,10 @@ func (s *Server) probeProviderModels(c *cart.Context) error {
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
 	if !registry.SupportedProtocol(req.Protocol) {
 		return badRequest(c, "unsupported protocol: "+req.Protocol)
+	}
+	if strings.EqualFold(strings.TrimSpace(req.Brand), "buzzhive") {
+		req.Protocol = registry.TypeOpenAICompatible
+		req.BaseURL = buzzHiveModelsBaseURL(req.BaseURL)
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)

@@ -1,6 +1,22 @@
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, EyeOff, Plus, Trash } from "@/components/icons";
+import { CircleHelp, Copy, Ellipsis, Eye, EyeOff, GripVertical, Plus, Trash, X } from "@/components/icons";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -21,13 +37,12 @@ import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Spinner } from "@/components/Spinner";
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -35,6 +50,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldContent, FieldLabel, FieldTitle } from "@/components/ui/field";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -47,6 +68,7 @@ import {
 import { NeutralRadioCard, NeutralRadioGroup } from "@/components/NeutralRadioGroup";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
@@ -54,9 +76,13 @@ import { cn } from "@/lib/utils";
 import {
   generateProviderProfileID,
   mergeProviderModelCandidate,
+  providerModelDisplayName,
+  providerModelDiscoveryForVariant,
+  providerProtocolDisplayName,
   providerPresetForBrand,
   providerPresetGroups,
   providerPresetProtocolsForGroup,
+  providerSupportsModelDiscovery,
   providerPresetVariantForSelection,
   providerPresetVariantGroup,
   type ProviderPreset,
@@ -67,8 +93,9 @@ import {
 const providerProtocolSchema = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 const PROVIDER_PROTOCOL_OPTIONS: ProviderPresetProtocol[] = ["openai-compatible", "openai-responses", "google", "anthropic"];
 const BASE_REASONING_EFFORT_OPTIONS = ["auto", "low", "medium", "high"];
-const OPENAI_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh"];
+const STANDARD_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh", "max"];
 const MODEL_ID_REQUIRED = "provider.modelIDRequired";
+const PROVIDER_NAME_REQUIRED = "provider.nameRequired";
 const optionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 
@@ -92,7 +119,7 @@ const modelFormSchema = z.object({
 
 const providerFormSchema = z.object({
   id: z.string().trim().min(1),
-  displayName: z.string().trim().min(1),
+  displayName: z.string().trim().min(1, PROVIDER_NAME_REQUIRED),
   brand: z.string().optional(),
   group: z.string().optional(),
   protocol: providerProtocolSchema,
@@ -103,6 +130,14 @@ const providerFormSchema = z.object({
 
 export type ProviderProfileEditorValue = z.infer<typeof providerFormSchema>;
 type ModelFormValue = z.infer<typeof modelFormSchema>;
+type ModelDialogState =
+  | { mode: "create" }
+  | { mode: "edit" | "duplicate"; index: number };
+type ModelCommit = {
+  models: ModelFormValue[];
+  protocol: ProviderProfileEditorValue["protocol"];
+  onCommitted?: () => void;
+};
 
 export function ProviderProfileEditorDialog({
   initialValue,
@@ -125,11 +160,18 @@ export function ProviderProfileEditorDialog({
   const { t } = useI18n();
   const editingID = profile?.id || null;
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesFailed, setCandidatesFailed] = useState(false);
   const [candidatePopoverOpen, setCandidatePopoverOpen] = useState(false);
   const [candidateIDs, setCandidateIDs] = useState<string[]>([]);
   const [selectedCandidateIDs, setSelectedCandidateIDs] = useState<string[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [apiKeyVisible, setAPIKeyVisible] = useState(false);
+  const [modelDialogState, setModelDialogState] = useState<ModelDialogState | null>(null);
+  const [pendingRevealModelIndex, setPendingRevealModelIndex] = useState<number | null>(null);
+  const [highlightedModelID, setHighlightedModelID] = useState<string | null>(null);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+  const [basicInfoSaving, setBasicInfoSaving] = useState(false);
+  const [modelDialogSaving, setModelDialogSaving] = useState(false);
   const form = useForm<ProviderProfileEditorValue>({
     resolver: zodResolver(providerFormSchema),
     defaultValues: emptyProviderProfileForm(),
@@ -139,21 +181,38 @@ export function ProviderProfileEditorDialog({
   const providerGroup = form.watch("group") || "default";
   const providerProtocol = form.watch("protocol");
   const profileID = form.watch("id");
+  const providerName = form.watch("displayName");
+  const configuredModels = form.watch("models");
+  const formReady = Boolean(providerName.trim());
+  const basicInfoDirty = Object.entries(form.formState.dirtyFields).some(
+    ([field, dirty]) => field !== "models" && Boolean(dirty),
+  );
   const existingIDs = useMemo(() => profiles.map((item) => item.id), [profiles]);
   const preset = useMemo(() => providerPresetForBrand(providerBrand), [providerBrand]);
+  const activeVariant = useMemo(
+    () => providerPresetVariantForSelection(preset, providerGroup, providerProtocol),
+    [preset, providerGroup, providerProtocol],
+  );
+  const supportsModelDiscovery = providerSupportsModelDiscovery(activeVariant);
   const presetGroups = useMemo(() => (preset ? providerPresetGroups(preset) : []), [preset]);
   const filteredCandidateIDs = useMemo(() => {
     const query = candidateFilter.trim().toLowerCase();
     if (!query) {
       return candidateIDs;
     }
-    return candidateIDs.filter((id) => id.toLowerCase().includes(query));
+    return candidateIDs.filter((id) =>
+      id.toLowerCase().includes(query) || providerModelDisplayName(id).toLowerCase().includes(query),
+    );
   }, [candidateFilter, candidateIDs]);
   const providerProtocolOptions = useMemo(() => {
     const presetProtocols = preset ? providerPresetProtocolsForGroup(preset, providerGroup) : [];
     return presetProtocols.length > 0 ? presetProtocols : PROVIDER_PROTOCOL_OPTIONS;
   }, [preset, providerGroup]);
   const showAPIKeyToggle = Boolean(editingID);
+  const modelSortSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     if (!open) {
@@ -169,20 +228,55 @@ export function ProviderProfileEditorDialog({
         : emptyProviderProfileForm(generateProviderProfileID(profiles, "custom"));
     form.reset(nextValue);
     setAPIKeyVisible(false);
+    setModelDialogState(null);
+    setPendingRevealModelIndex(null);
+    setHighlightedModelID(null);
+    setModelSaveError(null);
+    setBasicInfoSaving(false);
+    setModelDialogSaving(false);
+    setCandidatesFailed(false);
     setCandidatePopoverOpen(false);
     setCandidateIDs([]);
     setSelectedCandidateIDs([]);
     setCandidateFilter("");
-  }, [form, initialValue, open, profile, profiles]);
+  }, [form, initialValue, open, profile]);
+
+  useEffect(() => {
+    if (pendingRevealModelIndex === null) {
+      return;
+    }
+    const field = fields.fields[pendingRevealModelIndex];
+    if (!field) {
+      return;
+    }
+    setHighlightedModelID(field.id);
+    setPendingRevealModelIndex(null);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`provider-model-${field.id}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, [fields.fields, pendingRevealModelIndex]);
+
+  useEffect(() => {
+    if (!highlightedModelID) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setHighlightedModelID(null), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [highlightedModelID]);
 
   const createMutation = useMutation({
     mutationFn: (value: ProviderProfileEditorValue) => createProvider(token, cleanCreateProvider(value)),
+    onMutate: () => setBasicInfoSaving(true),
     onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
       onSaved?.(saved);
       onOpenChange(false);
     },
     onError: (error) => {
+      setBasicInfoSaving(false);
       if (error instanceof APIError && error.code === "profile_exists") {
         form.setError("id", { message: t("provider.profileExists") });
         return;
@@ -198,30 +292,77 @@ export function ProviderProfileEditorDialog({
       }
       return patchProvider(token, editingID, cleanPatchProvider(value));
     },
+    onMutate: () => setBasicInfoSaving(true),
     onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
       onSaved?.(saved);
       onOpenChange(false);
     },
     onError: (error) => {
+      setBasicInfoSaving(false);
       form.setError("root", { message: error instanceof Error ? error.message : t("provider.saveFailed") });
     },
   });
 
-  async function loadCandidates() {
+  const modelMutation = useMutation({
+    mutationFn: async (commit: ModelCommit) => {
+      if (!editingID) {
+        throw new Error("missing provider id");
+      }
+      return patchProvider(token, editingID, patchProviderRequest.parse({
+        models: commit.models.map((model) => cleanModel(model, commit.protocol)),
+      }));
+    },
+    onSuccess: async (saved, commit) => {
+      fields.replace(saved.models.map((model) => modelToForm(model, saved.protocol)));
+      form.clearErrors("models");
+      setModelSaveError(null);
+      commit.onCommitted?.();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    },
+    onError: (error) => {
+      setModelDialogSaving(false);
+      setModelSaveError(error instanceof Error ? error.message : t("provider.modelSaveFailed"));
+    },
+  });
+
+  function commitModels(models: ModelFormValue[], onCommitted?: () => void) {
+    setModelSaveError(null);
     if (!editingID) {
+      fields.replace(models);
+      form.clearErrors("models");
+      onCommitted?.();
       return;
     }
+    const values = form.getValues();
+    modelMutation.mutate({
+      models,
+      protocol: values.protocol,
+      onCommitted,
+    });
+  }
+
+  async function loadCandidates() {
     setCandidatePopoverOpen(true);
+    setModelSaveError(null);
     setCandidatesLoading(true);
+    setCandidatesFailed(false);
+    setCandidateIDs([]);
+    setSelectedCandidateIDs([]);
+    setCandidateFilter("");
+    form.clearErrors("root");
     try {
       const values = form.getValues();
-      const response = values.apiKey?.trim()
+      const discovery = activeVariant && preset
+        ? providerModelDiscoveryForVariant(preset, activeVariant, values.baseURL)
+        : null;
+      const response = !editingID || values.apiKey?.trim()
         ? await probeProviderModels(token, {
-            protocol: values.protocol,
-            baseURL: values.baseURL,
-            apiKey: values.apiKey.trim(),
-        })
+            protocol: discovery?.protocol || values.protocol,
+            baseURL: discovery?.baseURL || values.baseURL,
+            apiKey: values.apiKey?.trim() || "",
+            brand: values.brand,
+          })
         : await listProviderModels(token, editingID);
       const { models } = response;
       const existing = new Set(form.getValues("models").map((model) => model.id.trim()).filter(Boolean));
@@ -238,7 +379,7 @@ export function ProviderProfileEditorDialog({
       setSelectedCandidateIDs([]);
       setCandidateFilter("");
     } catch {
-      form.setError("root", { message: t("provider.candidatesFailed") });
+      setCandidatesFailed(true);
     } finally {
       setCandidatesLoading(false);
     }
@@ -253,6 +394,10 @@ export function ProviderProfileEditorDialog({
     });
   }
 
+  function selectAllFilteredCandidates() {
+    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidateIDs])));
+  }
+
   function addSelectedCandidates() {
     if (selectedCandidateIDs.length === 0) {
       return;
@@ -265,10 +410,32 @@ export function ProviderProfileEditorDialog({
       setSelectedCandidateIDs([]);
       return;
     }
-    fields.append(selected.map((id) => modelToForm(mergeProviderModelCandidate(id, variant, values.protocol), values.protocol, values.brand)));
-    setCandidateIDs((current) => current.filter((id) => !selected.includes(id)));
-    setSelectedCandidateIDs([]);
-    setCandidatePopoverOpen(false);
+    const nextModels = [
+      ...values.models,
+      ...selected.map((id) => modelToForm(mergeProviderModelCandidate(id, variant, values.protocol), values.protocol)),
+    ];
+    commitModels(nextModels, () => {
+      setPendingRevealModelIndex(values.models.length);
+      setCandidateIDs((current) => current.filter((id) => !selected.includes(id)));
+      setSelectedCandidateIDs([]);
+      setCandidatePopoverOpen(false);
+    });
+  }
+
+  function handleModelDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) {
+      return;
+    }
+    const from = fields.fields.findIndex((field) => field.id === active.id);
+    const to = fields.fields.findIndex((field) => field.id === over.id);
+    if (from >= 0 && to >= 0) {
+      const nextModels = [...form.getValues("models")];
+      const [moved] = nextModels.splice(from, 1);
+      if (moved) {
+        nextModels.splice(to, 0, moved);
+        commitModels(nextModels);
+      }
+    }
   }
 
   function submitProvider(value: ProviderProfileEditorValue) {
@@ -289,8 +456,8 @@ export function ProviderProfileEditorDialog({
     form.setValue("baseURL", baseURLForVariantSwitch(form.getValues("baseURL"), variant), { shouldDirty: true });
     // 动态模型只表示"预设不内置模型清单";切换接入方式时不能清空
     // 用户已经配置的模型,也不在这里从端点隐式恢复。
-    if (!variant.dynamicModels && variant.models.length > 0) {
-      fields.replace(variant.models.map((model) => modelToForm(model, variant.protocol, form.getValues("brand"))));
+    if (!editingID && !variant.dynamicModels && variant.models.length > 0) {
+      fields.replace(variant.models.map((model) => modelToForm(model, variant.protocol)));
     }
     form.clearErrors("root");
   }
@@ -319,8 +486,9 @@ export function ProviderProfileEditorDialog({
     form.setValue("protocol", protocol, { shouldDirty: true });
   }
 
-  const saving = createMutation.isPending || patchMutation.isPending;
-  const unsavedChanges = useUnsavedChangesGuard(form.formState.isDirty);
+  const modelSaving = modelMutation.isPending;
+  const saving = basicInfoSaving || modelSaving;
+  const unsavedChanges = useUnsavedChangesGuard(editingID ? basicInfoDirty : form.formState.isDirty);
 
   function handleDialogOpenChange(nextOpen: boolean) {
     if (saving) {
@@ -337,7 +505,8 @@ export function ProviderProfileEditorDialog({
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent
-          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
+          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-none"
+          showCloseButton={false}
           onPointerDownOutside={(event) => {
             if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
               event.preventDefault();
@@ -349,11 +518,22 @@ export function ProviderProfileEditorDialog({
             }
           }}
         >
+        <DialogClose asChild>
+          <Button
+            aria-label={t("common.close")}
+            className="absolute top-2 right-2"
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <X />
+          </Button>
+        </DialogClose>
         <DialogHeader className="px-5 py-4 pr-14">
           <DialogTitle>{editingID ? t("provider.edit") : t("provider.create")}</DialogTitle>
-          <DialogDescription>{t("provider.keyHint")}</DialogDescription>
+          <DialogDescription>{t("provider.editorHint")}</DialogDescription>
         </DialogHeader>
-        <form className="contents" onSubmit={form.handleSubmit(submitProvider)}>
+        <form id="provider-profile-form" className="contents" onSubmit={form.handleSubmit(submitProvider)}>
           <input type="hidden" {...form.register("brand")} />
           <input type="hidden" {...form.register("group")} />
           <input type="hidden" {...form.register("id")} />
@@ -371,6 +551,9 @@ export function ProviderProfileEditorDialog({
                     {t("provider.name")}
                   </FieldLabel>
                   <Input id="provider-name" {...form.register("displayName")} />
+                  {form.formState.errors.displayName?.message ? (
+                    <div className="text-xs text-destructive">{t(form.formState.errors.displayName.message)}</div>
+                  ) : null}
                   {form.formState.errors.id?.message ? (
                     <div className="text-xs text-destructive">{form.formState.errors.id.message}</div>
                   ) : null}
@@ -406,7 +589,7 @@ export function ProviderProfileEditorDialog({
                     <DialogSelectContent>
                       {providerProtocolOptions.map((protocol) => (
                         <SelectItem key={protocol} value={protocol}>
-                          {providerProtocolLabel(protocol)}
+                          {providerProtocolDisplayName(protocol)}
                         </SelectItem>
                       ))}
                     </DialogSelectContent>
@@ -446,14 +629,31 @@ export function ProviderProfileEditorDialog({
                 </div>
               </Field>
 
-              <div className="grid gap-2">
+              <div className="flex justify-end">
+                <Button
+                  disabled={saving || !formReady || Boolean(editingID && !basicInfoDirty)}
+                  size="sm"
+                  type="submit"
+                >
+                  {basicInfoSaving ? <Spinner /> : null}
+                  {t(editingID ? "provider.saveBasicInfo" : "provider.createAction")}
+                </Button>
+              </div>
+
+              <div className="grid gap-2 border-t pt-4">
                 <div className="flex items-center justify-between gap-2">
-                  <Label>{t("provider.models")}</Label>
+                  <div className="grid gap-0.5">
+                    <Label>{t("provider.models")}</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {t(editingID ? "provider.modelsImmediateHint" : "provider.modelsHint")}
+                    </span>
+                  </div>
                   <div className="flex gap-2">
-                    <Popover modal open={candidatePopoverOpen} onOpenChange={setCandidatePopoverOpen}>
+                    {supportsModelDiscovery ? <Popover modal open={candidatePopoverOpen} onOpenChange={setCandidatePopoverOpen}>
                       <PopoverAnchor asChild>
-                        <Button disabled={!editingID || candidatesLoading} size="sm" type="button" variant="ghost" onClick={() => void loadCandidates()}>
-                          {t("provider.loadCandidates")}
+                        <Button disabled={candidatesLoading || modelSaving} size="sm" type="button" variant="ghost" onClick={() => void loadCandidates()}>
+                          {candidatesLoading ? <Spinner className="size-4" /> : null}
+                          {editingID ? t("provider.loadCandidates") : t("provider.testAndLoadModels")}
                         </Button>
                       </PopoverAnchor>
                       <PopoverContent align="end" className="w-80 gap-0 overflow-hidden p-0">
@@ -461,14 +661,16 @@ export function ProviderProfileEditorDialog({
                           <PopoverTitle>{t("provider.candidateModels")}</PopoverTitle>
                           <PopoverDescription>{t("provider.candidateModelsHint")}</PopoverDescription>
                         </PopoverHeader>
-                        <div className="border-b p-2">
-                          <Input
-                            autoComplete="off"
-                            placeholder={t("provider.filterCandidates")}
-                            value={candidateFilter}
-                            onChange={(event) => setCandidateFilter(event.target.value)}
-                          />
-                        </div>
+                        {candidateIDs.length > 8 ? (
+                          <div className="border-b p-2">
+                            <Input
+                              autoComplete="off"
+                              placeholder={t("provider.filterCandidates")}
+                              value={candidateFilter}
+                              onChange={(event) => setCandidateFilter(event.target.value)}
+                            />
+                          </div>
+                        ) : null}
                         <div
                           className="h-64 overflow-y-scroll overscroll-contain"
                         >
@@ -477,6 +679,13 @@ export function ProviderProfileEditorDialog({
                               <div className="flex h-24 items-center justify-center gap-2 text-sm text-muted-foreground">
                                 <Spinner className="size-4" />
                                 {t("common.loading")}
+                              </div>
+                            ) : candidatesFailed ? (
+                              <div className="flex h-40 flex-col items-center justify-center gap-3 px-4 text-center text-sm text-muted-foreground">
+                                <span>{t("provider.candidatesFailed")}</span>
+                                <Button size="sm" type="button" variant="outline" onClick={() => void loadCandidates()}>
+                                  {t("provider.retryCandidates")}
+                                </Button>
                               </div>
                             ) : filteredCandidateIDs.length > 0 ? (
                               filteredCandidateIDs.map((id) => (
@@ -488,7 +697,10 @@ export function ProviderProfileEditorDialog({
                                     checked={selectedCandidateIDs.includes(id)}
                                     onCheckedChange={(checked) => toggleCandidate(id, checked)}
                                   />
-                                  <span className="truncate font-mono">{id}</span>
+                                  <span className="grid min-w-0 gap-0.5">
+                                    <span className="truncate">{providerModelDisplayName(id)}</span>
+                                    <span className="truncate font-mono text-xs text-muted-foreground">{id}</span>
+                                  </span>
                                 </label>
                               ))
                             ) : (
@@ -498,62 +710,154 @@ export function ProviderProfileEditorDialog({
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center justify-between gap-2 border-t p-2">
-                          <span className="text-xs text-muted-foreground">
-                            {selectedCandidateIDs.length} / {filteredCandidateIDs.length} / {candidateIDs.length}
-                          </span>
-                          <Button disabled={selectedCandidateIDs.length === 0} size="sm" type="button" onClick={addSelectedCandidates}>
-                            {t("provider.addSelectedModels")}
-                          </Button>
-                        </div>
+                        {candidateIDs.length > 0 && !candidatesLoading && !candidatesFailed ? (
+                          <div className="grid gap-2 border-t p-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-muted-foreground">
+                                {t("provider.selectedAndTotalCount")
+                                  .replace("{selected}", String(selectedCandidateIDs.length))
+                                  .replace("{total}", String(candidateIDs.length))}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  disabled={filteredCandidateIDs.length === 0}
+                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                  onClick={selectAllFilteredCandidates}
+                                >
+                                  {t("common.selectAll")}
+                                </Button>
+                                <Button
+                                  disabled={selectedCandidateIDs.length === 0}
+                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                  onClick={() => setSelectedCandidateIDs([])}
+                                >
+                                  {t("common.clear")}
+                                </Button>
+                              </div>
+                            </div>
+                            <Button className="w-full" disabled={selectedCandidateIDs.length === 0 || modelSaving} size="sm" type="button" onClick={addSelectedCandidates}>
+                              {modelSaving ? <Spinner /> : null}
+                              {t("provider.addSelectedModelsCount").replace("{count}", String(selectedCandidateIDs.length))}
+                            </Button>
+                          </div>
+                        ) : null}
                       </PopoverContent>
-                    </Popover>
-                    <Button size="sm" type="button" variant="outline" onClick={() => fields.append(emptyModel())}>
+                    </Popover> : null}
+                    <Button
+                      disabled={modelSaving}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setModelSaveError(null);
+                        setModelDialogSaving(false);
+                        setModelDialogState({ mode: "create" });
+                      }}
+                    >
                       <Plus />
                       {t("provider.addModel")}
                     </Button>
                   </div>
                 </div>
                 {fields.fields.length > 0 ? (
-                  <Accordion className="overflow-hidden rounded-lg border bg-card" type="multiple">
-                    {fields.fields.map((field, index) => (
-                      <ModelEditor
-                        key={field.id}
-                        canMoveDown={index < fields.fields.length - 1}
-                        canMoveUp={index > 0}
-                        canRemove
-                        form={form}
-                        index={index}
-                        providerBrand={providerBrand}
-                        providerProtocol={providerProtocol}
-                        value={field.id}
-                        onDuplicate={() => fields.insert(index + 1, { ...form.getValues(`models.${index}`) })}
-                        onMoveDown={() => fields.move(index, index + 1)}
-                        onMoveUp={() => fields.move(index, index - 1)}
-                        onRemove={() => fields.remove(index)}
-                      />
-                    ))}
-                  </Accordion>
+                  <DndContext
+                    collisionDetection={closestCenter}
+                    sensors={modelSortSensors}
+                    onDragEnd={handleModelDragEnd}
+                  >
+                    <div className="overflow-hidden rounded-lg border bg-card">
+                      <SortableContext
+                        items={fields.fields.map((field) => field.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {fields.fields.map((field, index) => (
+                          <SortableModelRow
+                            key={field.id}
+                            disabled={modelSaving}
+                            highlighted={highlightedModelID === field.id}
+                            model={configuredModels[index] || emptyModel()}
+                            sortableDisabled={fields.fields.length < 2 || modelSaving}
+                            sortableID={field.id}
+                            onDuplicate={() => {
+                              setModelSaveError(null);
+                              setModelDialogSaving(false);
+                              setModelDialogState({ mode: "duplicate", index });
+                            }}
+                            onEdit={() => {
+                              setModelSaveError(null);
+                              setModelDialogSaving(false);
+                              setModelDialogState({ mode: "edit", index });
+                            }}
+                            onRemove={() => {
+                              const nextModels = form.getValues("models").filter((_, modelIndex) => modelIndex !== index);
+                              commitModels(nextModels);
+                            }}
+                          />
+                        ))}
+                      </SortableContext>
+                    </div>
+                  </DndContext>
                 ) : (
                   <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
                     {t("picker.noModels")}
                   </div>
                 )}
+                {form.formState.errors.models?.message ? (
+                  <div className="text-xs text-destructive">{t(form.formState.errors.models.message)}</div>
+                ) : null}
+                {modelSaveError && !modelDialogState ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>{modelSaveError}</AlertDescription>
+                  </Alert>
+                ) : null}
               </div>
             </div>
           </div>
-          <DialogFooter className="m-0 rounded-none">
-            <Button disabled={saving} type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button disabled={saving} type="submit">
-              {saving ? <Spinner /> : null}
-              {t("common.save")}
-            </Button>
-          </DialogFooter>
         </form>
         </DialogContent>
       </Dialog>
+      {modelDialogState ? (
+        <ModelDetailsDialog
+          existingModelIDs={configuredModels.flatMap((model, index) =>
+            modelDialogState.mode === "edit" && modelDialogState.index === index ? [] : [model.id],
+          )}
+          initialValue={modelDialogState.mode === "create" ? null : configuredModels[modelDialogState.index]}
+          mode={modelDialogState.mode}
+          errorMessage={modelSaveError}
+          providerBrand={providerBrand}
+          providerProtocol={providerProtocol}
+          saving={modelSaving || modelDialogSaving}
+          onClose={() => {
+            if (!modelSaving && !modelDialogSaving) {
+              setModelDialogState(null);
+              setModelSaveError(null);
+            }
+          }}
+          onSave={(model) => {
+            setModelDialogSaving(true);
+            const nextModels = [...form.getValues("models")];
+            let nextIndex: number;
+            if (modelDialogState.mode === "edit") {
+              nextIndex = modelDialogState.index;
+              nextModels[nextIndex] = model;
+            } else if (modelDialogState.mode === "duplicate") {
+              nextIndex = modelDialogState.index + 1;
+              nextModels.splice(nextIndex, 0, model);
+            } else {
+              nextIndex = nextModels.length;
+              nextModels.push(model);
+            }
+            commitModels(nextModels, () => {
+              setPendingRevealModelIndex(nextIndex);
+              setModelDialogState(null);
+            });
+          }}
+        />
+      ) : null}
       <UnsavedChangesAlert
         open={unsavedChanges.confirmationOpen}
         onDiscard={unsavedChanges.discard}
@@ -563,172 +867,292 @@ export function ProviderProfileEditorDialog({
   );
 }
 
-function ModelEditor({
-  index,
-  providerBrand,
-  providerProtocol,
-  canMoveDown,
-  canMoveUp,
-  canRemove,
-  form,
-  value,
+function SortableModelRow({
+  disabled,
+  highlighted,
+  model,
+  sortableDisabled,
+  sortableID,
   onDuplicate,
-  onMoveDown,
-  onMoveUp,
+  onEdit,
   onRemove,
 }: {
-  index: number;
-  providerBrand?: string;
-  providerProtocol: ProviderProfileEditorValue["protocol"];
-  canMoveDown: boolean;
-  canMoveUp: boolean;
-  canRemove: boolean;
-  form: ReturnType<typeof useForm<ProviderProfileEditorValue>>;
-  value: string;
+  disabled: boolean;
+  highlighted: boolean;
+  model: ModelFormValue;
+  sortableDisabled: boolean;
+  sortableID: string;
   onDuplicate: () => void;
-  onMoveDown: () => void;
-  onMoveUp: () => void;
+  onEdit: () => void;
   onRemove: () => void;
 }) {
   const { t } = useI18n();
-  const prefix = `models.${index}` as const;
-  const watch = form.watch;
-  const modelID = watch(`${prefix}.id`);
-  const displayName = watch(`${prefix}.displayName`);
-  const reasoningEffort = watch(`${prefix}.reasoningEffort`);
-  const temperature = watch(`${prefix}.temperature`);
-  const setBoolean = (name: "image" | "audio" | "tools", checked: boolean | "indeterminate") => {
-    form.setValue(`${prefix}.${name}`, checked === true, { shouldDirty: true });
-  };
-  const setTemperature = (value: number) => {
-    form.setValue(`${prefix}.temperature`, value.toFixed(1), { shouldDirty: true });
+  const displayName = model.displayName?.trim() || providerModelDisplayName(model.id) || t("provider.unnamedModel");
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    id: sortableID,
+    disabled: sortableDisabled,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "relative grid h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 px-2 not-last:border-b",
+        highlighted && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+        isDragging && "z-10 bg-card opacity-80 shadow-md",
+      )}
+      id={`provider-model-${sortableID}`}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+    >
+      <Button
+        {...attributes}
+        {...listeners}
+        aria-label={t("provider.reorderModel")}
+        className="touch-none cursor-grab text-muted-foreground active:cursor-grabbing"
+        disabled={sortableDisabled}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      >
+        <GripVertical />
+      </Button>
+      <button
+        aria-label={t("provider.editModel")}
+        className="h-12 min-w-0 truncate text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+        disabled={disabled}
+        type="button"
+        onClick={onEdit}
+      >
+        {displayName}
+      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label={t("provider.modelActions")} disabled={disabled} size="icon-sm" type="button" variant="ghost">
+            <Ellipsis />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onSelect={onDuplicate}>
+            <Copy />
+            {t("provider.duplicateModel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+            <Trash />
+            {t("common.delete")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function ModelDetailsDialog({
+  existingModelIDs,
+  errorMessage,
+  initialValue,
+  mode,
+  providerBrand,
+  providerProtocol,
+  saving,
+  onClose,
+  onSave,
+}: {
+  existingModelIDs: string[];
+  errorMessage?: string | null;
+  initialValue?: ModelFormValue | null;
+  mode: "create" | "edit" | "duplicate";
+  providerBrand?: string;
+  providerProtocol: ProviderProfileEditorValue["protocol"];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (model: ModelFormValue) => void;
+}) {
+  const { t } = useI18n();
+  const modelForm = useForm<ModelFormValue>({ defaultValues: initialValue || emptyModel() });
+  const modelID = modelForm.watch("id");
+  const temperature = modelForm.watch("temperature");
+  const reasoningEffort = modelForm.watch("reasoningEffort");
+  const titleKey = mode === "edit"
+    ? "provider.editModel"
+    : mode === "duplicate"
+      ? "provider.duplicateModel"
+      : "provider.addModel";
+  const descriptionKey = mode === "edit"
+    ? "provider.editModelHint"
+    : mode === "duplicate"
+      ? "provider.duplicateModelHint"
+      : "provider.addModelHint";
+
+  function submitModel(value: ModelFormValue) {
+    if (mode === "edit" && !modelForm.formState.isDirty) {
+      return;
+    }
+    const id = value.id.trim();
+    if (!id) {
+      modelForm.setError("id", { message: MODEL_ID_REQUIRED });
+      return;
+    }
+    if (existingModelIDs.some((item) => item.trim() === id)) {
+      modelForm.setError("id", { message: "provider.modelExists" });
+      return;
+    }
+    onSave({
+      ...value,
+      id,
+      displayName: value.displayName?.trim() || providerModelDisplayName(id),
+    });
+  }
+
+  const setCapability = (name: "image" | "audio" | "tools", checked: boolean | "indeterminate") => {
+    modelForm.setValue(name, checked === true, { shouldDirty: true });
   };
 
   return (
-    <AccordionItem className="not-last:border-b" value={value}>
-      <div className="grid h-12 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3">
-        <AccordionTrigger className="min-w-0 items-center rounded-none border-0 p-0 hover:no-underline focus-visible:ring-0 [&_[data-slot=accordion-trigger-icon]]:hidden">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="w-7 shrink-0 text-sm tabular-nums text-muted-foreground">#{index}</span>
-            <span className="truncate text-sm font-medium">{displayName?.trim() || modelID?.trim() || t("session.model")}</span>
-            <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded/accordion-trigger:rotate-180" />
-          </div>
-        </AccordionTrigger>
-        <div className="flex items-center gap-1">
-          <IconAction disabled={!canMoveUp} label={t("provider.moveUp")} onClick={onMoveUp}>
-            <ArrowUp />
-          </IconAction>
-          <IconAction disabled={!canMoveDown} label={t("provider.moveDown")} onClick={onMoveDown}>
-            <ArrowDown />
-          </IconAction>
-          <IconAction label={t("provider.duplicateModel")} onClick={onDuplicate}>
-            <Copy />
-          </IconAction>
-          <IconAction className="text-destructive hover:text-destructive" disabled={!canRemove} label={t("common.delete")} onClick={onRemove}>
-            <Trash />
-          </IconAction>
-        </div>
-      </div>
-
-      <AccordionContent className="pb-3">
-        <div className="border-t" />
-        <div className="grid gap-3 px-3 pt-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <PlainField label={t("provider.modelID")}>
-              <Input {...form.register(`${prefix}.id`)} />
-              {form.formState.errors.models?.[index]?.id?.message ? (
-                <div className="text-xs text-destructive">{t(form.formState.errors.models[index]?.id?.message || "")}</div>
-              ) : null}
-            </PlainField>
-            <PlainField label={t("provider.modelName")}>
-              <Input {...form.register(`${prefix}.displayName`)} />
-            </PlainField>
-          </div>
-
-          <div className="grid gap-2">
-            <div className="text-sm font-medium">{t("provider.capabilities")}</div>
-            <div className="grid grid-cols-3 gap-2">
-              <CheckField checked={watch(`${prefix}.image`)} label={t("provider.capability.image")} onCheckedChange={(checked) => setBoolean("image", checked)} />
-              <CheckField checked={watch(`${prefix}.audio`)} label={t("provider.capability.audio")} onCheckedChange={(checked) => setBoolean("audio", checked)} />
-              <CheckField checked={watch(`${prefix}.tools`)} label={t("provider.capability.tools")} onCheckedChange={(checked) => setBoolean("tools", checked)} />
+    <Dialog open onOpenChange={(open) => {
+      if (!open && !saving) {
+        onClose();
+      }
+    }}>
+      <DialogContent
+        className="grid max-h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[min(560px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
+        showCloseButton={false}
+      >
+        <DialogClose asChild>
+          <Button
+            aria-label={t("common.close")}
+            className="absolute top-2 right-2"
+            disabled={saving}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <X />
+          </Button>
+        </DialogClose>
+        <DialogHeader className="px-5 py-4 pr-14">
+          <DialogTitle>{t(titleKey)}</DialogTitle>
+          <DialogDescription>{t(descriptionKey)}</DialogDescription>
+        </DialogHeader>
+        <form className="contents" onSubmit={modelForm.handleSubmit(submitModel)}>
+          <div className="grid min-h-0 gap-4 overflow-y-auto border-y px-5 py-4">
+            {errorMessage ? (
+              <Alert variant="destructive">
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <PlainField label={t("provider.modelID")}>
+                <Input
+                  autoFocus
+                  {...modelForm.register("id")}
+                  onFocus={(event) => {
+                    if (mode === "duplicate") {
+                      event.currentTarget.select();
+                    }
+                  }}
+                />
+                {modelForm.formState.errors.id?.message ? (
+                  <div className="text-xs text-destructive">{t(modelForm.formState.errors.id.message)}</div>
+                ) : null}
+              </PlainField>
+              <PlainField hint={t("provider.modelNameAutoHint")} label={t("provider.modelName")}>
+                <Input
+                  placeholder={modelID.trim() ? providerModelDisplayName(modelID) : undefined}
+                  {...modelForm.register("displayName")}
+                />
+              </PlainField>
             </div>
-          </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ReadableNumberField label={t("provider.contextWindow")} value={watch(`${prefix}.contextWindow`)}>
-              <Input inputMode="numeric" {...form.register(`${prefix}.contextWindow`)} />
-            </ReadableNumberField>
-            <MaxOutputField form={form} prefix={prefix} providerProtocol={providerProtocol} />
-            <TemperatureField label={t("provider.temperature")} value={temperature} onValueChange={setTemperature} />
-            {providerProtocol !== "anthropic" ? (
+            <div className="grid gap-2">
+              <div className="text-sm font-medium">{t("provider.capabilities")}</div>
+              <div className="grid grid-cols-3 gap-2">
+                <CheckField checked={modelForm.watch("image")} label={t("provider.capability.image")} onCheckedChange={(checked) => setCapability("image", checked)} />
+                <CheckField checked={modelForm.watch("audio")} label={t("provider.capability.audio")} onCheckedChange={(checked) => setCapability("audio", checked)} />
+                <CheckField checked={modelForm.watch("tools")} label={t("provider.capability.tools")} onCheckedChange={(checked) => setCapability("tools", checked)} />
+              </div>
+            </div>
+
+            <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+              <ReadableNumberField label={t("provider.contextWindow")} value={modelForm.watch("contextWindow")}>
+                <Input inputMode="numeric" {...modelForm.register("contextWindow")} />
+              </ReadableNumberField>
+              <ReadableNumberField
+                label={t("provider.maxOutput")}
+                value={modelForm.watch(providerProtocol === "anthropic" ? "anthropicMaxTokens" : "maxCompletionTokens")}
+              >
+                <Input
+                  inputMode="numeric"
+                  {...modelForm.register(providerProtocol === "anthropic" ? "anthropicMaxTokens" : "maxCompletionTokens")}
+                />
+              </ReadableNumberField>
+              <TemperatureField
+                label={t("provider.temperature")}
+                value={temperature}
+                onValueChange={(value) => modelForm.setValue("temperature", value.toFixed(1), { shouldDirty: true })}
+              />
               <ReasoningEffortField
                 label={t("provider.reasoningEffort")}
-                options={reasoningEffortOptions(providerProtocol, providerBrand, modelID)}
+                options={reasoningEffortOptions(providerProtocol)}
                 value={reasoningEffort}
                 onValueChange={(value) =>
-                  form.setValue(`${prefix}.reasoningEffort`, value === "auto" ? "" : value, { shouldDirty: true })
+                  modelForm.setValue("reasoningEffort", value === "auto" ? "" : value, { shouldDirty: true })
                 }
               />
+            </div>
+            {providerProtocol !== "anthropic" && providerProtocol !== "google" ? (
+              <PlainField className="sm:w-[calc(50%-0.375rem)]" label={t("provider.maxToolLoops")}>
+                <Input inputMode="numeric" {...modelForm.register("maxToolLoops")} />
+              </PlainField>
             ) : null}
           </div>
-          {providerProtocol !== "anthropic" && providerProtocol !== "google" ? (
-            <PlainField className="sm:w-[calc(50%-0.375rem)]" label={t("provider.maxToolLoops")}>
-              <Input inputMode="numeric" {...form.register(`${prefix}.maxToolLoops`)} />
-            </PlainField>
-          ) : null}
-        </div>
-      </AccordionContent>
-    </AccordionItem>
+          <DialogFooter className="m-0 rounded-none">
+            <Button disabled={saving} type="button" variant="outline" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button disabled={saving || (mode === "edit" && !modelForm.formState.isDirty)} type="submit">
+              {saving ? <Spinner /> : mode !== "edit" ? <Plus /> : null}
+              {t(mode === "edit" ? "common.save" : mode === "duplicate" ? "provider.createModelCopy" : "provider.addModel")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function PlainField({
   children,
   className,
+  hint,
   label,
 }: {
   children: ReactNode;
   className?: string;
+  hint?: string;
   label: string;
 }) {
   return (
     <Field className={cn("gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent", className)}>
-      <FieldLabel className="w-auto cursor-default text-sm font-medium">{label}</FieldLabel>
+      <FieldLabel className="w-auto cursor-default gap-1.5 text-sm font-medium">
+        <span>{label}</span>
+        {hint ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                aria-label={hint}
+                className="inline-flex size-4 cursor-help items-center justify-center text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                role="button"
+                tabIndex={0}
+              >
+                <CircleHelp className="size-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{hint}</TooltipContent>
+          </Tooltip>
+        ) : null}
+      </FieldLabel>
       {children}
     </Field>
-  );
-}
-
-function IconAction({
-  children,
-  className,
-  disabled,
-  label,
-  onClick,
-}: {
-  children: ReactNode;
-  className?: string;
-  disabled?: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      aria-label={label}
-      className={className}
-      disabled={disabled}
-      size="icon-sm"
-
-      type="button"
-      variant="ghost"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      {children}
-    </Button>
   );
 }
 
@@ -752,30 +1176,6 @@ function ReadableNumberField({
         </span>
       </div>
     </PlainField>
-  );
-}
-
-function MaxOutputField({
-  form,
-  prefix,
-  providerProtocol,
-}: {
-  form: ReturnType<typeof useForm<ProviderProfileEditorValue>>;
-  prefix: `models.${number}`;
-  providerProtocol: ProviderProfileEditorValue["protocol"];
-}) {
-  const { t } = useI18n();
-  if (providerProtocol === "anthropic") {
-    return (
-      <ReadableNumberField label={t("provider.maxOutput")} value={form.watch(`${prefix}.anthropicMaxTokens`)}>
-        <Input inputMode="numeric" placeholder="4096" {...form.register(`${prefix}.anthropicMaxTokens`)} />
-      </ReadableNumberField>
-    );
-  }
-  return (
-    <ReadableNumberField label={t("provider.maxOutput")} value={form.watch(`${prefix}.maxCompletionTokens`)}>
-      <Input inputMode="numeric" {...form.register(`${prefix}.maxCompletionTokens`)} />
-    </ReadableNumberField>
   );
 }
 
@@ -928,7 +1328,7 @@ export function emptyProviderProfileForm(id = ""): ProviderProfileEditorValue {
     protocol: "openai-compatible",
     baseURL: "",
     apiKey: "",
-    models: [emptyModel()],
+    models: [],
   };
 }
 
@@ -989,21 +1389,21 @@ function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
     protocol: profile.protocol,
     baseURL: profile.baseURL || variant?.baseURL || "",
     apiKey: profile.apiKey || "",
-    models: profile.models.map((model) => modelToForm(model, profile.protocol, profile.brand)),
+    models: profile.models.map((model) => modelToForm(model, profile.protocol)),
   };
 }
 
-function modelToForm(model: ProviderModel, providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string): ModelFormValue {
+function modelToForm(model: ProviderModel, providerProtocol: ProviderProfileEditorValue["protocol"]): ModelFormValue {
   const options = model.providerOptions?.openai || model.providerOptions?.google || model.providerOptions?.anthropic || {};
   return {
     id: model.id,
-    displayName: model.displayName || "",
+    displayName: model.displayName?.trim() || providerModelDisplayName(model.id),
     contextWindow: model.contextWindow ? String(model.contextWindow) : "",
     image: model.capabilities?.image === true,
     audio: model.capabilities?.audio === true,
     tools: model.capabilities?.tools !== false,
     temperature: stringifyOption(options.temperature),
-    reasoningEffort: stringifyOption(reasoningEffortFromModel(providerProtocol, providerBrand, model)),
+    reasoningEffort: stringifyOption(reasoningEffortFromModel(providerProtocol, model)),
     maxCompletionTokens: stringifyOption(model.limits?.maxOutputTokens),
     maxToolLoops: stringifyOption(model.limits?.maxToolLoops),
     anthropicMaxTokens: stringifyOption(model.limits?.maxOutputTokens),
@@ -1031,17 +1431,16 @@ function cleanPatchProvider(value: ProviderProfileEditorValue) {
     protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
-    models: cleanModels(value),
   });
 }
 
 function cleanModels(value: ProviderProfileEditorValue) {
   return value.models
     .filter((model) => model.id.trim() !== "")
-    .map((model) => cleanModel(model, value.protocol, value.brand));
+    .map((model) => cleanModel(model, value.protocol));
 }
 
-function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string): ProviderModel {
+function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEditorValue["protocol"]): ProviderModel {
   const out: ProviderModel = {
     id: value.id.trim(),
     capabilities: {
@@ -1059,7 +1458,7 @@ function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEdit
     out.contextWindow = contextWindow;
   }
   const temperature = numberValue(value.temperature);
-  const reasoningEffort = normalizedReasoningEffort(value.reasoningEffort, providerProtocol, providerBrand, value.id);
+  const reasoningEffort = normalizedReasoningEffort(value.reasoningEffort, providerProtocol);
   const maxOutputTokens = providerProtocol === "anthropic" ? positiveInt(value.anthropicMaxTokens) : positiveInt(value.maxCompletionTokens);
   const maxToolLoops = providerProtocol === "anthropic" || providerProtocol === "google" ? undefined : positiveInt(value.maxToolLoops);
   if (maxOutputTokens || maxToolLoops) {
@@ -1069,11 +1468,10 @@ function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEdit
     };
   }
   if (providerProtocol === "anthropic") {
+    const outputConfig = compactOptions({ effort: reasoningEffort });
     const anthropic = compactOptions({
       temperature,
-      output_config: supportsDeepSeekReasoning(providerProtocol, providerBrand, value.id)
-        ? compactOptions({ effort: deepSeekReasoningAPIValue(reasoningEffort) })
-        : undefined,
+      output_config: Object.keys(outputConfig).length > 0 ? outputConfig : undefined,
     });
     if (Object.keys(anthropic).length > 0) {
       out.providerOptions = { anthropic };
@@ -1119,66 +1517,36 @@ function googleThinkingLevel(options: Record<string, unknown> | undefined) {
 
 function reasoningEffortFromModel(
   providerProtocol: ProviderProfileEditorValue["protocol"],
-  providerBrand: string | undefined,
   model: ProviderModel,
 ) {
-  if (supportsDeepSeekReasoning(providerProtocol, providerBrand, model.id)) {
-    if (providerProtocol === "anthropic") {
-      return normalizeDeepSeekReasoningValue(deepSeekAnthropicEffort(model.providerOptions?.anthropic));
-    }
-    return normalizeDeepSeekReasoningValue(model.providerOptions?.openai?.reasoning_effort);
+  if (providerProtocol === "anthropic") {
+    return anthropicEffort(model.providerOptions?.anthropic);
   }
   return model.providerOptions?.openai?.reasoning_effort ?? googleThinkingLevel(model.providerOptions?.google);
 }
 
-function deepSeekAnthropicEffort(options: Record<string, unknown> | undefined) {
+function anthropicEffort(options: Record<string, unknown> | undefined) {
   const outputConfig = options?.output_config;
   if (!outputConfig || typeof outputConfig !== "object" || Array.isArray(outputConfig)) {
     return undefined;
   }
-  return (outputConfig as Record<string, unknown>).effort;
+  const effort = (outputConfig as Record<string, unknown>).effort;
+  return typeof effort === "string" ? effort : undefined;
 }
 
-function reasoningEffortOptions(providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string, modelID?: string) {
-  if (supportsDeepSeekReasoning(providerProtocol, providerBrand, modelID)) {
-    return providerProtocol === "anthropic" ? ["auto", "high", "xhigh"] : OPENAI_REASONING_EFFORT_OPTIONS;
-  }
-  if (providerProtocol === "openai-compatible" || providerProtocol === "openai-responses") {
-    return OPENAI_REASONING_EFFORT_OPTIONS;
+function reasoningEffortOptions(providerProtocol: ProviderProfileEditorValue["protocol"]) {
+  if (providerProtocol === "openai-compatible" || providerProtocol === "openai-responses" || providerProtocol === "anthropic") {
+    return STANDARD_REASONING_EFFORT_OPTIONS;
   }
   return BASE_REASONING_EFFORT_OPTIONS;
 }
 
-function normalizedReasoningEffort(value: string | undefined, providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string, modelID?: string) {
+function normalizedReasoningEffort(value: string | undefined, providerProtocol: ProviderProfileEditorValue["protocol"]) {
   const effort = value?.trim();
   if (!effort || effort === "auto") {
     return undefined;
   }
-  return reasoningEffortOptions(providerProtocol, providerBrand, modelID).includes(effort) ? effort : undefined;
-}
-
-function supportsDeepSeekReasoning(providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string, modelID?: string) {
-  if (providerBrand !== "deepseek") {
-    return false;
-  }
-  return (providerProtocol === "openai-compatible" || providerProtocol === "anthropic") && /^deepseek-v4-/i.test(modelID?.trim() || "");
-}
-
-function normalizeDeepSeekReasoningValue(value: unknown) {
-  if (value === "max") {
-    return "xhigh";
-  }
-  return typeof value === "string" ? value : undefined;
-}
-
-function deepSeekReasoningAPIValue(value: string | undefined) {
-  if (value === "xhigh") {
-    return "max";
-  }
-  if (value === "low" || value === "medium" || value === "high") {
-    return "high";
-  }
-  return undefined;
+  return reasoningEffortOptions(providerProtocol).includes(effort) ? effort : undefined;
 }
 
 function baseURLForVariantSwitch(currentBaseURL: string | undefined, variant: ProviderPresetVariant) {
@@ -1210,19 +1578,6 @@ function presetGroupLabel(preset: ProviderPreset, group: string, t: (key: string
     return t("provider.customHint");
   }
   return group;
-}
-
-function providerProtocolLabel(protocol: ProviderPresetProtocol) {
-  switch (protocol) {
-    case "openai-compatible":
-      return "OpenAI";
-    case "openai-responses":
-      return "OpenAI Responses";
-    case "google":
-      return "Google";
-    case "anthropic":
-      return "Anthropic";
-  }
 }
 
 function positiveInt(value: string | undefined) {

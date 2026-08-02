@@ -221,11 +221,17 @@ var schemaMigrations = map[int]schemaMigration{
 		return err
 	},
 	9: func(tx *sql.Tx) error {
-		return removeLoadedAppID(tx, "project-files")
+		return removeLoadedAppIDs(tx, "project-files", "source-control")
 	},
 }
 
-func removeLoadedAppID(tx *sql.Tx, removedID string) error {
+func removeLoadedAppIDs(tx *sql.Tx, removedIDs ...string) error {
+	removed := make(map[string]bool, len(removedIDs))
+	for _, id := range removedIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			removed[id] = true
+		}
+	}
 	rows, err := tx.Query(`SELECT id,loaded_app_ids FROM sessions`)
 	if err != nil {
 		return err
@@ -249,7 +255,7 @@ func removeLoadedAppID(tx *sql.Tx, removedID string) error {
 		filtered := make([]string, 0, len(ids))
 		changed := false
 		for _, appID := range ids {
-			if strings.TrimSpace(appID) == removedID {
+			if removed[strings.TrimSpace(appID)] {
 				changed = true
 				continue
 			}

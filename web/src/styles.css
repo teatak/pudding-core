@@ -153,7 +153,7 @@
     --workspace-segment-border: oklch(0.895 0 0);
     --workspace-tab-foreground: oklch(0.47 0 0);
     --workspace-tab-hover-background: oklch(0.952 0 0);
-    --workspace-tab-active-background: oklch(0.925 0 0);
+    --workspace-tab-active-background: oklch(0.94 0 0);
     --workspace-tab-border: oklch(0.84 0 0);
     --workspace-tab-indicator: oklch(0.56 0 0);
     --workspace-file-editor-background: #ffffff;
@@ -580,7 +580,7 @@ html[data-shell] :where(
     --workspace-segment-border: oklch(1 0 0 / 7.5%);
     --workspace-tab-foreground: var(--muted-foreground);
     --workspace-tab-hover-background: color-mix(in oklch, var(--accent) 45%, transparent);
-    --workspace-tab-active-background: color-mix(in oklch, var(--accent) 80%, transparent);
+    --workspace-tab-active-background: color-mix(in oklch, var(--accent) 60%, transparent);
     --workspace-tab-border: color-mix(in oklch, var(--border) 90%, transparent);
     --workspace-tab-indicator: color-mix(in oklch, var(--foreground) 55%, transparent);
     --workspace-file-editor-background: #171717;
@@ -1508,7 +1508,7 @@ html[data-agent-console-resizing="true"] webview {
 }
 
 .pudding-markdown {
-  @apply grid min-w-0 max-w-full gap-2.5 whitespace-normal break-words;
+  @apply grid w-full min-w-0 max-w-full gap-2.5 whitespace-normal break-words;
   line-height: 1.65;
 }
 
@@ -2105,6 +2105,24 @@ html[data-agent-console-resizing="true"] webview {
   @apply grid gap-1 pl-5;
 }
 
+/* 列表里的代码块和段落必须以列表内容区为宽度边界，不能反向撑宽整条消息。 */
+.pudding-markdown :where(ul, ol, li),
+.pudding-markdown li > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pudding-markdown li > p {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.pudding-markdown :where(p, li) > code {
+  overflow-wrap: anywhere;
+  white-space: break-spaces;
+  word-break: break-word;
+}
+
 .pudding-markdown ul {
   @apply list-disc;
 }
@@ -2246,16 +2264,40 @@ html[data-agent-console-resizing="true"] webview {
 }
 
 .pudding-markdown .code-block-wrap {
-  @apply relative min-w-0 max-w-full;
+  @apply relative w-full min-w-0 max-w-full;
 }
 
-.pudding-markdown .code-block-wrap > div {
+.pudding-markdown .code-block-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  overscroll-behavior-inline: contain;
+}
+
+.pudding-markdown .code-block-scroll > div {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.pudding-markdown .code-block-wrap pre {
-  padding-right: 2.25rem;
+.pudding-markdown .code-block-scroll pre {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  padding-right: 3rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pudding-markdown .code-block-scroll pre code,
+.pudding-markdown .code-block-scroll pre code span {
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
 }
 
 .pudding-markdown .mermaid-block {

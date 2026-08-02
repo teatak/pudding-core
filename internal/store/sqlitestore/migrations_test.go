@@ -236,7 +236,7 @@ func TestOpenMigratesVersionSevenRemovesProjectAppBindings(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesVersionEightProjectFilesLoadedAppID(t *testing.T) {
+func TestOpenMigratesVersionEightRemovedBuiltinLoadedAppIDs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
 	if err != nil {
@@ -244,8 +244,8 @@ func TestOpenMigratesVersionEightProjectFilesLoadedAppID(t *testing.T) {
 	}
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{
-		ID: "sess_project_files", Title: "legacy app", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "browser"},
+		ID: "sess_removed_apps", Title: "legacy apps", Provider: "mock", Model: "mock",
+		LoadedAppIDs: []string{"project-files", "source-control", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestOpenMigratesVersionEightProjectFilesLoadedAppID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	session, err := reopened.GetSession(ctx, "sess_project_files")
+	session, err := reopened.GetSession(ctx, "sess_removed_apps")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 	if err := st.CreateSession(context.Background(), &store.Session{
 		ID: "sess_baseline", Title: "baseline", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "browser"},
+		LoadedAppIDs: []string{"project-files", "source-control", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}

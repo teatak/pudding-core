@@ -83,6 +83,7 @@ import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
+import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
 import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
   getVisibleUIContext,
@@ -310,11 +311,13 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
+  const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
   const setSessionReasoningEffort = useCallback(
     (value: string) => {
       if (!resolvedModelKey) {
         return;
       }
+      setReasoningEffortForModel(resolvedModelKey, value);
       void updateSession(token, sessionID, { reasoningEffort: value })
         .then((updated) => {
           queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
@@ -333,7 +336,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
         });
     },
-    [queryClient, resolvedModelKey, sessionID, token],
+    [queryClient, resolvedModelKey, sessionID, setReasoningEffortForModel, token],
   );
   useEffect(() => {
     if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {

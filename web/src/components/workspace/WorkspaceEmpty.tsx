@@ -1,5 +1,6 @@
-import { Folders, Globe, PanelsTopLeft, SquareTerminal } from "@/components/icons";
+import { Folders, Globe, SquareTerminal } from "@/components/icons";
 
+import { WorkspaceEmptyIllustration } from "@/components/illustrations/WorkspaceEmptyIllustration";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
@@ -41,19 +42,19 @@ export function WorkspaceEmpty({
   const { t } = useI18n();
   return (
     <div className="pudding-workspace-empty h-full overflow-y-auto bg-[var(--workspace-background)]">
-      <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="w-full max-w-lg -translate-y-[3vh]">
-          <div className="flex items-center gap-3 px-1 text-left">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--workspace-tab-hover-background)] text-muted-foreground">
-              <PanelsTopLeft className="size-5" data-icon-weight="subtle" />
-            </span>
-            <span className="grid min-w-0 gap-0.5">
-              <h1 className="text-base font-semibold text-foreground">{t("workspace.title")}</h1>
-              <span className="text-xs text-muted-foreground">{t("workspace.startDescription")}</span>
-            </span>
+      <div className="flex min-h-full items-start justify-center px-6 pt-[clamp(3rem,8vh,6rem)] pb-16">
+        <div className="w-full max-w-2xl">
+          <div className="grid w-full justify-items-center text-center">
+            <WorkspaceEmptyIllustration />
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+              {t("workspace.title")}
+            </h1>
+            <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+              {t("workspace.startDescription")}
+            </p>
           </div>
           <div
-            className="pudding-workspace-empty-actions mt-5 grid gap-2"
+            className="pudding-workspace-empty-actions mx-auto mt-7 grid w-full max-w-xl gap-2"
             data-has-project={hasProject}
           >
             {hasProject ? (

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Pencil, Plus, Sparkles, Trash } from "@/components/icons";
+import { Copy, Plus, Trash } from "@/components/icons";
 import { useEffect, useState } from "react";
 
 import { deleteProvider, listProviders, type ProviderProfile } from "@/api/client";
@@ -10,7 +10,7 @@ import {
   ProviderProfileEditorDialog,
   type ProviderProfileEditorValue,
 } from "@/components/ProviderProfileEditorDialog";
-import { ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
+import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +38,7 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   getOrderedProviderPresets,
+  providerProtocolDisplayName,
   type ProviderPreset,
 } from "@/provider/presets";
 
@@ -118,25 +119,21 @@ export function ProviderSettings({
   return (
     <div className={SETTINGS_CONTENT_CLASS}>
       {showInlinePresets ? (
-        <SettingsSection title={t("provider.addFromPreset")}>
-          <ProviderPresetGrid presets={providerPresets} onSelect={selectPreset} />
+        <SettingsSection title={t("provider.addConfiguration")}>
+          <ProviderPresetGrid presets={providerPresets} onSelect={selectPreset}>
+            <ProviderCustomCard onSelect={startCreate} />
+          </ProviderPresetGrid>
         </SettingsSection>
       ) : null}
 
       <SettingsSection
         action={
-          <div className="flex items-center gap-2">
-            {showInlinePresets ? null : (
-              <Button size="sm" type="button" variant="outline" onClick={() => setPresetPickerOpen(true)}>
-                <Sparkles />
-                {t("provider.addFromPreset")}
-              </Button>
-            )}
-            <Button size="sm" type="button" variant="outline" onClick={startCreate}>
+          showInlinePresets ? null : (
+            <Button size="sm" type="button" variant="outline" onClick={() => setPresetPickerOpen(true)}>
               <Plus />
-              {t("provider.new")}
+              {t("provider.addConfiguration")}
             </Button>
-          </div>
+          )
         }
         title={t("provider.list")}
       >
@@ -162,34 +159,35 @@ export function ProviderSettings({
               return (
                 <Item
                   key={profile.id}
-                  className="group min-h-16 flex-nowrap rounded-xl bg-card px-4 py-3"
+                  className="group min-h-16 flex-nowrap rounded-xl bg-card px-4 py-3 hover:bg-muted/20"
                   role="listitem"
                   variant="outline"
                 >
-                  <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                  <button className="flex min-w-0 flex-1 items-center gap-3 text-left" type="button" onClick={() => editProfile(profile)}>
                     <ItemMedia>
                       <BrandIcon className="shrink-0" name={profile.brand || profile.displayName || profile.id} size="lg" />
                     </ItemMedia>
                     <ItemContent className="min-w-0 gap-0.5">
                       <ItemTitle className="w-full min-w-0 font-normal">
                         <span className="truncate text-base font-normal">{profile.displayName}</span>
-                        <span
-                          className={cn(
-                            "size-2 shrink-0 rounded-full",
-                            profile.apiKeySet ? "bg-success" : "bg-warning",
-                          )}
-
-                        />
+                        {profile.models.length > 0 ? (
+                          <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                            {profileModelCountLabel(profile, t)}
+                          </span>
+                        ) : (
+                          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-normal text-warning">
+                            <span className="size-1.5 rounded-full bg-warning" />
+                            {t("provider.statusNoModels")}
+                          </span>
+                        )}
                       </ItemTitle>
-                      <ItemDescription className="truncate text-xs">
-                        {profile.protocol} · {profileModelCountLabel(profile, t)}
+                      <ItemDescription className="grid min-w-0 gap-0 text-xs">
+                        <span>{providerProtocolDisplayName(profile.protocol)}</span>
+                        <span className="truncate text-muted-foreground/70" title={profile.baseURL}>{profile.baseURL}</span>
                       </ItemDescription>
                     </ItemContent>
-                  </div>
+                  </button>
                   <ItemActions className="ml-auto shrink-0 gap-1">
-                    <Button aria-label={t("provider.editShort")} size="icon-sm" type="button" variant="ghost" onClick={() => editProfile(profile)}>
-                      <Pencil />
-                    </Button>
                     <Button aria-label={t("common.copy")} size="icon-sm" type="button" variant="ghost" onClick={() => cloneProfile(profile)}>
                       <Copy />
                     </Button>
@@ -248,7 +246,12 @@ export function ProviderSettings({
             className="pudding-provider-preset-surface-dark"
             presets={providerPresets}
             onSelect={selectPreset}
-          />
+          >
+            <ProviderCustomCard onSelect={() => {
+              setPresetPickerOpen(false);
+              startCreate();
+            }} />
+          </ProviderPresetGrid>
         </DialogContent>
       </Dialog>
 
@@ -270,13 +273,7 @@ export function ProviderSettings({
         profile={editingProfile}
         profiles={profiles}
         token={token}
-        onOpenChange={(next) => {
-          setEditorOpen(next);
-          if (!next) {
-            setEditingProfile(null);
-            setEditorInitialValue(null);
-          }
-        }}
+        onOpenChange={setEditorOpen}
       />
     </div>
   );

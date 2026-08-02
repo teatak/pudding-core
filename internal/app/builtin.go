@@ -6,7 +6,6 @@ const (
 	BuiltinBrowserID        = "browser"
 	BuiltinSkillAuthoringID = "skill-authoring"
 	BuiltinAppAuthoringID   = "app-authoring"
-	BuiltinSourceControlID  = "source-control"
 	BuiltinCodeIntelID      = "code-intelligence"
 	BuiltinCaptureID        = "capture"
 )
@@ -25,12 +24,6 @@ const (
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolSkillValidate     = "builtin_skill_validate"
 	toolAppSave           = "builtin_app_save"
-	toolGitStatus         = "builtin_git_status"
-	toolGitDiff           = "builtin_git_diff"
-	toolGitLog            = "builtin_git_log"
-	toolGitStage          = "builtin_git_stage"
-	toolGitUnstage        = "builtin_git_unstage"
-	toolGitCommit         = "builtin_git_commit"
 	toolCodeSymbols       = "builtin_code_symbols"
 	toolCodeDefinition    = "builtin_code_definition"
 	toolCodeReferences    = "builtin_code_references"
@@ -150,26 +143,6 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 				Description: "Create or update a local Pudding App package.",
 				Path:        "skills/app-creator/SKILL.md",
 				Content:     builtinAppAuthoringInstructions,
-			},
-		},
-	},
-	{
-		definition: &Definition{
-			Kind:         KindApp,
-			ID:           BuiltinSourceControlID,
-			Name:         "Source Control",
-			Description:  "Inspect Git state and perform guarded staging and commit operations.",
-			Source:       SourceBuiltin,
-			Enabled:      true,
-			CanUninstall: false,
-			RequiredMode: "code",
-			Tools: []ToolRef{
-				{Name: toolGitStatus},
-				{Name: toolGitDiff},
-				{Name: toolGitLog},
-				{Name: toolGitStage},
-				{Name: toolGitUnstage},
-				{Name: toolGitCommit},
 			},
 		},
 	},

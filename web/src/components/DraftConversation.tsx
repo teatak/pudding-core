@@ -92,6 +92,7 @@ import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
 import { useDraftStore, type DraftAttachment, type DraftModelValue } from "@/state/draftStore";
 import { useOverlayStore } from "@/state/overlayStore";
+import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
 
 const draftSchema = z.object({
   text: z.string(),
@@ -432,9 +433,9 @@ function DraftComposer({
   const setDraftPartOrder = useDraftStore((state) => state.setPartOrder);
   const setDraftText = useDraftStore((state) => state.setText);
   const clearDraft = useDraftStore((state) => state.clear);
+  const reasoningEffortByModel = useReasoningEffortPreferenceStore((state) => state.byModel);
+  const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
-  const [draftReasoningEffort, setDraftReasoningEffortValue] = useState("");
-  const [draftReasoningModelKey, setDraftReasoningModelKey] = useState("");
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -537,7 +538,7 @@ function DraftComposer({
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
-  const reasoningEffort = resolvedModelKey && draftReasoningModelKey === resolvedModelKey ? draftReasoningEffort : "";
+  const reasoningEffort = resolvedModelKey ? reasoningEffortByModel[resolvedModelKey] || "" : "";
   const draftVoiceSessionID = draftVoiceSession?.id;
   useSessionEvents(draftVoiceSessionID, token);
   const draftVoiceBindingsQuery = useQuery({
@@ -571,10 +572,9 @@ function DraftComposer({
       if (!resolvedModelKey) {
         return;
       }
-      setDraftReasoningModelKey(resolvedModelKey);
-      setDraftReasoningEffortValue(value);
+      setReasoningEffortForModel(resolvedModelKey, value);
     },
-    [resolvedModelKey],
+    [resolvedModelKey, setReasoningEffortForModel],
   );
 
   const cleanupDraftVoiceSession = useCallback(
