@@ -698,13 +698,9 @@ html[data-shell] :where(
 }
 
 .pudding-agent-console[data-mode="floating"] {
-    top: auto !important;
-    left: 50% !important;
-    bottom: 0 !important;
     background: transparent;
     border-color: transparent;
     box-shadow: none;
-    transform: translateX(-50%) !important;
 }
 
 .pudding-agent-console-resize-shield {

@@ -8,7 +8,6 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Rnd } from "react-rnd";
 import { useGroupRef } from "react-resizable-panels";
 
 import { claimMobilePairing } from "@/api/client";
@@ -471,18 +470,6 @@ export function App() {
   // 浮动控制台始终以底部输入栏为锚点；展开只向上增长。
   const floatingY = maximumFloatingY;
   const docked = workspaceDocked;
-  const consolePosition =
-    consoleDisplayMode === "floating"
-      ? {
-          x: floatingX - floatingXInset,
-          y: floatingY - floatingTopInset,
-        }
-      : { x: 0, y: 0 };
-  const consoleSize =
-    consoleDisplayMode === "floating"
-      ? { width: floatingWidth, height: floatingHeight }
-      : { width: "100%", height: "100%" };
-
   const consoleAtTrafficLights = consoleDisplayMode === "floating" && floatingX < 120 && floatingY < 54;
   const consoleNeedsLeftInset =
     consoleDisplayMode === "full" || consoleDisplayMode === "dock-left" || consoleAtTrafficLights;
@@ -521,7 +508,7 @@ export function App() {
   const chatArea = (
     <main
       className={cn(
-        "flex h-full min-w-0 flex-col",
+        "flex h-full w-full min-w-0 flex-col",
         consoleDisplayMode === "floating"
           ? "overflow-visible bg-transparent"
           : "overflow-hidden bg-background",
@@ -639,32 +626,26 @@ export function App() {
     </div>
   );
   const agentConsole = (
-    <Rnd
-      key="agent-console-native-drag"
+    <div
+      key="agent-console"
       className={cn(
-        "pudding-agent-console flex min-h-0 min-w-0",
+        "pudding-agent-console min-h-0 min-w-0",
         consoleDisplayMode === "floating"
           ? "pointer-events-none overflow-visible"
           : "overflow-hidden",
       )}
       data-mode={consoleDisplayMode}
-      disableDragging
-      enableResizing={false}
-      position={consolePosition}
-      size={consoleSize}
       style={{
         flexShrink: 0,
+        height: consoleDisplayMode === "floating" ? floatingHeight : "100%",
         order: consoleDisplayMode === "dock-right" ? 2 : 0,
-        position: consoleDisplayMode === "floating" ? "absolute" : "relative",
+        position: "relative",
+        width: consoleDisplayMode === "floating" ? floatingWidth : "100%",
         zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
-        transition:
-          consoleInteracting || docked
-            ? "none"
-            : "transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out, border-radius 180ms ease-out",
       }}
     >
       {chatArea}
-    </Rnd>
+    </div>
   );
   const sessionStage = (
     <>
@@ -672,7 +653,7 @@ export function App() {
       <div
         className={cn(
           consoleDisplayMode === "floating"
-            ? "pointer-events-none absolute z-40"
+            ? "pointer-events-none absolute z-40 flex items-end justify-center"
             : "contents",
         )}
         style={
