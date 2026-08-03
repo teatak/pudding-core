@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Rnd, type Props as RndProps } from "react-rnd";
+import { Rnd } from "react-rnd";
 import { useGroupRef } from "react-resizable-panels";
 
 import { claimMobilePairing } from "@/api/client";
@@ -42,7 +42,10 @@ import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { saveLastAppRoute, type AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
-import { useAgentConsoleMode, type AgentConsoleMode } from "@/state/agentConsoleStore";
+import {
+  useAgentConsoleMode,
+  type AgentConsoleMode,
+} from "@/state/agentConsoleStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
 import {
   setRailResponsiveCollapsed,
@@ -57,51 +60,19 @@ type StageSize = {
   height: number;
 };
 
-type FloatingFrame = StageSize & {
-  x: number;
-  y: number;
-};
-
-type FloatingAnchor = {
-  horizontal: "left" | "right" | null;
-  vertical: "top" | "bottom" | null;
-};
-
 type ConsoleDisplayMode = "full" | AgentConsoleMode;
 
 const floatingInset = 16;
-const floatingSnapThreshold = 12;
+const floatingBottomInset = 8;
 const consoleMinimumWidth = 380;
 const consoleMinimumHeight = 320;
-const floatingDefaultWidth = consoleMinimumWidth;
-const floatingDefaultHeight = 560;
+const floatingMinimumWidth = 360;
+const floatingDefaultWidth = 640;
+const floatingDefaultHeight = 420;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const dockMaximumWidth = 640;
 const dockRatioStorageKey = "pudding.agentConsoleDockRatio";
 const dockRatioFallback = 0.4;
-const floatingResizeHandleStyles: NonNullable<RndProps["resizeHandleStyles"]> = {
-  top: { cursor: "ns-resize" },
-  right: { cursor: "ew-resize" },
-  bottom: { cursor: "ns-resize" },
-  left: { cursor: "ew-resize" },
-  topRight: { cursor: "nesw-resize" },
-  bottomRight: { cursor: "nwse-resize" },
-  bottomLeft: { cursor: "nesw-resize" },
-  topLeft: { cursor: "nwse-resize" },
-};
-
-function resizeCursor(direction: string) {
-  if (direction === "top" || direction === "bottom") {
-    return "ns-resize";
-  }
-  if (direction === "left" || direction === "right") {
-    return "ew-resize";
-  }
-  if (direction === "topLeft" || direction === "bottomRight") {
-    return "nwse-resize";
-  }
-  return "nesw-resize";
-}
 
 function readSavedSplitLayout() {
   return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -112,10 +83,6 @@ function readSavedSplitLayout() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function finiteOr(value: number, fallback: number) {
-  return Number.isFinite(value) ? value : fallback;
 }
 
 function lockAgentConsoleResizeCursor(cursor: string) {
@@ -172,21 +139,9 @@ export function App() {
   });
   const [consoleInteracting, setConsoleInteracting] = useState(false);
   const [dockRatio, setDockRatio] = useState(readDockRatio);
-  const [floatingFrame, setFloatingFrame] = useState<FloatingFrame>({
-    x: -1,
-    y: floatingInset,
-    width: floatingDefaultWidth,
-    height: floatingDefaultHeight,
-  });
-  const [floatingAnchor, setFloatingAnchor] = useState<FloatingAnchor>({
-    horizontal: "right",
-    vertical: "bottom",
-  });
   const splitGroupRef = useGroupRef();
   const dockRatioRef = useRef(dockRatio);
   const dockResizeCleanupRef = useRef<(() => void) | null>(null);
-  const floatingDragCleanupRef = useRef<(() => void) | null>(null);
-  const floatingResizeCleanupRef = useRef<(() => void) | null>(null);
   const previewTokenRef = useRef(token);
 
   const appsActive = view === "apps";
@@ -236,6 +191,7 @@ export function App() {
   }
   const consoleDisplayMode: ConsoleDisplayMode =
     effectiveWorkspaceOpen && !workspaceOverlay ? agentConsoleMode : "full";
+  const showConsoleSplit = showSplit && consoleDisplayMode !== "floating";
   const activeSessionIDs = (
     standaloneViewActive
       ? []
@@ -331,19 +287,9 @@ export function App() {
   useEffect(
     () => () => {
       dockResizeCleanupRef.current?.();
-      floatingDragCleanupRef.current?.();
-      floatingResizeCleanupRef.current?.();
     },
     [],
   );
-
-  useEffect(() => {
-    if (consoleDisplayMode !== "floating") {
-      floatingDragCleanupRef.current?.();
-      floatingResizeCleanupRef.current?.();
-      setConsoleInteracting(false);
-    }
-  }, [consoleDisplayMode]);
 
   useEffect(() => {
     if (token || !pairingCode) {
@@ -374,12 +320,12 @@ export function App() {
     if (!group) {
       return;
     }
-    if (!showSplit) {
+    if (!showConsoleSplit) {
       group.setLayout(splitLayout.closed);
       return;
     }
     group.setLayout(readSavedSplitLayout());
-  }, [showSplit, splitGroupRef]);
+  }, [showConsoleSplit, splitGroupRef]);
 
   if (!token) {
     if (pairingCode) {
@@ -492,110 +438,6 @@ export function App() {
     dockResizeCleanupRef.current = cleanup;
   };
 
-  const floatingPositionBounds = (width: number, height: number) => {
-    const stageRect = stageNode?.getBoundingClientRect();
-    const stageWidth = stageRect?.width || floatingDefaultWidth + floatingInset * 2;
-    const stageHeight = stageRect?.height || floatingDefaultHeight + floatingInset * 2;
-    const minimumX = stageWidth - width >= floatingInset * 2 ? floatingInset : 0;
-    const minimumY = Math.min(
-      readToolbarHeightPx() + floatingInset,
-      Math.max(0, stageHeight - floatingInset - 1),
-    );
-    return {
-      minimumX,
-      maximumX: Math.max(minimumX, stageWidth - width - minimumX),
-      minimumY,
-      maximumY: Math.max(minimumY, stageHeight - height - floatingInset),
-    };
-  };
-
-  const snapFloatingPosition = (
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ) => {
-    const bounds = floatingPositionBounds(width, height);
-    let nextX = clamp(x, bounds.minimumX, bounds.maximumX);
-    let nextY = clamp(y, bounds.minimumY, bounds.maximumY);
-    let horizontal: FloatingAnchor["horizontal"] = null;
-    let vertical: FloatingAnchor["vertical"] = null;
-
-    if (Math.abs(nextX - bounds.minimumX) <= floatingSnapThreshold) {
-      nextX = bounds.minimumX;
-      horizontal =
-        bounds.minimumX === bounds.maximumX
-          ? floatingAnchor.horizontal
-          : "left";
-    } else if (Math.abs(nextX - bounds.maximumX) <= floatingSnapThreshold) {
-      nextX = bounds.maximumX;
-      horizontal = "right";
-    }
-    if (Math.abs(nextY - bounds.minimumY) <= floatingSnapThreshold) {
-      nextY = bounds.minimumY;
-      vertical =
-        bounds.minimumY === bounds.maximumY
-          ? floatingAnchor.vertical
-          : "top";
-    } else if (Math.abs(nextY - bounds.maximumY) <= floatingSnapThreshold) {
-      nextY = bounds.maximumY;
-      vertical = "bottom";
-    }
-
-    return {
-      anchor: { horizontal, vertical } satisfies FloatingAnchor,
-      position: { x: nextX, y: nextY },
-    };
-  };
-
-  const startFloatingDrag = (consoleNode: HTMLElement) => {
-    floatingDragCleanupRef.current?.();
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    const dragShield = document.createElement("div");
-    dragShield.className = "pudding-agent-console-drag-shield no-drag-region";
-    dragShield.setAttribute("aria-hidden", "true");
-    document.body.appendChild(dragShield);
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-    consoleNode.dataset.dragging = "true";
-    const cleanup = () => {
-      dragShield.remove();
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      delete consoleNode.dataset.dragging;
-      floatingDragCleanupRef.current = null;
-    };
-
-    floatingDragCleanupRef.current = cleanup;
-  };
-
-  const startFloatingResize = (consoleNode: HTMLElement, direction: string) => {
-    floatingResizeCleanupRef.current?.();
-    const cursor = resizeCursor(direction);
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    const resizeShield = document.createElement("div");
-    resizeShield.className = "pudding-agent-console-resize-shield no-drag-region";
-    resizeShield.setAttribute("aria-hidden", "true");
-    resizeShield.style.cursor = cursor;
-    document.body.appendChild(resizeShield);
-    const restoreResizeCursor = lockAgentConsoleResizeCursor(cursor);
-    document.body.style.cursor = cursor;
-    document.body.style.userSelect = "none";
-    consoleNode.dataset.resizing = "true";
-    const cleanup = () => {
-      resizeShield.remove();
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      restoreResizeCursor();
-      delete consoleNode.dataset.resizing;
-      floatingResizeCleanupRef.current = null;
-    };
-
-    floatingResizeCleanupRef.current = cleanup;
-  };
-
   const resolvedStageWidth = stageSize.width || floatingDefaultWidth + floatingInset * 2;
   const resolvedStageHeight = stageSize.height || floatingDefaultHeight + floatingInset * 2;
   const preferredFloatingTopInset = readToolbarHeightPx() + floatingInset;
@@ -606,53 +448,28 @@ export function App() {
   const maximumFloatingWidth = Math.max(1, resolvedStageWidth - floatingInset * 2);
   const maximumFloatingHeight = Math.max(
     1,
-    resolvedStageHeight - floatingTopInset - floatingInset,
+    resolvedStageHeight - floatingTopInset - floatingBottomInset,
   );
-  const minimumFloatingWidth = Math.min(consoleMinimumWidth, maximumFloatingWidth);
+  const minimumFloatingWidth = Math.min(floatingMinimumWidth, maximumFloatingWidth);
   const minimumFloatingHeight = Math.min(consoleMinimumHeight, maximumFloatingHeight);
   const floatingWidth = clamp(
-    finiteOr(floatingFrame.width, floatingDefaultWidth),
+    floatingDefaultWidth,
     minimumFloatingWidth,
     maximumFloatingWidth,
   );
   const floatingHeight = clamp(
-    finiteOr(floatingFrame.height, floatingDefaultHeight),
+    floatingDefaultHeight,
     minimumFloatingHeight,
     maximumFloatingHeight,
   );
   const floatingXInset = resolvedStageWidth - floatingWidth >= floatingInset * 2 ? floatingInset : 0;
-  const requestedFloatingX = finiteOr(
-    floatingFrame.x,
-    resolvedStageWidth - floatingWidth - floatingXInset,
-  );
-  const maximumFloatingX = Math.max(
-    floatingXInset,
-    resolvedStageWidth - floatingWidth - floatingXInset,
-  );
   const maximumFloatingY = Math.max(
     floatingTopInset,
-    resolvedStageHeight - floatingHeight - floatingInset,
+    resolvedStageHeight - floatingHeight - floatingBottomInset,
   );
-  const floatingX =
-    floatingAnchor.horizontal === "left"
-      ? floatingXInset
-      : floatingAnchor.horizontal === "right"
-        ? maximumFloatingX
-        : clamp(
-            requestedFloatingX < 0 ? maximumFloatingX : requestedFloatingX,
-            floatingXInset,
-            maximumFloatingX,
-          );
-  const floatingY =
-    floatingAnchor.vertical === "top"
-      ? floatingTopInset
-      : floatingAnchor.vertical === "bottom"
-        ? maximumFloatingY
-        : clamp(
-            finiteOr(floatingFrame.y, floatingTopInset),
-            floatingTopInset,
-            maximumFloatingY,
-          );
+  const floatingX = Math.max(floatingXInset, (resolvedStageWidth - floatingWidth) / 2);
+  // 浮动控制台始终以底部输入栏为锚点；展开只向上增长。
+  const floatingY = maximumFloatingY;
   const docked = workspaceDocked;
   const consolePosition =
     consoleDisplayMode === "floating"
@@ -702,16 +519,23 @@ export function App() {
         : 1;
 
   const chatArea = (
-    <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+    <main
+      className={cn(
+        "flex h-full min-w-0 flex-col",
+        consoleDisplayMode === "floating"
+          ? "overflow-visible bg-transparent"
+          : "overflow-hidden bg-background",
+      )}
+    >
       <ResizablePanelGroup
         className="min-h-0 flex-1"
-        defaultLayout={showSplit ? readSavedSplitLayout() : splitLayout.closed}
+        defaultLayout={showConsoleSplit ? readSavedSplitLayout() : splitLayout.closed}
         groupRef={splitGroupRef}
         id="split-workspace"
         orientation="vertical"
         resizeTargetMinimumSize={resizeTargetMinimumSize}
         onLayoutChanged={(layout) => {
-          if (showSplit && typeof layout.split === "number" && layout.split > 0) {
+          if (showConsoleSplit && typeof layout.split === "number" && layout.split > 0) {
             savePanelLayout(layoutStorageKeys.splitRatio, layout);
           }
         }}
@@ -720,7 +544,7 @@ export function App() {
           <ChatPane
             draftActive={draftActive}
             draftProjectID={draftActive ? draftProjectID : undefined}
-            headerDragHandle={consoleDisplayMode === "floating"}
+            presentation={consoleDisplayMode === "floating" ? "floating" : "default"}
             reserveTopLeftInset={consoleNeedsLeftInset}
             reserveTopRightActions={
               chatOccupiesStageTopRight ? stageToolbarActionCount : 0
@@ -732,8 +556,8 @@ export function App() {
         </ResizablePanel>
         <WorkspaceResizableHandle
           aria-label={t("layout.resizeHint")}
-          className={showSplit ? undefined : "hidden"}
-          disabled={!showSplit}
+          className={showConsoleSplit ? undefined : "hidden"}
+          disabled={!showConsoleSplit}
         />
         <ResizablePanel
           id="split"
@@ -742,7 +566,7 @@ export function App() {
           collapsible
           minSize={splitLayout.minPanePx}
         >
-          {showSplit ? <ChatPane token={token} sessionID={splitSessionID} role="split" /> : null}
+          {showConsoleSplit ? <ChatPane token={token} sessionID={splitSessionID} role="split" /> : null}
         </ResizablePanel>
       </ResizablePanelGroup>
     </main>
@@ -817,22 +641,16 @@ export function App() {
   const agentConsole = (
     <Rnd
         key="agent-console-native-drag"
-        bounds={consoleDisplayMode === "floating" ? "parent" : undefined}
-        cancel=".no-drag-region,button,input,textarea,select,a,[role='button']"
         className={cn(
-          "pudding-agent-console flex min-h-0 min-w-0 overflow-hidden",
-          consoleDisplayMode === "floating" && "pointer-events-auto rounded-xl border",
+          "pudding-agent-console flex min-h-0 min-w-0",
+          consoleDisplayMode === "floating"
+            ? "pointer-events-none overflow-visible"
+            : "overflow-hidden",
         )}
         data-mode={consoleDisplayMode}
-        disableDragging={consoleDisplayMode !== "floating"}
-        dragHandleClassName="pudding-agent-console-drag-handle"
-        enableResizing={consoleDisplayMode === "floating"}
-        maxHeight={consoleDisplayMode === "floating" ? maximumFloatingHeight : undefined}
-        maxWidth={consoleDisplayMode === "floating" ? maximumFloatingWidth : undefined}
-        minHeight={consoleDisplayMode === "floating" ? minimumFloatingHeight : 0}
-        minWidth={consoleDisplayMode === "floating" ? minimumFloatingWidth : 0}
+        disableDragging
+        enableResizing={false}
         position={consolePosition}
-        resizeHandleStyles={floatingResizeHandleStyles}
         size={consoleSize}
         style={{
           flexShrink: 0,
@@ -843,46 +661,6 @@ export function App() {
             consoleInteracting || docked
               ? "none"
               : "transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out, border-radius 180ms ease-out",
-        }}
-        onDragStart={(_event, data) => {
-          setConsoleInteracting(true);
-          startFloatingDrag(data.node);
-        }}
-        onDragStop={(_event, data) => {
-          const nextPlacement = snapFloatingPosition(
-            data.x + floatingXInset,
-            data.y + floatingTopInset,
-            data.node.offsetWidth,
-            data.node.offsetHeight,
-          );
-          floatingDragCleanupRef.current?.();
-          setConsoleInteracting(false);
-          setFloatingAnchor(nextPlacement.anchor);
-          setFloatingFrame((current) => ({
-            ...current,
-            ...nextPlacement.position,
-          }));
-        }}
-        onResizeStart={(_event, direction, ref) => {
-          setConsoleInteracting(true);
-          startFloatingResize(ref, direction);
-        }}
-        onResizeStop={(_event, _direction, ref, _delta, position) => {
-          const nextPlacement = snapFloatingPosition(
-            position.x + floatingXInset,
-            position.y + floatingTopInset,
-            ref.offsetWidth,
-            ref.offsetHeight,
-          );
-          floatingResizeCleanupRef.current?.();
-          setConsoleInteracting(false);
-          setFloatingAnchor(nextPlacement.anchor);
-          setFloatingFrame({
-            x: finiteOr(nextPlacement.position.x, floatingX),
-            y: finiteOr(nextPlacement.position.y, floatingY),
-            width: finiteOr(ref.offsetWidth, floatingWidth),
-            height: finiteOr(ref.offsetHeight, floatingHeight),
-          });
         }}
       >
         {chatArea}
@@ -899,7 +677,7 @@ export function App() {
         )}
         style={
           consoleDisplayMode === "floating"
-            ? { inset: `${floatingTopInset}px ${floatingXInset}px ${floatingInset}px` }
+            ? { inset: `${floatingTopInset}px ${floatingXInset}px ${floatingBottomInset}px` }
             : undefined
         }
       >

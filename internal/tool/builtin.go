@@ -18,59 +18,59 @@ import (
 )
 
 const (
-	TimeGetCurrent      = "builtin_time_get_current"
-	WebSearch           = "builtin_web_search"
-	WebFetch            = "builtin_web_fetch"
-	HistorySearch       = "builtin_history_search"
-	HistoryGetMessage   = "builtin_history_get_message"
-	SkillRead           = "builtin_skill_read"
-	PlanUpdate          = "builtin_plan_update"
-	CodeSymbols         = "builtin_code_symbols"
-	CodeDefinition      = "builtin_code_definition"
-	CodeReferences      = "builtin_code_references"
-	CodeDiagnostics     = "builtin_code_diagnostics"
-	CodeRename          = "builtin_code_rename"
-	FileList            = "builtin_file_list"
-	FileRead            = "builtin_file_read"
-	AttachmentReadImage = "builtin_attachment_read_image"
-	AttachmentExport    = "builtin_attachment_export"
-	FileStat            = "builtin_file_stat"
-	FileSearch          = "builtin_file_search"
-	FileSlice           = "builtin_file_slice"
-	FileWrite           = "builtin_file_write"
-	FilePatch           = "builtin_file_patch"
-	FileDelete          = "builtin_file_delete"
-	FileMove            = "builtin_file_move"
-	FileCopy            = "builtin_file_copy"
-	CommandRun          = "builtin_command_run"
-	CommandSession      = "builtin_command_session"
-	GitStatus           = "builtin_git_status"
-	GitDiff             = "builtin_git_diff"
-	GitLog              = "builtin_git_log"
-	GitStage            = "builtin_git_stage"
-	GitUnstage          = "builtin_git_unstage"
-	GitCommit           = "builtin_git_commit"
-	SkillValidate       = "builtin_skill_validate"
-	AppSave             = "builtin_app_save"
-	RESTRequest         = "builtin_rest_request"
-	GraphQLRequest      = "builtin_graphql_request"
-	GraphQLIntrospect   = "builtin_graphql_introspect"
-	GraphQLSearch       = "builtin_graphql_search"
-	WeatherGet          = "builtin_weather_get"
-	CameraCapture       = "builtin_camera_capture"
-	DesktopScreenshot   = "builtin_desktop_screenshot"
-	BrowserStatus       = "builtin_browser_status"
-	BrowserOpen         = "builtin_browser_open"
-	BrowserObserve      = "builtin_browser_observe"
-	BrowserScreenshot   = "builtin_browser_screenshot"
-	BrowserBack         = "builtin_browser_back"
-	BrowserForward      = "builtin_browser_forward"
-	BrowserReload       = "builtin_browser_reload"
-	BrowserClose        = "builtin_browser_close"
-	BrowserClick        = "builtin_browser_click"
-	BrowserType         = "builtin_browser_type"
-	BrowserScroll       = "builtin_browser_scroll"
-	RequestUserInput    = "builtin_request_user_input"
+	TimeGetCurrent    = "builtin_time_get_current"
+	WebSearch         = "builtin_web_search"
+	WebFetch          = "builtin_web_fetch"
+	HistorySearch     = "builtin_history_search"
+	HistoryGetMessage = "builtin_history_get_message"
+	SkillRead         = "builtin_skill_read"
+	PlanUpdate        = "builtin_plan_update"
+	CodeSymbols       = "builtin_code_symbols"
+	CodeDefinition    = "builtin_code_definition"
+	CodeReferences    = "builtin_code_references"
+	CodeDiagnostics   = "builtin_code_diagnostics"
+	CodeRename        = "builtin_code_rename"
+	FileList          = "builtin_file_list"
+	FileRead          = "builtin_file_read"
+	MediaRead         = "builtin_media_read"
+	AttachmentExport  = "builtin_attachment_export"
+	FileStat          = "builtin_file_stat"
+	FileSearch        = "builtin_file_search"
+	FileSlice         = "builtin_file_slice"
+	FileWrite         = "builtin_file_write"
+	FilePatch         = "builtin_file_patch"
+	FileDelete        = "builtin_file_delete"
+	FileMove          = "builtin_file_move"
+	FileCopy          = "builtin_file_copy"
+	CommandRun        = "builtin_command_run"
+	CommandSession    = "builtin_command_session"
+	GitStatus         = "builtin_git_status"
+	GitDiff           = "builtin_git_diff"
+	GitLog            = "builtin_git_log"
+	GitStage          = "builtin_git_stage"
+	GitUnstage        = "builtin_git_unstage"
+	GitCommit         = "builtin_git_commit"
+	SkillValidate     = "builtin_skill_validate"
+	AppSave           = "builtin_app_save"
+	RESTRequest       = "builtin_rest_request"
+	GraphQLRequest    = "builtin_graphql_request"
+	GraphQLIntrospect = "builtin_graphql_introspect"
+	GraphQLSearch     = "builtin_graphql_search"
+	WeatherGet        = "builtin_weather_get"
+	CameraCapture     = "builtin_camera_capture"
+	DesktopScreenshot = "builtin_desktop_screenshot"
+	BrowserStatus     = "builtin_browser_status"
+	BrowserOpen       = "builtin_browser_open"
+	BrowserObserve    = "builtin_browser_observe"
+	BrowserScreenshot = "builtin_browser_screenshot"
+	BrowserBack       = "builtin_browser_back"
+	BrowserForward    = "builtin_browser_forward"
+	BrowserReload     = "builtin_browser_reload"
+	BrowserClose      = "builtin_browser_close"
+	BrowserClick      = "builtin_browser_click"
+	BrowserType       = "builtin_browser_type"
+	BrowserScroll     = "builtin_browser_scroll"
+	RequestUserInput  = "builtin_request_user_input"
 )
 
 type WebConfigSource interface {
@@ -373,14 +373,14 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileRead,
-			Description: "Read one small UTF-8 text file, or save one supported image file as an attachment from a Pudding-managed file area or an authorized project directory. Image bytes are visible only to models with image input support; otherwise the model sees attachment metadata only. For large text files use builtin_file_slice or builtin_file_search first.",
+			Description: "Read one small UTF-8 text file from a Pudding-managed file area or an authorized project directory. This tool is text-only; use builtin_media_read for supported images or audio. For large text files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        AttachmentReadImage,
-			Description: "Read one captured/uploaded image attachment by attachmentKey and route it as an image attachment. Image bytes are visible only to models with image input support; otherwise the model sees metadata only. Use only for existing Pudding attachments that are not already provided as image parts; do not pass local filesystem paths.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"attachmentKey":{"type":"string","description":"Attachment key returned by a capture/upload tool, for example sessions/{sessionID}/blobs/name.png. Prefer this field."},"url":{"type":"string","description":"Display URL fallback for older tool results. Prefer attachmentKey when available."}},"additionalProperties":false}`),
+			Name:        MediaRead,
+			Description: "Route one supported raster image or audio file up to 20 MiB to the model as a media attachment. Set source=attachment for an existing session attachment. In Code mode, source=file reads a Pudding-managed or explicitly authorized project file. Media bytes are visible only when the current model supports that input type; otherwise only metadata is available. This tool does not transcribe audio. SVG is text source and should be read with builtin_file_read.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["attachment","file"],"description":"Where the media comes from. source=file requires Code capability."},"attachmentKey":{"type":"string","description":"For source=attachment, the exact session attachment key returned by an upload or capture tool. Prefer this field."},"url":{"type":"string","description":"For source=attachment, a session attachment URL fallback."},"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"For source=file in Code mode, the target file area."},"path":{"type":"string","description":"For source=file in Code mode, a relative path in a managed area or an absolute/relative path inside authorized project directories."}},"required":["source"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
@@ -529,7 +529,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CameraCapture,
-			Description: "Take one photo from the local camera. The result is displayed automatically in the current conversation and includes displayMarkdown for explicitly showing the same photo again. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
+			Description: "Take one photo from the local camera. The result is displayed automatically in the current conversation and includes displayMarkdown for explicitly showing the same photo again. The photo bytes are not routed to the model; call builtin_media_read with source=attachment only if the image content must be inspected.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
@@ -643,8 +643,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileList(call)
 	case FileRead:
 		return r.fileRead(call)
-	case AttachmentReadImage:
-		return r.attachmentReadImage(call)
+	case MediaRead:
+		return r.mediaRead(call)
 	case AttachmentExport:
 		return r.attachmentExport(call)
 	case FileStat:

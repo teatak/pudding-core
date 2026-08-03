@@ -1002,6 +1002,9 @@ func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
 	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
 		t.Fatalf("unsupported audio should fallback to text summary: %+v", req.Messages)
 	}
+	if !strings.Contains(req.Messages[0].Parts[0].Text, "Audio content: not provided") {
+		t.Fatalf("unsupported audio fallback should forbid content inference: %+v", req.Messages)
+	}
 }
 
 func TestBuildStripsThoughtParts(t *testing.T) {

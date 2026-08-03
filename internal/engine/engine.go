@@ -1972,6 +1972,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("prepare code workspace: %v", err)}
 	}
 	call.ProjectDirs = projectDirs
+	call.Mode = store.NormalizeAgentMode(mode)
 	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
 	if risk, ok := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs); ok {

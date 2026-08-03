@@ -1688,7 +1688,7 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	}
 }
 
-func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
+func TestSubmitRoutesMediaReadImageToNextProviderRequest(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")
 	if err := os.MkdirAll(tempDir, 0o700); err != nil {
@@ -1701,7 +1701,7 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 
 	ms := memstore.New()
 	hub := event.NewHub()
-	client := &fileReadImageClient{}
+	client := &mediaReadImageClient{}
 	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool"
@@ -1876,7 +1876,7 @@ doneDisplayDrain:
 	}
 }
 
-func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
+func TestSubmitDoesNotRouteMediaReadImageWhenCapabilityUnknown(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")
 	if err := os.MkdirAll(tempDir, 0o700); err != nil {
@@ -1888,7 +1888,7 @@ func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
 
 	ms := memstore.New()
 	hub := event.NewHub()
-	client := &fileReadImageClient{}
+	client := &mediaReadImageClient{}
 	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool_unknown"
@@ -4352,21 +4352,21 @@ func (b *engineTestBrowser) Scroll(context.Context, string, string, browser.Scro
 
 func (b *engineTestBrowser) Close() error { return nil }
 
-type fileReadImageClient struct {
+type mediaReadImageClient struct {
 	requests []provider.Request
 }
 
-func (c *fileReadImageClient) Name() string { return "file-read-image" }
+func (c *mediaReadImageClient) Name() string { return "media-read-image" }
 
-func (c *fileReadImageClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *mediaReadImageClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 4)
 	if len(c.requests) == 1 {
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
 			CallID:    "call_image",
-			Name:      tool.FileRead,
-			ArgsDelta: `{"scope":"temp","path":"image.png"}`,
+			Name:      tool.MediaRead,
+			ArgsDelta: `{"source":"file","scope":"temp","path":"image.png"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {

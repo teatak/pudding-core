@@ -104,6 +104,7 @@ const draftAttachmentSessionID = "draft";
 
 type ComposerProps = {
   droppedFiles?: DroppedFilesBatch | null;
+  presentation?: "default" | "floating";
   token: string;
   session: Session;
   onSubmitError?: (message: string | null) => void;
@@ -137,8 +138,15 @@ async function captureBrowserSelection(sessionID: string, context: UIContextPart
     : context;
 }
 
-export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
+export function Composer({
+  droppedFiles,
+  presentation = "default",
+  token,
+  session,
+  onSubmitError,
+}: ComposerProps) {
   const sessionID = session.id;
+  const floating = presentation === "floating";
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
@@ -170,7 +178,22 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const audioBindings = audioBindingsQuery.data?.bindings;
   const micActive = audioBindings?.inputOwner === sessionID;
-  const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
+  const selectedModel = useMemo<ResolvedModelSelection | null>(() => {
+    if (!session.provider || !session.model) {
+      return null;
+    }
+    return { provider: session.provider, model: session.model };
+  }, [session.model, session.provider]);
+  const [pickerResolvedModel, setPickerResolvedModel] = useState<ResolvedModelSelection | null>(null);
+  const resolvedModelDetails = useMemo<ResolvedModelSelection | null>(() => {
+    if (
+      pickerResolvedModel?.provider === session.provider &&
+      pickerResolvedModel.model === session.model
+    ) {
+      return pickerResolvedModel;
+    }
+    return null;
+  }, [pickerResolvedModel, session.model, session.provider]);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
@@ -307,9 +330,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
     [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
   );
-  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
-  const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
-  const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
+  const reasoningOptions = useMemo(
+    () => reasoningEffortOptionsForSelection(resolvedModelDetails),
+    [resolvedModelDetails],
+  );
+  const audioInputSupported = resolvedModelDetails
+    ? resolvedModelDetails.modelConfig?.capabilities?.audio === true
+    : undefined;
+  const resolvedModelKey = resolvedModelDetails
+    ? `${resolvedModelDetails.provider}:${resolvedModelDetails.model}`
+    : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
   const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
   const setSessionReasoningEffort = useCallback(
@@ -572,10 +602,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       value: z.infer<typeof composerSchema> & { deliveryMode?: RunningDeliveryMode; parts: ContentPart[] },
     ) => {
       const clientMessageID = draftIDRef.current;
-      if (!resolvedModel) {
+      if (!selectedModel) {
         throw new APIError(400, "no_model");
       }
-      const { provider, model } = resolvedModel;
       const guideNow = Boolean(runningTurnID && value.deliveryMode === "steer");
       addPendingUser({
         sessionID,
@@ -586,9 +615,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         createdAt: new Date().toISOString(),
         turnID: guideNow ? runningTurnID : undefined,
       });
-      if (session.provider !== provider || session.model !== model) {
-        await updateSession(token, sessionID, { provider, model });
-      }
       if (runningTurnID && guideNow) {
         const result = await steerTurn(token, sessionID, runningTurnID, {
           clientMessageID,
@@ -649,12 +675,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const inputFlowSubmitMutation = useMutation({
     mutationFn: async (submission: InputFlowSubmission) => {
       const clientMessageID = `input-flow-${submission.request.id}`;
-      if (!resolvedModel) {
+      if (!selectedModel) {
         throw new APIError(400, "no_model");
-      }
-      const { provider, model } = resolvedModel;
-      if (session.provider !== provider || session.model !== model) {
-        await updateSession(token, sessionID, { provider, model });
       }
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
@@ -729,12 +751,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const systemSubmitMutation = useMutation({
     mutationFn: async ({ clientMessageID, text }: { clientMessageID: string; text: string }) => {
-      if (!resolvedModel) {
+      if (!selectedModel) {
         throw new APIError(400, "no_model");
-      }
-      const { provider, model } = resolvedModel;
-      if (session.provider !== provider || session.model !== model) {
-        await updateSession(token, sessionID, { provider, model });
       }
       return submitMessage(token, sessionID, { clientMessageID, kind: "system", text });
     },
@@ -779,7 +797,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     !compactMutation.isPending &&
     !systemSubmitMutation.isPending &&
     !renameMutation.isPending &&
-    (Boolean(resolvedModel) || Boolean(draftSlashCommand && draftSlashCommand.id !== "summary"));
+    (Boolean(selectedModel) || Boolean(draftSlashCommand && draftSlashCommand.id !== "summary"));
   const stopEnabled = running && !cancelMutation.isPending;
   const showStopButton = (running || cancelMutation.isPending) && !hasInput;
   const showSendButton =
@@ -886,7 +904,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const submitDraft = (value: z.infer<typeof composerSchema>) => submitDraftWithMode(value);
 
   const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
-    setResolvedModel((current) => {
+    setPickerResolvedModel((current) => {
       if (!next) {
         return current ? null : current;
       }
@@ -972,16 +990,85 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     setMascotGaze({ type: "pointer" });
   }, [sessionID]);
 
+  const composerTextArea = (
+    <ComposerTextArea
+      ref={textAreaHandleRef}
+      control={form.control}
+      textField={textField}
+      textAreaRef={textAreaRef}
+      mentionReferences={mentionReferences}
+      slashCommands={slashCommands}
+      placeholder={
+        session.activeMode === "chat"
+          ? t("composer.messagePlaceholder")
+          : t("composer.modeMessagePlaceholder").replace(
+              "{mode}",
+              t(`mode.${session.activeMode}`),
+            )
+      }
+      hasAttachments={hasAttachments}
+      hasLocalFolders={hasLocalFolders}
+      hasProjectReferences={hasProjectReferences}
+      hasPendingAttachments={hasPendingAttachments}
+      hasFailedAttachments={hasFailedAttachments}
+      uploadedAttachmentsCount={uploadedAttachments.length}
+      formSetValue={form.setValue}
+      setSessionDraftText={setSessionDraftText}
+      sessionID={sessionID}
+      onCanSendChange={setCanSend}
+      onHasContentChange={setHasInput}
+      onMentionMenuOpenChange={setMentionMenuOpen}
+      onSlashMenuOpenChange={setSlashMenuOpen}
+      onDraftSlashCommandChange={setDraftSlashCommand}
+      onAction={(actionID) => {
+        if (actionID === "files") {
+          pickAttachment();
+          return;
+        }
+        if (actionID === "folder") {
+          pickLocalFolder();
+          return;
+        }
+        if (actionID === "screenshot") {
+          captureScreenshot();
+          return;
+        }
+        if (actionID === "photo") {
+          capturePhoto();
+        }
+      }}
+      onSlashCommandSelect={(command) => {
+        if (!command.hasArgs) {
+          runClearCommand();
+        }
+      }}
+      onEnter={(info) => {
+        const hasModel = Boolean(selectedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
+        const pending = submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending;
+        if (info.canSend && !info.mentionMenuOpen && !info.slashMenuOpen && !pending && hasModel) {
+          void form.handleSubmit((value) =>
+            submitDraftWithMode(value, info.guideNow && runningTurnID ? "steer" : undefined),
+          )();
+        }
+      }}
+      onPaste={handleTextPaste}
+      onBlur={() => setMascotInputGaze(null)}
+      onClearError={clearSubmitError}
+      scheduleMascotInputGaze={scheduleMascotInputGaze}
+    />
+  );
+
   return (
     <>
       <form
         className={cn(
-          "pointer-events-none relative shrink-0 pb-4",
-          showComposerTopStatus ? "pt-11" : "pt-2",
+          "pointer-events-none relative shrink-0",
+          floating ? "px-2 pb-1" : "pb-4",
+          !floating && (showComposerTopStatus ? "pt-11" : "pt-2"),
         )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
-      {showComposerTopStatus ? (
+      {!floating && showComposerTopStatus ? (
         <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9">
           <ChatColumn className="relative flex h-full items-center justify-center">
             {showTurnProgress && activeTurnPlan ? (
@@ -997,20 +1084,31 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       ) : null}
       {/* 正文可以滚到 Composer 后方,但只在 Composer 上方的固定区域渐隐。
           Composer 本体至窗口底部保持不透明,避免底下的正文透出。 */}
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-0"
-        style={{ top: "calc(-1 * var(--pudding-composer-mask-height, 2.5rem))" }}
+      {floating ? null : (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-0"
+          style={{ top: "calc(-1 * var(--pudding-composer-mask-height, 2.5rem))" }}
+        >
+          <ChatColumn className="flex h-full flex-col">
+            <div
+              className="shrink-0 bg-gradient-to-t from-background to-transparent"
+              style={{ height: "var(--pudding-composer-mask-height, 2.5rem)" }}
+            />
+            <div className="min-h-0 flex-1 bg-background" />
+          </ChatColumn>
+        </div>
+      )}
+      <ChatColumn
+        className={cn(
+          "pointer-events-auto relative z-10",
+          floating && "w-full max-w-none",
+        )}
       >
-        <ChatColumn className="flex h-full flex-col">
-          <div
-            className="shrink-0 bg-gradient-to-t from-background to-transparent"
-            style={{ height: "var(--pudding-composer-mask-height, 2.5rem)" }}
-          />
-          <div className="min-h-0 flex-1 bg-background" />
-        </ChatColumn>
-      </div>
-      <ChatColumn className="pointer-events-auto relative z-10">
-        <div ref={selectionGuardRef} className="relative">
+        <div
+          ref={selectionGuardRef}
+          className="relative"
+          data-composer-presentation={presentation}
+        >
           {pendingApproval ? (
             <ComposerApprovalBar approval={pendingApproval} token={token} />
           ) : pendingInputFlow ? (
@@ -1019,6 +1117,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           <div
             className={cn(
               composerShellClassName,
+              floating && "pudding-composer-shell-floating rounded-full shadow-sm",
               micActive && "is-mic-active",
             )}
           >
@@ -1044,74 +1143,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onRemoveProjectReference={removeProjectReference}
               onRevealPath={revealLocalPath}
             />
-            <div className="px-4 pt-3.5 pb-2.5">
-              <ComposerTextArea
-                ref={textAreaHandleRef}
-                control={form.control}
-                textField={textField}
-                textAreaRef={textAreaRef}
-                mentionReferences={mentionReferences}
-                slashCommands={slashCommands}
-                placeholder={
-                  session.activeMode === "chat"
-                    ? t("composer.messagePlaceholder")
-                    : t("composer.modeMessagePlaceholder").replace(
-                        "{mode}",
-                        t(`mode.${session.activeMode}`),
-                      )
-                }
-                hasAttachments={hasAttachments}
-                hasLocalFolders={hasLocalFolders}
-                hasProjectReferences={hasProjectReferences}
-                hasPendingAttachments={hasPendingAttachments}
-                hasFailedAttachments={hasFailedAttachments}
-                uploadedAttachmentsCount={uploadedAttachments.length}
-                formSetValue={form.setValue}
-                setSessionDraftText={setSessionDraftText}
-                sessionID={sessionID}
-                onCanSendChange={setCanSend}
-                onHasContentChange={setHasInput}
-                onMentionMenuOpenChange={setMentionMenuOpen}
-                onSlashMenuOpenChange={setSlashMenuOpen}
-                onDraftSlashCommandChange={setDraftSlashCommand}
-                onAction={(actionID) => {
-                  if (actionID === "files") {
-                    pickAttachment();
-                    return;
-                  }
-                  if (actionID === "folder") {
-                    pickLocalFolder();
-                    return;
-                  }
-                  if (actionID === "screenshot") {
-                    captureScreenshot();
-                    return;
-                  }
-                  if (actionID === "photo") {
-                    capturePhoto();
-                  }
-                }}
-                onSlashCommandSelect={(command) => {
-                  if (!command.hasArgs) {
-                    runClearCommand();
-                    return;
-                  }
-                }}
-                onEnter={(info) => {
-                  const hasModel = Boolean(resolvedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
-                  const pending = submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending;
-                  if (info.canSend && !info.mentionMenuOpen && !info.slashMenuOpen && !pending && hasModel) {
-                    void form.handleSubmit((value) =>
-                      submitDraftWithMode(value, info.guideNow && runningTurnID ? "steer" : undefined),
-                    )();
-                  }
-                }}
-                onPaste={handleTextPaste}
-                onBlur={() => setMascotInputGaze(null)}
-                onClearError={clearSubmitError}
-                scheduleMascotInputGaze={scheduleMascotInputGaze}
-              />
-            </div>
+            {floating ? null : (
+              <div className="px-4 pt-3.5 pb-2.5">{composerTextArea}</div>
+            )}
             <ComposerToolbar
               addBusy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}
               audioBindings={audioBindings}
@@ -1119,8 +1153,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               cancelPending={cancelMutation.isPending}
               compacting={compactMutation.isPending}
               context={workspaceOpen ? visibleUIContext : undefined}
+              inputSlot={
+                floating ? (
+                  <div className="min-w-20 flex-1 px-1 py-1">{composerTextArea}</div>
+                ) : undefined
+              }
               mentionMenuOpen={mentionMenuOpen}
               projectID={projectID}
+              presentation={presentation}
               reasoningEffort={reasoningEffort}
               sendEnabled={sendEnabled}
               session={session}
@@ -1148,18 +1188,20 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>
-          <span
-            className="absolute z-30 size-12 overflow-visible"
-            style={{ left: 6, top: -36 }}
-          >
-            <Mascot
-              className="size-full overflow-visible"
-              gaze={mascotGaze}
-              inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
-              mood={running ? "thinking" : "idle"}
-              onPointerGaze={setMascotPointerGaze}
-            />
-          </span>
+          {floating ? null : (
+            <span
+              className="absolute z-30 size-12 overflow-visible"
+              style={{ left: 6, top: -36 }}
+            >
+              <Mascot
+                className="size-full overflow-visible"
+                gaze={mascotGaze}
+                inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
+                mood={running ? "thinking" : "idle"}
+                onPointerGaze={setMascotPointerGaze}
+              />
+            </span>
+          )}
         </div>
       </ChatColumn>
       </form>

@@ -418,6 +418,8 @@ func toolGroup(name string) string {
 		return "skill"
 	case strings.HasPrefix(name, "builtin_attachment_"):
 		return "attachment"
+	case name == tool.MediaRead:
+		return "media"
 	case name == tool.RequestUserInput:
 		return "interaction"
 	default:

@@ -3,6 +3,7 @@ package tool
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/app"
@@ -62,7 +63,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 		t.Fatal("core tool definitions are not stable")
 	}
 	for _, name := range []string{
-		RequestCapability, PlanUpdate, CommandRun, CommandSession, WebSearch,
+		RequestCapability, PlanUpdate, CommandRun, CommandSession, WebSearch, MediaRead,
 		FileList, FileRead, AttachmentExport, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
@@ -91,6 +92,20 @@ func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
 		if !HasDefinition(CoreDefinitionsForMode(mode, defs), PlanUpdate) {
 			t.Fatalf("plan update missing from %s Core", mode)
 		}
+	}
+}
+
+func TestMediaReadSchemaExposesFileSourceOnlyInCode(t *testing.T) {
+	defs := BuiltinDefinitions()
+	for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork} {
+		def := definitionByName(t, CoreDefinitionsForMode(mode, defs), MediaRead)
+		if strings.Contains(string(def.InputSchema), `"file"`) || strings.Contains(string(def.InputSchema), `"scope"`) {
+			t.Fatalf("%s media schema exposed file access: %s", mode, def.InputSchema)
+		}
+	}
+	def := definitionByName(t, CoreDefinitionsForMode(store.ModeCode, defs), MediaRead)
+	if !strings.Contains(string(def.InputSchema), `"file"`) || !strings.Contains(string(def.InputSchema), `"scope"`) {
+		t.Fatalf("Code media schema is missing file access: %s", def.InputSchema)
 	}
 }
 
@@ -133,4 +148,15 @@ func toolNames(defs []provider.ToolDef) []string {
 		names[index] = def.Name
 	}
 	return names
+}
+
+func definitionByName(t *testing.T, defs []provider.ToolDef, name string) provider.ToolDef {
+	t.Helper()
+	for _, def := range defs {
+		if def.Name == name {
+			return def
+		}
+	}
+	t.Fatalf("definition %s not found", name)
+	return provider.ToolDef{}
 }

@@ -27,11 +27,13 @@ import { cn } from "@/lib/utils";
 export function SessionAudioControls({
   audioInputSupported,
   bindings,
+  compact = false,
   token,
   sessionID,
 }: {
   audioInputSupported?: boolean;
   bindings?: AudioBindings;
+  compact?: boolean;
   token: string;
   sessionID: string;
 }) {
@@ -181,6 +183,7 @@ export function SessionAudioControls({
         outputBusy={outputMutation.isPending}
         outputPending={outputMutation.isPending && outputMutation.variables === true}
         controlsLabel={t("voice.controls")}
+        compact={compact}
         onInputModeClick={handleInputModeClick}
         onOutputClick={() => outputMutation.mutate(!outputActive)}
       />
@@ -434,6 +437,7 @@ function formatTemplate(template: string, values: Record<string, string | number
 export function AudioControlButtons({
   asrInputLabel,
   controlsLabel,
+  compact = false,
   inputActive,
   inputMode,
   inputLevel,
@@ -451,6 +455,7 @@ export function AudioControlButtons({
 }: {
   asrInputLabel: string;
   controlsLabel: string;
+  compact?: boolean;
   inputActive: boolean;
   inputMode: AudioInputMode;
   inputLevel: number;
@@ -468,6 +473,23 @@ export function AudioControlButtons({
 }) {
   const inputDisabled = inputBusy ?? inputPending;
   const outputDisabled = outputBusy ?? outputPending;
+  const compactInputMode: AudioInputMode = inputActive ? inputMode : "transcribe";
+  if (compact) {
+    return (
+      <div className="flex shrink-0 items-center" aria-label={controlsLabel}>
+        <AudioInputButton
+          active={inputActive}
+          disabled={inputDisabled}
+          grouped={false}
+          icon={<Mic className="size-4" />}
+          label={compactInputMode === "raw" ? rawInputLabel : asrInputLabel}
+          level={inputLevel}
+          pending={inputPending}
+          onClick={() => onInputModeClick(compactInputMode)}
+        />
+      </div>
+    );
+  }
   const asrButton = (
     <AudioInputButton
       active={inputActive && inputMode === "transcribe"}

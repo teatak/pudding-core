@@ -1,62 +1,14 @@
 import {
-  ArrowLeft,
-  ArrowRight,
-  BookOpen,
-  BookOpenCheck,
-  Braces,
-  Camera,
   Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  CircleX,
-  Clock3,
-  CloudSun,
   Copy,
-  Download,
-  FileCheck,
-  FileInput,
-  FileOutput,
-  FilePenLine,
-  FileSearch,
-  GitBranch,
-  GitCommitHorizontal,
-  GitCompareArrows,
-  Globe,
-  History,
-  Image,
-  Info,
-  Keyboard,
-  LayoutGrid,
   Lightbulb,
   ListChecks,
-  ListTree,
-  LocateFixed,
-  MessageSquareMore,
-  MessageSquareText,
-  MousePointerClick,
-  MoveRight,
-  MoveVertical,
-  PackageOpen,
-  PackageMinus,
-  PackagePlus,
-  PanelTop,
   Paperclip,
+  Pause,
   Play,
-  Plug,
-  RefreshCw,
-  RotateCw,
-  Search,
-  ScanLine,
-  ScanSearch,
-  Send,
-  ShieldCheck,
-  Square,
-  SquareTerminal,
-  TextCursorInput,
-  Trash2,
-  Waypoints,
-  Wrench,
   type LucideIcon,
 } from "@/components/icons";
 import {
@@ -89,6 +41,7 @@ import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/s
 import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
 import { useElapsedDuration } from "./time";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
+import { toolDisplayName, toolIcon } from "./turnActivitySummary";
 
 type CompactProcessPart = {
   hiddenParts: TurnPartVM[];
@@ -325,72 +278,7 @@ function ProcessActivityIcon({ active, icon }: { active: boolean; icon: LucideIc
 }
 
 function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIcon {
-  const name = part.name || part.resultName || "";
-  if (name.startsWith("canvas_")) {
-    return LayoutGrid;
-  }
-  if (name.startsWith("app_mcp__")) {
-    return Plug;
-  }
-  const known: Record<string, LucideIcon> = {
-    builtin_attachment_export: FileOutput,
-    builtin_attachment_read_image: Image,
-    builtin_app_load: PackageOpen,
-    builtin_app_unload: PackageMinus,
-    builtin_app_save: PackagePlus,
-    builtin_browser_back: ArrowLeft,
-    builtin_browser_click: MousePointerClick,
-    builtin_browser_close: CircleX,
-    builtin_browser_forward: ArrowRight,
-    builtin_browser_observe: FileSearch,
-    builtin_browser_open: Globe,
-    builtin_browser_reload: RotateCw,
-    builtin_browser_screenshot: Camera,
-    builtin_browser_scroll: MoveVertical,
-    builtin_browser_status: PanelTop,
-    builtin_browser_type: Keyboard,
-    builtin_camera_capture: Camera,
-    builtin_command_run: SquareTerminal,
-    builtin_command_session: Keyboard,
-    builtin_code_symbols: Braces,
-    builtin_code_definition: LocateFixed,
-    builtin_code_references: Waypoints,
-    builtin_code_diagnostics: CircleAlert,
-    builtin_code_rename: TextCursorInput,
-    builtin_desktop_screenshot: ScanLine,
-    builtin_file_copy: Copy,
-    builtin_file_delete: Trash2,
-    builtin_file_list: ListTree,
-    builtin_file_move: MoveRight,
-    builtin_file_patch: FileCheck,
-    builtin_file_read: BookOpenCheck,
-    builtin_file_search: Search,
-    builtin_file_slice: BookOpenCheck,
-    builtin_file_stat: Info,
-    builtin_file_write: FilePenLine,
-    builtin_git_diff: GitCompareArrows,
-    builtin_git_log: History,
-    builtin_git_stage: FileInput,
-    builtin_git_status: GitBranch,
-    builtin_git_unstage: FileOutput,
-    builtin_git_commit: GitCommitHorizontal,
-    builtin_graphql_introspect: ScanSearch,
-    builtin_graphql_request: Braces,
-    builtin_graphql_search: Search,
-    builtin_history_get_message: MessageSquareText,
-    builtin_history_search: History,
-    builtin_rest_request: Send,
-    builtin_skill_read: BookOpen,
-    builtin_skill_validate: BookOpenCheck,
-    builtin_time_get_current: Clock3,
-    builtin_weather_get: CloudSun,
-    builtin_web_fetch: Download,
-    builtin_web_search: Search,
-    request_capability: ShieldCheck,
-    builtin_request_user_input: MessageSquareMore,
-    builtin_plan_update: ListChecks,
-  };
-  return known[name] || Wrench;
+  return toolIcon(part.name || part.resultName);
 }
 
 export function partsFromMessages(messages: Message[]): TurnPartVM[] {
@@ -586,22 +474,35 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
 }
 
 function toolAttachmentsRenderInside(name: string | undefined) {
-  return name === "builtin_attachment_read_image";
+  // The legacy name is display-only for canonical history; the backend no longer registers it.
+  return name === "builtin_media_read" || name === "builtin_attachment_read_image";
 }
 
 function dedupeAttachmentParts(parts: TurnPartVM[]): TurnPartVM[] {
   const seen = new Set<string>();
+  for (const part of parts) {
+    if (part.type !== "tool_use" || !toolAttachmentsRenderInside(part.name || part.resultName)) {
+      continue;
+    }
+    for (const attachment of part.attachments || []) {
+      seen.add(attachmentIdentity(attachment));
+    }
+  }
   return parts.filter((part) => {
     if (part.type !== "attachment") {
       return true;
     }
-    const key = part.attachment.attachmentKey || part.attachment.url || part.attachment.id;
+    const key = attachmentIdentity(part.attachment);
     if (seen.has(key)) {
       return false;
     }
     seen.add(key);
     return true;
   });
+}
+
+function attachmentIdentity(attachment: { attachmentKey?: string; id: string; url?: string }) {
+  return attachment.attachmentKey || attachment.url || attachment.id;
 }
 
 function withPartKeys(parts: TurnPartVM[]) {
@@ -698,6 +599,10 @@ function AttachmentPart({ attachment, token }: { attachment: Extract<TurnPartVM,
     );
   }
 
+  if (isAudioAttachment(attachment.mime, attachment.name)) {
+    return <AudioAttachmentPreview label={attachment.name} src={url} />;
+  }
+
   return (
     <a
       className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs leading-5 text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
@@ -711,12 +616,55 @@ function AttachmentPart({ attachment, token }: { attachment: Extract<TurnPartVM,
   );
 }
 
+function AudioAttachmentPreview({ label, src }: { label: string; src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  return (
+    <div className="inline-flex h-10 min-w-44 max-w-full items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-2 text-xs text-muted-foreground">
+      <button
+        aria-label={label}
+        className="grid size-7 shrink-0 place-items-center rounded bg-muted/70 hover:bg-muted hover:text-foreground"
+        disabled={!src}
+        type="button"
+        onClick={() => {
+          const audio = audioRef.current;
+          if (!audio) {
+            return;
+          }
+          if (audio.paused) {
+            void audio.play();
+          } else {
+            audio.pause();
+          }
+        }}
+      >
+        {playing ? <Pause className="size-4" fill="currentColor" /> : <Play className="size-4" fill="currentColor" />}
+      </button>
+      <span className="min-w-0 truncate">{label}</span>
+      {src ? (
+        <audio
+          ref={audioRef}
+          preload="none"
+          src={src}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+          onPlay={() => setPlaying(true)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function isImageAttachment(mime: string | undefined, name: string) {
   const cleaned = (mime || "").toLowerCase();
   if (cleaned.startsWith("image/") && cleaned !== "image/svg+xml") {
     return true;
   }
   return /\.(png|jpe?g|gif|webp)$/i.test(name);
+}
+
+function isAudioAttachment(mime: string | undefined, name: string) {
+  return (mime || "").toLowerCase().startsWith("audio/") || /\.(aac|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(name);
 }
 
 function ThoughtPart({
@@ -1096,9 +1044,9 @@ function ToolUsePart({
   const toolName = part.name || part.resultName || "";
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
   const codeTool = isCodeToolName(toolName);
-  const imageInspectionTool = toolAttachmentsRenderInside(toolName);
+  const mediaInspectionTool = toolAttachmentsRenderInside(toolName);
   const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_session";
-  const showDetails = codeTool || imageInspectionTool || showRawInfo;
+  const showDetails = codeTool || mediaInspectionTool || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
@@ -1142,7 +1090,7 @@ function ToolUsePart({
       </summary>
       <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
         <div className="grid min-w-0 max-w-full gap-2">
-          {imageInspectionTool ? <ToolAttachmentImagePreview attachments={part.attachments || []} token={token} /> : null}
+          {mediaInspectionTool ? <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} /> : null}
           {codeTool ? (
             <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
               <CodeToolDetails
@@ -1171,7 +1119,7 @@ function ToolUsePart({
   );
 }
 
-function ToolAttachmentImagePreview({
+function ToolAttachmentMediaPreview({
   attachments,
   token,
 }: {
@@ -1187,8 +1135,9 @@ function ToolAttachmentImagePreview({
       size: attachment.size,
       url: attachmentResourceURL(attachment, token),
     }));
+  const otherMedia = attachments.filter((attachment) => !isImageAttachment(attachment.mime, attachment.name));
 
-  if (images.length === 0) {
+  if (images.length === 0 && otherMedia.length === 0) {
     return null;
   }
   return (
@@ -1196,6 +1145,9 @@ function ToolAttachmentImagePreview({
       <div className="flex min-w-0 flex-wrap gap-2">
         {images.map((image, index) => (
           <MarkdownImageCard key={image.id || image.url} image={image} onOpen={() => setOpenIndex(index)} />
+        ))}
+        {otherMedia.map((attachment) => (
+          <AttachmentPart key={attachment.attachmentKey || attachment.url || attachment.id} attachment={attachment} token={token} />
         ))}
       </div>
       <ImageLightbox images={images} openIndex={openIndex} onOpenIndexChange={setOpenIndex} />
@@ -1893,89 +1845,6 @@ function fieldCount(value: unknown): number | null {
     return value.length;
   }
   return null;
-}
-
-function toolDisplayName(name: string | undefined, fallback: string, t: (key: string) => string) {
-  if (!name) {
-    return fallback;
-  }
-  if (name.startsWith("app_mcp__")) {
-    return t("transcript.toolAppMCP");
-  }
-  const known: Record<string, string> = {
-    builtin_graphql_request: t("transcript.toolGraphQLRequest"),
-    builtin_graphql_introspect: t("transcript.toolGraphQLIntrospect"),
-    builtin_graphql_search: t("transcript.toolGraphQLSearch"),
-    builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
-    builtin_history_search: t("transcript.toolHistorySearch"),
-    builtin_app_load: t("transcript.toolAppLoad"),
-    builtin_app_unload: t("transcript.toolAppUnload"),
-    builtin_app_save: t("transcript.toolAppSave"),
-    builtin_command_run: t("transcript.toolCommandRun"),
-    builtin_command_session: t("transcript.toolCommandSession"),
-    builtin_code_symbols: t("transcript.toolCodeSymbols"),
-    builtin_code_definition: t("transcript.toolCodeDefinition"),
-    builtin_code_references: t("transcript.toolCodeReferences"),
-    builtin_code_diagnostics: t("transcript.toolCodeDiagnostics"),
-    builtin_code_rename: t("transcript.toolCodeRename"),
-    builtin_file_copy: t("transcript.toolFileCopy"),
-    builtin_file_delete: t("transcript.toolFileDelete"),
-    builtin_file_list: t("transcript.toolFileList"),
-    builtin_file_move: t("transcript.toolFileMove"),
-    builtin_file_patch: t("transcript.toolFilePatch"),
-    builtin_file_read: t("transcript.toolFileRead"),
-    builtin_attachment_export: t("transcript.toolAttachmentExport"),
-    builtin_attachment_read_image: t("transcript.toolAttachmentReadImage"),
-    builtin_file_search: t("transcript.toolFileSearch"),
-    builtin_file_slice: t("transcript.toolFileSlice"),
-    builtin_file_stat: t("transcript.toolFileStat"),
-    builtin_file_write: t("transcript.toolFileWrite"),
-    builtin_git_diff: t("transcript.toolGitDiff"),
-    builtin_git_log: t("transcript.toolGitLog"),
-    builtin_git_stage: t("transcript.toolGitStage"),
-    builtin_git_status: t("transcript.toolGitStatus"),
-    builtin_git_unstage: t("transcript.toolGitUnstage"),
-    builtin_git_commit: t("transcript.toolGitCommit"),
-    builtin_camera_capture: t("transcript.toolCameraCapture"),
-    builtin_desktop_screenshot: t("transcript.toolDesktopScreenshot"),
-    builtin_browser_click: t("transcript.toolBrowserClick"),
-    builtin_browser_back: t("transcript.toolBrowserBack"),
-    builtin_browser_close: t("transcript.toolBrowserClose"),
-    builtin_browser_forward: t("transcript.toolBrowserForward"),
-    builtin_browser_observe: t("transcript.toolBrowserObserve"),
-    builtin_browser_open: t("transcript.toolBrowserOpen"),
-    builtin_browser_reload: t("transcript.toolBrowserReload"),
-    builtin_browser_screenshot: t("transcript.toolBrowserScreenshot"),
-    builtin_browser_scroll: t("transcript.toolBrowserScroll"),
-    builtin_browser_status: t("transcript.toolBrowserStatus"),
-    builtin_browser_type: t("transcript.toolBrowserType"),
-    builtin_rest_request: t("transcript.toolRESTRequest"),
-    builtin_skill_read: t("transcript.toolSkillRead"),
-    builtin_skill_validate: t("transcript.toolSkillValidate"),
-    builtin_time_get_current: t("transcript.toolTimeCurrent"),
-    builtin_weather_get: t("transcript.toolWeatherGet"),
-    builtin_web_fetch: t("transcript.toolWebFetch"),
-    builtin_web_search: t("transcript.toolWebSearch"),
-    builtin_request_user_input: t("transcript.toolRequestUserInput"),
-    builtin_plan_update: t("transcript.toolPlanUpdate"),
-    canvas_chart: t("transcript.toolCanvasChart"),
-    canvas_doc_read: t("transcript.toolCanvasDocRead"),
-    canvas_gallery: t("transcript.toolCanvasGallery"),
-    canvas_grid: t("transcript.toolCanvasGrid"),
-    canvas_grid_patch: t("transcript.toolCanvasGridPatch"),
-    canvas_item_clear: t("transcript.toolCanvasItemClear"),
-    canvas_item_inspect: t("transcript.toolCanvasItemInspect"),
-    canvas_item_list: t("transcript.toolCanvasItemList"),
-    canvas_item_remove: t("transcript.toolCanvasItemRemove"),
-    canvas_markdown: t("transcript.toolCanvasMarkdown"),
-    canvas_table: t("transcript.toolCanvasTable"),
-    canvas_timeline: t("transcript.toolCanvasTimeline"),
-    request_capability: t("transcript.toolRequestCapability"),
-  };
-  if (known[name]) {
-    return known[name];
-  }
-  return name.replace(/^builtin_/, "").replace(/^mcp_/, "").split("_").filter(Boolean).join(" ");
 }
 
 function toolTitle(

@@ -49,7 +49,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_history_get_message`
 - `builtin_app_load`
 - `builtin_skill_read`
-- `builtin_attachment_read_image`
+- `builtin_media_read`
 - `builtin_weather_get`
 - 加载 Image Capture App 后的 `builtin_desktop_screenshot` 与 `builtin_camera_capture`
 - 当前 Runtime 提供且已通过 `builtin_app_load` 加载的 UI App 工具

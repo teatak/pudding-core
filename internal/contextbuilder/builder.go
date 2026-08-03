@@ -676,8 +676,11 @@ func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) 
 	case "audio":
 		b.WriteString("Audio content: provided as an audio part.\n")
 	default:
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(part.MIME)), "image/") {
+		mimeType := strings.ToLower(strings.TrimSpace(part.MIME))
+		if strings.HasPrefix(mimeType, "image/") {
 			b.WriteString("Image content: not provided because the current model does not support image inputs. Do not describe visual details from metadata alone.\n")
+		} else if strings.HasPrefix(mimeType, "audio/") {
+			b.WriteString("Audio content: not provided because the current model does not support audio inputs. Do not infer audio contents from metadata alone.\n")
 		}
 	}
 	if part.AudioTranscript != "" {

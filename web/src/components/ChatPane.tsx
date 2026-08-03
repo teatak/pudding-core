@@ -58,7 +58,7 @@ type ChatPaneProps = {
   sessionID: string | undefined;
   draftActive?: boolean;
   draftProjectID?: string;
-  headerDragHandle?: boolean;
+  presentation?: "default" | "floating";
   reserveTopLeftInset?: boolean;
   reserveTopRightActions?: 0 | 1 | 2;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
@@ -73,7 +73,7 @@ export function ChatPane({
   sessionID,
   draftActive = false,
   draftProjectID,
-  headerDragHandle = false,
+  presentation = "default",
   reserveTopLeftInset = true,
   reserveTopRightActions = 0,
   role,
@@ -83,6 +83,7 @@ export function ChatPane({
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
   const workspaceOpen = useWorkspaceOpen();
+  const floating = presentation === "floating";
   const clearSession = useOverlayStore((state) => state.clearSession);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
   const [conversationSearchFocusSignal, setConversationSearchFocusSignal] = useState(0);
@@ -217,6 +218,7 @@ export function ChatPane({
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         activeChatPaneRole !== role ||
+        floating ||
         !selectedSession ||
         event.altKey ||
         (!event.metaKey && !event.ctrlKey) ||
@@ -237,7 +239,7 @@ export function ChatPane({
       window.removeEventListener("keydown", handleKeyDown);
       unsubscribeMenu();
     };
-  }, [openConversationSearch, role, selectedSession]);
+  }, [floating, openConversationSearch, role, selectedSession]);
 
   useEffect(() => {
     if (workspaceOpen && selectedSession && workspaceActivities.length > 0) {
@@ -309,11 +311,8 @@ export function ChatPane({
         activeChatPaneRole = role;
       }}
     >
-      <header
-        className={cn(
-          "pudding-chat-pane-header flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-(--toolbar-edge-inset)",
-          headerDragHandle && "pudding-agent-console-drag-handle cursor-grab active:cursor-grabbing",
-        )}
+      {floating ? null : <header
+        className="pudding-chat-pane-header flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-(--toolbar-edge-inset)"
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
         style={Object.keys(headerStyle).length ? headerStyle : undefined}
       >
@@ -376,7 +375,7 @@ export function ChatPane({
             </Tooltip>
           ) : null}
         </div>
-      </header>
+      </header>}
       <div className="flex min-h-0 flex-1 flex-col">
         {showDraft ? (
           <DraftConversation token={token} projectID={draftProjectID} />
@@ -387,6 +386,7 @@ export function ChatPane({
             searchSlot={role}
             session={selectedSession}
             token={token}
+            presentation={presentation}
             onSearchOpenChange={setConversationSearchOpen}
           />
         ) : sessionsPending ? (

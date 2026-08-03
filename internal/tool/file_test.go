@@ -1,7 +1,6 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"mime"
@@ -9,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/teatak/pudding-core/internal/attachment"
 )
 
 func TestBuiltinFileSkillWriteRead(t *testing.T) {
@@ -699,6 +696,54 @@ func TestBuiltinFileReadTreatsTypeScriptAsTextDespiteSystemMIME(t *testing.T) {
 	}
 }
 
+func TestBuiltinFileReadTreatsUTF8SVGAsText(t *testing.T) {
+	root := t.TempDir()
+	content := "<svg xmlns=\"http://www.w3.org/2000/svg\">\n  <path d=\"M0 0h1v1H0z\"/>\n</svg>\n"
+	if err := os.WriteFile(filepath.Join(root, "icon.svg"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "binary.svg"), []byte{'<', 's', 'v', 'g', 0, '>'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+
+	read := runner.Call(context.Background(), Call{
+		Name:        FileRead,
+		Args:        json.RawMessage(`{"scope":"project","path":"icon.svg"}`),
+		ProjectDirs: []string{root},
+	})
+	if !read.Ok {
+		t.Fatalf("UTF-8 SVG read should succeed: %+v", read)
+	}
+	if payload := decodeToolResult(t, read); payload["content"] != content {
+		t.Fatalf("unexpected SVG content: %+v", payload)
+	}
+
+	slice := runner.Call(context.Background(), Call{
+		Name:        FileSlice,
+		Args:        json.RawMessage(`{"scope":"project","path":"icon.svg","start":2,"end":2}`),
+		ProjectDirs: []string{root},
+	})
+	if !slice.Ok {
+		t.Fatalf("UTF-8 SVG slice should succeed: %+v", slice)
+	}
+	if payload := decodeToolResult(t, slice); payload["content"] != `  <path d="M0 0h1v1H0z"/>` {
+		t.Fatalf("unexpected SVG slice: %+v", payload)
+	}
+
+	binary := runner.Call(context.Background(), Call{
+		Name:        FileRead,
+		Args:        json.RawMessage(`{"scope":"project","path":"binary.svg"}`),
+		ProjectDirs: []string{root},
+	})
+	if binary.Ok {
+		t.Fatalf("SVG containing NUL should fail: %+v", binary)
+	}
+	if payload := decodeToolResult(t, binary); payload["reason"] != "binary_file" {
+		t.Fatalf("unexpected binary SVG result: %+v", payload)
+	}
+}
+
 func TestBuiltinFileReadRejectsBinaryBeforeLargeHint(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")
@@ -717,12 +762,12 @@ func TestBuiltinFileReadRejectsBinaryBeforeLargeHint(t *testing.T) {
 		t.Fatalf("large binary read should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["reason"] != "binary_file" {
-		t.Fatalf("large binary should report binary_file, got %+v", payload)
+	if payload["reason"] != "unsupported_media" || payload["recommendedTool"] != MediaRead {
+		t.Fatalf("large audio should recommend media_read, got %+v", payload)
 	}
 }
 
-func TestBuiltinFileReadRoutesImageAttachment(t *testing.T) {
+func TestBuiltinTextReadersRejectImageWithMediaHint(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")
 	if err := os.MkdirAll(tempDir, 0o700); err != nil {
@@ -734,33 +779,19 @@ func TestBuiltinFileReadRoutesImageAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
-		SessionID: "sess_img",
-		Name:      FileRead,
-		Args:      json.RawMessage(`{"scope":"temp","path":"image.png"}`),
-	})
-	if !res.Ok {
-		t.Fatalf("image read should route attachment: %+v", res)
-	}
-	if len(res.Attachments) != 1 || res.Attachments[0].MIME != "image/png" || res.Attachments[0].Origin != attachment.OriginTool {
-		t.Fatalf("unexpected routed attachment: %+v", res.Attachments)
-	}
-	if len(res.ContextAttachments) != 1 || res.ContextAttachments[0].AttachmentKey != res.Attachments[0].AttachmentKey {
-		t.Fatalf("image read should route a context attachment: %+v", res.ContextAttachments)
-	}
-	payload := decodeToolResult(t, res)
-	if payload["kind"] != "attachment_routed" || payload["attachmentKey"] == "" {
-		t.Fatalf("unexpected image payload: %+v", payload)
-	}
-	storedPath, ok, err := attachment.NewService(home).Path("sess_img", res.Attachments[0].AttachmentKey)
-	if err != nil || !ok {
-		t.Fatalf("stored attachment path missing: ok=%v err=%v", ok, err)
-	}
-	data, err := os.ReadFile(storedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(data, imageBytes) {
-		t.Fatalf("unexpected stored bytes: %x", data)
+	runner := NewBuiltinRunner(WithHomeDir(home))
+	for _, name := range []string{FileRead, FileSlice} {
+		res := runner.Call(context.Background(), Call{
+			SessionID: "sess_img",
+			Name:      name,
+			Args:      json.RawMessage(`{"scope":"temp","path":"image.png"}`),
+		})
+		if res.Ok || len(res.Attachments) != 0 || len(res.ContextAttachments) != 0 {
+			t.Fatalf("%s should reject image without routing it: %+v", name, res)
+		}
+		payload := decodeToolResult(t, res)
+		if payload["reason"] != "unsupported_media" || payload["recommendedTool"] != MediaRead {
+			t.Fatalf("%s should recommend media_read: %+v", name, payload)
+		}
 	}
 }

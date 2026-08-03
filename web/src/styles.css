@@ -253,16 +253,6 @@ html[data-shell] .no-drag-region {
     -webkit-user-select: none;
 }
 
-html[data-shell] .pudding-agent-console-drag-handle {
-    -webkit-app-region: no-drag;
-    cursor: grab;
-}
-
-html[data-shell] .pudding-agent-console[data-dragging="true"] .pudding-agent-console-drag-handle,
-html[data-shell] .pudding-agent-console-drag-shield {
-    cursor: grabbing !important;
-}
-
 html[data-workspace-resizing],
 html[data-workspace-resizing] * {
     cursor: ew-resize !important;
@@ -708,23 +698,9 @@ html[data-shell] :where(
 }
 
 .pudding-agent-console[data-mode="floating"] {
-    border-color: var(--agent-console-border);
-    box-shadow: var(--agent-console-shadow);
-}
-
-.pudding-agent-console[data-dragging="true"] {
-    backface-visibility: hidden;
-    box-shadow: 0 5px 18px -10px oklch(0 0 0 / 38%);
-    transition: none !important;
-    will-change: transform;
-}
-
-.pudding-agent-console-drag-shield {
-    position: fixed;
-    z-index: 9999;
-    inset: 0;
-    cursor: grabbing;
     background: transparent;
+    border-color: transparent;
+    box-shadow: none;
 }
 
 .pudding-agent-console-resize-shield {
@@ -866,6 +842,25 @@ html[data-agent-console-resizing="true"] webview {
 
 .pudding-composer-suggestion {
     --muted: var(--control-hover-background);
+}
+
+[data-composer-presentation="floating"] .pudding-composer-suggestion {
+    left: 1rem;
+}
+
+[data-composer-presentation="floating"] .pudding-composer-floating-panel {
+    right: auto;
+    left: 50%;
+    width: min(34rem, calc(100% - 2rem));
+    transform: translateX(-50%);
+}
+
+[data-composer-presentation="floating"] [data-composer-text-input="true"] {
+    field-sizing: fixed;
+    height: 1.5rem;
+    min-height: 1.5rem;
+    max-height: 1.5rem;
+    overflow-y: auto;
 }
 
 .pudding-rail-toggle [data-slot="button"],

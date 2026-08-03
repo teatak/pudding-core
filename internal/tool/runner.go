@@ -15,6 +15,7 @@ type Call struct {
 	CallID         string
 	Name           string
 	Args           json.RawMessage
+	Mode           store.AgentMode
 	ProjectDirs    []string
 	CommandSandbox CommandSandboxMode
 }

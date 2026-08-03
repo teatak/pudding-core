@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 var chatCoreTools = map[string]bool{
 	TimeGetCurrent: true, WebSearch: true, WebFetch: true,
 	HistorySearch: true, HistoryGetMessage: true, SkillRead: true,
-	AttachmentReadImage: true, WeatherGet: true,
+	MediaRead: true, WeatherGet: true,
 }
 
 var workCoreTools = map[string]bool{
@@ -57,6 +58,9 @@ func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []pro
 			if !ok || seen[name] || !ToolDefAllowedForMode(mode, def) {
 				continue
 			}
+			if name == MediaRead && mode != store.ModeCode {
+				def = attachmentOnlyMediaReadDefinition(def)
+			}
 			seen[name] = true
 			out = append(out, def)
 		}
@@ -70,6 +74,12 @@ func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []pro
 		appendNames(mapKeys(codeCoreTools))
 	}
 	return out
+}
+
+func attachmentOnlyMediaReadDefinition(def provider.ToolDef) provider.ToolDef {
+	def.Description = "Route one supported raster image or audio attachment up to 20 MiB from the current session to the model. Media bytes are visible only when the current model supports that input type; otherwise only metadata is available. This tool does not transcribe audio."
+	def.InputSchema = json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["attachment"],"description":"Use an existing attachment from the current session."},"attachmentKey":{"type":"string","description":"The exact session attachment key returned by an upload or capture tool. Prefer this field."},"url":{"type":"string","description":"A session attachment URL fallback."}},"required":["source"],"additionalProperties":false}`)
+	return def
 }
 
 func IsCoreTool(name string) bool {

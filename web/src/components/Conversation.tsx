@@ -5,6 +5,7 @@ import type { Session } from "@/api/client";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { ConversationSearchBar } from "@/components/ConversationSearchBar";
+import { FloatingTurnConsole } from "@/components/FloatingTurnConsole";
 import { Transcript } from "@/components/Transcript";
 import type { TranscriptSearchState } from "@/components/transcript/types";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
@@ -20,6 +21,7 @@ export function Conversation({
   searchSlot,
   session,
   token,
+  presentation = "default",
   onSearchOpenChange,
 }: {
   searchFocusSignal: number;
@@ -27,6 +29,7 @@ export function Conversation({
   searchSlot: "primary" | "split";
   session: Session;
   token: string;
+  presentation?: "default" | "floating";
   onSearchOpenChange: (open: boolean) => void;
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -36,6 +39,7 @@ export function Conversation({
   const droppedFilesNonceRef = useRef(0);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
+  const floating = presentation === "floating";
 
   useLayoutEffect(() => {
     const conversation = conversationRef.current;
@@ -130,7 +134,10 @@ export function Conversation({
   return (
     <div
       ref={conversationRef}
-      className="pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background [--pudding-composer-mask-height:2.5rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100"
+      className={
+        "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-mask-height:2.5rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
+        (floating ? "bg-transparent" : "bg-background")
+      }
       data-file-drop-target=""
       data-pudding-drop-target="conversation"
       data-session-id={session.id}
@@ -139,30 +146,56 @@ export function Conversation({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
-        <ChatColumn>
-          <div className="h-6 bg-gradient-to-b from-background to-transparent" />
-        </ChatColumn>
+      {floating ? null : (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+          <ChatColumn>
+            <div className="h-6 bg-gradient-to-b from-background to-transparent" />
+          </ChatColumn>
+        </div>
+      )}
+      {floating ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-end"
+          style={{ bottom: "calc(var(--pudding-composer-overlay-height) - 1px)" }}
+        >
+          <FloatingTurnConsole session={session} submitError={submitError} token={token} />
+        </div>
+      ) : (
+        <Transcript
+          searchSlot={searchSlot}
+          searchState={searchState}
+          sessionID={session.id}
+          sessionRunning={session.running}
+          submitError={submitError}
+          token={token}
+        />
+      )}
+      <div
+        ref={composerOverlayRef}
+        className={
+          floating
+            ? "pointer-events-none relative z-30 mt-auto shrink-0"
+            : "pointer-events-none absolute inset-x-0 bottom-0 z-30"
+        }
+      >
+        <Composer
+          droppedFiles={droppedFiles}
+          presentation={floating ? "floating" : "default"}
+          token={token}
+          session={session}
+          onSubmitError={setSubmitError}
+        />
       </div>
-      <Transcript
-        searchSlot={searchSlot}
-        searchState={searchState}
-        sessionID={session.id}
-        sessionRunning={session.running}
-        submitError={submitError}
-        token={token}
-      />
-      <div ref={composerOverlayRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30">
-        <Composer droppedFiles={droppedFiles} token={token} session={session} onSubmitError={setSubmitError} />
-      </div>
-      <ConversationSearchBar
-        focusSignal={searchFocusSignal}
-        open={searchOpen}
-        sessionID={session.id}
-        token={token}
-        onOpenChange={onSearchOpenChange}
-        onSearchChange={setSearchState}
-      />
+      {floating ? null : (
+        <ConversationSearchBar
+          focusSignal={searchFocusSignal}
+          open={searchOpen}
+          sessionID={session.id}
+          token={token}
+          onOpenChange={onSearchOpenChange}
+          onSearchChange={setSearchState}
+        />
+      )}
       <ChatDropOverlay mode={dragMode} />
     </div>
   );
