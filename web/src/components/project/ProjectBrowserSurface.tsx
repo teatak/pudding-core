@@ -62,6 +62,8 @@ function resolveProjectSurfaceMode(width: number): ProjectSurfaceMode {
 export function ProjectBrowserSurface({
   active,
   activeTurnDiffID,
+  projectAvailable,
+  projectStateReady,
   sessionID,
   token,
   turnDiffTabs,
@@ -73,6 +75,8 @@ export function ProjectBrowserSurface({
 }: {
   active: boolean;
   activeTurnDiffID?: string;
+  projectAvailable: boolean;
+  projectStateReady: boolean;
   sessionID: string;
   token: string;
   turnDiffTabs: FilePreview[];
@@ -155,7 +159,7 @@ export function ProjectBrowserSurface({
     !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
   ))), [dirtyKeys, workspace.tabs]);
   const rootsQuery = useQuery({
-    enabled: (active || Boolean(fileReveal)) && Boolean(sessionID && token),
+    enabled: projectAvailable && projectStateReady && (active || Boolean(fileReveal)) && Boolean(sessionID && token),
     queryKey: queryKeys.projectBrowserRoots(sessionID),
     queryFn: () => listProjectBrowserRoots(token, sessionID),
     staleTime: 10_000,
@@ -276,7 +280,23 @@ export function ProjectBrowserSurface({
     });
   }, [active, queryClient, sessionID, rootPaths.join("\n")]);
   useEffect(() => {
-    if (!fileReveal || rootsQuery.isLoading || rootsQuery.isFetching) {
+    if (!fileReveal || !projectStateReady) {
+      return;
+    }
+    if (!projectAvailable) {
+      if (fileReveal.fallback) {
+        openFilePreview(fileReveal.fallback);
+      } else {
+        toast.warning(t("project.browserRevealUnavailable"));
+      }
+      consumeProjectFileReveal(sessionID, fileReveal.serial);
+      return;
+    }
+    if (rootsQuery.isLoading || rootsQuery.isFetching) {
+      return;
+    }
+    if (rootsQuery.isError) {
+      toast.warning(t("project.browserLoadFailed"));
       return;
     }
     const selection = resolveProjectFileReveal(roots, fileReveal);
@@ -296,7 +316,7 @@ export function ProjectBrowserSurface({
       toast.warning(t("project.browserRevealUnavailable"));
     }
     consumeProjectFileReveal(sessionID, fileReveal.serial);
-  }, [fileReveal?.serial, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
+  }, [fileReveal?.serial, projectAvailable, projectStateReady, rootsQuery.isError, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
   const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
   const refreshGitRoots = async (targetSessionID: string, rootIDs: string[]) => {

@@ -87,13 +87,22 @@ func normalizeApprovalScope(scope ApprovalScope) (ApprovalScope, bool) {
 }
 
 func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID string, scope ApprovalScope, projectDirs []string) error {
+	_, err := e.ApproveApprovalWithSession(ctx, sessionID, approvalID, scope, projectDirs)
+	return err
+}
+
+func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, approvalID string, scope ApprovalScope, projectDirs []string) (*store.Session, error) {
 	scope, ok := normalizeApprovalScope(scope)
 	if !ok {
-		return fmt.Errorf("engine: invalid approval scope")
+		return nil, fmt.Errorf("engine: invalid approval scope")
 	}
 	p, err := e.lookupPendingApproval(sessionID, approvalID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
 	switch p.req.Kind {
 	case ApprovalKindCapability:
@@ -114,14 +123,17 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 				if len(projectDirs) > 0 {
 					project, err := e.bindSessionProject(ctx, sessionID, projectDirs)
 					if err != nil {
-						return err
+						return nil, err
 					}
 					upd.ProjectID = &project.ID
 				}
 			}
-			if _, err := e.store.UpdateSession(ctx, sessionID, upd); err != nil {
-				return err
+			wasRunning := sess.Running
+			sess, err = e.store.UpdateSession(ctx, sessionID, upd)
+			if err != nil {
+				return nil, err
 			}
+			sess.Running = wasRunning
 		} else if p.req.TargetMode == store.ModeCode && len(projectDirs) > 0 {
 			e.mu.Lock()
 			grant := e.turnProjectAccess[p.req.TurnID]
@@ -133,10 +145,10 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 		scope = ApprovalScopeTurn
 		projectDirs = nil
 	default:
-		return ErrApprovalUnsupported
+		return nil, ErrApprovalUnsupported
 	}
 	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
-		return err
+		return nil, err
 	}
 	e.hub.Publish(event.Event{
 		SessionID:    p.req.SessionID,
@@ -149,7 +161,7 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 		Payload:      approvalResolvedPayload(p.req.Kind, scope, projectDirs),
 	})
 	p.ch <- approvalDecision{approved: true, scope: scope, projectDirs: projectDirs}
-	return nil
+	return sess, nil
 }
 
 func (e *Engine) bindSessionProject(ctx context.Context, sessionID string, rootDirs []string) (*store.Project, error) {

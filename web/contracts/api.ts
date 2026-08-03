@@ -23,6 +23,12 @@ export const session = z.object({
 });
 export type Session = z.infer<typeof session>;
 
+export const approveApprovalResponse = z.object({
+  status: z.literal("approved"),
+  session,
+});
+export type ApproveApprovalResponse = z.infer<typeof approveApprovalResponse>;
+
 export const approvalMode = z.enum(["ask", "auto", "full"]);
 export type ApprovalMode = z.infer<typeof approvalMode>;
 

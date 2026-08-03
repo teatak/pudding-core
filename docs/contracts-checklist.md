@@ -65,7 +65,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
 | `POST /sessions/{id}/audio/output` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
-| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status}` | 404 |
+| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status, session}` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |

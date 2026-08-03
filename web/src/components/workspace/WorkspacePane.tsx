@@ -119,6 +119,7 @@ export const WorkspacePane = memo(function WorkspacePane({
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
+  const [validatedProjectReveal, setValidatedProjectReveal] = useState<{ serial: number; sessionID: string }>();
   const hadResourcesRef = useRef(false);
   const resourceSessionIDRef = useRef("");
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
@@ -225,6 +226,36 @@ export const WorkspacePane = memo(function WorkspacePane({
   });
   const hasProject = Boolean(sessionQuery.data?.projectID);
   const projectTabVisible = hasProject && !projectTabClosed;
+  const projectRevealReady = !projectFileReveal || (
+    validatedProjectReveal?.serial === projectFileReveal.serial
+    && validatedProjectReveal.sessionID === projectFileReveal.sessionID
+  );
+  useEffect(() => {
+    if (!actorSessionID || projectFileReveal?.sessionID !== actorSessionID) {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      sessionQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectBrowserRoots(actorSessionID) }),
+    ]).then(([result]) => {
+      if (cancelled) {
+        return;
+      }
+      if (result.isSuccess) {
+        setValidatedProjectReveal({ serial: projectFileReveal.serial, sessionID: actorSessionID });
+      } else {
+        toast.warning(t("project.browserLoadFailed"));
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        toast.warning(t("project.browserLoadFailed"));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [actorSessionID, projectFileReveal?.serial, queryClient, sessionQuery.refetch]);
   const projectTurnDiffPreviews = useMemo(
     () => hasProject ? filePreviews.filter((preview) => preview.source === "turn-diff") : [],
     [filePreviews, hasProject],
@@ -1183,6 +1214,8 @@ export const WorkspacePane = memo(function WorkspacePane({
           <ProjectBrowserSurface
             active={projectActive}
             activeTurnDiffID={activeFilePreview?.source === "turn-diff" ? activeFilePreview.id : undefined}
+            projectAvailable={hasProject}
+            projectStateReady={projectRevealReady}
             sessionID={actorSessionID}
             token={token}
             turnDiffTabs={projectTurnDiffPreviews}

@@ -23,6 +23,7 @@ import { browserTabFaviconURL, browserTabTitle, upsertBrowserTab } from "@/brows
 import type { BrowserTabsData } from "@/browser/types";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
+import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import { apiURL } from "@/state/apiBase";
 import { requestBrowserReveal, retainBrowserActivities } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -116,6 +117,7 @@ function openSessionEventSource({
     syncProjectGitFromEvent(queryClient, parsed.data);
     syncBackgroundProcessFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
+    syncApprovalStateFromEvent(queryClient, token, parsed.data);
     if (
       parsed.data.kind === "turn.tool" &&
       (parsed.data.name === "builtin_app_load" || parsed.data.name === "builtin_app_unload") &&
@@ -162,6 +164,26 @@ function openSessionEventSource({
       source.close();
     },
   };
+}
+
+function syncApprovalStateFromEvent(queryClient: QueryClient, token: string, event: SessionEvent) {
+  if (
+    event.kind !== "approval.resolved"
+    || event.approvalKind !== "capability"
+    || event.status !== "approved"
+    || approvalScope(event.payload) !== "session"
+  ) {
+    return;
+  }
+  void syncSessionProjectState(queryClient, token, event.sessionID);
+}
+
+function approvalScope(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const scope = (payload as { scope?: unknown }).scope;
+  return scope === "turn" || scope === "session" ? scope : "";
 }
 
 function syncProjectGitFromEvent(queryClient: QueryClient, event: SessionEvent) {

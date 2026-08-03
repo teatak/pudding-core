@@ -1032,7 +1032,8 @@ func (s *Server) approveApproval(c *cart.Context) error {
 	if scope != engine.ApprovalScopeTurn && scope != engine.ApprovalScopeSession {
 		return badRequest(c, "invalid approval scope")
 	}
-	if err := s.engine.ApproveApproval(c.Request.Context(), id, approvalID, scope, req.ProjectDirs); err != nil {
+	sess, err := s.engine.ApproveApprovalWithSession(c.Request.Context(), id, approvalID, scope, req.ProjectDirs)
+	if err != nil {
 		if errors.Is(err, engine.ErrApprovalNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 			return nil
@@ -1042,7 +1043,8 @@ func (s *Server) approveApproval(c *cart.Context) error {
 		}
 		return s.fail(c, err)
 	}
-	c.JSON(http.StatusAccepted, map[string]string{"status": "approved"})
+	s.enrichSessionProcesses(sess)
+	c.JSON(http.StatusAccepted, map[string]any{"status": "approved", "session": sess})
 	return nil
 }
 

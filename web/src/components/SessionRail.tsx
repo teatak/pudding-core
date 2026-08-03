@@ -472,7 +472,7 @@ export function SessionRail({
     selectSession(selection.sessionID);
   }
 
-  function renderPanel(compactWordmarkGap = false) {
+  function renderPanel() {
     return (
       <RailPanel
         appsActive={appsActive}
@@ -486,7 +486,6 @@ export function SessionRail({
         selectedSessionID={selectedSessionID}
         sessions={sessions}
         token={token}
-        compactWordmarkGap={compactWordmarkGap}
         onSearch={openSessionSearch}
         onCreate={openNewSession}
         onCreateProject={openProjectCreate}
@@ -635,7 +634,7 @@ export function SessionRail({
           <div className="flex h-10 shrink-0 items-center px-3">
             <PuddingWordmark />
           </div>
-          {renderPanel(true)}
+          {renderPanel()}
         </div>
       </aside>
       {searchDialog}
@@ -959,7 +958,6 @@ type RailPanelProps = {
   onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
-  compactWordmarkGap?: boolean;
 };
 
 type SessionDropGroup = "pinned" | "unpinned";
@@ -1036,7 +1034,6 @@ function RailPanel({
   onRename,
   onOverlayOpenChange,
   onRefetch,
-  compactWordmarkGap = false,
 }: RailPanelProps) {
   const { t } = useI18n();
   const navigate = useNavigate({ from: "/" });
@@ -1437,12 +1434,7 @@ function RailPanel({
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-          <SidebarHeader
-            className={cn(
-              "px-2 pb-2",
-              compactWordmarkGap ? "pt-0" : "pt-2",
-            )}
-          >
+          <SidebarHeader className="px-2 pt-0 pb-2">
             <SidebarMenu
               className="gap-0.5"
               onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-header-action]")}

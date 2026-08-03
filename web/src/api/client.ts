@@ -1,5 +1,6 @@
 import {
   listBuiltinToolsResponse,
+  approveApprovalResponse,
   listBrowserMCPSessionsResponse,
   listAppConnectionsResponse,
   listCanvasItemsResponse,
@@ -109,6 +110,7 @@ import {
   terminal,
   webToolsConfig,
   type AppConnection,
+  type ApproveApprovalResponse,
   type AppDefinition,
   type AppMCPEndpointStatus,
   type AppMCPOverride,
@@ -1263,14 +1265,14 @@ export function listPendingApprovals(token: string, sessionID: string): Promise<
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals`, listPendingApprovalsResponse);
 }
 
-export async function approveApproval(
+export function approveApproval(
   token: string,
   sessionID: string,
   approvalID: string,
   scope: "turn" | "session" = "turn",
   projectDirs: string[] = [],
-): Promise<void> {
-  await request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals/${encodeURIComponent(approvalID)}/approve`, z.object({ status: z.string() }), {
+): Promise<ApproveApprovalResponse> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals/${encodeURIComponent(approvalID)}/approve`, approveApprovalResponse, {
     method: "POST",
     body: JSON.stringify({ scope, projectDirs }),
   });

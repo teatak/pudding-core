@@ -13,6 +13,7 @@ import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
+import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import type { AssistantOverlay, AssistantOverlayPart } from "@/state/overlayStore";
 
 type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
@@ -57,12 +58,9 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
     }
     setPendingAction(scope);
     try {
-      await approveApproval(token, current.sessionID, current.approvalID, scope, isCodeApproval ? projectDirs : []);
+      const response = await approveApproval(token, current.sessionID, current.approvalID, scope, isCodeApproval ? projectDirs : []);
       if (scope === "session") {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
-        ]);
+        await syncSessionProjectState(queryClient, token, current.sessionID, response.session);
       }
       setViewingPatchApproval(null);
       setViewingGitCommit(null);
