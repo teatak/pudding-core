@@ -640,31 +640,31 @@ export function App() {
   );
   const agentConsole = (
     <Rnd
-        key="agent-console-native-drag"
-        className={cn(
-          "pudding-agent-console flex min-h-0 min-w-0",
-          consoleDisplayMode === "floating"
-            ? "pointer-events-none overflow-visible"
-            : "overflow-hidden",
-        )}
-        data-mode={consoleDisplayMode}
-        disableDragging
-        enableResizing={false}
-        position={consolePosition}
-        size={consoleSize}
-        style={{
-          flexShrink: 0,
-          order: consoleDisplayMode === "dock-right" ? 2 : 0,
-          position: consoleDisplayMode === "floating" ? "absolute" : "relative",
-          zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
-          transition:
-            consoleInteracting || docked
-              ? "none"
-              : "transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out, border-radius 180ms ease-out",
-        }}
-      >
-        {chatArea}
-      </Rnd>
+      key="agent-console-native-drag"
+      className={cn(
+        "pudding-agent-console flex min-h-0 min-w-0",
+        consoleDisplayMode === "floating"
+          ? "pointer-events-none overflow-visible"
+          : "overflow-hidden",
+      )}
+      data-mode={consoleDisplayMode}
+      disableDragging
+      enableResizing={false}
+      position={consolePosition}
+      size={consoleSize}
+      style={{
+        flexShrink: 0,
+        order: consoleDisplayMode === "dock-right" ? 2 : 0,
+        position: consoleDisplayMode === "floating" ? "absolute" : "relative",
+        zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
+        transition:
+          consoleInteracting || docked
+            ? "none"
+            : "transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out, border-radius 180ms ease-out",
+      }}
+    >
+      {chatArea}
+    </Rnd>
   );
   const sessionStage = (
     <>
