@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -523,7 +525,7 @@ func TestSchemaMigrationRollsBackVersionAndChanges(t *testing.T) {
 func TestBackupDatabaseBeforeMigrationPreservesData(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "sess_backup")
-	if err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
+	if _, err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
 	backups, err := filepath.Glob(fmt.Sprintf("%s.backup-v%d-*", path, currentSchemaVersion))
@@ -542,6 +544,112 @@ func TestBackupDatabaseBeforeMigrationPreservesData(t *testing.T) {
 	if title != "sess_backup" {
 		t.Fatalf("backup session title = %q", title)
 	}
+}
+
+func TestOpenCleansOldBackupsAfterMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := backupDatabaseBeforeMigration(st.db, path, 7); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backups := migrationBackupFiles(t, path)
+	if len(backups) != 3 {
+		t.Fatalf("migration backups = %v, want three", backups)
+	}
+	unrelated := path + ".backup-vx-not-a-migration-backup"
+	if err := os.WriteFile(unrelated, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`PRAGMA user_version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	backups = migrationBackupFiles(t, path)
+	if len(backups) != 1 || !strings.Contains(filepath.Base(backups[0]), ".backup-v8-") {
+		t.Fatalf("migration backups after cleanup = %v, want latest v8 backup", backups)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated backup-like file was removed: %v", err)
+	}
+}
+
+func TestOpenDoesNotCleanBackupsWithoutMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	backups := migrationBackupFiles(t, path)
+	if len(backups) != 2 {
+		t.Fatalf("migration backups without migration = %v, want two", backups)
+	}
+}
+
+func TestCleanupMigrationBackupsDoesNotDeleteWithoutKeepBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for i := 0; i < 2; i++ {
+		if _, err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cleanupMigrationBackups(path, path+".backup-v9-missing"); err == nil {
+		t.Fatal("cleanup without the keep backup succeeded")
+	}
+	backups := migrationBackupFiles(t, path)
+	if len(backups) != 2 {
+		t.Fatalf("migration backups after rejected cleanup = %v, want two", backups)
+	}
+}
+
+func migrationBackupFiles(t *testing.T, path string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backups := make([]string, 0)
+	for _, entry := range entries {
+		if _, ok := migrationBackupTimestamp(filepath.Base(path), entry.Name()); ok {
+			backups = append(backups, filepath.Join(filepath.Dir(path), entry.Name()))
+		}
+	}
+	return backups
 }
 
 func openMigrationTestDB(t *testing.T, path string) *sql.DB {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -359,8 +360,11 @@ func prepareSchema(db *sql.DB, path string) error {
 			}
 		}
 	}
-	if version < currentSchemaVersion {
-		if err := backupDatabaseBeforeMigration(db, path, version); err != nil {
+	migrated := version < currentSchemaVersion
+	migrationBackupPath := ""
+	if migrated {
+		migrationBackupPath, err = backupDatabaseBeforeMigration(db, path, version)
+		if err != nil {
 			return err
 		}
 		for next := version + 1; next <= currentSchemaVersion; next++ {
@@ -375,6 +379,10 @@ func prepareSchema(db *sql.DB, path string) error {
 	}
 	if err := validateCurrentSchema(db); err != nil {
 		return fmt.Errorf("%w: schema v%d failed validation: %v", ErrUnsupportedSchema, currentSchemaVersion, err)
+	}
+	if migrated {
+		// Cleanup is best effort and only follows a successful schema migration.
+		_ = cleanupMigrationBackups(path, migrationBackupPath)
 	}
 	return nil
 }
@@ -438,22 +446,22 @@ func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) erro
 	return nil
 }
 
-func backupDatabaseBeforeMigration(db *sql.DB, path string, version int) error {
+func backupDatabaseBeforeMigration(db *sql.DB, path string, version int) (string, error) {
 	if path == ":memory:" {
-		return nil
+		return "", nil
 	}
 	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-		return fmt.Errorf("sqlite: checkpoint before migration: %w", err)
+		return "", fmt.Errorf("sqlite: checkpoint before migration: %w", err)
 	}
 	source, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("sqlite: open migration backup source: %w", err)
+		return "", fmt.Errorf("sqlite: open migration backup source: %w", err)
 	}
 	defer source.Close()
 	backupPath := fmt.Sprintf("%s.backup-v%d-%s", path, version, time.Now().UTC().Format("20060102T150405.000000000Z"))
 	target, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("sqlite: create migration backup: %w", err)
+		return "", fmt.Errorf("sqlite: create migration backup: %w", err)
 	}
 	ok := false
 	defer func() {
@@ -463,16 +471,80 @@ func backupDatabaseBeforeMigration(db *sql.DB, path string, version int) error {
 		}
 	}()
 	if _, err := io.Copy(target, source); err != nil {
-		return fmt.Errorf("sqlite: write migration backup: %w", err)
+		return "", fmt.Errorf("sqlite: write migration backup: %w", err)
 	}
 	if err := target.Sync(); err != nil {
-		return fmt.Errorf("sqlite: sync migration backup: %w", err)
+		return "", fmt.Errorf("sqlite: sync migration backup: %w", err)
 	}
 	if err := target.Close(); err != nil {
-		return fmt.Errorf("sqlite: close migration backup: %w", err)
+		return "", fmt.Errorf("sqlite: close migration backup: %w", err)
 	}
 	ok = true
-	return nil
+	return backupPath, nil
+}
+
+func cleanupMigrationBackups(path, keepPath string) error {
+	if path == ":memory:" {
+		return nil
+	}
+	if keepPath == "" {
+		return errors.New("sqlite: migration backup cleanup requires a backup to keep")
+	}
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("sqlite: list migration backups: %w", err)
+	}
+	keepName := filepath.Base(keepPath)
+	backups := make([]string, 0)
+	keepFound := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		_, ok := migrationBackupTimestamp(base, entry.Name())
+		if ok {
+			backups = append(backups, entry.Name())
+			keepFound = keepFound || entry.Name() == keepName
+		}
+	}
+	if !keepFound {
+		return fmt.Errorf("sqlite: migration backup to keep not found: %s", keepName)
+	}
+	if len(backups) <= 1 {
+		return nil
+	}
+	var cleanupErr error
+	for _, candidate := range backups {
+		if candidate == keepName {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, candidate)); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("sqlite: remove migration backup %s: %w", candidate, err))
+		}
+	}
+	return cleanupErr
+}
+
+func migrationBackupTimestamp(databaseName, candidate string) (time.Time, bool) {
+	const timestampFormat = "20060102T150405.000000000Z"
+	prefix := databaseName + ".backup-v"
+	if !strings.HasPrefix(candidate, prefix) {
+		return time.Time{}, false
+	}
+	versionAndTimestamp := strings.TrimPrefix(candidate, prefix)
+	version, timestamp, ok := strings.Cut(versionAndTimestamp, "-")
+	if !ok || version == "" || timestamp == "" {
+		return time.Time{}, false
+	}
+	for i := range version {
+		if version[i] < '0' || version[i] > '9' {
+			return time.Time{}, false
+		}
+	}
+	parsed, err := time.Parse(timestampFormat, timestamp)
+	return parsed, err == nil
 }
 
 type schemaContract struct {
