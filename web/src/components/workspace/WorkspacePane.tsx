@@ -24,6 +24,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { electronBrowserBridge } from "@/browser/electronBridge";
 import { browserTabTitle } from "@/browser/helpers";
+import { activateBrowserPageFindRegion } from "@/browser/pageFindTarget";
 import {
   useElectronRequiredBrowserTabs,
   type ElectronBrowserSurfaceTab,
@@ -1082,6 +1083,7 @@ export const WorkspacePane = memo(function WorkspacePane({
             onCloseProject={closeProjectSurface}
             onCloseTerminal={closeTerminal}
             onSelectBrowser={(tabID) => {
+              activateBrowserPageFindRegion();
               setActiveFilePreviewID(undefined);
               selectBrowserTab(tabID);
             }}

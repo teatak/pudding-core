@@ -2,6 +2,7 @@ import {
   Activity,
   AudioLines,
   BookOpen,
+  Globe,
   Info,
   MessageSquareText,
   Settings,
@@ -9,12 +10,14 @@ import {
   SlidersHorizontal,
   Sparkles,
   Wrench,
+  X,
 } from "@/components/icons";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { AboutSettings } from "@/components/settings/AboutSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
+import { BrowserSettings } from "@/components/settings/BrowserSettings";
 import { ProviderSettings } from "@/components/settings/ProviderSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ToolsSettings } from "@/components/settings/ToolsSettings";
@@ -23,6 +26,7 @@ import { VoiceSettings } from "@/components/settings/VoiceSettings";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogTitle,
@@ -49,7 +53,6 @@ type SettingsSection = {
   id: SettingsSectionID;
   icon: typeof MessageSquareText;
   labelKey: string;
-  descriptionKey: string;
 };
 
 const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> = [
@@ -60,19 +63,16 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
         id: "dialogue",
         icon: SlidersHorizontal,
         labelKey: "settings.section.dialogue",
-        descriptionKey: "settings.section.dialogue.desc",
       },
       {
         id: "model",
         icon: Sparkles,
         labelKey: "settings.section.model",
-        descriptionKey: "settings.section.model.desc",
       },
       {
         id: "voice",
         icon: AudioLines,
         labelKey: "settings.section.voice",
-        descriptionKey: "settings.section.voice.desc",
       },
     ],
   },
@@ -83,13 +83,11 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
         id: "skills",
         icon: BookOpen,
         labelKey: "settings.section.skills",
-        descriptionKey: "settings.section.skills.desc",
       },
       {
         id: "tools",
         icon: Wrench,
         labelKey: "settings.section.tools",
-        descriptionKey: "settings.section.tools.desc",
       },
     ],
   },
@@ -97,22 +95,24 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
     labelKey: "settings.group.system",
     sections: [
       {
+        id: "browser",
+        icon: Globe,
+        labelKey: "settings.section.browser",
+      },
+      {
         id: "usage",
         icon: Activity,
         labelKey: "settings.section.usage",
-        descriptionKey: "settings.section.usage.desc",
       },
       {
         id: "advanced",
         icon: Settings2,
         labelKey: "settings.section.advanced",
-        descriptionKey: "settings.section.advanced.desc",
       },
       {
         id: "about",
         icon: Info,
         labelKey: "settings.section.about",
-        descriptionKey: "settings.section.about.desc",
       },
     ],
   },
@@ -200,6 +200,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
         ) : null}
         <DialogContent
           className="pudding-settings-surface top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 shadow-lg sm:w-[calc(100vw-2rem)] sm:max-w-[1040px] xl:max-w-[1040px]"
+          showCloseButton={false}
           onPointerDownOutside={(event) => {
             if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
               event.preventDefault();
@@ -222,11 +223,19 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
             </div>
             <main className="flex h-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-background">
               <SettingsTopNav active={active} onActiveChange={changeActive} />
-              <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border/70 bg-background/95 py-2">
-                <div className="grid gap-0.5 px-4 sm:px-6">
-                  <h2 className="text-sm font-medium text-foreground">{t(activeSection.labelKey)}</h2>
-                  <p className="text-xs text-muted-foreground">{t(activeSection.descriptionKey)}</p>
-                </div>
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 bg-background/95">
+                <h2 className="min-w-0 flex-1 px-4 text-foreground sm:px-6">{t(activeSection.labelKey)}</h2>
+                <DialogClose asChild>
+                  <Button
+                    aria-label={t("common.close")}
+                    className="mr-2 active:translate-y-0 sm:mr-3"
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <X />
+                  </Button>
+                </DialogClose>
               </header>
               <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pt-4 pb-5 sm:px-6 sm:pt-5 sm:pb-6">
                 {active === "usage" ? <UsageSettings token={token} /> : null}
@@ -247,6 +256,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
                 ) : null}
                 {active === "skills" ? <SkillsSettings token={token} /> : null}
                 {active === "tools" ? <ToolsSettings token={token} onDirtyChange={setActiveDirty} /> : null}
+                {active === "browser" ? <BrowserSettings /> : null}
                 {active === "about" ? <AboutSettings token={token} /> : null}
               </div>
             </main>
@@ -345,9 +355,9 @@ function SettingsSidebar({
       <SidebarContent>
         {SETTINGS_GROUPS.map((group) => (
           <SidebarGroup key={group.labelKey} className="p-3 pb-0 last:pb-3">
-            <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-muted-foreground">{t(group.labelKey)}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 {group.sections.map((section) => {
                   const Icon = section.icon;
                   const isActive = section.id === active;

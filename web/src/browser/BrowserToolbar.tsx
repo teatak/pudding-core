@@ -20,6 +20,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import { BrowserOptionsMenu } from "@/browser/BrowserOptionsMenu";
 import { allowElectronBrowserTab, hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import {
   browserAddressToURL,
@@ -108,11 +109,13 @@ function sameToolbarURL(left: string, right: string): boolean {
 export function BrowserToolbar({
   active = true,
   activeTab: activeTabProp,
+  onOpenFind,
   sessionID,
   token,
 }: {
   active?: boolean;
   activeTab?: BrowserTab;
+  onOpenFind: () => void;
   sessionID: string;
   token: string;
 }) {
@@ -574,6 +577,12 @@ export function BrowserToolbar({
           ) : null}
         </PopoverContent>
       </Popover>
+      <BrowserOptionsMenu
+        active={active}
+        activeTab={activeTab}
+        sessionID={sessionID}
+        onOpenFind={onOpenFind}
+      />
       <AlertDialog open={clearHistoryOpen} onOpenChange={setClearHistoryOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

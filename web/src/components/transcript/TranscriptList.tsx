@@ -979,28 +979,13 @@ function ensureTranscriptSearchHighlightStyles() {
   style.textContent = `
     ::highlight(pudding-conversation-search-match-primary),
     ::highlight(pudding-conversation-search-match-split) {
-      color: inherit;
-      background-color: oklch(0.88 0.14 88 / 0.42);
+      color: #171717;
+      background-color: #f9e663;
     }
     ::highlight(pudding-conversation-search-active-primary),
     ::highlight(pudding-conversation-search-active-split) {
-      color: white;
-      background-color: var(--transcript-reveal-accent);
-      text-decoration-line: underline;
-      text-decoration-color: color-mix(in oklab, white 82%, transparent);
-      text-decoration-thickness: 2px;
-      text-underline-offset: 2px;
-      text-shadow: 0 0 0.55rem color-mix(in oklab, var(--transcript-reveal-accent) 80%, transparent);
-    }
-    .dark ::highlight(pudding-conversation-search-match-primary),
-    .dark ::highlight(pudding-conversation-search-match-split) {
-      background-color: oklch(0.72 0.13 82 / 0.3);
-    }
-    .dark ::highlight(pudding-conversation-search-active-primary),
-    .dark ::highlight(pudding-conversation-search-active-split) {
-      color: oklch(0.16 0 0);
-      background-color: var(--transcript-reveal-accent);
-      text-decoration-color: color-mix(in oklab, oklch(0.16 0 0) 70%, transparent);
+      color: #171717;
+      background-color: #ff9632;
     }
   `;
 }

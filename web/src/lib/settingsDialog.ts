@@ -4,6 +4,7 @@ export type SettingsSectionID =
   | "voice"
   | "skills"
   | "tools"
+  | "browser"
   | "usage"
   | "advanced"
   | "about";

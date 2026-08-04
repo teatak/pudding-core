@@ -59,6 +59,33 @@ export type ElectronBrowserSelectionEvent = {
   tabID: string;
 };
 
+export type ElectronBrowserFindResult = {
+  sessionID: string;
+  tabID: string;
+  requestID: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+};
+
+export type ElectronBrowserInteractionEvent = {
+  sessionID: string;
+  tabID: string;
+  kind: "keyboard" | "pointer";
+  key?: "Escape";
+};
+
+export type ElectronBrowserZoom = {
+  factor: number;
+  percent: number;
+};
+
+export type ElectronBrowserPrintResult = {
+  ok: boolean;
+  canceled: boolean;
+  reason: string;
+};
+
 export type ElectronBrowserCursorEvent = {
   sessionID: string;
   tabID: string;
@@ -78,6 +105,49 @@ export type ElectronBrowserAutomationEvent = {
   createdAt?: string;
 };
 
+export type ElectronBrowserCredential = {
+  id: string;
+  origin: string;
+  username: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ElectronBrowserCredentialPrompt = {
+  id: string;
+  origin: string;
+  username: string;
+  kind: "save" | "update";
+  createdAt: string;
+};
+
+export type ElectronBrowserCredentialState = {
+  available: boolean;
+  reason: string;
+  origin: string;
+  formDetected: boolean;
+  credentials: ElectronBrowserCredential[];
+  prompt: ElectronBrowserCredentialPrompt | null;
+  sessionID?: string;
+  tabID?: string;
+};
+
+export type ElectronBrowserCredentialList = {
+  available: boolean;
+  reason: string;
+  credentials: ElectronBrowserCredential[];
+  neverSaveOrigins: string[];
+};
+
+export type ElectronBrowserCredentialImportResult = {
+  canceled: boolean;
+  imported: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  sourceDeleted: boolean;
+};
+
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   resolveFavicon?: (request: { url: string; pageURL: string }) => Promise<string>;
@@ -87,14 +157,32 @@ export type ElectronBrowserBridge = {
   forward: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   reload: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   readSelection?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSelection>;
+  findInPage?: (request: ElectronBrowserRequest & { text: string; forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<{ requestID: number }>;
+  stopFindInPage?: (request: ElectronBrowserRequest) => Promise<{ ok: boolean }>;
+  getZoom?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserZoom>;
+  zoom?: (request: ElectronBrowserRequest & { action: "in" | "out" | "reset" }) => Promise<ElectronBrowserZoom>;
+  print?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserPrintResult>;
   listTabs: (request: ElectronBrowserRequest) => Promise<{ tabs: ElectronBrowserSnapshot[]; processMode: "webview" }>;
   closeTab: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
+  getCredentialState?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserCredentialState>;
+  listCredentials?: () => Promise<ElectronBrowserCredentialList>;
+  saveCredential?: (request: ElectronBrowserRequest & { pendingID: string }) => Promise<ElectronBrowserCredential>;
+  dismissCredential?: (request: ElectronBrowserRequest & { pendingID: string; neverSave?: boolean }) => Promise<void>;
+  deleteCredential?: (request: { credentialID: string }) => Promise<void>;
+  clearCredentials?: () => Promise<void>;
+  allowCredentialOrigin?: (request: { origin: string }) => Promise<void>;
+  importChromePasswords?: () => Promise<ElectronBrowserCredentialImportResult>;
   onUpdated: (listener: (snapshot: ElectronBrowserSnapshot) => void) => () => void;
   onCursor?: (listener: (event: ElectronBrowserCursorEvent) => void) => () => void;
   onSelectionChanged?: (listener: (event: ElectronBrowserSelectionEvent) => void) => () => void;
+  onFoundInPage?: (listener: (result: ElectronBrowserFindResult) => void) => () => void;
+  onInteraction?: (listener: (event: ElectronBrowserInteractionEvent) => void) => () => void;
   onAutomationStart?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
   onAutomationEnd?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
+  onCredentialState?: (listener: (state: ElectronBrowserCredentialState) => void) => () => void;
+  onCredentialsChanged?: (listener: (change: { updatedAt: string }) => void) => () => void;
+  onCredentialManage?: (listener: (request: { sessionID: string; tabID: string }) => void) => () => void;
   completeAutomationLifecycle?: (request: { requestID: string; ok: boolean }) => Promise<boolean>;
   onWebviewRequired?: (listener: (request: ElectronWebviewRequiredEvent) => void) => () => void;
 };

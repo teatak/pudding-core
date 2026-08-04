@@ -15,6 +15,8 @@ const selectionBindingName = "__puddingBrowserSelectionChanged";
 const maxTabsPerSession = 8;
 const maxTabsTotal = 16;
 const maxPopupWindowsTotal = 8;
+const credentialUserGestureTTLMS = 1_000;
+const browserZoomFactors = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 
 class BrowserHost {
   constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, windowHooks) {
@@ -30,6 +32,8 @@ class BrowserHost {
     this.onPopupCreated = typeof windowHooks?.created === "function" ? windowHooks.created : () => {};
     this.onBlockedWindowNavigation = typeof windowHooks?.blockedNavigation === "function" ? windowHooks.blockedNavigation : () => false;
     this.onSelectionChanged = typeof windowHooks?.selectionChanged === "function" ? windowHooks.selectionChanged : () => {};
+    this.onFoundInPage = typeof windowHooks?.foundInPage === "function" ? windowHooks.foundInPage : () => {};
+    this.onInteraction = typeof windowHooks?.interaction === "function" ? windowHooks.interaction : () => {};
     this.boundPopupContents = new WeakSet();
     this.popupWindows = new Set();
   }
@@ -70,7 +74,7 @@ class BrowserHost {
     await this.requireWebContents(slot);
     this.noteAutomationStart(slot, "back");
     await this.runCommand(slot, async () => {
-      const history = await this.navigationHistory(slot);
+      const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
       if (history.currentIndex > 0) {
         const entry = history.entries[history.currentIndex - 1];
         await this.navigateHistory(slot, entry.id, entry.url);
@@ -87,7 +91,7 @@ class BrowserHost {
     await this.requireWebContents(slot);
     this.noteAutomationStart(slot, "forward");
     await this.runCommand(slot, async () => {
-      const history = await this.navigationHistory(slot);
+      const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
       if (history.currentIndex + 1 < history.entries.length) {
         const entry = history.entries[history.currentIndex + 1];
         await this.navigateHistory(slot, entry.id, entry.url);
@@ -146,6 +150,68 @@ class BrowserHost {
     return browserSelectionResult(liveSelectionText || slot.selectionText);
   }
 
+  findInPage(request) {
+    const slot = this.requireLiveSlot(request);
+    const text = String(request.text || "");
+    if (!text) {
+      slot.webContents.stopFindInPage("clearSelection");
+      slot.findRequestID = 0;
+      return { requestID: 0 };
+    }
+    const requestID = slot.webContents.findInPage(text, {
+      forward: request.forward !== false,
+      findNext: Boolean(request.findNext),
+      matchCase: Boolean(request.matchCase),
+    });
+    slot.findRequestID = requestID;
+    return { requestID };
+  }
+
+  stopFindInPage(request) {
+    const slot = this.getSlot(request);
+    if (!slot?.webContents || slot.webContents.isDestroyed()) {
+      return { ok: true };
+    }
+    slot.webContents.stopFindInPage("clearSelection");
+    slot.findRequestID = 0;
+    return { ok: true };
+  }
+
+  getZoom(request) {
+    const slot = this.requireLiveSlot(request);
+    return browserZoomResult(slot.webContents.getZoomFactor());
+  }
+
+  zoom(request) {
+    const slot = this.requireLiveSlot(request);
+    const action = String(request.action || "");
+    const current = slot.webContents.getZoomFactor();
+    let target = 1;
+    if (action === "in") {
+      target = browserZoomFactors.find((factor) => factor > current + 0.001) || browserZoomFactors.at(-1);
+    } else if (action === "out") {
+      target = browserZoomFactors.findLast((factor) => factor < current - 0.001) || browserZoomFactors[0];
+    } else if (action !== "reset") {
+      throw new Error("browser zoom action is invalid");
+    }
+    slot.webContents.setZoomFactor(target);
+    return browserZoomResult(target);
+  }
+
+  print(request) {
+    const slot = this.requireLiveSlot(request);
+    return new Promise((resolve) => {
+      slot.webContents.print({ printBackground: true, usePrinterDefaultPageSize: true }, (success, failureReason) => {
+        const reason = String(failureReason || "");
+        resolve({
+          ok: Boolean(success),
+          canceled: !success && /cancel/i.test(reason),
+          reason,
+        });
+      });
+    });
+  }
+
   noteSelection(webContents, payload) {
     for (const slot of this.slots.values()) {
       if (slot.disposed || slot.webContents !== webContents) {
@@ -160,6 +226,51 @@ class BrowserHost {
       };
     }
     return null;
+  }
+
+  contextForWebContents(webContents) {
+    const slot = this.slotForWebContents(webContents);
+    return slot ? browserCredentialContext(slot) : null;
+  }
+
+  discardCredentialUserGesture(webContents) {
+    const slot = this.slotForWebContents(webContents);
+    if (slot) slot.credentialUserGestureAt = 0;
+  }
+
+  consumeCredentialUserGesture(webContents) {
+    const slot = this.slotForWebContents(webContents);
+    if (!slot) return false;
+    const createdAt = slot.credentialUserGestureAt;
+    slot.credentialUserGestureAt = 0;
+    return slot.automatedInputDepth === 0 && createdAt > 0 && Date.now() - createdAt <= credentialUserGestureTTLMS;
+  }
+
+  slotForWebContents(webContents) {
+    for (const slot of this.slots.values()) {
+      if (!slot.disposed && slot.webContents === webContents) return slot;
+    }
+    return null;
+  }
+
+  credentialContext(request) {
+    return browserCredentialContext(this.requireLiveSlot(request));
+  }
+
+  credentialContextIfLive(request) {
+    const slot = this.getSlot(request);
+    if (!slot || slot.disposed || !slot.webContents || slot.webContents.isDestroyed()) {
+      return null;
+    }
+    return browserCredentialContext(slot);
+  }
+
+  sendCredentialMessage(request, channel, payload) {
+    const slot = this.requireLiveSlot(request);
+    if (!slot.webContents || slot.webContents.isDestroyed()) {
+      throw new Error("browser webview target not found");
+    }
+    slot.webContents.send(channel, payload);
   }
 
   async screenshot(request) {
@@ -405,6 +516,9 @@ class BrowserHost {
       mainFrameID: "",
       mainFrameLoaderID: "",
       selectionText: "",
+      automatedInputDepth: 0,
+      credentialUserGestureAt: 0,
+      findRequestID: 0,
     });
     this.slots.set(key, slot);
     this.bindSlotEvents(slot);
@@ -416,7 +530,7 @@ class BrowserHost {
     if (!hadWaiters && !loadError && targetURL && !browserURLIsBlank(targetURL) && !sameNormalizedURL(targetURL, slot.committedURL, slot.fileRoots)) {
       await this.runCommand(slot, () => this.navigate(slot, targetURL));
     }
-    await this.refreshHistory(slot);
+    await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
     this.noteUpdated(slot);
     return snapshot(slot);
   }
@@ -478,6 +592,9 @@ class BrowserHost {
       mainFrameID: "",
       mainFrameLoaderID: "",
       selectionText: "",
+      automatedInputDepth: 0,
+      credentialUserGestureAt: 0,
+      findRequestID: 0,
       navigationGeneration: 0,
       navigationWaiter: null,
       historyIndex: 0,
@@ -623,31 +740,6 @@ class BrowserHost {
     return result;
   }
 
-  async refreshMetadata(slot) {
-    const metadata = await evaluateJSON(slot, `(() => JSON.stringify({
-      url: String(location.href || ""),
-      title: String(document.title || ""),
-      faviconURL: String(document.querySelector('link[rel~="icon"]')?.href || "")
-    }))()`);
-    const rawCommittedURL = String(metadata.url || "");
-    const committedURL = normalizeURL(rawCommittedURL, slot.fileRoots);
-    if (rawCommittedURL && !committedURL) {
-      throw navigationNotAllowedError(rawCommittedURL);
-    }
-    if (committedURL) {
-      slot.committedURL = committedURL;
-      slot.displayURL = committedURL;
-    }
-    slot.committedTitle = String(metadata.title || "");
-    slot.displayTitle = slot.committedTitle;
-    const faviconURL = normalizeURL(metadata.faviconURL, slot.fileRoots);
-    if (faviconURL) {
-      this.updateFavicon(slot, [faviconURL]);
-    } else if (!slot.faviconSourceURL) {
-      slot.faviconURL = "";
-    }
-  }
-
   updateFavicon(slot, candidates) {
     const sourceURL = (Array.isArray(candidates) ? candidates : [candidates])
       .map((candidate) => normalizeURL(candidate, slot.fileRoots))
@@ -676,13 +768,6 @@ class BrowserHost {
     return true;
   }
 
-  scheduleMetadataRefresh(slot) {
-    void this.runCommand(slot, async () => {
-      await this.refreshMetadata(slot);
-      this.noteUpdated(slot);
-    }).catch(() => undefined);
-  }
-
   async navigate(slot, url) {
     const targetURL = normalizeURL(url, slot.fileRoots);
     if (!targetURL) {
@@ -703,14 +788,44 @@ class BrowserHost {
     if (!normalizedTargetURL) {
       throw navigationNotAllowedError(targetURL);
     }
-    await this.runNavigation(
-      slot,
-      () => this.sendCDP(slot, "Page.navigateToHistoryEntry", { entryId: entryID }),
-      normalizedTargetURL,
-    );
+    const deadline = Date.now() + navigationTimeoutMS;
+    await this.sendCDP(slot, "Page.navigateToHistoryEntry", { entryId: entryID });
+    const history = await this.waitForNavigationHistory(slot, deadline, entryID);
+    const entry = history.entries[history.currentIndex];
+    const committedURL = normalizeURL(entry.url, slot.fileRoots);
+    if (!committedURL) {
+      throw navigationNotAllowedError(entry.url);
+    }
+    slot.committedURL = committedURL;
+    slot.displayURL = committedURL;
+    slot.navigationError = null;
+    this.noteUpdated(slot);
+  }
+
+  async waitForNavigationHistory(slot, deadline, entryID) {
+    let lastError;
+    while (Date.now() < deadline) {
+      if (this.slots.get(slot.key) !== slot || slot.disposed) {
+        throw new Error("browser tab destroyed");
+      }
+      try {
+        const history = await this.navigationHistory(slot);
+        const current = history.entries[history.currentIndex];
+        if (current && (entryID === undefined || String(current.id ?? "") === String(entryID))) {
+          return history;
+        }
+      } catch (error) {
+        lastError = error;
+        // The target can be temporarily unavailable while Chromium swaps documents.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const detail = lastError instanceof Error && lastError.message ? `: ${lastError.message}` : "";
+    throw new Error(`browser history navigation timed out${detail}`);
   }
 
   async runNavigation(slot, command, targetURL = "") {
+    const deadline = Date.now() + navigationTimeoutMS;
     const generation = ++slot.navigationGeneration;
     rejectNavigationWaiter(slot, new Error("browser navigation superseded"));
     const committed = createNavigationWaiter(slot, generation, targetURL);
@@ -729,9 +844,9 @@ class BrowserHost {
           );
         }
       }
-      await withTimeout(committed, navigationTimeoutMS, "browser navigation timed out");
-      await this.refreshHistory(slot);
-      await this.refreshMetadata(slot);
+      await withTimeout(committed, Math.max(1, deadline - Date.now()), "browser navigation timed out");
+      await this.waitForNavigationHistory(slot, deadline);
+      this.noteUpdated(slot);
     } catch (error) {
       rejectNavigationWaiter(slot, error);
       throw error;
@@ -745,16 +860,48 @@ class BrowserHost {
     return { currentIndex: slot.historyIndex, entries: slot.historyEntries };
   }
 
-  async refreshHistory(slot) {
-    try {
-      await this.navigationHistory(slot);
-    } catch {
-      // A snapshot can remain useful while a page is tearing down.
-    }
+  scheduleHistoryRefresh(slot) {
+    void this.runCommand(slot, async () => {
+      if (this.slots.get(slot.key) !== slot || slot.disposed) {
+        return;
+      }
+      await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
+      if (this.slots.get(slot.key) === slot && !slot.disposed) {
+        this.noteUpdated(slot);
+      }
+    }).catch(() => undefined);
   }
 
   bindSlotEvents(slot) {
     const webContents = slot.webContents;
+    webContents.on("found-in-page", (_event, result) => {
+      if (slot.webContents !== webContents || slot.disposed) return;
+      const requestID = Number(result?.requestId) || 0;
+      if (!requestID || requestID !== slot.findRequestID) return;
+      this.onFoundInPage({
+        sessionID: slot.sessionID,
+        tabID: slot.tabID,
+        requestID,
+        activeMatchOrdinal: Math.max(0, Number(result?.activeMatchOrdinal) || 0),
+        matches: Math.max(0, Number(result?.matches) || 0),
+        finalUpdate: Boolean(result?.finalUpdate),
+      });
+    });
+    webContents.on("before-mouse-event", (_event, input) => {
+      if (slot.webContents !== webContents || slot.automatedInputDepth > 0 || input?.type !== "mouseDown") return;
+      slot.credentialUserGestureAt = Date.now();
+      this.onInteraction({ sessionID: slot.sessionID, tabID: slot.tabID, kind: "pointer" });
+    });
+    webContents.on("before-input-event", (_event, input) => {
+      if (slot.webContents !== webContents || slot.automatedInputDepth > 0 || input?.type !== "keyDown") return;
+      slot.credentialUserGestureAt = Date.now();
+      this.onInteraction({
+        sessionID: slot.sessionID,
+        tabID: slot.tabID,
+        kind: "keyboard",
+        ...(input.key === "Escape" ? { key: "Escape" } : {}),
+      });
+    });
     webContents.on("select-bluetooth-device", (event, _devices, callback) => {
       event.preventDefault();
       callback("");
@@ -771,11 +918,13 @@ class BrowserHost {
       rejectNavigationWaiter(slot, error);
       this.noteUpdated(slot);
     });
-    webContents.on("page-title-updated", () => {
+    webContents.on("page-title-updated", (_event, title) => {
       if (slot.webContents !== webContents) {
         return;
       }
-      this.scheduleMetadataRefresh(slot);
+      slot.committedTitle = String(title || "");
+      slot.displayTitle = slot.committedTitle;
+      this.noteUpdated(slot);
     });
     webContents.on("page-favicon-updated", (_event, favicons) => {
       if (slot.webContents !== webContents || !this.updateFavicon(slot, favicons)) {
@@ -806,6 +955,7 @@ class BrowserHost {
       if (method === "Page.frameNavigated" && !params?.frame?.parentId) {
         const nextURL = normalizeURL(params?.frame?.url, slot.fileRoots);
         if (nextURL) {
+          const commandNavigationPending = Boolean(slot.navigationWaiter);
           slot.mainFrameID = String(params?.frame?.id || slot.mainFrameID || "");
           slot.mainFrameLoaderID = String(params?.frame?.loaderId || slot.mainFrameLoaderID || "");
           slot.lastMainFrameNavigation = {
@@ -816,6 +966,7 @@ class BrowserHost {
           slot.committedURL = nextURL;
           slot.committedTitle = "";
           slot.selectionText = "";
+          slot.findRequestID = 0;
           slot.faviconURL = "";
           slot.faviconSourceURL = "";
           slot.faviconResolveID += 1;
@@ -823,7 +974,11 @@ class BrowserHost {
           slot.displayTitle = "";
           slot.navigationError = null;
           resolveNavigationWaiter(slot, nextURL, slot.lastMainFrameNavigation.loaderID);
-          this.noteUpdated(slot);
+          if (commandNavigationPending) {
+            this.noteUpdated(slot);
+          } else {
+            this.scheduleHistoryRefresh(slot);
+          }
         }
       } else if (method === "Page.navigatedWithinDocument") {
         if (!slot.mainFrameID || String(params?.frameId || "") !== slot.mainFrameID) {
@@ -831,6 +986,7 @@ class BrowserHost {
         }
         const nextURL = normalizeURL(params?.url, slot.fileRoots);
         if (nextURL) {
+          const commandNavigationPending = Boolean(slot.navigationWaiter);
           slot.committedURL = nextURL;
           slot.displayURL = nextURL;
           slot.selectionText = "";
@@ -840,10 +996,12 @@ class BrowserHost {
             sameDocument: true,
           };
           resolveNavigationWaiter(slot, nextURL, slot.mainFrameLoaderID, true);
-          this.noteUpdated(slot);
+          if (commandNavigationPending) {
+            this.noteUpdated(slot);
+          } else {
+            this.scheduleHistoryRefresh(slot);
+          }
         }
-      } else if (method === "Page.loadEventFired") {
-        this.scheduleMetadataRefresh(slot);
       } else if (method === "Runtime.bindingCalled" && params?.name === selectionBindingName) {
         const selection = selectionPayload(params?.payload);
         slot.selectionText = selection.selectionText;
@@ -968,6 +1126,10 @@ class BrowserHost {
   }
 
   noteAutomationStart(slot, action) {
+    if (automationCanProduceInput(action)) {
+      slot.automatedInputDepth += 1;
+      slot.credentialUserGestureAt = 0;
+    }
     return this.onAutomationStart({
       sessionID: slot.sessionID,
       tabID: slot.tabID,
@@ -978,6 +1140,9 @@ class BrowserHost {
   }
 
   noteAutomationEnd(slot, action) {
+    if (automationCanProduceInput(action)) {
+      slot.automatedInputDepth = Math.max(0, slot.automatedInputDepth - 1);
+    }
     return this.onAutomationEnd({
       sessionID: slot.sessionID,
       tabID: slot.tabID,
@@ -1082,6 +1247,20 @@ function normalizeSelectionText(value) {
 
 function browserSelectionResult(selectionText) {
   return { selectionText: normalizeSelectionText(selectionText) };
+}
+
+function browserCredentialContext(slot) {
+  let liveURL = "";
+  try {
+    liveURL = slot.webContents?.getURL?.() || "";
+  } catch {
+  }
+  return {
+    sessionID: slot.sessionID,
+    tabID: slot.tabID,
+    webContentsID: Number(slot.webContents?.id) || 0,
+    url: slot.committedURL || normalizeURL(liveURL, slot.fileRoots) || slot.displayURL || "about:blank",
+  };
 }
 
 function selectionPayload(payload) {
@@ -1330,6 +1509,10 @@ function cursorPoint(result) {
     x: Math.max(0, Math.round(x)),
     y: Math.max(0, Math.round(y)),
   };
+}
+
+function automationCanProduceInput(action) {
+  return action === "click" || action === "type" || action === "scroll";
 }
 
 function slotKey(request) {
@@ -1592,7 +1775,8 @@ function observeScript(maxText, maxElements) {
   return `(() => {
   const maxText = ${JSON.stringify(maxText)};
   const maxElements = ${JSON.stringify(maxElements)};
-  const pickText = (el) => ((el.innerText || el.value || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\\s+/g, " "));
+  const isPasswordInput = (el) => el instanceof HTMLInputElement && String(el.type || "").toLowerCase() === "password";
+  const pickText = (el) => ((el.innerText || (isPasswordInput(el) ? "" : el.value) || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\\s+/g, " "));
   const visible = (el) => {
     const style = window.getComputedStyle(el);
     const rect = el.getBoundingClientRect();
@@ -1670,7 +1854,8 @@ function clickTargetScript(input, method) {
   const x = ${x};
   const y = ${y};
   const method = ${methodValue};
-  const elementText = (node) => String(node.innerText || node.textContent || node.value || node.getAttribute?.("aria-label") || "").trim();
+  const isPasswordInput = (node) => node instanceof HTMLInputElement && String(node.type || "").toLowerCase() === "password";
+  const elementText = (node) => String(node.innerText || node.textContent || (isPasswordInput(node) ? "" : node.value) || node.getAttribute?.("aria-label") || "").trim();
   const isVisible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));
   const resolveSelector = (rawSelector) => {
     if (!rawSelector) return null;
@@ -1712,7 +1897,7 @@ function clickTargetScript(input, method) {
   if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
   const editableTarget = el.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])') || el;
   globalThis[Symbol.for("pudding.browser.lastClickTarget")] = editableTarget;
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: elementText(el).slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`;
 }
 
@@ -1865,6 +2050,7 @@ function typeResultScript(input, method, expectation) {
   const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
   const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
     (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+  const isPasswordInput = (node) => node instanceof HTMLInputElement && String(node.type || "").toLowerCase() === "password";
   const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
   const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
   const fingerprint = (value) => {
@@ -1881,7 +2067,10 @@ function typeResultScript(input, method, expectation) {
   const rect = el.getBoundingClientRect();
   const value = isTextInput(el) ? String(el.value || "") : editableText(el);
   const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: ${JSON.stringify(method)}});
+  const result = {ok: true, tag: el.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: ${JSON.stringify(method)}};
+  if (isPasswordInput(el)) result.sensitive = true;
+  else result.valueLength = value.length;
+  return JSON.stringify(result);
 })()`;
 }
 
@@ -1953,6 +2142,14 @@ function imageSize(buffer) {
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
   }
   return { width: 0, height: 0 };
+}
+
+function browserZoomResult(factor) {
+  const normalized = Number.isFinite(factor) ? factor : 1;
+  return {
+    factor: normalized,
+    percent: Math.round(normalized * 100),
+  };
 }
 
 function snapshot(slot) {

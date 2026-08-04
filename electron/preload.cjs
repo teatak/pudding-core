@@ -92,9 +92,22 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   forward: (request) => ipcRenderer.invoke("pudding:browser:forward", request),
   reload: (request) => ipcRenderer.invoke("pudding:browser:reload", request),
   readSelection: (request) => ipcRenderer.invoke("pudding:browser:read-selection", request),
+  findInPage: (request) => ipcRenderer.invoke("pudding:browser:find", request),
+  stopFindInPage: (request) => ipcRenderer.invoke("pudding:browser:stop-find", request),
+  getZoom: (request) => ipcRenderer.invoke("pudding:browser:get-zoom", request),
+  zoom: (request) => ipcRenderer.invoke("pudding:browser:zoom", request),
+  print: (request) => ipcRenderer.invoke("pudding:browser:print", request),
   listTabs: (request) => ipcRenderer.invoke("pudding:browser:list-tabs", request),
   closeTab: (request) => ipcRenderer.invoke("pudding:browser:close-tab", request),
   closeSession: (request) => ipcRenderer.invoke("pudding:browser:close-session", request),
+  getCredentialState: (request) => ipcRenderer.invoke("pudding:browser:credentials:get-state", request),
+  listCredentials: () => ipcRenderer.invoke("pudding:browser:credentials:list"),
+  saveCredential: (request) => ipcRenderer.invoke("pudding:browser:credentials:save", request),
+  dismissCredential: (request) => ipcRenderer.invoke("pudding:browser:credentials:dismiss", request),
+  deleteCredential: (request) => ipcRenderer.invoke("pudding:browser:credentials:delete", request),
+  clearCredentials: () => ipcRenderer.invoke("pudding:browser:credentials:clear"),
+  allowCredentialOrigin: (request) => ipcRenderer.invoke("pudding:browser:credentials:allow-origin", request),
+  importChromePasswords: () => ipcRenderer.invoke("pudding:browser:credentials:import-chrome"),
   onUpdated: (listener) => {
     const wrapped = (_event, snapshot) => listener(snapshot);
     ipcRenderer.on("pudding:browser:updated", wrapped);
@@ -110,6 +123,16 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:selection-updated", wrapped);
     return () => ipcRenderer.off("pudding:browser:selection-updated", wrapped);
   },
+  onFoundInPage: (listener) => {
+    const wrapped = (_event, result) => listener(result);
+    ipcRenderer.on("pudding:browser:found-in-page", wrapped);
+    return () => ipcRenderer.off("pudding:browser:found-in-page", wrapped);
+  },
+  onInteraction: (listener) => {
+    const wrapped = (_event, interaction) => listener(interaction);
+    ipcRenderer.on("pudding:browser:interaction", wrapped);
+    return () => ipcRenderer.off("pudding:browser:interaction", wrapped);
+  },
   onAutomationStart: (listener) => {
     const wrapped = (_event, automation) => listener(automation);
     ipcRenderer.on("pudding:browser:automation-start", wrapped);
@@ -119,6 +142,21 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     const wrapped = (_event, automation) => listener(automation);
     ipcRenderer.on("pudding:browser:automation-end", wrapped);
     return () => ipcRenderer.off("pudding:browser:automation-end", wrapped);
+  },
+  onCredentialState: (listener) => {
+    const wrapped = (_event, state) => listener(state);
+    ipcRenderer.on("pudding:browser:credential-state", wrapped);
+    return () => ipcRenderer.off("pudding:browser:credential-state", wrapped);
+  },
+  onCredentialsChanged: (listener) => {
+    const wrapped = (_event, change) => listener(change);
+    ipcRenderer.on("pudding:browser:credentials-changed", wrapped);
+    return () => ipcRenderer.off("pudding:browser:credentials-changed", wrapped);
+  },
+  onCredentialManage: (listener) => {
+    const wrapped = (_event, request) => listener(request);
+    ipcRenderer.on("pudding:browser:credential-manage", wrapped);
+    return () => ipcRenderer.off("pudding:browser:credential-manage", wrapped);
   },
   completeAutomationLifecycle: (request) => ipcRenderer.invoke("pudding:browser:automation-lifecycle-complete", request),
   onWebviewRequired: (listener) => {

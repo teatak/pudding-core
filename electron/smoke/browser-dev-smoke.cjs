@@ -75,7 +75,7 @@ async function run() {
       webPreferences,
       params,
       managedBrowserPartition,
-      path.join(__dirname, "..", "browser-selection-preload.cjs"),
+      path.join(__dirname, "..", "browser-preload.cjs"),
     )) {
       finish(new Error("smoke webview rejected by managed attachment policy"));
     }
@@ -99,7 +99,9 @@ async function run() {
     fileRoot: projectRoot,
     _fileAuthorized: true,
   });
-  assert.match((await host.observe({ sessionID: fileTab.sessionID, tabID: fileTab.tabID })).text, /Project file ready/);
+  await waitUntil(async () => (
+    await host.observe({ sessionID: fileTab.sessionID, tabID: fileTab.tabID })
+  ).text.includes("Project file ready"));
 
   const webTab = await host.ensure({ sessionID: "smoke-session-a", tabID: "smoke-web", url: `${pageBaseURL}/one` });
   currentCheck = "favicon localization";
@@ -112,6 +114,16 @@ async function run() {
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/two` });
   assert.equal((await host.back({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/one`);
   assert.equal((await host.forward({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/two`);
+
+  const blankHistoryTab = await host.ensure({ sessionID: "smoke-session-a", tabID: "smoke-blank-history", url: "about:blank" });
+  const hashHistoryURL = `${pageBaseURL}/two#dashboard`;
+  await host.loadURL({ sessionID: blankHistoryTab.sessionID, tabID: blankHistoryTab.tabID, url: hashHistoryURL });
+  const blankHistoryBack = await host.back({ sessionID: blankHistoryTab.sessionID, tabID: blankHistoryTab.tabID });
+  assert.equal(blankHistoryBack.url, "about:blank");
+  assert.equal(blankHistoryBack.canGoBack, false);
+  assert.equal(blankHistoryBack.canGoForward, true);
+  assert.equal((await host.forward({ sessionID: blankHistoryTab.sessionID, tabID: blankHistoryTab.tabID })).url, hashHistoryURL);
+  host.closeTab({ sessionID: blankHistoryTab.sessionID, tabID: blankHistoryTab.tabID });
 
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/form` });
   currentCheck = "browser selection cache";
@@ -437,7 +449,7 @@ async function run() {
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
 
-  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "browser-selection-cache", "focus-isolation", "input-components", "background-input", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "blank-hash-history", "browser-selection-cache", "focus-isolation", "input-components", "background-input", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
   finish();
 }
 

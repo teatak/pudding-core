@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const { hardenManagedBrowserWebview } = require("../browser-webview-security.cjs");
@@ -25,7 +27,7 @@ test("hardens the managed browser webview before attachment", () => {
     preload: "file:///tmp/untrusted-preload.cjs",
     src: "about:blank",
   };
-  const trustedPreloadPath = "/app/electron/browser-selection-preload.cjs";
+  const trustedPreloadPath = "/app/electron/browser-preload.cjs";
 
   assert.equal(hardenManagedBrowserWebview(
     { preventDefault: () => { prevented = true; } },
@@ -64,4 +66,18 @@ test("rejects unmanaged webview attachments", () => {
     ), false);
     assert.equal(prevented, true);
   }
+});
+
+test("credential suggestions require an explicit trusted user selection", () => {
+  const preload = fs.readFileSync(path.join(__dirname, "..", "browser-preload.cjs"), "utf8");
+  const main = fs.readFileSync(path.join(__dirname, "..", "main.cjs"), "utf8");
+  const formHandler = main.slice(
+    main.indexOf('ipcMain.on("pudding:browser:credential-form"'),
+    main.indexOf('ipcMain.on("pudding:browser:credential-focus"'),
+  );
+
+  assert.match(preload, /attachShadow\(\{ mode: "closed" \}\)/);
+  assert.match(preload, /if \(!event\.isTrusted\) return;/);
+  assert.match(preload, /pudding:browser:credential-fill-request/);
+  assert.doesNotMatch(formHandler, /sendCredentialFill|credential-fill/);
 });

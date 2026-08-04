@@ -65,6 +65,10 @@ class FakeDebugger extends EventEmitter {
       return {};
     }
     if (method === "Page.getNavigationHistory") {
+      if (this.navigationHistoryFailures > 0) {
+        this.navigationHistoryFailures -= 1;
+        throw new Error("Not attached to an active page");
+      }
       return this.history || { currentIndex: 0, entries: [{ id: 1, url: this.webContents.url }] };
     }
     if (method === "Page.getFrameTree") {
@@ -97,6 +101,10 @@ class FakeWebContents extends EventEmitter {
     this.url = "about:blank";
     this.destroyed = false;
     this.reloadCount = 0;
+    this.findRequestID = 0;
+    this.findRequests = [];
+    this.stopFindActions = [];
+    this.zoomFactor = 1;
     this.debugger = new FakeDebugger(this);
   }
 
@@ -124,6 +132,29 @@ class FakeWebContents extends EventEmitter {
         frame: { id: "main", loaderId: loaderID, url: this.url },
       });
     });
+  }
+
+  findInPage(text, options) {
+    this.findRequestID += 1;
+    this.findRequests.push({ text, options });
+    return this.findRequestID;
+  }
+
+  stopFindInPage(action) {
+    this.stopFindActions.push(action);
+  }
+
+  getZoomFactor() {
+    return this.zoomFactor;
+  }
+
+  setZoomFactor(factor) {
+    this.zoomFactor = factor;
+  }
+
+  print(options, callback) {
+    this.printOptions = options;
+    callback(this.printSuccess !== false, this.printFailureReason || "");
   }
 
   setWindowOpenHandler(handler) {
@@ -202,6 +233,60 @@ test("managed browser cancels Web Bluetooth device selection", async () => {
   host.closeAll();
 });
 
+test("uses native webContents for page find, print, and tab zoom", async () => {
+  const required = [];
+  const found = [];
+  const interactions = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => required.push(request),
+    undefined,
+    {
+      foundInPage: (result) => found.push(result),
+      interaction: (event) => interactions.push(event),
+    },
+  );
+  const request = { sessionID: "session-page-controls", tabID: "tab-page-controls" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(44);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.deepEqual(host.findInPage({ ...request, text: "pudding" }), { requestID: 1 });
+  assert.deepEqual(webContents.findRequests, [{ text: "pudding", options: { forward: true, findNext: false, matchCase: false } }]);
+  webContents.emit("found-in-page", {}, { requestId: 1, activeMatchOrdinal: 2, matches: 3, finalUpdate: true });
+  assert.deepEqual(found, [{ ...request, requestID: 1, activeMatchOrdinal: 2, matches: 3, finalUpdate: true }]);
+  assert.deepEqual(host.findInPage({ ...request, text: "browser" }), { requestID: 2 });
+  webContents.emit("found-in-page", {}, { requestId: 1, activeMatchOrdinal: 3, matches: 3, finalUpdate: true });
+  assert.equal(found.length, 1);
+  assert.deepEqual(host.stopFindInPage(request), { ok: true });
+  assert.equal(webContents.stopFindActions.at(-1), "clearSelection");
+
+  assert.deepEqual(host.zoom({ ...request, action: "in" }), { factor: 1.1, percent: 110 });
+  assert.deepEqual(host.zoom({ ...request, action: "out" }), { factor: 1, percent: 100 });
+  assert.deepEqual(host.zoom({ ...request, action: "reset" }), { factor: 1, percent: 100 });
+  assert.deepEqual(host.getZoom(request), { factor: 1, percent: 100 });
+
+  assert.deepEqual(await host.print(request), { ok: true, canceled: false, reason: "" });
+  assert.deepEqual(webContents.printOptions, { printBackground: true, usePrinterDefaultPageSize: true });
+  webContents.printSuccess = false;
+  webContents.printFailureReason = "Print job canceled";
+  assert.deepEqual(await host.print(request), { ok: false, canceled: true, reason: "Print job canceled" });
+  webContents.emit("before-mouse-event", {}, { type: "mouseDown" });
+  webContents.emit("before-input-event", {}, { type: "keyDown", key: "Escape" });
+  assert.deepEqual(interactions, [
+    { ...request, kind: "pointer" },
+    { ...request, kind: "keyboard", key: "Escape" },
+  ]);
+  webContents.destroyed = true;
+  assert.deepEqual(host.stopFindInPage(request), { ok: true });
+  assert.deepEqual(host.stopFindInPage({ sessionID: "missing", tabID: "missing" }), { ok: true });
+  host.closeAll();
+});
+
 test("reads the current non-editable browser text selection", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
@@ -217,6 +302,49 @@ test("reads the current non-editable browser text selection", async () => {
   const evaluation = webContents.debugger.commands.filter(({ method }) => method === "Runtime.evaluate").at(-1);
   assert.match(evaluation.params.expression, /window\.getSelection/);
   assert.match(evaluation.params.expression, /contenteditable/);
+
+  host.closeAll();
+});
+
+test("browser observations and click results redact password input values", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-password", tabID: "tab-password" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(63);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  webContents.debugger.evaluateValues = [JSON.stringify({
+    title: "Login",
+    url: "https://example.com/login",
+    readyState: "complete",
+    text: "",
+    textChars: 0,
+    truncated: false,
+    elements: [],
+  })];
+  await host.observe(request);
+  const observeEvaluation = webContents.debugger.commands.filter(({ method }) => method === "Runtime.evaluate").at(-1);
+  assert.match(observeEvaluation.params.expression, /isPasswordInput/);
+  assert.match(observeEvaluation.params.expression, /isPasswordInput\(el\) \? "" : el\.value/);
+
+  webContents.debugger.evaluateValues = [JSON.stringify({
+    ok: true,
+    tag: "input",
+    text: "Password",
+    x: 20,
+    y: 20,
+    cursorX: 20,
+    cursorY: 20,
+    method: "pointer",
+  })];
+  await host.click({ ...request, selector: "#password" });
+  const clickEvaluation = webContents.debugger.commands
+    .filter(({ method, params }) => method === "Runtime.evaluate" && params.expression.includes("elementText"))
+    .at(-1);
+  assert.match(clickEvaluation.params.expression, /isPasswordInput\(node\) \? "" : node\.value/);
 
   host.closeAll();
 });
@@ -859,6 +987,201 @@ test("reload ignores stale main-frame events until a new loader commits", async 
   });
   await reload;
   assert.equal(settled, true);
+  host.closeAll();
+});
+
+test("waits for readable history after a document swap", async () => {
+  let required;
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
+    required = request;
+  });
+  const request = { sessionID: "session-history-swap", tabID: "tab-history-swap", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(60);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  webContents.debugger.commands = [];
+  webContents.debugger.navigationHistoryFailures = 1;
+
+  const snapshot = await host.loadURL({ ...request, url: "https://example.com/after-swap" });
+  assert.equal(snapshot.url, "https://example.com/after-swap");
+  assert.equal(
+    webContents.debugger.commands.filter(({ method }) => method === "Page.getNavigationHistory").length,
+    2,
+  );
+  host.closeAll();
+});
+
+test("refreshes back and forward availability after page-driven navigation", async () => {
+  let required;
+  const updates = [];
+  const host = new BrowserHost(
+    (snapshot) => updates.push(snapshot),
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+  );
+  const opening = host.ensure({ sessionID: "session-history", tabID: "tab-history", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(56);
+  await host.registerWebContents(required, webContents);
+  await opening;
+
+  webContents.debugger.history = {
+    currentIndex: 1,
+    entries: [
+      { id: 1, url: "https://example.com/first" },
+      { id: 2, url: "https://example.com/second" },
+    ],
+  };
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-second", url: "https://example.com/second" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updates.at(-1).canGoBack, true);
+  assert.equal(updates.at(-1).canGoForward, false);
+
+  webContents.debugger.history = {
+    currentIndex: 0,
+    entries: [
+      { id: 1, url: "https://example.com/first" },
+      { id: 2, url: "https://example.com/second" },
+    ],
+  };
+  webContents.debugger.emit("message", {}, "Page.navigatedWithinDocument", {
+    frameId: "main",
+    url: "https://example.com/first",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updates.at(-1).canGoBack, false);
+  assert.equal(updates.at(-1).canGoForward, true);
+  host.closeAll();
+});
+
+test("history navigation uses the target entry instead of frame URL events", async () => {
+  let required;
+  const updates = [];
+  const host = new BrowserHost(
+    (snapshot) => updates.push(snapshot),
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+  );
+  const request = { sessionID: "session-hash-history", tabID: "tab-hash-history", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(57);
+  await host.registerWebContents(required, webContents);
+  await opening;
+
+  const targetURL = "https://example.com/admin/#dashboard";
+  webContents.debugger.history = {
+    currentIndex: 0,
+    entries: [
+      { id: 1, url: "about:blank" },
+      { id: 2, url: targetURL },
+    ],
+  };
+  webContents.debugger.suppressNavigationEvent = true;
+  const sendCommand = webContents.debugger.sendCommand.bind(webContents.debugger);
+  webContents.debugger.sendCommand = async (method, params = {}) => {
+    if (method === "Page.navigateToHistoryEntry") {
+      const nextIndex = webContents.debugger.history.entries.findIndex((entry) => entry.id === params.entryId);
+      webContents.debugger.history.currentIndex = nextIndex;
+      webContents.url = webContents.debugger.history.entries[nextIndex].url;
+    }
+    return sendCommand(method, params);
+  };
+
+  const forwarded = await host.forward(request);
+  assert.equal(forwarded.url, targetURL);
+  assert.equal(forwarded.canGoBack, true);
+  assert.equal(updates.some((snapshot) => snapshot.url === targetURL), true);
+
+  const backed = await host.back(request);
+  assert.equal(backed.url, "about:blank");
+  assert.equal(backed.canGoBack, false);
+  assert.equal(backed.canGoForward, true);
+  host.closeAll();
+});
+
+test("page metadata events do not enqueue CDP work ahead of navigation", async () => {
+  const required = [];
+  const updates = [];
+  const host = new BrowserHost(
+    (snapshot) => updates.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+  );
+  const opening = host.ensure({ sessionID: "session-metadata", tabID: "tab-metadata", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(59);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+  webContents.debugger.commands = [];
+
+  webContents.emit("page-title-updated", {}, "Dashboard");
+  webContents.debugger.emit("message", {}, "Page.loadEventFired", {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(updates.at(-1).title, "Dashboard");
+  assert.equal(webContents.debugger.commands.some(({ method }) => method === "Runtime.evaluate"), false);
+  host.closeAll();
+});
+
+test("credential state lookup tolerates a tab close race", async () => {
+  let required;
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
+    required = request;
+  });
+  const request = { sessionID: "session-credential-close", tabID: "tab-credential-close", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(58);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  assert.equal(host.credentialContextIfLive(request)?.webContentsID, 58);
+
+  host.closeTab(request);
+  assert.equal(host.credentialContextIfLive(request), null);
+  assert.throws(() => host.credentialContext(request), /browser tab not found/);
+  host.closeAll();
+});
+
+test("credential fill consumes one native user gesture and rejects automated input", async () => {
+  let required;
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
+    required = request;
+  });
+  const request = { sessionID: "session-credential-gesture", tabID: "tab-credential-gesture", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(69);
+  await host.registerWebContents(required, webContents);
+  await opening;
+
+  webContents.emit("before-mouse-event", {}, { type: "mouseDown" });
+  assert.equal(host.consumeCredentialUserGesture(webContents), true);
+  assert.equal(host.consumeCredentialUserGesture(webContents), false);
+
+  webContents.emit("before-input-event", {}, { type: "keyDown" });
+  host.discardCredentialUserGesture(webContents);
+  assert.equal(host.consumeCredentialUserGesture(webContents), false);
+
+  const slot = host.getSlot(request);
+  host.noteAutomationStart(slot, "click");
+  webContents.emit("before-mouse-event", {}, { type: "mouseDown" });
+  assert.equal(host.consumeCredentialUserGesture(webContents), false);
+  host.noteAutomationEnd(slot, "click");
+
+  webContents.emit("before-input-event", {}, { type: "keyDown" });
+  assert.equal(host.consumeCredentialUserGesture(webContents), true);
   host.closeAll();
 });
 

@@ -166,13 +166,17 @@ export function ConversationSearchBar({
   );
   const resultCount = matches.length;
   const resultPosition = resultCount > 0 && activeIndex >= 0 ? activeIndex + 1 : 0;
-  const statusLabel = failed
-    ? t("conversationSearch.failed")
-    : normalizedQuery && resultsReady && resultCount === 0
-      ? t("conversationSearch.noResults")
-      : t("conversationSearch.count")
-          .replace("{current}", String(resultPosition))
-          .replace("{total}", String(resultCount));
+  const statusLabel = !normalizedQuery
+    ? ""
+    : failed
+      ? t("conversationSearch.failed")
+      : resultsReady && resultCount === 0
+        ? t("conversationSearch.noResults")
+        : resultCount > 0
+          ? t("conversationSearch.count")
+              .replace("{current}", String(resultPosition))
+              .replace("{total}", String(resultCount))
+          : "";
 
   if (!open) {
     return null;
@@ -181,69 +185,67 @@ export function ConversationSearchBar({
   return (
     <div
       aria-label={t("conversationSearch.open")}
-      className="absolute top-3 right-5 z-40 w-[min(22rem,calc(100%-2.5rem))] overflow-hidden rounded-2xl border border-border/80 bg-popover/95 shadow-lg backdrop-blur-md"
+      className="absolute top-3 right-5 z-40 flex h-11 w-[min(22rem,calc(100%-2.5rem))] items-center gap-1 rounded-xl border border-border/80 bg-popover/95 px-2.5 shadow-lg backdrop-blur-md"
       role="search"
     >
-      <div className="flex h-12 items-center gap-2 px-3">
-        <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <Input
-          ref={inputRef}
-          aria-label={t("conversationSearch.placeholder")}
-          className="h-full min-w-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-          placeholder={t("conversationSearch.placeholder")}
-          value={query}
-          onCompositionEnd={(event) => {
-            setIsComposing(false);
-            setQuery(event.currentTarget.value);
-          }}
-          onCompositionStart={() => setIsComposing(true)}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(-1);
-            appliedResultsRef.current = "";
-            onSearchChange(EMPTY_SEARCH_STATE);
-          }}
-          onKeyDown={handleKeyDown}
-        />
-        {waiting ? <Spinner className="size-4 shrink-0 text-muted-foreground" aria-label={t("common.loading")} /> : null}
-        <Button
-          aria-label={t("conversationSearch.close")}
-          className="size-7 shrink-0"
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-          onClick={close}
-        >
-          <X />
-        </Button>
-      </div>
-      <div className="flex h-10 items-center border-t border-border/70 px-2.5">
-        <Button
-          aria-label={t("conversationSearch.previous")}
-          className="size-7"
-          disabled={resultCount === 0}
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-          onClick={() => activate(activeIndex - 1)}
-        >
-          <ArrowUp />
-        </Button>
-        <Button
-          aria-label={t("conversationSearch.next")}
-          className="size-7"
-          disabled={resultCount === 0}
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-          onClick={() => activate(activeIndex + 1)}
-        >
-          <ArrowDown />
-        </Button>
-        <span className="ml-auto px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
+      <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <Input
+        ref={inputRef}
+        aria-label={t("conversationSearch.placeholder")}
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+        placeholder={t("conversationSearch.placeholder")}
+        value={query}
+        onCompositionEnd={(event) => {
+          setIsComposing(false);
+          setQuery(event.currentTarget.value);
+        }}
+        onCompositionStart={() => setIsComposing(true)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setActiveIndex(-1);
+          appliedResultsRef.current = "";
+          onSearchChange(EMPTY_SEARCH_STATE);
+        }}
+        onKeyDown={handleKeyDown}
+      />
+      {waiting ? <Spinner className="size-4 shrink-0 text-muted-foreground" aria-label={t("common.loading")} /> : null}
+      {statusLabel ? (
+        <span className="shrink-0 px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
           {statusLabel}
         </span>
-      </div>
+      ) : null}
+      <Button
+        aria-label={t("conversationSearch.previous")}
+        className="size-7 shrink-0"
+        disabled={resultCount === 0}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+        onClick={() => activate(activeIndex - 1)}
+      >
+        <ArrowUp />
+      </Button>
+      <Button
+        aria-label={t("conversationSearch.next")}
+        className="size-7 shrink-0"
+        disabled={resultCount === 0}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+        onClick={() => activate(activeIndex + 1)}
+      >
+        <ArrowDown />
+      </Button>
+      <Button
+        aria-label={t("conversationSearch.close")}
+        className="size-7 shrink-0"
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+        onClick={close}
+      >
+        <X />
+      </Button>
     </div>
   );
 }

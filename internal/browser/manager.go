@@ -2513,7 +2513,8 @@ func observeScript(maxText, maxElements int) string {
 	return fmt.Sprintf(`(() => {
   const maxText = %d;
   const maxElements = %d;
-  const pickText = (el) => ((el.innerText || el.value || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " "));
+  const isPasswordInput = (el) => el instanceof HTMLInputElement && String(el.type || "").toLowerCase() === "password";
+  const pickText = (el) => ((el.innerText || (isPasswordInput(el) ? "" : el.value) || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " "));
   const visible = (el) => {
     const style = window.getComputedStyle(el);
     const rect = el.getBoundingClientRect();
@@ -2576,7 +2577,8 @@ func clickTargetScript(in ClickInput, method string) string {
   const x = %s;
   const y = %s;
   const method = %s;
-  const elementText = (node) => String(node.innerText || node.textContent || node.value || node.getAttribute?.("aria-label") || "").trim();
+	  const isPasswordInput = (node) => node instanceof HTMLInputElement && String(node.type || "").toLowerCase() === "password";
+	  const elementText = (node) => String(node.innerText || node.textContent || (isPasswordInput(node) ? "" : node.value) || node.getAttribute?.("aria-label") || "").trim();
   const isVisible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));
   const resolveSelector = (rawSelector) => {
     if (!rawSelector) return null;
@@ -2618,7 +2620,7 @@ func clickTargetScript(in ClickInput, method string) string {
 	  if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
 	  const editableTarget = el.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])') || el;
 	  globalThis[Symbol.for("pudding.browser.lastClickTarget")] = editableTarget;
-	  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
+	  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: elementText(el).slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 	})()`, selector, x, y, methodValue)
 }
 
@@ -2764,6 +2766,7 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 		  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
 		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
 		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+		  const isPasswordInput = (node) => node instanceof HTMLInputElement && String(node.type || "").toLowerCase() === "password";
 		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
 		  const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
 		  const fingerprint = (value) => {
@@ -2780,7 +2783,10 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 		  const rect = el.getBoundingClientRect();
 		  const value = isTextInput(el) ? String(el.value || "") : editableText(el);
 		  const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
-		  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: %d, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: %s});
+		  const result = {ok: true, tag: el.tagName.toLowerCase(), textLength: %d, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: %s};
+		  if (isPasswordInput(el)) result.sensitive = true;
+		  else result.valueLength = value.length;
+		  return JSON.stringify(result);
 		})()`, jsString(in.Selector), expectation.ExpectedValueLength, jsString(expectation.ExpectedValueHash), len([]rune(in.Text)), jsString(method))
 }
 

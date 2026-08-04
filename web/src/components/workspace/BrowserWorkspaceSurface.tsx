@@ -1,8 +1,18 @@
 import { ChevronDown, ChevronUp } from "@/components/icons";
-import { memo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
+import { BrowserFindBar } from "@/browser/BrowserFindBar";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
+import { electronBrowserBridge } from "@/browser/electronBridge";
+import {
+  activateBrowserPageFindRegion,
+  closeFind,
+  closeOpenFind,
+  openFind,
+  registerBrowserPageFind,
+} from "@/browser/pageFindTarget";
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
@@ -26,8 +36,62 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
 }) {
   const { t } = useI18n();
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
   const activeTab = tabs.find((tab) => tab.id === activeTabID) || tabs[0];
   const browserKey = `${sessionID}:${activeTab?.id || "empty"}`;
+  const findTarget = useMemo(() => ({
+    id: `browser:${browserKey}`,
+    open: () => setFindOpen(true),
+    close: () => setFindOpen(false),
+  }), [browserKey]);
+  const openBrowserFind = useCallback(() => openFind(findTarget), [findTarget]);
+  const changeBrowserFindOpen = useCallback((open: boolean) => {
+    if (open) {
+      openFind(findTarget);
+      return;
+    }
+    closeFind(findTarget.id);
+  }, [findTarget]);
+
+  useEffect(() => {
+    closeFind(findTarget.id);
+  }, [activeTab?.url, findTarget.id]);
+
+  useEffect(() => {
+    if (!active || !activeTab) return;
+    return registerBrowserPageFind(findTarget);
+  }, [active, activeTab?.id, findTarget]);
+
+  useEffect(() => {
+    if (!active || !activeTab) return;
+    return electronBrowserBridge()?.onInteraction?.((event) => {
+      if (event.sessionID !== sessionID || event.tabID !== activeTab.id) return;
+      activateBrowserPageFindRegion();
+      if (event.key === "Escape") closeOpenFind();
+    });
+  }, [active, activeTab?.id, findTarget.id, sessionID]);
+
+  useEffect(() => {
+    if (!active || !activeTab) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
+      if (document.querySelector('[data-slot="dialog-content"][data-state="open"]')) return;
+      const key = event.key.toLowerCase();
+      if (key === "p") {
+        event.preventDefault();
+        const bridge = electronBrowserBridge();
+        if (!bridge?.print) return;
+        void bridge.print({ sessionID, tabID: activeTab.id }).then((result) => {
+          if (!result.ok && !result.canceled) toast.error(t("browser.printFailed"), { description: result.reason });
+        }).catch((error) => {
+          toast.error(t("browser.printFailed"), { description: error instanceof Error ? error.message : String(error) });
+        });
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [active, activeTab?.id, sessionID, t]);
+
   return (
     <div
       aria-hidden={!active}
@@ -36,12 +100,28 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
         !active && "pointer-events-none invisible opacity-0",
       )}
       data-console-collapsed={consoleCollapsed}
+      onFocusCapture={activateBrowserPageFindRegion}
+      onPointerDownCapture={activateBrowserPageFindRegion}
     >
       <div className="pudding-browser-workspace-viewport absolute inset-0 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)]">
         <div className="canvas-window-drag-handle flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
-          <BrowserToolbar key={`toolbar:${browserKey}`} active={active} activeTab={activeTab} sessionID={sessionID} token={token} />
+          <BrowserToolbar
+            key={`toolbar:${browserKey}`}
+            active={active}
+            activeTab={activeTab}
+            sessionID={sessionID}
+            token={token}
+            onOpenFind={openBrowserFind}
+          />
         </div>
         <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--workspace-chrome-background)]">
+          <BrowserFindBar
+            key={`find:${browserKey}`}
+            open={findOpen}
+            sessionID={sessionID}
+            tabID={activeTab?.id}
+            onOpenChange={changeBrowserFindOpen}
+          />
           {tabs.map((tab) => (
             <div
               key={`widget:${sessionID}:${tab.id}`}

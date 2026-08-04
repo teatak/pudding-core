@@ -7,6 +7,7 @@ const {
   ipcMain,
   nativeImage,
   nativeTheme,
+  safeStorage,
   screen,
   session,
   shell,
@@ -21,6 +22,11 @@ const path = require("node:path");
 const packageMetadata = require("../package.json");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
+const {
+  BrowserCredentialController,
+  BrowserCredentialVault,
+  parseChromePasswordCSV,
+} = require("./browser-credentials.cjs");
 const { resolveBrowserFavicon } = require("./browser-favicon.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { configureManagedBrowserPermissions, managedBrowserPartition } = require("./browser-permissions.cjs");
@@ -34,7 +40,7 @@ const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
-const browserSelectionPreloadPath = path.join(__dirname, "browser-selection-preload.cjs");
+const browserPreloadPath = path.join(__dirname, "browser-preload.cjs");
 const appDisplayName = "Pudding";
 const repositoryURL = "https://github.com/teatak/pudding";
 const issueTrackerURL = `${repositoryURL}/issues`;
@@ -69,11 +75,15 @@ const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 560, height: 680 };
 const browserFaviconCache = new Map();
 const browserAutomationLifecycleWaiters = new Map();
+const browserCredentialFillWaiters = new Map();
 let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
 nativeTheme.themeSource = themePreference;
 const browserHost = new BrowserHost(
   (snapshot) => {
+    if (snapshot?.status === "lost") {
+      browserCredentials.release(snapshot);
+    }
     broadcastToTrustedRenderers("pudding:browser:updated", snapshot);
   },
   (cursor) => {
@@ -103,8 +113,19 @@ const browserHost = new BrowserHost(
     selectionChanged: (selection) => {
       broadcastToTrustedRenderers("pudding:browser:selection-updated", selection);
     },
+    foundInPage: (result) => {
+      broadcastToTrustedRenderers("pudding:browser:found-in-page", result);
+    },
+    interaction: (interaction) => {
+      broadcastToTrustedRenderers("pudding:browser:interaction", interaction);
+    },
   },
 );
+const browserCredentialVault = new BrowserCredentialVault({
+  filePath: path.join(puddingHomePath(), "browser", "credentials.vault"),
+  safeStorage,
+});
+const browserCredentials = new BrowserCredentialController({ vault: browserCredentialVault });
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const projectFileWatcher = new ProjectFileWatcher();
 
@@ -285,7 +306,7 @@ function createMainWindow() {
       webPreferences,
       params,
       managedBrowserPartition,
-      browserSelectionPreloadPath,
+      browserPreloadPath,
     )) {
       console.warn("[electron] blocked unmanaged browser webview attachment");
     }
@@ -918,6 +939,78 @@ function broadcastToTrustedRenderers(channel, payload) {
   }
 }
 
+function broadcastCredentialState(context, state) {
+  broadcastToTrustedRenderers("pudding:browser:credential-state", {
+    ...state,
+    sessionID: context.sessionID,
+    tabID: context.tabID,
+  });
+}
+
+function broadcastCredentialsChanged() {
+  broadcastToTrustedRenderers("pudding:browser:credentials-changed", { updatedAt: new Date().toISOString() });
+}
+
+function emptyBrowserCredentialState() {
+  const availability = browserCredentialVault.availability();
+  return { ...availability, origin: "", formDetected: false, credentials: [], prompt: null };
+}
+
+function browserCredentialContextIsBlank(context) {
+  try {
+    const url = new URL(context?.url || "");
+    return url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
+  } catch {
+    return true;
+  }
+}
+
+function credentialPayloadMatchesContext(payload, context) {
+  try {
+    return String(payload?.origin || "") === new URL(context?.url || "").origin;
+  } catch {
+    return false;
+  }
+}
+
+function sendCredentialFill(request, credential) {
+  const context = browserHost.credentialContext(request);
+  if (new URL(context.url).origin !== credential.origin || !context.webContentsID) {
+    throw new Error("browser credential origin mismatch");
+  }
+  const requestID = `credential_fill_${crypto.randomUUID().replaceAll("-", "")}`;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const complete = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      browserCredentialFillWaiters.delete(requestID);
+      if (result.ok) {
+        resolve(result);
+      } else {
+        reject(new Error(result.reason || "browser credential fill failed"));
+      }
+    };
+    const timer = setTimeout(() => complete({ ok: false, reason: "credential_fill_timeout" }), 2_000);
+    timer.unref?.();
+    browserCredentialFillWaiters.set(requestID, { complete, webContentsID: context.webContentsID });
+    try {
+      browserHost.sendCredentialMessage(request, "pudding:browser:credential-fill", {
+        requestID,
+        origin: credential.origin,
+        username: credential.username,
+        password: credential.password,
+      });
+    } catch (error) {
+      browserCredentialFillWaiters.delete(requestID);
+      clearTimeout(timer);
+      settled = true;
+      reject(error);
+    }
+  });
+}
+
 function requestBrowserAutomationLifecycle(phase, event, target) {
   const channel = `pudding:browser:automation-${phase}`;
   if (event?.action !== "click") {
@@ -1147,11 +1240,214 @@ ipcMain.handle("pudding:browser:read-selection", (event, request) => {
   return browserHost.readSelection(request || {});
 });
 
+ipcMain.handle("pudding:browser:find", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.findInPage(untrustedBrowserRequest(request));
+});
+
+ipcMain.handle("pudding:browser:stop-find", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.stopFindInPage(untrustedBrowserRequest(request));
+});
+
+ipcMain.handle("pudding:browser:get-zoom", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.getZoom(untrustedBrowserRequest(request));
+});
+
+ipcMain.handle("pudding:browser:zoom", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.zoom(untrustedBrowserRequest(request));
+});
+
+ipcMain.handle("pudding:browser:print", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.print(untrustedBrowserRequest(request));
+});
+
 ipcMain.on("pudding:browser:selection-changed", (event, payload) => {
   const selection = browserHost.noteSelection(event.sender, payload);
   if (selection) {
     broadcastToTrustedRenderers("pudding:browser:selection-updated", selection);
   }
+});
+
+ipcMain.on("pudding:browser:credential-form", (event, payload) => {
+  const context = browserHost.contextForWebContents(event.sender);
+  if (!context) {
+    return;
+  }
+  void browserCredentials
+    .noteForm(context, Boolean(payload?.detected))
+    .then((state) => broadcastCredentialState(context, state))
+    .catch((error) => {
+      if (!browserCredentialContextIsBlank(context)) {
+        console.warn("[electron] browser credential form detection failed", error);
+      }
+    });
+});
+
+ipcMain.on("pudding:browser:credential-focus", (event, payload) => {
+  const context = browserHost.contextForWebContents(event.sender);
+  if (!context || !credentialPayloadMatchesContext(payload, context)) {
+    return;
+  }
+  browserHost.discardCredentialUserGesture(event.sender);
+  void browserCredentials
+    .state(context)
+    .then((state) => {
+      browserHost.sendCredentialMessage(
+        { sessionID: context.sessionID, tabID: context.tabID },
+        "pudding:browser:credential-suggestions",
+        {
+          origin: state.origin,
+          credentials: state.available ? state.credentials : [],
+          title: nativeText(shellLocale, "browserAccountsForSite"),
+          manageLabel: nativeText(shellLocale, "browserManagePasswords"),
+          dark: themeState().resolved === "dark",
+        },
+      );
+    })
+    .catch((error) => console.warn("[electron] browser credential suggestions failed", error));
+});
+
+ipcMain.on("pudding:browser:credential-fill-request", (event, payload) => {
+  const context = browserHost.contextForWebContents(event.sender);
+  if (
+    !context ||
+    !credentialPayloadMatchesContext(payload, context) ||
+    !browserHost.consumeCredentialUserGesture(event.sender)
+  ) {
+    return;
+  }
+  const request = { sessionID: context.sessionID, tabID: context.tabID };
+  void browserCredentials
+    .fill(context, payload?.credentialID)
+    .then((credential) => sendCredentialFill(request, credential))
+    .catch((error) => console.warn("[electron] browser credential fill request failed", error));
+});
+
+ipcMain.on("pudding:browser:credential-manage-request", (event) => {
+  const context = browserHost.contextForWebContents(event.sender);
+  if (!context || !browserHost.consumeCredentialUserGesture(event.sender)) {
+    return;
+  }
+  broadcastToTrustedRenderers("pudding:browser:credential-manage", {
+    sessionID: context.sessionID,
+    tabID: context.tabID,
+  });
+});
+
+ipcMain.on("pudding:browser:credential-candidate", (event, payload) => {
+  const context = browserHost.contextForWebContents(event.sender);
+  if (!context) {
+    return;
+  }
+  void browserCredentials
+    .noteCandidate(context, payload)
+    .then(() => browserCredentials.state(context))
+    .then((state) => broadcastCredentialState(context, state))
+    .catch((error) => console.warn("[electron] browser credential candidate rejected", error));
+});
+
+ipcMain.on("pudding:browser:credential-fill-result", (event, payload) => {
+  const requestID = String(payload?.requestID || "").trim();
+  const waiter = browserCredentialFillWaiters.get(requestID);
+  if (!waiter || waiter.webContentsID !== event.sender.id) {
+    return;
+  }
+  browserCredentialFillWaiters.delete(requestID);
+  waiter.complete({
+    ok: Boolean(payload?.ok),
+    reason: String(payload?.reason || ""),
+  });
+});
+
+ipcMain.handle("pudding:browser:credentials:get-state", async (event, request) => {
+  assertTrustedSender(event);
+  const context = browserHost.credentialContextIfLive(untrustedBrowserRequest(request));
+  if (!context || browserCredentialContextIsBlank(context)) {
+    return emptyBrowserCredentialState();
+  }
+  return browserCredentials.state(context);
+});
+
+ipcMain.handle("pudding:browser:credentials:list", async (event) => {
+  assertTrustedSender(event);
+  const availability = browserCredentialVault.availability();
+  if (!availability.available) {
+    return { ...availability, credentials: [], neverSaveOrigins: [] };
+  }
+  return { ...availability, ...(await browserCredentialVault.list()) };
+});
+
+ipcMain.handle("pudding:browser:credentials:save", async (event, request) => {
+  assertTrustedSender(event);
+  const context = browserHost.credentialContext(untrustedBrowserRequest(request));
+  const credential = await browserCredentials.commit(context, request?.pendingID);
+  broadcastCredentialsChanged();
+  broadcastCredentialState(context, await browserCredentials.state(context));
+  return credential;
+});
+
+ipcMain.handle("pudding:browser:credentials:dismiss", async (event, request) => {
+  assertTrustedSender(event);
+  const context = browserHost.credentialContext(untrustedBrowserRequest(request));
+  await browserCredentials.dismiss(context, request?.pendingID, Boolean(request?.neverSave));
+  broadcastCredentialsChanged();
+  broadcastCredentialState(context, await browserCredentials.state(context));
+});
+
+ipcMain.handle("pudding:browser:credentials:delete", async (event, request) => {
+  assertTrustedSender(event);
+  await browserCredentialVault.delete(request?.credentialID);
+  broadcastCredentialsChanged();
+});
+
+ipcMain.handle("pudding:browser:credentials:clear", async (event) => {
+  assertTrustedSender(event);
+  await browserCredentialVault.clear();
+  broadcastCredentialsChanged();
+});
+
+ipcMain.handle("pudding:browser:credentials:allow-origin", async (event, request) => {
+  assertTrustedSender(event);
+  await browserCredentialVault.setNeverSave(request?.origin, false);
+  broadcastCredentialsChanged();
+});
+
+ipcMain.handle("pudding:browser:credentials:import-chrome", async (event) => {
+  assertTrustedSender(event);
+  const window = BrowserWindow.fromWebContents(event.sender) || getMainWindow();
+  const result = await dialog.showOpenDialog(window, {
+    title: nativeText(shellLocale, "browserImportPasswordsTitle"),
+    properties: ["openFile"],
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+  if (result.canceled || result.filePaths.length !== 1) {
+    return { canceled: true, imported: 0, updated: 0, unchanged: 0, skipped: 0, sourceDeleted: false };
+  }
+  const sourcePath = result.filePaths[0];
+  const csv = await fsp.readFile(sourcePath, "utf8");
+  const parsed = parseChromePasswordCSV(csv);
+  const imported = await browserCredentialVault.importRecords(parsed.records);
+  broadcastCredentialsChanged();
+  const deleteResult = await dialog.showMessageBox(window, {
+    type: "warning",
+    title: nativeText(shellLocale, "browserDeletePasswordCSVTitle"),
+    message: nativeText(shellLocale, "browserDeletePasswordCSVMessage"),
+    detail: nativeText(shellLocale, "browserDeletePasswordCSVDetail"),
+    buttons: [nativeText(shellLocale, "browserDeletePasswordCSVDelete"), nativeText(shellLocale, "browserDeletePasswordCSVKeep")],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  let sourceDeleted = false;
+  if (deleteResult.response === 0) {
+    await fsp.rm(sourcePath);
+    sourceDeleted = true;
+  }
+  return { canceled: false, ...imported, skipped: parsed.skipped, sourceDeleted };
 });
 
 ipcMain.handle("pudding:browser:list-tabs", (event, request) => {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Ellipsis, FolderClosed, Trash, X } from "@/components/icons";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   deleteSession,
@@ -11,6 +11,12 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import {
+  activateConversationFindRegion,
+  closeFind,
+  openActiveBrowserPageFind,
+  openFind,
+} from "@/browser/pageFindTarget";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
@@ -178,14 +184,28 @@ export function ChatPane({
         }
       : {}),
   };
+  const conversationFindTarget = useMemo(() => ({
+    id: `conversation:${role}:${selectedSession?.id || "empty"}`,
+    open: () => {
+      setConversationSearchOpen(true);
+      setConversationSearchFocusSignal((signal) => signal + 1);
+    },
+    close: () => setConversationSearchOpen(false),
+  }), [role, selectedSession?.id]);
   const openConversationSearch = useCallback(() => {
     if (!selectedSession) {
       return;
     }
     activeChatPaneRole = role;
-    setConversationSearchOpen(true);
-    setConversationSearchFocusSignal((signal) => signal + 1);
-  }, [role, selectedSession]);
+    openFind(conversationFindTarget);
+  }, [conversationFindTarget, role, selectedSession]);
+  const changeConversationSearchOpen = useCallback((open: boolean) => {
+    if (open) {
+      openConversationSearch();
+      return;
+    }
+    closeFind(conversationFindTarget.id);
+  }, [conversationFindTarget.id, openConversationSearch]);
 
   const openProjects = useCallback(() => {
     void navigate({
@@ -201,9 +221,10 @@ export function ChatPane({
     });
   }, [navigate]);
 
-  useEffect(() => {
-    setConversationSearchOpen(false);
-  }, [selectedSession?.id]);
+  useEffect(
+    () => () => closeFind(conversationFindTarget.id),
+    [conversationFindTarget.id],
+  );
 
   useEffect(
     () => () => {
@@ -227,11 +248,17 @@ export function ChatPane({
         return;
       }
       event.preventDefault();
+      if (openActiveBrowserPageFind()) {
+        return;
+      }
       openConversationSearch();
     };
     window.addEventListener("keydown", handleKeyDown);
     const unsubscribeMenu = onDesktopMenuCommand((command) => {
       if (command === "search-conversation" && activeChatPaneRole === role) {
+        if (openActiveBrowserPageFind()) {
+          return;
+        }
         openConversationSearch();
       }
     });
@@ -306,9 +333,11 @@ export function ChatPane({
       data-chat-pane-role={role}
       onFocusCapture={() => {
         activeChatPaneRole = role;
+        activateConversationFindRegion();
       }}
       onPointerDownCapture={() => {
         activeChatPaneRole = role;
+        activateConversationFindRegion();
       }}
     >
       {floating ? null : <header
@@ -387,7 +416,7 @@ export function ChatPane({
             session={selectedSession}
             token={token}
             presentation={presentation}
-            onSearchOpenChange={setConversationSearchOpen}
+            onSearchOpenChange={changeConversationSearchOpen}
           />
         ) : sessionsPending ? (
           <LoadingState />
