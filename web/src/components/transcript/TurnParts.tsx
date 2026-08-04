@@ -131,7 +131,7 @@ function renderTranscriptPart({
 }) {
   switch (part.type) {
     case "text":
-      return <MarkdownBody key={partKey} messageID={part.messageID} text={part.text} token={token} />;
+      return <MarkdownBody key={partKey} enableMermaid messageID={part.messageID} text={part.text} token={token} />;
     case "attachment":
       return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
     case "thought":
@@ -1423,6 +1423,7 @@ function renderMermaidSVG(id: string, code: string, dark: boolean) {
       securityLevel: "strict",
       suppressErrorRendering: true,
       theme: dark ? "dark" : "default",
+      htmlLabels: false,
       maxTextSize: MAX_MERMAID_CHARS,
     });
     const result = await mermaid.render(id, code);

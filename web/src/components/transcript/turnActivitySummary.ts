@@ -63,9 +63,9 @@ export type TurnActivitySummary = {
   active: boolean;
   detail?: string;
   failed?: boolean;
-  icon: LucideIcon;
   label: string;
   phase?: TurnPhaseState["phase"];
+  toolIcon?: LucideIcon;
 };
 
 export function describeFloatingTurnActivity({
@@ -81,23 +81,22 @@ export function describeFloatingTurnActivity({
 }): TurnActivitySummary {
   if (!running) {
     if (phase?.phase === "error" || overlay?.status === "failed") {
-      return { active: false, failed: true, icon: CircleAlert, label: t("agentConsole.turnFailed") };
+      return { active: false, failed: true, label: t("agentConsole.turnFailed"), phase: "error" };
     }
     if (
       phase?.phase === "cancelled" ||
       overlay?.status === "cancelled" ||
       overlay?.interrupted
     ) {
-      return { active: false, icon: Square, label: t("agentConsole.turnStopped") };
+      return { active: false, label: t("agentConsole.turnStopped"), phase: "cancelled" };
     }
-    return { active: false, icon: CircleCheck, label: t("agentConsole.turnCompleted") };
+    return { active: false, label: t("agentConsole.turnCompleted") };
   }
 
   const approval = findLastPart(overlay?.parts, "approval");
   if (phase?.phase === "awaiting_approval" || (approval && !approval.status)) {
     return {
       active: true,
-      icon: ShieldCheck,
       label: t("agentConsole.needsApproval"),
       phase: "awaiting_approval",
     };
@@ -110,33 +109,32 @@ export function describeFloatingTurnActivity({
 
   switch (phase?.phase) {
     case "submitting":
-      return { active: true, icon: Send, label: t("transcript.phaseSubmitting"), phase: phase.phase };
+      return { active: true, label: t("transcript.phaseSubmitting"), phase: phase.phase };
     case "awaiting_model":
       return {
         active: true,
-        icon: Sparkles,
         label: t(phase.activity === "steering" ? "transcript.phaseSteering" : "transcript.phaseAwaitingModel"),
         phase: phase.phase,
       };
     case "thinking":
-      return { active: true, icon: Lightbulb, label: t("transcript.thinking"), phase: phase.phase };
+      return { active: true, label: t("transcript.thinking"), phase: phase.phase };
     case "streaming_text":
-      return { active: true, icon: MessageSquareText, label: t("agentConsole.generatingReply"), phase: phase.phase };
+      return { active: true, label: t("agentConsole.generatingReply"), phase: phase.phase };
     case "streaming_tool_args":
-      return { active: true, icon: Wrench, label: t("transcript.toolReadingArgs"), phase: phase.phase };
+      return { active: true, label: t("transcript.toolReadingArgs"), phase: phase.phase };
     case "executing_tool":
-      return { active: true, icon: Wrench, label: t("transcript.toolRunning"), phase: phase.phase };
+      return { active: true, label: t("transcript.toolRunning"), phase: phase.phase };
     case "awaiting_followup":
-      return { active: true, icon: MessageSquareMore, label: t("transcript.phaseAwaitingFollowup"), phase: phase.phase };
+      return { active: true, label: t("transcript.phaseAwaitingFollowup"), phase: phase.phase };
     case "error":
-      return { active: false, failed: true, icon: CircleAlert, label: t("agentConsole.turnFailed"), phase: phase.phase };
+      return { active: false, failed: true, label: t("agentConsole.turnFailed"), phase: phase.phase };
     case "cancelled":
-      return { active: false, icon: Square, label: t("agentConsole.turnStopped"), phase: phase.phase };
+      return { active: false, label: t("agentConsole.turnStopped"), phase: phase.phase };
     default:
       if (overlay?.text.trim()) {
-        return { active: true, icon: MessageSquareText, label: t("agentConsole.generatingReply"), phase: "streaming_text" };
+        return { active: true, label: t("agentConsole.generatingReply"), phase: "streaming_text" };
       }
-      return { active: true, icon: Sparkles, label: t("transcript.phaseAwaitingModel"), phase: "awaiting_model" };
+      return { active: true, label: t("transcript.phaseAwaitingModel"), phase: "awaiting_model" };
   }
 }
 
@@ -155,9 +153,9 @@ function describeToolActivity(
   return {
     active: true,
     detail,
-    icon: toolIcon(name),
     label,
     phase: phase?.phase === "streaming_tool_args" ? "streaming_tool_args" : "executing_tool",
+    toolIcon: toolIcon(name),
   };
 }
 

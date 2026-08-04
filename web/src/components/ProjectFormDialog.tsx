@@ -206,7 +206,7 @@ export function ProjectFormDialog({
                     type="button"
                     onClick={onChooseDirectories}
                   >
-                    <span className="flex items-center gap-2 font-medium">
+                    <span className="flex items-center gap-2 font-normal">
                       <FolderPlus className="size-4" />
                       {t("project.addFolder")}
                     </span>
@@ -228,8 +228,8 @@ export function ProjectFormDialog({
                         }}
                         className="flex min-w-0 items-center gap-2 border-b px-3 py-2.5"
                       >
-                        <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm">
+                        <FolderClosed className="size-4 shrink-0 text-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-normal">
                           {displayUserPath(path, homeDirectory)}
                         </span>
                         {directoryPaths.length > 1 && index === 0 ? (
@@ -269,7 +269,7 @@ export function ProjectFormDialog({
                       </div>
                     ))}
                     <button
-                      className="flex h-11 w-full items-center justify-start gap-1.5 bg-transparent px-3 text-sm font-medium transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                      className="flex h-11 w-full items-center justify-start gap-1.5 bg-transparent px-3 text-sm font-normal transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
                       disabled={isPending}
                       type="button"
                       onClick={onChooseDirectories}

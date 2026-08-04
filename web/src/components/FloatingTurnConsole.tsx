@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronUp, Clock3, TextCursorInput } from "@/components/icons";
+import { ChevronDown, ChevronUp, Clock3 } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import type { Session } from "@/api/client";
+import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -71,7 +72,7 @@ export function FloatingTurnConsole({
   const running = Boolean(runningTurnID || session.running || isTurnPhaseActive(phase));
   const phaseElapsed = useElapsedDuration(running ? phase?.updatedAt : undefined, locale);
   const activity = describeFloatingTurnActivity({ overlay, phase, running, t });
-  const ActivityIcon = pendingInputFlow ? TextCursorInput : activity.icon;
+  const ActivityIcon = activity.toolIcon;
   const completedDuration = !running ? turnDuration(selectedTurn) : "";
   const elapsed = phaseElapsed || completedDuration;
   const detailViewportRef = useRef<HTMLDivElement | null>(null);
@@ -176,13 +177,14 @@ export function FloatingTurnConsole({
       >
         {expanded ? null : (
           <>
-            <ActivityIcon
-              aria-hidden="true"
-              className={cn(
-                "size-3.5 shrink-0 text-muted-foreground",
-                activity.failed && "text-destructive",
-              )}
-            />
+            {ActivityIcon ? (
+              <ActivityIcon
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+            ) : (
+              <PhaseDot active={activity.active} phase={activity.phase ?? "streaming_text"} size="sm" />
+            )}
             <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
               {label}
               {statusDetail ? (

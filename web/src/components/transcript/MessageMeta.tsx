@@ -58,7 +58,7 @@ export function MessageMeta({
   return (
     <div
       className={cn(
-        "flex h-6 w-full items-center gap-2 text-xs text-muted-foreground",
+        "flex h-6 w-full items-center gap-1 text-xs text-muted-foreground",
         !persistentStatus &&
           (hoverGroup === "assistant-turn"
             ? "opacity-0 group-hover/assistant-turn:opacity-100 group-focus-within/assistant-turn:opacity-100"

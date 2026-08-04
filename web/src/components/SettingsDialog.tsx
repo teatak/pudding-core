@@ -199,7 +199,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
           </DialogTrigger>
         ) : null}
         <DialogContent
-          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 shadow-lg sm:w-[calc(100vw-2rem)] sm:max-w-[1040px] xl:max-w-[1040px]"
+          className="pudding-settings-surface top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 shadow-lg sm:w-[calc(100vw-2rem)] sm:max-w-[1040px] xl:max-w-[1040px]"
           onPointerDownOutside={(event) => {
             if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
               event.preventDefault();

@@ -7,6 +7,7 @@ import "vditor/dist/index.css";
 import "vditor/dist/js/i18n/zh_CN.js";
 import "vditor/dist/js/icons/ant.js";
 import luteURL from "vditor/dist/js/lute/lute.min.js?url";
+import mermaidScriptURL from "vditor/dist/js/mermaid/mermaid.min.js?url";
 
 import { useI18n } from "@/i18n";
 
@@ -63,6 +64,27 @@ const CODE_BLOCK_LANGUAGE_HINTS = [
   "math",
 ];
 
+let vditorMermaidScriptPromise: Promise<void> | undefined;
+
+function ensureVditorMermaidScript() {
+  const scriptID = "vditorMermaidScript";
+  if (document.getElementById(scriptID)) return Promise.resolve();
+  if (vditorMermaidScriptPromise) return vditorMermaidScriptPromise;
+  vditorMermaidScriptPromise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = scriptID;
+    script.src = mermaidScriptURL;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      script.remove();
+      vditorMermaidScriptPromise = undefined;
+      reject(new Error("failed to load Vditor Mermaid renderer"));
+    };
+    document.head.appendChild(script);
+  });
+  return vditorMermaidScriptPromise;
+}
+
 export function ProjectMarkdownEditor({
   path,
   reveal,
@@ -116,67 +138,74 @@ export function ProjectMarkdownEditor({
       });
     };
     const dark = document.documentElement.classList.contains("dark");
-    const editor = new Vditor(host, {
-      _lutePath: luteURL,
-      cache: { enable: false },
-      height: "auto",
-      icon: null as never,
-      i18n: window.VditorI18n,
-      lang: locale === "zh-TW" ? "zh_TW" : locale === "en" ? "en_US" : "zh_CN",
-      mode: "ir",
-      placeholder: t("project.browserMarkdownEditor"),
-      preview: {
-        hljs: {
-          enable: false,
-          langs: CODE_BLOCK_LANGUAGE_HINTS,
+    let editor: Vditor | undefined;
+    void ensureVditorMermaidScript().catch(() => undefined).then(() => {
+      if (disposed) return;
+      const nextEditor = new Vditor(host, {
+        _lutePath: luteURL,
+        cache: { enable: false },
+        height: "auto",
+        icon: null as never,
+        i18n: window.VditorI18n,
+        lang: locale === "zh-TW" ? "zh_TW" : locale === "en" ? "en_US" : "zh_CN",
+        mode: "ir",
+        placeholder: t("project.browserMarkdownEditor"),
+        preview: {
+          hljs: {
+            enable: false,
+            langs: CODE_BLOCK_LANGUAGE_HINTS,
+          },
+          markdown: {
+            codeBlockPreview: true,
+            mathBlockPreview: false,
+            sanitize: true,
+          },
+          mode: "editor",
+          theme: {
+            current: "",
+            path: "",
+          },
         },
-        markdown: {
-          codeBlockPreview: false,
-          mathBlockPreview: false,
-          sanitize: true,
+        theme: dark ? "dark" : "classic",
+        toolbar: [],
+        value: valueRef.current,
+        after: () => {
+          if (disposed) {
+            nextEditor.destroy();
+            return;
+          }
+          vditorRef.current = nextEditor;
+          const editorRoot = nextEditor.vditor.ir?.element;
+          if (editorRoot) {
+            tableObserver = new MutationObserver(() => {
+              scheduleTableLayout(nextEditor);
+              scheduleCodeCopyLayout(nextEditor);
+            });
+            tableObserver.observe(editorRoot, {
+              attributes: true,
+              attributeFilter: ["class"],
+              characterData: true,
+              childList: true,
+              subtree: true,
+            });
+          }
+          if (containerRef.current) {
+            editorResizeObserver = new ResizeObserver(() => scheduleCodeCopyLayout(nextEditor));
+            editorResizeObserver.observe(containerRef.current);
+          }
+          scheduleTableLayout(nextEditor);
+          scheduleCodeCopyLayout(nextEditor);
+          revealEditorPosition(nextEditor, revealRef.current);
         },
-        mode: "editor",
-        theme: {
-          current: "",
-          path: "",
+        input: (markdown) => {
+          valueRef.current = markdown;
+          setSelectionAction(undefined);
+          scheduleTableLayout(nextEditor);
+          scheduleCodeCopyLayout(nextEditor);
+          if (!syncingRef.current) onChangeRef.current(markdown);
         },
-      },
-      theme: dark ? "dark" : "classic",
-      toolbar: [],
-      value: valueRef.current,
-      after: () => {
-        if (disposed) {
-          editor.destroy();
-          return;
-        }
-        vditorRef.current = editor;
-        const editorRoot = editor.vditor.ir?.element;
-        if (editorRoot) {
-          tableObserver = new MutationObserver(() => {
-            scheduleTableLayout(editor);
-            scheduleCodeCopyLayout(editor);
-          });
-          tableObserver.observe(editorRoot, {
-            characterData: true,
-            childList: true,
-            subtree: true,
-          });
-        }
-        if (containerRef.current) {
-          editorResizeObserver = new ResizeObserver(() => scheduleCodeCopyLayout(editor));
-          editorResizeObserver.observe(containerRef.current);
-        }
-        scheduleTableLayout(editor);
-        scheduleCodeCopyLayout(editor);
-        revealEditorPosition(editor, revealRef.current);
-      },
-      input: (markdown) => {
-        valueRef.current = markdown;
-        setSelectionAction(undefined);
-        scheduleTableLayout(editor);
-        scheduleCodeCopyLayout(editor);
-        if (!syncingRef.current) onChangeRef.current(markdown);
-      },
+      });
+      editor = nextEditor;
     });
 
     return () => {
@@ -184,8 +213,8 @@ export function ProjectMarkdownEditor({
       tableObserver?.disconnect();
       editorResizeObserver?.disconnect();
       window.cancelAnimationFrame(codeCopyLayoutFrame);
-      if (vditorRef.current === editor) vditorRef.current = null;
-      editor.destroy();
+      if (editor && vditorRef.current === editor) vditorRef.current = null;
+      editor?.destroy();
     };
   }, [locale, path]);
 
@@ -348,7 +377,19 @@ function resolveCodeCopyActions(
       '[data-type="code-block"].vditor-ir__node > pre.vditor-ir__marker--pre > code',
     ),
   ).map((codeElement, index) => {
-    const rect = codeElement.getBoundingClientRect();
+    const codeBlock = codeElement.closest<HTMLElement>(
+      '[data-type="code-block"].vditor-ir__node',
+    );
+    const preview = codeBlock?.querySelector<HTMLElement>(
+      ":scope > .vditor-ir__preview",
+    );
+    const previewContent = preview?.querySelector<Element>(
+      "svg, canvas, img, pre",
+    );
+    const anchor = codeBlock?.classList.contains("vditor-ir__node--expand")
+      ? codeElement
+      : previewContent || preview || codeElement;
+    const rect = anchor.getBoundingClientRect();
     return {
       code: (codeElement.textContent || "").replace(/\n$/, ""),
       key: String(index),

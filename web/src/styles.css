@@ -4,6 +4,40 @@
 
 @custom-variant dark (&:is(.dark *));
 
+input:focus-visible,
+textarea:focus-visible,
+[data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
+    --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+.pudding-settings-surface {
+    --primary: oklch(0.546 0.245 262.881);
+    --primary-foreground: oklch(0.985 0 0);
+    --primary-hover: color-mix(in oklch, var(--primary), white 8%);
+    --primary-active: color-mix(in oklch, var(--primary), black 14%);
+    --ring: oklch(0.623 0.214 259.815);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.707 0.165 254.624);
+    --chart-3: oklch(0.623 0.214 259.815);
+    --chart-4: oklch(0.546 0.245 262.881);
+    --chart-5: oklch(0.488 0.243 264.376);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-ring: var(--ring);
+}
+
+.dark .pudding-settings-surface {
+    --primary: oklch(0.623 0.214 259.815);
+    --primary-foreground: oklch(0.985 0 0);
+    --primary-active: color-mix(in oklch, var(--primary), black 8%);
+    --ring: oklch(0.707 0.165 254.624);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.707 0.165 254.624);
+    --chart-3: oklch(0.623 0.214 259.815);
+    --chart-4: oklch(0.546 0.245 262.881);
+    --chart-5: oklch(0.488 0.243 264.376);
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI Variable", "Segoe UI", ui-sans-serif, sans-serif;
@@ -729,6 +763,29 @@ html[data-agent-console-resizing="true"] webview {
 .pudding-agent-console[data-mode="floating"] .pudding-chat-pane-header {
     border-bottom: 1px solid var(--workspace-border);
     background-color: var(--agent-console-chrome-background);
+}
+
+[data-workspace-presentation="canvas"] .pudding-browser-workspace-surface[data-console-collapsed="false"] .pudding-browser-workspace-viewport {
+    bottom: 6rem;
+}
+
+.pudding-browser-console-toggle {
+    display: none;
+    bottom: 0.75rem;
+}
+
+[data-workspace-presentation="canvas"] .pudding-browser-console-toggle {
+    display: inline-flex;
+}
+
+[data-workspace-presentation="canvas"] .pudding-browser-workspace-surface[data-console-collapsed="false"] .pudding-browser-console-toggle {
+    bottom: 3.5rem;
+}
+
+[data-workspace-presentation="canvas"]:has(
+    .pudding-browser-workspace-surface[aria-hidden="false"][data-console-collapsed="true"]
+) .pudding-agent-console {
+    visibility: hidden;
 }
 
 [data-app-floating-content] {
@@ -1844,13 +1901,35 @@ html[data-agent-console-resizing="true"] webview {
 .pudding-vditor-host
   .vditor-ir
   .vditor-reset
-  [data-type="code-block"]:not(.vditor-ir__node--expand)::before,
+  [data-type="code-block"]::after {
+  display: block;
+  min-height: 1.65em;
+  line-height: 1.65;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"].vditor-ir__node--expand
+  > .vditor-ir__preview {
+  display: none;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"]:not(.vditor-ir__node--expand)::before {
+  display: none;
+  content: none;
+}
+
 .pudding-vditor-host
   .vditor-ir
   .vditor-reset
   [data-type="code-block"]:not(.vditor-ir__node--expand)::after {
-  display: none;
-  content: none;
+  display: block;
+  height: 1.65em;
+  content: "";
 }
 
 .pudding-vditor-host
@@ -1890,6 +1969,7 @@ html[data-agent-console-resizing="true"] webview {
     "Liberation Mono", "Courier New", monospace;
   font-size: 0.875rem;
   line-height: 1.65;
+  text-align: left;
   white-space: pre;
 }
 

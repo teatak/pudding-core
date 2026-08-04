@@ -395,8 +395,8 @@ function ProjectEmptyState({
               <>
                 {rootDirs.map((path) => (
                   <div className="flex min-w-0 items-center gap-2 border-b px-3 py-2.5" key={path}>
-                    <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-sm">
+                    <FolderClosed className="size-4 shrink-0 text-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-normal">
                       {displayUserPath(path, homeDirectory)}
                     </span>
                     <Button
@@ -412,7 +412,7 @@ function ProjectEmptyState({
                   </div>
                 ))}
                 <button
-                  className="flex h-12 w-full items-center justify-center gap-2 bg-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-control-hover hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  className="flex h-12 w-full items-center justify-center gap-2 bg-transparent px-3 text-sm font-normal text-foreground transition-colors hover:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                   disabled={isPending}
                   type="button"
                   onClick={onChooseDirectories}
@@ -428,7 +428,7 @@ function ProjectEmptyState({
                 type="button"
                 onClick={onChooseDirectories}
               >
-                <span className="flex items-center gap-2 font-medium">
+                <span className="flex items-center gap-2 font-normal">
                   <FolderPlus className="size-4" />
                   {t("project.addFolder")}
                 </span>

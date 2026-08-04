@@ -310,6 +310,29 @@ function SortableSurfaceTabButton({
     disabled: closePending,
   });
   const horizontalTransform = transform ? { ...transform, y: 0, scaleX: 1, scaleY: 1 } : null;
+  const closeLabel =
+    tab.kind === "browser"
+      ? t("browser.release")
+      : tab.kind === "project"
+        ? t("workspace.closeProject")
+        : tab.kind === "terminal"
+          ? t("terminal.close")
+          : tab.kind === "widget"
+            ? t("canvas.delete")
+            : t("canvas.filePreviewClose");
+  const closeTab = () => {
+    if (tab.kind === "browser") {
+      onCloseBrowser(tab.id);
+    } else if (tab.kind === "project") {
+      onCloseProject();
+    } else if (tab.kind === "terminal") {
+      onCloseTerminal(tab.id);
+    } else if (tab.kind === "file") {
+      onCloseFilePreview(tab.id);
+    } else {
+      onCloseCanvasItem(tab.id);
+    }
+  };
 
   return (
     <button
@@ -348,12 +371,7 @@ function SortableSurfaceTabButton({
       }}
     >
       <span className="relative inline-flex size-(--workspace-toolbar-tab-icon) shrink-0">
-        <span
-          className={cn(
-            "inline-flex size-full items-center justify-center group-hover:opacity-0",
-            closePending && "opacity-0",
-          )}
-        >
+        <span className="inline-flex size-full items-center justify-center">
           {project ? (
             <span className="inline-flex size-full items-center justify-center text-current">
               <Folders className="h-3.5 w-3.5" />
@@ -368,42 +386,22 @@ function SortableSurfaceTabButton({
             <FilePreviewTabIcon kind={file?.kind || "file"} />
           )}
         </span>
-        <span
-          aria-label={
-            tab.kind === "browser"
-              ? t("browser.release")
-              : tab.kind === "project"
-                ? t("workspace.closeProject")
-                : tab.kind === "terminal"
-                  ? t("terminal.close")
-                  : tab.kind === "widget"
-                    ? t("canvas.delete")
-                    : t("canvas.filePreviewClose")
-          }
-          className="pointer-events-none absolute inset-0 z-10 inline-flex items-center justify-center rounded-[4px] bg-transparent opacity-0 hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20 group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
-          data-pending={closePending}
-          role="button"
-          tabIndex={-1}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (tab.kind === "browser") {
-              onCloseBrowser(tab.id);
-            } else if (tab.kind === "project") {
-              onCloseProject();
-            } else if (tab.kind === "terminal") {
-              onCloseTerminal(tab.id);
-            } else if (tab.kind === "file") {
-              onCloseFilePreview(tab.id);
-            } else {
-              onCloseCanvasItem(tab.id);
-            }
-          }}
-        >
-          {closePending ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
-        </span>
       </span>
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      <span
+        aria-label={closeLabel}
+        className="pointer-events-none z-10 inline-flex size-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[4px] bg-transparent opacity-0 hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20 group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        data-pending={closePending}
+        role="button"
+        tabIndex={-1}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          closeTab();
+        }}
+      >
+        {closePending ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
+      </span>
     </button>
   );
 }

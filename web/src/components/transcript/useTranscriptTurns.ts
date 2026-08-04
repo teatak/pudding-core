@@ -1,4 +1,4 @@
-import { useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listTurns, type ConversationTurn } from "@/api/client";
@@ -11,10 +11,25 @@ const TURNS_PAGE_SIZE = 20;
 const VISIBLE_TURN_STEP = TURNS_PAGE_SIZE;
 type TurnsPage = { turns: ConversationTurn[]; hasMore: boolean };
 export type TurnsInfiniteData = InfiniteData<TurnsPage, string | undefined>;
+const latestTurnsRefreshes = new Map<string, Promise<void>>();
 
 export function useTranscriptTurns(token: string, sessionID: string) {
   const { locale } = useI18n();
+  const queryClient = useQueryClient();
   const [visibleTurnCount, setVisibleTurnCount] = useState(VISIBLE_TURN_STEP);
+  const latestRefreshRef = useRef({
+    cachePresent: false,
+    key: "",
+    started: false,
+  });
+  const latestRefreshKey = `${token}\u0000${sessionID}`;
+  if (latestRefreshRef.current.key !== latestRefreshKey) {
+    latestRefreshRef.current = {
+      cachePresent: Boolean(queryClient.getQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID))?.pages.length),
+      key: latestRefreshKey,
+      started: false,
+    };
+  }
   const query = useInfiniteQuery({
     queryKey: queryKeys.turns(sessionID),
     queryFn: ({ pageParam }) => listTurns(token, sessionID, { before: pageParam, limit: TURNS_PAGE_SIZE }),
@@ -27,6 +42,10 @@ export function useTranscriptTurns(token: string, sessionID: string) {
     },
     getPreviousPageParam: () => undefined,
     enabled: Boolean(token && sessionID),
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    staleTime: "static",
   });
   const queryDataRef = useRef(query.data);
   const fetchNextPageRef = useRef(query.fetchNextPage);
@@ -39,6 +58,17 @@ export function useTranscriptTurns(token: string, sessionID: string) {
   useEffect(() => {
     setVisibleTurnCount(VISIBLE_TURN_STEP);
   }, [sessionID]);
+
+  useEffect(() => {
+    const refresh = latestRefreshRef.current;
+    if (!token || !sessionID || refresh.key !== latestRefreshKey || !refresh.cachePresent || refresh.started) {
+      return;
+    }
+    refresh.started = true;
+    void refreshLatestTurns(queryClient, token, sessionID).catch((error) => {
+      console.warn("failed to refresh latest turns", error);
+    });
+  }, [latestRefreshKey, queryClient, sessionID, token]);
 
   const cachedTurnCount = useMemo(() => countTurnPages(query.data?.pages), [query.data]);
   const hasCachedHistory = cachedTurnCount > visibleTurnCount;
@@ -124,6 +154,27 @@ export function useTranscriptTurns(token: string, sessionID: string) {
   };
 }
 
+function refreshLatestTurns(queryClient: QueryClient, token: string, sessionID: string) {
+  const refreshKey = `${token}\u0000${sessionID}`;
+  const existing = latestTurnsRefreshes.get(refreshKey);
+  if (existing) {
+    return existing;
+  }
+  const request = listTurns(token, sessionID, { limit: TURNS_PAGE_SIZE })
+    .then((latestPage) => {
+      queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) =>
+        mergeLatestTurnPage(previous, latestPage),
+      );
+    })
+    .finally(() => {
+      if (latestTurnsRefreshes.get(refreshKey) === request) {
+        latestTurnsRefreshes.delete(refreshKey);
+      }
+    });
+  latestTurnsRefreshes.set(refreshKey, request);
+  return request;
+}
+
 function countTurnPages(pages: { turns: ConversationTurn[] }[] | undefined) {
   return pages?.reduce((sum, page) => sum + page.turns.length, 0) || 0;
 }
@@ -156,6 +207,41 @@ function flattenTurnPages(pages: { turns: ConversationTurn[] }[] | undefined) {
     }
   }
   return out;
+}
+
+function mergeLatestTurnPage(previous: TurnsInfiniteData | undefined, latestPage: TurnsPage) {
+  if (!previous?.pages.length) {
+    return previous;
+  }
+  const cachedTurns = flattenTurnPages(previous.pages);
+  const cachedTurnIDs = new Set(cachedTurns.map((turn) => turn.id));
+  if (latestPage.turns.length > 0 && !latestPage.turns.some((turn) => cachedTurnIDs.has(turn.id))) {
+    return { pages: [latestPage], pageParams: [undefined] };
+  }
+  const turnsByID = new Map<string, ConversationTurn>();
+  for (const turn of cachedTurns) {
+    turnsByID.set(turn.id, turn);
+  }
+  for (const turn of latestPage.turns) {
+    const existing = turnsByID.get(turn.id);
+    if (!existing || !turnUpdateIsStale(existing, turn)) {
+      turnsByID.set(turn.id, turn);
+    }
+  }
+  const turns = sortTurnsByCreatedAt(Array.from(turnsByID.values()));
+  const oldestPageHasMore = Boolean(previous.pages.at(-1)?.hasMore);
+  const pages: TurnsPage[] = [];
+  for (let end = turns.length; end > 0; end -= TURNS_PAGE_SIZE) {
+    const start = Math.max(0, end - TURNS_PAGE_SIZE);
+    pages.push({
+      hasMore: start > 0 || oldestPageHasMore,
+      turns: turns.slice(start, end),
+    });
+  }
+  const pageParams = pages.map((_, index) =>
+    index === 0 ? undefined : pages[index - 1]?.turns[0]?.id,
+  );
+  return { pages, pageParams };
 }
 
 function visibleTurnCountForTarget(

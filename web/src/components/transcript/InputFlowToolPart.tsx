@@ -663,7 +663,7 @@ function QuickNumber({
             <input
               autoFocus
               className={cn(
-                "h-6 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
+                "h-6 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring",
                 customValue && !customValid ? "border-destructive" : "",
               )}
               inputMode="numeric"
@@ -738,7 +738,7 @@ function TextInputStep({
       <input
         autoFocus
         className={cn(
-          "h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
+          "h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus-visible:border-ring",
           value && !valid ? "border-destructive" : "",
         )}
         inputMode={step.type === "phone_input" ? "tel" : step.type === "number_input" ? "decimal" : "text"}

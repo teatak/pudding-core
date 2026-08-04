@@ -64,9 +64,9 @@ function TextFileChanges({ changes, sessionID, turnID }: {
         <span className="relative z-[1] shrink-0 text-foreground/70 group-hover/change-header:text-foreground">
           <Files className="size-3.5" />
         </span>
-        <span className="relative z-[1] flex min-w-0 flex-1 items-center gap-2">
+        <span className="relative z-[1] flex min-w-0 flex-1 items-center gap-1">
           {singleChange ? (
-            <span className={cn("shrink-0 text-sm font-medium", statusClass(singleChange.kind))}>
+            <span className="shrink-0 text-sm font-medium text-foreground">
               {t(statusLabelKey(singleChange.kind))}
             </span>
           ) : null}
@@ -93,9 +93,6 @@ function TextFileChanges({ changes, sessionID, turnID }: {
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 group-hover/change-row:opacity-100"
               />
-              <span className={cn("relative z-[1] w-3 shrink-0 text-center font-mono text-[10px] font-semibold", statusClass(change.kind))}>
-                {statusLetter(change.kind)}
-              </span>
               <code className="relative z-[1] min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
               {change.additions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-added">+{change.additions}</span> : null}
               {change.deletions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-deleted">−{change.deletions}</span> : null}
@@ -157,9 +154,9 @@ function ResourceFileChanges({ changes, sessionID }: {
           className="pointer-events-none absolute inset-0 bg-muted/[46%] opacity-0 group-hover/resource-header:opacity-100"
         />
         <FileImage className="relative z-[1] size-3.5 shrink-0 text-foreground/70 group-hover/resource-header:text-foreground" />
-        <span className="relative z-[1] flex min-w-0 flex-1 items-center gap-2">
+        <span className="relative z-[1] flex min-w-0 flex-1 items-center gap-1">
           {singleChange ? (
-            <span className={cn("shrink-0 text-sm font-medium", statusClass(singleChange.kind))}>
+            <span className="shrink-0 text-sm font-medium text-foreground">
               {t(statusLabelKey(singleChange.kind))}
             </span>
           ) : null}
@@ -183,9 +180,6 @@ function ResourceFileChanges({ changes, sessionID }: {
                   aria-hidden="true"
                   className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 group-hover/resource-row:opacity-100"
                 />
-                <span className={cn("relative z-[1] w-3 shrink-0 text-center font-mono text-[10px] font-semibold", statusClass(change.kind))}>
-                  {statusLetter(change.kind)}
-                </span>
                 <code className="relative z-[1] min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
                 {canPreview ? <ChevronRight className="relative z-[1] size-3.5 shrink-0 opacity-0 group-hover/resource-row:opacity-60" /> : null}
               </button>
@@ -209,24 +203,6 @@ function ResourceFileChanges({ changes, sessionID }: {
       ) : null}
     </section>
   );
-}
-
-function statusLetter(kind: TurnFileChange["kind"]) {
-  switch (kind) {
-    case "added": return "A";
-    case "deleted": return "D";
-    case "renamed": return "R";
-    default: return "M";
-  }
-}
-
-function statusClass(kind: TurnFileChange["kind"]) {
-  switch (kind) {
-    case "added": return "text-git-added";
-    case "deleted": return "text-git-deleted";
-    case "renamed": return "text-git-renamed";
-    default: return "text-git-modified";
-  }
 }
 
 function statusLabelKey(kind: TurnFileChange["kind"]) {
