@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ProjectBrowserRoot } from "@/api/client";
 
@@ -22,11 +22,17 @@ export function useProjectWorkspace(sessionID: string) {
     [workspace.activeKey, workspace.tabs],
   );
 
+  useEffect(() => {
+    writeProjectWorkspaces(bySession);
+  }, [bySession]);
+
   const updateSession = (targetSessionID: string, change: (current: ProjectWorkspace) => ProjectWorkspace) => {
     setBySession((current) => {
-      const next = { ...current, [targetSessionID]: change(current[targetSessionID] || EMPTY_WORKSPACE) };
-      writeProjectWorkspaces(next);
-      return next;
+      const currentWorkspace = current[targetSessionID] || EMPTY_WORKSPACE;
+      const nextWorkspace = change(currentWorkspace);
+      return nextWorkspace === currentWorkspace
+        ? current
+        : { ...current, [targetSessionID]: nextWorkspace };
     });
   };
 
@@ -34,11 +40,8 @@ export function useProjectWorkspace(sessionID: string) {
 
   const revealInSession = (targetSessionID: string, selection: ProjectSelection) => {
     updateSession(targetSessionID, (current) => {
-      const expanded = new Set(current.expandedKeys);
-      expanded.add(`${selection.rootID}:.`);
-      const parents = selection.path.split("/").slice(0, -1);
-      parents.forEach((_part, index) => expanded.add(`${selection.rootID}:${parents.slice(0, index + 1).join("/")}`));
-      return { ...current, expandedKeys: Array.from(expanded) };
+      const expandedKeys = expandedKeysForSelection(current.expandedKeys, selection);
+      return expandedKeys === current.expandedKeys ? current : { ...current, expandedKeys };
     });
   };
 
@@ -62,9 +65,13 @@ export function useProjectWorkspace(sessionID: string) {
           tabs.push(candidate);
         }
       }
-      return { ...current, activeKey: key, tabs };
+      return {
+        ...current,
+        activeKey: key,
+        expandedKeys: expandedKeysForSelection(current.expandedKeys, selection),
+        tabs,
+      };
     });
-    revealInSession(targetSessionID, selection);
   };
 
   const openInSession = (targetSessionID: string, selection: ProjectSelection, pinned: boolean) => {
@@ -74,8 +81,13 @@ export function useProjectWorkspace(sessionID: string) {
   const open = (selection: ProjectSelection, pinned: boolean) => openInSession(sessionID, selection, pinned);
 
   const activate = (selection: ProjectTab) => {
-    update((current) => ({ ...current, activeKey: projectTabKey(selection) }));
-    reveal(selection);
+    update((current) => {
+      const activeKey = projectTabKey(selection);
+      const expandedKeys = expandedKeysForSelection(current.expandedKeys, selection);
+      return activeKey === current.activeKey && expandedKeys === current.expandedKeys
+        ? current
+        : { ...current, activeKey, expandedKeys };
+    });
   };
 
   const closeKeysInSession = (targetSessionID: string, keys: string[]) => {
@@ -182,6 +194,19 @@ export function useProjectWorkspace(sessionID: string) {
       return { ...current, expandedKeys };
     }),
   };
+}
+
+function expandedKeysForSelection(
+  current: string[],
+  selection: Pick<ProjectSelection, "path" | "rootID">,
+) {
+  const expanded = new Set(current);
+  expanded.add(`${selection.rootID}:.`);
+  const parents = selection.path.split("/").slice(0, -1);
+  parents.forEach((_part, index) => {
+    expanded.add(`${selection.rootID}:${parents.slice(0, index + 1).join("/")}`);
+  });
+  return expanded.size === current.length ? current : Array.from(expanded);
 }
 
 function readProjectWorkspaces(): Record<string, ProjectWorkspace> {

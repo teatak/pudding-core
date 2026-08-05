@@ -59,16 +59,18 @@ export function useWorkspaceBrowserSurface({
 }: UseWorkspaceBrowserSurfaceArgs) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const [initialSessionSurfaces] = useState(readSessionSurfaces);
+  const [initialSelectedBrowserTabs] = useState(readSelectedBrowserTabs);
   const currentSessionIDRef = useRef("");
-  const sessionSurfaceRef = useRef<Record<string, WorkspaceSurface>>(readSessionSurfaces());
+  const sessionSurfaceRef = useRef<Record<string, WorkspaceSurface>>(initialSessionSurfaces);
   const surfaceSessionRef = useRef(sessionID);
-  const selectedBrowserTabRef = useRef<Record<string, string>>(readSelectedBrowserTabs());
+  const selectedBrowserTabRef = useRef<Record<string, string>>(initialSelectedBrowserTabs);
   const syncTimersRef = useRef<Record<string, number>>({});
   const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>(
     () => sessionSurfaceRef.current[sessionID] || "workspace",
   );
   const [browserSelections, setBrowserSelections] = useState<Record<string, string>>({});
-  const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
+  const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(initialSelectedBrowserTabs);
   const browserActive = activeSurface === "browser";
   const processModeFallback = electronBrowserBridge() ? "webview" : "headless";
 

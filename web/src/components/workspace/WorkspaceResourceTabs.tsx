@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FileCode2, FileDiff, Folders, Globe, SquareTerminal, X } from "@/components/icons";
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
@@ -91,7 +91,7 @@ type SurfaceTab =
   | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab }
   | { kind: "widget"; id: string; sortAt: number; widget: CanvasItem };
 
-export function WorkspaceResourceTabs({
+export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   activeBrowserTabID,
   activeCanvasItemID,
   activeFilePreviewID,
@@ -234,7 +234,7 @@ export function WorkspaceResourceTabs({
       </div>
     </DndContext>
   );
-}
+});
 
 function SortableSurfaceTabButton({
   activeBrowserTabID,

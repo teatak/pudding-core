@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Star } from "@/components/icons";
 
 import {
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/Spinner";
 
-export function CanvasItemSurface({
+export const CanvasItemSurface = memo(function CanvasItemSurface({
   active,
   activeIndex,
   item,
@@ -28,8 +28,8 @@ export function CanvasItemSurface({
   activeIndex: number;
   item: CanvasItem;
   token: string;
-  onActiveIndexChange: (activeIndex: number) => void;
-  onGalleryLayoutChange: (layout: GalleryLayout) => void;
+  onActiveIndexChange: (itemID: string, activeIndex: number) => void;
+  onGalleryLayoutChange: (item: CanvasItem, layout: GalleryLayout) => void;
 }) {
   const contentKind = stringValue(asRecord(item.item)?.kind) || item.kind;
   const backgroundClass = contentKind === "grid"
@@ -50,12 +50,12 @@ export function CanvasItemSurface({
         galleryActiveIndex={activeIndex}
         item={item}
         token={token}
-        onGalleryActiveIndexChange={onActiveIndexChange}
-        onGalleryLayoutChange={onGalleryLayoutChange}
+        onGalleryActiveIndexChange={(nextIndex) => onActiveIndexChange(item.id, nextIndex)}
+        onGalleryLayoutChange={(layout) => onGalleryLayoutChange(item, layout)}
       />
     </div>
   );
-}
+});
 
 export function CanvasItemActions({
   item,

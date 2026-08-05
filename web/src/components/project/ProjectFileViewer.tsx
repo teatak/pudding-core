@@ -358,7 +358,7 @@ export function ProjectFileViewer({
         {!fileSelection ? (
           <ProjectViewerStatus icon={<Folders className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
         ) : isImage ? (
-          <ProjectImagePreview key={resourceURL} alt={fileSelection.path} src={resourceURL} />
+          <ProjectImagePreview key={resourceURL} active={active} alt={fileSelection.path} src={resourceURL} />
         ) : isPDF ? (
           <ProjectPDFPreview key={resourceURL} src={resourceURL} title={fileSelection.path} />
         ) : fileQuery.isError ? (
@@ -427,7 +427,7 @@ function ProjectViewerStatus({ children, icon }: { children: ReactNode; icon?: R
   return <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">{icon}<span>{children}</span></div>;
 }
 
-function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
+function ProjectImagePreview({ active, alt, src }: { active: boolean; alt: string; src: string }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -437,6 +437,7 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
   const [customScale, setCustomScale] = useState(1);
 
   useEffect(() => {
+    if (!active) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
     let resizeFrame = 0;
@@ -459,7 +460,7 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
       observer.disconnect();
       if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
     };
-  }, []);
+  }, [active]);
 
   const fitScale = useMemo(() => {
     if (!viewportSize.width || !viewportSize.height || !imageSize.width || !imageSize.height) return 1;

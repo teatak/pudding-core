@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, X } from "@/components/icons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -59,7 +59,7 @@ function resolveProjectSurfaceMode(width: number): ProjectSurfaceMode {
   return "wide";
 }
 
-export function ProjectBrowserSurface({
+export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   active,
   activeTurnDiffID,
   projectAvailable,
@@ -108,6 +108,7 @@ export function ProjectBrowserSurface({
   const resizeCursorCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     const surface = surfaceRef.current;
     if (!surface) return;
     let frame = 0;
@@ -126,7 +127,7 @@ export function ProjectBrowserSurface({
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [active]);
 
   useEffect(
     () => () => resizeCursorCleanupRef.current?.(),
@@ -187,11 +188,13 @@ export function ProjectBrowserSurface({
     [activeTurnChange?.id, activeTurnChange?.path, activeTurnChange?.rootPath, roots, sessionID],
   );
   const rootPaths = roots.map((root) => root.path);
+  const rootWatchSignature = roots.map((root) => `${root.id}\0${root.path}`).join("\n");
   const gitQueries = useQueries({
     queries: roots.map((root) => ({
       enabled: active && Boolean(sessionID && token),
       queryKey: queryKeys.projectGitStatus(sessionID, root.id),
       queryFn: () => getProjectGitStatus(token, sessionID, root.id),
+      notifyOnChangeProps: ["data", "error"],
       refetchInterval: active ? 5_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
@@ -275,10 +278,21 @@ export function ProjectBrowserSurface({
   }, [active, queryClient, sessionID]);
   useEffect(() => {
     if (!active || rootPaths.length === 0) return;
-    return watchElectronProjectDirectories(rootPaths, () => {
-      void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
+    return watchElectronProjectDirectories(rootPaths, (change) => {
+      const changedRoot = resolveWatchedProjectRoot(roots, change.path);
+      if (!changedRoot) {
+        void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
+        return;
+      }
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "tree", changedRoot.id] }),
+        queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "file", changedRoot.id] }),
+        queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git", "status", changedRoot.id] }),
+        queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git", "diff", changedRoot.id] }),
+        queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "search"] }),
+      ]);
     });
-  }, [active, queryClient, sessionID, rootPaths.join("\n")]);
+  }, [active, queryClient, rootWatchSignature, sessionID]);
   useEffect(() => {
     if (!fileReveal || !projectStateReady) {
       return;
@@ -767,8 +781,16 @@ export function ProjectBrowserSurface({
       />
     </div>
   );
-}
+});
 
 function projectFileName(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+}
+
+function resolveWatchedProjectRoot(
+  roots: Array<{ id: string; path: string }>,
+  watchedPath: string,
+) {
+  const normalizedPath = watchedPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  return roots.find((root) => root.path.replace(/\\/g, "/").replace(/\/+$/, "") === normalizedPath);
 }

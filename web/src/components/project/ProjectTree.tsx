@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, File } from "@/components/icons";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   listProjectTree,
@@ -71,6 +71,7 @@ export function ProjectTree({
   onToggle: (rootID: string, path: string) => void;
 }) {
   const { t } = useI18n();
+  const expandedKeySet = useMemo(() => new Set(expandedKeys), [expandedKeys]);
   return (
     <div>
         {loading ? (
@@ -85,7 +86,7 @@ export function ProjectTree({
             {...actions}
             active={active}
             depth={0}
-            expandedKeys={expandedKeys}
+            expandedKeys={expandedKeySet}
             gitStatuses={gitStatuses}
             isRoot
             label={root.name}
@@ -122,7 +123,7 @@ function ProjectDirectoryNode({
 }: TreeActions & {
   active: boolean;
   depth: number;
-  expandedKeys: string[];
+  expandedKeys: ReadonlySet<string>;
   gitStatuses?: ReadonlyMap<string, ProjectGitStatusFile>;
   isRoot?: boolean;
   label: string;
@@ -137,7 +138,7 @@ function ProjectDirectoryNode({
 }) {
   const { t } = useI18n();
   const key = `${root.id}:${path}`;
-  const expanded = expandedKeys.includes(key);
+  const expanded = expandedKeys.has(key);
   const [dropActive, setDropActive] = useState(false);
   const target: ProjectEntryTarget = { rootID: root.id, path, name: label, type: "dir" };
   const treeQuery = useQuery({
