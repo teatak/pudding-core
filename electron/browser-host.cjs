@@ -531,6 +531,7 @@ class BrowserHost {
       await this.runCommand(slot, () => this.navigate(slot, targetURL));
     }
     await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
+    await this.syncInitialPageMetadata(slot).catch(() => undefined);
     this.noteUpdated(slot);
     return snapshot(slot);
   }
@@ -766,6 +767,26 @@ class BrowserHost {
       this.noteUpdated(slot);
     }).catch(() => undefined);
     return true;
+  }
+
+  async syncInitialPageMetadata(slot) {
+    const metadata = await evaluateJSON(slot, pageMetadataScript());
+    if (this.slots.get(slot.key) !== slot || slot.disposed) {
+      return;
+    }
+    const metadataURL = normalizeURL(metadata.url, slot.fileRoots);
+    const currentURL = normalizeURL(slot.committedURL, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
+    if (!metadataURL || !sameNormalizedURL(metadataURL, currentURL, slot.fileRoots)) {
+      return;
+    }
+    const title = String(metadata.title || "").trim();
+    if (!slot.committedTitle && title) {
+      slot.committedTitle = title;
+      slot.displayTitle = title;
+    }
+    if (!slot.faviconURL) {
+      this.updateFavicon(slot, metadata.faviconURL);
+    }
   }
 
   async navigate(slot, url) {
@@ -1821,6 +1842,14 @@ function observeScript(maxText, maxElements) {
     elements
   });
 })()`;
+}
+
+function pageMetadataScript() {
+  return `(() => JSON.stringify({
+    url: location.href,
+    title: document.title,
+    faviconURL: document.querySelector('link[rel~="icon"][href]')?.href || ""
+  }))()`;
 }
 
 function selectionScript() {

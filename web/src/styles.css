@@ -188,6 +188,8 @@ textarea:focus-visible,
     --workspace-tab-foreground: oklch(0.47 0 0);
     --workspace-tab-hover-background: oklch(0.952 0 0);
     --workspace-tab-active-background: oklch(0.94 0 0);
+    --workspace-tab-hover-mask-background: var(--workspace-tab-hover-background);
+    --workspace-tab-active-mask-background: var(--workspace-tab-active-background);
     --workspace-tab-border: oklch(0.84 0 0);
     --workspace-tab-indicator: oklch(0.56 0 0);
     --workspace-file-editor-background: #ffffff;
@@ -605,6 +607,8 @@ html[data-shell] :where(
     --workspace-tab-foreground: var(--muted-foreground);
     --workspace-tab-hover-background: color-mix(in oklch, var(--accent) 45%, transparent);
     --workspace-tab-active-background: color-mix(in oklch, var(--accent) 60%, transparent);
+    --workspace-tab-hover-mask-background: color-mix(in oklch, var(--accent) 45%, var(--workspace-chrome-background));
+    --workspace-tab-active-mask-background: color-mix(in oklch, var(--accent) 60%, var(--workspace-chrome-background));
     --workspace-tab-border: color-mix(in oklch, var(--border) 90%, transparent);
     --workspace-tab-indicator: color-mix(in oklch, var(--foreground) 55%, transparent);
     --workspace-file-editor-background: #171717;

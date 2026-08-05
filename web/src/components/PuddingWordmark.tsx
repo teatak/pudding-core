@@ -9,7 +9,7 @@ export function PuddingWordmark({ className }: { className?: string }) {
     >
       <svg
         aria-hidden="true"
-        className="h-[28px] w-[28px] shrink-0 text-[#584cff] dark:text-[#818cf8]"
+        className="size-6 shrink-0 text-[#584cff] dark:text-[#818cf8]"
         fill="currentColor"
         viewBox="0 0 120 120"
       >
@@ -20,7 +20,7 @@ export function PuddingWordmark({ className }: { className?: string }) {
       </svg>
       <span
         aria-hidden="true"
-        className="-ml-[3px] text-[23px] leading-none font-semibold tracking-[-0.2px] text-sidebar-foreground"
+        className="-ml-0.5 text-xl leading-none font-semibold tracking-[-0.2px] text-sidebar-foreground"
       >
         udding
       </span>

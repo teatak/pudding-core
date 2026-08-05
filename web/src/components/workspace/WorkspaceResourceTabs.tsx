@@ -343,7 +343,7 @@ function SortableSurfaceTabButton({
       aria-selected={selected}
       className={cn(
         workspaceTabClassName,
-        "group relative w-max min-w-0 max-w-32 shrink-0 px-2 whitespace-nowrap",
+        "group relative w-28 min-w-20 shrink whitespace-nowrap",
         selected && workspaceTabActiveClassName,
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
@@ -387,10 +387,24 @@ function SortableSurfaceTabButton({
           )}
         </span>
       </span>
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      <span className="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap">{label}</span>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-y-0 right-0 z-[5] w-8 rounded-r-[7px]",
+          selected
+            ? "bg-[linear-gradient(to_right,transparent_0%,var(--workspace-tab-active-mask-background)_40%,var(--workspace-tab-active-mask-background)_100%)]"
+            : "bg-[linear-gradient(to_right,transparent_0%,var(--workspace-tab-action-background)_68%,var(--workspace-tab-action-background)_100%)] [--workspace-tab-action-background:var(--workspace-chrome-background)] group-hover:bg-[linear-gradient(to_right,transparent_0%,var(--workspace-tab-action-background)_40%,var(--workspace-tab-action-background)_100%)] group-hover:[--workspace-tab-action-background:var(--workspace-tab-hover-mask-background)]",
+        )}
+      />
       <span
         aria-label={closeLabel}
-        className="pointer-events-none z-10 inline-flex size-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[4px] bg-transparent opacity-0 hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20 group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        className={cn(
+          "absolute top-[calc((var(--workspace-toolbar-tab-h)-var(--workspace-toolbar-tab-icon))/2)] right-1 z-10 inline-flex size-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[4px] bg-transparent hover:bg-foreground/14 hover:text-foreground active:bg-foreground/20",
+          selected || closePending
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+        )}
         data-pending={closePending}
         role="button"
         tabIndex={-1}

@@ -82,6 +82,9 @@ class FakeDebugger extends EventEmitter {
       };
     }
     if (method === "Runtime.evaluate") {
+      if (params.expression.includes("document.title") && params.expression.includes('link[rel~="icon"]') && this.pageMetadata) {
+        return { result: { value: JSON.stringify(this.pageMetadata) } };
+      }
       if (this.evaluateValues?.length) {
         return { result: { value: this.evaluateValues.shift() } };
       }
@@ -538,6 +541,35 @@ test("captures dynamically updated favicons and publishes the resolved local ima
     url: "https://discord.com/assets/favicon.ico",
     pageURL: "https://discord.com/login",
   }]);
+  assert.equal(snapshots.at(-1).faviconURL, resolved);
+  host.closeAll();
+});
+
+test("captures title and favicon when the page loaded before webview registration", async () => {
+  const required = [];
+  const snapshots = [];
+  const resolved = "data:image/png;base64,cG5n";
+  const host = new BrowserHost(
+    (snapshot) => snapshots.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+    undefined,
+    { resolveFavicon: async () => resolved },
+  );
+  const url = "https://buzzhive.example/admin/#dashboard";
+  const faviconURL = "https://buzzhive.example/assets/favicon.png";
+  const opening = host.ensure({ sessionID: "session-loaded-metadata", tabID: "tab-loaded-metadata", url });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(70);
+  webContents.url = url;
+  webContents.debugger.pageMetadata = { url, title: "BuzzHive Admin", faviconURL };
+
+  const registered = await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.equal(registered.title, "BuzzHive Admin");
+  assert.equal(registered.faviconURL, resolved);
   assert.equal(snapshots.at(-1).faviconURL, resolved);
   host.closeAll();
 });
