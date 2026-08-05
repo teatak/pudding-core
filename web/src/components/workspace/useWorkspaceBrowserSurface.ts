@@ -60,11 +60,13 @@ export function useWorkspaceBrowserSurface({
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const currentSessionIDRef = useRef("");
-  const surfaceSessionRef = useRef("");
   const sessionSurfaceRef = useRef<Record<string, WorkspaceSurface>>(readSessionSurfaces());
+  const surfaceSessionRef = useRef(sessionID);
   const selectedBrowserTabRef = useRef<Record<string, string>>(readSelectedBrowserTabs());
   const syncTimersRef = useRef<Record<string, number>>({});
-  const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>("workspace");
+  const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>(
+    () => sessionSurfaceRef.current[sessionID] || "workspace",
+  );
   const [browserSelections, setBrowserSelections] = useState<Record<string, string>>({});
   const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
   const browserActive = activeSurface === "browser";
@@ -364,7 +366,14 @@ export function useWorkspaceBrowserSurface({
   ]);
 
   useEffect(() => {
-    if (!enabled || !sessionID || itemsPending || itemsLength === 0 || activeSurface !== "workspace") {
+    if (
+      !enabled ||
+      !sessionID ||
+      itemsPending ||
+      itemsLength === 0 ||
+      activeSurface !== "workspace" ||
+      sessionSurfaceRef.current[sessionID]
+    ) {
       return;
     }
     rememberSessionSurface(sessionID, "canvas");

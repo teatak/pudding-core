@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Folders, Globe, Plus, SquareTerminal } from "@/components/icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,15 +34,10 @@ import {
   CanvasItemSurface,
 } from "@/components/canvas/CanvasItemSurface";
 import { titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
-import {
-  AppDropdownMenuContent as DropdownMenuContent,
-  AppDropdownMenuItem as DropdownMenuItem,
-} from "@/components/AppMenu";
 import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { asRecord, numberValue, stringValue } from "@/components/canvas/canvasPayload";
 import { Spinner } from "@/components/Spinner";
 import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
-import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,7 +48,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
@@ -86,8 +79,8 @@ import {
 
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
+import { WorkspaceResourceMenu } from "./WorkspaceResourceMenu";
 import { WorkspaceResourceTabs } from "./WorkspaceResourceTabs";
-import { CanvasLibraryMenuSections } from "./WorkspaceSurfaceControls";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 import { useWorkspaceTerminals } from "./useWorkspaceTerminals";
 
@@ -114,7 +107,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const hasSeenCanvasItemsRef = useRef(false);
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
-  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
   const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
@@ -1097,54 +1089,22 @@ export const WorkspacePane = memo(function WorkspacePane({
             onSelectTerminal={selectTerminal}
         />
         {actorSessionID && activeSurface !== "workspace" ? (
-          <DropdownMenu open={resourceMenuOpen} onOpenChange={setResourceMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={t("workspace.add")}
-                className="pudding-toolbar-icon-button no-drag-region shrink-0 rounded-md"
-                disabled={creatingBrowserTab || creatingTerminal}
-                size="icon-sm"
-
-                type="button"
-                variant="ghost"
-              >
-                {creatingBrowserTab || creatingTerminal ? (
-                  <Spinner className="h-3.5 w-3.5" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64 space-y-0">
-              {hasProject && !projectTabVisible ? (
-                <DropdownMenuItem className="h-8 px-2.5" onSelect={activateProjectSurface}>
-                  <Folders />
-                  {t("workspace.project")}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem
-                className="h-8 px-2.5"
-                onSelect={createBrowserSurface}
-              >
-                <Globe />
-                {t("browser.create")}
-              </DropdownMenuItem>
-              <DropdownMenuItem className="h-8 px-2.5" onSelect={createNewTerminal}>
-                <SquareTerminal />
-                {t("terminal.create")}
-              </DropdownMenuItem>
-              <CanvasLibraryMenuSections
-                closedItems={closedItems}
-                savedItems={savedItems}
-                onClearClosed={() => clearClosedMutation.mutate()}
-                onDismiss={() => setResourceMenuOpen(false)}
-                onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
-                onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
-                onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
-                onRestoreClosed={restoreClosedItem}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <WorkspaceResourceMenu
+            closedItems={closedItems}
+            creatingBrowser={creatingBrowserTab}
+            creatingTerminal={creatingTerminal}
+            hasProject={hasProject}
+            projectTabVisible={projectTabVisible}
+            savedItems={savedItems}
+            onClearClosed={() => clearClosedMutation.mutate()}
+            onCreateBrowser={createBrowserSurface}
+            onCreateTerminal={createNewTerminal}
+            onOpenProject={activateProjectSurface}
+            onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
+            onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
+            onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
+            onRestoreClosed={restoreClosedItem}
+          />
         ) : null}
         <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
         {secondarySessionID && sessionQuery.data?.title ? (

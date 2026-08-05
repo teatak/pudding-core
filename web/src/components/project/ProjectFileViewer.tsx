@@ -560,7 +560,6 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
             src={src}
             style={{
               height: layoutReady ? imageHeight : 0,
-              visibility: layoutReady ? "visible" : "hidden",
               width: layoutReady ? imageWidth : 0,
             }}
             onError={() => setFailed(true)}
