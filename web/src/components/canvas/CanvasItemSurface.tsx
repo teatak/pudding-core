@@ -77,7 +77,7 @@ export function CanvasItemActions({
   if (!galleryLayout && !table && !showSave) return null;
 
   return (
-    <div className="no-drag-region flex shrink-0 items-center gap-1">
+    <div className="no-drag-region flex items-center gap-1 rounded-lg border border-border/70 bg-background/90 p-1 text-foreground shadow-sm backdrop-blur-[2px]">
       {galleryLayout ? <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} /> : null}
       {table ? <TableExportMenu table={table} token={token} /> : null}
       {showSave ? (

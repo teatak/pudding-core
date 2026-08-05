@@ -1147,15 +1147,6 @@ export const WorkspacePane = memo(function WorkspacePane({
           </DropdownMenu>
         ) : null}
         <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
-        {activeSurface === "canvas" && !filePreviewActive && activeCanvasItem ? (
-          <CanvasItemActions
-            item={activeCanvasItem}
-            saving={saveItemMutation.isPending && saveItemMutation.variables?.id === activeCanvasItem.id}
-            token={token}
-            onSave={() => saveItemMutation.mutate(activeCanvasItem)}
-            onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item: activeCanvasItem, layout })}
-          />
-        ) : null}
         {secondarySessionID && sessionQuery.data?.title ? (
           <span
             className="no-drag-region max-w-32 shrink-0 truncate rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
@@ -1207,6 +1198,17 @@ export const WorkspacePane = memo(function WorkspacePane({
             }}
           />
         ))}
+        {activeSurface === "canvas" && !filePreviewActive && activeCanvasItem ? (
+          <div className="absolute top-3 right-3 z-20">
+            <CanvasItemActions
+              item={activeCanvasItem}
+              saving={saveItemMutation.isPending && saveItemMutation.variables?.id === activeCanvasItem.id}
+              token={token}
+              onSave={() => saveItemMutation.mutate(activeCanvasItem)}
+              onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item: activeCanvasItem, layout })}
+            />
+          </div>
+        ) : null}
         {activeSurface === "canvas" && !filePreviewActive && itemsQuery.isLoading && items.length === 0 ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--workspace-background)] text-muted-foreground">
             <Spinner className="size-5" />

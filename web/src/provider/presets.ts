@@ -523,6 +523,18 @@ export function providerPresetForBrand(brand: string | undefined) {
   return PROVIDER_PRESETS.find((preset) => preset.id === normalizedBrand);
 }
 
+export function providerPresetForModel(modelID: string | undefined) {
+  const normalizedModelID = (modelID || "").trim().toLowerCase();
+  if (!normalizedModelID) {
+    return undefined;
+  }
+  return PROVIDER_PRESETS.find((preset) =>
+    preset.variants.some((variant) =>
+      variant.models.some((model) => model.id.trim().toLowerCase() === normalizedModelID),
+    ),
+  );
+}
+
 export function providerPresetVariantGroup(variant: ProviderPresetVariant | undefined) {
   return variant?.group || "default";
 }
