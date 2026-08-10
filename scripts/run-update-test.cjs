@@ -40,7 +40,7 @@ async function main() {
   if (!fs.existsSync(path.join(root, releaseChannel.updateInfoFile))) {
     throw new Error(`${releaseChannel.updateInfoFile} not found in ${root}`);
   }
-  assertAppStopped(appExecutable);
+  assertAppStopped();
 
   const installed = readInstalledBuild(appExecutable);
   if (!installed.version) {
@@ -120,11 +120,24 @@ function readInstalledBuild(executable) {
   }
 }
 
-function assertAppStopped(executable) {
-  const result = spawnSync("pgrep", ["-f", executable], { encoding: "utf8" });
-  if (result.status === 0 && String(result.stdout || "").trim()) {
-    throw new Error("Pudding is already running; quit it before starting the update test");
+function assertAppStopped() {
+  const result = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error("unable to inspect running Pudding processes");
   }
+  const running = findRunningPuddingProcesses(result.stdout);
+  if (running.length > 0) {
+    throw new Error(
+      `Pudding is already running; quit it before starting the update test: ${running.join(", ")}`,
+    );
+  }
+}
+
+function findRunningPuddingProcesses(output) {
+  return String(output || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.includes("/Pudding.app/Contents/MacOS/Pudding"));
 }
 
 function checkInstalledUpdate() {
@@ -236,6 +249,7 @@ function positiveInt(value, fallback) {
 module.exports = {
   assertBundleWritable,
   findUnwritableEntries,
+  findRunningPuddingProcesses,
   installedAppPath,
   readInstalledBuild,
   readInstalledVersion,

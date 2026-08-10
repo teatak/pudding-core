@@ -6,10 +6,25 @@ const test = require("node:test");
 
 const {
   assertBundleWritable,
+  findRunningPuddingProcesses,
   findUnwritableEntries,
   installedAppPath,
   readInstalledVersion,
 } = require("../../scripts/run-update-test.cjs");
+
+test("update verification detects any running Pudding app bundle", () => {
+  const processes = `
+  101 /Applications/Pudding.app/Contents/MacOS/Pudding
+  102 /tmp/release/Pudding.app/Contents/Frameworks/Pudding Helper.app/Contents/MacOS/Pudding Helper
+  103 node scripts/run-update-test.cjs
+  104 /tmp/release/Pudding.app/Contents/MacOS/Pudding --test
+  `;
+
+  assert.deepEqual(findRunningPuddingProcesses(processes), [
+    "101 /Applications/Pudding.app/Contents/MacOS/Pudding",
+    "104 /tmp/release/Pudding.app/Contents/MacOS/Pudding --test",
+  ]);
+});
 
 test("update verification resolves the app root and rejects entries the current user cannot write", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-update-runner-"));

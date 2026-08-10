@@ -1,10 +1,10 @@
 # Pudding 0.1.24 发版报告
 
-日期：2026-08-10
+日期：2026-08-11
 
 对比基线：`v0.1.23`（`54bf3005`）
 
-审查范围：`v0.1.23..ccac0462`
+审查范围：`v0.1.23..HEAD`
 
 ## 发版结论
 
@@ -54,7 +54,7 @@
 ## 已完成验证
 
 - `go test -tags "sqlite_fts5 webrtcaec" ./...`。
-- `npm run test:electron`，126 项通过。
+- `npm run test:electron`，127 项通过。
 - `web/` 下执行 `npm run build`。
 - `workers/oauth/` 下执行 `npm run typecheck`。
 - `npm run smoke:electron-browser`，覆盖多标签、多会话、历史、焦点隔离、弹窗、截图与撤销。
@@ -66,7 +66,7 @@
 ## 剩余发版门槛
 
 1. 提交并推送 `0.1.24` 版本号与发版报告。
-2. 构建签名公证包，并用已安装的 `0.1.23` 验证本地跨版本自动更新。
+2. 构建并验证签名公证包。
 3. 执行正式发布，核验 Draft 的英文功能清单与 9 个标准资产后 finalize。
 
 ## Release Notes
