@@ -47,13 +47,20 @@ export function Conversation({
     if (!conversation || !composerOverlay) {
       return;
     }
-    const updateComposerInset = () => {
-      const nextHeight = Math.ceil(composerOverlay.getBoundingClientRect().height);
+    let currentHeight = -1;
+    const updateComposerInset = (entry?: ResizeObserverEntry) => {
+      const nextHeight = Math.ceil(
+        entry?.borderBoxSize[0]?.blockSize ?? composerOverlay.offsetHeight,
+      );
+      if (currentHeight === nextHeight) {
+        return;
+      }
+      currentHeight = nextHeight;
       conversation.style.setProperty("--pudding-composer-overlay-height", `${nextHeight}px`);
     };
     updateComposerInset();
-    const observer = new ResizeObserver(updateComposerInset);
-    observer.observe(composerOverlay);
+    const observer = new ResizeObserver(([entry]) => updateComposerInset(entry));
+    observer.observe(composerOverlay, { box: "border-box" });
     return () => observer.disconnect();
   }, []);
 

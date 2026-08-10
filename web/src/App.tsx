@@ -56,24 +56,25 @@ import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 
-type StageSize = {
-  width: number;
-  height: number;
-};
-
 type ConsoleDisplayMode = "full" | AgentConsoleMode;
 
 const floatingInset = 16;
 const floatingBottomInset = 4;
 const consoleMinimumWidth = 380;
-const consoleMinimumHeight = 320;
-const floatingMinimumWidth = 360;
 const floatingDefaultWidth = 640;
 const floatingDefaultHeight = 420;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const dockMaximumWidth = 640;
 const dockWidthStorageKey = "pudding.agentConsoleDockWidth";
 const dockWidthFallback = 480;
+const centeredLayoutConstraints = {
+  chatDockMaximumWidth: dockMaximumWidth,
+  chatDockMinimumWidth: consoleMinimumWidth,
+  leftPairMinimumWidth: workspaceLayout.railAutoCollapsePx,
+  railWidth: sessionRailLayout.expandedWidthPx,
+  rightPairMinimumWidth: workspaceLayout.drawerBreakpointPx,
+  workspaceDockMinimumWidth: workspaceMinimumWidth,
+};
 
 function readSavedSplitLayout() {
   return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -112,12 +113,6 @@ function readDockWidth() {
     : dockWidthFallback;
 }
 
-function readToolbarHeightPx() {
-  return Number.parseFloat(
-    getComputedStyle(document.documentElement).getPropertyValue("--toolbar-h"),
-  ) || 54;
-}
-
 export function App() {
   const token = useToken();
   const navigate = useNavigate();
@@ -136,18 +131,22 @@ export function App() {
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [layoutNode, setLayoutNode] = useState<HTMLDivElement | null>(null);
-  const [layoutWidth, setLayoutWidth] = useState(0);
+  const [centeredLayout, setCenteredLayout] = useState(() =>
+    resolveCenteredLayoutPresentation({
+      constraints: centeredLayoutConstraints,
+      dockWidth: dockWidthFallback,
+      layoutWidth: 0,
+      workspaceDockRequested: false,
+    }),
+  );
   const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null);
-  const [stageSize, setStageSize] = useState<StageSize>({
-    width: 0,
-    height: 0,
-  });
   const [consoleInteracting, setConsoleInteracting] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
   const splitGroupRef = useGroupRef();
   const agentConsoleRef = useRef<HTMLDivElement | null>(null);
   const dockWidthRef = useRef(dockWidth);
   const dockResizeCleanupRef = useRef<(() => void) | null>(null);
+  const centeredLayoutRef = useRef(centeredLayout);
   const previewTokenRef = useRef(token);
 
   const appsActive = view === "apps";
@@ -159,19 +158,6 @@ export function App() {
   const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
   const workspaceDockRequested =
     effectiveWorkspaceOpen && agentConsoleMode !== "floating";
-  const centeredLayout = resolveCenteredLayoutPresentation({
-    constraints: {
-      chatDockMaximumWidth: dockMaximumWidth,
-      chatDockMinimumWidth: consoleMinimumWidth,
-      leftPairMinimumWidth: workspaceLayout.railAutoCollapsePx,
-      railWidth: sessionRailLayout.expandedWidthPx,
-      rightPairMinimumWidth: workspaceLayout.drawerBreakpointPx,
-      workspaceDockMinimumWidth: workspaceMinimumWidth,
-    },
-    dockWidth,
-    layoutWidth,
-    workspaceDockRequested,
-  });
   // workspaceOpen 只表达用户意图。停靠/抽屉以及 rail 的响应式展示由
   // 两个共享 Chat 的组合区域统一求解，不写回用户偏好。
   const workspaceOverlay =
@@ -240,51 +226,30 @@ export function App() {
     if (!layoutNode) {
       return;
     }
-    let frame = 0;
-    const measure = () => {
-      const width = Math.round(layoutNode.getBoundingClientRect().width);
-      setLayoutWidth((current) => current === width ? current : width);
+    const updatePresentation = (layoutWidth: number) => {
+      const next = resolveCenteredLayoutPresentation({
+        constraints: centeredLayoutConstraints,
+        dockWidth,
+        layoutWidth,
+        workspaceDockRequested,
+      });
+      const current = centeredLayoutRef.current;
+      if (
+        current.railResponsiveCollapsed === next.railResponsiveCollapsed &&
+        current.workspaceOverlay === next.workspaceOverlay
+      ) {
+        return;
+      }
+      centeredLayoutRef.current = next;
+      setCenteredLayout(next);
     };
-    const scheduleMeasure = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    };
-    measure();
-    const observer = new ResizeObserver(scheduleMeasure);
+    updatePresentation(layoutNode.clientWidth);
+    const observer = new ResizeObserver(([entry]) => {
+      updatePresentation(Math.round(entry?.contentRect.width || layoutNode.clientWidth));
+    });
     observer.observe(layoutNode);
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
-  }, [layoutNode]);
-
-  useLayoutEffect(() => {
-    if (!stageNode || consoleDisplayMode !== "floating") {
-      return;
-    }
-    let frame = 0;
-    const measure = () => {
-      const rect = stageNode.getBoundingClientRect();
-      const width = Math.round(rect.width);
-      const height = Math.round(rect.height);
-      setStageSize((current) => (
-        current.width === width && current.height === height
-          ? current
-          : { width, height }
-      ));
-    };
-    const scheduleMeasure = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    };
-    measure();
-    const observer = new ResizeObserver(scheduleMeasure);
-    observer.observe(stageNode);
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
-  }, [consoleDisplayMode, stageNode]);
+    return () => observer.disconnect();
+  }, [dockWidth, layoutNode, workspaceDockRequested]);
 
   useEffect(() => {
     dockWidthRef.current = dockWidth;
@@ -468,42 +433,9 @@ export function App() {
     dockResizeCleanupRef.current = cleanup;
   };
 
-  const resolvedStageWidth = stageSize.width || floatingDefaultWidth + floatingInset * 2;
-  const resolvedStageHeight = stageSize.height || floatingDefaultHeight + floatingInset * 2;
-  const preferredFloatingTopInset = readToolbarHeightPx() + floatingInset;
-  const floatingTopInset = Math.min(
-    preferredFloatingTopInset,
-    Math.max(0, resolvedStageHeight - floatingInset - 1),
-  );
-  const maximumFloatingWidth = Math.max(1, resolvedStageWidth - floatingInset * 2);
-  const maximumFloatingHeight = Math.max(
-    1,
-    resolvedStageHeight - floatingTopInset - floatingBottomInset,
-  );
-  const minimumFloatingWidth = Math.min(floatingMinimumWidth, maximumFloatingWidth);
-  const minimumFloatingHeight = Math.min(consoleMinimumHeight, maximumFloatingHeight);
-  const floatingWidth = clamp(
-    floatingDefaultWidth,
-    minimumFloatingWidth,
-    maximumFloatingWidth,
-  );
-  const floatingHeight = clamp(
-    floatingDefaultHeight,
-    minimumFloatingHeight,
-    maximumFloatingHeight,
-  );
-  const floatingXInset = resolvedStageWidth - floatingWidth >= floatingInset * 2 ? floatingInset : 0;
-  const maximumFloatingY = Math.max(
-    floatingTopInset,
-    resolvedStageHeight - floatingHeight - floatingBottomInset,
-  );
-  const floatingX = Math.max(floatingXInset, (resolvedStageWidth - floatingWidth) / 2);
-  // 浮动控制台始终以底部输入栏为锚点；展开只向上增长。
-  const floatingY = maximumFloatingY;
   const docked = workspaceDocked;
-  const consoleAtTrafficLights = consoleDisplayMode === "floating" && floatingX < 120 && floatingY < 54;
   const consoleNeedsLeftInset =
-    consoleDisplayMode === "full" || consoleDisplayMode === "dock-left" || consoleAtTrafficLights;
+    consoleDisplayMode === "full" || consoleDisplayMode === "dock-left";
   const workspaceStartsAtStageLeft = consoleDisplayMode !== "dock-left";
   const workspaceToolbarPadding =
     railCollapsed && workspaceStartsAtStageLeft
@@ -659,10 +591,14 @@ export function App() {
       data-mode={consoleDisplayMode}
       style={{
         flexShrink: 0,
-        height: consoleDisplayMode === "floating" ? floatingHeight : "100%",
+        height: consoleDisplayMode === "floating" ? `min(${floatingDefaultHeight}px, 100%)` : "100%",
         order: consoleDisplayMode === "dock-right" ? 2 : 0,
         position: "relative",
-        width: consoleDisplayMode === "floating" ? floatingWidth : docked ? dockedConsoleWidth : "100%",
+        width: consoleDisplayMode === "floating"
+          ? `min(${floatingDefaultWidth}px, 100%)`
+          : docked
+            ? dockedConsoleWidth
+            : "100%",
         zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
       }}
     >
@@ -680,7 +616,9 @@ export function App() {
         )}
         style={
           consoleDisplayMode === "floating"
-            ? { inset: `${floatingTopInset}px ${floatingXInset}px ${floatingBottomInset}px` }
+            ? {
+                inset: `calc(var(--toolbar-h) + ${floatingInset}px) ${floatingInset}px ${floatingBottomInset}px`,
+              }
             : undefined
         }
       >

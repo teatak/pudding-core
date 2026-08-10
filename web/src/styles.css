@@ -2436,15 +2436,6 @@ html:has(
   @apply border-b-0;
 }
 
-.pudding-transcript-turn {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto 240px;
-}
-
-.pudding-floating-turn-console .pudding-transcript-turn {
-  content-visibility: visible;
-}
-
 @keyframes pudding-transcript-turn-reveal {
   0%,
   45% {

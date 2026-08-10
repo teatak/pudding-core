@@ -88,6 +88,7 @@ export const TranscriptList = memo(function TranscriptList({
   const initialScrollSessionRef = useRef("");
   const isAtLatestRef = useRef(true);
   const lastClientHeightRef = useRef(0);
+  const lastListHeightRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const latestSentinelRef = useRef<HTMLDivElement | null>(null);
   const listElementRef = useRef<HTMLDivElement | null>(null);
@@ -450,23 +451,41 @@ export const TranscriptList = memo(function TranscriptList({
   }, [scrollElement]);
 
   const handleObservedResize = useCallback((entries: ResizeObserverEntry[]) => {
-    const viewportChanged = entries.some((entry) => entry.target === scrollElement);
-    const contentChanged = entries.some((entry) => entry.target === listElementRef.current);
-    if (viewportChanged && scrollElement) {
-      lastClientHeightRef.current = scrollElement.clientHeight;
+    const viewportEntry = entries.find((entry) => entry.target === scrollElement);
+    const contentEntry = entries.find((entry) => entry.target === listElementRef.current);
+    const viewportObserved = Boolean(viewportEntry);
+    let viewportChanged = false;
+    let contentChanged = false;
+    if (viewportEntry && scrollElement) {
+      const nextClientHeight = scrollElement.clientHeight;
+      viewportChanged = Math.abs(nextClientHeight - lastClientHeightRef.current) >= 1;
+      lastClientHeightRef.current = nextClientHeight;
+    }
+    if (contentEntry) {
+      const nextListHeight = contentEntry.borderBoxSize[0]?.blockSize ?? contentEntry.contentRect.height;
+      contentChanged = Math.abs(nextListHeight - lastListHeightRef.current) >= 1;
+      lastListHeightRef.current = nextListHeight;
+    }
+    if (!viewportObserved && !contentChanged) {
+      return;
     }
     if (smoothJumpRef.current) {
       return;
     }
     if (autoStickRef.current) {
-      syncPinnedBottom();
+      if (viewportChanged || contentChanged) {
+        syncPinnedBottom();
+      }
       return;
     }
     if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
       setLatestState(false);
     }
-    if (viewportChanged) {
-      restoreResizeAnchorIfDetached(holdViewportResizeAnchor());
+    if (viewportObserved) {
+      const anchor = holdViewportResizeAnchor();
+      if (viewportChanged || contentChanged) {
+        restoreResizeAnchorIfDetached(anchor);
+      }
       return;
     }
     if (contentChanged && resizeAnchorRef.current) {
