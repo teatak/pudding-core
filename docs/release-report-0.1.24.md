@@ -4,7 +4,7 @@
 
 对比基线：`v0.1.23`（`54bf3005`）
 
-审查范围：`v0.1.23..e1563051`
+审查范围：`v0.1.23..ccac0462`
 
 ## 发版结论
 
@@ -22,6 +22,7 @@
 - 修复更新在活动 turn 中下载完成后，turn 结束时未继续安装的问题。
 - 使用定向 ResizeObserver、像素化 dock 尺寸和 memoization 减少布局与工作区重绘。
 - 缩小 Query 失效与 UI 状态写入范围，提取资源菜单并优化标签、画布、transcript 和执行面板布局。
+- 简化模型推理强度选择逻辑，以真实 `auto` 值作为显示与选中状态，并调整菜单尺寸和对齐。
 - 清理不再使用的 DOMPurify、Mermaid 和 semver 依赖。
 
 ## 影响范围
@@ -33,6 +34,7 @@
 | 工作区性能 | 中 | 布局观察、尺寸同步、Query 失效和组件渲染路径收敛。 |
 | 浏览器交互 | 中 | 选项菜单、凭据提示、标签与资源呈现调整。 |
 | Transcript 与画布 | 低 | 执行面板、活动摘要、画布操作和局部样式优化。 |
+| 模型选择 | 低 | 推理强度菜单统一使用实际选择值，并微调紧凑布局。 |
 | SQLite | 低 | schema 仍为 v9，没有迁移或运行数据改写。 |
 
 ## 数据库分析
@@ -86,6 +88,7 @@
 - Reduce layout work with targeted resize observation, pixel-based dock sizing, and memoized workspace surfaces.
 - Replace broad query invalidation and state synchronization with focused updates.
 - Refine resource menus, tabs, canvas controls, transcript activity, and the floating turn console.
+- Simplify reasoning-effort selection around the actual automatic value and refine the compact picker layout.
 
 ### Data and Compatibility
 
