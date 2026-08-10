@@ -3,8 +3,11 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { BrowserFindBar } from "@/browser/BrowserFindBar";
+import {
+  BrowserViewportOverlay,
+  BrowserViewportPlaceholder,
+} from "@/browser/BrowserRuntimeProvider";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
-import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import { electronBrowserBridge } from "@/browser/electronBridge";
 import {
   activateBrowserPageFindRegion,
@@ -93,58 +96,65 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
   }, [active, activeTab?.id, sessionID, t]);
 
   return (
-    <div
-      aria-hidden={!active}
-      className={cn(
-        "pudding-browser-workspace-surface absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-chrome-background)] text-card-foreground shadow-none",
-        !active && "pointer-events-none invisible opacity-0",
-      )}
-      data-console-collapsed={consoleCollapsed}
-      onFocusCapture={activateBrowserPageFindRegion}
-      onPointerDownCapture={activateBrowserPageFindRegion}
-    >
-      <div className="pudding-browser-workspace-viewport absolute inset-0 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)]">
-        <div className="canvas-window-drag-handle flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
-          <BrowserToolbar
-            key={`toolbar:${browserKey}`}
-            active={active}
-            activeTab={activeTab}
-            sessionID={sessionID}
-            token={token}
-            onOpenFind={openBrowserFind}
-          />
-        </div>
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--workspace-chrome-background)]">
-          <BrowserFindBar
-            key={`find:${browserKey}`}
-            open={findOpen}
-            sessionID={sessionID}
-            tabID={activeTab?.id}
-            onOpenChange={changeBrowserFindOpen}
-          />
-          {tabs.map((tab) => (
-            <div
-              key={`widget:${sessionID}:${tab.id}`}
-              aria-hidden={tab.id !== activeTab?.id}
-              className={cn("absolute inset-0", tab.id !== activeTab?.id && "pointer-events-none invisible")}
-            >
-              <ElectronWebviewBrowser activeTab={tab} sessionID={sessionID} token={token} />
+    <>
+      <div
+        aria-hidden={!active}
+        className={cn(
+          "pudding-browser-workspace-surface pointer-events-none absolute inset-0 z-30 min-h-0 overflow-hidden text-card-foreground shadow-none",
+          !active && "hidden",
+        )}
+        data-console-collapsed={consoleCollapsed}
+        onFocusCapture={activateBrowserPageFindRegion}
+        onPointerDownCapture={activateBrowserPageFindRegion}
+      >
+        <div className="pudding-browser-workspace-viewport absolute inset-0 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)]">
+          <div className="canvas-window-drag-handle pointer-events-auto flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
+            <BrowserToolbar
+              key={`toolbar:${browserKey}`}
+              active={active}
+              activeTab={activeTab}
+              sessionID={sessionID}
+              token={token}
+              onOpenFind={openBrowserFind}
+            />
+          </div>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="pointer-events-auto">
+              <BrowserFindBar
+                key={`find:${browserKey}`}
+                open={findOpen}
+                sessionID={sessionID}
+                tabID={activeTab?.id}
+                onOpenChange={changeBrowserFindOpen}
+              />
             </div>
-          ))}
-          {tabs.length === 0 && pending ? <BrowserLoading /> : null}
+            <BrowserViewportPlaceholder
+              active={active && Boolean(activeTab)}
+              sessionID={sessionID}
+              tabID={activeTab?.id}
+            />
+            {tabs.length === 0 && pending ? <BrowserLoading /> : null}
+          </div>
         </div>
       </div>
-      <Button
-        aria-label={t(consoleCollapsed ? "agentConsole.showBrowserBar" : "agentConsole.hideBrowserBar")}
-        className="pudding-browser-console-toggle absolute right-3 z-40 rounded-full border border-border/70 bg-card/95 shadow-sm backdrop-blur"
-        size="icon-sm"
-        type="button"
-        variant="ghost"
-        onClick={() => setConsoleCollapsed((collapsed) => !collapsed)}
+      <BrowserViewportOverlay
+        active={active && Boolean(activeTab)}
+        sessionID={sessionID}
+        tabID={activeTab?.id}
       >
-        {consoleCollapsed ? <ChevronUp /> : <ChevronDown />}
-      </Button>
-    </div>
+        <Button
+          aria-label={t(consoleCollapsed ? "agentConsole.showBrowserBar" : "agentConsole.hideBrowserBar")}
+          className="pudding-browser-console-toggle pointer-events-auto absolute right-3 shrink-0 rounded-full border border-border/70 bg-card/95 shadow-sm backdrop-blur"
+          data-console-collapsed={consoleCollapsed}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={() => setConsoleCollapsed((collapsed) => !collapsed)}
+        >
+          {consoleCollapsed ? <ChevronUp /> : <ChevronDown />}
+        </Button>
+      </BrowserViewportOverlay>
+    </>
   );
 });
 

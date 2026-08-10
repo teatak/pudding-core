@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
   setPreviewUpdatesEnabled: (enabled) => ipcRenderer.invoke("pudding:desktop:update:set-preview", enabled),
+  downloadUpdate: () => ipcRenderer.invoke("pudding:desktop:update:download"),
   activateUpdate: () => ipcRenderer.invoke("pudding:desktop:update:activate"),
   onUpdateState: (listener) => {
     const wrapped = (_event, state) => listener(state);

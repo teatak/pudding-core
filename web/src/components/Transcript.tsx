@@ -30,7 +30,7 @@ export function Transcript({
   submitError,
   token,
 }: TranscriptProps) {
-  const [disclosureByKey, setDisclosureByKey] = useState<Record<string, boolean>>({});
+  const disclosureByKeyRef = useRef<Record<string, boolean>>({});
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
@@ -52,10 +52,8 @@ export function Transcript({
     () => transcriptDisplaySettings(settingsQuery.data?.settings),
     [settingsQuery.data?.settings],
   );
-  const disclosureByKeyRef = useRef(disclosureByKey);
   const sessionIDRef = useRef(sessionID);
   const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
-  disclosureByKeyRef.current = disclosureByKey;
   sessionIDRef.current = sessionID;
   const cancelQueued = useCallback(
     (clientMessageID: string) => updateQueued(clientMessageID, { status: "cancelled" }),
@@ -85,13 +83,8 @@ export function Transcript({
       isOpen: (key: string) => Boolean(disclosureByKeyRef.current[`${sessionIDRef.current}:${key}`]),
       setOpen: (key: string, open: boolean) => {
         const scopedKey = `${sessionIDRef.current}:${key}`;
-        setDisclosureByKey((previous) => {
-          if (Object.prototype.hasOwnProperty.call(previous, scopedKey) && previous[scopedKey] === open) {
-            return previous;
-          }
-          // Keep explicit false values so a streamed parent group cannot reopen after the user closes it.
-          return { ...previous, [scopedKey]: open };
-        });
+        // Keep explicit false values so a streamed parent group cannot reopen after the user closes it.
+        disclosureByKeyRef.current[scopedKey] = open;
       },
     }),
     [],

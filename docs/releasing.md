@@ -81,9 +81,10 @@ required. The current Sherpa ONNX binaries set the effective minimum versions to
 For a preview version, use `make desktop-preview-bundle`. Stable builds require an `x.y.z` version and preview
 builds require `x.y.z-beta.n`; packaging fails when the version and release channel disagree.
 
-Desktop updates are always automatic: they check in the background, download a signed update, and wait for the
-user to choose **Restart to Update**. Every package therefore requires a Developer ID identity and notarization
-credentials. It produces arm64 and x64 DMGs, ZIPs, their blockmaps, and one combined `latest-mac.yml` under
+Desktop updates check in the background and expose a signed update for the user to start. Download progress is
+shown in the sidebar; installation restarts automatically unless a turn was running when the download finished.
+Every package therefore requires a Developer ID identity and notarization credentials. It produces arm64 and x64
+DMGs, ZIPs, their blockmaps, and one combined `latest-mac.yml` under
 `dist/release`, then verifies:
 
 - `Info.plist`, bundled `package.json`, and `latest-mac.yml` use the canonical version.
@@ -188,8 +189,9 @@ make desktop-update-test
 ```
 
 The command starts a loopback update feed, launches `/Applications/Pudding.app`, and waits for the installed app
-to reach the package version. After choosing **Restart to Update**, it verifies the installed version, signature,
-notarization ticket, Gatekeeper assessment, and bundle permissions before reporting success. Use
+to reach the package version. Choose **Update** when it appears; the app restarts automatically when no turn is
+running, otherwise choose **Restart to Update** after the download finishes. The runner then verifies the installed
+version, signature, notarization ticket, Gatekeeper assessment, and bundle permissions. Use
 `make desktop-verify` to recheck existing artifacts without rebuilding them.
 
 Keep the user-facing installation instructions in the public
@@ -197,7 +199,8 @@ Keep the user-facing installation instructions in the public
 
 ## Failure recovery
 
-- Updates download in the background but never install until the user chooses **Restart to Update**.
+- Background checks only expose **Update** in the sidebar. A user action starts the download; installation restarts
+  automatically unless a turn was running when the download finished.
 - If publishing fails before the source tag is pushed, fix the problem and rerun the original publish command.
 - If publishing fails after the source tag is pushed but before creating a draft, rerun
   `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag`. Use `preview` for a beta tag. Do not move the

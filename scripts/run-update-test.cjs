@@ -72,7 +72,7 @@ async function main() {
     shutdown(1);
   });
   console.log(
-    `Waiting up to ${Math.round(timeoutMs / 1000)}s for Restart to Update and installation of ${expectedVersion}`,
+    `Waiting up to ${Math.round(timeoutMs / 1000)}s for update approval and installation of ${expectedVersion}`,
   );
   verificationTimer = setInterval(checkInstalledUpdate, 1_000);
   timeoutTimer = setTimeout(() => {

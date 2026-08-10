@@ -294,11 +294,6 @@ html[data-workspace-resizing] * {
     cursor: ew-resize !important;
 }
 
-html[data-project-browser-resizing="true"],
-html[data-project-browser-resizing="true"] * {
-    cursor: ew-resize !important;
-}
-
 html[data-workspace-resizing] .workspace-split-pane {
     transition: none !important;
 }
@@ -759,6 +754,36 @@ html[data-agent-console-resizing="true"] webview {
     pointer-events: none !important;
 }
 
+.pudding-browser-viewport-placeholder {
+    anchor-name: var(--pudding-browser-anchor);
+}
+
+.pudding-browser-viewport-overlay {
+    position-anchor: var(--pudding-browser-anchor);
+    top: anchor(top);
+    left: anchor(left);
+    width: anchor-size(width);
+    height: anchor-size(height);
+}
+
+.pudding-browser-runtime-host[data-anchored="true"] {
+    position-anchor: var(--pudding-browser-anchor);
+    top: anchor(top);
+    left: anchor(left);
+    width: anchor-size(width);
+    height: anchor-size(height);
+}
+
+.pudding-browser-runtime-host[data-presentation="visible"] {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.pudding-browser-runtime-host[data-presentation="automation"] {
+    visibility: visible;
+}
+
 .pudding-agent-console[data-mode="dock-left"],
 .pudding-agent-console[data-mode="dock-right"] {
     border-color: var(--workspace-border);
@@ -770,20 +795,27 @@ html[data-agent-console-resizing="true"] webview {
 }
 
 [data-workspace-presentation="canvas"] .pudding-browser-workspace-surface[data-console-collapsed="false"] .pudding-browser-workspace-viewport {
-    bottom: 6rem;
+    bottom: 5.75rem;
+    border-bottom: 1px solid var(--workspace-border);
+}
+
+.pudding-browser-console-toggle[data-console-collapsed="true"] {
+    bottom: 0.75rem;
+}
+
+.pudding-browser-console-toggle[data-console-collapsed="false"] {
+    bottom: -2.25rem;
 }
 
 .pudding-browser-console-toggle {
     display: none;
-    bottom: 0.75rem;
 }
 
-[data-workspace-presentation="canvas"] .pudding-browser-console-toggle {
+html:has(
+    [data-workspace-presentation="canvas"]
+    .pudding-browser-workspace-surface[aria-hidden="false"]
+) .pudding-browser-console-toggle {
     display: inline-flex;
-}
-
-[data-workspace-presentation="canvas"] .pudding-browser-workspace-surface[data-console-collapsed="false"] .pudding-browser-console-toggle {
-    bottom: 3.5rem;
 }
 
 [data-workspace-presentation="canvas"]:has(
@@ -951,14 +983,6 @@ html[data-agent-console-resizing="true"] webview {
 .pudding-toolbar-icon-button,
 .pudding-chrome-icon {
     color: var(--chrome-icon-button-foreground);
-}
-
-.pudding-agent-console:is([data-mode="dock-left"], [data-mode="dock-right"]) {
-    width: clamp(
-        min(380px, 50%),
-        var(--agent-console-dock-width),
-        min(640px, calc(100% - min(380px, 50%)))
-    ) !important;
 }
 
 .pudding-agent-console:is([data-mode="full"], [data-mode="dock-left"], [data-mode="dock-right"]) {
@@ -2379,26 +2403,6 @@ html[data-agent-console-resizing="true"] webview {
   word-break: inherit;
 }
 
-.pudding-markdown .mermaid-block {
-  @apply my-2 max-w-full overflow-auto rounded-lg border bg-card p-3;
-}
-
-.pudding-markdown .mermaid-block svg {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  margin-inline: auto;
-}
-
-.pudding-markdown .mermaid-block-error {
-  @apply p-0;
-}
-
-.pudding-markdown .mermaid-block-error pre {
-  @apply m-0 rounded-none border-0;
-}
-
 .pudding-markdown .code-copy-btn {
   @apply absolute top-2 right-2 z-10 size-5 rounded-md border border-border/70 bg-background text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground hover:opacity-100 focus-visible:opacity-100;
 }
@@ -2430,6 +2434,15 @@ html[data-agent-console-resizing="true"] webview {
 /* 末行不带底边,避免与 wrapper 圆角边框叠出双线 */
 .pudding-markdown tr:last-child td {
   @apply border-b-0;
+}
+
+.pudding-transcript-turn {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 240px;
+}
+
+.pudding-floating-turn-console .pudding-transcript-turn {
+  content-visibility: visible;
 }
 
 @keyframes pudding-transcript-turn-reveal {

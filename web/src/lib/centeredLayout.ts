@@ -18,11 +18,11 @@ function clamp(value: number, minimum: number, maximum: number) {
 
 function dockedChatWidth({
   constraints,
-  dockRatio,
+  dockWidth,
   stageWidth,
 }: {
   constraints: CenteredLayoutConstraints;
-  dockRatio: number;
+  dockWidth: number;
   stageWidth: number;
 }) {
   const chatMinimumWidth = Math.min(
@@ -41,7 +41,7 @@ function dockedChatWidth({
     ),
   );
   return clamp(
-    stageWidth * clamp(dockRatio, 0.2, 0.8),
+    dockWidth,
     chatMinimumWidth,
     chatMaximumWidth,
   );
@@ -49,12 +49,12 @@ function dockedChatWidth({
 
 export function resolveCenteredLayoutPresentation({
   constraints,
-  dockRatio,
+  dockWidth,
   layoutWidth,
   workspaceDockRequested,
 }: {
   constraints: CenteredLayoutConstraints;
-  dockRatio: number;
+  dockWidth: number;
   layoutWidth: number;
   workspaceDockRequested: boolean;
 }): CenteredLayoutPresentation {
@@ -90,7 +90,7 @@ export function resolveCenteredLayoutPresentation({
   const expandedRailStageWidth = Math.max(0, layoutWidth - railWidth);
   const expandedRailChatWidth = dockedChatWidth({
     constraints,
-    dockRatio,
+    dockWidth,
     stageWidth: expandedRailStageWidth,
   });
   const leftPairWidth = railWidth + expandedRailChatWidth;

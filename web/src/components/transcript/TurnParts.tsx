@@ -15,7 +15,6 @@ import {
   Children,
   isValidElement,
   useEffect,
-  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -131,7 +130,7 @@ function renderTranscriptPart({
 }) {
   switch (part.type) {
     case "text":
-      return <MarkdownBody key={partKey} enableMermaid messageID={part.messageID} text={part.text} token={token} />;
+      return <MarkdownBody key={partKey} messageID={part.messageID} text={part.text} token={token} />;
     case "attachment":
       return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
     case "thought":
@@ -1182,7 +1181,6 @@ type MarkdownImageItem = ImageLightboxItem & {
 
 export function MarkdownBody({
   allowHtmlImages = true,
-  enableMermaid = false,
   messageID,
   onResolvedLinkClick,
   resolveImageURL,
@@ -1191,7 +1189,6 @@ export function MarkdownBody({
   token = "",
 }: {
   allowHtmlImages?: boolean;
-  enableMermaid?: boolean;
   messageID?: string;
   onResolvedLinkClick?: (href: string) => boolean;
   resolveImageURL?: (raw: string) => string;
@@ -1287,9 +1284,6 @@ export function MarkdownBody({
       if (!block) {
         return <pre tabIndex={-1}>{children}</pre>;
       }
-      if (enableMermaid && block.lang?.trim().toLowerCase() === "mermaid") {
-        return <MermaidBlock code={block.code} />;
-      }
       return (
         <CodeBlock
           code={block.code}
@@ -1354,85 +1348,6 @@ export function MarkdownBody({
       <ImageLightbox images={markdownImages} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
     </>
   );
-}
-
-const MAX_MERMAID_CHARS = 50_000;
-let mermaidRenderQueue: Promise<void> = Promise.resolve();
-
-function MermaidBlock({ code }: { code: string }) {
-  const { t } = useI18n();
-  const reactID = useId();
-  const [svg, setSVG] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSVG("");
-    setFailed(false);
-    if (code.length > MAX_MERMAID_CHARS) {
-      setFailed(true);
-      return () => {
-        cancelled = true;
-      };
-    }
-    const id = `pudding-mermaid-${reactID.replace(/[^a-zA-Z0-9_-]/g, "")}`;
-    const dark = document.documentElement.classList.contains("dark");
-    void renderMermaidSVG(id, code, dark)
-      .then((rendered) => {
-        if (!cancelled) {
-          setSVG(rendered);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [code, reactID]);
-
-  if (failed) {
-    return (
-      <div className="mermaid-block mermaid-block-error">
-        <div className="border-b px-3 py-2 text-xs text-destructive">{code.length > MAX_MERMAID_CHARS ? t("project.browserMermaidTooLarge") : t("project.browserMermaidFailed")}</div>
-        <pre tabIndex={-1}><code>{code}</code></pre>
-      </div>
-    );
-  }
-  if (!svg) {
-    return (
-      <div className="mermaid-block flex min-h-32 items-center justify-center text-sm text-muted-foreground">
-        <Spinner className="mr-2" />
-        {t("common.loading")}
-      </div>
-    );
-  }
-  return <div className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />;
-}
-
-function renderMermaidSVG(id: string, code: string, dark: boolean) {
-  const render = mermaidRenderQueue.then(async () => {
-    const [{ default: mermaid }, { default: DOMPurify }] = await Promise.all([
-      import("mermaid"),
-      import("dompurify"),
-    ]);
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      suppressErrorRendering: true,
-      theme: dark ? "dark" : "default",
-      htmlLabels: false,
-      maxTextSize: MAX_MERMAID_CHARS,
-    });
-    const result = await mermaid.render(id, code);
-    return DOMPurify.sanitize(result.svg, {
-      USE_PROFILES: { svg: true, svgFilters: true },
-    });
-  });
-  mermaidRenderQueue = render.then(() => undefined, () => undefined);
-  return render;
 }
 
 function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen: () => void }) {

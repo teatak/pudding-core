@@ -4,6 +4,8 @@ const test = require("node:test");
 
 const { UpdateManager } = require("../update-manager.cjs");
 
+const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
+
 class FakeUpdater extends EventEmitter {
   constructor() {
     super();
@@ -84,8 +86,9 @@ test("background checks stay silent while interactive checks report their result
   assert.deepEqual(results, [{ kind: "up-to-date" }]);
 });
 
-test("download completion exposes a restart state without a completion dialog", async () => {
+test("an interactive check confirms before downloading and then exposes restart", async () => {
   const updater = new FakeUpdater();
+  const requests = [];
   const results = [];
   const states = [];
   const calls = [];
@@ -93,17 +96,28 @@ test("download completion exposes a restart state without a completion dialog", 
     updater,
     isPackaged: true,
     beforeInstall: async () => calls.push("stop-services"),
+    onDownloadRequest: async (request) => {
+      requests.push(request);
+      return true;
+    },
     onInteractiveResult: async (result) => results.push(result),
     onStateChange: (state) => states.push(state),
   });
+  updater.downloadUpdate = async () => {
+    updater.downloads += 1;
+    updater.emit("download-progress", { percent: 42.4 });
+    updater.emit("update-downloaded", { version: "1.2.0" });
+    return [];
+  };
 
   await manager.check(true);
-  assert.equal(updater.autoDownload, true);
+  assert.equal(updater.autoDownload, false);
   updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("download-progress", { percent: 42.4 });
-  updater.emit("update-downloaded", { version: "1.2.0" });
+  await flushAsync();
 
-  assert.deepEqual(results, [{ kind: "downloading", version: "1.2.0" }]);
+  assert.deepEqual(requests, [{ version: "1.2.0" }]);
+  assert.deepEqual(results, []);
+  assert.equal(updater.downloads, 1);
   assert.equal(states.at(-1).status, "downloaded");
   assert.equal(states.at(-1).percent, 100);
 
@@ -113,105 +127,47 @@ test("download completion exposes a restart state without a completion dialog", 
   assert.equal(states.at(-1).status, "installing");
 });
 
-test("a downloaded update is rechecked without downloading the same version again", async () => {
+test("a background check exposes download in the UI without prompting", async () => {
   const updater = new FakeUpdater();
-  const manager = new UpdateManager({ updater, isPackaged: true });
+  const requests = [];
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    onDownloadRequest: async (request) => {
+      requests.push(request);
+      return true;
+    },
+  });
 
+  await manager.check(false);
   updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("update-downloaded", { version: "1.2.0" });
-  updater.checkResult = {
-    isUpdateAvailable: true,
-    updateInfo: { version: "1.2.0" },
-  };
+  await flushAsync();
 
-  assert.equal(await manager.check(false), true);
-  assert.equal(updater.checks, 1);
+  assert.deepEqual(requests, []);
   assert.equal(updater.downloads, 0);
   assert.deepEqual(manager.getState(), {
-    status: "downloaded",
+    status: "available",
     receivePreviewUpdates: false,
     version: "1.2.0",
-    percent: 100,
+    percent: null,
   });
 });
 
-test("a newer release replaces the pending downloaded update", async () => {
+test("declining an interactive download keeps the update available", async () => {
   const updater = new FakeUpdater();
-  const states = [];
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    onStateChange: (state) => states.push(state),
+    onDownloadRequest: async () => false,
   });
 
+  await manager.check(true);
   updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("update-downloaded", { version: "1.2.0" });
-  updater.checkResult = {
-    isUpdateAvailable: true,
-    updateInfo: { version: "1.3.0" },
-  };
-  updater.downloadUpdate = async () => {
-    updater.downloads += 1;
-    updater.emit("download-progress", { percent: 54 });
-    updater.emit("update-downloaded", { version: "1.3.0" });
-    return [];
-  };
+  await flushAsync();
 
-  assert.equal(await manager.check(false), true);
-  assert.equal(updater.downloads, 1);
-  assert.deepEqual(states.slice(-3).map((state) => [state.status, state.version, state.percent]), [
-    ["downloading", "1.3.0", 0],
-    ["downloading", "1.3.0", 54],
-    ["downloaded", "1.3.0", 100],
-  ]);
-});
-
-test("a failed pending-update refresh keeps the previously downloaded version", async () => {
-  const updater = new FakeUpdater();
-  const errors = [];
-  const manager = new UpdateManager({
-    updater,
-    isPackaged: true,
-    onError: (error) => errors.push(error.message),
-  });
-
-  updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("update-downloaded", { version: "1.2.0" });
-  updater.checkForUpdates = async () => {
-    updater.checks += 1;
-    const error = new Error("offline");
-    updater.emit("error", error);
-    throw error;
-  };
-
-  assert.equal(await manager.check(false), false);
-  assert.deepEqual(errors, ["offline"]);
-  assert.equal(manager.getState().status, "downloaded");
+  assert.equal(updater.downloads, 0);
+  assert.equal(manager.getState().status, "available");
   assert.equal(manager.getState().version, "1.2.0");
-});
-
-test("install refreshes and installs the newest downloaded release", async () => {
-  const updater = new FakeUpdater();
-  const manager = new UpdateManager({ updater, isPackaged: true });
-
-  updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("update-downloaded", { version: "1.2.0" });
-  updater.checkResult = {
-    isUpdateAvailable: true,
-    updateInfo: { version: "1.3.0" },
-  };
-  updater.downloadUpdate = async () => {
-    updater.downloads += 1;
-    updater.emit("update-downloaded", { version: "1.3.0" });
-    return [];
-  };
-
-  assert.equal(await manager.install(), true);
-  assert.equal(updater.checks, 1);
-  assert.equal(updater.downloads, 1);
-  assert.equal(updater.installs, 1);
-  assert.equal(manager.getState().version, "1.3.0");
-  assert.equal(manager.getState().status, "installing");
 });
 
 test("development builds explain why update checks are unavailable", async () => {
@@ -226,7 +182,7 @@ test("development builds explain why update checks are unavailable", async () =>
   assert.deepEqual(results, [{ kind: "development" }]);
 });
 
-test("can simulate a downloaded update without checking or quitting", async () => {
+test("can simulate the update flow without checking or quitting", async () => {
   const updater = new FakeUpdater();
   const states = [];
   let simulatedInstalls = 0;
@@ -238,15 +194,23 @@ test("can simulate a downloaded update without checking or quitting", async () =
       simulatedInstalls += 1;
     },
     onStateChange: (state) => states.push(state),
+    setTimeoutFn: (callback) => {
+      callback();
+      return null;
+    },
   });
 
   manager.start();
+  assert.equal(manager.getState().status, "available");
+  assert.equal(await manager.download(), true);
   assert.equal(manager.getState().status, "downloaded");
   assert.equal(await manager.install(), true);
   assert.equal(simulatedInstalls, 1);
   assert.equal(updater.checks, 0);
   assert.equal(updater.installs, 0);
-  assert.deepEqual(states.map((state) => state.status), ["downloaded", "installing", "downloaded"]);
+  assert.deepEqual(states.slice(0, 2).map((state) => state.status), ["available", "downloading"]);
+  assert.deepEqual(states.slice(2, 10).map((state) => state.percent), [8, 19, 33, 48, 64, 79, 91, 100]);
+  assert.deepEqual(states.slice(10).map((state) => state.status), ["downloaded", "installing", "available"]);
 });
 
 test("uses an explicit generic feed for local packaged update tests", () => {
@@ -258,7 +222,7 @@ test("uses an explicit generic feed for local packaged update tests", () => {
   });
 
   assert.deepEqual(updater.feed, { provider: "generic", url: "http://127.0.0.1:8099" });
-  assert.equal(updater.autoDownload, true);
+  assert.equal(updater.autoDownload, false);
   assert.equal(updater.autoInstallOnAppQuit, false);
   assert.equal(updater.channel, "latest");
   assert.equal(updater.allowPrerelease, false);
@@ -295,24 +259,28 @@ test("cannot change update channel while an update is active", async () => {
   );
 });
 
-test("reports an interactively started download that later fails", async () => {
+test("reports a confirmed download that later fails", async () => {
   const updater = new FakeUpdater();
   const results = [];
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
+    onDownloadRequest: async () => true,
     onInteractiveResult: async (result) => results.push(result),
   });
+  updater.downloadUpdate = async () => {
+    updater.downloads += 1;
+    const error = new Error("signature rejected");
+    updater.emit("error", error);
+    throw error;
+  };
 
   await manager.check(true);
   updater.emit("update-available", { version: "1.2.0" });
-  updater.emit("error", new Error("signature rejected"));
+  await flushAsync();
 
   assert.equal(manager.getState().status, "idle");
-  assert.deepEqual(results, [
-    { kind: "downloading", version: "1.2.0" },
-    { kind: "error", error: "signature rejected" },
-  ]);
+  assert.deepEqual(results, [{ kind: "error", error: "signature rejected" }]);
 });
 
 test("an asynchronous install error clears the installing state", async () => {
@@ -324,7 +292,6 @@ test("an asynchronous install error clears the installing state", async () => {
     onInteractiveResult: async (result) => results.push(result),
   });
 
-  updater.emit("update-available", { version: "1.2.0" });
   updater.emit("update-downloaded", { version: "1.2.0" });
   assert.equal(await manager.install(), true);
   updater.emit("error", new Error("signature rejected"));

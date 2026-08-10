@@ -1,9 +1,8 @@
-const semver = require("semver");
-
 const updateStatuses = Object.freeze({
   unavailable: "unavailable",
   idle: "idle",
   checking: "checking",
+  available: "available",
   downloading: "downloading",
   downloaded: "downloaded",
   installing: "installing",
@@ -20,6 +19,7 @@ class UpdateManager {
     initialDelayMs = 15_000,
     intervalMs = 6 * 60 * 60 * 1_000,
     beforeInstall = async () => {},
+    onDownloadRequest = async () => false,
     onError = () => {},
     onInteractiveResult = async () => {},
     onSimulatedInstall = async () => {},
@@ -36,6 +36,7 @@ class UpdateManager {
     this.initialDelayMs = initialDelayMs;
     this.intervalMs = intervalMs;
     this.beforeInstall = beforeInstall;
+    this.onDownloadRequest = onDownloadRequest;
     this.onError = onError;
     this.onInteractiveResult = onInteractiveResult;
     this.onSimulatedInstall = onSimulatedInstall;
@@ -45,16 +46,12 @@ class UpdateManager {
     this.timer = null;
     this.started = false;
     this.interactiveCheck = false;
-    this.interactiveDownload = false;
-    this.downloadedRefreshFallback = null;
-    this.downloadedRefreshInteractive = false;
-    this.downloadedRefreshPromise = null;
     this.installPromise = null;
     this.state = {
-      status: this.simulated ? updateStatuses.downloaded : this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
+      status: this.simulated ? updateStatuses.available : this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
       receivePreviewUpdates: this.receivePreviewUpdates,
       version: this.simulatedVersion,
-      percent: this.simulated ? 100 : null,
+      percent: null,
     };
 
     if (this.enabled && !this.simulated) {
@@ -64,7 +61,7 @@ class UpdateManager {
   }
 
   configureUpdater() {
-    this.updater.autoDownload = true;
+    this.updater.autoDownload = false;
     this.updater.autoInstallOnAppQuit = false;
     this.configureUpdaterChannel();
     if (this.feedURL) {
@@ -86,21 +83,14 @@ class UpdateManager {
       }
     });
     this.updater.on("update-available", (info) => {
-      if (this.downloadedRefreshFallback) {
-        return;
-      }
       const interactive = this.takeInteractiveCheck();
       const version = cleanVersion(info?.version);
-      this.interactiveDownload = interactive;
-      this.setState({ status: updateStatuses.downloading, version, percent: 0 });
+      this.setState({ status: updateStatuses.available, version, percent: null });
       if (interactive) {
-        void this.onInteractiveResult({ kind: "downloading", version });
+        void this.confirmAvailableDownload(version);
       }
     });
     this.updater.on("update-not-available", () => {
-      if (this.downloadedRefreshFallback) {
-        return;
-      }
       const interactive = this.takeInteractiveCheck();
       this.setState({ status: updateStatuses.idle, version: "", percent: null });
       if (interactive) {
@@ -115,8 +105,6 @@ class UpdateManager {
     });
     this.updater.on("update-downloaded", (info) => {
       this.interactiveCheck = false;
-      this.interactiveDownload = false;
-      this.clearDownloadedRefreshContext();
       this.setState({
         status: updateStatuses.downloaded,
         version: cleanVersion(info?.version) || this.state.version,
@@ -137,6 +125,7 @@ class UpdateManager {
     }
     if (
       this.state.status === updateStatuses.checking ||
+      this.state.status === updateStatuses.available ||
       this.state.status === updateStatuses.downloading ||
       this.state.status === updateStatuses.downloaded ||
       this.state.status === updateStatuses.installing
@@ -146,7 +135,6 @@ class UpdateManager {
 
     this.receivePreviewUpdates = next;
     this.interactiveCheck = false;
-    this.interactiveDownload = false;
     if (this.enabled && !this.simulated) {
       this.configureUpdaterChannel();
     }
@@ -196,7 +184,7 @@ class UpdateManager {
   async check(interactive = false) {
     if (this.simulated) {
       if (interactive) {
-        await this.onInteractiveResult({ kind: "downloaded", version: this.state.version });
+        return this.confirmAvailableDownload(this.state.version);
       }
       return true;
     }
@@ -206,12 +194,13 @@ class UpdateManager {
       }
       return false;
     }
-    if (this.state.status === updateStatuses.downloaded) {
-      return this.refreshDownloadedUpdate(interactive);
+    if (this.state.status === updateStatuses.available) {
+      return interactive ? this.confirmAvailableDownload(this.state.version) : false;
     }
     if (
       this.state.status === updateStatuses.checking ||
       this.state.status === updateStatuses.downloading ||
+      this.state.status === updateStatuses.downloaded ||
       this.state.status === updateStatuses.installing
     ) {
       if (interactive) {
@@ -237,7 +226,7 @@ class UpdateManager {
     if (this.installPromise) {
       return this.installPromise;
     }
-    const installPromise = this.installLatestDownloadedUpdate();
+    const installPromise = this.finishInstall();
     this.installPromise = installPromise;
     try {
       return await installPromise;
@@ -248,26 +237,61 @@ class UpdateManager {
     }
   }
 
-  async installLatestDownloadedUpdate() {
-    if (!this.enabled || this.state.status !== updateStatuses.downloaded) {
-      return false;
-    }
-    if (!this.simulated) {
-      if (this.downloadedRefreshPromise) {
-        await this.downloadedRefreshPromise;
-      } else {
-        await this.refreshDownloadedUpdate(false);
-      }
-      if (this.state.status !== updateStatuses.downloaded) {
+  async confirmAvailableDownload(version) {
+    try {
+      const accepted = await this.onDownloadRequest({ version });
+      if (!accepted || this.state.status !== updateStatuses.available || this.state.version !== version) {
         return false;
       }
+      return this.download();
+    } catch (error) {
+      this.onError(error);
+      await this.onInteractiveResult({ kind: "error", error: errorMessage(error) });
+      return false;
+    }
+  }
+
+  async download() {
+    if (!this.enabled || this.state.status !== updateStatuses.available) {
+      return false;
+    }
+    this.setState({ status: updateStatuses.downloading, percent: 0 });
+    if (this.simulated) {
+      return this.simulateDownload();
+    }
+    try {
+      await this.updater.downloadUpdate();
+      return true;
+    } catch (error) {
+      if (this.state.status === updateStatuses.downloading) {
+        this.handleError(error);
+      }
+      return false;
+    }
+  }
+
+  async simulateDownload() {
+    for (const percent of [8, 19, 33, 48, 64, 79, 91, 100]) {
+      await new Promise((resolve) => this.setTimeoutFn(resolve, 250));
+      if (this.state.status !== updateStatuses.downloading) {
+        return false;
+      }
+      this.setState({ percent });
+    }
+    this.setState({ status: updateStatuses.downloaded });
+    return true;
+  }
+
+  async finishInstall() {
+    if (!this.enabled || this.state.status !== updateStatuses.downloaded) {
+      return false;
     }
 
     const downloadedState = this.getState();
     this.setState({ status: updateStatuses.installing });
     if (this.simulated) {
       await this.onSimulatedInstall(downloadedState);
-      this.state = downloadedState;
+      this.state = { ...downloadedState, status: updateStatuses.available, percent: null };
       this.onStateChange(this.getState());
       return true;
     }
@@ -284,85 +308,10 @@ class UpdateManager {
     }
   }
 
-  async refreshDownloadedUpdate(interactive = false) {
-    if (this.downloadedRefreshPromise) {
-      const refreshed = await this.downloadedRefreshPromise;
-      if (interactive) {
-        await this.reportCurrentUpdateState();
-      }
-      return refreshed;
-    }
-    if (!this.enabled || this.simulated || this.state.status !== updateStatuses.downloaded) {
-      return false;
-    }
-
-    const fallback = this.getState();
-    const previousAutoDownload = this.updater.autoDownload;
-    this.downloadedRefreshFallback = fallback;
-    this.downloadedRefreshInteractive = Boolean(interactive);
-    this.updater.autoDownload = false;
-
-    const refreshPromise = (async () => {
-      try {
-        const result = await this.updater.checkForUpdates();
-        const version = cleanVersion(result?.updateInfo?.version);
-        if (!result?.isUpdateAvailable || !isVersionGreater(version, fallback.version)) {
-          this.clearDownloadedRefreshContext();
-          if (interactive) {
-            await this.onInteractiveResult({ kind: "downloaded", version: fallback.version });
-          }
-          return true;
-        }
-
-        this.setState({ status: updateStatuses.downloading, version, percent: 0 });
-        if (interactive) {
-          await this.onInteractiveResult({ kind: "downloading", version });
-        }
-        await this.updater.downloadUpdate(result.cancellationToken);
-        return true;
-      } catch (error) {
-        if (this.downloadedRefreshFallback) {
-          this.handleError(error);
-        }
-        return false;
-      } finally {
-        this.updater.autoDownload = previousAutoDownload;
-      }
-    })();
-
-    this.downloadedRefreshPromise = refreshPromise;
-    try {
-      return await refreshPromise;
-    } finally {
-      if (this.downloadedRefreshPromise === refreshPromise) {
-        this.downloadedRefreshPromise = null;
-      }
-    }
-  }
-
-  async reportCurrentUpdateState() {
-    if (this.state.status === updateStatuses.downloaded) {
-      await this.onInteractiveResult({ kind: "downloaded", version: this.state.version });
-    } else {
-      await this.onInteractiveResult({ kind: this.state.status, version: this.state.version });
-    }
-  }
-
   handleError(error) {
     this.onError(error);
-    if (this.downloadedRefreshFallback) {
-      const fallback = this.downloadedRefreshFallback;
-      const interactive = this.downloadedRefreshInteractive;
-      this.clearDownloadedRefreshContext();
-      this.state = fallback;
-      this.onStateChange(this.getState());
-      if (interactive) {
-        void this.onInteractiveResult({ kind: "error", error: errorMessage(error) });
-      }
-      return;
-    }
     const installing = this.state.status === updateStatuses.installing;
-    const interactive = this.takeInteractiveCheck() || this.takeInteractiveDownload();
+    const interactive = this.takeInteractiveCheck() || this.state.status === updateStatuses.downloading;
     this.setState({ status: updateStatuses.idle, version: "", percent: null });
     if (installing) {
       void this.onInteractiveResult({ kind: "install-error", error: errorMessage(error) });
@@ -375,17 +324,6 @@ class UpdateManager {
     const interactive = this.interactiveCheck;
     this.interactiveCheck = false;
     return interactive;
-  }
-
-  takeInteractiveDownload() {
-    const interactive = this.interactiveDownload;
-    this.interactiveDownload = false;
-    return interactive;
-  }
-
-  clearDownloadedRefreshContext() {
-    this.downloadedRefreshFallback = null;
-    this.downloadedRefreshInteractive = false;
   }
 
   setState(patch) {
@@ -408,15 +346,6 @@ function clampPercent(value) {
 
 function errorMessage(error) {
   return String(error?.message || error || "update failed");
-}
-
-function isVersionGreater(candidate, current) {
-  const next = semver.valid(cleanVersion(candidate));
-  const previous = semver.valid(cleanVersion(current));
-  if (next && previous) {
-    return semver.gt(next, previous);
-  }
-  return Boolean(candidate && candidate !== current);
 }
 
 module.exports = { UpdateManager, updateStatuses };

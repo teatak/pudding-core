@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 
+import { onAgentConsoleResizePhase } from "@/lib/agentConsoleResize";
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
 import { TranscriptTurn } from "./TranscriptTurn";
@@ -30,7 +31,7 @@ const TURN_REVEAL_TOP_RATIO = 0.38;
 
 type HistoryLoadState = "idle" | "loading" | "settling";
 type DisclosureOpenState = { openedAtLatest: boolean; userScrollSeq: number };
-type ResizeAnchor = { anchorID: string; top: number; topRatio: number };
+type ResizeAnchor = { element: HTMLElement; top: number };
 type HistoryAnchor = { top: number; turnID: string };
 type CapturedAnchor<T> = T & { element: HTMLElement };
 type PointerGesture = { pointerID: number; startY: number };
@@ -107,6 +108,7 @@ export const TranscriptList = memo(function TranscriptList({
   const smoothJumpRafRef = useRef<number | null>(null);
   const smoothJumpRef = useRef(false);
   const turnRevealRef = useRef(turnReveal);
+  const visibleTurnElementsRef = useRef(new Set<HTMLElement>());
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
   turnRevealRef.current = turnReveal;
   const firstTurnKey = turns[0]?.key ?? "";
@@ -177,7 +179,10 @@ export const TranscriptList = memo(function TranscriptList({
   }, [clearPendingHistoryAnchor]);
 
   const beginPendingHistoryAnchor = useCallback(() => {
-    pendingHistoryAnchorRef.current = captureHistoryViewportAnchor(scrollElement);
+    pendingHistoryAnchorRef.current = captureHistoryViewportAnchor(
+      scrollElement,
+      visibleTurnElementsRef.current,
+    );
     pendingHistoryAnchorSessionRef.current = sessionID;
     if (pendingHistoryAnchorClearTimerRef.current !== null) {
       window.clearTimeout(pendingHistoryAnchorClearTimerRef.current);
@@ -189,7 +194,10 @@ export const TranscriptList = memo(function TranscriptList({
     if (pendingHistoryAnchorSessionRef.current !== sessionID) {
       return;
     }
-    const anchor = captureHistoryViewportAnchor(scrollElement);
+    const anchor = captureHistoryViewportAnchor(
+      scrollElement,
+      visibleTurnElementsRef.current,
+    );
     if (anchor) {
       pendingHistoryAnchorRef.current = anchor;
     }
@@ -199,7 +207,10 @@ export const TranscriptList = memo(function TranscriptList({
     if (!scrollElement) {
       return null;
     }
-    const anchor = resizeAnchorRef.current ?? captureResizeAnchor(scrollElement);
+    const anchor = resizeAnchorRef.current ?? captureResizeAnchor(
+      scrollElement,
+      visibleTurnElementsRef.current,
+    );
     resizeAnchorRef.current = anchor;
     if (viewportResizeSettleTimerRef.current !== null) {
       window.clearTimeout(viewportResizeSettleTimerRef.current);
@@ -428,14 +439,22 @@ export const TranscriptList = memo(function TranscriptList({
     if (!scrollElement || autoStickRef.current) {
       return;
     }
-    const anchor = anchorOverride ?? resizeAnchorRef.current ?? captureResizeAnchor(scrollElement);
+    const anchor = anchorOverride ?? resizeAnchorRef.current ?? captureResizeAnchor(
+      scrollElement,
+      visibleTurnElementsRef.current,
+    );
     resizeAnchorRef.current = anchor;
-    restoreResizeAnchorOverFrames(scrollElement, anchor, () => markProgrammaticScroll(programmaticScrollIgnoreUntilRef), "ratio");
+    if (restoreResizeAnchor(scrollElement, anchor, () => markProgrammaticScroll(programmaticScrollIgnoreUntilRef))) {
+      lastScrollTopRef.current = scrollElement.scrollTop;
+    }
   }, [scrollElement]);
 
-  const handleContentResize = useCallback(() => {
-    // ResizeObserver runs before paint. Compensate synchronously so pinned disclosures
-    // visually grow upward instead of rendering first and snapping on the next frame.
+  const handleObservedResize = useCallback((entries: ResizeObserverEntry[]) => {
+    const viewportChanged = entries.some((entry) => entry.target === scrollElement);
+    const contentChanged = entries.some((entry) => entry.target === listElementRef.current);
+    if (viewportChanged && scrollElement) {
+      lastClientHeightRef.current = scrollElement.clientHeight;
+    }
     if (smoothJumpRef.current) {
       return;
     }
@@ -446,11 +465,14 @@ export const TranscriptList = memo(function TranscriptList({
     if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
       setLatestState(false);
     }
-    if (resizeAnchorRef.current) {
-      restoreResizeAnchorIfDetached(resizeAnchorRef.current);
+    if (viewportChanged) {
+      restoreResizeAnchorIfDetached(holdViewportResizeAnchor());
       return;
     }
-  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, syncPinnedBottom]);
+    if (contentChanged && resizeAnchorRef.current) {
+      restoreResizeAnchorIfDetached(resizeAnchorRef.current);
+    }
+  }, [holdViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, setLatestState, syncPinnedBottom]);
 
   useEffect(() => {
     if (!scrollElement) {
@@ -669,46 +691,69 @@ export const TranscriptList = memo(function TranscriptList({
   ]);
 
   useEffect(() => {
-    const handleViewportResize = () => {
-      if (scrollElement) {
-        lastClientHeightRef.current = scrollElement.clientHeight;
+    return onAgentConsoleResizePhase((phase) => {
+      if (!scrollElement || smoothJumpRef.current) {
+        return;
       }
-      if (smoothJumpRef.current) {
+      if (phase === "start") {
+        releaseViewportResizeAnchor();
+        if (!autoStickRef.current) {
+          resizeAnchorRef.current = captureResizeAnchor(
+            scrollElement,
+            visibleTurnElementsRef.current,
+          );
+        }
         return;
       }
       if (autoStickRef.current) {
         syncPinnedBottom();
-        return;
+      } else {
+        restoreResizeAnchorIfDetached(resizeAnchorRef.current);
       }
-      restoreResizeAnchorIfDetached(holdViewportResizeAnchor());
-    };
-    const observer = new ResizeObserver(handleViewportResize);
-    if (scrollElement) {
-      observer.observe(scrollElement);
-    }
-    window.addEventListener("resize", handleViewportResize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", handleViewportResize);
-    };
-  }, [
-    holdViewportResizeAnchor,
-    restoreResizeAnchorIfDetached,
-    scrollElement,
-    syncPinnedBottom,
-  ]);
+      releaseViewportResizeAnchor();
+    });
+  }, [releaseViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, syncPinnedBottom]);
 
   useEffect(() => {
-    const node = listElementRef.current;
-    if (!node) {
+    const listElement = listElementRef.current;
+    if (!scrollElement || !listElement) {
       return;
     }
-    const observer = new ResizeObserver(() => {
-      handleContentResize();
-    });
-    observer.observe(node);
+    const observer = new ResizeObserver(handleObservedResize);
+    observer.observe(scrollElement);
+    observer.observe(listElement);
     return () => observer.disconnect();
-  }, [handleContentResize]);
+  }, [handleObservedResize, scrollElement]);
+
+  useEffect(() => {
+    const listElement = listElementRef.current;
+    if (!scrollElement || !listElement) {
+      visibleTurnElementsRef.current.clear();
+      return;
+    }
+    const visibleTurns = visibleTurnElementsRef.current;
+    visibleTurns.clear();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const element = entry.target as HTMLElement;
+          if (entry.isIntersecting) {
+            visibleTurns.add(element);
+          } else {
+            visibleTurns.delete(element);
+          }
+        }
+      },
+      { root: scrollElement },
+    );
+    for (const element of listElement.querySelectorAll<HTMLElement>("[data-transcript-turn-id]")) {
+      observer.observe(element);
+    }
+    return () => {
+      observer.disconnect();
+      visibleTurns.clear();
+    };
+  }, [scrollElement, searchRenderVersion]);
 
   useEffect(() => {
     historyLoader.reset();
@@ -1166,26 +1211,39 @@ function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {
   });
 }
 
-function captureResizeAnchor(node: HTMLElement | null): ResizeAnchor | null {
+function captureResizeAnchor(
+  node: HTMLElement | null,
+  visibleTurns: Iterable<HTMLElement>,
+): ResizeAnchor | null {
   if (!node) {
     return null;
   }
-  return captureBestVisibleAnchor(node, "[data-transcript-ai-anchor]", (element) => {
-    const anchorID = element.dataset.transcriptAiAnchor;
-    if (!anchorID) {
-      return null;
-    }
-    return { anchorID };
-  });
+  const candidates: HTMLElement[] = [];
+  const selector = [
+    "[data-transcript-ai-anchor] .pudding-markdown > *",
+    "[data-transcript-ai-anchor] details",
+    "[data-transcript-ai-anchor]",
+  ].join(", ");
+  for (const turn of visibleTurns) {
+    candidates.push(...turn.querySelectorAll<HTMLElement>(selector));
+  }
+  return captureBestVisibleAnchor(
+    node,
+    candidates,
+    () => ({}),
+  );
 }
 
-function captureHistoryViewportAnchor(node: HTMLElement | null): HistoryAnchor | null {
+function captureHistoryViewportAnchor(
+  node: HTMLElement | null,
+  visibleTurns: Iterable<HTMLElement>,
+): HistoryAnchor | null {
   if (!node) {
     return null;
   }
   return captureBestVisibleAnchor(
     node,
-    "[data-transcript-turn-id]",
+    visibleTurns,
     (element) => {
       const turnID = element.dataset.transcriptTurnId;
       return turnID ? { turnID } : null;
@@ -1196,14 +1254,14 @@ function captureHistoryViewportAnchor(node: HTMLElement | null): HistoryAnchor |
 
 function captureBestVisibleAnchor<T extends object>(
   node: HTMLElement,
-  selector: string,
+  elements: Iterable<HTMLElement>,
   getIDs: (element: HTMLElement) => T | null,
   targetTopOverride?: number,
 ): CapturedAnchor<T & { top: number; topRatio: number }> | null {
   const viewportRect = node.getBoundingClientRect();
   const targetTop = targetTopOverride ?? viewportAnchorTargetTop(viewportRect.height);
   let best: { element: HTMLElement; ids: T; top: number } | null = null;
-  for (const element of Array.from(node.querySelectorAll<HTMLElement>(selector))) {
+  for (const element of elements) {
     const ids = getIDs(element);
     if (!ids) {
       continue;
@@ -1234,40 +1292,17 @@ function viewportAnchorTargetTop(viewportHeight: number) {
   return Math.min(Math.max(viewportHeight * VIEWPORT_ANCHOR_TARGET_RATIO, minTop), maxTop);
 }
 
-function restoreResizeAnchorOverFrames(
-  node: HTMLElement | null,
-  anchor: ResizeAnchor | null,
-  beforeScroll?: () => void,
-  restoreMode: "saved" | "ratio" = "saved",
-) {
-  if (!node || !anchor) {
-    return;
-  }
-  let remaining = 8;
-  const tick = () => {
-    restoreResizeAnchor(node, anchor, beforeScroll, restoreMode);
-    remaining -= 1;
-    if (remaining > 0) {
-      window.requestAnimationFrame(tick);
-    }
-  };
-  window.requestAnimationFrame(tick);
-}
-
 function restoreResizeAnchor(
   node: HTMLElement,
-  anchor: ResizeAnchor,
+  anchor: ResizeAnchor | null,
   beforeScroll?: () => void,
-  restoreMode: "saved" | "ratio" = "saved",
 ) {
-  const element = findResizeAnchorElement(node, anchor);
-  if (!element) {
+  if (!anchor || !node.contains(anchor.element)) {
     return false;
   }
   const viewportRect = node.getBoundingClientRect();
-  const top = element.getBoundingClientRect().top - viewportRect.top;
-  const targetTop = restoreMode === "ratio" ? viewportRect.height * anchor.topRatio : anchor.top;
-  const delta = top - targetTop;
+  const top = anchor.element.getBoundingClientRect().top - viewportRect.top;
+  const delta = top - anchor.top;
   if (Math.abs(delta) < ANCHOR_RESTORE_EPSILON_PX) {
     return false;
   }
@@ -1290,13 +1325,6 @@ function restoreHistoryAnchor(node: HTMLElement, anchor: HistoryAnchor, beforeSc
   beforeScroll?.();
   node.scrollTop += delta;
   return true;
-}
-
-function findResizeAnchorElement(node: HTMLElement, anchor: ResizeAnchor) {
-  if (!anchor.anchorID) {
-    return null;
-  }
-  return node.querySelector<HTMLElement>(`[data-transcript-ai-anchor="${CSS.escape(anchor.anchorID)}"]`);
 }
 
 function pointerHitsVerticalScrollbar(event: PointerEvent, node: HTMLElement) {

@@ -144,7 +144,7 @@ const receivePreviewUpdates =
   storedPreviewUpdatePreference ??
   packageMetadata.puddingReleaseChannel === "preview";
 const simulatedUpdateVersion =
-  !app.isPackaged && process.env.PUDDING_UPDATE_TEST_STATE === "downloaded" ? "99.0.0-test" : "";
+  !app.isPackaged && process.env.PUDDING_UPDATE_TEST_STATE === "available" ? "99.0.0-test" : "";
 const updateManager = new UpdateManager({
   updater: autoUpdater,
   isPackaged: app.isPackaged,
@@ -153,6 +153,7 @@ const updateManager = new UpdateManager({
   feedURL: updateFeedURL,
   simulatedVersion: simulatedUpdateVersion,
   beforeInstall: prepareForUpdateInstall,
+  onDownloadRequest: confirmUpdateDownload,
   onError: (error) => console.warn("[electron] update failed", error),
   onInteractiveResult: showInteractiveUpdateResult,
   onSimulatedInstall: showSimulatedUpdateResult,
@@ -581,6 +582,12 @@ function updateApplicationMenu() {
 
 function updateMenuItem() {
   const state = updateManager.getState();
+  if (state.status === updateStatuses.available) {
+    return {
+      label: nativeMenuText("downloadUpdate"),
+      click: () => void updateManager.download(),
+    };
+  }
   if (state.status === updateStatuses.downloaded || state.status === updateStatuses.installing) {
     return {
       enabled: state.status === updateStatuses.downloaded,
@@ -652,18 +659,6 @@ async function showInteractiveUpdateResult(result) {
     );
     return;
   }
-  if (result.kind === "downloading") {
-    await showUpdateMessage(
-      {
-        buttons: [nativeMenuText("ok")],
-        message: nativeText(shellLocale, "updateDownloadStartedMessage", { version: result.version }),
-        title: nativeMenuText("updateAvailableTitle"),
-        type: "info",
-      },
-      true,
-    );
-    return;
-  }
   if (result.kind === "downloaded") {
     return;
   }
@@ -684,6 +679,22 @@ async function showInteractiveUpdateResult(result) {
     app.relaunch();
     app.exit(1);
   }
+}
+
+async function confirmUpdateDownload({ version }) {
+  const result = await showUpdateMessage(
+    {
+      buttons: [nativeMenuText("downloadUpdate"), nativeMenuText("notNow")],
+      cancelId: 1,
+      defaultId: 0,
+      message: nativeText(shellLocale, "updateAvailableMessage", { version }),
+      noLink: true,
+      title: nativeMenuText("updateAvailableTitle"),
+      type: "info",
+    },
+    true,
+  );
+  return result.response === 0;
 }
 
 function showSimulatedUpdateResult() {
@@ -1036,7 +1047,7 @@ function requestBrowserAutomationLifecycle(phase, event, target) {
       browserAutomationLifecycleWaiters.delete(requestID);
       resolve(Boolean(ok));
     };
-    const timer = setTimeout(() => complete(false), 500);
+    const timer = setTimeout(() => complete(false), 1_500);
     timer.unref?.();
     browserAutomationLifecycleWaiters.set(requestID, { complete, senderID: sender.id });
     try {
@@ -1141,6 +1152,11 @@ ipcMain.handle("pudding:desktop:set-locale", (event, locale) => {
 ipcMain.handle("pudding:desktop:update:get-state", (event) => {
   assertTrustedSender(event);
   return updateManager.getState();
+});
+
+ipcMain.handle("pudding:desktop:update:download", async (event) => {
+  assertTrustedSender(event);
+  return updateManager.download();
 });
 
 ipcMain.handle("pudding:desktop:update:activate", async (event) => {

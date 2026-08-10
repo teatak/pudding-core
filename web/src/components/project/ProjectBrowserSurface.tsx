@@ -105,7 +105,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   const [narrowPane, setNarrowPane] = useState<"tree" | "viewer">("tree");
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const searchRevealSerial = useRef(0);
-  const resizeCursorCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!active) return;
@@ -129,32 +128,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     };
   }, [active]);
 
-  useEffect(
-    () => () => resizeCursorCleanupRef.current?.(),
-    [],
-  );
-
-  const startProjectBrowserResize = (pointerID: number) => {
-    resizeCursorCleanupRef.current?.();
-    const root = document.documentElement;
-    root.dataset.projectBrowserResizing = "true";
-
-    const cleanup = () => {
-      window.removeEventListener("pointerup", handlePointerEnd, true);
-      window.removeEventListener("pointercancel", handlePointerEnd, true);
-      window.removeEventListener("blur", cleanup);
-      delete root.dataset.projectBrowserResizing;
-      resizeCursorCleanupRef.current = null;
-    };
-    const handlePointerEnd = (event: PointerEvent) => {
-      if (event.pointerId === pointerID) cleanup();
-    };
-
-    window.addEventListener("pointerup", handlePointerEnd, true);
-    window.addEventListener("pointercancel", handlePointerEnd, true);
-    window.addEventListener("blur", cleanup);
-    resizeCursorCleanupRef.current = cleanup;
-  };
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
   const dirtyRootIDs = useMemo(() => new Set(workspace.tabs.flatMap((tab) => (
     !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
@@ -702,7 +675,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <div
       ref={surfaceRef}
       aria-hidden={!active}
-      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}
+      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
     >
       {narrow ? (
         <div className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]">
@@ -712,7 +685,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
         <ResizablePanelGroup
           className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
           defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
-          disableCursor
           id="project-browser-layout"
           orientation="horizontal"
           onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout)}
@@ -720,12 +692,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           <ResizablePanel id="tree" className="min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
             {projectSidebar}
           </ResizablePanel>
-          <ResizableHandle
-            className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize"
-            onPointerDownCapture={(event) => {
-              if (event.button === 0) startProjectBrowserResize(event.pointerId);
-            }}
-          />
+          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize" />
           <ResizablePanel id="viewer" className="min-w-0" minSize={compact ? 240 : 280}>
             {projectViewer}
           </ResizablePanel>

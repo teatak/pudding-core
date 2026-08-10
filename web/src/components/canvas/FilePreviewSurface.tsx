@@ -83,7 +83,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
       aria-hidden={!active}
       className={cn(
         "absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden bg-[var(--workspace-background)] text-card-foreground",
-        !active && "pointer-events-none invisible opacity-0",
+        !active && "hidden",
       )}
     >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">

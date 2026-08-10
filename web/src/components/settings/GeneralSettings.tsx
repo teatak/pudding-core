@@ -84,6 +84,7 @@ export function GeneralSettings({
   const savedPrompt = userPromptQuery.data?.content || "";
   const previewUpdateBusy =
     desktopUpdateState?.status === "checking" ||
+    desktopUpdateState?.status === "available" ||
     desktopUpdateState?.status === "downloading" ||
     desktopUpdateState?.status === "downloaded" ||
     desktopUpdateState?.status === "installing";

@@ -16,18 +16,13 @@ import {
   putCanvasItem,
   openSavedCanvasItem,
   saveCanvasItem,
-  type BrowserTab,
   type CanvasItemPayload,
   type Terminal,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { electronBrowserBridge } from "@/browser/electronBridge";
+import { useBrowserRuntimeTabs } from "@/browser/BrowserRuntimeProvider";
 import { browserTabTitle } from "@/browser/helpers";
 import { activateBrowserPageFindRegion } from "@/browser/pageFindTarget";
-import {
-  useElectronRequiredBrowserTabs,
-  type ElectronBrowserSurfaceTab,
-} from "@/browser/useElectronRequiredBrowserTabs";
 import type { GalleryLayout } from "@/components/canvas/CanvasItemContent";
 import {
   CanvasItemActions,
@@ -65,7 +60,7 @@ import {
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
 import { retainWorkspaceActivities } from "@/state/workspaceActivityStore";
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
   setVisibleUIContext,
@@ -99,6 +94,7 @@ export const WorkspacePane = memo(function WorkspacePane({
 }: WorkspacePaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const workspaceOpen = useWorkspaceOpen();
   const terminalDimensionsRef = useRef<TerminalDimensions>({ ...DEFAULT_TERMINAL_DIMENSIONS });
   const actorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
@@ -108,7 +104,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
-  const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
@@ -155,7 +150,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   }, [actorSessionID]);
   const primaryFilePreviews = useFilePreviews(sessionID);
   const secondaryFilePreviews = useFilePreviews(secondarySessionID);
-  const requiredBrowserTabs = useElectronRequiredBrowserTabs(token);
   const allFilePreviews = useMemo(
     () =>
       [...primaryFilePreviews, ...secondaryFilePreviews].filter(
@@ -347,6 +341,11 @@ export const WorkspacePane = memo(function WorkspacePane({
     sessionID: actorSessionID,
     token,
   });
+  const requiredBrowserTabs = useBrowserRuntimeTabs(actorSessionID, browserTabs);
+  const browserSurfaceTabs = useMemo(
+    () => mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs),
+    [browserTabs, requiredBrowserTabs],
+  );
   const terminalActive = activeSurface === "terminal";
   const projectActive = activeSurface === "project" && hasProject;
   const getInitialTerminalDimensions = useCallback(() => terminalDimensionsRef.current, []);
@@ -402,41 +401,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (!actorSessionID) {
       return;
     }
-    setRetainedBrowserTabs((current) =>
-      sameResourceList(current[actorSessionID], browserTabs)
-        ? current
-        : { ...current, [actorSessionID]: browserTabs },
-    );
-  }, [actorSessionID, browserTabs]);
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge) {
-      return;
-    }
-    return bridge.onUpdated((snapshot) => {
-      if (snapshot.status !== "lost") {
-        return;
-      }
-      setRetainedBrowserTabs((current) => {
-        const tabs = current[snapshot.sessionID];
-        if (!tabs?.some((tab) => tab.id === snapshot.tabID)) {
-          return current;
-        }
-        const next = { ...current };
-        const remaining = tabs.filter((tab) => tab.id !== snapshot.tabID);
-        if (remaining.length > 0) {
-          next[snapshot.sessionID] = remaining;
-        } else {
-          delete next[snapshot.sessionID];
-        }
-        return next;
-      });
-    });
-  }, []);
-  useEffect(() => {
-    if (!actorSessionID) {
-      return;
-    }
     setRetainedTerminals((current) =>
       sameResourceList(current[actorSessionID], terminals)
         ? current
@@ -448,22 +412,11 @@ export const WorkspacePane = memo(function WorkspacePane({
       return;
     }
     retainedTokenRef.current = token;
-    setRetainedBrowserTabs({});
     setRetainedTerminals({});
     setRetainedFilePreviews({});
     setActiveFilePreviewIDs({});
     setCanvasGalleryActiveIndices({});
   }, [token]);
-  const mountedBrowserTabs = useMemo(() => {
-    const mounted: Record<string, ElectronBrowserSurfaceTab[]> = { ...retainedBrowserTabs };
-    if (actorSessionID) {
-      mounted[actorSessionID] = browserTabs;
-    }
-    Object.entries(requiredBrowserTabs).forEach(([targetSessionID, requiredTabs]) => {
-      mounted[targetSessionID] = mergeBrowserSurfaceTabs(mounted[targetSessionID], requiredTabs);
-    });
-    return mounted;
-  }, [actorSessionID, browserTabs, requiredBrowserTabs, retainedBrowserTabs]);
   const mountedTerminals = useMemo(
     () => actorSessionID
       ? { ...retainedTerminals, [actorSessionID]: terminals }
@@ -1249,19 +1202,17 @@ export const WorkspacePane = memo(function WorkspacePane({
             token={token}
           />
         ))}
-        {Object.entries(mountedBrowserTabs).map(([targetSessionID, tabs]) =>
-          tabs.length > 0 || (targetSessionID === actorSessionID && browserSurfaceVisible) ? (
-            <BrowserWorkspaceSurface
-              key={`browser:${targetSessionID}`}
-              active={targetSessionID === actorSessionID && browserActive}
-              activeTabID={targetSessionID === actorSessionID ? activeBrowserTabID : undefined}
-              pending={targetSessionID === actorSessionID && browserSurfacePending}
-              sessionID={targetSessionID}
-              tabs={tabs}
-              token={token}
-            />
-          ) : null,
-        )}
+        {actorSessionID && (browserSurfaceTabs.length > 0 || browserSurfaceVisible) ? (
+          <BrowserWorkspaceSurface
+            key={`browser:${actorSessionID}`}
+            active={browserActive && workspaceOpen}
+            activeTabID={activeBrowserTabID}
+            pending={browserSurfacePending}
+            sessionID={actorSessionID}
+            tabs={browserSurfaceTabs}
+            token={token}
+          />
+        ) : null}
         {Object.entries(mountedTerminals).map(([targetSessionID, sessionTerminals]) =>
           sessionTerminals.length > 0 ? (
             <TerminalSurface
@@ -1312,10 +1263,7 @@ function sameResourceList<T>(current: T[] | undefined, next: T[]) {
   return Boolean(current && current.length === next.length && current.every((item, index) => item === next[index]));
 }
 
-function mergeBrowserSurfaceTabs(
-  current: ElectronBrowserSurfaceTab[] | undefined,
-  required: ElectronBrowserSurfaceTab[],
-) {
+function mergeBrowserSurfaceTabs<T extends { id: string }>(current: T[] | undefined, required: T[]) {
   const next = [...(current || [])];
   required.forEach((tab) => {
     const index = next.findIndex((entry) => entry.id === tab.id);

@@ -76,7 +76,9 @@ export function FloatingTurnConsole({
   const completedDuration = !running ? turnDuration(selectedTurn) : "";
   const elapsed = phaseElapsed || completedDuration;
   const detailViewportRef = useRef<HTMLDivElement | null>(null);
+  const detailContentRef = useRef<HTMLDivElement | null>(null);
   const atLatestRef = useRef(true);
+  const previouslyExpandedRef = useRef(false);
   const autoExpandedForBlockingRef = useRef(false);
 
   useEffect(() => {
@@ -97,11 +99,31 @@ export function FloatingTurnConsole({
 
   useLayoutEffect(() => {
     const viewport = detailViewportRef.current;
-    if (!viewport || !expanded || !atLatestRef.current) {
+    const opening = expanded && !previouslyExpandedRef.current;
+    previouslyExpandedRef.current = expanded;
+    if (opening) {
+      atLatestRef.current = true;
+    }
+    if (!viewport || !expanded || (!opening && !atLatestRef.current)) {
       return;
     }
     viewport.scrollTop = viewport.scrollHeight;
   }, [expanded, selectedTurn]);
+
+  useLayoutEffect(() => {
+    const viewport = detailViewportRef.current;
+    const content = detailContentRef.current;
+    if (!expanded || !viewport || !content) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (atLatestRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [expanded]);
 
   const cancelQueued = useCallback(
     (clientMessageID: string) => updateQueued(clientMessageID, { status: "cancelled" }),
@@ -142,7 +164,7 @@ export function FloatingTurnConsole({
   return (
     <Collapsible
       className={cn(
-        "pointer-events-auto mx-auto flex w-[560px] max-w-[calc(100%_-_2.5rem)] min-h-0 flex-none flex-col overflow-hidden rounded-t-[16px] rounded-b-none border border-b-0 border-border/70 bg-card",
+        "pudding-floating-turn-console pointer-events-auto mx-auto flex w-[560px] max-w-[calc(100%_-_2.5rem)] min-h-0 flex-none flex-col overflow-hidden rounded-t-[16px] rounded-b-none border border-b-0 border-border/70 bg-card",
         expanded && "h-full",
       )}
       open={expanded}
@@ -224,44 +246,46 @@ export function FloatingTurnConsole({
             atLatestRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 8;
           }}
         >
-          {selectedTurn ? (
-            <TranscriptTurn
-              sessionID={session.id}
-              token={token}
-              turn={selectedTurn}
-              onAssistantRevealComplete={markAssistantRevealed}
-            />
-          ) : (
-            <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
-              {t("agentConsole.noTurn")}
-            </div>
-          )}
-          {submitError ? (
-            <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {submitError}
-            </div>
-          ) : null}
-          {queuedTurns.length > 0 ? (
-            <div className="mt-4 grid gap-3 border-t border-border/70 pt-3">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Clock3 className="size-3.5" />
-                {t("agentConsole.queuedCount").replace("{count}", String(queuedTurns.length))}
+          <div ref={detailContentRef}>
+            {selectedTurn ? (
+              <TranscriptTurn
+                sessionID={session.id}
+                token={token}
+                turn={selectedTurn}
+                onAssistantRevealComplete={markAssistantRevealed}
+              />
+            ) : (
+              <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
+                {t("agentConsole.noTurn")}
               </div>
-              {queuedTurns.map((turn) =>
-                turn.user ? (
-                  <UserInput
-                    key={turn.key}
-                    token={token}
-                    user={turn.user}
-                    onQueuedCancel={cancelQueued}
-                    onQueuedEditStart={startQueuedEdit}
-                    onQueuedSave={saveQueued}
-                    onQueuedSteer={activeTurnID ? guideQueued : undefined}
-                  />
-                ) : null,
-              )}
-            </div>
-          ) : null}
+            )}
+            {submitError ? (
+              <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {submitError}
+              </div>
+            ) : null}
+            {queuedTurns.length > 0 ? (
+              <div className="mt-4 grid gap-3 border-t border-border/70 pt-3">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Clock3 className="size-3.5" />
+                  {t("agentConsole.queuedCount").replace("{count}", String(queuedTurns.length))}
+                </div>
+                {queuedTurns.map((turn) =>
+                  turn.user ? (
+                    <UserInput
+                      key={turn.key}
+                      token={token}
+                      user={turn.user}
+                      onQueuedCancel={cancelQueued}
+                      onQueuedEditStart={startQueuedEdit}
+                      onQueuedSave={saveQueued}
+                      onQueuedSteer={activeTurnID ? guideQueued : undefined}
+                    />
+                  ) : null,
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       </CollapsibleContent>
     </Collapsible>

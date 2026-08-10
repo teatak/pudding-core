@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground";
 export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground hover:bg-[var(--workspace-tab-active-background)]";
+const libraryItemIconClassName = "!h-4 !w-4 !bg-transparent !text-muted-foreground [&>svg]:!h-4 [&>svg]:!w-4";
 
 export function CanvasLibraryMenuSections({
   closedItems,
@@ -115,7 +116,7 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove, startLayout }: { entry: S
   return (
     <div className={cn("group/saved mx-1 flex min-w-0 items-center rounded-md pr-2 hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-9" : "h-8")}>
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onOpen}>
-        <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
+        <CanvasKindIcon className={libraryItemIconClassName} kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover/saved:opacity-100 group-focus-within/saved:opacity-100">
@@ -133,7 +134,7 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore, startLayout }: { entr
   return (
     <div className={cn("group/closed mx-1 flex min-w-0 items-center rounded-md pr-2 hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-9" : "h-8")}>
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onRestore}>
-        <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
+        <CanvasKindIcon className={libraryItemIconClassName} kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <div className="relative flex h-6 w-12 shrink-0 items-center justify-end">

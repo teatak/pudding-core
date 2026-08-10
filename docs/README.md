@@ -26,6 +26,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [workspace-resize-performance-plan.md](workspace-resize-performance-plan.md) | Workspace 拖拽性能与 WebView 保活层改造 |
 | [attachments-multimodal-plan.md](attachments-multimodal-plan.md) | 图片主链路已完成；文本/PDF、音频与 GC 仍未完成 |
 | [voice-migration-plan.md](voice-migration-plan.md) | macOS runtime 发布链路仍在收尾 |
 | [electron-migration-plan.md](electron-migration-plan.md) | 主迁移完成；保留多会话生命周期的手动验收记录 |

@@ -80,6 +80,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import {
   Sidebar,
   SidebarContent,
@@ -102,6 +103,7 @@ import { useI18n } from "@/i18n";
 import {
   type DesktopUpdateState,
   activateDesktopUpdate,
+  downloadDesktopUpdate,
   getDesktopUpdateState,
   onDesktopMenuCommand,
   onDesktopUpdateState,
@@ -1752,7 +1754,7 @@ function RailThemeToggle() {
 function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean }) {
   const { t } = useI18n();
   const [state, setState] = useState<DesktopUpdateState | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const handledDownloadedVersionRef = useRef("");
   const runningTurns = useOverlayStore((current) => current.runningTurns);
   const turnPhases = useOverlayStore((current) => current.turnPhases);
 
@@ -1776,43 +1778,67 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
     };
   }, []);
 
-  if (state?.status !== "downloaded" && state?.status !== "installing") {
-    return null;
-  }
-  const installing = state.status === "installing";
   const hasActiveTurn =
     serverTurnRunning ||
     Object.values(runningTurns).some(Boolean) ||
     Object.values(turnPhases).some((phase) => isTurnPhaseActive(phase));
-  const restart = () => void activateDesktopUpdate();
-  return (
-    <>
-      <Button
-        className="mb-1 h-9 w-full justify-start gap-2 px-2 font-normal"
-        disabled={installing}
+  const downloaded = state?.status === "downloaded";
 
-        variant="secondary"
-        onClick={() => (hasActiveTurn ? setConfirmOpen(true) : restart())}
-      >
-        <span className="truncate">
-          {t(installing ? "update.restarting" : "update.restart")}
-          {state.version ? ` ${state.version}` : ""}
-        </span>
-        {installing ? <Spinner className="ml-auto size-4 shrink-0" /> : <ArrowRight className="ml-auto size-4 shrink-0" />}
-      </Button>
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("update.activeTurnTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("update.activeTurnDescription")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={restart}>{t("update.restartAnyway")}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+  useEffect(() => {
+    if (!downloaded) {
+      handledDownloadedVersionRef.current = "";
+      return;
+    }
+    const version = state?.version || "downloaded";
+    if (handledDownloadedVersionRef.current === version) {
+      return;
+    }
+    handledDownloadedVersionRef.current = version;
+    if (!hasActiveTurn) {
+      void activateDesktopUpdate();
+    }
+  }, [downloaded, hasActiveTurn, state?.version]);
+
+  if (
+    state?.status !== "available" &&
+    state?.status !== "downloading" &&
+    state?.status !== "downloaded" &&
+    state?.status !== "installing"
+  ) {
+    return null;
+  }
+  const available = state.status === "available";
+  const downloading = state.status === "downloading";
+  const installing = state.status === "installing";
+  const download = () => void downloadDesktopUpdate();
+  const restart = () => void activateDesktopUpdate();
+  const label = available
+    ? t("update.update")
+    : downloading
+      ? t("update.downloading")
+      : t(installing ? "update.restarting" : "update.restart");
+  return (
+    <Button
+      className="relative mb-1 h-10 w-full justify-start gap-2 overflow-hidden px-2 font-normal disabled:opacity-100"
+      disabled={downloading || installing}
+      variant="secondary"
+      onClick={downloaded ? restart : download}
+    >
+      <span className="truncate">
+        {label}
+        {available && state.version ? ` ${state.version}` : ""}
+      </span>
+      {downloading ? (
+        <>
+          <Progress aria-label={label} className="ml-auto h-1.5 w-16 shrink-0 bg-primary/10" value={state.percent ?? 0} />
+          <span className="w-8 shrink-0 text-right text-xs tabular-nums">{state.percent ?? 0}%</span>
+        </>
+      ) : installing ? (
+        <Spinner className="ml-auto size-4 shrink-0" />
+      ) : (
+        <ArrowRight className="ml-auto size-4 shrink-0" />
+      )}
+    </Button>
   );
 }
 

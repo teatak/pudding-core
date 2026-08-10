@@ -363,17 +363,20 @@ BrowserHost 生命周期收口审查(更新于 2026-07-13):
   防止不同版本连续构建时残留旧 `.app` 元数据。
 - Tray 与原生应用菜单支持简体中文、繁体中文和英文,并通过 preload IPC 跟随 Web
   语言设置实时切换;开发态 Tray 直接读取仓库 `assets/macos/TrayTemplate.png`。
-- 更新状态由 Electron main 统一管理:启动 15 秒后检查,之后每 6 小时检查;后台无更新或
-  检查失败不打扰用户,手动检查明确显示结果。桌面包只支持自动更新,不再提供 manual 构建模式。
-- 所有包必须使用 Developer ID 签名并完成公证;后台下载完成后显示“重新启动并更新”;
-  用户显式点击后先停止 browser bridge,等待 managed daemon 优雅退出,再调用 `quitAndInstall()`。
-  前端、daemon 和语言服务始终作为一个完整应用包更新,普通退出不会自动安装。
+- 更新状态由 Electron main 统一管理:启动 15 秒后检查,之后每 6 小时检查;后台发现更新只在
+  侧边栏显示“更新”,手动检查发现更新时先确认是否下载。桌面包只支持自动更新,不再提供
+  manual 构建模式。
+- 所有包必须使用 Developer ID 签名并完成公证;下载过程在侧边栏显示百分比和进度条。下载完成时
+  若没有运行中的 turn 则直接重启;否则显示“重启更新”。重启前先停止 browser bridge,等待
+  managed daemon 优雅退出,再调用 `quitAndInstall()`。前端、daemon 和语言服务始终作为一个
+  完整应用包更新,普通退出不会自动安装。
 - 正式自动更新必须使用 Developer ID 签名并完成公证。正式版本号以根目录 `package.json` 为准;
   `PUDDING_APP_VERSION` 只用于本地跨版本测试。
-- 更新交互无需发布即可测试:`PUDDING_UPDATE_TEST_STATE=downloaded make desktop-dev` 会在开发态
-  模拟已下载状态,点击按钮只展示安装中状态并恢复,不会关闭服务。完整检查/下载流程可先安装旧版,
+- 更新交互无需发布即可测试:`PUDDING_UPDATE_TEST_STATE=available make desktop-dev` 会在开发态
+  模拟可用更新和约 2 秒的下载进度;没有 turn 时模拟重启,有 turn 时显示“重启更新”,
+  不会实际关闭服务。完整检查/下载流程可先安装旧版,
   用更高的 `PUDDING_APP_VERSION` 构建新包,再运行 `make desktop-update-test`。该命令会启动本地
-  Range feed、拉起 `/Applications/Pudding.app`,并在用户点击“重新启动并更新”后自动检查安装版本、
+  Range feed、拉起 `/Applications/Pudding.app`,并在更新重启后自动检查安装版本、
   Developer ID 签名、公证票据、Gatekeeper 和包内权限。新旧版本必须使用同一 Developer ID。
 - 2026-07-14 验证:Apple Silicon 可交叉编译 arm64/x64 daemon、WebRTC、PortAudio 和 gopls;
   完整发布门禁会继续逐架构校验 DMG/ZIP/update metadata、签名、公证和 Gatekeeper。

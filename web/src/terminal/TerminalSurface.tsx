@@ -45,7 +45,7 @@ export const TerminalSurface = memo(function TerminalSurface({
       className={cn(
         "absolute inset-0 z-20 overflow-hidden rounded-none",
         resolved === "dark" ? "bg-[#0d1117] text-[#d8dee9]" : "bg-white text-[#24292f]",
-        !active && "pointer-events-none invisible opacity-0",
+        !active && "hidden",
       )}
     >
       {terminals.map((item) => (
@@ -282,7 +282,7 @@ function TerminalPane({
   return (
     <div
       aria-hidden={!active}
-      className={cn("absolute inset-0 p-2", !active && "pointer-events-none invisible")}
+      className={cn("absolute inset-0 p-2", !active && "hidden")}
       onMouseDown={() => terminalRef.current?.focus()}
     >
       <div ref={containerRef} className="h-full w-full overflow-hidden" />

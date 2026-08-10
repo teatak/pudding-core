@@ -18,7 +18,7 @@ export type DesktopEditorContextMenuRequest = {
 };
 
 export type DesktopUpdateState = {
-  status: "unavailable" | "idle" | "checking" | "downloading" | "downloaded" | "installing";
+  status: "unavailable" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing";
   receivePreviewUpdates: boolean;
   version: string;
   percent: number | null;
@@ -29,6 +29,7 @@ type ElectronDesktopBridge = {
   getHomeDirectory?: () => Promise<string>;
   getUpdateState?: () => Promise<DesktopUpdateState>;
   setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
+  downloadUpdate?: () => Promise<boolean>;
   activateUpdate?: () => Promise<boolean>;
   onMenuCommand?: (listener: (command: DesktopMenuCommand) => void) => () => void;
   onOAuthConnected?: (listener: (payload: OAuthReturnPayload) => void) => () => void;
@@ -173,6 +174,18 @@ export async function activateDesktopUpdate() {
   }
   try {
     return await bridge.activateUpdate();
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadDesktopUpdate() {
+  const bridge = desktopBridge();
+  if (!bridge?.downloadUpdate) {
+    return false;
+  }
+  try {
+    return await bridge.downloadUpdate();
   } catch {
     return false;
   }

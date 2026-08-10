@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileX, Globe, MousePointer2, RefreshCw } from "@/components/icons";
-import { createElement, useCallback, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
+import {
+  createElement,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type CSSProperties,
+  type HTMLAttributes,
+} from "react";
 
 import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -70,15 +80,20 @@ type HostFocusSnapshot = {
   };
 };
 
-export function ElectronWebviewBrowser({
-  activeTab: activeTabProp,
-  sessionID,
-  token,
-}: {
+export type ElectronWebviewRuntimeHandle = {
+  focusForAutomation: () => boolean;
+  releaseAutomationFocus: () => void;
+};
+
+export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   activeTab?: ElectronBrowserSurfaceTab;
   sessionID: string;
   token: string;
-}) {
+}>(function ElectronWebviewBrowser({
+  activeTab: activeTabProp,
+  sessionID,
+  token,
+}, ref) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const webviewRef = useRef<WebviewElement | null>(null);
@@ -144,6 +159,32 @@ export function ElectronWebviewBrowser({
       }
     }
   }, []);
+
+  const focusForAutomation = useCallback(() => {
+    releaseAutomationFocus();
+    const node = webviewRef.current;
+    if (hostCompositionActiveRef.current || !node?.isConnected || !webviewReadyRef.current) {
+      return false;
+    }
+    try {
+      hostFocusSnapshotRef.current = captureHostFocusSnapshot();
+      webviewFocusLeaseRef.current = acquireWebviewFocusLease(node);
+      node.focus({ preventScroll: true });
+      const focused = document.activeElement === node;
+      if (!focused) {
+        releaseAutomationFocus();
+      }
+      return focused;
+    } catch {
+      releaseAutomationFocus();
+      return false;
+    }
+  }, [releaseAutomationFocus]);
+
+  useImperativeHandle(ref, () => ({
+    focusForAutomation,
+    releaseAutomationFocus,
+  }), [focusForAutomation, releaseAutomationFocus]);
 
   const updateLoadError = useCallback((error: WebviewLoadError | null) => {
     loadErrorRef.current = error;
@@ -280,56 +321,6 @@ export function ElectronWebviewBrowser({
       document.removeEventListener("compositionend", handleCompositionEnd, true);
     };
   }, []);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge?.onAutomationStart || !ownerSessionID || !tabID) {
-      return;
-    }
-    return bridge.onAutomationStart((event) => {
-      if (event.sessionID !== ownerSessionID || event.tabID !== tabID || event.action !== "click") {
-        return;
-      }
-      releaseAutomationFocus();
-      let ready = false;
-      let focused = false;
-      const node = webviewRef.current;
-      try {
-        if (!hostCompositionActiveRef.current && node?.isConnected && webviewReadyRef.current) {
-          hostFocusSnapshotRef.current = captureHostFocusSnapshot();
-          webviewFocusLeaseRef.current = acquireWebviewFocusLease(node);
-          node.focus({ preventScroll: true });
-          ready = true;
-          focused = document.activeElement === node;
-        }
-      } catch {
-        ready = false;
-        focused = false;
-      }
-      if (!ready || !focused) {
-        releaseAutomationFocus();
-      }
-      if (event.requestID && bridge.completeAutomationLifecycle) {
-        void bridge.completeAutomationLifecycle({ requestID: event.requestID, ok: ready && focused }).catch(() => undefined);
-      }
-    });
-  }, [ownerSessionID, releaseAutomationFocus, tabID]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge?.onAutomationEnd || !ownerSessionID || !tabID) {
-      return;
-    }
-    return bridge.onAutomationEnd((event) => {
-      if (event.sessionID !== ownerSessionID || event.tabID !== tabID || event.action !== "click") {
-        return;
-      }
-      releaseAutomationFocus();
-      if (event.requestID && bridge.completeAutomationLifecycle) {
-        void bridge.completeAutomationLifecycle({ requestID: event.requestID, ok: true }).catch(() => undefined);
-      }
-    });
-  }, [ownerSessionID, releaseAutomationFocus, tabID]);
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -499,7 +490,7 @@ export function ElectronWebviewBrowser({
       {automationCursor ? <BrowserAutomationCursor cursor={automationCursor} /> : null}
     </div>
   );
-}
+});
 
 function captureHostFocusSnapshot(): HostFocusSnapshot | null {
   const element = document.activeElement;

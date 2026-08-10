@@ -42,7 +42,7 @@ export const CanvasItemSurface = memo(function CanvasItemSurface({
       aria-hidden={!active}
       className={cn(
         "absolute inset-0 min-h-0 overflow-auto",
-        active ? "z-10" : "pointer-events-none invisible z-0",
+        active ? "z-10" : "hidden",
         backgroundClass,
       )}
     >
