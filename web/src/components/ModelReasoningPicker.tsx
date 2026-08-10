@@ -17,10 +17,7 @@ import {
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
-import {
-  defaultReasoningEffortForSelection,
-  reasoningEffortOptionsForSelection,
-} from "@/components/ReasoningEffortChip";
+import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -168,10 +165,7 @@ export function ModelReasoningPicker({
     [currentModelAvailable, resolveSelection, selectedModel, selectedProvider],
   );
   const reasoningOptions = reasoningEffortOptionsForSelection(resolvedSelection);
-  const defaultReasoningEffort = defaultReasoningEffortForSelection(resolvedSelection);
   const selectedReasoning = reasoningOptions.includes(reasoningValue) ? reasoningValue : "auto";
-  const knownDefaultReasoning = defaultReasoningEffort && reasoningOptions.includes(defaultReasoningEffort) ? defaultReasoningEffort : undefined;
-  const displayReasoning = selectedReasoning === "auto" && knownDefaultReasoning ? knownDefaultReasoning : selectedReasoning;
 
   const [viewedProfileID, setViewedProfileID] = useState(selectedProvider);
   useEffect(() => {
@@ -204,7 +198,7 @@ export function ModelReasoningPicker({
     ? providerPresetForModel(visibleModel)?.id || providerBrandKey(activeProfile) || selectedProvider
     : "";
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
-  const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${displayReasoning}`) : "";
+  const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${selectedReasoning}`) : "";
   const triggerLabel = reasoningLabel ? `${label} · ${reasoningLabel}` : label;
 
   return (
@@ -250,7 +244,7 @@ export function ModelReasoningPicker({
         align="end"
         className={cn(
           "max-h-[min(28rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0",
-          selectableProfiles.length > 1 ? "w-[19rem]" : "w-[12rem]",
+          selectableProfiles.length > 1 ? "w-[19rem]" : "w-[13rem]",
         )}
         collisionPadding={8}
         side="top"
@@ -264,7 +258,7 @@ export function ModelReasoningPicker({
         }}
       >
         {reasoningOptions.length > 0 ? (
-          <div className="shrink-0 border-b border-border/70 p-1.5">
+          <div className="shrink-0 border-b border-border/70 px-1 py-1.5">
             <DropdownMenu
               modal={false}
               open={reasoningMenu.open}
@@ -272,14 +266,14 @@ export function ModelReasoningPicker({
             >
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex h-8 w-full items-center rounded-md px-2 text-left text-[13px] hover:bg-control-hover active:bg-control-active data-[state=open]:bg-control-hover"
+                  className="flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs hover:bg-control-hover active:bg-control-active data-[state=open]:bg-control-hover"
                   type="button"
                   onPointerEnter={reasoningMenu.openFromHover}
                   onPointerLeave={reasoningMenu.closeFromHover}
                 >
-                  <span className="text-muted-foreground">{t("provider.reasoningEffort")}</span>
-                  <span className="ml-auto">{reasoningLabel}</span>
-                  <ChevronRight className="ml-2 size-3.5 text-muted-foreground" />
+                  <span className="whitespace-nowrap text-muted-foreground">{t("provider.reasoningEffort")}</span>
+                  <span className="ml-auto whitespace-nowrap">{reasoningLabel}</span>
+                  <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -292,7 +286,7 @@ export function ModelReasoningPicker({
                 onPointerLeave={reasoningMenu.closeFromHover}
               >
                 <DropdownMenuRadioGroup
-                  value={displayReasoning}
+                  value={selectedReasoning}
                   onValueChange={(next) => {
                     onReasoningChange(next === "auto" ? "" : next);
                     reasoningMenu.close();
