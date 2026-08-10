@@ -1790,13 +1790,11 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
       return;
     }
     const version = state?.version || "downloaded";
-    if (handledDownloadedVersionRef.current === version) {
+    if (handledDownloadedVersionRef.current === version || hasActiveTurn) {
       return;
     }
     handledDownloadedVersionRef.current = version;
-    if (!hasActiveTurn) {
-      void activateDesktopUpdate();
-    }
+    void activateDesktopUpdate();
   }, [downloaded, hasActiveTurn, state?.version]);
 
   if (
