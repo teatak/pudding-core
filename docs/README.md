@@ -84,4 +84,5 @@
 [0.1.20](release-report-0.1.20.md) ·
 [0.1.21](release-report-0.1.21.md) ·
 [0.1.22](release-report-0.1.22.md) ·
-[0.1.23](release-report-0.1.23.md)
+[0.1.23](release-report-0.1.23.md) ·
+[0.1.24](release-report-0.1.24.md)

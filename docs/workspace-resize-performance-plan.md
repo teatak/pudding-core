@@ -1,8 +1,8 @@
 # Workspace 拖拽性能与 WebView 保活层改造计划
 
-> 状态:核心改造已实施；持续 Performance trace 作为发布前验收  
-> 日期:2026-08-10  
-> 范围:Electron 桌面端 Agent Console 与 Workspace 的横向拖拽、Workspace 显隐、浏览器 WebView 生命周期。  
+> 状态:核心改造已实施；持续 Performance trace 作为发布前验收
+> 日期:2026-08-10
+> 范围:Electron 桌面端 Agent Console 与 Workspace 的横向拖拽、Workspace 显隐、浏览器 WebView 生命周期。
 > 结论:继续使用 Renderer `<webview>`，但把 WebView 运行时从 Workspace 布局树中分离到固定父节点的保活层；Workspace 只负责浏览器 Chrome 和 viewport 占位，不再负责 WebView 生命周期。
 
 ## 0. 结论
