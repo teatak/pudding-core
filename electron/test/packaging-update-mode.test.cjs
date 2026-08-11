@@ -6,6 +6,15 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..", "..");
 
+test("desktop development and packaging use the same exact Electron version", () => {
+  const webPackage = JSON.parse(fs.readFileSync(path.join(root, "web", "package.json"), "utf8"));
+  assert.match(webPackage.devDependencies.electron, /^\d+\.\d+\.\d+$/);
+  assert.equal(
+    loadConfigValue("electronVersion", signedBuildEnv()),
+    webPackage.devDependencies.electron,
+  );
+});
+
 test("direct Electron Builder packaging is rejected", () => {
   assert.throws(
     () => loadConfigValue("appId", { PUDDING_PACKAGING_PIPELINE: "" }),

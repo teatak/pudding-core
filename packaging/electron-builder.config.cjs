@@ -1,6 +1,7 @@
 const path = require("node:path");
 
 const packageMetadata = require("../package.json");
+const webPackageMetadata = require("../web/package.json");
 const { resolveReleaseChannel } = require("./release-channel.cjs");
 
 const root = path.resolve(__dirname, "..");
@@ -15,6 +16,7 @@ if (String(process.env.PUDDING_UPDATE_MODE || "").trim()) {
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
 const releaseVersion = requestedVersion || packageMetadata.version;
 const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, releaseVersion);
+const electronVersion = exactElectronVersion(webPackageMetadata.devDependencies?.electron);
 const notarizationConfigured =
   Boolean(String(process.env.APPLE_KEYCHAIN_PROFILE || "").trim()) ||
   Boolean(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ||
@@ -36,7 +38,7 @@ if (requestedVersion) {
 module.exports = {
   appId: "com.teatak.pudding",
   productName: "Pudding",
-  electronVersion: "43.0.0",
+  electronVersion,
   forceCodeSigning: true,
   asar: true,
   artifactName: "${productName}-${version}-${arch}.${ext}",
@@ -111,4 +113,12 @@ function normalizeSigningIdentity(identity) {
     return identity;
   }
   return identity.replace(/^Developer ID Application:\s*/i, "");
+}
+
+function exactElectronVersion(version) {
+  const normalized = String(version || "").trim();
+  if (!/^\d+\.\d+\.\d+$/.test(normalized)) {
+    throw new Error("web devDependency electron must use an exact x.y.z version");
+  }
+  return normalized;
 }
