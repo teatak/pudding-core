@@ -18,6 +18,7 @@ export const session = z.object({
   createdAt: z.string(), // RFC3339
   updatedAt: z.string(),
   lastActivityAt: z.string(),
+  archivedAt: z.string().optional(),
   running: z.boolean(), // 读取时从 turns 派生,rail 运行态指示
   backgroundProcessCount: z.number().int().nonnegative(),
 });

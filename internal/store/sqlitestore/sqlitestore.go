@@ -95,6 +95,8 @@ const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_in
 
 const messageSelectColumnsAliasM = `m.id,m.session_id,m.turn_id,m.role,m.kind,m.text,m.parts,m.turn_index,m.metadata,m.client_message_id,m.interrupted,m.created_at`
 
+const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_app_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
+
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) CreateProject(ctx context.Context, project *store.Project) error {
@@ -123,10 +125,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
-		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id)
+		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0)
 		FROM projects p
 		ORDER BY COALESCE(
-			(SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id),
+			(SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0),
 			p.updated_at
 		) DESC, p.created_at DESC`)
 	if err != nil {
@@ -222,35 +224,34 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	var sess store.Session
-	var created, updated, lastActivity int64
-	var loadedAppIDs string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
-		return nil, err
-	}
-	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
-	if sess.ActiveMode == "" {
-		sess.ActiveMode = store.ModeChat
-	}
-	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
-	return &sess, nil
+	return s.getSessionDB(ctx, id)
 }
 
-func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
+func (s *Store) ListSessions(ctx context.Context, options ...store.SessionListOptions) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
+	resolved := store.ResolveSessionListOptions(options)
+	where := "s.archived_at=0"
+	order := "s.last_activity_at DESC, s.created_at DESC"
+	switch resolved.Scope {
+	case store.SessionListActive:
+	case store.SessionListArchived:
+		where = "s.archived_at>0"
+		order = "s.archived_at DESC, s.last_activity_at DESC"
+	case store.SessionListAll:
+		where = "1=1"
+	default:
+		return nil, store.ErrInvalidSession
+	}
+	args := make([]any, 0, 2)
+	if resolved.Query != "" {
+		where += " AND (instr(lower(s.title),lower(?))>0 OR instr(lower(coalesce(p.name,'')),lower(?))>0)"
+		args = append(args, resolved.Query, resolved.Query)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+sessionSelectColumnsAliasS+`
+		FROM sessions s LEFT JOIN projects p ON p.id=s.project_id
+		WHERE `+where+` ORDER BY `+order, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -258,21 +259,11 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 
 	out := make([]*store.Session, 0)
 	for rows.Next() {
-		var sess store.Session
-		var created, updated, lastActivity int64
-		var loadedAppIDs string
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
+		sess, err := scanSession(rows)
+		if err != nil {
 			return nil, err
 		}
-		if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
-			return nil, err
-		}
-		sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
-		if sess.ActiveMode == "" {
-			sess.ActiveMode = store.ModeChat
-		}
-		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
-		out = append(out, &sess)
+		out = append(out, sess)
 	}
 	return out, rows.Err()
 }
@@ -283,7 +274,7 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 	}
 	var out *store.Session
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		sess, err := getSessionTx(ctx, tx, id)
+		sess, err := getSessionAnyTx(ctx, tx, id)
 		if err != nil {
 			return err
 		}
@@ -345,6 +336,82 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		return nil
 	})
 	return out, err
+}
+
+func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, error) {
+	var out *store.Session
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		now := time.Now()
+		res, err := tx.ExecContext(ctx,
+			`UPDATE sessions SET archived_at=?,updated_at=? WHERE id=? AND archived_at=0`,
+			unixMS(now), unixMS(now), id,
+		)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE queued_inputs SET status=?,updated_at=? WHERE session_id=? AND status IN (?,?)`,
+			store.QueuedInputCancelled, unixMS(now), id, store.QueuedInputQueued, store.QueuedInputEditing,
+		); err != nil {
+			return err
+		}
+		out, err = getSessionAnyTx(ctx, tx, id)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) RestoreSession(ctx context.Context, id string) (*store.Session, error) {
+	var out *store.Session
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		now := time.Now()
+		res, err := tx.ExecContext(ctx,
+			`UPDATE sessions SET archived_at=0,updated_at=? WHERE id=? AND archived_at>0`,
+			unixMS(now), id,
+		)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		out, err = getSessionTx(ctx, tx, id)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) ListExpiredArchivedSessionIDs(ctx context.Context, cutoff time.Time) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM sessions WHERE archived_at>0 AND archived_at<=? ORDER BY archived_at ASC`,
+		unixMS(cutoff),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
@@ -901,7 +968,11 @@ func (s *Store) QueuedSessions(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT session_id FROM queued_inputs WHERE status=? ORDER BY session_id ASC`,
+		`SELECT DISTINCT q.session_id
+		 FROM queued_inputs q
+		 JOIN sessions s ON s.id=q.session_id
+		 WHERE q.status=? AND s.archived_at=0
+		 ORDER BY q.session_id ASC`,
 		store.QueuedInputQueued,
 	)
 	if err != nil {
@@ -1650,7 +1721,7 @@ func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput)
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+	if _, err := getSessionAnyTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
 	if in.Exact {
@@ -2105,33 +2176,19 @@ func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) 
 
 // getSessionDB 是 getSessionTx 的免事务版本,服务只读单查。
 func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
-	var sess store.Session
-	var created, updated, lastActivity int64
-	var loadedAppIDs string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+	sess, err := scanSession(s.db.QueryRowContext(ctx,
+		`SELECT `+sessionSelectColumnsAliasS+` FROM sessions s WHERE s.id=? AND s.archived_at=0`, id,
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
-		return nil, err
-	}
-	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
-	if sess.ActiveMode == "" {
-		sess.ActiveMode = store.ModeChat
-	}
-	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
-	return &sess, nil
+	return sess, err
 }
 
 func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
-		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id)
+		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0)
 		FROM projects p
 		WHERE p.id=?`, id)
 	project, err := scanProjectWithLastActivity(row)
@@ -2159,27 +2216,23 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 }
 
 func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
-	var sess store.Session
-	var created, updated, lastActivity int64
-	var loadedAppIDs string
-	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+	sess, err := scanSession(tx.QueryRowContext(ctx,
+		`SELECT `+sessionSelectColumnsAliasS+` FROM sessions s WHERE s.id=? AND s.archived_at=0`, id,
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
-	if err != nil {
-		return nil, err
+	return sess, err
+}
+
+func getSessionAnyTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
+	sess, err := scanSession(tx.QueryRowContext(ctx,
+		`SELECT `+sessionSelectColumnsAliasS+` FROM sessions s WHERE s.id=?`, id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
 	}
-	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
-		return nil, err
-	}
-	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
-	if sess.ActiveMode == "" {
-		sess.ActiveMode = store.ModeChat
-	}
-	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
-	return &sess, nil
+	return sess, err
 }
 
 func getProjectTx(ctx context.Context, tx *sql.Tx, id string) (*store.Project, error) {
@@ -2360,6 +2413,48 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, ev *event.Event) error {
 
 type messageScanner interface {
 	Scan(dest ...any) error
+}
+
+func scanSession(row messageScanner) (*store.Session, error) {
+	var sess store.Session
+	var created, updated, lastActivity, archived int64
+	var loadedAppIDs string
+	if err := row.Scan(
+		&sess.ID,
+		&sess.Title,
+		&sess.Provider,
+		&sess.Model,
+		&sess.ReasoningEffort,
+		&sess.ReasoningModelKey,
+		&sess.ActiveMode,
+		&sess.ModeLease,
+		&sess.ProjectID,
+		&loadedAppIDs,
+		&sess.Pinned,
+		&sess.PinnedOrder,
+		&created,
+		&updated,
+		&lastActivity,
+		&archived,
+		&sess.Running,
+	); err != nil {
+		return nil, err
+	}
+	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
+		return nil, err
+	}
+	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
+	if sess.ActiveMode == "" {
+		sess.ActiveMode = store.ModeChat
+	}
+	sess.CreatedAt = timeFromMS(created)
+	sess.UpdatedAt = timeFromMS(updated)
+	sess.LastActivityAt = timeFromMS(lastActivity)
+	if archived > 0 {
+		archivedAt := timeFromMS(archived)
+		sess.ArchivedAt = &archivedAt
+	}
+	return &sess, nil
 }
 
 func scanProject(row messageScanner) (*store.Project, error) {

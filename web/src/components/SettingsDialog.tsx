@@ -1,5 +1,6 @@
 import {
   Activity,
+  Archive,
   AudioLines,
   BookOpen,
   Globe,
@@ -16,6 +17,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { AboutSettings } from "@/components/settings/AboutSettings";
+import { ArchivedSessionsSettings } from "@/components/settings/ArchivedSessionsSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { BrowserSettings } from "@/components/settings/BrowserSettings";
 import { ProviderSettings } from "@/components/settings/ProviderSettings";
@@ -103,6 +105,11 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
         id: "usage",
         icon: Activity,
         labelKey: "settings.section.usage",
+      },
+      {
+        id: "archives",
+        icon: Archive,
+        labelKey: "settings.section.archives",
       },
       {
         id: "advanced",
@@ -239,6 +246,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
               </header>
               <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pt-4 pb-5 sm:px-6 sm:pt-5 sm:pb-6">
                 {active === "usage" ? <UsageSettings token={token} /> : null}
+                {active === "archives" ? <ArchivedSessionsSettings token={token} /> : null}
                 {active === "dialogue" ? <GeneralSettings token={token} onDirtyChange={setActiveDirty} /> : null}
                 {active === "voice" ? <VoiceSettings token={token} /> : null}
                 {active === "advanced" ? (
@@ -363,7 +371,7 @@ function SettingsSidebar({
                   const isActive = section.id === active;
                   return (
                     <SidebarMenuItem key={section.id}>
-                      <SidebarMenuButton asChild className="cursor-default" isActive={isActive}>
+                      <SidebarMenuButton asChild className="cursor-default data-active:font-normal!" isActive={isActive}>
                         <a
                           aria-current={isActive ? "page" : undefined}
                           href={`#settings-${section.id}`}

@@ -17,8 +17,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     pinned_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL, -- unix ms
     updated_at INTEGER NOT NULL,
-    last_activity_at INTEGER NOT NULL
+    last_activity_at INTEGER NOT NULL,
+    archived_at INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS sessions_archived_at
+    ON sessions(archived_at);
 
 CREATE TABLE IF NOT EXISTS projects (
     id            TEXT PRIMARY KEY,

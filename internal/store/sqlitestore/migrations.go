@@ -17,7 +17,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 9
+	currentSchemaVersion       = 10
 )
 
 var (
@@ -223,6 +223,19 @@ var schemaMigrations = map[int]schemaMigration{
 	},
 	9: func(tx *sql.Tx) error {
 		return removeLoadedAppIDs(tx, "project-files", "source-control", "code-intelligence")
+	},
+	10: func(tx *sql.Tx) error {
+		exists, err := tableColumnExists(tx, "sessions", "archived_at")
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := tx.Exec(`ALTER TABLE sessions ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_archived_at ON sessions(archived_at)`)
+		return err
 	},
 }
 
@@ -602,6 +615,8 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, nil)
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
+	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
+	out.indexes = append(out.indexes, "sessions_archived_at")
 	out.forbiddenTables = []string{"project_app_bindings"}
 	return out
 }()

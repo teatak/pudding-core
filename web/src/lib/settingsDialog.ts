@@ -6,6 +6,7 @@ export type SettingsSectionID =
   | "tools"
   | "browser"
   | "usage"
+  | "archives"
   | "advanced"
   | "about";
 

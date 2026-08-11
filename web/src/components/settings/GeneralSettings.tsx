@@ -64,6 +64,7 @@ export function GeneralSettings({
   const [editorFontSize, setEditorFontSize] = useState("12");
   const [editorLineHeight, setEditorLineHeight] = useState("20");
   const [settingsTransitionsReady, setSettingsTransitionsReady] = useState(false);
+  const [desktopUpdateTransitionReady, setDesktopUpdateTransitionReady] = useState(false);
   const [pendingSettingSaveCount, setPendingSettingSaveCount] = useState(0);
   const [pendingSettingCounts, setPendingSettingCounts] = useState<Record<string, number>>({});
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
@@ -111,6 +112,14 @@ export function GeneralSettings({
       unsubscribe();
     };
   }, [view]);
+
+  useEffect(() => {
+    if (!desktopUpdateState) {
+      return;
+    }
+    const frameID = window.requestAnimationFrame(() => setDesktopUpdateTransitionReady(true));
+    return () => window.cancelAnimationFrame(frameID);
+  }, [desktopUpdateState]);
 
   useEffect(() => {
     if (userPromptQuery.isSuccess) {
@@ -495,6 +504,7 @@ export function GeneralSettings({
         </div>
         <div className={SETTINGS_GROUP_CLASS}>
           <SettingsToggleRow
+            animate={desktopUpdateTransitionReady}
             checked={desktopUpdateState?.receivePreviewUpdates === true}
             description={t("settings.general.receivePreviewUpdatesDesc")}
             disabled={

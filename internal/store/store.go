@@ -54,9 +54,10 @@ type Session struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
 	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
-	LastActivityAt time.Time `json:"lastActivityAt"`
-	Pinned         bool      `json:"pinned"`
-	PinnedOrder    int64     `json:"pinnedOrder"`
+	LastActivityAt time.Time  `json:"lastActivityAt"`
+	Pinned         bool       `json:"pinned"`
+	PinnedOrder    int64      `json:"pinnedOrder"`
+	ArchivedAt     *time.Time `json:"archivedAt,omitempty"`
 	// Running 是读取时从 turns 派生的运行态(不落库,turns 仍是唯一事实源),
 	// 服务会话栏"哪个 session 正在干活"的指示。
 	Running bool `json:"running"`
@@ -77,6 +78,31 @@ type SessionUpdate struct {
 	Pinned          *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
+}
+
+type SessionListScope string
+
+const (
+	SessionListActive   SessionListScope = "active"
+	SessionListArchived SessionListScope = "archived"
+	SessionListAll      SessionListScope = "all"
+)
+
+type SessionListOptions struct {
+	Scope SessionListScope
+	Query string
+}
+
+func ResolveSessionListOptions(options []SessionListOptions) SessionListOptions {
+	resolved := SessionListOptions{Scope: SessionListActive}
+	if len(options) > 0 {
+		resolved = options[0]
+		if resolved.Scope == "" {
+			resolved.Scope = SessionListActive
+		}
+	}
+	resolved.Query = strings.TrimSpace(resolved.Query)
+	return resolved
 }
 
 type ApprovalMode string
@@ -2137,8 +2163,12 @@ type Store interface {
 
 	CreateSession(ctx context.Context, s *Session) error
 	GetSession(ctx context.Context, id string) (*Session, error)
-	ListSessions(ctx context.Context) ([]*Session, error)
+	// ListSessions 默认只返回 active session；内部维护任务必须显式使用 all。
+	ListSessions(ctx context.Context, options ...SessionListOptions) ([]*Session, error)
 	UpdateSession(ctx context.Context, id string, upd SessionUpdate) (*Session, error)
+	ArchiveSession(ctx context.Context, id string) (*Session, error)
+	RestoreSession(ctx context.Context, id string) (*Session, error)
+	ListExpiredArchivedSessionIDs(ctx context.Context, cutoff time.Time) ([]string, error)
 	DeleteSession(ctx context.Context, id string) error
 
 	// BeginTurn:幂等检查(clientMessageID 重复则返回 Duplicate)→ 校验无

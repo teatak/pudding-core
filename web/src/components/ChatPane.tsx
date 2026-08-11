@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Ellipsis, FolderClosed, Trash, X } from "@/components/icons";
+import { Archive, Ellipsis, FolderClosed, X } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import {
-  deleteSession,
+  archiveSession,
   listProjects,
   listSessions,
   updateSession,
@@ -28,16 +29,6 @@ import { PhaseDot } from "@/components/PhaseDot";
 import { SessionAppsControl } from "@/components/SessionAppsControl";
 import { SessionModeIcon } from "@/components/SessionModeIcon";
 import { Spinner } from "@/components/Spinner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -117,8 +108,8 @@ export function ChatPane({
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
   });
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteSession(token, id),
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => archiveSession(token, id),
     onSuccess: async (_, deletedSessionID) => {
       const previous = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
       const remaining = previous?.sessions.filter((session) => session.id !== deletedSessionID) || [];
@@ -148,6 +139,7 @@ export function ChatPane({
       });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
+    onError: () => toast.error(t("session.archiveFailed")),
   });
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
@@ -350,11 +342,11 @@ export function ChatPane({
             <>
               <HeaderSessionTitle
                 key={selectedSession.id}
-                deletePending={deleteMutation.isPending}
+                archivePending={archiveMutation.isPending}
                 projectName={headerProjectName}
                 renamePending={renameMutation.isPending}
                 session={selectedSession}
-                onDelete={() => deleteMutation.mutate(selectedSession.id)}
+                onArchive={() => archiveMutation.mutate(selectedSession.id)}
                 onOpenProject={openProjects}
                 onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
                 onSearch={openConversationSearch}
@@ -432,18 +424,18 @@ function HeaderSessionTitle({
   session,
   projectName,
   renamePending,
-  deletePending,
+  archivePending,
   onRename,
-  onDelete,
+  onArchive,
   onOpenProject,
   onSearch,
 }: {
   session: Session;
   projectName?: string;
   renamePending: boolean;
-  deletePending: boolean;
+  archivePending: boolean;
   onRename: (title: string) => void;
-  onDelete: () => void;
+  onArchive: () => void;
   onOpenProject: () => void;
   onSearch: () => void;
 }) {
@@ -452,7 +444,6 @@ function HeaderSessionTitle({
   const [draft, setDraft] = useState(session.title);
   const [localTitle, setLocalTitle] = useState<string | null>(null);
   const [editWidth, setEditWidth] = useState<number | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const editAfterMenuCloseRef = useRef(false);
@@ -581,63 +572,45 @@ function HeaderSessionTitle({
         )}
       </div>
       {editing ? null : (
-        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={t("session.actions")}
-                className="pudding-toolbar-icon-button pudding-chat-title-action"
-                size="icon-sm"
-                tabIndex={-1}
-                variant="ghost"
-              >
-                <Ellipsis />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="w-36"
-              onCloseAutoFocus={(event) => {
-                if (!editAfterMenuCloseRef.current) {
-                  return;
-                }
-                event.preventDefault();
-                editAfterMenuCloseRef.current = false;
-                startEditing();
-              }}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={t("session.actions")}
+              className="pudding-toolbar-icon-button pudding-chat-title-action"
+              size="icon-sm"
+              tabIndex={-1}
+              variant="ghost"
             >
-              <DropdownMenuItem onSelect={onSearch}>
-                {t("conversationSearch.open")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => {
-                editAfterMenuCloseRef.current = true;
-              }}>
-                {t("session.rename")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={deletePending}
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                <Trash />
-                {t("session.delete")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
-              <AlertDialogDescription>{t("deleteSession.description")}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={onDelete}>
-                {t("common.delete")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-36"
+            onCloseAutoFocus={(event) => {
+              if (!editAfterMenuCloseRef.current) {
+                return;
+              }
+              event.preventDefault();
+              editAfterMenuCloseRef.current = false;
+              startEditing();
+            }}
+          >
+            <DropdownMenuItem onSelect={onSearch}>
+              {t("conversationSearch.open")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => {
+              editAfterMenuCloseRef.current = true;
+            }}>
+              {t("session.rename")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={archivePending} onSelect={onArchive}>
+              <Archive />
+              {t("session.archive")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );

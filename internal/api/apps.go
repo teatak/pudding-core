@@ -267,7 +267,7 @@ func (s *Server) deleteApp(c *cart.Context) error {
 			return s.fail(c, err)
 		}
 	}
-	sessions, err := s.store.ListSessions(c.Request.Context())
+	sessions, err := s.store.ListSessions(c.Request.Context(), store.SessionListOptions{Scope: store.SessionListAll})
 	if err != nil {
 		return s.fail(c, err)
 	}

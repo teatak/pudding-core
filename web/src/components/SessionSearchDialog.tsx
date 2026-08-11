@@ -1,27 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
 import { Search } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
-import { searchSessionMessages, type Message, type Project, type Session } from "@/api/client";
-import { queryKeys } from "@/api/queryKeys";
+import type { Project, Session } from "@/api/client";
 import { Spinner } from "@/components/Spinner";
 import { SessionModeIcon } from "@/components/SessionModeIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useSessionMessageSearch } from "@/hooks/useSessionMessageSearch";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
+import {
+  buildSessionSearchResults,
+  normalizeSessionSearchText,
+  sessionSearchExcerpt,
+  sessionSearchTerms,
+  type SessionSearchResult,
+} from "@/lib/sessionSearch";
 
-const searchDelayMs = 180;
 const maxVisibleResults = 50;
 const maxRecentResults = 8;
-
-type SearchResult = {
-  session: Session;
-  project?: Project;
-  message?: Message;
-  score: number;
-};
 
 export type SessionSearchSelection = {
   messageRole?: "assistant" | "user";
@@ -46,48 +44,27 @@ export function SessionSearchDialog({
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultListRef = useRef<HTMLDivElement | null>(null);
-  const sessionIDs = useMemo(() => sessions.map((session) => session.id).sort(), [sessions]);
-  const normalizedQuery = normalizeSearchText(query);
-  const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
+  const messageSearch = useSessionMessageSearch({ active: open, query, sessions, token });
+  const normalizedQuery = messageSearch.normalizedQuery;
 
   useEffect(() => {
     if (open) {
       return;
     }
     setQuery("");
-    setDebouncedQuery("");
     setActiveIndex(0);
   }, [open]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const timeoutID = window.setTimeout(() => setDebouncedQuery(query.trim()), searchDelayMs);
-    return () => window.clearTimeout(timeoutID);
-  }, [open, query]);
-
-  const messageSearch = useQuery({
-    queryKey: queryKeys.sessionSearch(sessionIDs, debouncedQuery),
-    queryFn: () => searchSessionMessages(token, { sessionIDs, query: debouncedQuery, limit: 100 }),
-    enabled: Boolean(open && token && sessionIDs.length > 0 && debouncedQuery),
-    retry: false,
-  });
-  const matchingMessages =
-    normalizedQuery && normalizedQuery === normalizedDebouncedQuery ? messageSearch.data?.messages || [] : [];
-  const responseMatchTerms =
-    normalizedQuery && normalizedQuery === normalizedDebouncedQuery ? messageSearch.data?.matchTerms : undefined;
   const highlightTerms = useMemo(
-    () => normalizeHighlightTerms([normalizedQuery, ...searchTerms(normalizedQuery), ...(responseMatchTerms || [])]),
-    [normalizedQuery, responseMatchTerms],
+    () => normalizeHighlightTerms([normalizedQuery, ...sessionSearchTerms(normalizedQuery), ...(messageSearch.matchTerms || [])]),
+    [messageSearch.matchTerms, normalizedQuery],
   );
   const results = useMemo(
-    () => buildSearchResults(sessions, projects, matchingMessages, normalizedQuery),
-    [matchingMessages, normalizedQuery, projects, sessions],
+    () => buildSessionSearchResults(sessions, projects, messageSearch.messages, normalizedQuery)
+      .slice(0, normalizedQuery ? maxVisibleResults : maxRecentResults),
+    [messageSearch.messages, normalizedQuery, projects, sessions],
   );
 
   useEffect(() => {
@@ -99,7 +76,7 @@ export function SessionSearchDialog({
     active?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
-  function chooseResult(result: SearchResult | undefined) {
+  function chooseResult(result: SessionSearchResult | undefined) {
     if (!result) {
       return;
     }
@@ -116,7 +93,6 @@ export function SessionSearchDialog({
 
   function clearSearch() {
     setQuery("");
-    setDebouncedQuery("");
     setActiveIndex(0);
     window.requestAnimationFrame(() => searchInputRef.current?.focus());
   }
@@ -141,9 +117,7 @@ export function SessionSearchDialog({
     }
   }
 
-  const waitingForMessageResults = Boolean(
-    normalizedQuery && (normalizedQuery !== normalizedDebouncedQuery || messageSearch.isFetching),
-  );
+  const waitingForMessageResults = messageSearch.waiting;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,7 +155,7 @@ export function SessionSearchDialog({
             <div className="space-y-0.5">
               {results.map((result, index) => {
                 const active = index === activeIndex;
-                const secondary = result.message ? searchExcerpt(result.message.text, highlightTerms) : "";
+                const secondary = result.message ? sessionSearchExcerpt(result.message.text, highlightTerms) : "";
                 return (
                   <button
                     key={result.session.id}
@@ -256,92 +230,8 @@ export function SessionSearchDialog({
   );
 }
 
-function buildSearchResults(
-  sessions: Session[],
-  projects: Project[],
-  messages: Message[],
-  normalizedQuery: string,
-): SearchResult[] {
-  const queryTerms = searchTerms(normalizedQuery);
-  const projectByID = new Map(projects.map((project) => [project.id, project]));
-  const messageBySessionID = new Map<string, Message>();
-  for (const message of messages) {
-    if (!messageBySessionID.has(message.sessionID)) {
-      messageBySessionID.set(message.sessionID, message);
-    }
-  }
-
-  return sessions
-    .map((session): SearchResult | null => {
-      const project = session.projectID ? projectByID.get(session.projectID) : undefined;
-      const message = messageBySessionID.get(session.id);
-      const title = normalizeSearchText(session.title);
-      const projectText = normalizeSearchText([project?.name, ...(project?.rootDirs || [])].filter(Boolean).join(" "));
-      const modelText = normalizeSearchText(`${session.provider} ${session.model}`);
-      let score = 0;
-
-      if (normalizedQuery) {
-        if (title === normalizedQuery) {
-          score = 0;
-        } else if (title.startsWith(normalizedQuery)) {
-          score = 1;
-        } else if (containsSearchTerms(title, queryTerms)) {
-          score = 2;
-        } else if (containsSearchTerms(projectText, queryTerms)) {
-          score = 3;
-        } else if (containsSearchTerms(modelText, queryTerms)) {
-          score = 4;
-        } else if (message) {
-          score = 5;
-        } else {
-          return null;
-        }
-      }
-      return { session, project, message, score };
-    })
-    .filter((result): result is SearchResult => Boolean(result))
-    .sort((left, right) => {
-      if (left.score !== right.score) {
-        return left.score - right.score;
-      }
-      return sessionActivityTime(right.session) - sessionActivityTime(left.session);
-    })
-    .slice(0, normalizedQuery ? maxVisibleResults : maxRecentResults);
-}
-
-function normalizeSearchText(value: string) {
-  return value.trim().toLocaleLowerCase();
-}
-
-function searchTerms(normalizedQuery: string) {
-  return normalizedQuery.split(/\s+/).filter(Boolean);
-}
-
-function containsSearchTerms(text: string, terms: string[]) {
-  return terms.length > 0 && terms.every((term) => text.includes(term));
-}
-
-function sessionActivityTime(session: Session) {
-  return new Date(session.lastActivityAt || session.updatedAt || session.createdAt).getTime();
-}
-
-function searchExcerpt(text: string, terms: string[], maxLength = 120) {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxLength) {
-    return compact;
-  }
-  const normalizedCompact = compact.toLocaleLowerCase();
-  const matchIndexes = terms
-    .map((term) => normalizedCompact.indexOf(term))
-    .filter((index) => index >= 0);
-  const matchIndex = matchIndexes.length > 0 ? Math.min(...matchIndexes) : -1;
-  const start = Math.max(0, matchIndex < 0 ? 0 : matchIndex - Math.floor(maxLength / 3));
-  const excerpt = compact.slice(start, start + maxLength).trim();
-  return `${start > 0 ? "…" : ""}${excerpt}${start + maxLength < compact.length ? "…" : ""}`;
-}
-
 function normalizeHighlightTerms(terms: string[]) {
-  return Array.from(new Set(terms.map(normalizeSearchText).filter(Boolean))).sort(
+  return Array.from(new Set(terms.map(normalizeSessionSearchText).filter(Boolean))).sort(
     (left, right) => right.length - left.length,
   );
 }

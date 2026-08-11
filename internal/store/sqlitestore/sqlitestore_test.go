@@ -540,6 +540,82 @@ func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	}
 }
 
+func TestArchiveSessionLifecycle(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.CreateProject(ctx, &store.Project{
+		ID:           "proj_archive",
+		Name:         "Archive Project",
+		RootDirs:     []string{t.TempDir()},
+		ApprovalMode: store.ApprovalAuto,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{
+		ID:        "sess_archive",
+		Title:     "Archived conversation",
+		Provider:  "mock",
+		Model:     "mock",
+		ProjectID: "proj_archive",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.QueueInput(ctx, store.QueueInputInput{
+		SessionID:       "sess_archive",
+		ClientMessageID: "queued_archive",
+		Text:            "queued",
+		Provider:        "mock",
+		Model:           "mock",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	archived, err := st.ArchiveSession(ctx, "sess_archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived.ArchivedAt == nil {
+		t.Fatal("archivedAt was not recorded")
+	}
+	if _, err := st.GetSession(ctx, "sess_archive"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("archived session remained active: %v", err)
+	}
+	active, err := st.ListSessions(ctx)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("active sessions = %+v, err=%v", active, err)
+	}
+	archivedList, err := st.ListSessions(ctx, store.SessionListOptions{
+		Scope: store.SessionListArchived,
+		Query: "archive project",
+	})
+	if err != nil || len(archivedList) != 1 || archivedList[0].ID != "sess_archive" {
+		t.Fatalf("archived sessions = %+v, err=%v", archivedList, err)
+	}
+	queued, err := st.QueuedSessions(ctx)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("archived queued sessions = %+v, err=%v", queued, err)
+	}
+	projects, err := st.ListProjects(ctx)
+	if err != nil || len(projects) != 1 || projects[0].LastActivityAt != nil {
+		t.Fatalf("archived activity leaked into project: projects=%+v err=%v", projects, err)
+	}
+	expired, err := st.ListExpiredArchivedSessionIDs(ctx, time.Now().Add(time.Second))
+	if err != nil || len(expired) != 1 || expired[0] != "sess_archive" {
+		t.Fatalf("expired archives = %+v, err=%v", expired, err)
+	}
+
+	restored, err := st.RestoreSession(ctx, "sess_archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.ArchivedAt != nil {
+		t.Fatalf("restored archivedAt = %v", restored.ArchivedAt)
+	}
+	if _, err := st.GetSession(ctx, "sess_archive"); err != nil {
+		t.Fatalf("restored session is unavailable: %v", err)
+	}
+}
+
 func beginTestTurn(t *testing.T, st store.Store, sessionID, turnID, msgID, clientID string) *store.BeginTurnResult {
 	t.Helper()
 	res, err := st.BeginTurn(context.Background(), store.BeginTurnInput{

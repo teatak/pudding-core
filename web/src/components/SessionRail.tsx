@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ArrowUpDown,
   ArrowRight,
+  Archive,
   ChevronRight,
   Ellipsis,
   FolderClosed,
@@ -17,7 +18,6 @@ import {
   Search,
   Settings,
   SquareTerminal,
-  Trash,
 } from "@/components/icons";
 import {
   createContext,
@@ -38,7 +38,7 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 import {
-  deleteSession,
+  archiveSession,
   getAudioBindings,
   listProjects,
   listSessions,
@@ -53,16 +53,6 @@ import { SessionSearchDialog, type SessionSearchSelection } from "@/components/S
 import { Spinner } from "@/components/Spinner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { requestTranscriptTurnReveal } from "@/state/transcriptRevealStore";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
@@ -365,8 +355,8 @@ export function SessionRail({
     );
   }
 
-  const deleteMutation = useMutation({
-    mutationFn: (sessionID: string) => deleteSession(token, sessionID),
+  const archiveMutation = useMutation({
+    mutationFn: (sessionID: string) => archiveSession(token, sessionID),
     onSuccess: async (_, sessionID) => {
       const previous = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
       const remaining = previous?.sessions.filter((session) => session.id !== sessionID) || [];
@@ -398,6 +388,7 @@ export function SessionRail({
       });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
+    onError: () => toast.error(t("session.archiveFailed")),
   });
 
   function collapse(next: boolean) {
@@ -480,7 +471,7 @@ export function SessionRail({
         appsActive={appsActive}
         projectsActive={projectsActive}
         draftActive={draftActive}
-        deletePending={deleteMutation.isPending}
+        archivePending={archiveMutation.isPending}
         draftProjectID={draftProjectID}
         isError={sessionsQuery.isError}
         isLoading={sessionsQuery.isLoading}
@@ -491,7 +482,7 @@ export function SessionRail({
         onSearch={openSessionSearch}
         onCreate={openNewSession}
         onCreateProject={openProjectCreate}
-        onDelete={(id) => deleteMutation.mutate(id)}
+        onArchive={(id) => archiveMutation.mutate(id)}
         onCreateProjectSession={openProjectDraft}
         onRename={async (id, title) => {
           await renameMutation.mutateAsync({ id, title });
@@ -948,14 +939,14 @@ type RailPanelProps = {
   isError: boolean;
   draftActive: boolean;
   draftProjectID?: string;
-  deletePending: boolean;
+  archivePending: boolean;
   onCreate: () => void;
   onCreateProject: () => void;
   onSearch: () => void;
   onCreateProjectSession: (projectID: string) => void;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
-  onDelete: (id: string) => void;
+  onArchive: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
@@ -1024,14 +1015,14 @@ function RailPanel({
   isError,
   draftActive,
   draftProjectID,
-  deletePending,
+  archivePending,
   onCreate,
   onCreateProject,
   onSearch,
   onCreateProjectSession,
   onSelect,
   onOpenSplit,
-  onDelete,
+  onArchive,
   onPinChange,
   onRename,
   onOverlayOpenChange,
@@ -1545,7 +1536,7 @@ function RailPanel({
                       <CollapsibleContent className="pudding-session-group-content overflow-hidden">
                         <SidebarGroupContent className="pt-0.5">
                           <SessionItems
-                            deletePending={deletePending}
+                            archivePending={archivePending}
                             projectNamesByID={projectNamesByID}
                             selectedSessionID={selectedSessionID}
                             sessions={pinnedSessions}
@@ -1553,7 +1544,7 @@ function RailPanel({
                             draggingSessionID={draggingSessionID}
                             dropIndex={dragTarget?.group === "pinned" ? dragTarget.index : null}
                             showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
-                            onDelete={onDelete}
+                            onArchive={onArchive}
                             onOpenSplit={onOpenSplit}
                             onPinChange={onPinChange}
                             onPointerDragCancel={clearDragState}
@@ -1595,7 +1586,7 @@ function RailPanel({
                         <CollapsibleContent className="pudding-session-group-content overflow-hidden">
                           <SidebarGroupContent className={cn("pt-0.5", isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
                             <SessionItems
-                              deletePending={deletePending}
+                              archivePending={archivePending}
                               projectNamesByID={projectNamesByID}
                               selectedSessionID={selectedSessionID}
                               sessions={chatSessions}
@@ -1603,7 +1594,7 @@ function RailPanel({
                               draggingSessionID={draggingSessionID}
                               dropIndex={null}
                               showEmptyDropTarget={Boolean(isDraggingPinned && chatSessions.length === 0 && sessions.length > 0)}
-                              onDelete={onDelete}
+                              onArchive={onArchive}
                               onOpenSplit={onOpenSplit}
                               onPinChange={onPinChange}
                               onPointerDragCancel={clearDragState}
@@ -1678,7 +1669,7 @@ function RailPanel({
                                     <CollapsibleContent className="pudding-session-group-content overflow-hidden">
                                       <SidebarGroupContent className="pt-0.5">
                                         <SessionItems
-                                          deletePending={deletePending}
+                                          archivePending={archivePending}
                                           projectNamesByID={projectNamesByID}
                                           selectedSessionID={selectedSessionID}
                                           sessions={group.sessions}
@@ -1686,7 +1677,7 @@ function RailPanel({
                                           draggingSessionID={draggingSessionID}
                                           dropIndex={null}
                                           showEmptyDropTarget={false}
-                                          onDelete={onDelete}
+                                          onArchive={onArchive}
                                           onOpenSplit={onOpenSplit}
                                           onPinChange={onPinChange}
                                           onPointerDragCancel={clearDragState}
@@ -2084,7 +2075,7 @@ type SessionItemsProps = {
   sessions: Session[];
   projectNamesByID: ReadonlyMap<string, string>;
   selectedSessionID: string | undefined;
-  deletePending: boolean;
+  archivePending: boolean;
   showEmptyState?: boolean;
   draggingSessionID: string | null;
   dropIndex: number | null;
@@ -2092,7 +2083,7 @@ type SessionItemsProps = {
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
-  onDelete: (id: string) => void;
+  onArchive: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onPointerDragStart: (id: string, clientX: number, clientY: number) => void;
   onPointerDragMove: (clientX: number, clientY: number) => void;
@@ -2126,7 +2117,7 @@ function SessionItems({
   sessions,
   projectNamesByID,
   selectedSessionID,
-  deletePending,
+  archivePending,
   showEmptyState = true,
   draggingSessionID,
   dropIndex,
@@ -2134,7 +2125,7 @@ function SessionItems({
   onSelect,
   onOpenSplit,
   onPinChange,
-  onDelete,
+  onArchive,
   onRename,
   onPointerDragStart,
   onPointerDragMove,
@@ -2175,13 +2166,13 @@ function SessionItems({
           {dropIndex === index ? <SessionDropIndicator active /> : null}
           <SessionItem
             completed={Boolean(completedSessions[session.id])}
-            deletePending={deletePending}
+            archivePending={archivePending}
             projectName={session.projectID ? projectNamesByID.get(session.projectID) : undefined}
             running={isSessionTurnRunning(session, runningTurns, turnPhases)}
             selected={session.id === selectedSessionID}
             session={session}
             suppressInteractiveState={Boolean(draggingSessionID)}
-            onDelete={() => onDelete(session.id)}
+            onArchive={() => onArchive(session.id)}
             onOpenSplit={() => onOpenSplit(session.id)}
             onPinChange={(pinned) => onPinChange(session.id, pinned)}
             onPointerDragCancel={onPointerDragCancel}
@@ -2242,12 +2233,12 @@ type SessionItemProps = {
   selected: boolean;
   running: boolean;
   completed: boolean;
-  deletePending: boolean;
+  archivePending: boolean;
   suppressInteractiveState: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
   onPinChange: (pinned: boolean) => void;
-  onDelete: () => void;
+  onArchive: () => void;
   onRename: (title: string) => Promise<void>;
   onPointerDragStart: (clientX: number, clientY: number) => void;
   onPointerDragMove: (clientX: number, clientY: number) => void;
@@ -2261,12 +2252,12 @@ function SessionItem({
   selected,
   running,
   completed,
-  deletePending,
+  archivePending,
   suppressInteractiveState,
   onSelect,
   onOpenSplit,
   onPinChange,
-  onDelete,
+  onArchive,
   onRename,
   onPointerDragStart,
   onPointerDragMove,
@@ -2276,7 +2267,6 @@ function SessionItem({
   const { t, locale } = useI18n();
   const actionsAlwaysVisible = !useHasHoverInput();
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
   const [pendingTitle, setPendingTitle] = useState<string | null>(null);
@@ -2292,7 +2282,7 @@ function SessionItem({
   } | null>(null);
   const suppressClickRef = useRef(false);
 
-  useRailOverlayHold(actionsOpen || deleteOpen);
+  useRailOverlayHold(actionsOpen);
 
   useEffect(() => {
     if (!editing) {
@@ -2490,10 +2480,10 @@ function SessionItem({
           className={cn(
             "h-8 px-2 py-1 focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-inset",
             running
-              ? "pr-24 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-24"
+              ? "pr-28 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-28"
               : actionsAlwaysVisible
-              ? "pr-20 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-20"
-              : "pr-11 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-11",
+              ? "pr-28 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-28"
+              : "pr-16 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-16",
             suppressInteractiveState
               ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
               : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent group-focus-within/menu-item:text-sidebar-accent-foreground",
@@ -2535,7 +2525,7 @@ function SessionItem({
           <SidebarMenuBadge
             className={cn(
               "min-w-0 px-0 font-normal text-muted-foreground",
-              actionsAlwaysVisible ? "right-8" : "right-2",
+              actionsAlwaysVisible ? "right-14" : "right-2",
               !actionsAlwaysVisible &&
               !suppressInteractiveState &&
               "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
@@ -2565,7 +2555,7 @@ function SessionItem({
               <SidebarMenuAction
                 aria-label={t("session.actions")}
                 className={cn(
-                  "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  "right-7 rounded-sm bg-transparent text-muted-foreground after:hidden peer-hover/menu-button:text-muted-foreground peer-data-active/menu-button:text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
                   suppressInteractiveState &&
@@ -2611,35 +2601,36 @@ function SessionItem({
               >
                 {t("session.rename")}
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={deletePending}
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                <Trash />
-                {t("session.delete")}
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {session.backgroundProcessCount > 0
-                    ? t("deleteSession.descriptionWithProcesses").replace("{count}", String(session.backgroundProcessCount))
-                    : t("deleteSession.description")}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={onDelete}>
-                  {t("common.delete")}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <SidebarMenuAction
+                aria-label={t("session.archive")}
+                className={cn(
+                  "right-1.5 rounded-sm bg-transparent text-muted-foreground after:hidden peer-hover/menu-button:text-muted-foreground peer-data-active/menu-button:text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground",
+                  actionsAlwaysVisible && "opacity-100",
+                  !actionsAlwaysVisible &&
+                  suppressInteractiveState &&
+                  "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
+                  actionsOpen && "opacity-100 md:opacity-100",
+                )}
+                disabled={archivePending}
+                showOnHover={!actionsAlwaysVisible}
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onArchive();
+                }}
+              >
+                <Archive className="size-3.5!" />
+              </SidebarMenuAction>
+            </TooltipTrigger>
+            <TooltipContent className="pointer-events-none" side="right" sideOffset={4}>
+              {t("session.archive")}
+            </TooltipContent>
+          </Tooltip>
         </>
       ) : null}
     </SidebarMenuItem>

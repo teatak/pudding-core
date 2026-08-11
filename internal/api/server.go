@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -195,6 +196,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
 	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
+	app.Route("/sessions/:id/archive").POST(s.archiveSession)
+	app.Route("/sessions/:id/restore").POST(s.restoreSession)
 	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/turns/:turnID/steer").POST(s.steerTurn)
@@ -586,7 +589,16 @@ func (s *Server) revokeProjectBrowserFileAccess(ctx context.Context, projectID s
 }
 
 func (s *Server) listSessions(c *cart.Context) error {
-	sessions, err := s.store.ListSessions(c.Request.Context())
+	options := store.SessionListOptions{Scope: store.SessionListActive}
+	switch scope := strings.TrimSpace(c.Request.URL.Query().Get("scope")); scope {
+	case "", string(store.SessionListActive):
+	case string(store.SessionListArchived):
+		options.Scope = store.SessionListArchived
+	default:
+		return badRequest(c, "invalid session scope")
+	}
+	options.Query = strings.TrimSpace(c.Request.URL.Query().Get("query"))
+	sessions, err := s.store.ListSessions(c.Request.Context(), options)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -686,33 +698,116 @@ func (s *Server) unloadSessionApp(c *cart.Context) error {
 
 func (s *Server) deleteSession(c *cart.Context) error {
 	id, _ := c.Param("id")
+	if err := s.purgeSession(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) archiveSession(c *cart.Context) error {
+	id, _ := c.Param("id")
+	if err := s.cancelSessionWork(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	session, err := s.store.ArchiveSession(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	s.releaseSessionResources(c.Request.Context(), id, false)
+	c.JSON(http.StatusOK, session)
+	return nil
+}
+
+func (s *Server) restoreSession(c *cart.Context) error {
+	id, _ := c.Param("id")
+	session, err := s.store.RestoreSession(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	s.enrichSessionProcesses(session)
+	c.JSON(http.StatusOK, session)
+	return nil
+}
+
+func (s *Server) purgeSession(ctx context.Context, id string) error {
+	if err := s.cancelSessionWork(ctx, id); err != nil {
+		return err
+	}
+	if err := s.store.DeleteSession(ctx, id); err != nil {
+		return err
+	}
+	s.releaseSessionResources(ctx, id, true)
+	return nil
+}
+
+func (s *Server) cancelSessionWork(ctx context.Context, id string) error {
 	if s.voice != nil {
-		s.voice.CancelSession(c.Request.Context(), id)
+		s.voice.CancelSession(ctx, id)
 	}
 	// 先 cancel 进行中的 turn:否则 provider 流会继续跑到自然结束,
 	// 且收尾 FinishTurn 撞上已删除的 session。无进行中 turn 时 cancel 返回
 	// ErrNoRunningTurn,忽略即可。
 	if err := s.engine.Cancel(id); err != nil && !errors.Is(err, engine.ErrNoRunningTurn) {
-		return s.fail(c, err)
+		return err
 	}
-	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
-		return s.fail(c, err)
-	}
+	return nil
+}
+
+func (s *Server) releaseSessionResources(ctx context.Context, id string, removeScratch bool) {
 	if s.terminals != nil {
 		s.terminals.CloseSession(id)
 	}
 	s.engine.ReleaseSessionResources(id)
-	if err := home.RemoveCodeScratch(s.home, id); err != nil {
-		slog.Warn("remove session code scratch failed", "sessionID", id, "err", err)
+	if removeScratch {
+		if err := home.RemoveCodeScratch(s.home, id); err != nil {
+			slog.Warn("remove session code scratch failed", "sessionID", id, "err", err)
+		}
 	}
 	if s.voice != nil {
 		s.voice.ReleaseSession(id)
 	}
 	if s.browser != nil {
-		_ = s.browser.ReleaseSession(c.Request.Context(), id)
+		_ = s.browser.ReleaseSession(ctx, id)
 	}
-	c.String(http.StatusNoContent, "")
-	return nil
+}
+
+const (
+	sessionArchiveRetention       = 30 * 24 * time.Hour
+	sessionArchiveCleanupInterval = time.Hour
+)
+
+func (s *Server) RunSessionArchiveJanitor(ctx context.Context) {
+	cleanup := func() {
+		if err := s.purgeExpiredSessionArchives(ctx, time.Now()); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("purge expired session archives failed", "err", err)
+		}
+	}
+	cleanup()
+	ticker := time.NewTicker(sessionArchiveCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanup()
+		}
+	}
+}
+
+func (s *Server) purgeExpiredSessionArchives(ctx context.Context, now time.Time) error {
+	ids, err := s.store.ListExpiredArchivedSessionIDs(ctx, now.Add(-sessionArchiveRetention))
+	if err != nil {
+		return err
+	}
+	var purgeErr error
+	for _, id := range ids {
+		if err := s.purgeSession(ctx, id); err != nil && !errors.Is(err, store.ErrNotFound) {
+			purgeErr = errors.Join(purgeErr, fmt.Errorf("purge session %s: %w", id, err))
+		}
+	}
+	return purgeErr
 }
 
 type submitReq struct {

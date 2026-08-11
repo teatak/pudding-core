@@ -154,6 +154,7 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	}
 	now := time.Now()
 	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
+	s.ArchivedAt = nil
 	m.sessions[s.ID] = cloneSession(s)
 	return nil
 }
@@ -162,7 +163,7 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
-	if !ok {
+	if !ok || s.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
 	cp := cloneSession(s)
@@ -174,11 +175,31 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 	return cp, nil
 }
 
-func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
+func (m *Memstore) ListSessions(_ context.Context, options ...store.SessionListOptions) ([]*store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	resolved := store.ResolveSessionListOptions(options)
+	if resolved.Scope != store.SessionListActive && resolved.Scope != store.SessionListArchived && resolved.Scope != store.SessionListAll {
+		return nil, store.ErrInvalidSession
+	}
+	query := strings.ToLower(resolved.Query)
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
+		if resolved.Scope == store.SessionListActive && s.ArchivedAt != nil {
+			continue
+		}
+		if resolved.Scope == store.SessionListArchived && s.ArchivedAt == nil {
+			continue
+		}
+		if query != "" {
+			projectName := ""
+			if project := m.projects[s.ProjectID]; project != nil {
+				projectName = project.Name
+			}
+			if !strings.Contains(strings.ToLower(s.Title), query) && !strings.Contains(strings.ToLower(projectName), query) {
+				continue
+			}
+		}
 		cp := cloneSession(s)
 		cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
 		if cp.ActiveMode == "" {
@@ -188,6 +209,9 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if resolved.Scope == store.SessionListArchived && out[i].ArchivedAt != nil && out[j].ArchivedAt != nil && !out[i].ArchivedAt.Equal(*out[j].ArchivedAt) {
+			return out[i].ArchivedAt.After(*out[j].ArchivedAt)
+		}
 		if !out[i].LastActivityAt.Equal(out[j].LastActivityAt) {
 			return out[i].LastActivityAt.After(out[j].LastActivityAt)
 		}
@@ -282,7 +306,7 @@ func cloneProject(p *store.Project) *store.Project {
 func (m *Memstore) projectWithActivityLocked(project *store.Project) *store.Project {
 	cloned := cloneProject(project)
 	for _, session := range m.sessions {
-		if session.ProjectID != project.ID {
+		if session.ProjectID != project.ID || session.ArchivedAt != nil {
 			continue
 		}
 		if cloned.LastActivityAt == nil || session.LastActivityAt.After(*cloned.LastActivityAt) {
@@ -306,7 +330,55 @@ func cloneSession(s *store.Session) *store.Session {
 	}
 	cp := *s
 	cp.LoadedAppIDs = append([]string(nil), s.LoadedAppIDs...)
+	if s.ArchivedAt != nil {
+		archivedAt := *s.ArchivedAt
+		cp.ArchivedAt = &archivedAt
+	}
 	return &cp
+}
+
+func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[id]
+	if !ok || session.ArchivedAt != nil {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	session.ArchivedAt = &now
+	session.UpdatedAt = now
+	for _, input := range m.queued[id] {
+		if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
+			input.Status = store.QueuedInputCancelled
+			input.UpdatedAt = now
+		}
+	}
+	return cloneSession(session), nil
+}
+
+func (m *Memstore) RestoreSession(_ context.Context, id string) (*store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[id]
+	if !ok || session.ArchivedAt == nil {
+		return nil, store.ErrNotFound
+	}
+	session.ArchivedAt = nil
+	session.UpdatedAt = time.Now()
+	return cloneSession(session), nil
+}
+
+func (m *Memstore) ListExpiredArchivedSessionIDs(_ context.Context, cutoff time.Time) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]string, 0)
+	for id, session := range m.sessions {
+		if session.ArchivedAt != nil && !session.ArchivedAt.After(cutoff) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 func (m *Memstore) DeleteSession(_ context.Context, id string) error {
@@ -752,6 +824,9 @@ func (m *Memstore) QueuedSessions(_ context.Context) ([]string, error) {
 	defer m.mu.Unlock()
 	seen := make(map[string]bool)
 	for sessionID, inputs := range m.queued {
+		if session := m.sessions[sessionID]; session == nil || session.ArchivedAt != nil {
+			continue
+		}
 		for _, input := range inputs {
 			if input.Status == store.QueuedInputQueued {
 				seen[sessionID] = true

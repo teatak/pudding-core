@@ -2941,6 +2941,9 @@ func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
 		}
 		appendAPITestTurn(t, st, sessionID, 1)
 	}
+	if _, err := st.ArchiveSession(ctx, "sess_search_a"); err != nil {
+		t.Fatal(err)
+	}
 
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/search", map[string]any{
 		"sessionIDs": []string{"sess_search_a"},
@@ -3627,6 +3630,65 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	case <-waited:
 	case <-time.After(1 * time.Second):
 		t.Fatal("delete did not cancel the running turn; goroutine still streaming")
+	}
+}
+
+func TestArchiveSessionHidesRestoresAndExpires(t *testing.T) {
+	ctx := context.Background()
+	homeDir := t.TempDir()
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
+	server := New(eng, ms, ms, hub).WithHome(homeDir)
+	handler := server.Handler(testToken, nil)
+	sessionID := "sess_archive_lifecycle"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Title: "Archive", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	scratch, err := home.PrepareCodeScratch(homeDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doRequest := func(method, target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, nil)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		return recorder
+	}
+	if recorder := doRequest(http.MethodPost, "/sessions/"+sessionID+"/archive"); recorder.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(scratch); err != nil {
+		t.Fatalf("archive removed code scratch: %v", err)
+	}
+	active := doRequest(http.MethodGet, "/sessions")
+	if active.Code != http.StatusOK || !strings.Contains(active.Body.String(), `"sessions":[]`) {
+		t.Fatalf("active sessions status=%d body=%s", active.Code, active.Body.String())
+	}
+	archived := doRequest(http.MethodGet, "/sessions?scope=archived")
+	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), sessionID) {
+		t.Fatalf("archived sessions status=%d body=%s", archived.Code, archived.Body.String())
+	}
+	if recorder := doRequest(http.MethodPost, "/sessions/"+sessionID+"/restore"); recorder.Code != http.StatusOK {
+		t.Fatalf("restore status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := ms.GetSession(ctx, sessionID); err != nil {
+		t.Fatalf("restored session unavailable: %v", err)
+	}
+	if recorder := doRequest(http.MethodPost, "/sessions/"+sessionID+"/archive"); recorder.Code != http.StatusOK {
+		t.Fatalf("second archive status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if err := server.purgeExpiredSessionArchives(ctx, time.Now().Add(31*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	all, err := ms.ListSessions(ctx, store.SessionListOptions{Scope: store.SessionListAll})
+	if err != nil || len(all) != 0 {
+		t.Fatalf("expired archive was not purged: sessions=%+v err=%v", all, err)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("expired archive scratch still exists: %v", err)
 	}
 }
 

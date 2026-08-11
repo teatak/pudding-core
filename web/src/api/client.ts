@@ -344,6 +344,14 @@ export function listSessions(token: string): Promise<{ sessions: Session[] }> {
   return request(token, "/sessions", listSessionsResponse);
 }
 
+export function listArchivedSessions(token: string, query = ""): Promise<{ sessions: Session[] }> {
+  const params = new URLSearchParams({ scope: "archived" });
+  if (query.trim()) {
+    params.set("query", query.trim());
+  }
+  return request(token, `/sessions?${params.toString()}`, listSessionsResponse);
+}
+
 export function searchSessionMessages(
   token: string,
   body: z.infer<typeof searchSessionMessagesRequest>,
@@ -690,6 +698,18 @@ export function updateSession(
 export async function deleteSession(token: string, sessionID: string): Promise<void> {
   await request(token, `/sessions/${encodeURIComponent(sessionID)}`, z.null(), {
     method: "DELETE",
+  });
+}
+
+export function archiveSession(token: string, sessionID: string): Promise<Session> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/archive`, session, {
+    method: "POST",
+  });
+}
+
+export function restoreSession(token: string, sessionID: string): Promise<Session> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/restore`, session, {
+    method: "POST",
   });
 }
 
