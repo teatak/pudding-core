@@ -1819,7 +1819,7 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
       </span>
       {downloading ? (
         <>
-          <Progress aria-label={label} className="ml-auto h-1.5 w-16 shrink-0 bg-primary/10" value={state.percent ?? 0} />
+          <Progress aria-label={label} className="ml-auto h-1.5 w-24 shrink-0 bg-primary/10" value={state.percent ?? 0} />
           <span className="w-8 shrink-0 text-right text-xs tabular-nums">{state.percent ?? 0}%</span>
         </>
       ) : installing ? (
