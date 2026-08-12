@@ -66,17 +66,17 @@ const floatingDefaultWidth = 680;
 const floatingDefaultHeight = 420;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const dockMaximumWidth = 640;
-const dockWidthStorageKey = "pudding.agentConsoleDockWidth";
-const dockWidthFallback = 480;
 const workspaceTransitionDurationMs = 220;
 type WorkspaceTransitionPhase = "idle" | "opening" | "closing";
 const centeredLayoutConstraints = {
-  chatDockMaximumWidth: dockMaximumWidth,
-  chatDockMinimumWidth: consoleMinimumWidth,
-  leftPairMinimumWidth: workspaceLayout.railAutoCollapsePx,
-  railWidth: sessionRailLayout.expandedWidthPx,
-  rightPairMinimumWidth: workspaceLayout.drawerBreakpointPx,
-  workspaceDockMinimumWidth: workspaceMinimumWidth,
+  dockedMinimumWidth: workspaceLayout.drawerBreakpointPx,
+  railChatMinimumWidth: workspaceLayout.railAutoCollapsePx,
+  railWorkspaceMinimumWidth:
+    sessionRailLayout.expandedWidthPx + workspaceMinimumWidth,
+  thirdColumnMinimumWidth: Math.min(
+    consoleMinimumWidth,
+    workspaceMinimumWidth,
+  ),
 };
 
 function readSavedSplitLayout() {
@@ -113,11 +113,41 @@ function lockAgentConsoleResizeCursor(cursor: string) {
   };
 }
 
-function readDockWidth() {
-  const saved = Number.parseFloat(localStorage.getItem(dockWidthStorageKey) || "");
+function readDockSplitRatio() {
+  const saved = Number.parseFloat(
+    localStorage.getItem(layoutStorageKeys.agentConsoleDockSplitRatio) || "",
+  );
   return Number.isFinite(saved)
-    ? clamp(saved, consoleMinimumWidth, dockMaximumWidth)
-    : dockWidthFallback;
+    ? clamp(saved, 0, 1)
+    : workspaceLayout.defaultLeftGroupRatio;
+}
+
+function dockSplitRatioBounds({
+  chatDockSide,
+  layoutWidth,
+  railCollapsed,
+}: {
+  chatDockSide: "left" | "right";
+  layoutWidth: number;
+  railCollapsed: boolean;
+}) {
+  const railWidth = railCollapsed ? 0 : sessionRailLayout.expandedWidthPx;
+  if (chatDockSide === "left") {
+    return {
+      maximum: Math.min(
+        sessionRailLayout.expandedWidthPx + dockMaximumWidth,
+        layoutWidth - workspaceMinimumWidth,
+      ) / layoutWidth,
+      minimum: (railWidth + consoleMinimumWidth) / layoutWidth,
+    };
+  }
+  return {
+    maximum: (layoutWidth - consoleMinimumWidth) / layoutWidth,
+    minimum: Math.max(
+      railWidth + workspaceMinimumWidth,
+      layoutWidth - dockMaximumWidth,
+    ) / layoutWidth,
+  };
 }
 
 export function App() {
@@ -140,18 +170,18 @@ export function App() {
   const [layoutNode, setLayoutNode] = useState<HTMLDivElement | null>(null);
   const [centeredLayout, setCenteredLayout] = useState(() =>
     resolveCenteredLayoutPresentation({
+      chatDockSide: "left",
       constraints: centeredLayoutConstraints,
-      dockWidth: dockWidthFallback,
       layoutWidth: 0,
+      leftGroupRatio: workspaceLayout.defaultLeftGroupRatio,
       workspaceDockRequested: false,
     }),
   );
-  const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null);
   const [consoleInteracting, setConsoleInteracting] = useState(false);
-  const [dockWidth, setDockWidth] = useState(readDockWidth);
+  const [dockSplitRatio, setDockSplitRatio] = useState(readDockSplitRatio);
   const splitGroupRef = useGroupRef();
   const agentConsoleRef = useRef<HTMLDivElement | null>(null);
-  const dockWidthRef = useRef(dockWidth);
+  const dockSplitRatioRef = useRef(dockSplitRatio);
   const dockResizeCleanupRef = useRef<(() => void) | null>(null);
   const centeredLayoutRef = useRef(centeredLayout);
   const previewTokenRef = useRef(token);
@@ -196,12 +226,24 @@ export function App() {
   const workspaceVisible = effectiveWorkspaceOpen && workspaceTransition !== "closing";
   const workspaceDockRequested =
     effectiveWorkspaceOpen && agentConsoleMode !== "floating";
+  const chatDockSide = agentConsoleMode === "dock-right" ? "right" : "left";
   const updateCenteredLayout = useCallback(
-    (layoutWidth: number, nextDockWidth = dockWidthRef.current) => {
-      const next = resolveCenteredLayoutPresentation({
-        constraints: centeredLayoutConstraints,
-        dockWidth: nextDockWidth,
+    (layoutWidth: number, nextSplitRatio = dockSplitRatioRef.current) => {
+      const expandedBounds = dockSplitRatioBounds({
+        chatDockSide,
         layoutWidth,
+        railCollapsed: false,
+      });
+      const feasibleExpandedRatio = clamp(
+        nextSplitRatio,
+        expandedBounds.minimum,
+        expandedBounds.maximum,
+      );
+      const next = resolveCenteredLayoutPresentation({
+        chatDockSide,
+        constraints: centeredLayoutConstraints,
+        layoutWidth,
+        leftGroupRatio: feasibleExpandedRatio,
         workspaceDockRequested,
       });
       const current = centeredLayoutRef.current;
@@ -216,7 +258,7 @@ export function App() {
       setCenteredLayout(next);
       return next;
     },
-    [workspaceDockRequested],
+    [chatDockSide, workspaceDockRequested],
   );
   // workspaceOpen 只表达用户意图。停靠/抽屉以及 rail 的响应式展示由
   // 两个共享 Chat 的组合区域统一求解，不写回用户偏好。
@@ -282,8 +324,19 @@ export function App() {
     if (!layoutNode) {
       return;
     }
+    let previousWidth = layoutNode.clientWidth;
+    let resizeSettledTimer = 0;
     const updatePresentation = () => {
-      updateCenteredLayout(layoutNode.clientWidth);
+      const nextWidth = layoutNode.clientWidth;
+      if (nextWidth !== previousWidth) {
+        document.documentElement.dataset.shellResizing = "true";
+        window.clearTimeout(resizeSettledTimer);
+        resizeSettledTimer = window.setTimeout(() => {
+          delete document.documentElement.dataset.shellResizing;
+        }, 80);
+        previousWidth = nextWidth;
+      }
+      updateCenteredLayout(nextWidth);
     };
     updatePresentation();
     const observer = new ResizeObserver(updatePresentation);
@@ -292,12 +345,14 @@ export function App() {
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", updatePresentation);
+      window.clearTimeout(resizeSettledTimer);
+      delete document.documentElement.dataset.shellResizing;
     };
   }, [layoutNode, updateCenteredLayout]);
 
   useEffect(() => {
-    dockWidthRef.current = dockWidth;
-  }, [dockWidth]);
+    dockSplitRatioRef.current = dockSplitRatio;
+  }, [dockSplitRatio]);
 
   useEffect(
     () => () => {
@@ -349,23 +404,41 @@ export function App() {
     return <TokenGate />;
   }
 
-  const commitDockWidth = (
-    next: number,
-    minimum = consoleMinimumWidth,
-  ) => {
-    const normalized = clamp(next, minimum, dockMaximumWidth);
-    dockWidthRef.current = normalized;
-    setDockWidth(normalized);
-    if (layoutNode) {
-      updateCenteredLayout(layoutNode.clientWidth, normalized);
+  const commitDockSplitRatio = (next: number) => {
+    const layoutWidth = layoutNode?.clientWidth || 0;
+    let normalized = clamp(next, 0, 1);
+    if (layoutWidth > 0 && workspaceDocked) {
+      const presentation = updateCenteredLayout(layoutWidth, normalized);
+      const bounds = dockSplitRatioBounds({
+        chatDockSide,
+        layoutWidth,
+        railCollapsed:
+          getRailCollapsedPreference() ||
+          presentation.railResponsiveCollapsed,
+      });
+      normalized = clamp(normalized, bounds.minimum, bounds.maximum);
+      updateCenteredLayout(layoutWidth, normalized);
     }
-    localStorage.setItem(dockWidthStorageKey, String(normalized));
+    dockSplitRatioRef.current = normalized;
+    setDockSplitRatio(normalized);
+    localStorage.setItem(
+      layoutStorageKeys.agentConsoleDockSplitRatio,
+      String(normalized),
+    );
+  };
+
+  const moveDockDivider = (delta: number) => {
+    const layoutWidth = layoutNode?.clientWidth || 0;
+    if (layoutWidth <= 0) {
+      return;
+    }
+    commitDockSplitRatio(dockSplitRatioRef.current + delta / layoutWidth);
   };
 
   const startDockResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (
       event.button !== 0 ||
-      !stageNode ||
+      !layoutNode ||
       !agentConsoleRef.current ||
       (consoleDisplayMode !== "dock-left" && consoleDisplayMode !== "dock-right")
     ) {
@@ -373,14 +446,10 @@ export function App() {
     }
     event.preventDefault();
     const pointerID = event.pointerId;
-    const resizeStartClientX = event.clientX;
-    const resizeStartWidth = dockWidthRef.current;
-    const railPreferenceCollapsed = getRailCollapsedPreference();
     const resizeHandle = event.currentTarget;
     const agentConsoleNode = agentConsoleRef.current;
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
-    const resizeFromRight = consoleDisplayMode === "dock-right";
     const resizeShield = document.createElement("div");
     resizeShield.className = "pudding-agent-console-resize-shield no-drag-region";
     resizeShield.setAttribute("aria-hidden", "true");
@@ -398,47 +467,33 @@ export function App() {
     document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
 
-    let liveWidth = dockWidthRef.current;
-    let liveRailCollapsed = railCollapsed;
+    let liveSplitRatio = dockSplitRatioRef.current;
     let resizeFrame = 0;
     let pendingClientX: number | undefined;
     let cleaned = false;
     const update = (clientX: number) => {
-      const stageRect = stageNode.getBoundingClientRect();
-      const layoutWidth = layoutNode?.clientWidth || (
-        stageRect.width + (liveRailCollapsed ? 0 : sessionRailLayout.expandedWidthPx)
-      );
-      const pointerDelta = clientX - resizeStartClientX;
-      const rawWidth = resizeStartWidth + (resizeFromRight ? -pointerDelta : pointerDelta);
-      const presentation = layoutNode
-        ? updateCenteredLayout(layoutWidth, rawWidth)
-        : centeredLayoutRef.current;
-      liveRailCollapsed =
-        railPreferenceCollapsed || presentation.railResponsiveCollapsed;
-      const resizeWidthCompensation =
-        liveRailCollapsed && consoleDisplayMode === "dock-left"
-          ? sessionRailLayout.expandedWidthPx
-          : 0;
-      const availableStageWidth = Math.max(
-        0,
-        layoutWidth - (liveRailCollapsed ? 0 : sessionRailLayout.expandedWidthPx),
-      );
-      const consoleMin = Math.max(
-        0,
-        Math.min(consoleMinimumWidth, availableStageWidth / 2) - resizeWidthCompensation,
-      );
-      const workspaceMin = Math.min(workspaceMinimumWidth, availableStageWidth / 2);
-      const consoleMax = Math.max(
-        consoleMin,
-        Math.min(
-          dockMaximumWidth,
-          availableStageWidth - workspaceMin - resizeWidthCompensation,
-        ),
-      );
-      const width = clamp(rawWidth, consoleMin, consoleMax);
-      liveWidth = width;
-      dockWidthRef.current = liveWidth;
-      agentConsoleNode.style.width = `${width + resizeWidthCompensation}px`;
+      const layoutRect = layoutNode.getBoundingClientRect();
+      const layoutWidth = layoutRect.width;
+      const rawRatio = (clientX - layoutRect.left) / layoutWidth;
+      const presentation = updateCenteredLayout(layoutWidth, rawRatio);
+      const liveRailCollapsed =
+        getRailCollapsedPreference() ||
+        presentation.railResponsiveCollapsed;
+      const bounds = dockSplitRatioBounds({
+        chatDockSide,
+        layoutWidth,
+        railCollapsed: liveRailCollapsed,
+      });
+      liveSplitRatio = clamp(rawRatio, bounds.minimum, bounds.maximum);
+      dockSplitRatioRef.current = liveSplitRatio;
+      const railWidth = liveRailCollapsed
+        ? 0
+        : sessionRailLayout.expandedWidthPx;
+      const leftGroupWidth = layoutWidth * liveSplitRatio;
+      const chatWidth = chatDockSide === "left"
+        ? leftGroupWidth - railWidth
+        : layoutWidth - leftGroupWidth;
+      agentConsoleNode.style.width = `${chatWidth}px`;
     };
     const scheduleUpdate = (clientX: number) => {
       pendingClientX = clientX;
@@ -479,11 +534,7 @@ export function App() {
         pendingClientX = undefined;
       }
       cleanup();
-      const minimum =
-        liveRailCollapsed && consoleDisplayMode === "dock-left"
-          ? consoleMinimumWidth - sessionRailLayout.expandedWidthPx
-          : consoleMinimumWidth;
-      commitDockWidth(liveWidth, minimum);
+      commitDockSplitRatio(liveSplitRatio);
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId === pointerID) {
@@ -525,15 +576,32 @@ export function App() {
         ? `max(var(--toolbar-edge-inset), calc(var(--traffic-inset) + var(--toolbar-edge-inset) - (100vw - min(100vw, ${workspaceLayout.drawerWidthPx}px))))`
         : "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
       : "0.75rem";
-  const dockWidthCompensation =
-    railCollapsed && agentConsoleMode === "dock-left"
+  const renderedDockSplitRatio = consoleInteracting
+    ? dockSplitRatioRef.current
+    : dockSplitRatio;
+  const renderedChatRatio = chatDockSide === "left"
+    ? renderedDockSplitRatio
+    : 1 - renderedDockSplitRatio;
+  const renderedChatPercent = `${renderedChatRatio * 100}%`;
+  const railAdjustment = railCollapsed
+    ? 0
+    : chatDockSide === "left"
+      ? -(1 - renderedDockSplitRatio) * sessionRailLayout.expandedWidthPx
+      : renderedChatRatio * sessionRailLayout.expandedWidthPx;
+  const preferredDockWidth = railAdjustment === 0
+    ? renderedChatPercent
+    : `calc(${renderedChatPercent} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
+  const renderedChatContainerWidth = `${renderedChatRatio * 100}cqw`;
+  const preferredDockContainerWidth = railAdjustment === 0
+    ? renderedChatContainerWidth
+    : `calc(${renderedChatContainerWidth} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
+  const renderedDockMaximumWidth =
+    dockMaximumWidth +
+    (railCollapsed && chatDockSide === "left"
       ? sessionRailLayout.expandedWidthPx
-      : 0;
-  const renderedDockWidth =
-    (consoleInteracting ? dockWidthRef.current : dockWidth) + dockWidthCompensation;
-  const renderedDockMaximumWidth = dockMaximumWidth + dockWidthCompensation;
-  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${renderedDockWidth}px, min(${renderedDockMaximumWidth}px, calc(100% - min(${workspaceMinimumWidth}px, 50%))))`;
-  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${renderedDockWidth}px, min(${renderedDockMaximumWidth}px, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw)))) - 1px))`;
+      : 0);
+  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${preferredDockWidth}, min(${renderedDockMaximumWidth}px, calc(100% - min(${workspaceMinimumWidth}px, 50%))))`;
+  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${preferredDockContainerWidth}, min(${renderedDockMaximumWidth}px, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw)))) - 1px))`;
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: consoleDisplayMode === "dock-left" ? 2 : 0,
@@ -736,9 +804,9 @@ export function App() {
           key="dock-resize-handle"
           aria-label={t("layout.resizeHint")}
           aria-orientation="vertical"
-          aria-valuemax={dockMaximumWidth + dockWidthCompensation}
-          aria-valuemin={consoleMinimumWidth}
-          aria-valuenow={Math.round(renderedDockWidth)}
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={Math.round(renderedDockSplitRatio * 100)}
           className={cn(
             "pudding-shell-divider group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none transition-opacity duration-[var(--workspace-transition-duration)] before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 focus-visible:before:bg-muted-foreground/80",
             !workspaceVisible && "pointer-events-none opacity-0",
@@ -754,9 +822,10 @@ export function App() {
               return;
             }
             event.preventDefault();
-            commitDockWidth(
-              dockWidth + (event.key === increaseKey ? 20 : -20),
-              consoleMinimumWidth - dockWidthCompensation,
+            moveDockDivider(
+              event.key === increaseKey
+                ? consoleDisplayMode === "dock-left" ? 20 : -20
+                : consoleDisplayMode === "dock-left" ? -20 : 20,
             );
           }}
           onPointerDown={startDockResize}
@@ -800,7 +869,6 @@ export function App() {
                 onCreateProject={openProjectCreate}
               />
               <div
-                ref={setStageNode}
                 data-workspace-presentation={
                   !effectiveWorkspaceOpen
                     ? "hidden"

@@ -1,61 +1,28 @@
 export type CenteredLayoutConstraints = {
-  chatDockMaximumWidth: number;
-  chatDockMinimumWidth: number;
-  leftPairMinimumWidth: number;
-  railWidth: number;
-  rightPairMinimumWidth: number;
-  workspaceDockMinimumWidth: number;
+  dockedMinimumWidth: number;
+  railChatMinimumWidth: number;
+  railWorkspaceMinimumWidth: number;
+  thirdColumnMinimumWidth: number;
 };
+
+export type CenteredLayoutDockSide = "left" | "right";
 
 export type CenteredLayoutPresentation = {
   railResponsiveCollapsed: boolean;
   workspaceOverlay: boolean;
 };
 
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(Math.max(value, minimum), maximum);
-}
-
-function dockedChatWidth({
-  constraints,
-  dockWidth,
-  stageWidth,
-}: {
-  constraints: CenteredLayoutConstraints;
-  dockWidth: number;
-  stageWidth: number;
-}) {
-  const chatMinimumWidth = Math.min(
-    constraints.chatDockMinimumWidth,
-    stageWidth / 2,
-  );
-  const workspaceMinimumWidth = Math.min(
-    constraints.workspaceDockMinimumWidth,
-    stageWidth / 2,
-  );
-  const chatMaximumWidth = Math.max(
-    chatMinimumWidth,
-    Math.min(
-      constraints.chatDockMaximumWidth,
-      stageWidth - workspaceMinimumWidth,
-    ),
-  );
-  return clamp(
-    dockWidth,
-    chatMinimumWidth,
-    chatMaximumWidth,
-  );
-}
-
 export function resolveCenteredLayoutPresentation({
+  chatDockSide,
   constraints,
-  dockWidth,
   layoutWidth,
+  leftGroupRatio,
   workspaceDockRequested,
 }: {
+  chatDockSide: CenteredLayoutDockSide;
   constraints: CenteredLayoutConstraints;
-  dockWidth: number;
   layoutWidth: number;
+  leftGroupRatio: number;
   workspaceDockRequested: boolean;
 }): CenteredLayoutPresentation {
   // The first measurement is delivered from ResizeObserver after mount. Keep the
@@ -68,50 +35,38 @@ export function resolveCenteredLayoutPresentation({
   }
 
   const {
-    leftPairMinimumWidth,
-    railWidth,
-    rightPairMinimumWidth,
+    dockedMinimumWidth,
+    railChatMinimumWidth,
+    railWorkspaceMinimumWidth,
+    thirdColumnMinimumWidth,
   } = constraints;
 
   if (!workspaceDockRequested) {
     return {
-      railResponsiveCollapsed: layoutWidth < leftPairMinimumWidth,
+      railResponsiveCollapsed: layoutWidth < railChatMinimumWidth,
       workspaceOverlay: false,
     };
   }
 
-  // Chat is shared by two overlapping constraint regions:
-  //
-  //   [ rail + chat ] and [ chat + workspace ]
-  //
-  // Try the four stable presentations in product-priority order. The rail yields
-  // before a docked workspace; once the workspace becomes an overlay it no longer
-  // consumes width, so the rail may expand again when its own pair fits.
-  const expandedRailStageWidth = Math.max(0, layoutWidth - railWidth);
-  const expandedRailChatWidth = dockedChatWidth({
-    constraints,
-    dockWidth,
-    stageWidth: expandedRailStageWidth,
-  });
-  const leftPairWidth = railWidth + expandedRailChatWidth;
-  const rightPairWidth = expandedRailStageWidth;
-  if (
-    leftPairWidth >= leftPairMinimumWidth &&
-    rightPairWidth >= rightPairMinimumWidth
-  ) {
+  if (layoutWidth < dockedMinimumWidth) {
     return {
-      railResponsiveCollapsed: false,
-      workspaceOverlay: false,
+      railResponsiveCollapsed: layoutWidth < railChatMinimumWidth,
+      workspaceOverlay: true,
     };
   }
-  if (layoutWidth >= rightPairMinimumWidth) {
-    return {
-      railResponsiveCollapsed: true,
-      workspaceOverlay: false,
-    };
-  }
+
+  // The divider splits [rail + left content] from the third column. Keeping
+  // that boundary as the single source prevents it from jumping when the rail
+  // yields. Which content joins the rail depends on the chat dock side.
+  const leftGroupWidth = layoutWidth * leftGroupRatio;
+  const leftGroupMinimumWidth = chatDockSide === "left"
+    ? railChatMinimumWidth
+    : railWorkspaceMinimumWidth;
+  const expandedRailFits =
+    layoutWidth >= leftGroupMinimumWidth + thirdColumnMinimumWidth &&
+    leftGroupWidth >= leftGroupMinimumWidth;
   return {
-    railResponsiveCollapsed: layoutWidth < leftPairMinimumWidth,
-    workspaceOverlay: true,
+    railResponsiveCollapsed: !expandedRailFits,
+    workspaceOverlay: false,
   };
 }

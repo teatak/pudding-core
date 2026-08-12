@@ -1,8 +1,8 @@
 export const layoutStorageKeys = {
+  agentConsoleDockSplitRatio: "pudding.agentConsoleDockSplitRatio",
   projectBrowserRatio: "pudding.projectBrowserRatio",
   projectSidebarRatio: "pudding.projectSidebarRatio",
   splitRatio: "pudding.splitRatio",
-  workspaceRatio: "pudding.workspaceRatio",
 } as const;
 
 export const sessionRailLayout = {
@@ -15,12 +15,8 @@ export const chatLayout = {
 } as const;
 
 export const workspaceLayout = {
-  fallback: { chat: 30, workspace: 70 },
-  closed: { chat: 100, workspace: 0 },
-  minPercent: 1,
-  maxPercent: 99,
+  defaultLeftGroupRatio: 0.55,
   minChatPx: chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx,
-  maxChatPx: 920,
   minWorkspacePx: 380,
   drawerBreakpointPx:
     chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + 380,

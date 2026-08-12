@@ -561,7 +561,8 @@ html[data-shell] :where(
     transition: width var(--workspace-transition-duration) cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-html[data-agent-console-resizing="true"] .pudding-workspace-width-transition {
+html[data-agent-console-resizing="true"] .pudding-workspace-width-transition,
+html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     transition: none;
 }
 
