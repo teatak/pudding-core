@@ -49,7 +49,6 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
-	"github.com/teatak/pudding-core/internal/terminal"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/webui"
 )
@@ -72,7 +71,6 @@ type Daemon struct {
 	homeDir   string
 	voice     *voice.Service
 	browser   browser.Service
-	terminals *terminal.Manager
 	lsp       *lsp.Manager
 	stopSSE   context.CancelFunc
 	serveErr  chan error
@@ -158,12 +156,6 @@ func Start(opts Options) (*Daemon, error) {
 	}
 	browserMCP := tool.NewBrowserMCPRunner()
 	apps.WithRuntimeSource(browserMCP)
-	terminalManager, err := terminal.NewManager(st)
-	if err != nil {
-		_ = browserService.Close()
-		_ = st.Close()
-		return nil, err
-	}
 	appMCP := tool.NewAppMCPRunner(apps)
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
@@ -236,7 +228,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithTerminals(terminalManager).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,
@@ -258,7 +250,6 @@ func Start(opts Options) (*Daemon, error) {
 		homeDir:   dir,
 		voice:     voiceService,
 		browser:   browserService,
-		terminals: terminalManager,
 		lsp:       languageServers,
 		stopSSE:   stopSSE,
 		serveErr:  make(chan error, 1),
@@ -557,9 +548,6 @@ func (d *Daemon) ServeErr() <-chan error { return d.serveErr }
 
 // Shutdown 优雅关闭:SSE 退出 → server 关闭 → 等 turn 收尾 → 关存储。
 func (d *Daemon) Shutdown(ctx context.Context) error {
-	if d.terminals != nil {
-		_ = d.terminals.Close()
-	}
 	if d.voice != nil {
 		_ = d.voice.Close()
 	}

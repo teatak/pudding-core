@@ -938,24 +938,6 @@ export const listBrowserTabsResponse = z.object({
   processMode: z.enum(["headless", "webview", "external"]).optional(),
 });
 
-export const terminalStatus = z.enum(["running", "exited"]);
-export const terminal = z.object({
-  id: z.string(),
-  sessionID: z.string(),
-  title: z.string().optional(),
-  cwd: z.string(),
-  shell: z.string(),
-  status: terminalStatus,
-  exitCode: z.number().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type Terminal = z.infer<typeof terminal>;
-
-export const listTerminalsResponse = z.object({
-  terminals: z.array(terminal),
-});
-
 export const backgroundProcess = z.object({
   processID: z.string(),
   turnID: z.string().optional(),
@@ -997,12 +979,6 @@ export const backgroundProcessLog = z.object({
   hasMore: z.boolean(),
 });
 export type BackgroundProcessLog = z.infer<typeof backgroundProcessLog>;
-
-export const createTerminalRequest = z.object({
-  cwd: z.string().optional(),
-  columns: z.number().int().positive().optional(),
-  rows: z.number().int().positive().optional(),
-});
 
 export const browserOpenRequest = z.object({ url: z.string().min(1) });
 export const browserSyncRequest = z.object({

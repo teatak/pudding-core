@@ -32,7 +32,6 @@ import (
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/terminal"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -48,7 +47,6 @@ type Server struct {
 	voice      voiceController
 	audioRT    *runtimeassets.Installer
 	browser    browser.Service
-	terminals  terminal.Service
 	camera     desktopcamera.Capturer
 	browserMCP browserMCPService
 	browserMu  sync.Mutex
@@ -122,11 +120,6 @@ func (s *Server) WithAudioRuntime(installer *runtimeassets.Installer) *Server {
 
 func (s *Server) WithBrowser(service browser.Service) *Server {
 	s.browser = service
-	return s
-}
-
-func (s *Server) WithTerminals(service terminal.Service) *Server {
-	s.terminals = service
 	return s
 }
 
@@ -243,8 +236,6 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/browser/tabs/:tabID/type").POST(s.typeBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/scroll").POST(s.scrollBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/release").POST(s.releaseBrowserTab)
-	app.Route("/sessions/:id/terminals").GET(s.listTerminals).POST(s.createTerminal)
-	app.Route("/sessions/:id/terminals/:terminalID").GET(s.getTerminal).DELETE(s.deleteTerminal)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID/steer").POST(s.steerQueuedInput)
@@ -349,17 +340,9 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	if s.browserMCP != nil {
 		mcpAuthed = withAuth(token, cfg.deviceTokens, s.browserMCP)
 	}
-	var terminalAuthed http.Handler
-	if s.terminals != nil {
-		terminalAuthed = withAuth(token, cfg.deviceTokens, http.HandlerFunc(s.serveTerminalWebSocket))
-	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
 			mcpAuthed.ServeHTTP(w, r)
-			return
-		}
-		if isTerminalWebSocketPath(r.URL.Path) && terminalAuthed != nil {
-			terminalAuthed.ServeHTTP(w, r)
 			return
 		}
 		if r.URL.Path == browserTestFormPath {
@@ -755,9 +738,6 @@ func (s *Server) cancelSessionWork(ctx context.Context, id string) error {
 }
 
 func (s *Server) releaseSessionResources(ctx context.Context, id string, removeScratch bool) {
-	if s.terminals != nil {
-		s.terminals.CloseSession(id)
-	}
 	s.engine.ReleaseSessionResources(id)
 	if removeScratch {
 		if err := home.RemoveCodeScratch(s.home, id); err != nil {

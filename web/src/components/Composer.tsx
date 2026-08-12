@@ -108,6 +108,7 @@ type ComposerProps = {
   token: string;
   session: Session;
   onSubmitError?: (message: string | null) => void;
+  onSubmitStart?: () => void;
 };
 
 export type DroppedFilesBatch = DroppedLocalItems & {
@@ -144,6 +145,7 @@ export function Composer({
   token,
   session,
   onSubmitError,
+  onSubmitStart,
 }: ComposerProps) {
   const sessionID = session.id;
   const floating = presentation === "floating";
@@ -692,6 +694,7 @@ export function Composer({
     },
     onMutate: (submission) => {
       const clientMessageID = `input-flow-${submission.request.id}`;
+      onSubmitStart?.();
       clearSubmitError();
       onSubmitError?.(null);
       if (!running) {
@@ -892,6 +895,7 @@ export function Composer({
         partOrder,
         projectReferencesToSubmit,
       );
+      onSubmitStart?.();
       submitMutation.mutate({
         deliveryMode,
         text,

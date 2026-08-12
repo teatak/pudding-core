@@ -17,6 +17,10 @@ export function setRailCollapsed(next: boolean) {
   notify();
 }
 
+export function getRailCollapsedPreference() {
+  return pref;
+}
+
 export function setRailResponsiveCollapsed(next: boolean) {
   if (responsiveCollapsed === next) {
     return;

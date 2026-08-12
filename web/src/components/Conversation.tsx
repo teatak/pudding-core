@@ -33,6 +33,7 @@ export function Conversation({
   onSearchOpenChange: (open: boolean) => void;
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSignal, setSubmitSignal] = useState(0);
   const [dragMode, setDragMode] = useState<"files" | "project_reference" | null>(null);
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
   const [searchState, setSearchState] = useState<TranscriptSearchState>({ terms: [] });
@@ -40,6 +41,9 @@ export function Conversation({
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
   const floating = presentation === "floating";
+  const handleSubmitStart = useCallback(() => {
+    setSubmitSignal((signal) => signal + 1);
+  }, []);
 
   useLayoutEffect(() => {
     const conversation = conversationRef.current;
@@ -174,6 +178,7 @@ export function Conversation({
           sessionID={session.id}
           sessionRunning={session.running}
           submitError={submitError}
+          submitSignal={submitSignal}
           token={token}
         />
       )}
@@ -190,6 +195,7 @@ export function Conversation({
           presentation={floating ? "floating" : "default"}
           token={token}
           session={session}
+          onSubmitStart={handleSubmitStart}
           onSubmitError={setSubmitError}
         />
       </div>

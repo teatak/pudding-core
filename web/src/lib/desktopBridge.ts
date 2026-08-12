@@ -35,6 +35,7 @@ type ElectronDesktopBridge = {
   onOAuthConnected?: (listener: (payload: OAuthReturnPayload) => void) => () => void;
   onUpdateState?: (listener: (state: DesktopUpdateState) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
+  openSystemTerminal?: (path: string) => Promise<boolean>;
   revealPath?: (path: string) => Promise<boolean>;
   showEditorContextMenu?: (request: DesktopEditorContextMenuRequest) => Promise<DesktopEditorCommand | null>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
@@ -82,6 +83,19 @@ export async function revealDesktopPath(path: string) {
   }
   try {
     return await bridge.revealPath(clean);
+  } catch {
+    return false;
+  }
+}
+
+export async function openDesktopTerminal(path: string) {
+  const clean = path.trim();
+  const bridge = desktopBridge();
+  if (!clean || !bridge?.openSystemTerminal) {
+    return false;
+  }
+  try {
+    return await bridge.openSystemTerminal(clean);
   } catch {
     return false;
   }

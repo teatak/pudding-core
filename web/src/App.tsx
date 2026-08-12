@@ -1,6 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { PanelRightClose, PanelRightOpen } from "@/components/icons";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -30,7 +31,6 @@ import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
-import { emitAgentConsoleResizePhase } from "@/lib/agentConsoleResize";
 import {
   layoutStorageKeys,
   resizeTargetMinimumSize,
@@ -49,6 +49,7 @@ import {
 } from "@/state/agentConsoleStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
 import {
+  getRailCollapsedPreference,
   setRailResponsiveCollapsed,
   useRailCollapsed,
 } from "@/state/railStore";
@@ -67,6 +68,8 @@ const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const dockMaximumWidth = 640;
 const dockWidthStorageKey = "pudding.agentConsoleDockWidth";
 const dockWidthFallback = 480;
+const workspaceTransitionDurationMs = 220;
+type WorkspaceTransitionPhase = "idle" | "opening" | "closing";
 const centeredLayoutConstraints = {
   chatDockMaximumWidth: dockMaximumWidth,
   chatDockMinimumWidth: consoleMinimumWidth,
@@ -87,6 +90,12 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function workspaceTransitionDelay() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? 1
+    : workspaceTransitionDurationMs;
+}
+
 function lockAgentConsoleResizeCursor(cursor: string) {
   const root = document.documentElement;
   const property = "--agent-console-resize-cursor";
@@ -94,7 +103,6 @@ function lockAgentConsoleResizeCursor(cursor: string) {
   const previousPriority = root.style.getPropertyPriority(property);
   root.style.setProperty(property, cursor);
   root.dataset.agentConsoleResizing = "true";
-  emitAgentConsoleResizePhase("start");
   return () => {
     if (previousValue) {
       root.style.setProperty(property, previousValue, previousPriority);
@@ -102,7 +110,6 @@ function lockAgentConsoleResizeCursor(cursor: string) {
       root.style.removeProperty(property);
     }
     delete root.dataset.agentConsoleResizing;
-    emitAgentConsoleResizePhase("end");
   };
 }
 
@@ -155,9 +162,62 @@ export function App() {
   const showSplit = !standaloneViewActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
   const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
   const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
-  const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
+  const workspaceRequestedOpen = canUseWorkspace && workspaceOpen;
+  const workspaceTransitionEnabled = agentConsoleMode !== "floating";
+  const [workspacePresent, setWorkspacePresent] = useState(workspaceRequestedOpen);
+  const [workspaceTransition, setWorkspaceTransition] = useState<WorkspaceTransitionPhase>("idle");
+  const workspaceRequestRef = useRef(workspaceRequestedOpen);
+  useLayoutEffect(() => {
+    if (!workspaceTransitionEnabled) {
+      workspaceRequestRef.current = workspaceRequestedOpen;
+      setWorkspaceTransition("idle");
+      setWorkspacePresent(workspaceRequestedOpen);
+      return;
+    }
+    if (workspaceRequestRef.current === workspaceRequestedOpen) {
+      return;
+    }
+    workspaceRequestRef.current = workspaceRequestedOpen;
+    if (workspaceRequestedOpen) {
+      setWorkspacePresent(true);
+      setWorkspaceTransition("opening");
+    } else {
+      setWorkspaceTransition("closing");
+    }
+    const timer = window.setTimeout(() => {
+      setWorkspaceTransition("idle");
+      if (!workspaceRequestedOpen) {
+        setWorkspacePresent(false);
+      }
+    }, workspaceTransitionDelay());
+    return () => window.clearTimeout(timer);
+  }, [workspaceRequestedOpen, workspaceTransitionEnabled]);
+  const effectiveWorkspaceOpen = canUseWorkspace && workspacePresent;
+  const workspaceVisible = effectiveWorkspaceOpen && workspaceTransition !== "closing";
   const workspaceDockRequested =
     effectiveWorkspaceOpen && agentConsoleMode !== "floating";
+  const updateCenteredLayout = useCallback(
+    (layoutWidth: number, nextDockWidth = dockWidthRef.current) => {
+      const next = resolveCenteredLayoutPresentation({
+        constraints: centeredLayoutConstraints,
+        dockWidth: nextDockWidth,
+        layoutWidth,
+        workspaceDockRequested,
+      });
+      const current = centeredLayoutRef.current;
+      if (
+        current.railResponsiveCollapsed === next.railResponsiveCollapsed &&
+        current.workspaceOverlay === next.workspaceOverlay
+      ) {
+        return current;
+      }
+      centeredLayoutRef.current = next;
+      setRailResponsiveCollapsed(next.railResponsiveCollapsed);
+      setCenteredLayout(next);
+      return next;
+    },
+    [workspaceDockRequested],
+  );
   // workspaceOpen 只表达用户意图。停靠/抽屉以及 rail 的响应式展示由
   // 两个共享 Chat 的组合区域统一求解，不写回用户偏好。
   const workspaceOverlay =
@@ -189,10 +249,6 @@ export function App() {
       ? []
       : [selectedSessionID, showSplit ? splitSessionID : undefined]
   ).filter((sessionID): sessionID is string => Boolean(sessionID));
-
-  useLayoutEffect(() => {
-    setRailResponsiveCollapsed(centeredLayout.railResponsiveCollapsed);
-  }, [centeredLayout.railResponsiveCollapsed]);
 
   useEffect(
     () => () => {
@@ -226,30 +282,18 @@ export function App() {
     if (!layoutNode) {
       return;
     }
-    const updatePresentation = (layoutWidth: number) => {
-      const next = resolveCenteredLayoutPresentation({
-        constraints: centeredLayoutConstraints,
-        dockWidth,
-        layoutWidth,
-        workspaceDockRequested,
-      });
-      const current = centeredLayoutRef.current;
-      if (
-        current.railResponsiveCollapsed === next.railResponsiveCollapsed &&
-        current.workspaceOverlay === next.workspaceOverlay
-      ) {
-        return;
-      }
-      centeredLayoutRef.current = next;
-      setCenteredLayout(next);
+    const updatePresentation = () => {
+      updateCenteredLayout(layoutNode.clientWidth);
     };
-    updatePresentation(layoutNode.clientWidth);
-    const observer = new ResizeObserver(([entry]) => {
-      updatePresentation(Math.round(entry?.contentRect.width || layoutNode.clientWidth));
-    });
+    updatePresentation();
+    const observer = new ResizeObserver(updatePresentation);
     observer.observe(layoutNode);
-    return () => observer.disconnect();
-  }, [dockWidth, layoutNode, workspaceDockRequested]);
+    window.addEventListener("resize", updatePresentation, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePresentation);
+    };
+  }, [layoutNode, updateCenteredLayout]);
 
   useEffect(() => {
     dockWidthRef.current = dockWidth;
@@ -305,10 +349,16 @@ export function App() {
     return <TokenGate />;
   }
 
-  const commitDockWidth = (next: number) => {
-    const normalized = clamp(next, consoleMinimumWidth, dockMaximumWidth);
+  const commitDockWidth = (
+    next: number,
+    minimum = consoleMinimumWidth,
+  ) => {
+    const normalized = clamp(next, minimum, dockMaximumWidth);
     dockWidthRef.current = normalized;
     setDockWidth(normalized);
+    if (layoutNode) {
+      updateCenteredLayout(layoutNode.clientWidth, normalized);
+    }
     localStorage.setItem(dockWidthStorageKey, String(normalized));
   };
 
@@ -323,9 +373,11 @@ export function App() {
     }
     event.preventDefault();
     const pointerID = event.pointerId;
+    const resizeStartClientX = event.clientX;
+    const resizeStartWidth = dockWidthRef.current;
+    const railPreferenceCollapsed = getRailCollapsedPreference();
     const resizeHandle = event.currentTarget;
     const agentConsoleNode = agentConsoleRef.current;
-    const stageRect = stageNode.getBoundingClientRect();
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
     const resizeFromRight = consoleDisplayMode === "dock-right";
@@ -347,20 +399,46 @@ export function App() {
     document.body.style.userSelect = "none";
 
     let liveWidth = dockWidthRef.current;
+    let liveRailCollapsed = railCollapsed;
     let resizeFrame = 0;
     let pendingClientX: number | undefined;
     let cleaned = false;
     const update = (clientX: number) => {
-      const rawWidth = resizeFromRight ? stageRect.right - clientX : clientX - stageRect.left;
-      const consoleMin = Math.min(consoleMinimumWidth, stageRect.width / 2);
-      const workspaceMin = Math.min(workspaceMinimumWidth, stageRect.width / 2);
+      const stageRect = stageNode.getBoundingClientRect();
+      const layoutWidth = layoutNode?.clientWidth || (
+        stageRect.width + (liveRailCollapsed ? 0 : sessionRailLayout.expandedWidthPx)
+      );
+      const pointerDelta = clientX - resizeStartClientX;
+      const rawWidth = resizeStartWidth + (resizeFromRight ? -pointerDelta : pointerDelta);
+      const presentation = layoutNode
+        ? updateCenteredLayout(layoutWidth, rawWidth)
+        : centeredLayoutRef.current;
+      liveRailCollapsed =
+        railPreferenceCollapsed || presentation.railResponsiveCollapsed;
+      const resizeWidthCompensation =
+        liveRailCollapsed && consoleDisplayMode === "dock-left"
+          ? sessionRailLayout.expandedWidthPx
+          : 0;
+      const availableStageWidth = Math.max(
+        0,
+        layoutWidth - (liveRailCollapsed ? 0 : sessionRailLayout.expandedWidthPx),
+      );
+      const consoleMin = Math.max(
+        0,
+        Math.min(consoleMinimumWidth, availableStageWidth / 2) - resizeWidthCompensation,
+      );
+      const workspaceMin = Math.min(workspaceMinimumWidth, availableStageWidth / 2);
       const consoleMax = Math.max(
         consoleMin,
-        Math.min(dockMaximumWidth, stageRect.width - workspaceMin),
+        Math.min(
+          dockMaximumWidth,
+          availableStageWidth - workspaceMin - resizeWidthCompensation,
+        ),
       );
       const width = clamp(rawWidth, consoleMin, consoleMax);
       liveWidth = width;
-      agentConsoleNode.style.width = `${width}px`;
+      dockWidthRef.current = liveWidth;
+      agentConsoleNode.style.width = `${width + resizeWidthCompensation}px`;
     };
     const scheduleUpdate = (clientX: number) => {
       pendingClientX = clientX;
@@ -401,7 +479,11 @@ export function App() {
         pendingClientX = undefined;
       }
       cleanup();
-      commitDockWidth(liveWidth);
+      const minimum =
+        liveRailCollapsed && consoleDisplayMode === "dock-left"
+          ? consoleMinimumWidth - sessionRailLayout.expandedWidthPx
+          : consoleMinimumWidth;
+      commitDockWidth(liveWidth, minimum);
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId === pointerID) {
@@ -439,9 +521,19 @@ export function App() {
   const workspaceStartsAtStageLeft = consoleDisplayMode !== "dock-left";
   const workspaceToolbarPadding =
     railCollapsed && workspaceStartsAtStageLeft
-      ? "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
+      ? workspaceOverlay
+        ? `max(var(--toolbar-edge-inset), calc(var(--traffic-inset) + var(--toolbar-edge-inset) - (100vw - min(100vw, ${workspaceLayout.drawerWidthPx}px))))`
+        : "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
       : "0.75rem";
-  const dockedConsoleWidth = `clamp(min(380px, 50%), ${dockWidth}px, min(640px, calc(100% - min(380px, 50%))))`;
+  const dockWidthCompensation =
+    railCollapsed && agentConsoleMode === "dock-left"
+      ? sessionRailLayout.expandedWidthPx
+      : 0;
+  const renderedDockWidth =
+    (consoleInteracting ? dockWidthRef.current : dockWidth) + dockWidthCompensation;
+  const renderedDockMaximumWidth = dockMaximumWidth + dockWidthCompensation;
+  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${renderedDockWidth}px, min(${renderedDockMaximumWidth}px, calc(100% - min(${workspaceMinimumWidth}px, 50%))))`;
+  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${renderedDockWidth}px, min(${renderedDockMaximumWidth}px, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw)))) - 1px))`;
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: consoleDisplayMode === "dock-left" ? 2 : 0,
@@ -449,12 +541,13 @@ export function App() {
   } as CSSProperties;
   const chatOccupiesStageTopRight =
     consoleDisplayMode === "full" ||
-    consoleDisplayMode === "dock-right";
+    consoleDisplayMode === "dock-right" ||
+    workspaceTransition === "closing";
   const workspaceOccupiesStageTopRight = consoleDisplayMode !== "dock-right";
   const stageToolbarActionCount: 0 | 1 | 2 =
     !canUseWorkspace
       ? 0
-      : effectiveWorkspaceOpen && !workspaceOverlay
+      : workspaceVisible && !workspaceOverlay
         ? 2
         : 1;
 
@@ -513,11 +606,11 @@ export function App() {
   );
 
   const workspaceToggleLabel = t(
-    effectiveWorkspaceOpen ? "workspace.close" : "workspace.open",
+    workspaceRequestedOpen ? "workspace.close" : "workspace.open",
   );
   const stageToolbarActions = canUseWorkspace ? (
     <div className="no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[60] flex h-(--toolbar-h) items-center gap-2">
-      {effectiveWorkspaceOpen && !workspaceOverlay
+      {workspaceVisible && !workspaceOverlay
         ? <AgentConsoleLayoutControl />
         : null}
       <div className="pudding-workspace-toggle flex items-center">
@@ -525,15 +618,15 @@ export function App() {
           <TooltipTrigger asChild>
             <Button
               aria-label={workspaceToggleLabel}
-              aria-pressed={effectiveWorkspaceOpen}
+              aria-pressed={workspaceRequestedOpen}
               className="no-drag-region pointer-events-auto"
               size="icon-sm"
               tabIndex={-1}
               type="button"
               variant="ghost"
-              onClick={() => setWorkspaceOpen(!effectiveWorkspaceOpen)}
+              onClick={() => setWorkspaceOpen(!workspaceRequestedOpen)}
             >
-              {effectiveWorkspaceOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
             </Button>
           </TooltipTrigger>
           <TooltipContent align="end" side="bottom">
@@ -558,14 +651,17 @@ export function App() {
   const workspaceSurface = (
     <div
       key="workspace"
-      aria-hidden={!effectiveWorkspaceOpen}
+      aria-hidden={!workspaceVisible}
       className={cn(
         "pudding-workspace-stage h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background",
-        !effectiveWorkspaceOpen && "hidden",
+        !effectiveWorkspaceOpen && "invisible pointer-events-none !w-0 !flex-none opacity-0",
         workspaceOverlay &&
-          "absolute inset-y-0 right-0 flex-none border-l border-[var(--workspace-border)] shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
+          "absolute inset-y-0 right-0 z-50 flex-none border-l border-[var(--workspace-border)] shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
       )}
-      inert={!effectiveWorkspaceOpen}
+      data-presentation={workspaceOverlay ? "overlay" : docked ? "docked" : "inline"}
+      data-dock-side={agentConsoleMode === "dock-right" ? "left" : "right"}
+      data-transition={workspaceTransition}
+      inert={!workspaceVisible}
       style={workspaceSurfaceStyle}
     >
       <WorkspacePane
@@ -584,6 +680,7 @@ export function App() {
       key="agent-console"
       className={cn(
         "pudding-agent-console min-h-0 min-w-0",
+        docked && "pudding-workspace-width-transition",
         consoleDisplayMode === "floating"
           ? "pointer-events-none overflow-visible"
           : "overflow-hidden",
@@ -597,7 +694,7 @@ export function App() {
         width: consoleDisplayMode === "floating"
           ? `min(${floatingDefaultWidth}px, 100%)`
           : docked
-            ? dockedConsoleWidth
+            ? (workspaceVisible ? dockedConsoleWidth : "100%")
             : "100%",
         zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
       }}
@@ -627,7 +724,8 @@ export function App() {
       {workspaceOverlay ? (
         <button
           aria-label={t("workspace.close")}
-          className="no-drag-region absolute inset-0 bg-overlay"
+          className="pudding-workspace-backdrop no-drag-region absolute inset-0 z-40 bg-overlay"
+          data-transition={workspaceTransition}
           tabIndex={-1}
           type="button"
           onClick={() => setWorkspaceOpen(false)}
@@ -638,10 +736,14 @@ export function App() {
           key="dock-resize-handle"
           aria-label={t("layout.resizeHint")}
           aria-orientation="vertical"
-          aria-valuemax={dockMaximumWidth}
+          aria-valuemax={dockMaximumWidth + dockWidthCompensation}
           aria-valuemin={consoleMinimumWidth}
-          aria-valuenow={Math.round(dockWidth)}
-          className="group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border focus-visible:before:bg-muted-foreground/80"
+          aria-valuenow={Math.round(renderedDockWidth)}
+          className={cn(
+            "pudding-shell-divider group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none transition-opacity duration-[var(--workspace-transition-duration)] before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 focus-visible:before:bg-muted-foreground/80",
+            !workspaceVisible && "pointer-events-none opacity-0",
+          )}
+          data-chat-side={consoleDisplayMode === "dock-left" ? "left" : "right"}
           role="separator"
           tabIndex={0}
           onKeyDown={(event) => {
@@ -653,7 +755,10 @@ export function App() {
               return;
             }
             event.preventDefault();
-            commitDockWidth(dockWidth + (event.key === increaseKey ? 20 : -20));
+            commitDockWidth(
+              dockWidth + (event.key === increaseKey ? 20 : -20),
+              consoleMinimumWidth - dockWidthCompensation,
+            );
           }}
           onPointerDown={startDockResize}
         >
@@ -707,9 +812,13 @@ export function App() {
                         : "docked"
                 }
                 className={cn(
-                  "relative h-full min-w-0 flex-1 overflow-hidden bg-background",
+                  "pudding-session-stage relative h-full min-w-0 flex-1 overflow-hidden bg-background",
                   (consoleDisplayMode === "full" || docked) && "flex",
                 )}
+                style={{
+                  "--workspace-inline-content-width": dockedWorkspaceWidth,
+                  "--workspace-transition-duration": `${workspaceTransitionDurationMs}ms`,
+                } as CSSProperties}
               >
                 {standalonePane || sessionStage}
                 {stageToolbarActions}

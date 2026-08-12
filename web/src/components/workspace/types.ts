@@ -1,1 +1,1 @@
-export type WorkspaceSurface = "workspace" | "canvas" | "browser" | "project" | "terminal";
+export type WorkspaceSurface = "workspace" | "canvas" | "browser" | "project";

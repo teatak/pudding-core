@@ -26,7 +26,6 @@ export const queryKeys = {
   browserTabs: (sessionID: string) => ["session", sessionID, "browser", "tabs"] as const,
   browserHistory: (query?: string) => (query === undefined ? (["browser", "history"] as const) : (["browser", "history", query] as const)),
   browserHistoryRecent: (limit: number) => ["browser", "history", "recent", limit] as const,
-  terminals: (sessionID: string) => ["session", sessionID, "terminals"] as const,
   canvasItems: (sessionID: string) => ["session", sessionID, "canvas", "items"] as const,
   closedCanvasItems: (sessionID: string) => ["session", sessionID, "canvas", "closed"] as const,
   savedCanvasItems: () => ["canvas", "saved"] as const,

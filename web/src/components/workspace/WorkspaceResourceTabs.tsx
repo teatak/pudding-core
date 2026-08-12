@@ -16,10 +16,10 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileCode2, FileDiff, Folders, Globe, SquareTerminal, X } from "@/components/icons";
+import { FileCode2, FileDiff, Folders, Globe, X } from "@/components/icons";
 import { memo, useEffect } from "react";
 
-import type { BrowserTab, Terminal } from "@/api/client";
+import type { BrowserTab } from "@/api/client";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
@@ -53,18 +53,6 @@ function BrowserTabIcon({ faviconURL, pageURL }: { faviconURL?: string; pageURL:
   );
 }
 
-function TerminalTabIcon({ exited }: { exited: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-transparent text-current"
-      data-exited={exited}
-    >
-      <SquareTerminal className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
 function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] }) {
   return (
     <span
@@ -87,7 +75,6 @@ export type WorkspaceFilePreviewTab = {
 type SurfaceTab =
   | { kind: "project"; id: "project"; sortAt: number }
   | { kind: "browser"; id: string; sortAt: number; browser: BrowserTab }
-  | { kind: "terminal"; id: string; sortAt: number; terminal: Terminal }
   | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab }
   | { kind: "widget"; id: string; sortAt: number; widget: CanvasItem };
 
@@ -96,53 +83,43 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   activeCanvasItemID,
   activeFilePreviewID,
   activeSurface,
-  activeTerminalID,
   browserTabs,
   canvasItems,
   closingCanvasItemID,
   closingBrowserTabID,
-  closingTerminalID,
   filePreviewActive,
   filePreviewTabs,
   orderScope,
   projectTabVisible,
-  terminalTabs,
   onCloseBrowser,
   onCloseCanvasItem,
   onCloseFilePreview,
   onCloseProject,
-  onCloseTerminal,
   onSelectBrowser,
   onSelectCanvasItem,
   onSelectFilePreview,
   onSelectProject,
-  onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
   activeCanvasItemID?: string;
   activeFilePreviewID?: string;
   activeSurface: WorkspaceSurface;
-  activeTerminalID?: string;
   browserTabs: BrowserTab[];
   canvasItems: CanvasItem[];
   closingCanvasItemID?: string;
   closingBrowserTabID?: string;
-  closingTerminalID?: string;
   filePreviewActive: boolean;
   filePreviewTabs: WorkspaceFilePreviewTab[];
   orderScope: string;
   projectTabVisible: boolean;
-  terminalTabs: Terminal[];
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
   onCloseProject: () => void;
-  onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
   onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
   onSelectProject: () => void;
-  onSelectTerminal: (terminalID: string) => void;
 }) {
   const scrollMask = useHorizontalScrollMask<HTMLDivElement>();
   const sensors = useSensors(
@@ -155,7 +132,6 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   );
   const createdTabs: SurfaceTab[] = [
     ...browserTabs.map((browser) => ({ kind: "browser" as const, id: browser.id, sortAt: Date.parse(browser.createdAt), browser })),
-    ...terminalTabs.map((terminal) => ({ kind: "terminal" as const, id: terminal.id, sortAt: Date.parse(terminal.createdAt), terminal })),
     ...filePreviewTabs.map((file) => ({ kind: "file" as const, id: file.id, sortAt: file.openedAt, file })),
     ...canvasItems.map((widget) => ({ kind: "widget" as const, id: widget.id, sortAt: Date.parse(widget.createdAt), widget })),
     ...(projectTabVisible ? [{ kind: "project" as const, id: "project" as const, sortAt: Number.MAX_SAFE_INTEGER }] : []),
@@ -211,22 +187,18 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
                 activeCanvasItemID={activeCanvasItemID}
                 activeFilePreviewID={activeFilePreviewID}
                 activeSurface={activeSurface}
-                activeTerminalID={activeTerminalID}
                 closingBrowserTabID={closingBrowserTabID}
                 closingCanvasItemID={closingCanvasItemID}
-                closingTerminalID={closingTerminalID}
                 filePreviewActive={filePreviewActive}
                 tab={tab}
                 onCloseBrowser={onCloseBrowser}
                 onCloseCanvasItem={onCloseCanvasItem}
                 onCloseFilePreview={onCloseFilePreview}
                 onCloseProject={onCloseProject}
-                onCloseTerminal={onCloseTerminal}
                 onSelectBrowser={onSelectBrowser}
                 onSelectCanvasItem={onSelectCanvasItem}
                 onSelectFilePreview={onSelectFilePreview}
                 onSelectProject={onSelectProject}
-                onSelectTerminal={onSelectTerminal}
               />
             ))}
           </div>
@@ -241,70 +213,56 @@ function SortableSurfaceTabButton({
   activeCanvasItemID,
   activeFilePreviewID,
   activeSurface,
-  activeTerminalID,
   closingBrowserTabID,
   closingCanvasItemID,
-  closingTerminalID,
   filePreviewActive,
   tab,
   onCloseBrowser,
   onCloseCanvasItem,
   onCloseFilePreview,
   onCloseProject,
-  onCloseTerminal,
   onSelectBrowser,
   onSelectCanvasItem,
   onSelectFilePreview,
   onSelectProject,
-  onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
   activeCanvasItemID?: string;
   activeFilePreviewID?: string;
   activeSurface: WorkspaceSurface;
-  activeTerminalID?: string;
   closingBrowserTabID?: string;
   closingCanvasItemID?: string;
-  closingTerminalID?: string;
   filePreviewActive: boolean;
   tab: SurfaceTab;
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
   onCloseProject: () => void;
-  onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
   onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
   onSelectProject: () => void;
-  onSelectTerminal: (terminalID: string) => void;
 }) {
   const { t } = useI18n();
   const browser = tab.kind === "browser" ? tab.browser : undefined;
   const project = tab.kind === "project";
-  const terminal = tab.kind === "terminal" ? tab.terminal : undefined;
   const file = tab.kind === "file" ? tab.file : undefined;
   const widget = tab.kind === "widget" ? tab.widget : undefined;
   const label = project
     ? t("workspace.project")
     : browser
       ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
-      : terminal
-        ? terminalTabTitle(terminal, t("terminal.newTab"))
-        : widget
-          ? titleForCanvasItem(widget, t)
-          : file?.label || t("terminal.newTab");
+      : widget
+        ? titleForCanvasItem(widget, t)
+        : file?.label || t("uiContext.filePreview");
   const selected =
     (tab.kind === "project" && activeSurface === "project") ||
     (tab.kind === "browser" && activeSurface === "browser" && tab.id === activeBrowserTabID) ||
-    (tab.kind === "terminal" && activeSurface === "terminal" && tab.id === activeTerminalID) ||
     (tab.kind === "file" && filePreviewActive && tab.id === activeFilePreviewID) ||
     (tab.kind === "widget" && activeSurface === "canvas" && !filePreviewActive && tab.id === activeCanvasItemID);
   const closePending =
     (tab.kind === "browser" && tab.id === closingBrowserTabID) ||
-    (tab.kind === "terminal" && tab.id === closingTerminalID) ||
     (tab.kind === "widget" && tab.id === closingCanvasItemID);
-  const exited = terminal?.status === "exited";
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
     id: surfaceTabID(tab),
     disabled: closePending,
@@ -315,18 +273,14 @@ function SortableSurfaceTabButton({
       ? t("browser.release")
       : tab.kind === "project"
         ? t("workspace.closeProject")
-        : tab.kind === "terminal"
-          ? t("terminal.close")
-          : tab.kind === "widget"
-            ? t("canvas.delete")
-            : t("canvas.filePreviewClose");
+        : tab.kind === "widget"
+          ? t("canvas.delete")
+          : t("canvas.filePreviewClose");
   const closeTab = () => {
     if (tab.kind === "browser") {
       onCloseBrowser(tab.id);
     } else if (tab.kind === "project") {
       onCloseProject();
-    } else if (tab.kind === "terminal") {
-      onCloseTerminal(tab.id);
     } else if (tab.kind === "file") {
       onCloseFilePreview(tab.id);
     } else {
@@ -361,8 +315,6 @@ function SortableSurfaceTabButton({
           onSelectBrowser(tab.id);
         } else if (tab.kind === "project") {
           onSelectProject();
-        } else if (tab.kind === "terminal") {
-          onSelectTerminal(tab.id);
         } else if (tab.kind === "file") {
           onSelectFilePreview(tab.id);
         } else {
@@ -378,8 +330,6 @@ function SortableSurfaceTabButton({
             </span>
           ) : browser ? (
             <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
-          ) : terminal ? (
-            <TerminalTabIcon exited={exited} />
           ) : widget ? (
             <CanvasKindIcon className="!bg-transparent !text-current" kind={widget.kind} size="xs" />
           ) : (
@@ -422,17 +372,4 @@ function SortableSurfaceTabButton({
 
 function surfaceTabID(tab: SurfaceTab) {
   return `${tab.kind}:${tab.id}`;
-}
-
-function terminalTabTitle(terminal: Terminal, fallback: string) {
-  const title = (terminal.title || "").trim();
-  const shellName = basename(terminal.shell);
-  if (title && title !== shellName) {
-    return title;
-  }
-  return basename(terminal.cwd) || title || fallback;
-}
-
-function basename(path: string) {
-  return path.replace(/[/\\]+$/, "").split(/[/\\]/).pop()?.trim() || "";
 }

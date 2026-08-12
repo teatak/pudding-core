@@ -20,6 +20,7 @@ type TranscriptProps = {
   searchSlot: "primary" | "split";
   searchState: TranscriptSearchState;
   submitError?: string | null;
+  submitSignal?: number;
 };
 
 export function Transcript({
@@ -28,6 +29,7 @@ export function Transcript({
   sessionID,
   sessionRunning = false,
   submitError,
+  submitSignal = 0,
   token,
 }: TranscriptProps) {
   const disclosureByKeyRef = useRef<Record<string, boolean>>({});
@@ -67,14 +69,20 @@ export function Transcript({
     (clientMessageID: string, text: string) => updateQueued(clientMessageID, { status: "queued", text }),
     [updateQueued],
   );
+  const moveToLatest = useCallback(() => {
+    setNewMessageCount(0);
+    setIsAtLatest(true);
+    setJumpLatestSignal((signal) => signal + 1);
+  }, []);
   const guideQueued = useCallback(
     (clientMessageID: string) => {
       if (!runningTurnID) {
         return Promise.reject(new Error("turn_not_active"));
       }
+      moveToLatest();
       return steerQueued(clientMessageID, runningTurnID);
     },
-    [runningTurnID, steerQueued],
+    [moveToLatest, runningTurnID, steerQueued],
   );
   const disclosure = useMemo(
     () => ({
@@ -132,17 +140,17 @@ export function Transcript({
     }
   }, [isAtLatest, transcript.turnVMs]);
 
+  useLayoutEffect(() => {
+    if (submitSignal > 0) {
+      moveToLatest();
+    }
+  }, [moveToLatest, submitSignal]);
+
   const handleLatestChange = useCallback((next: boolean) => {
     setIsAtLatest(next);
     if (next) {
       setNewMessageCount(0);
     }
-  }, []);
-
-  const handleJumpLatest = useCallback(() => {
-    setNewMessageCount(0);
-    setIsAtLatest(true);
-    setJumpLatestSignal((signal) => signal + 1);
   }, []);
 
   return (
@@ -167,7 +175,7 @@ export function Transcript({
       turnReveal={turnReveal}
       turns={transcript.turnVMs}
       onAssistantRevealComplete={handleAssistantRevealComplete}
-      onJumpLatest={handleJumpLatest}
+      onJumpLatest={moveToLatest}
       onLatestChange={handleLatestChange}
       onLoadHistory={loadHistory}
       onTurnRevealComplete={handleTurnRevealComplete}

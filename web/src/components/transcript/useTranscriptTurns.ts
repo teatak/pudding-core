@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { listTurns, type ConversationTurn } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -8,7 +8,6 @@ import { useI18n } from "@/i18n";
 import { formatDurationBetween } from "./time";
 
 const TURNS_PAGE_SIZE = 20;
-const VISIBLE_TURN_STEP = TURNS_PAGE_SIZE;
 type TurnsPage = { turns: ConversationTurn[]; hasMore: boolean };
 export type TurnsInfiniteData = InfiniteData<TurnsPage, string | undefined>;
 const latestTurnsRefreshes = new Map<string, Promise<void>>();
@@ -16,7 +15,6 @@ const latestTurnsRefreshes = new Map<string, Promise<void>>();
 export function useTranscriptTurns(token: string, sessionID: string) {
   const { locale } = useI18n();
   const queryClient = useQueryClient();
-  const [visibleTurnCount, setVisibleTurnCount] = useState(VISIBLE_TURN_STEP);
   const latestRefreshRef = useRef({
     cachePresent: false,
     key: "",
@@ -56,10 +54,6 @@ export function useTranscriptTurns(token: string, sessionID: string) {
   sessionIDRef.current = sessionID;
 
   useEffect(() => {
-    setVisibleTurnCount(VISIBLE_TURN_STEP);
-  }, [sessionID]);
-
-  useEffect(() => {
     const refresh = latestRefreshRef.current;
     if (!token || !sessionID || refresh.key !== latestRefreshKey || !refresh.cachePresent || refresh.started) {
       return;
@@ -70,22 +64,13 @@ export function useTranscriptTurns(token: string, sessionID: string) {
     });
   }, [latestRefreshKey, queryClient, sessionID, token]);
 
-  const cachedTurnCount = useMemo(() => countTurnPages(query.data?.pages), [query.data]);
-  const hasCachedHistory = cachedTurnCount > visibleTurnCount;
-  const hasMoreHistory = hasCachedHistory || Boolean(query.hasNextPage);
-  const loadHistory = useCallback(async () => {
-    const targetVisibleCount = visibleTurnCount + VISIBLE_TURN_STEP;
-    let cachedCount = countTurnPages(query.data?.pages);
-    if (cachedCount < targetVisibleCount && query.hasNextPage) {
-      let result = await query.fetchNextPage();
-      cachedCount = countTurnPages(result.data?.pages);
-      while (cachedCount < targetVisibleCount && result.hasNextPage) {
-        result = await query.fetchNextPage();
-        cachedCount = countTurnPages(result.data?.pages);
-      }
+  const hasMoreHistory = Boolean(query.hasNextPage);
+  const loadHistory = useCallback(() => {
+    if (!query.hasNextPage || query.isFetchingNextPage) {
+      return Promise.resolve(query.data);
     }
-    setVisibleTurnCount((current) => Math.min(current + VISIBLE_TURN_STEP, Math.max(cachedCount, current)));
-  }, [query, visibleTurnCount]);
+    return query.fetchNextPage();
+  }, [query.data, query.fetchNextPage, query.hasNextPage, query.isFetchingNextPage]);
   const revealTurn = useCallback((turnID: string) => {
     const targetSessionID = sessionIDRef.current;
     const requestKey = `${targetSessionID}:${turnID}`;
@@ -100,9 +85,7 @@ export function useTranscriptTurns(token: string, sessionID: string) {
           if (sessionIDRef.current !== targetSessionID) {
             return false;
           }
-          const targetVisibleCount = visibleTurnCountForTarget(pages, turnID);
-          if (targetVisibleCount !== undefined) {
-            setVisibleTurnCount((current) => Math.max(current, targetVisibleCount));
+          if (turnPagesContain(pages, turnID)) {
             return true;
           }
           const lastPage = pages?.at(-1);
@@ -129,7 +112,7 @@ export function useTranscriptTurns(token: string, sessionID: string) {
     return request;
   }, []);
 
-  const turns = useMemo(() => flattenVisibleTurnPages(query.data?.pages, visibleTurnCount), [query.data, visibleTurnCount]);
+  const turns = useMemo(() => flattenTurnPages(query.data?.pages), [query.data]);
   const messages = useMemo(() => turns.flatMap((turn) => turn.messages), [turns]);
   const turnDurationByID = useMemo(() => {
     const out = new Map<string, string>();
@@ -173,23 +156,6 @@ function refreshLatestTurns(queryClient: QueryClient, token: string, sessionID: 
     });
   latestTurnsRefreshes.set(refreshKey, request);
   return request;
-}
-
-function countTurnPages(pages: { turns: ConversationTurn[] }[] | undefined) {
-  return pages?.reduce((sum, page) => sum + page.turns.length, 0) || 0;
-}
-
-function flattenVisibleTurnPages(pages: { turns: ConversationTurn[] }[] | undefined, visibleTurnCount: number) {
-  if (!pages?.length) {
-    return [];
-  }
-  let includedTurnCount = 0;
-  let includedPageCount = 0;
-  while (includedPageCount < pages.length && includedTurnCount < visibleTurnCount) {
-    includedTurnCount += pages[includedPageCount].turns.length;
-    includedPageCount += 1;
-  }
-  return flattenTurnPages(pages.slice(0, includedPageCount)).slice(-visibleTurnCount);
 }
 
 function flattenTurnPages(pages: { turns: ConversationTurn[] }[] | undefined) {
@@ -244,13 +210,11 @@ function mergeLatestTurnPage(previous: TurnsInfiniteData | undefined, latestPage
   return { pages, pageParams };
 }
 
-function visibleTurnCountForTarget(
+function turnPagesContain(
   pages: { turns: ConversationTurn[] }[] | undefined,
   turnID: string,
 ) {
-  const turns = flattenTurnPages(pages);
-  const targetIndex = turns.findIndex((turn) => turn.id === turnID);
-  return targetIndex >= 0 ? turns.length - targetIndex : undefined;
+  return Boolean(pages?.some((page) => page.turns.some((turn) => turn.id === turnID)));
 }
 
 export function upsertTurnIntoPages(previous: TurnsInfiniteData | undefined, turn: ConversationTurn) {

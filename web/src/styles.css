@@ -140,6 +140,8 @@ textarea:focus-visible,
     --sidebar-accent-foreground: oklch(0.2 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --shell-divider: oklch(0.86 0 0 / 64%);
+    --shell-layer-shadow: oklch(0 0 0 / 5%);
     /* macOS 红绿灯横向让位:浏览器 0;Electron 壳模式由 data-shell 切换,
        全屏时红绿灯隐藏、让位归零。 */
     --traffic-inset: 0px;
@@ -555,14 +557,134 @@ html[data-shell] :where(
     }
 }
 
-.pudding-workspace-panel-animating [data-slot="resizable-panel"] {
-    transition-property: flex-grow, flex-basis;
-    transition-duration: 220ms;
-    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+.pudding-workspace-width-transition {
+    transition: width var(--workspace-transition-duration) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-agent-console-resizing="true"] .pudding-workspace-width-transition {
+    transition: none;
+}
+
+.pudding-session-rail-surface {
+    border-right-color: color-mix(in oklch, var(--sidebar-border) 72%, transparent);
+}
+
+.pudding-session-rail-surface::after {
+    position: absolute;
+    z-index: 20;
+    inset-block: 0;
+    right: -12px;
+    width: 12px;
+    pointer-events: none;
+    content: "";
+    background: linear-gradient(to right, var(--shell-layer-shadow), transparent 72%);
+}
+
+.pudding-shell-divider::before {
+    background: var(--shell-divider);
+}
+
+.pudding-shell-divider::after {
+    position: absolute;
+    inset-block: 0;
+    width: 14px;
+    pointer-events: none;
+    content: "";
+}
+
+.pudding-shell-divider[data-chat-side="left"]::after {
+    left: 0;
+    background: linear-gradient(to right, var(--shell-layer-shadow), transparent 75%);
+}
+
+.pudding-shell-divider[data-chat-side="right"]::after {
+    right: 0;
+    background: linear-gradient(to left, var(--shell-layer-shadow), transparent 75%);
+}
+
+.pudding-session-stage {
+    container-type: inline-size;
+}
+
+.pudding-chat-pane-header {
+    transition:
+        padding-left var(--workspace-transition-duration, 220ms) cubic-bezier(0.22, 1, 0.36, 1),
+        padding-right var(--workspace-transition-duration, 220ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pudding-workspace-stage[data-presentation="docked"] {
+    position: relative;
+}
+
+.pudding-workspace-stage[data-presentation="docked"]:is([data-transition="opening"], [data-transition="closing"]) > .pudding-workspace-pane {
+    position: absolute;
+    inset-block: 0;
+    width: var(--workspace-inline-content-width);
+    min-width: var(--workspace-inline-content-width);
+}
+
+.pudding-workspace-stage[data-presentation="docked"][data-dock-side="left"]:is([data-transition="opening"], [data-transition="closing"]) > .pudding-workspace-pane {
+    left: 0;
+}
+
+.pudding-workspace-stage[data-presentation="docked"][data-dock-side="right"]:is([data-transition="opening"], [data-transition="closing"]) > .pudding-workspace-pane {
+    right: 0;
+}
+
+.pudding-workspace-stage[data-presentation="overlay"][data-transition="opening"] {
+    animation: pudding-workspace-drawer-in var(--workspace-transition-duration) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pudding-workspace-stage[data-presentation="overlay"][data-transition="closing"] {
+    animation: pudding-workspace-drawer-out var(--workspace-transition-duration) cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.pudding-workspace-backdrop[data-transition="opening"] {
+    animation: pudding-workspace-backdrop-in var(--workspace-transition-duration) ease-out both;
+}
+
+.pudding-workspace-backdrop[data-transition="closing"] {
+    animation: pudding-workspace-backdrop-out var(--workspace-transition-duration) ease-in both;
+}
+
+@keyframes pudding-workspace-drawer-in {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes pudding-workspace-drawer-out {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+}
+
+@keyframes pudding-workspace-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes pudding-workspace-backdrop-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pudding-workspace-panel-animating [data-slot="resizable-panel"] {
+    .pudding-workspace-width-transition,
+    .pudding-workspace-stage[data-presentation],
+    .pudding-workspace-backdrop,
+    .pudding-chat-pane-header {
+        animation-duration: 1ms;
         transition-duration: 1ms;
     }
 }
@@ -607,6 +729,8 @@ html[data-shell] :where(
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
+    --shell-divider: oklch(1 0 0 / 8%);
+    --shell-layer-shadow: oklch(0 0 0 / 28%);
     --transcript-reveal-accent: oklch(0.75 0.17 285);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);

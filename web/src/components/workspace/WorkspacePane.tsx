@@ -17,7 +17,6 @@ import {
   openSavedCanvasItem,
   saveCanvasItem,
   type CanvasItemPayload,
-  type Terminal,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { useBrowserRuntimeTabs } from "@/browser/BrowserRuntimeProvider";
@@ -66,18 +65,11 @@ import {
   setVisibleUIContext,
   type UIContextPart,
 } from "@/state/uiContextStore";
-import { TerminalSizeProbe, TerminalSurface } from "@/terminal/TerminalSurface";
-import {
-  DEFAULT_TERMINAL_DIMENSIONS,
-  type TerminalDimensions,
-} from "@/terminal/terminalDimensions";
-
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { WorkspaceResourceMenu } from "./WorkspaceResourceMenu";
 import { WorkspaceResourceTabs } from "./WorkspaceResourceTabs";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
-import { useWorkspaceTerminals } from "./useWorkspaceTerminals";
 
 type WorkspacePaneProps = {
   token: string;
@@ -95,7 +87,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const workspaceOpen = useWorkspaceOpen();
-  const terminalDimensionsRef = useRef<TerminalDimensions>({ ...DEFAULT_TERMINAL_DIMENSIONS });
   const actorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
   const retainedTokenRef = useRef(token);
@@ -104,7 +95,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
-  const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
   const [validatedProjectReveal, setValidatedProjectReveal] = useState<{ serial: number; sessionID: string }>();
@@ -330,7 +320,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     selectCanvasSurface,
     selectBrowserTab,
     selectProjectSurface,
-    selectTerminalSurface,
     selectWorkspaceSurface,
   } = useWorkspaceBrowserSurface({
     enabled,
@@ -346,112 +335,16 @@ export const WorkspacePane = memo(function WorkspacePane({
     () => mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs),
     [browserTabs, requiredBrowserTabs],
   );
-  const terminalActive = activeSurface === "terminal";
   const projectActive = activeSurface === "project" && hasProject;
-  const getInitialTerminalDimensions = useCallback(() => terminalDimensionsRef.current, []);
-  const activateTerminalSurface = useCallback(() => {
-    setActiveFilePreviewID(undefined);
-    selectTerminalSurface();
-  }, [selectTerminalSurface, setActiveFilePreviewID]);
-  const deactivateTerminalSurface = useCallback(() => {
-    if (browserTabs.length > 0) {
-      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else if (surfaceFilePreviews.length > 0) {
-      setActiveFilePreviewID(surfaceFilePreviews[0].id);
-      selectCanvasSurface();
-    } else if (items.length > 0) {
-      selectCanvasSurface();
-    } else if (projectTabVisible) {
-      selectProjectSurface();
-    } else {
-      selectWorkspaceSurface();
-    }
-  }, [
-    activeBrowserTabID,
-    browserTabs,
-    items.length,
-    projectTabVisible,
-    selectBrowserTab,
-    selectCanvasSurface,
-    selectProjectSurface,
-    selectWorkspaceSurface,
-    setActiveFilePreviewID,
-    surfaceFilePreviews,
-  ]);
-  const {
-    activeTerminalID,
-    closeTerminal,
-    closingTerminalID,
-    createNewTerminal,
-    createNewTerminalAt,
-    creatingTerminal,
-    selectTerminal,
-    terminals,
-    terminalInitialDimensions,
-  } = useWorkspaceTerminals({
-    active: terminalActive,
-    enabled,
-    getInitialDimensions: getInitialTerminalDimensions,
-    sessionID: actorSessionID,
-    token,
-    onActivate: activateTerminalSurface,
-    onDeactivate: deactivateTerminalSurface,
-  });
-  useEffect(() => {
-    if (!actorSessionID) {
-      return;
-    }
-    setRetainedTerminals((current) =>
-      sameResourceList(current[actorSessionID], terminals)
-        ? current
-        : { ...current, [actorSessionID]: terminals },
-    );
-  }, [actorSessionID, terminals]);
   useEffect(() => {
     if (retainedTokenRef.current === token) {
       return;
     }
     retainedTokenRef.current = token;
-    setRetainedTerminals({});
     setRetainedFilePreviews({});
     setActiveFilePreviewIDs({});
     setCanvasGalleryActiveIndices({});
   }, [token]);
-  const mountedTerminals = useMemo(
-    () => actorSessionID
-      ? { ...retainedTerminals, [actorSessionID]: terminals }
-      : retainedTerminals,
-    [actorSessionID, retainedTerminals, terminals],
-  );
-  const updateMountedTerminalStatus = useCallback((
-    targetSessionID: string,
-    terminalID: string,
-    status: Terminal["status"],
-    exitCode?: number,
-  ) => {
-    const update = (current: Terminal[] | undefined) =>
-      (current || []).map((item) =>
-        item.id === terminalID ? { ...item, status, exitCode, updatedAt: new Date().toISOString() } : item,
-      );
-    const retained = retainedTerminals[targetSessionID];
-    queryClient.setQueryData<{ terminals: Terminal[] }>(queryKeys.terminals(targetSessionID), (current) => ({
-      terminals: update(current?.terminals ?? retained),
-    }));
-    setRetainedTerminals((current) => ({
-      ...current,
-      [targetSessionID]: update(current[targetSessionID]),
-    }));
-  }, [queryClient, retainedTerminals]);
-  const mountedTerminalStatusHandlers = useMemo(
-    () => Object.fromEntries(
-      Object.keys(mountedTerminals).map((targetSessionID) => [
-        targetSessionID,
-        (terminalID: string, status: Terminal["status"], exitCode?: number) =>
-          updateMountedTerminalStatus(targetSessionID, terminalID, status, exitCode),
-      ]),
-    ),
-    [mountedTerminals, updateMountedTerminalStatus],
-  );
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
   const filePreviewActive = Boolean(
     activeFilePreview
@@ -519,20 +412,6 @@ export const WorkspacePane = memo(function WorkspacePane({
           }
         : { type: "ui_context", surface: "browser" };
     }
-    if (activeSurface === "terminal") {
-      const terminal = terminals.find((entry) => entry.id === activeTerminalID);
-      return terminal
-        ? {
-            type: "ui_context",
-            surface: "terminal",
-            resource: "terminal",
-            id: terminal.id,
-            name: terminal.title || filePreviewTitle(terminal.cwd),
-            path: terminal.cwd,
-            kind: terminal.status,
-          }
-        : { type: "ui_context", surface: "terminal" };
-    }
     return undefined;
   }, [
     activeBrowserTabID,
@@ -540,14 +419,12 @@ export const WorkspacePane = memo(function WorkspacePane({
     activeCanvasItem,
     activeFilePreview,
     activeSurface,
-    activeTerminalID,
     actorSessionID,
     browserTabs,
     filePreviewActive,
     projectActive,
     projectUIContext,
     t,
-    terminals,
   ]);
 
   useEffect(() => {
@@ -618,8 +495,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (!projectActive) return;
     if (browserTabs.length > 0) {
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else if (terminals.length > 0) {
-      selectTerminal(activeTerminalID || terminals[0].id);
     } else if (surfaceFilePreviews.length > 0) {
       setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
       selectCanvasSurface();
@@ -631,18 +506,15 @@ export const WorkspacePane = memo(function WorkspacePane({
     }
   }, [
     activeBrowserTabID,
-    activeTerminalID,
     actorSessionID,
     browserTabs,
     items.length,
     projectActive,
     selectBrowserTab,
     selectCanvasSurface,
-    selectTerminal,
     selectWorkspaceSurface,
     setActiveFilePreviewID,
     surfaceFilePreviews,
-    terminals,
   ]);
 
   useEffect(() => {
@@ -699,9 +571,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     const next = surfaceFilePreviews[closedIndex + 1] || surfaceFilePreviews[closedIndex - 1];
     if (next) {
       setActiveFilePreviewID(next.id);
-    } else if (terminals.length > 0) {
-      setActiveFilePreviewID(undefined);
-      selectTerminal(activeTerminalID || terminals[0].id);
     } else if (browserTabs.length > 0) {
       setActiveFilePreviewID(undefined);
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
@@ -716,17 +585,14 @@ export const WorkspacePane = memo(function WorkspacePane({
   }, [
     activeBrowserTabID,
     activeFilePreviewID,
-    activeTerminalID,
     browserTabs,
     items.length,
     projectTabVisible,
     selectBrowserTab,
     selectProjectSurface,
-    selectTerminal,
     selectWorkspaceSurface,
     setActiveFilePreviewID,
     surfaceFilePreviews,
-    terminals,
   ]);
 
   const galleryLayoutMutation = useMutation({
@@ -967,7 +833,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     }
   }, [activeCanvasItemIDs, actorSessionID, items, itemsQuery.isLoading]);
 
-  const totalResourceCount = items.length + browserTabs.length + terminals.length + surfaceFilePreviews.length + (projectTabVisible ? 1 : 0);
+  const totalResourceCount = items.length + browserTabs.length + surfaceFilePreviews.length + (projectTabVisible ? 1 : 0);
   useEffect(() => {
     if (resourceSessionIDRef.current !== actorSessionID) {
       resourceSessionIDRef.current = actorSessionID;
@@ -988,8 +854,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;
     if (surfaceFilePreviews.length > 0) {
       setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
-    } else if (terminals.length > 0) {
-      selectTerminal(activeTerminalID || terminals[0].id);
     } else if (browserTabs.length > 0) {
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
     } else if (projectTabVisible) {
@@ -1000,7 +864,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   }, [
     activeBrowserTabID,
     activeSurface,
-    activeTerminalID,
     browserTabs,
     filePreviewActive,
     surfaceFilePreviews,
@@ -1008,16 +871,13 @@ export const WorkspacePane = memo(function WorkspacePane({
     itemsQuery.isFetching,
     itemsQuery.isLoading,
     projectTabVisible,
-    terminals,
   ]);
 
   const closeWorkspaceBrowser = useCallback((tabID: string) => {
     const closingLastActiveBrowser =
       activeSurface === "browser" && activeBrowserTabID === tabID && browserTabs.length === 1;
     closeBrowserTab(tabID);
-    if (closingLastActiveBrowser && terminals.length > 0) {
-      selectTerminal(activeTerminalID || terminals[0].id);
-    } else if (closingLastActiveBrowser && surfaceFilePreviews.length > 0) {
+    if (closingLastActiveBrowser && surfaceFilePreviews.length > 0) {
       const fallbackPreviewID = surfaceFilePreviews.some((preview) => preview.id === activeFilePreviewID)
         ? activeFilePreviewID!
         : surfaceFilePreviews[0].id;
@@ -1027,13 +887,10 @@ export const WorkspacePane = memo(function WorkspacePane({
     activeBrowserTabID,
     activeFilePreviewID,
     activeSurface,
-    activeTerminalID,
     browserTabs.length,
     closeBrowserTab,
     selectFilePreview,
-    selectTerminal,
     surfaceFilePreviews,
-    terminals,
   ]);
   const closeWorkspaceCanvasItem = useCallback((itemID: string) => {
     const item = items.find((entry) => entry.id === itemID);
@@ -1067,47 +924,40 @@ export const WorkspacePane = memo(function WorkspacePane({
         )}
       >
         <WorkspaceResourceTabs
-            activeBrowserTabID={activeBrowserTabID}
-            activeCanvasItemID={activeCanvasItem?.id}
-            activeFilePreviewID={activeFilePreviewID}
-            activeSurface={activeSurface}
-            activeTerminalID={activeTerminalID}
-            browserTabs={browserTabs}
-            canvasItems={items}
-            closingCanvasItemID={deleteMutation.isPending
-              ? deleteMutation.variables?.id
-              : closeSavedMutation.isPending
-                ? closeSavedMutation.variables?.item.id
-                : undefined}
-            closingBrowserTabID={closingBrowserTabID}
-            closingTerminalID={closingTerminalID}
-            filePreviewActive={filePreviewActive}
-            filePreviewTabs={workspaceFilePreviewTabs}
-            orderScope={actorSessionID || "workspace"}
-            projectTabVisible={projectTabVisible}
-            terminalTabs={terminals}
-            onCloseBrowser={closeWorkspaceBrowser}
-            onCloseCanvasItem={closeWorkspaceCanvasItem}
-            onCloseFilePreview={closeWorkspaceFilePreview}
-            onCloseProject={closeProjectSurface}
-            onCloseTerminal={closeTerminal}
-            onSelectBrowser={activateWorkspaceBrowser}
-            onSelectCanvasItem={activateWorkspaceCanvasItem}
-            onSelectFilePreview={selectFilePreview}
-            onSelectProject={activateProjectSurface}
-            onSelectTerminal={selectTerminal}
+          activeBrowserTabID={activeBrowserTabID}
+          activeCanvasItemID={activeCanvasItem?.id}
+          activeFilePreviewID={activeFilePreviewID}
+          activeSurface={activeSurface}
+          browserTabs={browserTabs}
+          canvasItems={items}
+          closingCanvasItemID={deleteMutation.isPending
+            ? deleteMutation.variables?.id
+            : closeSavedMutation.isPending
+              ? closeSavedMutation.variables?.item.id
+              : undefined}
+          closingBrowserTabID={closingBrowserTabID}
+          filePreviewActive={filePreviewActive}
+          filePreviewTabs={workspaceFilePreviewTabs}
+          orderScope={actorSessionID || "workspace"}
+          projectTabVisible={projectTabVisible}
+          onCloseBrowser={closeWorkspaceBrowser}
+          onCloseCanvasItem={closeWorkspaceCanvasItem}
+          onCloseFilePreview={closeWorkspaceFilePreview}
+          onCloseProject={closeProjectSurface}
+          onSelectBrowser={activateWorkspaceBrowser}
+          onSelectCanvasItem={activateWorkspaceCanvasItem}
+          onSelectFilePreview={selectFilePreview}
+          onSelectProject={activateProjectSurface}
         />
         {actorSessionID && activeSurface !== "workspace" ? (
           <WorkspaceResourceMenu
             closedItems={closedItems}
             creatingBrowser={creatingBrowserTab}
-            creatingTerminal={creatingTerminal}
             hasProject={hasProject}
             projectTabVisible={projectTabVisible}
             savedItems={savedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
             onCreateBrowser={createBrowserSurface}
-            onCreateTerminal={createNewTerminal}
             onOpenProject={activateProjectSurface}
             onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
             onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
@@ -1119,29 +969,21 @@ export const WorkspacePane = memo(function WorkspacePane({
         {secondarySessionID && sessionQuery.data?.title ? (
           <span
             className="no-drag-region max-w-32 shrink-0 truncate rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
-
           >
             {sessionQuery.data.title}
           </span>
         ) : null}
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
-        <TerminalSizeProbe
-          onDimensionsChange={(dimensions) => {
-            terminalDimensionsRef.current = dimensions;
-          }}
-        />
         {activeSurface === "workspace" ? (
           <WorkspaceEmpty
             closedItems={closedItems}
             disabled={!actorSessionID}
             creatingBrowser={creatingBrowserTab}
-            creatingTerminal={creatingTerminal}
             hasProject={hasProject}
             savedItems={savedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
             onCreateBrowser={createBrowserSurface}
-            onCreateTerminal={createNewTerminal}
             onOpenProject={activateProjectSurface}
             onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
             onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
@@ -1188,7 +1030,6 @@ export const WorkspacePane = memo(function WorkspacePane({
             onActivateTurnDiff={selectProjectTurnDiff}
             onCloseTurnDiffs={closeProjectTurnDiffs}
             onDeactivateTurnDiff={deactivateProjectTurnDiff}
-            onOpenTerminal={createNewTerminalAt}
             onVisibleContextChange={setProjectUIContext}
           />
         ) : null}
@@ -1213,21 +1054,6 @@ export const WorkspacePane = memo(function WorkspacePane({
             token={token}
           />
         ) : null}
-        {Object.entries(mountedTerminals).map(([targetSessionID, sessionTerminals]) =>
-          sessionTerminals.length > 0 ? (
-            <TerminalSurface
-              key={`terminal:${targetSessionID}`}
-              active={targetSessionID === actorSessionID && terminalActive}
-              activeTerminalID={targetSessionID === actorSessionID ? activeTerminalID : undefined}
-              fallbackDimensions={terminalDimensionsRef.current}
-              initialDimensionsByID={terminalInitialDimensions}
-              sessionID={targetSessionID}
-              terminals={sessionTerminals}
-              token={token}
-              onStatus={mountedTerminalStatusHandlers[targetSessionID]}
-            />
-          ) : null,
-        )}
       </div>
       <AlertDialog open={Boolean(pendingSavedClose)} onOpenChange={(open) => !open && setPendingSavedClose(undefined)}>
         <AlertDialogContent>
@@ -1258,10 +1084,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     </aside>
   );
 });
-
-function sameResourceList<T>(current: T[] | undefined, next: T[]) {
-  return Boolean(current && current.length === next.length && current.every((item, index) => item === next[index]));
-}
 
 function mergeBrowserSurfaceTabs<T extends { id: string }>(current: T[] | undefined, required: T[]) {
   const next = [...(current || [])];

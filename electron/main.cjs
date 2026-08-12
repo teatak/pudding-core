@@ -38,6 +38,7 @@ const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
 const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
+const { createSystemTerminalOpener } = require("./system-terminal.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const browserPreloadPath = path.join(__dirname, "browser-preload.cjs");
@@ -50,6 +51,7 @@ process.on("uncaughtExceptionMonitor", (error, origin) => {
 });
 const releasePageOverride = normalizeUpdatePageURL(process.env.PUDDING_UPDATE_DOWNLOAD_URL);
 const releasePageURL = releasePageOverride || `${repositoryURL}/releases/latest`;
+const openSystemTerminal = createSystemTerminalOpener({ spawn });
 
 app.setName(appDisplayName);
 app.setPath("userData", electronUserDataDir());
@@ -1103,6 +1105,24 @@ ipcMain.handle("pudding:desktop:reveal-path", async (event, rawPath) => {
   }
   shell.showItemInFolder(target);
   return true;
+});
+
+ipcMain.handle("pudding:desktop:open-system-terminal", async (event, rawPath) => {
+  assertTrustedSender(event);
+  const target = String(rawPath || "").trim();
+  if (!path.isAbsolute(target)) {
+    return false;
+  }
+  let info;
+  try {
+    info = await fsp.stat(target);
+  } catch {
+    return false;
+  }
+  if (!info.isDirectory()) {
+    return false;
+  }
+  return openSystemTerminal(target);
 });
 
 ipcMain.handle("pudding:desktop:get-home-directory", (event) => {

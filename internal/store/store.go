@@ -26,7 +26,6 @@ var (
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
 	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
-	ErrInvalidTerminal          = errors.New("store: invalid terminal")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
 )
 
@@ -2002,43 +2001,6 @@ type BrowserHistoryInput struct {
 	Title      string
 	FaviconURL string
 	VisitedAt  time.Time
-}
-
-type TerminalStatus string
-
-const (
-	TerminalRunning TerminalStatus = "running"
-	TerminalExited  TerminalStatus = "exited"
-)
-
-type Terminal struct {
-	ID        string         `json:"id"`
-	SessionID string         `json:"sessionID"`
-	Title     string         `json:"title,omitempty"`
-	CWD       string         `json:"cwd"`
-	Shell     string         `json:"shell"`
-	Status    TerminalStatus `json:"status"`
-	ExitCode  *int           `json:"exitCode,omitempty"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-}
-
-func NormalizeTerminal(item *Terminal) error {
-	if item == nil {
-		return ErrInvalidTerminal
-	}
-	item.ID = strings.TrimSpace(item.ID)
-	item.SessionID = strings.TrimSpace(item.SessionID)
-	item.Title = strings.TrimSpace(item.Title)
-	item.CWD = filepath.Clean(strings.TrimSpace(item.CWD))
-	item.Shell = filepath.Clean(strings.TrimSpace(item.Shell))
-	if item.ID == "" || item.SessionID == "" || item.CWD == "." || item.Shell == "." {
-		return ErrInvalidTerminal
-	}
-	if item.Status != TerminalRunning && item.Status != TerminalExited {
-		return ErrInvalidTerminal
-	}
-	return nil
 }
 
 func NormalizeCanvasItemInput(in *CanvasItemInput) error {

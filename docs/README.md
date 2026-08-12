@@ -26,6 +26,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [transcript-virtualization-plan.md](transcript-virtualization-plan.md) | Transcript 会话窗口虚拟化已实现，持续回归 |
 | [workspace-resize-performance-plan.md](workspace-resize-performance-plan.md) | Workspace 拖拽性能与 WebView 保活层改造 |
 | [attachments-multimodal-plan.md](attachments-multimodal-plan.md) | 图片主链路已完成；文本/PDF、音频与 GC 仍未完成 |
 | [voice-migration-plan.md](voice-migration-plan.md) | macOS runtime 发布链路仍在收尾 |

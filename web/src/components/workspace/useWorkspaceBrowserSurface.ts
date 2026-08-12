@@ -109,10 +109,6 @@ export function useWorkspaceBrowserSurface({
     setActiveSurface("workspace");
   }, [setActiveSurface]);
 
-  const selectTerminalSurface = useCallback(() => {
-    setActiveSurface("terminal");
-  }, [setActiveSurface]);
-
   const selectProjectSurface = useCallback(() => {
     setActiveSurface("project");
   }, [setActiveSurface]);
@@ -391,8 +387,7 @@ export function useWorkspaceBrowserSurface({
       hasTransientSurface ||
       itemsLength > 0 ||
       sessionSurfaceRef.current[sessionID] === "canvas" ||
-      sessionSurfaceRef.current[sessionID] === "project" ||
-      sessionSurfaceRef.current[sessionID] === "terminal"
+      sessionSurfaceRef.current[sessionID] === "project"
     ) {
       return;
     }
@@ -541,7 +536,6 @@ export function useWorkspaceBrowserSurface({
     selectCanvasSurface,
     selectBrowserTab,
     selectProjectSurface,
-    selectTerminalSurface,
     selectWorkspaceSurface,
   };
 }
@@ -561,7 +555,7 @@ function readSessionSurfaces(): Record<string, WorkspaceSurface> {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const out: Record<string, WorkspaceSurface> = {};
     Object.entries(parsed).forEach(([sessionID, surface]) => {
-      if (surface === "workspace" || surface === "canvas" || surface === "browser" || surface === "project" || surface === "terminal") {
+      if (surface === "workspace" || surface === "canvas" || surface === "browser" || surface === "project") {
         out[sessionID] = !currentRaw && surface === "canvas" ? "workspace" : surface;
       }
     });

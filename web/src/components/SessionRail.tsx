@@ -488,7 +488,7 @@ export function SessionRail({
   return (
     <>
       {railButton}
-      <aside className="relative h-full w-[268px] shrink-0 border-r border-sidebar-border/70 bg-sidebar text-sidebar-foreground">
+      <aside className="pudding-session-rail-surface relative h-full w-[268px] shrink-0 border-r bg-sidebar text-sidebar-foreground">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-0 bg-sidebar"

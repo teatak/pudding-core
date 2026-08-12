@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Folders, Globe, Plus, SquareTerminal } from "@/components/icons";
+import { Folders, Globe, Plus } from "@/components/icons";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
@@ -16,13 +16,11 @@ import { CanvasLibraryMenuSections } from "./WorkspaceSurfaceControls";
 export function WorkspaceResourceMenu({
   closedItems,
   creatingBrowser,
-  creatingTerminal,
   hasProject,
   projectTabVisible,
   savedItems,
   onClearClosed,
   onCreateBrowser,
-  onCreateTerminal,
   onOpenProject,
   onOpenSaved,
   onRemoveClosed,
@@ -31,13 +29,11 @@ export function WorkspaceResourceMenu({
 }: {
   closedItems: ClosedCanvasItem[];
   creatingBrowser: boolean;
-  creatingTerminal: boolean;
   hasProject: boolean;
   projectTabVisible: boolean;
   savedItems: SavedCanvasItem[];
   onClearClosed: () => void;
   onCreateBrowser: () => void;
-  onCreateTerminal: () => void;
   onOpenProject: () => void;
   onOpenSaved: (entry: SavedCanvasItem) => void;
   onRemoveClosed: (entry: ClosedCanvasItem) => void;
@@ -46,7 +42,7 @@ export function WorkspaceResourceMenu({
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const creating = creatingBrowser || creatingTerminal;
+  const creating = creatingBrowser;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -72,10 +68,6 @@ export function WorkspaceResourceMenu({
         <DropdownMenuItem className="h-8 px-2.5" onSelect={onCreateBrowser}>
           <Globe />
           {t("browser.create")}
-        </DropdownMenuItem>
-        <DropdownMenuItem className="h-8 px-2.5" onSelect={onCreateTerminal}>
-          <SquareTerminal />
-          {t("terminal.create")}
         </DropdownMenuItem>
         <CanvasLibraryMenuSections
           closedItems={closedItems}

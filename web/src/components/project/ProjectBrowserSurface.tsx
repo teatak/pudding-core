@@ -17,7 +17,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { watchElectronProjectDirectories } from "@/desktop/projectFileWatcher";
 import { useI18n } from "@/i18n";
-import { revealDesktopPath } from "@/lib/desktopBridge";
+import { openDesktopTerminal, revealDesktopPath } from "@/lib/desktopBridge";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
@@ -70,7 +70,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   onActivateTurnDiff,
   onCloseTurnDiffs,
   onDeactivateTurnDiff,
-  onOpenTerminal,
   onVisibleContextChange,
 }: {
   active: boolean;
@@ -83,7 +82,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   onActivateTurnDiff: (previewID: string) => void;
   onCloseTurnDiffs: (previewIDs: string[]) => void;
   onDeactivateTurnDiff: () => void;
-  onOpenTerminal: (cwd: string) => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
 }) {
   const { t } = useI18n();
@@ -499,7 +497,9 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     const root = roots.find((candidate) => candidate.id === target.rootID);
     if (!root) return;
     const directory = target.type === "dir" ? target.path : projectParentPath(target.path);
-    onOpenTerminal(projectAbsolutePath(root.path, directory));
+    void openDesktopTerminal(projectAbsolutePath(root.path, directory)).then((opened) => {
+      if (!opened) toast.error(t("project.openTerminalFailed"));
+    });
   };
 
   const copyPath = (target: ProjectEntryTarget) => {

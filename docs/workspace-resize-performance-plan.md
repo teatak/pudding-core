@@ -60,8 +60,6 @@ stageNode.style.setProperty("--agent-console-dock-width", `${width}px`);
 - Project Browser。
 - 所有文件预览。
 - 多 session Browser Surface 和其中的所有 WebView。
-- 多 session Terminal Surface。
-- 隐藏的 TerminalSizeProbe。
 
 Surface 普遍使用:
 
@@ -82,7 +80,7 @@ absolute inset-0 + visibility:hidden
 - 与 BrowserHost 的注册关系。
 - 页面 URL、history、表单、滚动和 renderer 状态。
 
-浏览器工具栏、查找栏、空状态、Project、Canvas 和 Terminal 不应因为 WebView 生命周期而被迫使用同一隐藏策略。
+浏览器工具栏、查找栏、空状态、Project 和 Canvas 不应因为 WebView 生命周期而被迫使用同一隐藏策略。
 
 ### 1.4 `display:none` 不能直接套在当前 WebView 路径上
 
@@ -316,17 +314,6 @@ WebView 保活层落地后，其他 Surface 不再承担浏览器生命周期。
 
 如果后续证明某类 Surface 可以无损 remount，再单独改为条件渲染；本次不同时扩大生命周期变更范围。
 
-### 5.2 Terminal
-
-PTY 和 terminal UI 生命周期分离:
-
-- daemon terminal 继续运行。
-- 非活动 XTerm 保持 mounted 或按明确恢复能力处理，但必须暂停 ResizeObserver 和 `fit()`。
-- 只有活动 terminal 接收实时尺寸。
-- `TerminalSizeProbe` 不应在每次 Workspace resize 中无条件执行 `fit()`；应改为稳定测量源或仅在需要创建/显示 terminal 时测量。
-
-Terminal 优化在 WebView 隔离后根据 Performance profile 决定是否同批完成，但不得继续让非活动 terminal 响应拖拽。
-
 ## 6. Dock resize controller
 
 ### 6.1 单一宽度写入点
@@ -386,8 +373,8 @@ WebView 和隐藏 Surface 隔离完成后重新采集 Performance profile。只�
 ### P0 基线与生命周期验证
 
 - 使用 release/Vite production build 录制当前拖拽 Performance trace。
-- 分别覆盖:长 Transcript、Canvas、Project、活动 Browser、隐藏多 Browser tab、Terminal。
-- 记录 Recalculate Style、Layout、ResizeObserver、XTerm fit、长任务和帧时间。
+- 分别覆盖:长 Transcript、Canvas、Project、活动 Browser、隐藏多 Browser tab。
+- 记录 Recalculate Style、Layout、ResizeObserver、长任务和帧时间。
 - 实机验证固定保活尺寸 + `visibility:hidden` 不改变 `webContentsID`、URL、history、表单和滚动状态。
 - 用当前 Electron 运行时探针验证 `anchor-name`、`position-anchor`、`anchor()`、`anchor-size()` 的实际布局结果。
 - 实机验证 `opacity:0 + 非零保活尺寸` 可以完成当前 click focus handshake 和 CDP screenshot。
@@ -427,7 +414,6 @@ P0 验证失败时先证明具体失败原因，再修改 presentation 细节；
 
 - Workspace 关闭时直接 `display:none`。
 - 普通非活动 Surface 使用 `display:none`。
-- 非活动 terminal 暂停 size observer/fit。
 - 保留需要的组件状态，不保留响应式隐藏 layout。
 
 验收:
@@ -452,7 +438,6 @@ P0 验证失败时先证明具体失败原因，再修改 presentation 细节；
 
 - 重新采集与 P0 相同 trace。
 - 如果 Transcript 仍为主要成本，合并其 resize/anchor observer。
-- 如果 Terminal 仍为主要成本，收口 XTerm fit 和 size probe。
 - 没有 trace 证据的优化不进入本轮。
 
 ## 9. 测试矩阵
@@ -461,7 +446,7 @@ P0 验证失败时先证明具体失败原因，再修改 presentation 细节；
 
 - 新 tab 在 Workspace 关闭时创建并成功 register。
 - Workspace 关闭/打开前后 `getWebContentsId()` 相同。
-- Canvas、Project、Terminal、Browser 间切换后 ID 相同。
+- Canvas、Project、Browser 间切换后 ID 相同。
 - session 主/副 pane 切换后 ID 相同。
 - Browser tab 切换后各自 ID 不变。
 - URL、back/forward history、scroll、form value 和登录态保留。
@@ -503,7 +488,6 @@ P0 验证失败时先证明具体失败原因，再修改 presentation 细节；
 - Canvas + 4 个隐藏 WebView。
 - Project tree/editor + 4 个隐藏 WebView。
 - 活动 Browser + 3 个隐藏 WebView。
-- Terminal + 4 个隐藏 WebView。
 
 必须满足:
 
@@ -539,7 +523,6 @@ Electron handshake:
 后续按 profile 决定:
 
 - `web/src/components/transcript/TranscriptList.tsx`
-- `web/src/terminal/TerminalSurface.tsx`
 - Canvas/Project/FilePreview Surface wrappers。
 
 不应修改 Go browser API、SQLite schema、session routing 或工具 schema。

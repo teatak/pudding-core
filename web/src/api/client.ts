@@ -97,17 +97,14 @@ import {
   browserSyncRequest,
   browserTab,
   browserTypeRequest,
-  createTerminalRequest,
   installAppRequest,
   importMCPAppsResponse,
   listBrowserTabsResponse,
   listBackgroundProcessesResponse,
   backgroundProcessLog,
-  listTerminalsResponse,
   startAppOAuthRequest,
   startAppOAuthResponse,
   completeAppOAuthRequest,
-  terminal,
   webToolsConfig,
   type AppConnection,
   type ApproveApprovalResponse,
@@ -168,7 +165,6 @@ import {
   type SessionUsage,
   type Skill,
   type WebToolsConfig,
-  type Terminal,
 } from "@/contracts/api";
 import { z } from "zod";
 
@@ -812,10 +808,6 @@ export function createBrowserTab(token: string, sessionID: string): Promise<Brow
   });
 }
 
-export function listTerminals(token: string, sessionID: string): Promise<{ terminals: Terminal[] }> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/terminals`, listTerminalsResponse);
-}
-
 export function listBackgroundProcesses(token: string, sessionID: string): Promise<{ processes: BackgroundProcess[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/processes`, listBackgroundProcessesResponse);
 }
@@ -841,34 +833,6 @@ export async function stopBackgroundProcess(token: string, sessionID: string, pr
     z.null(),
     { method: "DELETE" },
   );
-}
-
-export function createTerminal(
-  token: string,
-  sessionID: string,
-  body: z.infer<typeof createTerminalRequest> = {},
-): Promise<Terminal> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/terminals`, terminal, {
-    method: "POST",
-    body: JSON.stringify(createTerminalRequest.parse(body)),
-  });
-}
-
-export async function deleteTerminal(token: string, sessionID: string, terminalID: string): Promise<void> {
-  await request(
-    token,
-    `/sessions/${encodeURIComponent(sessionID)}/terminals/${encodeURIComponent(terminalID)}`,
-    z.null(),
-    { method: "DELETE" },
-  );
-}
-
-export function terminalWebSocketURL(token: string, sessionID: string, terminalID: string) {
-  const path = `/sessions/${encodeURIComponent(sessionID)}/terminals/${encodeURIComponent(terminalID)}/ws`;
-  const url = new URL(apiURL(path), window.location.href);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.searchParams.set("token", token);
-  return url.toString();
 }
 
 export function openBrowserURL(
@@ -1580,5 +1544,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };
