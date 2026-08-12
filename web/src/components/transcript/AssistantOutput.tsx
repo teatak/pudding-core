@@ -1,10 +1,9 @@
-import { Archive, CircleAlert } from "@/components/icons";
+import { Archive, ChevronDown, ChevronRight, CircleAlert } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Spinner } from "@/components/Spinner";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
 
@@ -16,6 +15,7 @@ import {
   partsFromOverlay,
   TurnParts,
 } from "./TurnParts";
+import { ToolHoverCopyButton } from "./CodeToolDetails";
 import type { AssistantOutputVM, TurnDisclosureState } from "./types";
 import type { TranscriptDisplaySettings } from "./types";
 
@@ -83,12 +83,7 @@ function CanonicalAssistantOutput({
     <div className="group flex min-w-0 flex-col" data-transcript-message-role="assistant">
       <div className="selectable-text min-w-0 text-sm leading-6">
         {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
-        {assistant.error ? (
-          <Alert className="mt-2 min-w-0" variant="destructive">
-            <CircleAlert className="h-3.5 w-3.5" />
-            <AlertDescription className="min-w-0 overflow-hidden break-words">{assistant.error}</AlertDescription>
-          </Alert>
-        ) : null}
+        {assistant.error ? <AssistantError error={assistant.error} /> : null}
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
     </div>
@@ -273,13 +268,41 @@ function LiveAssistantOutput({
         {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
       </div>
       {footerPhase ? <AssistantPhaseItem phase={footerPhase} /> : null}
-      {overlay.status === "failed" && overlay.error ? (
-        <Alert className="mt-2 min-w-0" variant="destructive">
-          <CircleAlert className="h-3.5 w-3.5" />
-          <AlertDescription className="min-w-0 overflow-hidden break-words">{overlay.error}</AlertDescription>
-        </Alert>
-      ) : null}
+      {overlay.status === "failed" && overlay.error ? <AssistantError error={overlay.error} /> : null}
       {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}
+    </div>
+  );
+}
+
+function AssistantError({ error }: { error: string }) {
+  const { t } = useI18n();
+  const status = error.match(/\bstatus\s+(\d{3})\b/i)?.[1];
+  const unavailable = status === "503" || /\b(?:service unavailable|too busy|overloaded)\b/i.test(error);
+  const summary = t(unavailable ? "transcript.errorServiceUnavailable" : "transcript.errorRequestFailed");
+  const summaryWithStatus = status ? `${summary} (${status})` : summary;
+  return (
+    <div className="mt-1.5 min-w-0" role="alert">
+      <details className="group/error relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground">
+        <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] hidden border-l border-border group-open/error:block" />
+        <summary className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex h-6 w-4 items-center justify-center">
+            <CircleAlert className="size-3.5 text-destructive/70" />
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 truncate">{summaryWithStatus}</span>
+            <span className="shrink-0 text-muted-foreground/60">
+              <ChevronRight className="size-3.5 group-open/error:hidden" />
+              <ChevronDown className="hidden size-3.5 group-open/error:block" />
+            </span>
+          </span>
+        </summary>
+        <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
+          <div className="group/error-detail relative min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 pr-8">
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">{error}</pre>
+            <ToolHoverCopyButton className="absolute top-1 right-1 group-hover/error-detail:opacity-100" text={error} />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

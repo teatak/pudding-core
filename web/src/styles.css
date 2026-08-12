@@ -129,7 +129,7 @@ textarea:focus-visible,
     --chart-4: oklch(0.457 0.24 277.023);
     --chart-5: oklch(0.398 0.195 277.366);
     --radius: 0.5rem;
-    --sidebar: oklch(0.968 0 0);
+    --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.18 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -141,7 +141,7 @@ textarea:focus-visible,
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
     --shell-divider: oklch(0.86 0 0 / 64%);
-    --shell-layer-shadow: oklch(0 0 0 / 5%);
+    --shell-layer-shadow: oklch(0 0 0 / 7%);
     /* macOS 红绿灯横向让位:浏览器 0;Electron 壳模式由 data-shell 切换,
        全屏时红绿灯隐藏、让位归零。 */
     --traffic-inset: 0px;
@@ -572,34 +572,14 @@ html[data-agent-console-resizing="true"] .pudding-workspace-width-transition {
 .pudding-session-rail-surface::after {
     position: absolute;
     z-index: 20;
-    inset-block: 0;
-    right: -12px;
-    width: 12px;
+    inset: 0;
     pointer-events: none;
     content: "";
-    background: linear-gradient(to right, var(--shell-layer-shadow), transparent 72%);
+    box-shadow: inset -6px 0 12px -8px var(--shell-layer-shadow);
 }
 
 .pudding-shell-divider::before {
     background: var(--shell-divider);
-}
-
-.pudding-shell-divider::after {
-    position: absolute;
-    inset-block: 0;
-    width: 14px;
-    pointer-events: none;
-    content: "";
-}
-
-.pudding-shell-divider[data-chat-side="left"]::after {
-    left: 0;
-    background: linear-gradient(to right, var(--shell-layer-shadow), transparent 75%);
-}
-
-.pudding-shell-divider[data-chat-side="right"]::after {
-    right: 0;
-    background: linear-gradient(to left, var(--shell-layer-shadow), transparent 75%);
 }
 
 .pudding-session-stage {

@@ -743,7 +743,6 @@ export function App() {
             "pudding-shell-divider group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none transition-opacity duration-[var(--workspace-transition-duration)] before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 focus-visible:before:bg-muted-foreground/80",
             !workspaceVisible && "pointer-events-none opacity-0",
           )}
-          data-chat-side={consoleDisplayMode === "dock-left" ? "left" : "right"}
           role="separator"
           tabIndex={0}
           onKeyDown={(event) => {

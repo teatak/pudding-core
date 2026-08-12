@@ -139,6 +139,17 @@ export const TranscriptList = memo(function TranscriptList({
   });
   const virtualItems = virtualizer.getVirtualItems();
   const virtualRenderVersion = virtualItems.map((item) => item.key).join("\u0000");
+  const measureElement = useCallback((node: HTMLDivElement | null) => {
+    if (!node) {
+      virtualizer.measureElement(null);
+      return;
+    }
+    queueMicrotask(() => {
+      if (node.isConnected) {
+        virtualizer.measureElement(node);
+      }
+    });
+  }, [virtualizer]);
   const setListElement = useCallback((node: HTMLDivElement | null) => {
     listElementRef.current = node;
   }, []);
@@ -497,7 +508,7 @@ export const TranscriptList = memo(function TranscriptList({
               return (
                 <div
                   key={virtualItem.key}
-                  ref={virtualizer.measureElement}
+                  ref={measureElement}
                   aria-hidden={!footer}
                   className="min-w-0"
                   data-index={virtualItem.index}
@@ -522,7 +533,7 @@ export const TranscriptList = memo(function TranscriptList({
             return (
               <div
                 key={virtualItem.key}
-                ref={virtualizer.measureElement}
+                ref={measureElement}
                 aria-posinset={virtualItem.index + 1}
                 aria-setsize={turns.length}
                 className="min-w-0"

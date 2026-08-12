@@ -586,7 +586,7 @@ function HeaderSessionTitle({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="w-36"
+            className="w-max min-w-48 max-w-[var(--radix-dropdown-menu-content-available-width)]"
             onCloseAutoFocus={(event) => {
               if (!editAfterMenuCloseRef.current) {
                 return;
