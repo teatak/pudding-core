@@ -398,4 +398,3 @@ export function RailProjectActionsMenu({ project, token }: { project: Project; t
     />
   );
 }
-
