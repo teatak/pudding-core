@@ -125,6 +125,7 @@ export {
   PackageMinus,
   PackageOpen,
   PackagePlus,
+  PanelBottomDashed,
   PanelLeft,
   PanelLeftIcon,
   PanelRight,

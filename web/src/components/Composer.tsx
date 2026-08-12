@@ -1117,7 +1117,7 @@ export function Composer({
           <div
             className={cn(
               composerShellClassName,
-              floating && "pudding-composer-shell-floating rounded-full shadow-sm",
+              floating && "pudding-composer-shell-floating rounded-[24px]",
               micActive && "is-mic-active",
             )}
           >

@@ -103,10 +103,11 @@ export function ComposerToolbar({
           {t("composer.compacting")}
         </span>
       ) : null}
-      <div className={floating ? "hidden" : "ml-auto flex min-w-0 items-center gap-1"}>
+      <div className="ml-auto flex min-w-0 items-center gap-1">
         {floating ? null : <ContextUsageRing token={token} sessionID={session.id} />}
         <ModelReasoningPicker
           className="min-w-0"
+          iconOnly={floating}
           token={token}
           session={session}
           reasoningValue={reasoningEffort}
@@ -118,7 +119,6 @@ export function ComposerToolbar({
       <SessionAudioControls
         audioInputSupported={audioInputSupported}
         bindings={audioBindings}
-        compact={floating}
         token={token}
         sessionID={session.id}
       />

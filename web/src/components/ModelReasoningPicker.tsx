@@ -39,6 +39,7 @@ type ModelReasoningPickerProps = {
   onAfterClose?: () => void;
   onReasoningChange: (value: string) => void;
   onResolvedChange?: (value: ResolvedModelSelection | null) => void;
+  iconOnly?: boolean;
   className?: string;
 };
 
@@ -51,6 +52,7 @@ export function ModelReasoningPicker({
   onChange,
   onReasoningChange,
   onResolvedChange,
+  iconOnly = false,
   className,
 }: ModelReasoningPickerProps) {
   const queryClient = useQueryClient();
@@ -218,9 +220,12 @@ export function ModelReasoningPicker({
         <Button
           aria-label={`${t("session.model")}: ${triggerLabel}`}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-7 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-transparent py-0 pr-1.5 text-xs font-normal text-foreground transition-none sm:max-w-[10.5rem]",
+            "pudding-composer-model-picker group/model-picker h-7 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-foreground transition-none",
+            iconOnly
+              ? "w-7 max-w-7 flex-none justify-center p-0"
+              : "min-w-0 max-w-[9.5rem] gap-0.5 pr-1.5 sm:max-w-[10.5rem]",
             composerControlStateClassName,
-            visibleModel ? "pl-1" : "pl-2",
+            !iconOnly && (visibleModel ? "pl-1" : "pl-2"),
             className,
           )}
           size="sm"
@@ -232,12 +237,14 @@ export function ModelReasoningPicker({
               ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" />
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
-          <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
-            <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
-            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
-            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-          </span>
+          {iconOnly ? null : (
+            <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
+              <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
+              {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
+              {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent

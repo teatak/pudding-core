@@ -425,6 +425,30 @@ html[data-shell] :where(
         0 12px 30px -18px rgb(0 0 0 / 0.68);
 }
 
+.pudding-composer-shell-floating {
+    box-shadow:
+        0 1px 2px rgb(0 0 0 / 0.1),
+        0 6px 18px -10px rgb(0 0 0 / 0.2);
+}
+
+.pudding-floating-turn-console {
+    box-shadow:
+        0 -1px 2px rgb(0 0 0 / 0.04),
+        0 -12px 30px -22px rgb(0 0 0 / 0.2);
+}
+
+.dark .pudding-composer-shell-floating {
+    box-shadow:
+        0 1px 2px rgb(0 0 0 / 0.42),
+        0 7px 20px -11px rgb(0 0 0 / 0.68);
+}
+
+.dark .pudding-floating-turn-console {
+    box-shadow:
+        0 -1px 2px rgb(0 0 0 / 0.24),
+        0 -14px 34px -22px rgb(0 0 0 / 0.64);
+}
+
 @container (max-width: 36rem) {
     .pudding-composer-project-name,
     .pudding-composer-approval-label,

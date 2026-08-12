@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { PanelLeft, PanelRight, PictureInPicture2 } from "@/components/icons";
+import { PanelBottomDashed, PanelLeft, PanelRight } from "@/components/icons";
 
 import {
   AppDropdownMenuContent as DropdownMenuContent,
@@ -21,7 +21,7 @@ import {
 } from "@/state/agentConsoleStore";
 
 const icons = {
-  floating: PictureInPicture2,
+  floating: PanelBottomDashed,
   "dock-left": PanelLeft,
   "dock-right": PanelRight,
 } satisfies Record<AgentConsoleMode, typeof PanelLeft>;
