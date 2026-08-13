@@ -380,9 +380,9 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 /*
- * Desktop interaction policy: hover/focus colors switch immediately.
- * Keep upstream shadcn component sources unchanged while preventing their
- * broad transition utilities from animating background, text, border, or icons.
+ * Desktop interaction policy: layout surfaces switch immediately. Buttons only
+ * animate painted surfaces; text and icons switch immediately so Chromium never
+ * interpolates their currentColor during hover.
  */
 html[data-shell] :where(
     .transition,
@@ -400,6 +400,12 @@ html[data-shell] :where(
     [class*=":transition-colors"]
 ) * {
     transition: none !important;
+}
+
+html[data-shell] :where(button, [data-slot="button"]) {
+    transition-property: background-color, border-color, box-shadow !important;
+    transition-duration: 120ms !important;
+    transition-timing-function: ease-out !important;
 }
 
 @property --composer-mic-angle {
@@ -429,8 +435,8 @@ html[data-shell] :where(
 
 .pudding-composer-shell-floating {
     box-shadow:
-        0 1px 2px rgb(0 0 0 / 0.1),
-        0 6px 18px -10px rgb(0 0 0 / 0.2);
+        0 1px 2px rgb(0 0 0 / 0.08),
+        0 2px 14px -7px rgb(0 0 0 / 0.18);
 }
 
 .pudding-floating-turn-console {
@@ -441,8 +447,8 @@ html[data-shell] :where(
 
 .dark .pudding-composer-shell-floating {
     box-shadow:
-        0 1px 2px rgb(0 0 0 / 0.42),
-        0 7px 20px -11px rgb(0 0 0 / 0.68);
+        0 1px 2px rgb(0 0 0 / 0.36),
+        0 2px 16px -8px rgb(0 0 0 / 0.62);
 }
 
 .dark .pudding-floating-turn-console {

@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, ChevronRight, CircleAlert } from "@/components/icons";
+import { Archive, CircleAlert } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";
@@ -16,6 +16,7 @@ import {
   TurnParts,
 } from "./TurnParts";
 import { ToolHoverCopyButton } from "./CodeToolDetails";
+import { TranscriptDisclosure } from "./TranscriptDisclosure";
 import type { AssistantOutputVM, TurnDisclosureState } from "./types";
 import type { TranscriptDisplaySettings } from "./types";
 
@@ -124,38 +125,37 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
       : t("transcript.compactStats")
           .replace("{source}", String(sourceCount))
           .replace("{tail}", String(tailCount));
-  return (
-    <div
-      className="selectable-text my-1 overflow-hidden rounded-lg border border-border/70 bg-background text-sm"
-      data-transcript-message-role="assistant"
-    >
-      <div className="flex min-h-11 min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 text-muted-foreground">
-        <Archive className="size-3.5 shrink-0" />
-        <span className="shrink-0 font-medium text-foreground">{t("transcript.compactMark")}</span>
-        <span className="min-w-0 truncate text-xs">{statsText}</span>
+  const summaryAvailable = showSummary && Boolean(summaryText.trim());
+  if (!summaryAvailable) {
+    return (
+      <div className="selectable-text my-1" data-transcript-message-role="assistant">
+        <TranscriptDisclosure icon={<Archive className="size-3.5" />} summary={statsText} title={t("transcript.compactMark")} />
       </div>
-      {showSummary && summaryText.trim() ? (
-        <details className="min-w-0 max-w-full overflow-hidden border-t border-border/70 bg-background px-3 py-1 text-xs text-muted-foreground">
-          <summary className="flex min-h-8 cursor-pointer items-center select-none" tabIndex={-1}>{t("transcript.compactSummary")}</summary>
-          <div className="mt-2 min-w-0 max-w-full border-t border-border/70 pt-2 text-foreground/80">
-            <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
-          </div>
-        </details>
-      ) : null}
-    </div>
+    );
+  }
+  return (
+    <TranscriptDisclosure
+      className="selectable-text my-1"
+      icon={<Archive className="size-3.5" />}
+      summary={statsText}
+      title={t("transcript.compactMark")}
+    >
+      <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 text-foreground/80">
+        <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
+      </div>
+    </TranscriptDisclosure>
   );
 }
 
 export function CompactPendingMarker() {
   const { t } = useI18n();
   return (
-    <div className="selectable-text my-1 flex min-h-11 items-center rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-sm">
-      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-        <Archive className="size-3.5 shrink-0" />
-        <span className="shrink-0 font-medium leading-none text-foreground">{t("transcript.compactRunning")}</span>
-        <Spinner className="size-3.5 align-middle" />
-      </div>
-    </div>
+    <TranscriptDisclosure
+      className="selectable-text my-1"
+      icon={<Archive className="size-3.5" />}
+      summary={<Spinner className="size-3.5 align-middle" />}
+      title={t("transcript.compactRunning")}
+    />
   );
 }
 
@@ -282,27 +282,16 @@ function AssistantError({ error }: { error: string }) {
   const summaryWithStatus = status ? `${summary} (${status})` : summary;
   return (
     <div className="mt-1.5 min-w-0" role="alert">
-      <details className="group/error relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground">
-        <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] hidden border-l border-border group-open/error:block" />
-        <summary className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-          <span className="inline-flex h-6 w-4 items-center justify-center">
-            <CircleAlert className="size-3.5 text-destructive/70" />
-          </span>
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 truncate">{summaryWithStatus}</span>
-            <span className="shrink-0 text-muted-foreground/60">
-              <ChevronRight className="size-3.5 group-open/error:hidden" />
-              <ChevronDown className="hidden size-3.5 group-open/error:block" />
-            </span>
-          </span>
-        </summary>
-        <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
-          <div className="group/error-detail relative min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 pr-8">
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">{error}</pre>
-            <ToolHoverCopyButton className="absolute top-1 right-1 group-hover/error-detail:opacity-100" text={error} />
-          </div>
+      <TranscriptDisclosure
+        icon={<CircleAlert className="size-3.5" />}
+        iconClassName="text-destructive/70"
+        title={summaryWithStatus}
+      >
+        <div className="group/error-detail relative min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 pr-8">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">{error}</pre>
+          <ToolHoverCopyButton className="absolute top-1 right-1 group-hover/error-detail:opacity-100" text={error} />
         </div>
-      </details>
+      </TranscriptDisclosure>
     </div>
   );
 }

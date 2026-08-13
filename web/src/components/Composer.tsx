@@ -1067,7 +1067,7 @@ export function Composer({
       <form
         className={cn(
           "pointer-events-none relative shrink-0",
-          floating ? "px-2 pb-1" : "pb-4",
+          floating ? "px-2 pb-0.5" : "pb-4",
           !floating && (showComposerTopStatus ? "pt-11" : "pt-2"),
         )}
         onSubmit={form.handleSubmit(submitDraft)}
@@ -1121,7 +1121,7 @@ export function Composer({
           <div
             className={cn(
               composerShellClassName,
-              floating && "pudding-composer-shell-floating rounded-[24px]",
+              floating && "pudding-composer-shell-floating",
               micActive && "is-mic-active",
             )}
           >

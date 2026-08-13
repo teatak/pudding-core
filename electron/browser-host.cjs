@@ -948,7 +948,20 @@ class BrowserHost {
       this.noteUpdated(slot);
     });
     webContents.on("page-favicon-updated", (_event, favicons) => {
-      if (slot.webContents !== webContents || !this.updateFavicon(slot, favicons)) {
+      if (slot.webContents !== webContents) {
+        return;
+      }
+      if (Array.isArray(favicons) && favicons.length === 0) {
+        if (!slot.faviconURL && !slot.faviconSourceURL) {
+          return;
+        }
+        slot.faviconURL = "";
+        slot.faviconSourceURL = "";
+        slot.faviconResolveID += 1;
+        this.noteUpdated(slot);
+        return;
+      }
+      if (!this.updateFavicon(slot, favicons)) {
         return;
       }
       this.noteUpdated(slot);
@@ -988,9 +1001,6 @@ class BrowserHost {
           slot.committedTitle = "";
           slot.selectionText = "";
           slot.findRequestID = 0;
-          slot.faviconURL = "";
-          slot.faviconSourceURL = "";
-          slot.faviconResolveID += 1;
           slot.displayURL = nextURL;
           slot.displayTitle = "";
           slot.navigationError = null;

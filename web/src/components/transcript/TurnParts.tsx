@@ -39,6 +39,7 @@ import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/s
 
 import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
 import { useElapsedDuration } from "./time";
+import { TranscriptDisclosure } from "./TranscriptDisclosure";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
 import { toolDisplayName, toolIcon } from "./turnActivitySummary";
 
@@ -257,23 +258,8 @@ function isProcessPart(part: TurnPartVM) {
   return part.type === "thought" || part.type === "tool_use";
 }
 
-function PartIcon({ icon: Icon }: { icon: LucideIcon }) {
-  return (
-    <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
-      <Icon aria-hidden="true" className="size-3.5" />
-    </span>
-  );
-}
-
-function ProcessActivityIcon({ active, icon }: { active: boolean; icon: LucideIcon }) {
-  if (!active) {
-    return <PartIcon icon={icon} />;
-  }
-  return (
-    <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
-      <Spinner className="size-3" />
-    </span>
-  );
+function ProcessActivityGlyph({ active, icon: Icon }: { active: boolean; icon: LucideIcon }) {
+  return active ? <Spinner className="size-3" /> : <Icon aria-hidden="true" className="size-3.5" />;
 }
 
 function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIcon {
@@ -712,41 +698,23 @@ function ThoughtPart({
   }, [active, open, text]);
 
   return (
-    <details
-      className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground"
-      open={canShowContent && open}
+    <TranscriptDisclosure
+      icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Lightbulb} />}
+      open={canShowContent ? open : undefined}
+      title={active ? t("transcript.thinking") : t("transcript.thought")}
+      onSummaryClick={handleThoughtSummaryClick}
+      onSummaryKeyDown={handleThoughtSummaryKeyDown}
       onToggle={handleToggle}
     >
-      {canShowContent && open ? (
-        <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" />
-      ) : null}
-      <summary
-        className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
-        tabIndex={-1}
-        onClick={handleThoughtSummaryClick}
-        onKeyDown={handleThoughtSummaryKeyDown}
-      >
-        <ProcessActivityIcon active={showActivitySpinner} icon={Lightbulb} />
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
-          {canShowContent ? (
-            <span className="shrink-0 text-muted-foreground/50">
-              {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            </span>
-          ) : null}
-        </span>
-      </summary>
-      {canShowContent && open ? (
-        <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
-          <div
-            ref={bodyRef}
-            className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[13px] leading-6 text-muted-foreground italic"
-          >
-            {text}
-          </div>
+      {canShowContent ? (
+        <div
+          ref={bodyRef}
+          className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-muted/20 p-2 text-[13px] leading-6 text-muted-foreground italic"
+        >
+          {text}
         </div>
-      ) : null}
-    </details>
+      ) : undefined}
+    </TranscriptDisclosure>
   );
 }
 
@@ -769,30 +737,21 @@ function ProcessCompactPart({
   const title = processCompactTitle(hiddenParts, activePart, elapsed, t);
   const Icon = title.failed ? CircleAlert : ListChecks;
   return (
-    <details className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
-      <summary
-        className="inline-grid h-6 max-w-full cursor-default list-none grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
-        tabIndex={-1}
-        onClick={handleSummaryClick}
-        onKeyDown={handleSummaryKeyDown}
-      >
-        <ProcessActivityIcon active={title.active && !open} icon={Icon} />
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 truncate">
-            <span>{title.label}</span>
-            {title.summary ? <span className="text-muted-foreground/50"> · {title.summary}</span> : null}
-          </span>
-          <span className="shrink-0 text-muted-foreground/50">
-            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-          </span>
-        </span>
-      </summary>
-      {open ? (
-        <div className="min-w-0 max-w-full">
-          {hiddenParts.map((part, index) => renderPart(part, index, part === activePart))}
-        </div>
-      ) : null}
-    </details>
+    <TranscriptDisclosure
+      className="text-muted-foreground/70"
+      contentClassName="py-0"
+      icon={<ProcessActivityGlyph active={title.active && !open} icon={Icon} />}
+      open={open}
+      summary={title.summary || undefined}
+      title={title.label}
+      onSummaryClick={handleSummaryClick}
+      onSummaryKeyDown={handleSummaryKeyDown}
+      onToggle={handleToggle}
+    >
+      <div className="min-w-0 max-w-full">
+        {hiddenParts.map((part, index) => renderPart(part, index, part === activePart))}
+      </div>
+    </TranscriptDisclosure>
   );
 }
 
@@ -1053,68 +1012,55 @@ function ToolUsePart({
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const toneClass = "text-muted-foreground";
   const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
-  const hoverClass = "hover:text-foreground";
   if (!showDetails) {
     return (
-      <div className={cn("grid h-6 w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5]", toneClass)}>
-        <ProcessActivityIcon active={showActivitySpinner} icon={Icon} />
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="shrink-0 truncate">{title.label}</span>
-          {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
-        </span>
-      </div>
+      <TranscriptDisclosure
+        className={toneClass}
+        icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Icon} />}
+        summary={title.summary || undefined}
+        summaryClassName={summaryClass}
+        title={title.label}
+      />
     );
   }
   return (
-    <details
-      className={cn("relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5]", toneClass)}
+    <TranscriptDisclosure
+      className={toneClass}
+      icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Icon} />}
       open={open}
+      summary={title.summary || undefined}
+      summaryClassName={summaryClass}
+      title={title.label}
+      onSummaryClick={handleSummaryClick}
+      onSummaryKeyDown={handleSummaryKeyDown}
       onToggle={handleToggle}
     >
-      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
-      <summary
-        className={cn("inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none [&::-webkit-details-marker]:hidden", hoverClass)}
-        tabIndex={-1}
-        onClick={handleSummaryClick}
-        onKeyDown={handleSummaryKeyDown}
-      >
-        <ProcessActivityIcon active={showActivitySpinner} icon={Icon} />
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="shrink-0 truncate">{title.label}</span>
-          {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
-          <span className={cn("shrink-0", summaryClass)}>
-            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-          </span>
-        </span>
-      </summary>
-      <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
-        <div className="grid min-w-0 max-w-full gap-2">
-          {mediaInspectionTool ? <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} /> : null}
-          {codeTool ? (
-            <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
-              <CodeToolDetails
-                args={part.argsText || part.args}
-                callID={part.id}
-                liveStderr={part.liveStderr}
-                liveStdout={part.liveStdout}
-                name={toolName}
-                result={liveResult?.value}
-                sessionID={sessionID}
-              />
-            </div>
-          ) : null}
-          {showRawInfo ? (
-            <RawToolDataCard
-              args={args}
-              defaultOpen={rawDefaultOpen}
-              result={liveResult?.text || ""}
-              toolName={toolName}
-              onOpenChange={onRawOpenChange}
+      <div className="grid min-w-0 max-w-full gap-2">
+        {mediaInspectionTool ? <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} /> : null}
+        {codeTool ? (
+          <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
+            <CodeToolDetails
+              args={part.argsText || part.args}
+              callID={part.id}
+              liveStderr={part.liveStderr}
+              liveStdout={part.liveStdout}
+              name={toolName}
+              result={liveResult?.value}
+              sessionID={sessionID}
             />
-          ) : null}
-        </div>
+          </div>
+        ) : null}
+        {showRawInfo ? (
+          <RawToolDataCard
+            args={args}
+            defaultOpen={rawDefaultOpen}
+            result={liveResult?.text || ""}
+            toolName={toolName}
+            onOpenChange={onRawOpenChange}
+          />
+        ) : null}
       </div>
-    </details>
+    </TranscriptDisclosure>
   );
 }
 

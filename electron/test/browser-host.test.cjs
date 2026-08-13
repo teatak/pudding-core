@@ -545,6 +545,37 @@ test("captures dynamically updated favicons and publishes the resolved local ima
   host.closeAll();
 });
 
+test("keeps the current favicon during navigation until the page reports a replacement", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-favicon-navigation", tabID: "tab-favicon-navigation", url: "https://www.google.com/" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(71);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  const faviconURL = "https://www.google.com/favicon.ico";
+  webContents.emit("page-favicon-updated", {}, [faviconURL]);
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-search", url: "https://www.google.com/search?q=weather" },
+  });
+  assert.equal(host.listTabs(request).tabs[0].faviconURL, faviconURL);
+
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-example", url: "https://example.com/" },
+  });
+  assert.equal(host.listTabs(request).tabs[0].faviconURL, faviconURL);
+
+  const nextFaviconURL = "https://example.com/favicon.ico";
+  webContents.emit("page-favicon-updated", {}, [nextFaviconURL]);
+  assert.equal(host.listTabs(request).tabs[0].faviconURL, nextFaviconURL);
+
+  webContents.emit("page-favicon-updated", {}, []);
+  assert.equal(host.listTabs(request).tabs[0].faviconURL, "");
+  host.closeAll();
+});
+
 test("captures title and favicon when the page loaded before webview registration", async () => {
   const required = [];
   const snapshots = [];

@@ -15,7 +15,8 @@ import type {
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_TOP_PX = 22;
 const LIST_PADDING_BOTTOM_PX = 36;
-const TURN_GAP_PX = 22;
+const TURN_GAP_PX = 12;
+const TURN_OVERSCAN = 8;
 const LIST_BOTTOM_SPACER_PX = Math.max(0, LIST_PADDING_BOTTOM_PX - TURN_GAP_PX);
 const SCROLL_END_THRESHOLD_PX = 8;
 const TURN_ESTIMATED_HEIGHT_PX = 320;
@@ -131,7 +132,7 @@ export const TranscriptList = memo(function TranscriptList({
     getItemKey,
     getScrollElement: () => scrollElement,
     onChange: handleVirtualizerChange,
-    overscan: 3,
+    overscan: TURN_OVERSCAN,
     paddingStart: LIST_PADDING_TOP_PX,
     scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
     // resizeItem 会同步修正 scrollTop；turn transform 必须在同一帧提交。
