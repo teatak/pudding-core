@@ -12,6 +12,8 @@ import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 
+const SUBMIT_ERROR_DURATION_MS = 5000;
+
 // 会话体:Transcript 的滚动视口始终铺满整列,Composer 作为底部浮层覆盖在其上。
 // Composer 的实测高度通过 CSS 变量提供给 Transcript 的底部占位,因此输入区变高时
 // 只改变 scrollHeight,不会再挤压滚动视口的 clientHeight。
@@ -38,11 +40,33 @@ export function Conversation({
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
   const [searchState, setSearchState] = useState<TranscriptSearchState>({ terms: [] });
   const droppedFilesNonceRef = useRef(0);
+  const submitErrorTimerRef = useRef<number | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
   const floating = presentation === "floating";
   const handleSubmitStart = useCallback(() => {
     setSubmitSignal((signal) => signal + 1);
+  }, []);
+  const handleSubmitError = useCallback((message: string | null) => {
+    if (submitErrorTimerRef.current !== null) {
+      window.clearTimeout(submitErrorTimerRef.current);
+      submitErrorTimerRef.current = null;
+    }
+    setSubmitError(message);
+    if (message) {
+      submitErrorTimerRef.current = window.setTimeout(() => {
+        submitErrorTimerRef.current = null;
+        setSubmitError(null);
+      }, SUBMIT_ERROR_DURATION_MS);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (submitErrorTimerRef.current !== null) {
+        window.clearTimeout(submitErrorTimerRef.current);
+      }
+    };
   }, []);
 
   useLayoutEffect(() => {
@@ -177,7 +201,6 @@ export function Conversation({
           searchState={searchState}
           sessionID={session.id}
           sessionRunning={session.running}
-          submitError={submitError}
           submitSignal={submitSignal}
           token={token}
         />
@@ -193,10 +216,11 @@ export function Conversation({
         <Composer
           droppedFiles={droppedFiles}
           presentation={floating ? "floating" : "default"}
+          submitError={submitError}
           token={token}
           session={session}
           onSubmitStart={handleSubmitStart}
-          onSubmitError={setSubmitError}
+          onSubmitError={handleSubmitError}
         />
       </div>
       {floating ? null : (

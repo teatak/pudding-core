@@ -207,6 +207,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
 ) {
   const [textFocused, setTextFocused] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const pendingComposedSlashCommandRef = useRef<SlashCommand | null>(null);
 
   const draftText = useWatch({ control, name: "text", defaultValue: "" });
   const trimmedDraftText = draftText.trim();
@@ -344,9 +345,26 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     });
   };
 
+  const handleCompositionEnd = () => {
+    ime.onCompositionEnd();
+    const pendingCommand = pendingComposedSlashCommandRef.current;
+    pendingComposedSlashCommandRef.current = null;
+    if (pendingCommand) {
+      window.requestAnimationFrame(() => selectSlashCommand(pendingCommand));
+    }
+  };
+
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
       mentions.notifyCursor(event.currentTarget.selectionStart + 1);
+    }
+    if ((event.key === "Enter" || event.key === "Tab") && ime.isComposing(event)) {
+      if (event.key === "Enter" && slashMenuOpen) {
+        pendingComposedSlashCommandRef.current =
+          visibleSlashCommands[slashSelectedIndex] ?? visibleSlashCommands[0] ?? null;
+      }
+      scheduleMascotInputGaze();
+      return;
     }
     if (mentions.onKeyDown(event)) {
       scheduleMascotInputGaze();
@@ -378,10 +396,6 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
       }
     }
     if (event.key === "Enter" && !event.shiftKey) {
-      if (ime.isComposing(event)) {
-        scheduleMascotInputGaze();
-        return;
-      }
       event.preventDefault();
 
       const currentText = event.currentTarget.value.trim();
@@ -433,7 +447,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         ref={setTextAreaRef}
         onBlur={handleTextBlur}
         onChange={handleTextChange}
-        onCompositionEnd={ime.onCompositionEnd}
+        onCompositionEnd={handleCompositionEnd}
         onCompositionStart={ime.onCompositionStart}
         onClick={handleTextCursorUpdate}
         onFocus={handleTextFocus}

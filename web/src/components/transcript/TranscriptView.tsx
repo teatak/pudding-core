@@ -42,7 +42,6 @@ export function TranscriptView({
   searchState,
   sessionID,
   showJumpLatest,
-  submitError,
   token,
   turnReveal,
   turns,
@@ -71,7 +70,6 @@ export function TranscriptView({
   searchState: TranscriptSearchState;
   sessionID: string;
   showJumpLatest: boolean;
-  submitError?: string | null;
   token: string;
   turnReveal?: TranscriptTurnReveal;
   turns: TranscriptTurnVM[];
@@ -90,7 +88,7 @@ export function TranscriptView({
     );
   }
 
-  if (!isLoading && !isError && !hasItems && !submitError) {
+  if (!isLoading && !isError && !hasItems) {
     return <div className="min-h-0 flex-1" />;
   }
 
@@ -112,14 +110,6 @@ export function TranscriptView({
           <TranscriptList
             disclosure={disclosure}
             displaySettings={displaySettings}
-            footer={
-              submitError ? (
-                <Alert className="min-w-0" variant="destructive">
-                  <CircleAlert className="h-3.5 w-3.5" />
-                  <AlertDescription className="min-w-0 overflow-hidden break-words">{submitError}</AlertDescription>
-                </Alert>
-              ) : null
-            }
             hasMoreHistory={hasMoreHistory}
             isLoadingHistory={isLoadingHistory}
             jumpLatestSignal={jumpLatestSignal}

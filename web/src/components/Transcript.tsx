@@ -19,7 +19,6 @@ type TranscriptProps = {
   sessionRunning?: boolean;
   searchSlot: "primary" | "split";
   searchState: TranscriptSearchState;
-  submitError?: string | null;
   submitSignal?: number;
 };
 
@@ -28,7 +27,6 @@ export function Transcript({
   searchState,
   sessionID,
   sessionRunning = false,
-  submitError,
   submitSignal = 0,
   token,
 }: TranscriptProps) {
@@ -170,7 +168,6 @@ export function Transcript({
       searchState={searchState}
       sessionID={sessionID}
       showJumpLatest={!isAtLatest}
-      submitError={submitError}
       token={token}
       turnReveal={turnReveal}
       turns={transcript.turnVMs}

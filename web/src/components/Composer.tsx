@@ -105,6 +105,7 @@ const draftAttachmentSessionID = "draft";
 type ComposerProps = {
   droppedFiles?: DroppedFilesBatch | null;
   presentation?: "default" | "floating";
+  submitError?: string | null;
   token: string;
   session: Session;
   onSubmitError?: (message: string | null) => void;
@@ -142,6 +143,7 @@ async function captureBrowserSelection(sessionID: string, context: UIContextPart
 export function Composer({
   droppedFiles,
   presentation = "default",
+  submitError,
   token,
   session,
   onSubmitError,
@@ -1193,18 +1195,31 @@ export function Composer({
             />
           </div>
           {floating ? null : (
-            <span
-              className="absolute z-30 size-12 overflow-visible"
-              style={{ left: 6, top: -36 }}
-            >
-              <Mascot
-                className="size-full overflow-visible"
-                gaze={mascotGaze}
-                inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
-                mood={running ? "thinking" : "idle"}
-                onPointerGaze={setMascotPointerGaze}
-              />
-            </span>
+            <>
+              <span
+                className="absolute z-30 size-12 overflow-visible"
+                style={{ left: 6, top: -36 }}
+              >
+                <Mascot
+                  className="size-full overflow-visible"
+                  gaze={submitError ? { type: "center" } : mascotGaze}
+                  inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
+                  mood={submitError ? "error" : running ? "thinking" : "idle"}
+                  headShakeSignal={submitError ? 1 : 0}
+                  onPointerGaze={setMascotPointerGaze}
+                />
+              </span>
+              {submitError ? (
+                <span
+                  aria-live="polite"
+                  className="pointer-events-none absolute z-30 max-w-[min(28rem,calc(100%-4rem))] truncate px-1 text-xs font-semibold text-destructive"
+                  role="status"
+                  style={{ left: 56, top: -16 }}
+                >
+                  {submitError}
+                </span>
+              ) : null}
+            </>
           )}
         </div>
       </ChatColumn>
