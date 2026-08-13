@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 
 type MascotProps = {
   className?: string;
@@ -56,10 +56,6 @@ const EYE_DEPTH_SCALE = 0.08;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
-const SHADE_BASE_OPACITY = 0.03;
-const SHADE_TURN_OPACITY = 0.11;
-const HIGHLIGHT_SHIFT_X = 2;
-const HIGHLIGHT_SHIFT_Y = 1;
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -201,9 +197,6 @@ export function Mascot({
   const screenLeftGlintRef = useRef<SVGGElement>(null);
   const screenRightGlintRef = useRef<SVGGElement>(null);
   const shadowMotionRef = useRef<HTMLSpanElement>(null);
-  const highlightMotionRef = useRef<HTMLSpanElement>(null);
-  const leftShadeRef = useRef<HTMLSpanElement>(null);
-  const rightShadeRef = useRef<HTMLSpanElement>(null);
   const metricsRef = useRef<MascotMetrics | null>(null);
   const currentXRef = useRef(0);
   const currentYRef = useRef(0);
@@ -217,9 +210,6 @@ export function Mascot({
   const gazeLockedRef = useRef(gaze.type === "center" || mood === "error");
   const gazeTypeRef = useRef(gaze.type);
   const onPointerGazeRef = useRef(onPointerGaze);
-  const id = useId().replace(/:/g, "");
-  const faceID = `mascot-face-${id}`;
-  const highlightID = `mascot-highlight-${id}`;
 
   const applyPose = (x: number, y: number) => {
     const turnX = x / EYE_MAX_X;
@@ -233,9 +223,6 @@ export function Mascot({
     const screenLeftGlint = screenLeftGlintRef.current;
     const screenRightGlint = screenRightGlintRef.current;
     const shadowMotion = shadowMotionRef.current;
-    const highlightMotion = highlightMotionRef.current;
-    const leftShade = leftShadeRef.current;
-    const rightShade = rightShadeRef.current;
 
     if (head) {
       head.style.transform = `translate3d(${turnX * HEAD_SHIFT_X_PERCENT}%, ${pitchTurnY * HEAD_SHIFT_Y_PERCENT}%, 0) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-pitchTurnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * pitchTurnY * HEAD_ROLL_MAX_DEG}deg)`;
@@ -258,16 +245,6 @@ export function Mascot({
       const scaleX = 1 - (Math.abs(turnX) * SHADOW_SQUEEZE_X) / 34;
       const scaleY = 1 + (Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y) / 7;
       shadowMotion.style.transform = `translate3d(${turnX * (SHADOW_SHIFT_X / 128) * 100}%, 0, 0) scale(${scaleX}, ${scaleY})`;
-    }
-    if (highlightMotion) {
-      highlightMotion.style.transform = `translate3d(${turnX * (HIGHLIGHT_SHIFT_X / 128) * 100}%, ${pitchTurnY * (HIGHLIGHT_SHIFT_Y / 128) * 100}%, 0)`;
-      highlightMotion.style.opacity = `${1 - Math.max(pitchTurnY, 0) * 0.14}`;
-    }
-    if (leftShade) {
-      leftShade.style.opacity = `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`;
-    }
-    if (rightShade) {
-      rightShade.style.opacity = `${SHADE_BASE_OPACITY + Math.max(turnX, 0) * SHADE_TURN_OPACITY}`;
     }
   };
 
@@ -567,7 +544,7 @@ export function Mascot({
                 data-slot="arm-left-limb"
                 d="M30 85 C21 90 16 98 16 105"
                 fill="none"
-                stroke="var(--mascot-limb)"
+                stroke="var(--mascot-body)"
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -575,7 +552,7 @@ export function Mascot({
                 data-slot="arm-left-palm"
                 cx="16"
                 cy="106"
-                fill="var(--mascot-limb)"
+                fill="var(--mascot-body)"
                 r="7"
               />
             </svg>
@@ -587,7 +564,7 @@ export function Mascot({
                 data-slot="arm-right-limb"
                 d="M98 85 C107 90 112 98 112 105"
                 fill="none"
-                stroke="var(--mascot-limb)"
+                stroke="var(--mascot-body)"
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -595,7 +572,7 @@ export function Mascot({
                 data-slot="arm-right-palm"
                 cx="112"
                 cy="106"
-                fill="var(--mascot-limb)"
+                fill="var(--mascot-body)"
                 r="7"
               />
             </svg>
@@ -614,7 +591,7 @@ export function Mascot({
                 <circle
                   cx="59"
                   cy="16"
-                  fill="var(--mascot-antenna)"
+                  fill="var(--mascot-body)"
                   r="6"
                   stroke="var(--mascot-antenna-stroke)"
                   strokeWidth="2"
@@ -624,14 +601,7 @@ export function Mascot({
           </span>
 
           <svg data-slot="body-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-            <defs>
-              <linearGradient id={faceID} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="var(--mascot-body-top)" />
-                <stop offset="55%" stopColor="var(--mascot-body-mid)" />
-                <stop offset="100%" stopColor="var(--mascot-body-bottom)" />
-              </linearGradient>
-            </defs>
-            <rect fill={`url(#${faceID})`} height="76" rx="24" width="86" x="21" y="34" />
+            <rect fill="var(--mascot-body)" height="76" rx="24" width="86" x="21" y="34" />
             {showHeadDebugFrame ? (
               <rect
                 data-slot="head-debug-frame"
@@ -648,36 +618,6 @@ export function Mascot({
               />
             ) : null}
           </svg>
-
-          <span data-slot="highlight-motion" ref={highlightMotionRef} style={compositeLayerStyle}>
-            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <defs>
-                <linearGradient id={highlightID} x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="var(--mascot-highlight)" />
-                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <rect fill={`url(#${highlightID})`} height="34" rx="18" width="74" x="27" y="39" />
-            </svg>
-          </span>
-
-          <span data-slot="shade-left" ref={leftShadeRef} style={compositeLayerStyle}>
-            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <path
-                d="M31 45 C26 51 24 59 24 70 V86 C24 98 35 108 48 110 C36 103 31 93 31 79 Z"
-                fill="var(--mascot-side-shade)"
-              />
-            </svg>
-          </span>
-
-          <span data-slot="shade-right" ref={rightShadeRef} style={compositeLayerStyle}>
-            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <path
-                d="M97 45 C102 51 104 59 104 70 V86 C104 98 93 108 80 110 C92 103 97 93 97 79 Z"
-                fill="var(--mascot-side-shade)"
-              />
-            </svg>
-          </span>
 
           <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
             <span data-slot="face-motion" ref={faceMotionRef} style={faceMotionStyle}>
