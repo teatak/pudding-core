@@ -664,7 +664,6 @@ export function Mascot({
                   <path
                     d={FACE_PAD_PATH}
                     fill="var(--mascot-face)"
-                    style={{ filter: "drop-shadow(0 1.5px 1.5px var(--mascot-face-shadow))" }}
                   />
                 </svg>
               </span>

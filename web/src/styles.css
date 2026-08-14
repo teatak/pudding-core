@@ -208,7 +208,6 @@ textarea:focus-visible,
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --mascot-body: oklch(0.61 0.19 277);
     --mascot-face: oklch(0.95 0.02 20);
-    --mascot-face-shadow: oklch(0.38 0.08 277 / 18%);
     --mascot-cheek: oklch(0.74 0.13 16 / 78%);
     --mascot-feature-outline: oklch(0.3 0.018 270);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 20%);
@@ -747,7 +746,6 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --mascot-body: oklch(0.7 0.17 277);
     --mascot-face: oklch(0.88 0.027 20);
-    --mascot-face-shadow: oklch(0.08 0.02 277 / 34%);
     --mascot-cheek: oklch(0.67 0.13 16 / 82%);
     --mascot-feature-outline: oklch(0.22 0.014 270);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 28%);

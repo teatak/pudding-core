@@ -55,6 +55,7 @@ import { buildComposerMentionReferences } from "@/components/composerMentionData
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
+import { Mascot } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { AudioControlButtons, AudioRuntimeInstallDialog, audioAPIErrorMessage } from "@/components/SessionAudioControls";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -237,6 +238,11 @@ export function DraftConversation({ token, projectID }: { token: string; project
       onDrop={handleDrop}
     >
       <div className="pudding-draft-body">
+        {!showPresetSetup ? (
+          <div className="mb-3 flex justify-center">
+            <Mascot className="size-24" pointerTracking />
+          </div>
+        ) : null}
         <div className="pudding-draft-title" aria-busy={userMessagesQuery.isPending}>
           {userMessagesQuery.isPending ? (
             <Skeleton className="h-8 w-72 max-w-[60vw]" />
