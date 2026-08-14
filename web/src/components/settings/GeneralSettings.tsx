@@ -18,7 +18,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
@@ -29,7 +28,6 @@ import {
   setDesktopPreviewUpdatesEnabled,
 } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
-import { ACCENT_THEMES, setAccentTheme, type AccentTheme, useAccentTheme } from "@/theme/theme";
 import { toast } from "sonner";
 
 import {
@@ -311,23 +309,6 @@ export function GeneralSettings({
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
       {view === "general" ? <section className="grid gap-4">
         <div className="grid gap-2">
-          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.appearance")}</h3>
-        </div>
-        <div className={SETTINGS_GROUP_CLASS}>
-          <div className="grid gap-3 px-3 py-3">
-            <label className="grid min-w-0 gap-1" htmlFor="pudding-accent-theme">
-              <span className="text-sm font-medium">{t("settings.general.accentTheme")}</span>
-              <span className="text-xs leading-5 text-muted-foreground">
-                {t("settings.general.accentThemeDesc")}
-              </span>
-            </label>
-            <AccentThemePicker />
-          </div>
-        </div>
-      </section> : null}
-
-      {view === "general" ? <section className="grid gap-4">
-        <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.personalization")}</h3>
           <p className="text-sm leading-6 text-muted-foreground">{t("settings.general.personalizationDesc")}</p>
         </div>
@@ -599,40 +580,5 @@ export function GeneralSettings({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-function AccentThemePicker() {
-  const { t } = useI18n();
-  const accentTheme = useAccentTheme();
-  return (
-    <RadioGroup
-      id="pudding-accent-theme"
-      aria-label={t("settings.general.accentTheme")}
-      className="grid w-full grid-cols-3 gap-1.5 sm:grid-cols-6"
-      value={accentTheme}
-      onValueChange={(value) => setAccentTheme(value as AccentTheme)}
-    >
-      {ACCENT_THEMES.map((accent) => (
-        <label
-          key={accent}
-          htmlFor={`pudding-accent-${accent}`}
-          className={cn(
-            "inline-flex h-9 min-w-16 cursor-default items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs",
-            accentTheme === accent
-              ? "border-primary bg-primary/10 text-foreground shadow-[0_0_0_1px_var(--primary)]"
-              : "border-border/70 bg-background text-muted-foreground hover:bg-control-hover",
-          )}
-        >
-          <RadioGroupItem
-            id={`pudding-accent-${accent}`}
-            className="pudding-accent-swatch size-3 border-transparent after:-inset-2"
-            data-accent-swatch={accent}
-            value={accent}
-          />
-          <span>{t(`theme.accent.${accent}`)}</span>
-        </label>
-      ))}
-    </RadioGroup>
   );
 }

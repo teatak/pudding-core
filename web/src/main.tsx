@@ -11,12 +11,9 @@ import { restoreInitialAppRoute } from "@/lib/route";
 import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
 import {
-  applyAccentTheme,
   applyTheme,
   initThemeFromLaunch,
-  readStoredAccentTheme,
   readStoredTheme,
-  startAccentThemeSync,
   startThemeSync,
 } from "@/theme/theme";
 
@@ -25,9 +22,7 @@ initShellMode();
 initThemeFromLaunch();
 
 applyTheme(readStoredTheme());
-applyAccentTheme(readStoredAccentTheme());
 startThemeSync();
-startAccentThemeSync();
 startLocaleSync();
 restoreInitialAppRoute();
 

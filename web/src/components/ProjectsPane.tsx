@@ -211,6 +211,7 @@ export function ProjectsPane({
                   <Button
                     className="shrink-0"
                     type="button"
+                    variant="secondary"
                     onClick={() => setAdding(true)}
                   >
                     <FolderPlus className="size-4" />

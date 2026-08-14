@@ -13,50 +13,6 @@ textarea:focus-visible,
 :root {
     --brand-accent: #584cff;
     --brand-accent-rgb: 88 76 255;
-    --accent-blue: oklch(0.488 0.243 264.376);
-    --accent-blue-foreground: oklch(0.97 0.014 254.604);
-    --accent-indigo: oklch(0.457 0.24 277.023);
-    --accent-indigo-foreground: oklch(0.962 0.018 272.314);
-    --accent-red: oklch(0.505 0.213 27.518);
-    --accent-red-foreground: oklch(0.971 0.013 17.38);
-    --accent-emerald: oklch(0.508 0.118 165.612);
-    --accent-emerald-foreground: oklch(0.979 0.021 166.113);
-    --accent-orange: oklch(0.553 0.195 38.402);
-    --accent-orange-foreground: oklch(0.98 0.016 73.684);
-    --accent-neutral: oklch(0.205 0 0);
-    --accent-neutral-foreground: oklch(0.985 0 0);
-    --theme-accent: var(--accent-blue);
-    --theme-accent-foreground: var(--accent-blue-foreground);
-}
-
-:root[data-accent="blue"] {
-    --theme-accent: var(--accent-blue);
-    --theme-accent-foreground: var(--accent-blue-foreground);
-}
-
-:root[data-accent="indigo"] {
-    --theme-accent: var(--accent-indigo);
-    --theme-accent-foreground: var(--accent-indigo-foreground);
-}
-
-:root[data-accent="red"] {
-    --theme-accent: var(--accent-red);
-    --theme-accent-foreground: var(--accent-red-foreground);
-}
-
-:root[data-accent="emerald"] {
-    --theme-accent: var(--accent-emerald);
-    --theme-accent-foreground: var(--accent-emerald-foreground);
-}
-
-:root[data-accent="orange"] {
-    --theme-accent: var(--accent-orange);
-    --theme-accent-foreground: var(--accent-orange-foreground);
-}
-
-:root[data-accent="neutral"] {
-    --theme-accent: var(--accent-neutral);
-    --theme-accent-foreground: var(--accent-neutral-foreground);
 }
 
 @theme inline {
@@ -127,11 +83,11 @@ textarea:focus-visible,
     --card-foreground: oklch(0.18 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.18 0 0);
-    --primary: var(--theme-accent);
-    --primary-foreground: var(--theme-accent-foreground);
+    --primary: oklch(0.488 0.243 264.376);
+    --primary-foreground: oklch(0.97 0.014 254.604);
     --primary-hover: color-mix(in oklch, var(--primary), white 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 14%);
-    --markdown-link: var(--theme-accent);
+    --markdown-link: var(--primary);
     --markdown-link-hover: color-mix(in oklch, var(--markdown-link), var(--foreground) 16%);
     --secondary: oklch(0.967 0 0);
     --secondary-foreground: oklch(0.2 0 0);
@@ -143,20 +99,20 @@ textarea:focus-visible,
     --destructive: oklch(0.56 0.22 27.5);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: color-mix(in oklch, var(--theme-accent), white 14%);
-    --chart-1: color-mix(in oklch, var(--theme-accent), white 56%);
-    --chart-2: color-mix(in oklch, var(--theme-accent), white 34%);
-    --chart-3: var(--theme-accent);
-    --chart-4: color-mix(in oklch, var(--theme-accent), black 12%);
-    --chart-5: color-mix(in oklch, var(--theme-accent), black 24%);
+    --ring: color-mix(in oklch, var(--primary), white 14%);
+    --chart-1: color-mix(in oklch, var(--primary), white 56%);
+    --chart-2: color-mix(in oklch, var(--primary), white 34%);
+    --chart-3: var(--primary);
+    --chart-4: color-mix(in oklch, var(--primary), black 12%);
+    --chart-5: color-mix(in oklch, var(--primary), black 24%);
     --radius: 0.5rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.18 0 0);
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-hover-background: oklch(0.92 0 0);
-    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--theme-accent) 11%);
-    --sidebar-active-border: color-mix(in srgb, var(--border), var(--theme-accent) 38%);
+    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--primary) 11%);
+    --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 38%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.2 0 0);
     --sidebar-border: oklch(0.922 0 0);
@@ -192,12 +148,12 @@ textarea:focus-visible,
     --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
-    --transcript-reveal-accent: var(--theme-accent);
-    --rail-drop-target-background: color-mix(in srgb, var(--sidebar), var(--theme-accent) 12%);
+    --transcript-reveal-accent: var(--primary);
+    --rail-drop-target-background: color-mix(in srgb, var(--sidebar), var(--primary) 12%);
     --control-hover-background: oklch(0.945 0 0);
     --control-active-background: oklch(0.905 0 0);
-    --control-selected-background: color-mix(in srgb, var(--background), var(--theme-accent) 12%);
-    --control-selected-border: color-mix(in srgb, var(--border), var(--theme-accent) 42%);
+    --control-selected-background: color-mix(in srgb, var(--background), var(--primary) 12%);
+    --control-selected-border: color-mix(in srgb, var(--border), var(--primary) 42%);
     --item-hover-background: color-mix(in oklch, var(--card), var(--control-hover-background) 45%);
     --workspace-background: var(--background);
     --workspace-chrome-background: var(--workspace-background);
@@ -258,7 +214,7 @@ textarea:focus-visible,
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
     --phase-awaiting-followup: oklch(0.769 0.188 70.08);
-    --phase-thinking: var(--theme-accent);
+    --phase-thinking: var(--primary);
     --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
     --phase-executing-tool: oklch(0.789 0.154 211.53);
     --phase-error: var(--destructive);
@@ -498,7 +454,7 @@ html[data-shell] :where(button, [data-slot="button"]) {
 }
 
 .pudding-composer-shell.is-mic-active {
-    --conic-primary: color-mix(in srgb, var(--card) 12%, var(--theme-accent) 88%);
+    --conic-primary: color-mix(in srgb, var(--card) 12%, var(--primary) 88%);
     --conic-secondary: color-mix(in srgb, var(--card) 16%, #60a5fa 84%);
     --conic-tertiary: color-mix(in srgb, var(--card) 18%, #34d399 82%);
     animation: composer-mic-rotate 8s linear infinite;
@@ -508,7 +464,7 @@ html[data-shell] :where(button, [data-slot="button"]) {
         0 3px 3px -1.5px rgba(10, 13, 18, 0.04),
         0 8px 8px -4px rgba(10, 13, 18, 0.03),
         0 20px 24px -4px rgba(10, 13, 18, 0.08),
-        0 10px 28px -24px color-mix(in srgb, var(--theme-accent) 42%, transparent),
+        0 10px 28px -24px color-mix(in srgb, var(--primary) 42%, transparent),
         0 12px 30px -26px rgba(96, 165, 250, 0.28);
 }
 
@@ -527,7 +483,7 @@ html[data-shell] :where(button, [data-slot="button"]) {
     filter: blur(16px);
     background: conic-gradient(
         from var(--composer-mic-angle) at 50% 50%,
-        color-mix(in srgb, var(--theme-accent) 34%, transparent) 0deg,
+        color-mix(in srgb, var(--primary) 34%, transparent) 0deg,
         transparent 35deg,
         transparent 85deg,
         rgba(96, 165, 250, 0.28) 120deg,
@@ -536,7 +492,7 @@ html[data-shell] :where(button, [data-slot="button"]) {
         rgba(52, 211, 153, 0.24) 240deg,
         transparent 275deg,
         transparent 325deg,
-        color-mix(in srgb, var(--theme-accent) 34%, transparent) 1turn
+        color-mix(in srgb, var(--primary) 34%, transparent) 1turn
     );
 }
 
@@ -692,29 +648,17 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 .dark {
     --brand-accent: #818cf8;
     --brand-accent-rgb: 129 140 248;
-    --accent-blue: oklch(0.424 0.199 265.638);
-    --accent-blue-foreground: oklch(0.97 0.014 254.604);
-    --accent-indigo: oklch(0.398 0.195 277.366);
-    --accent-indigo-foreground: oklch(0.962 0.018 272.314);
-    --accent-red: oklch(0.444 0.177 26.899);
-    --accent-red-foreground: oklch(0.971 0.013 17.38);
-    --accent-emerald: oklch(0.432 0.095 166.913);
-    --accent-emerald-foreground: oklch(0.979 0.021 166.113);
-    --accent-orange: oklch(0.47 0.157 37.304);
-    --accent-orange-foreground: oklch(0.98 0.016 73.684);
-    --accent-neutral: oklch(0.922 0 0);
-    --accent-neutral-foreground: oklch(0.205 0 0);
     --background: oklch(0.19 0 0);
     --foreground: oklch(0.95 0 0);
     --card: oklch(0.245 0 0);
     --card-foreground: oklch(0.95 0 0);
     --popover: oklch(0.255 0 0);
     --popover-foreground: oklch(0.95 0 0);
-    --primary: var(--theme-accent);
-    --primary-foreground: var(--theme-accent-foreground);
+    --primary: oklch(0.424 0.199 265.638);
+    --primary-foreground: oklch(0.97 0.014 254.604);
     --primary-hover: color-mix(in oklch, var(--primary), white 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 8%);
-    --markdown-link: var(--theme-accent);
+    --markdown-link: var(--primary);
     --markdown-link-hover: oklch(0.82 0.13 250);
     --secondary: oklch(0.315 0 0);
     --secondary-foreground: oklch(0.95 0 0);
@@ -726,32 +670,32 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --destructive: oklch(0.66 0.17 24);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: color-mix(in oklch, var(--theme-accent), black 12%);
-    --chart-1: color-mix(in oklch, var(--theme-accent), white 26%);
-    --chart-2: color-mix(in oklch, var(--theme-accent), white 12%);
-    --chart-3: var(--theme-accent);
-    --chart-4: color-mix(in oklch, var(--theme-accent), black 12%);
-    --chart-5: color-mix(in oklch, var(--theme-accent), black 24%);
+    --ring: color-mix(in oklch, var(--primary), black 12%);
+    --chart-1: color-mix(in oklch, var(--primary), white 26%);
+    --chart-2: color-mix(in oklch, var(--primary), white 12%);
+    --chart-3: var(--primary);
+    --chart-4: color-mix(in oklch, var(--primary), black 12%);
+    --chart-5: color-mix(in oklch, var(--primary), black 24%);
     --sidebar: oklch(0.245 0 0);
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-hover-background: oklch(0.305 0 0);
-    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--theme-accent) 18%);
-    --sidebar-active-border: color-mix(in srgb, var(--border), var(--theme-accent) 42%);
+    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--primary) 18%);
+    --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 42%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: var(--ring);
     --shell-divider: oklch(1 0 0 / 8%);
     --shell-layer-shadow: oklch(0 0 0 / 28%);
-    --transcript-reveal-accent: var(--theme-accent);
+    --transcript-reveal-accent: var(--primary);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --control-hover-background: oklch(0.3 0 0);
     --control-active-background: oklch(0.35 0 0);
-    --control-selected-background: color-mix(in srgb, var(--background), var(--theme-accent) 20%);
-    --control-selected-border: color-mix(in srgb, var(--border), var(--theme-accent) 48%);
+    --control-selected-background: color-mix(in srgb, var(--background), var(--primary) 20%);
+    --control-selected-border: color-mix(in srgb, var(--border), var(--primary) 48%);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
     --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
@@ -809,7 +753,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
     --phase-awaiting-followup: oklch(0.769 0.188 70.08);
-    --phase-thinking: var(--theme-accent);
+    --phase-thinking: var(--primary);
     --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
     --phase-executing-tool: oklch(0.789 0.154 211.53);
     --phase-error: var(--destructive);
@@ -828,30 +772,6 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 
 [data-slot="button"][data-variant="default"]:active:not(:disabled) {
     background-color: var(--primary-active);
-}
-
-.pudding-accent-swatch[data-accent-swatch="blue"] {
-    background-color: var(--accent-blue);
-}
-
-.pudding-accent-swatch[data-accent-swatch="indigo"] {
-    background-color: var(--accent-indigo);
-}
-
-.pudding-accent-swatch[data-accent-swatch="red"] {
-    background-color: var(--accent-red);
-}
-
-.pudding-accent-swatch[data-accent-swatch="emerald"] {
-    background-color: var(--accent-emerald);
-}
-
-.pudding-accent-swatch[data-accent-swatch="orange"] {
-    background-color: var(--accent-orange);
-}
-
-.pudding-accent-swatch[data-accent-swatch="neutral"] {
-    background-color: var(--accent-neutral);
 }
 
 [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
@@ -1480,7 +1400,7 @@ html:has(
     position: absolute;
     z-index: 20;
     inset: 0;
-    border: 2px dashed color-mix(in oklch, var(--theme-accent) 62%, transparent);
+    border: 2px dashed color-mix(in oklch, var(--primary) 62%, transparent);
     border-radius: inherit;
     pointer-events: none;
     content: "";
@@ -1491,12 +1411,12 @@ html:has(
 }
 
 .pudding-session-drop-row-active::after {
-    border-color: var(--theme-accent);
+    border-color: var(--primary);
 }
 
 .pudding-session-drop-project-active {
     background-color: var(--rail-drop-target-background);
-    outline: 2px solid var(--theme-accent);
+    outline: 2px solid var(--primary);
     outline-offset: -2px;
 }
 
