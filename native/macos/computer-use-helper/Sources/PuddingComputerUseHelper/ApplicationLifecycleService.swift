@@ -2,35 +2,54 @@ import AppKit
 import Foundation
 
 final class ApplicationLifecycleService {
-  func launch(bundleID: String) async throws -> LaunchApplicationSnapshot {
+  func identity(bundleID: String) throws -> ApplicationIdentitySnapshot {
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+      throw HelperError.applicationNotInstalled(bundleID)
+    }
+    let bundle = Bundle(url: url)
+    let name =
+      (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+      ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+      ?? url.deletingPathExtension().lastPathComponent
+    return ApplicationIdentitySnapshot(
+      bundleID: bundleID,
+      name: name,
+      iconPNGBase64: applicationIconPNGBase64(bundle: bundle)
+    )
+  }
+
+  func use(bundleID: String) async throws -> UseApplicationSnapshot {
     guard AppPolicy.allows(bundleID: bundleID) else {
       throw HelperError.appNotAllowed(bundleID)
     }
-    if let running = runningApplication(bundleID: bundleID) {
-      guard AppPolicy.allows(bundleID: bundleID, pid: running.processIdentifier) else {
+    let runningPIDs = Set(runningApplications(bundleID: bundleID).map(\.processIdentifier))
+    for pid in runningPIDs {
+      guard AppPolicy.allows(bundleID: bundleID, pid: pid) else {
         throw HelperError.appNotAllowed(bundleID)
       }
-      return snapshot(running, newlyLaunched: false)
     }
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
       throw HelperError.applicationNotInstalled(bundleID)
     }
     let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
+    configuration.activates = true
     configuration.addsToRecentItems = false
     do {
-      let launched = try await NSWorkspace.shared.openApplication(
+      let application = try await NSWorkspace.shared.openApplication(
         at: url,
         configuration: configuration
       )
-      guard AppPolicy.allows(bundleID: bundleID, pid: launched.processIdentifier) else {
+      guard AppPolicy.allows(bundleID: bundleID, pid: application.processIdentifier) else {
         throw HelperError.appNotAllowed(bundleID)
       }
-      return snapshot(launched, newlyLaunched: true)
+      return snapshot(
+        application,
+        newlyLaunched: !runningPIDs.contains(application.processIdentifier)
+      )
     } catch let error as HelperError {
       throw error
     } catch {
-      throw HelperError.launchFailed(error.localizedDescription)
+      throw HelperError.useFailed(error.localizedDescription)
     }
   }
 
@@ -63,9 +82,46 @@ final class ApplicationLifecycleService {
     )
   }
 
-  private func runningApplication(bundleID: String) -> NSRunningApplication? {
+  private func runningApplications(bundleID: String) -> [NSRunningApplication] {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-      .first(where: { !$0.isTerminated })
+      .filter { !$0.isTerminated }
+  }
+
+  private func applicationIconPNGBase64(bundle: Bundle?) -> String? {
+    guard
+      let bundle,
+      let resourceURL = bundle.resourceURL,
+      let iconFile = bundle.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
+      !iconFile.isEmpty
+    else {
+      return nil
+    }
+    var iconURL = resourceURL.appendingPathComponent(iconFile)
+    if iconURL.pathExtension.isEmpty {
+      iconURL.appendPathExtension("icns")
+    }
+    guard let source = NSImage(contentsOf: iconURL) else {
+      return nil
+    }
+    let size = NSSize(width: 64, height: 64)
+    let rendered = NSImage(size: size)
+    rendered.lockFocus()
+    NSGraphicsContext.current?.imageInterpolation = .high
+    source.draw(
+      in: NSRect(origin: .zero, size: size),
+      from: .zero,
+      operation: .copy,
+      fraction: 1
+    )
+    rendered.unlockFocus()
+    guard
+      let tiff = rendered.tiffRepresentation,
+      let bitmap = NSBitmapImageRep(data: tiff),
+      let png = bitmap.representation(using: .png, properties: [:])
+    else {
+      return nil
+    }
+    return png.base64EncodedString()
   }
 
   private func applicationIsClosed(bundleID: String, pid: pid_t) -> Bool {
@@ -78,8 +134,8 @@ final class ApplicationLifecycleService {
   private func snapshot(
     _ application: NSRunningApplication,
     newlyLaunched: Bool
-  ) -> LaunchApplicationSnapshot {
-    LaunchApplicationSnapshot(
+  ) -> UseApplicationSnapshot {
+    UseApplicationSnapshot(
       bundleID: application.bundleIdentifier ?? "",
       name: application.localizedName ?? application.bundleIdentifier ?? "Application",
       pid: application.processIdentifier,

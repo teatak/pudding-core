@@ -21,12 +21,27 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    true
+    false
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows flag: Bool
+  ) -> Bool {
+    guard !flag else { return true }
+    primaryWindow?.makeKeyAndOrderFront(nil)
+    secondaryWindow?.orderFront(nil)
+    return true
   }
 
   @objc private func increment(_ sender: NSButton) {
     count += 1
     countValue.stringValue = String(count)
+  }
+
+  @objc private func closeWindows(_ sender: NSButton) {
+    primaryWindow?.close()
+    secondaryWindow?.close()
   }
 
   private func makePrimaryWindow() -> NSWindow {
@@ -80,6 +95,16 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
     countValue.frame = NSRect(x: 228, y: 311, width: 60, height: 22)
     identify(countValue, id: "fixture.count", label: "Fixture count")
     content.addSubview(countValue)
+
+    let closeWindows = NSButton(
+      title: "Close Windows",
+      target: self,
+      action: #selector(closeWindows(_:))
+    )
+    closeWindows.frame = NSRect(x: 330, y: 306, width: 150, height: 32)
+    closeWindows.bezelStyle = .rounded
+    identify(closeWindows, id: "fixture.close-windows", label: "Close Windows")
+    content.addSubview(closeWindows)
 
     let checkbox = NSButton(checkboxWithTitle: "Fixture checkbox", target: nil, action: nil)
     checkbox.frame = NSRect(x: 24, y: 260, width: 180, height: 24)

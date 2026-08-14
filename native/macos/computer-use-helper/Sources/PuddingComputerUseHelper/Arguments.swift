@@ -4,9 +4,10 @@ enum HelperCommand: Equatable {
   case serve
   case permissions(promptAccessibility: Bool, promptScreenRecording: Bool)
   case listApps
+  case applicationIdentity(bundleID: String)
   case observe(bundleID: String, windowID: UInt32?, maxElements: Int)
   case capture(bundleID: String, windowID: UInt32, output: String)
-  case launchApp(bundleID: String)
+  case useApp(bundleID: String)
   case quitApp(bundleID: String, pid: Int32)
   case act(
     bundleID: String,
@@ -75,6 +76,17 @@ struct ArgumentParser {
     case "list-apps":
       try cursor.requireEmpty()
       return .listApps
+    case "app-identity":
+      var bundleID: String?
+      while let option = cursor.next() {
+        switch option {
+        case "--bundle-id":
+          bundleID = try cursor.requireValue(option)
+        default:
+          throw ArgumentError.unknownOption(option)
+        }
+      }
+      return .applicationIdentity(bundleID: try require(bundleID, "--bundle-id"))
     case "observe":
       var bundleID: String?
       var windowID: UInt32?
@@ -129,7 +141,7 @@ struct ArgumentParser {
         windowID: try require(windowID, "--window-id"),
         output: try require(output, "--output")
       )
-    case "launch-app":
+    case "use-app":
       var bundleID: String?
       while let option = cursor.next() {
         switch option {
@@ -139,7 +151,7 @@ struct ArgumentParser {
           throw ArgumentError.unknownOption(option)
         }
       }
-      return .launchApp(bundleID: try require(bundleID, "--bundle-id"))
+      return .useApp(bundleID: try require(bundleID, "--bundle-id"))
     case "quit-app":
       var bundleID: String?
       var pid: Int32?

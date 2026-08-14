@@ -20,10 +20,10 @@ func (f *fakeComputerController) ListApps(_ context.Context, sessionID string) (
 	return computer.AppList{Apps: []computer.Application{{AppID: "com.example.App", Name: "Example"}}}, nil
 }
 
-func (f *fakeComputerController) LaunchApp(_ context.Context, sessionID, appID string) (computer.LaunchResult, error) {
+func (f *fakeComputerController) UseApp(_ context.Context, sessionID, appID string) (computer.UseResult, error) {
 	f.lastSession = sessionID
 	launchID := "launch_1"
-	return computer.LaunchResult{LaunchID: &launchID, AppID: appID, Name: "Example", PID: 42}, nil
+	return computer.UseResult{LaunchID: &launchID, AppID: appID, Name: "Example", PID: 42}, nil
 }
 
 func (f *fakeComputerController) OwnedLaunchAppID(sessionID, launchID string) (string, bool) {
@@ -67,9 +67,9 @@ func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {
 	if !listed.Ok || fake.lastSession != "session_a" {
 		t.Fatalf("list result=%+v session=%q", listed, fake.lastSession)
 	}
-	launched := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "launch", Name: ComputerLaunchApp, Args: json.RawMessage(`{"appID":"com.example.App"}`)})
-	if !launched.Ok || fake.lastSession != "session_a" {
-		t.Fatalf("launch result=%+v session=%q", launched, fake.lastSession)
+	used := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "use", Name: ComputerUseApp, Args: json.RawMessage(`{"appID":"com.example.App"}`)})
+	if !used.Ok || fake.lastSession != "session_a" {
+		t.Fatalf("use result=%+v session=%q", used, fake.lastSession)
 	}
 	quit := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "quit", Name: ComputerQuitApp, Args: json.RawMessage(`{"launchID":"launch_1"}`)})
 	if !quit.Ok || fake.lastSession != "session_a" {
@@ -90,14 +90,14 @@ func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {
 }
 
 func TestComputerLifecycleRiskAndApprovalDetails(t *testing.T) {
-	launchCall := Call{Name: ComputerLaunchApp, Args: json.RawMessage(`{"appID":"com.example.App"}`)}
-	launchRisk, ok := ClassifyToolCall(launchCall.Name, launchCall.Args)
-	if !ok || launchRisk.Class != RiskClassWrite || launchRisk.Scope != "computer" || launchRisk.Operation != "computer_launch_app" {
-		t.Fatalf("unexpected launch risk: %+v ok=%v", launchRisk, ok)
+	useCall := Call{Name: ComputerUseApp, Args: json.RawMessage(`{"appID":"com.example.App"}`)}
+	useRisk, ok := ClassifyToolCall(useCall.Name, useCall.Args)
+	if !ok || useRisk.Class != RiskClassWrite || useRisk.Scope != "computer" || useRisk.Operation != "computer_use_app" {
+		t.Fatalf("unexpected use risk: %+v ok=%v", useRisk, ok)
 	}
-	launchDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), launchCall)
-	if err != nil || launchDetails["appID"] != "com.example.App" {
-		t.Fatalf("unexpected launch details: %+v err=%v", launchDetails, err)
+	useDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), useCall)
+	if err != nil || useDetails["appID"] != "com.example.App" {
+		t.Fatalf("unexpected use details: %+v err=%v", useDetails, err)
 	}
 
 	quitCall := Call{SessionID: "session_a", Name: ComputerQuitApp, Args: json.RawMessage(`{"launchID":"launch_1"}`)}

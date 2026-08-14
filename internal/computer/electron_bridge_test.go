@@ -68,7 +68,7 @@ func TestElectronBridgeRoutesApplicationLifecycle(t *testing.T) {
 			t.Fatalf("unexpected request: %#v", request)
 		}
 		switch r.URL.Path {
-		case "/computer/apps/launch":
+		case "/computer/apps/use":
 			writeJSON(w, map[string]any{"bundleID": "com.example.App", "name": "Example", "pid": 42, "newlyLaunched": true})
 		case "/computer/apps/quit":
 			if request["pid"] != float64(42) {
@@ -84,7 +84,7 @@ func TestElectronBridgeRoutesApplicationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launched, err := service.LaunchApp(context.Background(), "session_a", "com.example.App")
+	launched, err := service.UseApp(context.Background(), "session_a", "com.example.App")
 	if err != nil || launched.PID != 42 || !launched.NewlyLaunched {
 		t.Fatalf("unexpected launch: %#v err=%v", launched, err)
 	}

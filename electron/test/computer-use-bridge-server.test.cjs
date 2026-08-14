@@ -69,7 +69,7 @@ test("Computer Use bridge routes app lifecycle targets", async () => {
   const bridge = new ComputerUseBridgeServer(host);
   const identity = await bridge.start();
   try {
-    const launch = await fetch(`${identity.url}/computer/apps/launch`, {
+    const launch = await fetch(`${identity.url}/computer/apps/use`, {
       method: "POST",
       headers: authenticatedHeaders(identity.token),
       body: JSON.stringify({ sessionID: "sess-c", appID: "com.apple.calculator" }),
@@ -171,7 +171,7 @@ class FakeComputerUseHost {
     return { apps: [{ bundleID: "com.apple.TextEdit", controllable: true }] };
   }
 
-  launchApp(params) {
+  useApp(params) {
     this.launched = params;
     return { ...params, pid: 42, newlyLaunched: true };
   }

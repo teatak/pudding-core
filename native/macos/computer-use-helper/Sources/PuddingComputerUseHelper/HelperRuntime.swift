@@ -30,8 +30,10 @@ final class HelperRuntime {
           apps: accessibility.listApplications(current: inventory?.applications),
           capturableWindows: inventory?.windows ?? []
         ))
-    case .launchApp(let bundleID):
-      return AnyEncodable(try await applicationLifecycle.launch(bundleID: bundleID))
+    case .applicationIdentity(let bundleID):
+      return AnyEncodable(try applicationLifecycle.identity(bundleID: bundleID))
+    case .useApp(let bundleID):
+      return AnyEncodable(try await applicationLifecycle.use(bundleID: bundleID))
     case .quitApp(let bundleID, let pid):
       return AnyEncodable(try await applicationLifecycle.quit(bundleID: bundleID, pid: pid))
     case .observe(let bundleID, let windowID, let maxElements):

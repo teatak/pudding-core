@@ -52,14 +52,14 @@ type AppList struct {
 	CapturableWindows []CapturableWindow `json:"capturableWindows"`
 }
 
-type NativeLaunch struct {
+type NativeUse struct {
 	AppID         string `json:"appID"`
 	Name          string `json:"name"`
 	PID           int32  `json:"pid"`
 	NewlyLaunched bool   `json:"newlyLaunched"`
 }
 
-type LaunchResult struct {
+type UseResult struct {
 	LaunchID *string `json:"launchID,omitempty"`
 	AppID    string  `json:"appID"`
 	Name     string  `json:"name"`
@@ -144,7 +144,7 @@ type ActionResult struct {
 type Service interface {
 	Permissions(ctx context.Context) (Permissions, error)
 	ListApps(ctx context.Context, sessionID string) (AppList, error)
-	LaunchApp(ctx context.Context, sessionID, appID string) (NativeLaunch, error)
+	UseApp(ctx context.Context, sessionID, appID string) (NativeUse, error)
 	QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error)
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error)
 	Capture(ctx context.Context, sessionID, appID string, windowID uint32, output string) (Capture, error)
@@ -154,7 +154,7 @@ type Service interface {
 
 type Controller interface {
 	ListApps(ctx context.Context, sessionID string) (AppList, error)
-	LaunchApp(ctx context.Context, sessionID, appID string) (LaunchResult, error)
+	UseApp(ctx context.Context, sessionID, appID string) (UseResult, error)
 	OwnedLaunchAppID(sessionID, launchID string) (string, bool)
 	QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error)
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (ManagedObservation, error)

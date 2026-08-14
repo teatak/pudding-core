@@ -111,6 +111,21 @@ async function waitForInventory(client) {
   throw new Error("fixture app did not expose two controllable windows");
 }
 
+async function waitForClosedWindows(client) {
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const inventory = await client.request("list_apps");
+    const windows = inventory.capturableWindows.filter(
+      (item) => item.bundleID === fixtureBundleID,
+    );
+    if (windows.length === 0) {
+      return;
+    }
+    await sleep(150);
+  }
+  throw new Error("fixture windows remained visible after close");
+}
+
 function elementWithAction(observation, action, predicate = () => true) {
   return observation.elements.find(
     (element) => element.actions.includes(action) && predicate(element),
@@ -138,7 +153,7 @@ async function main() {
       "Pudding Computer Use Fixture is already running; close it before the smoke",
     );
 
-    launched = await client.request("launch_app", { bundleID: fixtureBundleID });
+    launched = await client.request("use_app", { bundleID: fixtureBundleID });
     assert(launched.newlyLaunched === true && launched.pid > 0, "fixture launch was not newly owned");
 
     const { app, windows } = await waitForInventory(client);
@@ -204,13 +219,32 @@ async function main() {
       "fixture increment action did not update the count",
     );
 
+    const closeWindows = elementWithAction(
+      observation,
+      "press",
+      (element) => element.label === "Close Windows" || element.description === "Close Windows",
+    );
+    assert(closeWindows, "fixture close-windows button was not observed");
+    await client.request("act", {
+      bundleID: fixtureBundleID,
+      windowID: primary.windowID,
+      elementID: closeWindows.elementID,
+      action: "press",
+    });
+    await waitForClosedWindows(client);
+
+    const reused = await client.request("use_app", { bundleID: fixtureBundleID });
+    assert(reused.newlyLaunched === false, "using a running fixture app incorrectly created launch ownership");
+    assert(reused.pid === launched.pid, "using a running fixture app changed its process");
+    await waitForInventory(client);
+
     const quit = await client.request("quit_app", {
       bundleID: fixtureBundleID,
       pid: launched.pid,
     });
     assert(quit.closed === true, "fixture app did not close normally");
     launched = undefined;
-    console.log("Computer Use fixture smoke passed: launch, two windows, set_value, press, secure redaction, quit");
+    console.log("Computer Use fixture smoke passed: start, activate/reopen, two windows, set_value, press, secure redaction, quit");
   } finally {
     if (launched?.pid) {
       await client.request("quit_app", { bundleID: fixtureBundleID, pid: launched.pid }).catch(() => {});

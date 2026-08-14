@@ -3,7 +3,8 @@ const { spawn } = require("node:child_process");
 const supportedCommands = new Set([
   "permissions",
   "list_apps",
-  "launch_app",
+  "app_identity",
+  "use_app",
   "quit_app",
   "observe",
   "capture",
@@ -42,8 +43,12 @@ class ComputerUseHost {
     return this.request("list_apps", {}, options);
   }
 
-  launchApp(params, options = {}) {
-    return this.request("launch_app", params, options);
+  applicationIdentity(params, options = {}) {
+    return this.request("app_identity", params, options);
+  }
+
+  useApp(params, options = {}) {
+    return this.request("use_app", params, options);
   }
 
   quitApp(params, options = {}) {

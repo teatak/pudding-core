@@ -59,11 +59,18 @@ import Testing
   }
 }
 
-@Test func parsesLaunchApplication() throws {
+@Test func parsesUseApplication() throws {
   #expect(
     try ArgumentParser.parse([
-      "launch-app", "--bundle-id", "com.apple.calculator",
-    ]) == .launchApp(bundleID: "com.apple.calculator"))
+      "use-app", "--bundle-id", "com.apple.calculator",
+    ]) == .useApp(bundleID: "com.apple.calculator"))
+}
+
+@Test func parsesApplicationIdentity() throws {
+  #expect(
+    try ArgumentParser.parse([
+      "app-identity", "--bundle-id", "com.apple.Notes",
+    ]) == .applicationIdentity(bundleID: "com.apple.Notes"))
 }
 
 @Test func parsesQuitApplication() throws {

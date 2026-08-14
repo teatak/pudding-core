@@ -60,7 +60,6 @@ import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
-import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -79,7 +78,6 @@ import {
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitParts";
-import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
@@ -99,7 +97,6 @@ const composerSchema = z.object({
   text: z.string(),
 });
 
-const MASCOT_INPUT_PITCH_BIAS = 0.65;
 const draftAttachmentSessionID = "draft";
 
 type ComposerProps = {
@@ -198,7 +195,6 @@ export function Composer({
     }
     return null;
   }, [pickerResolvedModel, session.model, session.provider]);
-  const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -215,7 +211,6 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
-  const mascotGazeRafRef = useRef(0);
   const submitPreparationRef = useRef(false);
   const form = useForm<z.infer<typeof composerSchema>>({
     resolver: zodResolver(composerSchema),
@@ -926,38 +921,11 @@ export function Composer({
       return next;
     });
   }, []);
-  const setMascotPointerGaze = useCallback(() => {
-    if (mascotGazeRafRef.current) {
-      window.cancelAnimationFrame(mascotGazeRafRef.current);
-      mascotGazeRafRef.current = 0;
-    }
-    setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
-  }, []);
-  const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {
-    setMascotGaze(target ? { type: "input", target } : { type: "pointer" });
-  }, []);
-  const updateMascotInputGaze = useCallback(() => {
-    const textArea = textAreaRef.current;
-    if (!textArea || document.activeElement !== textArea) {
-      return;
-    }
-    setMascotInputGaze(getTextAreaCaretClientPoint(textArea));
-  }, [setMascotInputGaze]);
-  const scheduleMascotInputGaze = useCallback(() => {
-    if (mascotGazeRafRef.current) {
-      window.cancelAnimationFrame(mascotGazeRafRef.current);
-    }
-    mascotGazeRafRef.current = window.requestAnimationFrame(() => {
-      mascotGazeRafRef.current = 0;
-      updateMascotInputGaze();
-    });
-  }, [updateMascotInputGaze]);
   const focusTextarea = useCallback(() => {
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus({ preventScroll: true });
-      scheduleMascotInputGaze();
     });
-  }, [scheduleMascotInputGaze]);
+  }, []);
   useEffect(() => {
     if (!droppedFiles || droppedFiles.nonce === lastDroppedFilesNonceRef.current) {
       return;
@@ -985,17 +953,6 @@ export function Composer({
       setAttachmentPreviewIndex(null);
     }
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
-  useEffect(() => {
-    return () => {
-      if (mascotGazeRafRef.current) {
-        window.cancelAnimationFrame(mascotGazeRafRef.current);
-      }
-    };
-  }, []);
-  useEffect(() => {
-    setMascotGaze({ type: "pointer" });
-  }, [sessionID]);
-
   const composerTextArea = (
     <ComposerTextArea
       ref={textAreaHandleRef}
@@ -1058,9 +1015,7 @@ export function Composer({
         }
       }}
       onPaste={handleTextPaste}
-      onBlur={() => setMascotInputGaze(null)}
       onClearError={clearSubmitError}
-      scheduleMascotInputGaze={scheduleMascotInputGaze}
     />
   );
 
@@ -1070,7 +1025,7 @@ export function Composer({
         className={cn(
           "pointer-events-none relative shrink-0",
           floating ? "px-2 pb-0.5" : "pb-4",
-          !floating && (showComposerTopStatus ? "pt-11" : "pt-2"),
+          !floating && showComposerTopStatus && "pt-11",
         )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
@@ -1088,22 +1043,6 @@ export function Composer({
           </ChatColumn>
         </aside>
       ) : null}
-      {/* 正文可以滚到 Composer 后方,但只在 Composer 上方的固定区域渐隐。
-          Composer 本体至窗口底部保持不透明,避免底下的正文透出。 */}
-      {floating ? null : (
-        <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-0"
-          style={{ top: "calc(-1 * var(--pudding-composer-mask-height, 2.5rem))" }}
-        >
-          <ChatColumn className="flex h-full flex-col">
-            <div
-              className="shrink-0 bg-gradient-to-t from-background to-transparent"
-              style={{ height: "var(--pudding-composer-mask-height, 2.5rem)" }}
-            />
-            <div className="min-h-0 flex-1 bg-background" />
-          </ChatColumn>
-        </div>
-      )}
       <ChatColumn
         className={cn(
           "pointer-events-auto relative z-10",
@@ -1196,25 +1135,12 @@ export function Composer({
           </div>
           {floating ? null : (
             <>
-              <span
-                className="absolute z-30 size-12 overflow-visible"
-                style={{ left: 6, top: -36 }}
-              >
-                <Mascot
-                  className="size-full overflow-visible"
-                  gaze={submitError ? { type: "center" } : mascotGaze}
-                  inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
-                  mood={submitError ? "error" : running ? "thinking" : "idle"}
-                  headShakeSignal={submitError ? 1 : 0}
-                  onPointerGaze={setMascotPointerGaze}
-                />
-              </span>
               {submitError ? (
                 <span
                   aria-live="polite"
                   className="pointer-events-none absolute z-30 max-w-[min(28rem,calc(100%-4rem))] truncate px-1 text-xs font-semibold text-destructive"
                   role="status"
-                  style={{ left: 56, top: -16 }}
+                  style={{ left: 8, top: -16 }}
                 >
                   {submitError}
                 </span>

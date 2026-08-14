@@ -35,9 +35,16 @@ export type DesktopPermissionState = {
 
 export type DesktopPermission = "accessibility" | "screenRecording" | "desktopScreenRecording" | "camera" | "microphone";
 
+export type DesktopApplicationIdentity = {
+  appID: string;
+  name: string;
+  iconURL: string;
+};
+
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
   getHomeDirectory?: () => Promise<string>;
+	getApplicationIdentity?: (appID: string) => Promise<DesktopApplicationIdentity | null>;
 	getDesktopPermissions?: () => Promise<DesktopPermissionState>;
 	requestDesktopPermission?: (permission: DesktopPermission) => Promise<DesktopPermissionState>;
 	openDesktopPermissionSettings?: (permission: DesktopPermission) => Promise<boolean>;
@@ -125,6 +132,19 @@ export async function getDesktopHomeDirectory() {
   } catch {
     return "";
   }
+}
+
+export async function getDesktopApplicationIdentity(appID: string) {
+	const clean = appID.trim();
+	const bridge = desktopBridge();
+	if (!clean || !bridge?.getApplicationIdentity) {
+		return null;
+	}
+	try {
+		return await bridge.getApplicationIdentity(clean);
+	} catch {
+		return null;
+	}
 }
 
 export async function getDesktopPermissions(): Promise<DesktopPermissionState> {

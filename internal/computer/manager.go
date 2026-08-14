@@ -60,32 +60,32 @@ func (m *Manager) ListApps(ctx context.Context, sessionID string) (AppList, erro
 	return m.service.ListApps(ctx, sessionID)
 }
 
-func (m *Manager) LaunchApp(ctx context.Context, sessionID, appID string) (LaunchResult, error) {
+func (m *Manager) UseApp(ctx context.Context, sessionID, appID string) (UseResult, error) {
 	if err := validateApp(sessionID, appID); err != nil {
-		return LaunchResult{}, err
+		return UseResult{}, err
 	}
-	if err := m.acquireWrite(ctx, "launch"); err != nil {
-		return LaunchResult{}, err
+	if err := m.acquireWrite(ctx, "app use"); err != nil {
+		return UseResult{}, err
 	}
 	defer m.releaseWrite()
-	launchID, err := newLaunchID()
-	if err != nil {
-		return LaunchResult{}, err
-	}
 
-	native, err := m.service.LaunchApp(ctx, sessionID, appID)
+	native, err := m.service.UseApp(ctx, sessionID, appID)
 	if err != nil {
-		return LaunchResult{}, err
+		return UseResult{}, err
 	}
 	if native.AppID != appID || native.PID <= 0 || strings.TrimSpace(native.Name) == "" {
-		return LaunchResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use launch returned an invalid result", Outcome: "unknown"}
+		return UseResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use app entry returned an invalid result", Outcome: "unknown"}
 	}
 	if !native.NewlyLaunched {
 		if record, ok := m.findLaunch(sessionID, native.AppID, native.PID); ok {
 			existingLaunchID := record.launchID
-			return LaunchResult{LaunchID: &existingLaunchID, AppID: record.appID, Name: record.name, PID: record.pid}, nil
+			return UseResult{LaunchID: &existingLaunchID, AppID: record.appID, Name: record.name, PID: record.pid}, nil
 		}
-		return LaunchResult{AppID: native.AppID, Name: native.Name, PID: native.PID}, nil
+		return UseResult{AppID: native.AppID, Name: native.Name, PID: native.PID}, nil
+	}
+	launchID, err := newLaunchID()
+	if err != nil {
+		return UseResult{}, err
 	}
 	record := launchRecord{launchID: launchID, appID: native.AppID, name: native.Name, pid: native.PID}
 	m.mu.Lock()
@@ -96,7 +96,7 @@ func (m *Manager) LaunchApp(ctx context.Context, sessionID, appID string) (Launc
 	}
 	launches[launchID] = record
 	m.mu.Unlock()
-	return LaunchResult{LaunchID: &launchID, AppID: native.AppID, Name: native.Name, PID: native.PID}, nil
+	return UseResult{LaunchID: &launchID, AppID: native.AppID, Name: native.Name, PID: native.PID}, nil
 }
 
 func (m *Manager) QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error) {

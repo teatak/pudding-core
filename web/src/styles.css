@@ -77,6 +77,9 @@ textarea:focus-visible,
 }
 
 :root {
+    --pudding-chat-column-inline-gap: 2.5rem;
+    --pudding-chat-column-max-width: 48rem;
+    --pudding-composer-radius: 25px;
     --background: oklch(1 0 0);
     --foreground: oklch(0.18 0 0);
     --card: oklch(1 0 0);
@@ -1061,6 +1064,10 @@ html:has(
     transform: translateX(-50%);
 }
 
+[data-composer-presentation="floating"] .pudding-composer-floating-panel[data-computer-approval="true"] {
+    width: min(28rem, calc(100% - 2rem));
+}
+
 [data-composer-presentation="floating"] [data-composer-text-input="true"] {
     field-sizing: fixed;
     height: 1.5rem;
@@ -1183,8 +1190,31 @@ html:has(
 }
 
 .pudding-transcript-viewport {
+    --pudding-chat-column-edge: max(
+        calc(var(--pudding-chat-column-inline-gap) / 2),
+        calc((100% - var(--pudding-chat-column-max-width)) / 2)
+    );
     font-size: 0.875rem;
     letter-spacing: -0.004em;
+    mask-composite: add;
+    mask-image:
+        linear-gradient(
+            to bottom,
+            #000 0,
+            #000 calc(100% - var(--pudding-composer-overlay-height) - var(--pudding-composer-mask-height)),
+            rgb(0 0 0 / 0.3) calc(100% - var(--pudding-composer-overlay-height)),
+            transparent calc(100% - var(--pudding-composer-overlay-height) + var(--pudding-composer-radius)),
+            transparent 100%
+        ),
+        linear-gradient(
+            to right,
+            #000 0,
+            #000 var(--pudding-chat-column-edge),
+            transparent var(--pudding-chat-column-edge),
+            transparent calc(100% - var(--pudding-chat-column-edge)),
+            #000 calc(100% - var(--pudding-chat-column-edge)),
+            #000 100%
+        );
 }
 
 [data-ambient-motion="false"],
@@ -1494,10 +1524,6 @@ html:has(
     @apply flex items-center justify-center gap-3;
 }
 
-.pudding-draft-mascot {
-    @apply size-12 shrink-0 overflow-visible;
-}
-
 .pudding-draft-heading {
     @apply text-2xl leading-tight font-medium text-foreground;
 }
@@ -1534,10 +1560,6 @@ html:has(
 @container (min-width: 42rem) {
     .pudding-draft-heading {
         @apply text-3xl;
-    }
-
-    .pudding-draft-mascot {
-        @apply size-14;
     }
 
     .pudding-draft-stack {
@@ -1621,10 +1643,6 @@ html:has(
 @container (min-width: 56rem) {
     .pudding-draft-heading {
         @apply text-4xl;
-    }
-
-    .pudding-draft-mascot {
-        @apply size-16;
     }
 
     .pudding-provider-preset-grid {

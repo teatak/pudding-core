@@ -19,7 +19,7 @@ var builtinAppTools = map[string]string{
 	CameraCapture:     app.BuiltinCaptureID,
 	DesktopScreenshot: app.BuiltinCaptureID,
 	ComputerListApps:  app.BuiltinComputerUseID,
-	ComputerLaunchApp: app.BuiltinComputerUseID,
+	ComputerUseApp:    app.BuiltinComputerUseID,
 	ComputerQuitApp:   app.BuiltinComputerUseID,
 	ComputerObserve:   app.BuiltinComputerUseID,
 	ComputerAct:       app.BuiltinComputerUseID,

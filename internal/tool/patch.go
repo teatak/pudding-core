@@ -498,8 +498,8 @@ func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[str
 		return r.gitWriteApprovalDetails(ctx, call)
 	case FilePatch:
 		// Continue below and prepare the exact filesystem snapshot shown for approval.
-	case ComputerLaunchApp:
-		return computerLaunchAppApprovalDetails(call)
+	case ComputerUseApp:
+		return computerUseAppApprovalDetails(call)
 	case ComputerQuitApp:
 		return computerQuitAppApprovalDetails(r.computer, call)
 	case ComputerObserve:

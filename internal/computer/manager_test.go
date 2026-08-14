@@ -15,7 +15,7 @@ type fakeService struct {
 	observeErr   error
 	actErr       error
 	lastSession  string
-	launch       NativeLaunch
+	launch       NativeUse
 	quits        []NativeQuit
 	quitRequests []NativeQuit
 }
@@ -29,10 +29,10 @@ func (f *fakeService) ListApps(_ context.Context, sessionID string) (AppList, er
 	return AppList{}, nil
 }
 
-func (f *fakeService) LaunchApp(_ context.Context, sessionID, appID string) (NativeLaunch, error) {
+func (f *fakeService) UseApp(_ context.Context, sessionID, appID string) (NativeUse, error) {
 	f.lastSession = sessionID
 	if f.launch.AppID == "" {
-		return NativeLaunch{AppID: appID, Name: "Example", PID: 42, NewlyLaunched: true}, nil
+		return NativeUse{AppID: appID, Name: "Example", PID: 42, NewlyLaunched: true}, nil
 	}
 	return f.launch, nil
 }
@@ -103,7 +103,7 @@ func TestManagerRoutesSessionAndConsumesObservationOnce(t *testing.T) {
 func TestManagerOwnsOnlyNewSessionLaunches(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	launched, err := manager.LaunchApp(context.Background(), "session_a", "com.example.App")
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +127,9 @@ func TestManagerOwnsOnlyNewSessionLaunches(t *testing.T) {
 }
 
 func TestManagerDoesNotOwnAlreadyRunningApplication(t *testing.T) {
-	service := &fakeService{launch: NativeLaunch{AppID: "com.example.App", Name: "Example", PID: 42}}
+	service := &fakeService{launch: NativeUse{AppID: "com.example.App", Name: "Example", PID: 42}}
 	manager := NewManager(service)
-	launched, err := manager.LaunchApp(context.Background(), "session_a", "com.example.App")
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestManagerDoesNotOwnAlreadyRunningApplication(t *testing.T) {
 func TestManagerKeepsOwnershipWhenNormalQuitNeedsAttention(t *testing.T) {
 	service := &fakeService{quits: []NativeQuit{{AppID: "com.example.App", PID: 42, Closed: false}, {AppID: "com.example.App", PID: 42, Closed: true}}}
 	manager := NewManager(service)
-	launched, err := manager.LaunchApp(context.Background(), "session_a", "com.example.App")
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestManagerKeepsOwnershipWhenNormalQuitNeedsAttention(t *testing.T) {
 func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	launched, err := manager.LaunchApp(context.Background(), "session_a", "com.example.App")
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,8 +369,8 @@ func (s *serialActionService) Permissions(context.Context) (Permissions, error) 
 func (s *serialActionService) ListApps(context.Context, string) (AppList, error) {
 	return AppList{}, nil
 }
-func (s *serialActionService) LaunchApp(context.Context, string, string) (NativeLaunch, error) {
-	return NativeLaunch{}, nil
+func (s *serialActionService) UseApp(context.Context, string, string) (NativeUse, error) {
+	return NativeUse{}, nil
 }
 func (s *serialActionService) QuitApp(context.Context, string, string, int32) (NativeQuit, error) {
 	return NativeQuit{}, nil

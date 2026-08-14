@@ -56,7 +56,7 @@ make computer-use-helper-dev
 
 - Electron 暴露独立 loopback bearer-token bridge;除权限查询外所有请求必须显式带 `sessionID`。
 - Go `computer.Manager` 保存 session-scoped 短期 observation,动作快照单次消费,所有 session 的写动作全局串行。
-- 内置 App ID 为 `computer-use`,包含 `list_apps`、`launch_app`、`quit_app`、`observe`、`act` 五个 Work 模式工具。
+- 内置 App ID 为 `computer-use`,包含 `list_apps`、`use_app`、`quit_app`、`observe`、`act` 五个 Work 模式工具。
 - 每个 session 首次访问一个 app 时统一审批观察和操作;同 session 后续访问同 app 不再重复审批,项目的“完全允许”模式也不能跳过首次审批。
 - 动作传输中断返回 `outcome=unknown` 且不可重试;成功后观察失败仍明确保留动作已完成事实。
 - transcript 已有可读显示名、图标、分组和简中/繁中/英文文案。
@@ -284,9 +284,9 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 列出可见应用、窗口、授权状态和稳定 `appID`。不隐式选择应用。
 
-### `builtin_computer_launch_app`
+### `builtin_computer_use_app`
 
-按 `appID` 启动应用。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
+按 `appID` 使用应用：未运行时启动，已运行时激活，并在没有可见窗口时请求重新打开。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
 
 ### `builtin_computer_quit_app`
 
@@ -339,7 +339,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 | 路由 | 用途 |
 | --- | --- |
 | `POST /computer/apps/list` | 列应用和窗口 |
-| `POST /computer/apps/launch` | 启动一个明确 bundle ID |
+| `POST /computer/apps/use` | 启动、激活或重新打开一个明确 bundle ID |
 | `POST /computer/apps/quit` | 普通退出一个明确 bundle ID + PID |
 | `POST /computer/observe` | AX observation,可选截图 |
 | `POST /computer/act` | 执行一个显式动作 |
@@ -535,7 +535,7 @@ make computer-use-product-smoke
 make computer-use-calculator-smoke
 ```
 
-已运行 App 的非 ownership 分支由测试夹具先启动 Calculator，再让 session 完成同一操作。`launch_app` 必须不返回 `launchID`，任务结束后 Calculator 必须仍以同一 PID 运行；最后仅由测试夹具清理：
+已运行 App 的非 ownership 分支由测试夹具先启动 Calculator，再让 session 完成同一操作。`use_app` 必须不返回 `launchID`，任务结束后 Calculator 必须仍以同一 PID 运行；最后仅由测试夹具清理：
 
 ```bash
 make computer-use-calculator-existing-smoke

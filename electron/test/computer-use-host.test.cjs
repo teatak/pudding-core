@@ -43,15 +43,34 @@ test("ComputerUseHost preserves structured helper errors", async () => {
 test("ComputerUseHost sends lifecycle commands", async () => {
   const fake = new FakeHelper();
   const host = createHost(fake);
-  const launched = host.launchApp({ bundleID: "com.apple.calculator" });
+  const launched = host.useApp({ bundleID: "com.apple.calculator" });
   const quit = host.quitApp({ bundleID: "com.apple.calculator", pid: 42 });
   await fake.waitForRequests(2);
-  assert.equal(fake.requests[0].command, "launch_app");
+  assert.equal(fake.requests[0].command, "use_app");
   assert.equal(fake.requests[1].command, "quit_app");
   fake.respond(fake.requests[0].id, { pid: 42, newlyLaunched: true });
   fake.respond(fake.requests[1].id, { pid: 42, closed: true });
   assert.equal((await launched).newlyLaunched, true);
   assert.equal((await quit).closed, true);
+  await host.stop();
+});
+
+test("ComputerUseHost requests installed application identity", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake);
+  const identity = host.applicationIdentity({ bundleID: "com.apple.Notes" });
+  await fake.waitForRequests(1);
+  assert.equal(fake.requests[0].command, "app_identity");
+  fake.respond(fake.requests[0].id, {
+    bundleID: "com.apple.Notes",
+    name: "Notes",
+    iconPNGBase64: "cG5n",
+  });
+  assert.deepEqual(await identity, {
+    bundleID: "com.apple.Notes",
+    name: "Notes",
+    iconPNGBase64: "cG5n",
+  });
   await host.stop();
 });
 

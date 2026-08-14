@@ -170,7 +170,7 @@ export function Conversation({
     <div
       ref={conversationRef}
       className={
-        "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-mask-height:2.5rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
+        "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-mask-height:1rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
         (floating ? "bg-transparent" : "bg-background")
       }
       data-file-drop-target=""

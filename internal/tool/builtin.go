@@ -72,7 +72,7 @@ const (
 	BrowserType       = "builtin_browser_type"
 	BrowserScroll     = "builtin_browser_scroll"
 	ComputerListApps  = "builtin_computer_list_apps"
-	ComputerLaunchApp = "builtin_computer_launch_app"
+	ComputerUseApp    = "builtin_computer_use_app"
 	ComputerQuitApp   = "builtin_computer_quit_app"
 	ComputerObserve   = "builtin_computer_observe"
 	ComputerAct       = "builtin_computer_act"
@@ -625,15 +625,15 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeWork,
 		},
 		{
-			Name:        ComputerLaunchApp,
-			Description: "Launch one installed macOS application by appID. This is the only supported launch path for an app that will be used through Computer Use; never substitute command_run, open, osascript, or AppleScript. Opening and operating the same app share one session approval. If this session newly starts it, the result includes a launchID and PID and only that launchID may later be quit by this session. If it was already running, no launchID is returned and Pudding does not own or close it.",
+			Name:        ComputerUseApp,
+			Description: "Use one installed macOS application by appID: start it when stopped, or activate and reopen it when already running. This is the only supported entry point for an app that will be used through Computer Use; never substitute command_run, open, osascript, or AppleScript. Opening and operating the same app share one session approval. If this session newly starts it, the result includes a launchID and PID and only that launchID may later be quit by this session. If it was already running, no launchID is returned and Pudding does not own or close it.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"appID":{"type":"string","minLength":1,"description":"Installed application bundle identifier, such as com.apple.calculator."}},"required":["appID"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        ComputerQuitApp,
 			Description: "Request a normal quit for an application newly launched by this exact session, using its launchID. Never force-quits. If closed=false, the app is still open, commonly because it needs user attention such as an unsaved-changes confirmation; stop and ask the user to handle it.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"launchID":{"type":"string","minLength":1,"description":"Session-owned launchID returned by builtin_computer_launch_app."}},"required":["launchID"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"launchID":{"type":"string","minLength":1,"description":"Session-owned launchID returned by builtin_computer_use_app."}},"required":["launchID"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -764,8 +764,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.browserScroll(ctx, call)
 	case ComputerListApps:
 		return r.computerListApps(ctx, call)
-	case ComputerLaunchApp:
-		return r.computerLaunchApp(ctx, call)
+	case ComputerUseApp:
+		return r.computerUseApp(ctx, call)
 	case ComputerQuitApp:
 		return r.computerQuitApp(ctx, call)
 	case ComputerObserve:

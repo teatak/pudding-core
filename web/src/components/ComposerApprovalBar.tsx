@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { approveApproval, denyApproval } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { AppIcon } from "@/components/AppIcon";
 import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
 import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { GitCommitDiffDialog, type GitCommitApproval } from "@/components/GitCommitDiffDialog";
@@ -12,7 +13,8 @@ import { PatchDiffDialog, type PatchApproval } from "@/components/PatchDiffDialo
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
-import { pickDirectories } from "@/lib/desktopBridge";
+import { getDesktopApplicationIdentity, pickDirectories, type DesktopApplicationIdentity } from "@/lib/desktopBridge";
+import { cn } from "@/lib/utils";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import type { AssistantOverlay, AssistantOverlayPart } from "@/state/overlayStore";
 
@@ -50,9 +52,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   const gitCommitApproval = gitCommitFromPayload(current.payload);
   const isComputerAppApproval = isToolCallApproval && toolCallApproval.scope === "computer" && Boolean(toolCallApproval.appID);
   const approvalReason = isToolCallApproval
-    ? isComputerAppApproval
-      ? t("transcript.approvalComputerAppReason").replace("{app}", toolCallApproval.appID)
-      : toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
+    ? toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
     : current.reason;
 
   async function approve(scope: "turn" | "session") {
@@ -108,21 +108,19 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   }
 
   const approvalMenuItems: Array<ChoiceMenuItem<ApprovalMenuAction>> = [];
-  if (isToolCallApproval) {
-    const approveAction: ApprovalMenuAction = isComputerAppApproval ? "approve-session" : "approve-turn";
-    const approveLabel = isComputerAppApproval
-      ? t("transcript.approvalAllowComputerApp")
-      : approvalToolActionLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t);
+  if (isToolCallApproval && !isComputerAppApproval) {
+    const approveAction: ApprovalMenuAction = "approve-turn";
+    const approveLabel = approvalToolActionLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t);
     approvalMenuItems.push({
       id: approveAction,
       label: approveLabel,
       value: approveAction,
       render: () => (
         <ApprovalMenuOption
-          description={t(isComputerAppApproval ? "transcript.approvalAllowComputerAppDesc" : "transcript.approvalAllowToolCallDesc")}
+          description={t("transcript.approvalAllowToolCallDesc")}
           icon={Check}
           label={approveLabel}
-          loading={pendingAction === (isComputerAppApproval ? "session" : "turn")}
+          loading={pendingAction === "turn"}
         />
       ),
     });
@@ -142,7 +140,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
         render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("transcript.approvalGitCommitReview")} />,
       });
     }
-  } else {
+  } else if (!isToolCallApproval) {
     approvalMenuItems.push(
       {
         id: "approve-turn",
@@ -172,19 +170,21 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
       },
     );
   }
-  approvalMenuItems.push({
-    id: "deny",
-    label: approvalDenyLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t),
-    value: "deny",
-    render: () => (
-      <ApprovalMenuOption
-        description={t("transcript.approvalDenyDesc")}
-        icon={X}
-        label={approvalDenyLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t)}
-        loading={pendingAction === "deny"}
-      />
-    ),
-  });
+  if (!isComputerAppApproval) {
+    approvalMenuItems.push({
+      id: "deny",
+      label: approvalDenyLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t),
+      value: "deny",
+      render: () => (
+        <ApprovalMenuOption
+          description={t("transcript.approvalDenyDesc")}
+          icon={X}
+          label={approvalDenyLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t)}
+          loading={pendingAction === "deny"}
+        />
+      ),
+    });
+  }
 
   function selectApprovalAction(action: ApprovalMenuAction) {
     switch (action) {
@@ -211,18 +211,47 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   }
 
   return (
-    <ComposerFloatingPanel className="right-4 grid gap-1 overflow-y-auto px-3 py-2 text-xs sm:right-8">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate font-medium">{title}</span>
-      </div>
-      {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
+    <ComposerFloatingPanel
+      className={cn(
+        "right-4 mb-1 overflow-y-auto rounded-b-lg text-xs sm:right-8",
+        isComputerAppApproval
+          ? "px-2.5 py-1.5 sm:left-auto sm:w-[28rem] sm:max-w-[calc(100%-4rem)]"
+          : "grid gap-1 px-3 py-2",
+      )}
+      data-computer-approval={isComputerAppApproval ? "true" : undefined}
+      onKeyDown={(event) => {
+        if (isComputerAppApproval && event.key === "Escape") {
+          event.preventDefault();
+          void deny();
+        }
+      }}
+    >
+      {isComputerAppApproval ? (
+        <ComputerApprovalTarget
+          appID={toolCallApproval.appID}
+          approveDescription={t("transcript.approvalAllowComputerAppDesc")}
+          approveLabel={t("transcript.approvalAllowComputerApp")}
+          denyDescription={t("transcript.approvalDenyDesc")}
+          denyLabel={t("transcript.approvalRejectComputerApp")}
+          pendingAction={pendingAction}
+          onApprove={() => void approve("session")}
+          onDeny={() => void deny()}
+        />
+      ) : (
+        <>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate font-medium">{title}</span>
+          </div>
+          {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
+        </>
+      )}
       {isToolCallApproval && toolCallApproval.command ? (
         <div className="max-h-28 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
           <pre className="whitespace-pre-wrap break-words"><span className="select-none text-muted-foreground">$ </span>{toolCallApproval.command}</pre>
         </div>
       ) : null}
-      {isToolCallApproval && toolCallApproval.paths.length > 0 && !patchApproval && !gitCommitApproval ? (
+      {isToolCallApproval && toolCallApproval.paths.length > 0 && !isComputerAppApproval && !patchApproval && !gitCommitApproval ? (
         <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
           {toolCallApproval.paths.map((path) => (
             <div key={path} className="truncate" >
@@ -231,7 +260,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
           ))}
         </div>
       ) : null}
-      {isToolCallApproval && toolCallApproval.valuePreview !== undefined ? (
+      {isToolCallApproval && !isComputerAppApproval && toolCallApproval.valuePreview !== undefined ? (
         <div className="max-h-20 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
           <pre className="whitespace-pre-wrap break-words">{toolCallApproval.valuePreview}</pre>
         </div>
@@ -296,15 +325,17 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
           ) : null}
         </div>
       ) : null}
-      <ChoiceMenu
-        busy={pending}
-        className="mt-0.5 border-t border-border/60 pt-1"
-        focusMode="when-idle"
-        items={approvalMenuItems}
-        maxHeightClassName="max-h-44"
-        onEscape={() => void deny()}
-        onSelect={selectApprovalAction}
-      />
+      {!isComputerAppApproval ? (
+        <ChoiceMenu
+          busy={pending}
+          className="mt-0.5 border-t border-border/60 pt-1"
+          focusMode="when-idle"
+          items={approvalMenuItems}
+          maxHeightClassName="max-h-44"
+          onEscape={() => void deny()}
+          onSelect={selectApprovalAction}
+        />
+      ) : null}
       <PatchDiffDialog
         applying={pendingAction === "turn"}
         approval={viewingPatchApproval}
@@ -345,6 +376,80 @@ function ApprovalMenuOption({
         <span className="block truncate text-xs font-medium text-foreground">{label}</span>
         <span className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground">{description}</span>
       </span>
+    </div>
+  );
+}
+
+function ComputerApprovalTarget({
+  appID,
+  approveDescription,
+  approveLabel,
+  denyDescription,
+  denyLabel,
+  pendingAction,
+  onApprove,
+  onDeny,
+}: {
+  appID: string;
+  approveDescription: string;
+  approveLabel: string;
+  denyDescription: string;
+  denyLabel: string;
+  pendingAction: "turn" | "session" | "deny" | null;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const [identity, setIdentity] = useState<DesktopApplicationIdentity | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIdentity(null);
+    void getDesktopApplicationIdentity(appID).then((next) => {
+      if (!cancelled && next?.appID === appID) {
+        setIdentity(next);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appID]);
+
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <AppIcon
+        className="shrink-0 bg-foreground/[0.08] ring-1 ring-inset ring-foreground/10"
+        size="md"
+        src={identity?.iconURL}
+      />
+      <div className="min-w-0 flex-1 truncate text-sm font-medium" title={appID}>
+        {identity?.name || appID}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          aria-label={approveLabel}
+          disabled={pendingAction !== null}
+          size="sm"
+          title={approveDescription}
+          type="button"
+          variant="secondary"
+          onClick={onApprove}
+        >
+          {pendingAction === "session" ? <Spinner className="size-3.5" /> : <Check className="size-4" />}
+          {approveLabel}
+        </Button>
+        <Button
+          aria-label={denyLabel}
+          disabled={pendingAction !== null}
+          size="sm"
+          title={denyDescription}
+          type="button"
+          variant="ghost"
+          onClick={onDeny}
+        >
+          {pendingAction === "deny" ? <Spinner className="size-3.5" /> : <X className="size-4" />}
+          {denyLabel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -558,7 +663,7 @@ function toolCallReason(operation: string, sandboxBypass: boolean, t: (key: stri
     case "shell":
     case "process_start":
     case "computer_observe":
-    case "computer_launch_app":
+    case "computer_use_app":
     case "computer_quit_app":
     case "computer_press":
     case "computer_set_value":

@@ -21,7 +21,7 @@ export function ComposerAddButton({
       aria-expanded={active}
       aria-label={label}
       className={cn(
-        "rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground",
+        "rounded-full border-0 bg-transparent text-foreground",
         composerControlStateClassName,
         active && "bg-control-active text-foreground !shadow-none",
       )}

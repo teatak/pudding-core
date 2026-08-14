@@ -39,14 +39,14 @@ func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []
 }
 
 func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
-	if name == ComputerLaunchApp {
-		args, err := decodeComputerLaunchAppArgs(raw)
+	if name == ComputerUseApp {
+		args, err := decodeComputerUseAppArgs(raw)
 		if err != nil {
 			return ToolRisk{}, false
 		}
 		return ToolRisk{
-			Class: RiskClassWrite, Operation: "computer_launch_app", Scope: "computer",
-			Paths: compactRiskPaths(args.AppID), Summary: "Launch one local macOS application.",
+			Class: RiskClassWrite, Operation: "computer_use_app", Scope: "computer",
+			Paths: compactRiskPaths(args.AppID), Summary: "Open or activate one local macOS application.",
 		}, true
 	}
 	if name == ComputerQuitApp {

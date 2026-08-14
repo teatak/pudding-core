@@ -20,7 +20,7 @@ type computerObserveArgs struct {
 	IncludeScreenshot bool   `json:"includeScreenshot"`
 }
 
-type computerLaunchAppArgs struct {
+type computerUseAppArgs struct {
 	AppID string `json:"appID"`
 }
 
@@ -53,16 +53,16 @@ func (r *BuiltinRunner) computerListApps(ctx context.Context, call Call) Result 
 	return out
 }
 
-func (r *BuiltinRunner) computerLaunchApp(ctx context.Context, call Call) Result {
+func (r *BuiltinRunner) computerUseApp(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	if ready := r.computerReady(call, out); ready != nil {
 		return *ready
 	}
-	args, err := decodeComputerLaunchAppArgs(call.Args)
+	args, err := decodeComputerUseAppArgs(call.Args)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	result, err := r.computer.LaunchApp(ctx, call.SessionID, args.AppID)
+	result, err := r.computer.UseApp(ctx, call.SessionID, args.AppID)
 	if err != nil {
 		return computerToolError(out, err)
 	}
@@ -207,8 +207,8 @@ func decodeComputerObserveArgs(raw []byte) (computerObserveArgs, error) {
 	return args, nil
 }
 
-func decodeComputerLaunchAppArgs(raw []byte) (computerLaunchAppArgs, error) {
-	var args computerLaunchAppArgs
+func decodeComputerUseAppArgs(raw []byte) (computerUseAppArgs, error) {
+	var args computerUseAppArgs
 	if err := decodeStructToolArgs(raw, &args); err != nil {
 		return args, err
 	}
@@ -265,8 +265,8 @@ func computerObserveApprovalDetails(call Call) (map[string]any, error) {
 	}, nil
 }
 
-func computerLaunchAppApprovalDetails(call Call) (map[string]any, error) {
-	args, err := decodeComputerLaunchAppArgs(call.Args)
+func computerUseAppApprovalDetails(call Call) (map[string]any, error) {
+	args, err := decodeComputerUseAppArgs(call.Args)
 	if err != nil {
 		return nil, err
 	}

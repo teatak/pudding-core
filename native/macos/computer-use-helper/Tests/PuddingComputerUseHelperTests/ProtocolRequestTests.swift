@@ -62,14 +62,24 @@ import Testing
       == .capture(bundleID: "com.apple.TextEdit", windowID: 42, output: "/tmp/window.png"))
 }
 
-@Test func protocolLaunchRoutesBundleID() throws {
+@Test func protocolUseRoutesBundleID() throws {
   let request = ProtocolRequest(
     id: "req-5",
-    command: "launch_app",
+    command: "use_app",
     params: ProtocolParameters(bundleID: "com.apple.calculator")
   )
 
-  #expect(try request.helperCommand() == .launchApp(bundleID: "com.apple.calculator"))
+  #expect(try request.helperCommand() == .useApp(bundleID: "com.apple.calculator"))
+}
+
+@Test func protocolApplicationIdentityRoutesBundleID() throws {
+  let request = ProtocolRequest(
+    id: "req-identity",
+    command: "app_identity",
+    params: ProtocolParameters(bundleID: "com.apple.Notes")
+  )
+
+  #expect(try request.helperCommand() == .applicationIdentity(bundleID: "com.apple.Notes"))
 }
 
 @Test func protocolQuitRequiresPositivePID() {

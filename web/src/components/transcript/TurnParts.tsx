@@ -957,7 +957,7 @@ function processToolGroup(tool: Extract<TurnPartVM, { type: "tool_use" }>, t: (k
     builtin_browser_status: "transcript.processToolBrowser",
     builtin_browser_type: "transcript.processToolBrowser",
 	builtin_computer_list_apps: "transcript.processToolComputer",
-	builtin_computer_launch_app: "transcript.processToolComputer",
+	builtin_computer_use_app: "transcript.processToolComputer",
 	builtin_computer_quit_app: "transcript.processToolComputer",
 	builtin_computer_observe: "transcript.processToolComputer",
 	builtin_computer_act: "transcript.processToolComputer",

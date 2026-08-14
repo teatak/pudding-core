@@ -20,6 +20,12 @@ struct RunningApplicationSnapshot: Codable, Equatable {
   let windows: [ApplicationWindowSnapshot]
 }
 
+struct ApplicationIdentitySnapshot: Codable, Equatable {
+  let bundleID: String
+  let name: String
+  let iconPNGBase64: String?
+}
+
 struct ApplicationWindowSnapshot: Codable, Equatable {
   let index: Int
   let windowID: UInt32?
@@ -77,7 +83,7 @@ struct CaptureSnapshot: Codable, Equatable {
   let scaleFactor: Double
 }
 
-struct LaunchApplicationSnapshot: Codable, Equatable {
+struct UseApplicationSnapshot: Codable, Equatable {
   let bundleID: String
   let name: String
   let pid: Int32
@@ -128,7 +134,7 @@ enum HelperError: Error, LocalizedError {
   case actionFailed(String)
   case captureFailed(String)
   case applicationNotInstalled(String)
-  case launchFailed(String)
+  case useFailed(String)
 
   var code: String {
     switch self {
@@ -150,8 +156,8 @@ enum HelperError: Error, LocalizedError {
       return "computer_capture_failed"
     case .applicationNotInstalled:
       return "computer_app_not_installed"
-    case .launchFailed:
-      return "computer_launch_failed"
+    case .useFailed:
+      return "computer_use_failed"
     }
   }
 
@@ -177,14 +183,14 @@ enum HelperError: Error, LocalizedError {
       return "capture failed: \(reason)"
     case .applicationNotInstalled(let bundleID):
       return "application is not installed: \(bundleID)"
-    case .launchFailed(let reason):
+    case .useFailed(let reason):
       return "application launch failed: \(reason)"
     }
   }
 
   var outcome: ActionOutcome {
     switch self {
-    case .actionFailed, .launchFailed:
+    case .actionFailed, .useFailed:
       return .unknown
     default:
       return .notStarted

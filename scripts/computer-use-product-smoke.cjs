@@ -112,7 +112,7 @@ async function main() {
       `${scenarioName} is already running; close it before the product smoke`,
     );
     if (scenario.prelaunch) {
-      const launched = await host.launchApp({ bundleID: scenario.appID });
+      const launched = await host.useApp({ bundleID: scenario.appID });
       cleanupPID = launched.pid;
       cleanupTarget = cleanupPID > 0;
       assert(launched.newlyLaunched && launched.pid > 0, `${scenarioName} test setup did not own the launch`);

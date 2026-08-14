@@ -69,7 +69,7 @@ type bridgeNativeAction struct {
 	Completed bool   `json:"completed"`
 }
 
-type bridgeNativeLaunch struct {
+type bridgeNativeUse struct {
 	BundleID      string `json:"bundleID"`
 	Name          string `json:"name"`
 	PID           int32  `json:"pid"`
@@ -132,12 +132,12 @@ func (s *ElectronBridgeService) ListApps(ctx context.Context, sessionID string) 
 	return out, nil
 }
 
-func (s *ElectronBridgeService) LaunchApp(ctx context.Context, sessionID, appID string) (NativeLaunch, error) {
-	var raw bridgeNativeLaunch
-	if err := s.post(ctx, "/computer/apps/launch", map[string]any{"sessionID": sessionID, "appID": appID}, &raw); err != nil {
-		return NativeLaunch{}, err
+func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID string) (NativeUse, error) {
+	var raw bridgeNativeUse
+	if err := s.post(ctx, "/computer/apps/use", map[string]any{"sessionID": sessionID, "appID": appID}, &raw); err != nil {
+		return NativeUse{}, err
 	}
-	return NativeLaunch{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched}, nil
+	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched}, nil
 }
 
 func (s *ElectronBridgeService) QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error) {

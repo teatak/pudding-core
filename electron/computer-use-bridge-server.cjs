@@ -156,8 +156,8 @@ class ComputerUseBridgeServer {
     switch (path) {
       case "/computer/apps/list":
         return this.host.listApps({ signal });
-      case "/computer/apps/launch":
-        return this.host.launchApp({ bundleID: body.appID }, { signal });
+      case "/computer/apps/use":
+        return this.host.useApp({ bundleID: body.appID }, { signal });
       case "/computer/apps/quit":
         return this.host.quitApp({ bundleID: body.appID, pid: body.pid }, { signal });
       case "/computer/observe":

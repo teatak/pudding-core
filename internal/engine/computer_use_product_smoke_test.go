@@ -286,32 +286,32 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	var args any
 	switch {
 	case stage == 1:
-		if !smokeHasToolDef(req.Tools, tool.AppLoad) || smokeHasToolDef(req.Tools, tool.ComputerLaunchApp) {
+		if !smokeHasToolDef(req.Tools, tool.AppLoad) || smokeHasToolDef(req.Tools, tool.ComputerUseApp) {
 			return c.fail(fmt.Errorf("Computer Use must begin unloaded; tools = %+v", req.Tools))
 		}
 		name, callID = tool.AppLoad, "call_computer_app_load"
 		args = map[string]any{"app_id": app.BuiltinComputerUseID}
 	case stage == 2:
-		for _, required := range []string{tool.ComputerListApps, tool.ComputerLaunchApp, tool.ComputerQuitApp, tool.ComputerObserve, tool.ComputerAct} {
+		for _, required := range []string{tool.ComputerListApps, tool.ComputerUseApp, tool.ComputerQuitApp, tool.ComputerObserve, tool.ComputerAct} {
 			if !smokeHasToolDef(req.Tools, required) {
 				return c.fail(fmt.Errorf("Computer Use tool %q missing after app load", required))
 			}
 		}
-		name, callID = tool.ComputerLaunchApp, "call_computer_launch"
+		name, callID = tool.ComputerUseApp, "call_computer_use"
 		args = map[string]any{"appID": c.scenario.appID}
 	case stage == 3:
 		var result struct {
-			OK     bool                  `json:"ok"`
-			Result computer.LaunchResult `json:"result"`
+			OK     bool               `json:"ok"`
+			Result computer.UseResult `json:"result"`
 		}
-		if err := decodeSmokeToolResult(req, tool.ComputerLaunchApp, &result); err != nil {
+		if err := decodeSmokeToolResult(req, tool.ComputerUseApp, &result); err != nil {
 			return c.fail(err)
 		}
 		if !result.OK || result.Result.PID <= 0 {
-			return c.fail(fmt.Errorf("%s launch returned an invalid result: %+v", c.scenario.name, result))
+			return c.fail(fmt.Errorf("%s app use returned an invalid result: %+v", c.scenario.name, result))
 		}
 		if c.scenario.expectOwned && result.Result.LaunchID == nil {
-			return c.fail(fmt.Errorf("%s launch was not newly session-owned: %+v", c.scenario.name, result))
+			return c.fail(fmt.Errorf("%s app use was not newly session-owned: %+v", c.scenario.name, result))
 		}
 		if !c.scenario.expectOwned && result.Result.LaunchID != nil {
 			return c.fail(fmt.Errorf("%s unexpectedly acquired ownership of an already-running app: %+v", c.scenario.name, result))

@@ -60,9 +60,7 @@ type ComposerTextAreaProps = {
     draftSlashCommand: SlashSubmitCommand | null;
   }) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
-  onBlur: () => void;
   onClearError: () => void;
-  scheduleMascotInputGaze: () => void;
 };
 
 export function parseSlashSubmitCommand(text: string): SlashSubmitCommand | null {
@@ -199,9 +197,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     onSlashCommandSelect,
     onEnter,
     onPaste,
-    onBlur,
     onClearError,
-    scheduleMascotInputGaze,
   },
   ref,
 ) {
@@ -243,7 +239,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
 
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
 
-  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
+  const ime = useImeCompositionGuard();
 
   const prevCanSendRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
@@ -303,7 +299,6 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     textField.onBlur(event);
     mentions.close();
     setTextFocused(false);
-    onBlur();
   };
 
   const handleTextFocus = () => {
@@ -311,12 +306,10 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     if (textAreaRef.current) {
       mentions.notifyCursor(textAreaRef.current.selectionStart);
     }
-    scheduleMascotInputGaze();
   };
 
   const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
     mentions.notifyCursor(event.currentTarget.selectionStart);
-    scheduleMascotInputGaze();
   };
 
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -327,7 +320,6 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     mentions.notifyChange(nextText, previousText, event.target.selectionStart);
     onClearError();
     setTextFocused(true);
-    scheduleMascotInputGaze();
   };
 
   const selectSlashCommand = (command: SlashCommand) => {
@@ -341,7 +333,6 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
     onSlashCommandSelect(command);
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus();
-      scheduleMascotInputGaze();
     });
   };
 
@@ -363,11 +354,9 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         pendingComposedSlashCommandRef.current =
           visibleSlashCommands[slashSelectedIndex] ?? visibleSlashCommands[0] ?? null;
       }
-      scheduleMascotInputGaze();
       return;
     }
     if (mentions.onKeyDown(event)) {
-      scheduleMascotInputGaze();
       return;
     }
     if (slashMenuOpen) {
@@ -410,7 +399,6 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         draftSlashCommand: currentSlashCommand,
       });
     }
-    scheduleMascotInputGaze();
   };
 
   const openMentionMenu = useCallback(() => {

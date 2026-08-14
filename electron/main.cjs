@@ -1142,6 +1142,25 @@ ipcMain.handle("pudding:desktop:get-home-directory", (event) => {
   return os.homedir();
 });
 
+ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID) => {
+  assertTrustedSender(event);
+  const appID = String(rawAppID || "").trim();
+  if (!isValidBundleID(appID)) {
+    return null;
+  }
+  try {
+    const identity = await computerUseHost.applicationIdentity({ bundleID: appID });
+    const iconPNGBase64 = String(identity?.iconPNGBase64 || "").trim();
+    return {
+      appID,
+      name: String(identity?.name || appID),
+      iconURL: iconPNGBase64 ? `data:image/png;base64,${iconPNGBase64}` : "",
+    };
+  } catch {
+    return null;
+  }
+});
+
 ipcMain.handle("pudding:desktop:permissions:get", (event) => {
   assertTrustedSender(event);
   return desktopPermissionState(computerUseHost, systemPreferences);
@@ -1846,6 +1865,10 @@ function isAllowedExternalURL(rawURL) {
   } catch {
     return false;
   }
+}
+
+function isValidBundleID(value) {
+  return value.length <= 255 && /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/i.test(value);
 }
 
 function openAllowedExternalURL(rawURL) {

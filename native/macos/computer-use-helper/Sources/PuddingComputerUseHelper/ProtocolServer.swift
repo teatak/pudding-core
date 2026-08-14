@@ -20,8 +20,10 @@ struct ProtocolRequest: Decodable, Equatable {
       )
     case "list_apps":
       return .listApps
-    case "launch_app":
-      return .launchApp(bundleID: try required(params.bundleID, "bundleID"))
+    case "app_identity":
+      return .applicationIdentity(bundleID: try required(params.bundleID, "bundleID"))
+    case "use_app":
+      return .useApp(bundleID: try required(params.bundleID, "bundleID"))
     case "quit_app":
       let pid = try required(params.pid, "pid")
       guard pid > 0 else {

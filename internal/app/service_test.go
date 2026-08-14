@@ -142,7 +142,8 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil ||
 		!strings.Contains(computerSkill.Content, "does not monitor keyboard or mouse input") ||
 		!strings.Contains(computerSkill.Content, "Quit is always normal, never forced") ||
-		!strings.Contains(computerSkill.Content, "only with builtin_computer_launch_app") ||
+		!strings.Contains(computerSkill.Content, "only with builtin_computer_use_app") ||
+		!strings.Contains(computerSkill.Content, "start, activate, or reopen") ||
 		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
 		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)
 	}

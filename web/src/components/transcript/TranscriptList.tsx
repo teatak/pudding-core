@@ -14,10 +14,8 @@ import type {
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_TOP_PX = 22;
-const LIST_PADDING_BOTTOM_PX = 36;
 const TURN_GAP_PX = 12;
 const TURN_OVERSCAN = 8;
-const LIST_BOTTOM_SPACER_PX = Math.max(0, LIST_PADDING_BOTTOM_PX - TURN_GAP_PX);
 const SCROLL_END_THRESHOLD_PX = 8;
 const TURN_ESTIMATED_HEIGHT_PX = 320;
 const TAIL_ESTIMATED_HEIGHT_PX = 180;
@@ -520,7 +518,7 @@ export const TranscriptList = memo(function TranscriptList({
                     <div
                       aria-hidden="true"
                       style={{
-                        height: `calc(${LIST_BOTTOM_SPACER_PX}px + var(--pudding-composer-overlay-height, 0px))`,
+                        height: `calc(var(--pudding-composer-mask-height) - ${TURN_GAP_PX}px + var(--pudding-composer-overlay-height))`,
                       }}
                     />
                   </div>
