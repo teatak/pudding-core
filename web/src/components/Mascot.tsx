@@ -671,8 +671,8 @@ export function Mascot({
 
               <span data-slot="cheeks" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <ellipse cx="38" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
-                  <ellipse cx="90" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
+                  <ellipse cx="41" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
+                  <ellipse cx="87" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
                 </svg>
               </span>
 
