@@ -215,7 +215,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
       className={cn(
         "right-4 mb-1 overflow-y-auto rounded-b-lg text-xs sm:right-8",
         isComputerAppApproval
-          ? "px-2.5 py-1.5 sm:left-auto sm:w-[28rem] sm:max-w-[calc(100%-4rem)]"
+          ? "px-2.5 py-2 sm:left-auto sm:w-[28rem] sm:max-w-[calc(100%-4rem)]"
           : "grid gap-1 px-3 py-2",
       )}
       data-computer-approval={isComputerAppApproval ? "true" : undefined}
@@ -233,6 +233,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
           approveLabel={t("transcript.approvalAllowComputerApp")}
           denyDescription={t("transcript.approvalDenyDesc")}
           denyLabel={t("transcript.approvalRejectComputerApp")}
+          heading={title}
           pendingAction={pendingAction}
           onApprove={() => void approve("session")}
           onDeny={() => void deny()}
@@ -386,6 +387,7 @@ function ComputerApprovalTarget({
   approveLabel,
   denyDescription,
   denyLabel,
+  heading,
   pendingAction,
   onApprove,
   onDeny,
@@ -395,6 +397,7 @@ function ComputerApprovalTarget({
   approveLabel: string;
   denyDescription: string;
   denyLabel: string;
+  heading: string;
   pendingAction: "turn" | "session" | "deny" | null;
   onApprove: () => void;
   onDeny: () => void;
@@ -415,40 +418,46 @@ function ComputerApprovalTarget({
   }, [appID]);
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <AppIcon
-        className="shrink-0 bg-foreground/[0.08] ring-1 ring-inset ring-foreground/10"
-        size="md"
-        src={identity?.iconURL}
-      />
-      <div className="min-w-0 flex-1 truncate text-sm font-medium" title={appID}>
-        {identity?.name || appID}
+    <div className="grid min-w-0 gap-1">
+      <div className="flex min-w-0 items-center gap-1.5 px-0.5 text-[11px] font-medium text-muted-foreground">
+        <ShieldCheck className="size-3.5 shrink-0" />
+        <span className="truncate">{heading}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          aria-label={approveLabel}
-          disabled={pendingAction !== null}
-          size="sm"
-          title={approveDescription}
-          type="button"
-          variant="secondary"
-          onClick={onApprove}
-        >
-          {pendingAction === "session" ? <Spinner className="size-3.5" /> : <Check className="size-4" />}
-          {approveLabel}
-        </Button>
-        <Button
-          aria-label={denyLabel}
-          disabled={pendingAction !== null}
-          size="sm"
-          title={denyDescription}
-          type="button"
-          variant="ghost"
-          onClick={onDeny}
-        >
-          {pendingAction === "deny" ? <Spinner className="size-3.5" /> : <X className="size-4" />}
-          {denyLabel}
-        </Button>
+      <div className="flex min-w-0 items-center gap-2">
+        <AppIcon
+          className="shrink-0 bg-foreground/[0.08] ring-1 ring-inset ring-foreground/10"
+          size="md"
+          src={identity?.iconURL}
+        />
+        <div className="min-w-0 flex-1 truncate text-sm font-medium" title={appID}>
+          {identity?.name || appID}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            aria-label={approveLabel}
+            disabled={pendingAction !== null}
+            size="sm"
+            title={approveDescription}
+            type="button"
+            variant="secondary"
+            onClick={onApprove}
+          >
+            {pendingAction === "session" ? <Spinner className="size-3.5" /> : <Check className="size-4" />}
+            {approveLabel}
+          </Button>
+          <Button
+            aria-label={denyLabel}
+            disabled={pendingAction !== null}
+            size="sm"
+            title={denyDescription}
+            type="button"
+            variant="ghost"
+            onClick={onDeny}
+          >
+            {pendingAction === "deny" ? <Spinner className="size-3.5" /> : <X className="size-4" />}
+            {denyLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );

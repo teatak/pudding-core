@@ -59,7 +59,7 @@ const LEFT_PALM_X = 13;
 const RIGHT_PALM_X = 115;
 const PALM_Y = 107;
 const MOUTH_PATH = "M56 88.5 Q64 91.5 72 88.5";
-const FACE_PAD_PATH = "M39 54 C47 50 81 50 89 54 C96 58 98 82 92 91 C85 100 43 100 36 91 C30 82 32 58 39 54 Z";
+const FACE_PAD_PATH = "M39 54 C47 50 81 50 89 54 C96 58 99 82 94 92 C87 102 41 102 34 92 C29 82 32 58 39 54 Z";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
