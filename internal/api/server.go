@@ -446,10 +446,6 @@ func (s *Server) createSession(c *cart.Context) error {
 		return nil
 	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
-	if req.ProjectID != "" {
-		sess.ActiveMode = store.ModeCode
-		sess.ModeLease = store.ModeLeaseSession
-	}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
 	}

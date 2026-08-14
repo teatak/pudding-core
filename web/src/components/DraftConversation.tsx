@@ -48,6 +48,7 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import {
   composerAttachmentRemoveStateClassName,
+  composerSendButtonClassName,
   composerShellClassName,
 } from "@/components/composerControlStyles";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
@@ -1417,11 +1418,11 @@ function DraftComposer({
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.send")}
-                    className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
+                    className={composerSendButtonClassName}
                     disabled={!sendEnabled || submitMutation.isPending}
                     size="icon"
                     type="submit"
-                    variant={sendEnabled ? "default" : "secondary"}
+                    variant="secondary"
                   >
                     {submitMutation.isPending ? <Spinner /> : <ArrowUp />}
                   </Button>

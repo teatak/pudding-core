@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { AudioBindings, Session } from "@/api/client";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
+import { composerSendButtonClassName } from "@/components/composerControlStyles";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
@@ -149,11 +150,11 @@ export function ComposerToolbar({
           <TooltipTrigger asChild>
             <Button
               aria-label={t(steering ? "composer.queue" : "composer.send")}
-              className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
+              className={composerSendButtonClassName}
               disabled={!sendEnabled}
               size="icon"
               type="submit"
-              variant={sendEnabled ? "default" : "secondary"}
+              variant="secondary"
             >
               {submitPending ? <Spinner /> : <ArrowUp />}
             </Button>

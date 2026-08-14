@@ -31,6 +31,7 @@ import {
   LocateFixed,
   MessageSquareMore,
   MessageSquareText,
+  Monitor,
   MousePointerClick,
   MoveRight,
   MoveVertical,
@@ -206,6 +207,11 @@ function toolActivityDetail(name: string, argsText: string) {
         readString(args, "tab_id"),
     );
   }
+  if (name.startsWith("builtin_computer_")) {
+    const appID = readString(args, "appID");
+    const windowID = typeof args.windowID === "number" ? `#${args.windowID}` : "";
+    return shortValue([appID, windowID].filter(Boolean).join(" "));
+  }
   return shortValue(
     readString(args, "path") ||
       readString(args, "url") ||
@@ -302,6 +308,11 @@ export function toolIcon(name: string | undefined): LucideIcon {
     builtin_camera_capture: Camera,
     builtin_command_run: SquareTerminal,
     builtin_command_session: Keyboard,
+	builtin_computer_list_apps: Monitor,
+	builtin_computer_launch_app: Monitor,
+	builtin_computer_quit_app: CircleX,
+	builtin_computer_observe: Monitor,
+	builtin_computer_act: MousePointerClick,
     builtin_code_symbols: Braces,
     builtin_code_definition: LocateFixed,
     builtin_code_references: Waypoints,
@@ -362,6 +373,11 @@ export function toolDisplayName(name: string | undefined, fallback: string, t: T
     builtin_app_save: t("transcript.toolAppSave"),
     builtin_command_run: t("transcript.toolCommandRun"),
     builtin_command_session: t("transcript.toolCommandSession"),
+	builtin_computer_list_apps: t("transcript.toolComputerListApps"),
+	builtin_computer_launch_app: t("transcript.toolComputerLaunchApp"),
+	builtin_computer_quit_app: t("transcript.toolComputerQuitApp"),
+	builtin_computer_observe: t("transcript.toolComputerObserve"),
+	builtin_computer_act: t("transcript.toolComputerAct"),
     builtin_code_symbols: t("transcript.toolCodeSymbols"),
     builtin_code_definition: t("transcript.toolCodeDefinition"),
     builtin_code_references: t("transcript.toolCodeReferences"),

@@ -44,15 +44,11 @@ const HEAD_SHIFT_X_PERCENT = 2.7;
 const HEAD_SHIFT_Y_PERCENT = 1.35;
 const FACE_SHIFT_X = 12;
 const FACE_SHIFT_Y = 4;
+const FACE_YAW_SQUEEZE_X = 0.1;
+const FACE_YAW_ORIGIN_SHIFT_PERCENT = 12;
 const FACE_CENTER_X = 64;
 const FACE_CENTER_Y = 77;
-const FACE_EXTRA_SKEW_DEG = 4;
-const FACE_EXTRA_SQUEEZE_X = 0.035;
-const FACE_EXTRA_SCALE_Y = 0.025;
-const FACE_EXTRA_YAW_DEG = 4;
-const FACE_EXTRA_PITCH_DEG = 3;
 const FACE_Z_OFFSET_PX = 4;
-const EYE_DEPTH_SCALE = 0.08;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -63,6 +59,7 @@ const LEFT_PALM_X = 13;
 const RIGHT_PALM_X = 115;
 const PALM_Y = 107;
 const MOUTH_PATH = "M56 88.5 Q64 91.5 72 88.5";
+const FACE_PAD_PATH = "M39 54 C47 50 81 50 89 54 C96 58 98 82 92 91 C85 100 43 100 36 91 C30 82 32 58 39 54 Z";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -165,11 +162,6 @@ const eyeMotionStyle: CSSProperties = {
   transformOrigin: "50% 54.296875%",
 };
 
-const individualEyeStyle: CSSProperties = {
-  transformBox: "fill-box",
-  transformOrigin: "center",
-};
-
 const mouthMotionStyle: CSSProperties = {
   ...compositeLayerStyle,
   transformOrigin: "50% 69.53125%",
@@ -197,12 +189,8 @@ export function Mascot({
   const rootRef = useRef<HTMLSpanElement>(null);
   const headGestureRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
-  const faceLayerRef = useRef<HTMLSpanElement>(null);
   const faceMotionRef = useRef<HTMLSpanElement>(null);
-  const screenLeftEyeRef = useRef<SVGGElement>(null);
-  const screenRightEyeRef = useRef<SVGGElement>(null);
-  const screenLeftGlintRef = useRef<SVGGElement>(null);
-  const screenRightGlintRef = useRef<SVGGElement>(null);
+  const pupilMotionRef = useRef<SVGGElement>(null);
   const shadowMotionRef = useRef<HTMLSpanElement>(null);
   const metricsRef = useRef<MascotMetrics | null>(null);
   const currentXRef = useRef(0);
@@ -223,31 +211,22 @@ export function Mascot({
     const turnY = y / EYE_MAX_Y;
     const pitchTurnY = clamp(turnY + currentInputPitchBiasRef.current, -1, 1);
     const head = headRef.current;
-    const faceLayer = faceLayerRef.current;
     const faceMotion = faceMotionRef.current;
-    const screenLeftEye = screenLeftEyeRef.current;
-    const screenRightEye = screenRightEyeRef.current;
-    const screenLeftGlint = screenLeftGlintRef.current;
-    const screenRightGlint = screenRightGlintRef.current;
+    const pupilMotion = pupilMotionRef.current;
     const shadowMotion = shadowMotionRef.current;
 
     if (head) {
       head.style.transform = `translate3d(${turnX * HEAD_SHIFT_X_PERCENT}%, ${pitchTurnY * HEAD_SHIFT_Y_PERCENT}%, 0) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-pitchTurnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * pitchTurnY * HEAD_ROLL_MAX_DEG}deg)`;
     }
-    if (faceLayer) {
-      faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-pitchTurnY * FACE_EXTRA_PITCH_DEG}deg)`;
-    }
     if (faceMotion) {
-      const scaleX = 1 - Math.abs(turnX) * FACE_EXTRA_SQUEEZE_X;
-      const scaleY = 1 + pitchTurnY * FACE_EXTRA_SCALE_Y;
-      faceMotion.style.transform = `translate3d(${turnX * (FACE_SHIFT_X / 128) * 100}%, ${pitchTurnY * (FACE_SHIFT_Y / 128) * 100}%, 0) skewX(${-turnX * FACE_EXTRA_SKEW_DEG}deg) scale(${scaleX}, ${scaleY})`;
+      const faceScaleX = 1 - Math.abs(turnX) * FACE_YAW_SQUEEZE_X;
+      const faceOriginX = 50 - turnX * FACE_YAW_ORIGIN_SHIFT_PERCENT;
+      faceMotion.style.transformOrigin = `${faceOriginX}% ${(FACE_CENTER_Y / 128) * 100}%`;
+      faceMotion.style.transform = `translate3d(${turnX * (FACE_SHIFT_X / 128) * 100}%, ${pitchTurnY * (FACE_SHIFT_Y / 128) * 100}%, 0) scaleX(${faceScaleX})`;
     }
-    const screenLeftEyeScale = 1 + turnX * EYE_DEPTH_SCALE;
-    const screenRightEyeScale = 1 - turnX * EYE_DEPTH_SCALE;
-    if (screenLeftEye) screenLeftEye.style.transform = `scale(${screenLeftEyeScale})`;
-    if (screenRightEye) screenRightEye.style.transform = `scale(${screenRightEyeScale})`;
-    if (screenLeftGlint) screenLeftGlint.style.transform = `scale(${screenLeftEyeScale})`;
-    if (screenRightGlint) screenRightGlint.style.transform = `scale(${screenRightEyeScale})`;
+    if (pupilMotion) {
+      pupilMotion.setAttribute("transform", `translate(${x * 0.28} ${y * 0.25 - 0.45})`);
+    }
     if (shadowMotion) {
       const scaleX = 1 - (Math.abs(turnX) * SHADOW_SQUEEZE_X) / 34;
       const scaleY = 1 + (Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y) / 7;
@@ -660,7 +639,7 @@ export function Mascot({
             ) : null}
           </svg>
 
-          <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
+          <span data-slot="face-layer" style={faceLayerStyle}>
             <span data-slot="face-motion" ref={faceMotionRef} style={faceMotionStyle}>
               {showFaceDebugFrame ? (
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
@@ -680,6 +659,16 @@ export function Mascot({
                 </svg>
               ) : null}
 
+              <span data-slot="face-pad" style={compositeLayerStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <path
+                    d={FACE_PAD_PATH}
+                    fill="var(--mascot-face)"
+                    style={{ filter: "drop-shadow(0 1.5px 1.5px var(--mascot-face-shadow))" }}
+                  />
+                </svg>
+              </span>
+
               <span data-slot="cheeks" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
                   <ellipse cx="38" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
@@ -690,42 +679,35 @@ export function Mascot({
               <span data-slot="eyes" style={eyeMotionStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
                   <g
-                    ref={screenLeftEyeRef}
                     fill="#ffffff"
                     paintOrder="stroke fill"
-                    stroke="var(--mascot-outline)"
-                    strokeWidth="4"
-                    style={individualEyeStyle}
+                    stroke="var(--mascot-feature-outline)"
+                    strokeWidth="2.25"
                   >
-                    <rect height="10" rx="3.25" width="15" x="44" y="64.5" />
+                    <rect height="9" rx="3" width="13" x="45" y="65" />
                   </g>
                   <g
-                    ref={screenRightEyeRef}
                     fill="#ffffff"
                     paintOrder="stroke fill"
-                    stroke="var(--mascot-outline)"
-                    strokeWidth="4"
-                    style={individualEyeStyle}
+                    stroke="var(--mascot-feature-outline)"
+                    strokeWidth="2.25"
                   >
-                    <rect height="10" rx="3.25" width="15" x="69" y="64.5" />
+                    <rect height="9" rx="3" width="13" x="70" y="65" />
                   </g>
-                </svg>
-              </span>
-
-              <span data-slot="eye-glints" style={eyeMotionStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g ref={screenLeftGlintRef} fill="#ffffff" style={individualEyeStyle}>
-                    <rect height="1.4" rx="0.7" width="3.2" x="47" y="67" />
-                  </g>
-                  <g ref={screenRightGlintRef} fill="#ffffff" style={individualEyeStyle}>
-                    <rect height="1.4" rx="0.7" width="3.2" x="72" y="67" />
+                  <g ref={pupilMotionRef} fill="var(--mascot-feature-outline)">
+                    <circle cx="51.5" cy="69.5" r="2.3" />
+                    <circle cx="76.5" cy="69.5" r="2.3" />
+                    <g fill="#ffffff">
+                      <circle cx="51.5" cy="69.5" r="0.6" />
+                      <circle cx="76.5" cy="69.5" r="0.6" />
+                    </g>
                   </g>
                 </svg>
               </span>
 
               <span data-slot="eyes-error" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g fill="none" stroke="var(--mascot-outline)" strokeLinecap="round" strokeWidth="8.1">
+                  <g fill="none" stroke="var(--mascot-feature-outline)" strokeLinecap="round" strokeWidth="6.7">
                     <path d="M47 66.9 L56 70.8 L47 74.7" />
                     <path d="M81 66.9 L72 70.8 L81 74.7" />
                   </g>
@@ -741,9 +723,9 @@ export function Mascot({
                   <path
                     d={MOUTH_PATH}
                     fill="none"
-                    stroke="var(--mascot-outline)"
+                    stroke="var(--mascot-feature-outline)"
                     strokeLinecap="round"
-                    strokeWidth="7.5"
+                    strokeWidth="6.2"
                   />
                   <path
                     d={MOUTH_PATH}
@@ -760,9 +742,9 @@ export function Mascot({
                   <path
                     d="M58 89.1 Q64 88.1 70 89.1"
                     fill="none"
-                    stroke="var(--mascot-outline)"
+                    stroke="var(--mascot-feature-outline)"
                     strokeLinecap="round"
-                    strokeWidth="7.2"
+                    strokeWidth="5.9"
                   />
                   <path
                     d="M58 89.1 Q64 88.1 70 89.1"

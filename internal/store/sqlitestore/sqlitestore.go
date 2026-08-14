@@ -442,6 +442,40 @@ func (s *Store) deleteSession(ctx context.Context, id string) error {
 	})
 }
 
+func (s *Store) HasComputerAppGrant(ctx context.Context, sessionID, appID string) (bool, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	appID = strings.TrimSpace(appID)
+	if sessionID == "" || appID == "" {
+		return false, store.ErrInvalidComputerAppGrant
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM computer_app_grants WHERE session_id=? AND app_id=?)`,
+		sessionID, appID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) GrantComputerApp(ctx context.Context, sessionID, appID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	appID = strings.TrimSpace(appID)
+	if sessionID == "" || appID == "" {
+		return store.ErrInvalidComputerAppGrant
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionAnyTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO computer_app_grants(session_id,app_id,created_at) VALUES(?,?,?) ON CONFLICT(session_id,app_id) DO NOTHING`,
+			sessionID, appID, unixMS(time.Now()),
+		)
+		return err
+	})
+}
+
 func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.BeginTurnResult, error) {
 	var out *store.BeginTurnResult
 	err := s.tx(ctx, func(tx *sql.Tx) error {

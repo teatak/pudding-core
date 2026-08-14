@@ -43,7 +43,6 @@ export function WorkspaceEmpty({
             className={`pudding-workspace-empty-actions mx-auto gap-2 ${
               hasProject ? "grid w-full max-w-sm grid-cols-2" : "flex justify-center"
             }`}
-            data-has-project={hasProject}
           >
             {hasProject ? (
               <Button

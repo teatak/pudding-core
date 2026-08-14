@@ -65,7 +65,7 @@ function WorkspaceActivityIcon({ activity }: { activity: WorkspaceActivity }) {
     return <CanvasKindIcon kind={activity.resourceKind} size="xs" />;
   }
   return (
-    <span className="grid size-(--workspace-toolbar-tab-icon) shrink-0 place-items-center overflow-hidden rounded-[5px] bg-blue-500/15 text-blue-600 dark:text-blue-300">
+    <span className="grid size-(--workspace-toolbar-tab-icon) shrink-0 place-items-center overflow-hidden rounded-[5px] bg-primary/15 text-primary">
       <BrowserFavicon
         className="size-full rounded-sm object-cover"
         fallback={<Globe className="size-3.5" />}

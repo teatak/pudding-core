@@ -182,17 +182,31 @@ https://github.com/teatak/pudding/releases/latest
 Local DMG/ZIP tests use the same Developer ID signing, notarization, and automatic-update configuration as a
 published release. Use the build command above; unsigned desktop packages are intentionally unsupported.
 
-To test a real update from an older installed version, close Pudding and run:
+To test a real update from an older installed version, close Pudding and run the target matching the built
+channel:
 
 ```bash
+# Stable package
 make desktop-update-test
+
+# Preview package, including stable -> beta.1
+make desktop-preview-update-test
 ```
 
 The command starts a loopback update feed, launches `/Applications/Pudding.app`, and waits for the installed app
 to reach the package version. Choose **Update** when it appears; the app restarts automatically when no turn is
 running, otherwise choose **Restart to Update** after the download finishes. The runner then verifies the installed
 version, signature, notarization ticket, Gatekeeper assessment, and bundle permissions. Use
-`make desktop-verify` to recheck existing artifacts without rebuilding them.
+`make desktop-verify` or `make desktop-preview-verify` to recheck existing artifacts without rebuilding them.
+
+After both the installed source and target packages contain Computer Use Helper, use the strict target matching
+the channel. It additionally requires the Helper identifier, Team ID, and complete designated requirement to
+remain identical across the update:
+
+```bash
+make desktop-computer-use-update-test
+make desktop-preview-computer-use-update-test
+```
 
 Keep the user-facing installation instructions in the public
 [`teatak/pudding` README](https://github.com/teatak/pudding#install), next to the release downloads.

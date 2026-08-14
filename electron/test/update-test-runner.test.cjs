@@ -57,3 +57,24 @@ test("update verification resolves the app root and rejects entries the current 
   assert.deepEqual(findUnwritableEntries(app), []);
   assert.doesNotThrow(() => assertBundleWritable(app, "test bundle"));
 });
+
+test("stable and preview update targets use matching artifacts and channels", () => {
+  const makefile = fs.readFileSync(path.resolve(__dirname, "..", "..", "Makefile"), "utf8");
+
+  assert.match(
+    makefile,
+    /desktop-update-test: desktop-verify\n\t@PUDDING_RELEASE_CHANNEL=stable node scripts\/run-update-test\.cjs/,
+  );
+  assert.match(
+    makefile,
+    /desktop-preview-update-test: desktop-preview-verify\n\t@PUDDING_RELEASE_CHANNEL=preview node scripts\/run-update-test\.cjs/,
+  );
+  assert.match(
+    makefile,
+    /desktop-computer-use-update-test: desktop-verify\n\t@PUDDING_RELEASE_CHANNEL=stable PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY=1 node scripts\/run-update-test\.cjs/,
+  );
+  assert.match(
+    makefile,
+    /desktop-preview-computer-use-update-test: desktop-preview-verify\n\t@PUDDING_RELEASE_CHANNEL=preview PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY=1 node scripts\/run-update-test\.cjs/,
+  );
+});

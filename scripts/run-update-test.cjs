@@ -5,6 +5,10 @@ const path = require("node:path");
 
 const packageMetadata = require("../package.json");
 const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+const {
+  hasComputerUseHelper,
+  verifyComputerUseHelper,
+} = require("./computer-use-release-verification.cjs");
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist", "release"));
 const port = positiveInt(process.env.PUDDING_UPDATE_TEST_PORT, 8099);
@@ -15,6 +19,7 @@ const appExecutable =
   process.env.PUDDING_UPDATE_TEST_APP || "/Applications/Pudding.app/Contents/MacOS/Pudding";
 const expectedVersion = version;
 const timeoutMs = positiveInt(process.env.PUDDING_UPDATE_TEST_TIMEOUT_SECONDS, 600) * 1000;
+const requireComputerUseIdentity = process.env.PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY === "1";
 
 let appProcess = null;
 let feedProcess = null;
@@ -22,6 +27,7 @@ let verificationTimer = null;
 let timeoutTimer = null;
 let expectedVersionSeenAt = 0;
 let stopping = false;
+let installedComputerUseIdentity = null;
 
 if (require.main === module) {
   void main().catch((error) => {
@@ -49,7 +55,19 @@ async function main() {
   if (installed.version === expectedVersion) {
     throw new Error(`installed Pudding is already ${expectedVersion}; install an older version first`);
   }
-  assertBundleWritable(installedAppPath(appExecutable), "installed source bundle");
+  const sourceAppPath = installedAppPath(appExecutable);
+  assertBundleWritable(sourceAppPath, "installed source bundle");
+  if (hasComputerUseHelper(sourceAppPath)) {
+    installedComputerUseIdentity = verifyComputerUseHelper(sourceAppPath, {
+      label: "installed source bundle",
+    });
+    console.log(
+      `Installed Computer Use identity: ${installedComputerUseIdentity.identifier} ` +
+        `team=${installedComputerUseIdentity.teamIdentifier}`,
+    );
+  } else if (requireComputerUseIdentity) {
+    throw new Error("installed source bundle does not contain Pudding Computer Use.app");
+  }
   console.log(`Installed Pudding: version=${installed.version} channel=${installed.channel}`);
   if (!(await feedReady())) {
     feedProcess = spawn(process.execPath, [path.join(__dirname, "serve-update-feed.cjs"), root, String(port)], {
@@ -156,7 +174,7 @@ function checkInstalledUpdate() {
     return;
   }
   try {
-    verifyInstalledApp(installedAppPath(appExecutable));
+    verifyInstalledApp(installedAppPath(appExecutable), installedComputerUseIdentity);
     console.log(`Local update verified: ${expectedVersion}`);
     shutdown(0);
   } catch (error) {
@@ -175,11 +193,15 @@ function readInstalledVersion(executable) {
   return result.status === 0 ? String(result.stdout || "").trim() : "";
 }
 
-function verifyInstalledApp(appPath) {
+function verifyInstalledApp(appPath, expectedComputerUseIdentity = null) {
   assertBundleWritable(appPath, "installed update bundle");
   runCheck("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   runCheck("xcrun", ["stapler", "validate", appPath]);
   runCheck("spctl", ["--assess", "--type", "execute", "--verbose=2", appPath]);
+  verifyComputerUseHelper(appPath, {
+    label: "installed update bundle",
+    expectedIdentity: expectedComputerUseIdentity,
+  });
 }
 
 function installedAppPath(executable) {
@@ -253,4 +275,5 @@ module.exports = {
   installedAppPath,
   readInstalledBuild,
   readInstalledVersion,
+  verifyInstalledApp,
 };

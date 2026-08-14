@@ -4,6 +4,9 @@ export const composerControlStateClassName =
 export const composerShellClassName =
   "pudding-composer-shell relative rounded-[25px] border border-border/70 bg-card transition-shadow";
 
+export const composerSendButtonClassName =
+  "rounded-full !bg-foreground !text-background hover:!bg-foreground/85 disabled:!bg-control-disabled disabled:!text-background disabled:opacity-100 disabled:shadow-none";
+
 export const composerSuggestionPanelClassName =
   "pudding-composer-suggestion rounded-t-lg border border-b-0 bg-card text-card-foreground after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-card after:content-['']";
 

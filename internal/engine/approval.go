@@ -56,8 +56,10 @@ type ProjectAccessGrant struct {
 }
 
 type pendingApproval struct {
-	req ApprovalRequest
-	ch  chan approvalDecision
+	req       ApprovalRequest
+	ch        chan approvalDecision
+	resolving bool
+	abandoned bool
 }
 
 func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
@@ -65,7 +67,7 @@ func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
 	defer e.mu.Unlock()
 	out := make([]ApprovalRequest, 0)
 	for _, p := range e.approvals {
-		if p.req.SessionID != sessionID {
+		if p.req.SessionID != sessionID || p.resolving {
 			continue
 		}
 		req := p.req
@@ -96,14 +98,21 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 	if !ok {
 		return nil, fmt.Errorf("engine: invalid approval scope")
 	}
-	p, err := e.lookupPendingApproval(sessionID, approvalID)
+	p, err := e.claimPendingApproval(sessionID, approvalID)
 	if err != nil {
 		return nil, err
 	}
+	claimed := true
+	defer func() {
+		if claimed {
+			e.releasePendingApprovalClaim(sessionID, approvalID, p)
+		}
+	}()
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	computerAppID := ""
 	switch p.req.Kind {
 	case ApprovalKindCapability:
 		if p.req.TargetMode == store.ModeCode {
@@ -142,14 +151,25 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 			e.mu.Unlock()
 		}
 	case ApprovalKindToolCall:
-		scope = ApprovalScopeTurn
+		computerAppID = computerAppIDFromApprovalPayload(p.req.Payload)
+		if computerAppID != "" {
+			scope = ApprovalScopeSession
+		} else {
+			scope = ApprovalScopeTurn
+		}
 		projectDirs = nil
 	default:
 		return nil, ErrApprovalUnsupported
 	}
+	if computerAppID != "" {
+		if err := e.store.GrantComputerApp(ctx, sessionID, computerAppID); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
 		return nil, err
 	}
+	claimed = false
 	e.hub.Publish(event.Event{
 		SessionID:    p.req.SessionID,
 		Kind:         event.ApprovalResolved,
@@ -231,13 +251,20 @@ func sameStringList(left, right []string) bool {
 }
 
 func (e *Engine) DenyApproval(_ context.Context, sessionID, approvalID, reason string) error {
-	p, err := e.lookupPendingApproval(sessionID, approvalID)
+	p, err := e.claimPendingApproval(sessionID, approvalID)
 	if err != nil {
 		return err
 	}
+	claimed := true
+	defer func() {
+		if claimed {
+			e.releasePendingApprovalClaim(sessionID, approvalID, p)
+		}
+	}()
 	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
 		return err
 	}
+	claimed = false
 	e.hub.Publish(event.Event{
 		SessionID:    p.req.SessionID,
 		Kind:         event.ApprovalResolved,
@@ -252,24 +279,51 @@ func (e *Engine) DenyApproval(_ context.Context, sessionID, approvalID, reason s
 	return nil
 }
 
-func (e *Engine) lookupPendingApproval(sessionID, approvalID string) (*pendingApproval, error) {
+func (e *Engine) claimPendingApproval(sessionID, approvalID string) (*pendingApproval, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	p := e.approvals[approvalID]
-	if p == nil || p.req.SessionID != sessionID {
+	if p == nil || p.req.SessionID != sessionID || p.resolving {
 		return nil, ErrApprovalNotFound
 	}
+	p.resolving = true
 	return p, nil
 }
 
 func (e *Engine) completePendingApproval(sessionID, approvalID string, p *pendingApproval) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.approvals[approvalID] != p || p.req.SessionID != sessionID {
+	if e.approvals[approvalID] != p || p.req.SessionID != sessionID || !p.resolving {
 		return ErrApprovalNotFound
 	}
 	delete(e.approvals, approvalID)
 	return nil
+}
+
+func (e *Engine) releasePendingApprovalClaim(sessionID, approvalID string, p *pendingApproval) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.approvals[approvalID] != p || p.req.SessionID != sessionID {
+		return
+	}
+	if p.abandoned {
+		delete(e.approvals, approvalID)
+		return
+	}
+	p.resolving = false
+}
+
+func (e *Engine) abandonPendingApproval(approvalID string, p *pendingApproval) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.approvals[approvalID] != p {
+		return
+	}
+	if p.resolving {
+		p.abandoned = true
+		return
+	}
+	delete(e.approvals, approvalID)
 }
 
 func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnID string, call tool.Call, currentMode store.AgentMode) (tool.Result, store.AgentMode, bool) {
@@ -290,6 +344,15 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	}
 	if req.TargetMode == store.ModeWork && (len(req.ProjectDirs) > 0 || req.NeedsProjectDir || req.SuggestedDirName != "") {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_not_allowed"}), currentMode, false
+	}
+	if currentMode == store.ModeCode && req.TargetMode == store.ModeWork {
+		return capabilityToolResult(call, true, map[string]any{
+			"ok":          true,
+			"status":      "already_available",
+			"currentMode": string(store.ModeCode),
+			"targetMode":  publicTargetMode,
+			"message":     "Work capability is already included in Code; the current mode remains Code. Load the Work App directly.",
+		}), currentMode, false
 	}
 	if currentMode == store.ModeCode && req.TargetMode == store.ModeCode && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
 		return capabilityToolResult(call, true, map[string]any{
@@ -334,11 +397,7 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 
 	select {
 	case <-ctx.Done():
-		e.mu.Lock()
-		if e.approvals[approval.ID] == pending {
-			delete(e.approvals, approval.ID)
-		}
-		e.mu.Unlock()
+		e.abandonPendingApproval(approval.ID, pending)
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "cancelled"}), currentMode, false
 	case decision := <-pending.ch:
 		if !decision.approved {
@@ -418,11 +477,7 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 
 	select {
 	case <-ctx.Done():
-		e.mu.Lock()
-		if e.approvals[approval.ID] == pending {
-			delete(e.approvals, approval.ID)
-		}
-		e.mu.Unlock()
+		e.abandonPendingApproval(approval.ID, pending)
 		return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "cancelled"}), false
 	case decision := <-pending.ch:
 		if !decision.approved {
@@ -432,10 +487,18 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	}
 }
 
-func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string, risk tool.ToolRisk) (*store.Project, bool, error) {
+func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string, risk tool.ToolRisk, details map[string]any) (*store.Project, bool, error) {
 	project, err := e.projectForToolCallPolicy(ctx, sessionID)
 	if err != nil {
 		return nil, false, err
+	}
+	if risk.Scope == "computer" {
+		appID := computerAppIDFromDetails(details)
+		if appID == "" {
+			return project, false, errors.New("Computer Use approval is missing appID")
+		}
+		granted, err := e.store.HasComputerAppGrant(ctx, sessionID, appID)
+		return project, !granted, err
 	}
 	mode := store.ApprovalAuto
 	if project != nil {
@@ -460,6 +523,22 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 			return project, false, nil
 		}
 	}
+}
+
+func computerAppIDFromDetails(details map[string]any) string {
+	appID, _ := details["appID"].(string)
+	return strings.TrimSpace(appID)
+}
+
+func computerAppIDFromApprovalPayload(raw json.RawMessage) string {
+	var payload struct {
+		Scope string `json:"scope"`
+		AppID string `json:"appID"`
+	}
+	if json.Unmarshal(raw, &payload) != nil || strings.TrimSpace(payload.Scope) != "computer" {
+		return ""
+	}
+	return strings.TrimSpace(payload.AppID)
 }
 
 func commandSandboxModeForProject(project *store.Project) tool.CommandSandboxMode {
@@ -508,7 +587,7 @@ func approvalToolResult(call tool.Call, ok bool, payload map[string]any) tool.Re
 
 func approvalResolvedPayload(kind string, scope ApprovalScope, projectDirs []string) json.RawMessage {
 	if kind == ApprovalKindToolCall {
-		return mustJSON(map[string]any{"scope": ApprovalScopeTurn})
+		return mustJSON(map[string]any{"scope": scope})
 	}
 	return mustJSON(map[string]any{"scope": scope, "projectDirs": projectDirs})
 }

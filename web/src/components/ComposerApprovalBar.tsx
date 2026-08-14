@@ -48,8 +48,11 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   const toolCallApproval = toolCallFromPayload(current.payload);
   const patchApproval = patchApprovalFromPayload(current.payload);
   const gitCommitApproval = gitCommitFromPayload(current.payload);
+  const isComputerAppApproval = isToolCallApproval && toolCallApproval.scope === "computer" && Boolean(toolCallApproval.appID);
   const approvalReason = isToolCallApproval
-    ? toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
+    ? isComputerAppApproval
+      ? t("transcript.approvalComputerAppReason").replace("{app}", toolCallApproval.appID)
+      : toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
     : current.reason;
 
   async function approve(scope: "turn" | "session") {
@@ -106,16 +109,20 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
 
   const approvalMenuItems: Array<ChoiceMenuItem<ApprovalMenuAction>> = [];
   if (isToolCallApproval) {
+    const approveAction: ApprovalMenuAction = isComputerAppApproval ? "approve-session" : "approve-turn";
+    const approveLabel = isComputerAppApproval
+      ? t("transcript.approvalAllowComputerApp")
+      : approvalToolActionLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t);
     approvalMenuItems.push({
-      id: "approve-turn",
-      label: approvalToolActionLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t),
-      value: "approve-turn",
+      id: approveAction,
+      label: approveLabel,
+      value: approveAction,
       render: () => (
         <ApprovalMenuOption
-          description={t("transcript.approvalAllowToolCallDesc")}
+          description={t(isComputerAppApproval ? "transcript.approvalAllowComputerAppDesc" : "transcript.approvalAllowToolCallDesc")}
           icon={Check}
-          label={approvalToolActionLabel(toolCallApproval.operation, Boolean(patchApproval), Boolean(gitCommitApproval), t)}
-          loading={pendingAction === "turn"}
+          label={approveLabel}
+          loading={pendingAction === (isComputerAppApproval ? "session" : "turn")}
         />
       ),
     });
@@ -222,6 +229,11 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
               {path}
             </div>
           ))}
+        </div>
+      ) : null}
+      {isToolCallApproval && toolCallApproval.valuePreview !== undefined ? (
+        <div className="max-h-20 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+          <pre className="whitespace-pre-wrap break-words">{toolCallApproval.valuePreview}</pre>
         </div>
       ) : null}
       {isToolCallApproval && patchApproval ? (
@@ -433,15 +445,18 @@ function suggestedProjectDirName(payload: unknown) {
 
 function toolCallFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
-    return { command: "", operation: "", paths: [] as string[], sandboxBypass: false };
+    return { appID: "", command: "", operation: "", paths: [] as string[], sandboxBypass: false, scope: "", valuePreview: undefined as string | undefined };
   }
   const data = payload as Record<string, unknown>;
+  const appID = typeof data.appID === "string" ? data.appID.trim() : "";
   const operation = typeof data.operation === "string" ? data.operation.trim() : "";
+  const scope = typeof data.scope === "string" ? data.scope.trim() : "";
   const command = typeof data.command === "string" ? data.command : "";
   const paths = Array.isArray(data.paths)
     ? data.paths.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
     : [];
-  return { command, operation, paths: dedupeStrings(paths), sandboxBypass: data.sandboxBypass === true };
+  const valuePreview = typeof data.valuePreview === "string" ? data.valuePreview : undefined;
+  return { appID, command, operation, paths: dedupeStrings(paths), sandboxBypass: data.sandboxBypass === true, scope, valuePreview };
 }
 
 function patchApprovalFromPayload(payload: unknown): PatchApproval | null {
@@ -542,6 +557,11 @@ function toolCallReason(operation: string, sandboxBypass: boolean, t: (key: stri
     case "app_save":
     case "shell":
     case "process_start":
+    case "computer_observe":
+    case "computer_launch_app":
+    case "computer_quit_app":
+    case "computer_press":
+    case "computer_set_value":
       return t(`transcript.approvalToolCall.${operation}`);
     default:
       return "";

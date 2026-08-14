@@ -36,6 +36,7 @@ import (
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/buildinfo"
+	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/desktopscreen"
@@ -154,6 +155,12 @@ func Start(opts Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, err
 	}
+	computerController, err := newComputerController()
+	if err != nil {
+		_ = browserService.Close()
+		_ = st.Close()
+		return nil, err
+	}
 	browserMCP := tool.NewBrowserMCPRunner()
 	apps.WithRuntimeSource(browserMCP)
 	appMCP := tool.NewAppMCPRunner(apps)
@@ -184,7 +191,7 @@ func Start(opts Options) (*Daemon, error) {
 		})
 	}
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)
@@ -289,6 +296,21 @@ func newBrowserService(homeDir string, projectFiles browser.ProjectFileScope) (b
 	}
 	slog.Info("browser service", "kind", "chrome-manager")
 	return browser.NewManager(browser.Config{HomeDir: homeDir, Headless: true, FileURLAuthorizer: fileURLs}), nil
+}
+
+func newComputerController() (computer.Controller, error) {
+	bridgeURL := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_COMPUTER_BRIDGE_URL"))
+	bridgeToken := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_COMPUTER_BRIDGE_TOKEN"))
+	if bridgeURL == "" && bridgeToken == "" {
+		slog.Info("Computer Use service", "kind", "unavailable")
+		return nil, nil
+	}
+	service, err := computer.NewElectronBridgeService(computer.ElectronBridgeConfig{URL: bridgeURL, Token: bridgeToken})
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("Computer Use service", "kind", "electron-bridge")
+	return computer.NewManager(service), nil
 }
 
 func (d *Daemon) Addr() string { return d.localAddr }

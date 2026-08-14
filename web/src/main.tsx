@@ -10,14 +10,24 @@ import { startLocaleSync } from "@/i18n";
 import { restoreInitialAppRoute } from "@/lib/route";
 import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
-import { applyTheme, initThemeFromLaunch, readStoredTheme, startThemeSync } from "@/theme/theme";
+import {
+  applyAccentTheme,
+  applyTheme,
+  initThemeFromLaunch,
+  readStoredAccentTheme,
+  readStoredTheme,
+  startAccentThemeSync,
+  startThemeSync,
+} from "@/theme/theme";
 
 initAPIBase();
 initShellMode();
 initThemeFromLaunch();
 
 applyTheme(readStoredTheme());
+applyAccentTheme(readStoredAccentTheme());
 startThemeSync();
+startAccentThemeSync();
 startLocaleSync();
 restoreInitialAppRoute();
 

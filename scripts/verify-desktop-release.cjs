@@ -6,6 +6,7 @@ const path = require("node:path");
 const asar = require("@electron/asar");
 const packageMetadata = require("../package.json");
 const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+const { verifyComputerUseHelper } = require("./computer-use-release-verification.cjs");
 
 const root = path.resolve(__dirname, "..");
 const outputDir = path.join(root, "dist", "release");
@@ -136,6 +137,11 @@ function verifyAppBundle(bundlePath, label, expectedArch, verifyCustomCode = fal
   verifyMachOArchitecture(path.join(bundlePath, "Contents", "MacOS", "Pudding"), label, expectedArch);
   verifyHardwareEntitlements(bundlePath, label);
   verifyUsageDescriptions(bundlePath, label);
+  try {
+    verifyComputerUseHelper(bundlePath, { label, expectedArch, signingAuthority });
+  } catch (error) {
+    fail(error.message);
+  }
   if (verifyCustomCode) {
     const appRoot = path.join(bundlePath, "Contents", "Resources", "app");
     const daemonPath = path.join(appRoot, "bin", "puddingd");

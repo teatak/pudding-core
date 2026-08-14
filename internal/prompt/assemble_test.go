@@ -322,6 +322,11 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, "builtin_command_session") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
 		t.Fatalf("code prompt missing mode or apps segments: %+v", code.Segments)
 	}
+	if !strings.Contains(code.SystemInstruction, "Code already includes Work") ||
+		!strings.Contains(code.SystemInstruction, "load the App directly without requesting another capability") ||
+		!strings.Contains(code.SystemInstruction, `request_capability(targetMode="work")`) {
+		t.Fatalf("code prompt missing inherited Work capability guidance:\n%s", code.SystemInstruction)
+	}
 	if strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) {
 		t.Fatalf("code prompt still treats terminal as an App:\n%s", code.SystemInstruction)
 	}

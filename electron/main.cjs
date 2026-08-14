@@ -11,6 +11,7 @@ const {
   screen,
   session,
   shell,
+  systemPreferences,
   webContents,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
@@ -34,6 +35,13 @@ const { hardenManagedBrowserWebview } = require("./browser-webview-security.cjs"
 const { probePuddingDaemon } = require("./daemon-health.cjs");
 const { installConsoleFileLogging } = require("./file-logger.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
+const { ComputerUseBridgeServer } = require("./computer-use-bridge-server.cjs");
+const { ComputerUseHost } = require("./computer-use-host.cjs");
+const {
+  desktopPermissionSettingsURL,
+  desktopPermissionState,
+  requestDesktopPermission,
+} = require("./desktop-permissions.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
 const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
@@ -129,6 +137,8 @@ const browserCredentialVault = new BrowserCredentialVault({
 });
 const browserCredentials = new BrowserCredentialController({ vault: browserCredentialVault });
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
+const computerUseHost = new ComputerUseHost({ binaryPath: resolveComputerUseHelperBinary() });
+const computerUseBridgeServer = new ComputerUseBridgeServer(computerUseHost);
 const projectFileWatcher = new ProjectFileWatcher();
 
 let daemonProcess = null;
@@ -186,8 +196,11 @@ app.whenReady().then(async () => {
   updateApplicationMenu();
   try {
     configureManagedBrowserPermissions(session.fromPartition(managedBrowserPartition));
-    const browserBridge = await browserBridgeServer.start();
-    const token = await ensureDaemon(browserBridge);
+    const [browserBridge, computerBridge] = await Promise.all([
+      browserBridgeServer.start(),
+      computerUseBridgeServer.start(),
+    ]);
+    const token = await ensureDaemon(browserBridge, computerBridge);
     const window = createMainWindow();
     createTray();
     await loadRenderer(window, token);
@@ -218,9 +231,8 @@ function activateApplication() {
     showMainWindow(window);
     return;
   }
-  void browserBridgeServer
-    .start()
-    .then((browserBridge) => ensureDaemon(browserBridge))
+  void Promise.all([browserBridgeServer.start(), computerUseBridgeServer.start()])
+    .then(([browserBridge, computerBridge]) => ensureDaemon(browserBridge, computerBridge))
     .then((token) => {
       const window = createMainWindow();
       createTray();
@@ -1130,6 +1142,26 @@ ipcMain.handle("pudding:desktop:get-home-directory", (event) => {
   return os.homedir();
 });
 
+ipcMain.handle("pudding:desktop:permissions:get", (event) => {
+  assertTrustedSender(event);
+  return desktopPermissionState(computerUseHost, systemPreferences);
+});
+
+ipcMain.handle("pudding:desktop:permissions:request", (event, permission) => {
+  assertTrustedSender(event);
+  return requestDesktopPermission(computerUseHost, systemPreferences, permission);
+});
+
+ipcMain.handle("pudding:desktop:permissions:open-settings", async (event, permission) => {
+  assertTrustedSender(event);
+  const url = desktopPermissionSettingsURL(permission);
+  if (!url) {
+    return false;
+  }
+  await shell.openExternal(url);
+  return true;
+});
+
 ipcMain.handle("pudding:desktop:editor-context-menu", (event, request) => {
   const window = assertTrustedSender(event);
   const selectionText = String(request?.selectionText || "").slice(0, 16 * 1024);
@@ -1515,11 +1547,11 @@ async function loadRenderer(window, token) {
   await window.loadURL(url.toString());
 }
 
-async function ensureDaemon(browserBridge) {
+async function ensureDaemon(browserBridge, computerBridge) {
   if (daemonStartupPromise) {
     return daemonStartupPromise;
   }
-  const attempt = startOrAttachDaemon(browserBridge);
+  const attempt = startOrAttachDaemon(browserBridge, computerBridge);
   daemonStartupPromise = attempt;
   try {
     return await attempt;
@@ -1530,7 +1562,7 @@ async function ensureDaemon(browserBridge) {
   }
 }
 
-async function startOrAttachDaemon(browserBridge) {
+async function startOrAttachDaemon(browserBridge, computerBridge) {
   const attachedToken = await readUsableToken();
   if (attachedToken) {
     console.info(`[electron] attached to daemon addr=${daemonAddr}`);
@@ -1550,6 +1582,8 @@ async function startOrAttachDaemon(browserBridge) {
       PUDDING_ELECTRON_MANAGED: "1",
       PUDDING_ELECTRON_BROWSER_BRIDGE_URL: browserBridge?.url || "",
       PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN: browserBridge?.token || "",
+      PUDDING_ELECTRON_COMPUTER_BRIDGE_URL: computerBridge?.url || "",
+      PUDDING_ELECTRON_COMPUTER_BRIDGE_TOKEN: computerBridge?.token || "",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -1676,6 +1710,18 @@ function resolveDaemonBinary() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
+function resolveComputerUseHelperBinary() {
+  if (process.platform !== "darwin") {
+    return "";
+  }
+  return [
+    process.env.PUDDING_COMPUTER_USE_HELPER_BIN,
+    path.join(repoRoot, "bin", "Pudding Computer Use.app", "Contents", "MacOS", "PuddingComputerUseHelper"),
+  ]
+    .filter(Boolean)
+    .find((candidate) => fs.existsSync(candidate)) || "";
+}
+
 async function prepareForUpdateInstall() {
   quitting = true;
   updateManager.stop();
@@ -1690,7 +1736,12 @@ async function prepareForUpdateInstall() {
 }
 
 async function stopDesktopResources() {
-  const results = await Promise.allSettled([stopManagedDaemonAndWait(), browserBridgeServer.stop()]);
+  const results = await Promise.allSettled([
+    stopManagedDaemonAndWait(),
+    browserBridgeServer.stop(),
+    computerUseBridgeServer.stop(),
+    computerUseHost.stop(),
+  ]);
   const failure = results.find((result) => result.status === "rejected");
   if (failure) {
     throw failure.reason;

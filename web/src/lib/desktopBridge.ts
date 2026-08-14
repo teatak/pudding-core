@@ -24,9 +24,23 @@ export type DesktopUpdateState = {
   percent: number | null;
 };
 
+export type DesktopPermissionState = {
+	supported: boolean;
+	accessibility: boolean;
+	screenRecording: boolean;
+	desktopScreenRecording: boolean;
+	camera: boolean;
+	microphone: boolean;
+};
+
+export type DesktopPermission = "accessibility" | "screenRecording" | "desktopScreenRecording" | "camera" | "microphone";
+
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
   getHomeDirectory?: () => Promise<string>;
+	getDesktopPermissions?: () => Promise<DesktopPermissionState>;
+	requestDesktopPermission?: (permission: DesktopPermission) => Promise<DesktopPermissionState>;
+	openDesktopPermissionSettings?: (permission: DesktopPermission) => Promise<boolean>;
   getUpdateState?: () => Promise<DesktopUpdateState>;
   setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
   downloadUpdate?: () => Promise<boolean>;
@@ -111,6 +125,30 @@ export async function getDesktopHomeDirectory() {
   } catch {
     return "";
   }
+}
+
+export async function getDesktopPermissions(): Promise<DesktopPermissionState> {
+	const bridge = desktopBridge();
+	if (!bridge?.getDesktopPermissions) {
+		return { supported: false, accessibility: false, screenRecording: false, desktopScreenRecording: false, camera: false, microphone: false };
+	}
+	return bridge.getDesktopPermissions();
+}
+
+export async function openDesktopPermissionSettings(permission: DesktopPermission) {
+	const bridge = desktopBridge();
+	if (!bridge?.openDesktopPermissionSettings) {
+		return false;
+	}
+	return bridge.openDesktopPermissionSettings(permission);
+}
+
+export async function requestDesktopPermission(permission: DesktopPermission) {
+	const bridge = desktopBridge();
+	if (!bridge?.requestDesktopPermission) {
+		return null;
+	}
+	return bridge.requestDesktopPermission(permission);
 }
 
 export async function showDesktopEditorContextMenu(request: DesktopEditorContextMenuRequest) {

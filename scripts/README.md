@@ -8,10 +8,20 @@ called directly unless debugging the pipeline itself.
 | Goal | Command |
 | --- | --- |
 | Run the desktop app in development | `make desktop-dev` |
+| Build the macOS Computer Use C0 helper | `make computer-use-helper-dev` |
+| Test the macOS Computer Use C0 helper | `make computer-use-helper-test` |
+| Run the native Computer Use fixture smoke | `make computer-use-fixture-smoke` |
+| Run the full Computer Use product smoke | `make computer-use-product-smoke` |
+| Run the real Calculator product smoke | `make computer-use-calculator-smoke` |
+| Verify an already-running Calculator is not session-owned | `make computer-use-calculator-existing-smoke` |
 | Build and fully verify a stable package | `make desktop-bundle` |
 | Build and fully verify a preview package | `make desktop-preview-bundle` |
 | Recheck existing stable artifacts | `make desktop-verify` |
-| Test an older installed app updating to the built version | `make desktop-update-test` |
+| Recheck existing preview artifacts | `make desktop-preview-verify` |
+| Test an older installed app updating to the built stable version | `make desktop-update-test` |
+| Test an older installed app updating to the built preview version | `make desktop-preview-update-test` |
+| Verify Computer Use identity remains stable across a stable update | `make desktop-computer-use-update-test` |
+| Verify Computer Use identity remains stable across a preview update | `make desktop-preview-computer-use-update-test` |
 | Create a stable Draft Release | `make desktop-publish` |
 | Create a preview Draft Release | `make desktop-preview-publish` |
 | Resume only Draft creation or asset upload | `make desktop-publish-upload-resume` |

@@ -18,6 +18,11 @@ var builtinAppTools = map[string]string{
 	AppSave:           app.BuiltinAppAuthoringID,
 	CameraCapture:     app.BuiltinCaptureID,
 	DesktopScreenshot: app.BuiltinCaptureID,
+	ComputerListApps:  app.BuiltinComputerUseID,
+	ComputerLaunchApp: app.BuiltinComputerUseID,
+	ComputerQuitApp:   app.BuiltinComputerUseID,
+	ComputerObserve:   app.BuiltinComputerUseID,
+	ComputerAct:       app.BuiltinComputerUseID,
 }
 
 func BuiltinAppIDForTool(name string) (string, bool) {

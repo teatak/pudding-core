@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 4 {
+	if len(defs) != 5 {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
 	}
 	if definitionByID(defs, "project-files") != nil {
@@ -132,6 +133,18 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	capture := definitionByID(defs, BuiltinCaptureID)
 	if capture == nil || capture.RequiredMode != "chat" || capture.DefaultSkillID != "" || len(capture.Skills) != 0 || len(capture.Tools) != 2 {
 		t.Fatalf("unexpected Image Capture builtin App: %+v", capture)
+	}
+	computerUse := definitionByID(defs, BuiltinComputerUseID)
+	if computerUse == nil || computerUse.RequiredMode != "work" || computerUse.DefaultSkillID != BuiltinComputerUseID || len(computerUse.Skills) != 1 || len(computerUse.Tools) != 5 {
+		t.Fatalf("unexpected Computer Use builtin App: %+v", computerUse)
+	}
+	computerSkill, err := svc.ReadSkill(context.Background(), BuiltinComputerUseID, BuiltinComputerUseID)
+	if err != nil ||
+		!strings.Contains(computerSkill.Content, "does not monitor keyboard or mouse input") ||
+		!strings.Contains(computerSkill.Content, "Quit is always normal, never forced") ||
+		!strings.Contains(computerSkill.Content, "only with builtin_computer_launch_app") ||
+		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
+		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)
 	}
 
 	updated, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, false)
@@ -167,7 +180,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 4 {
+	if len(defs) != 5 {
 		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
 	}
 
@@ -177,7 +190,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	canvas := definitionByID(defs, "canvas")
-	if len(defs) != 5 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
+	if len(defs) != 6 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
 		t.Fatalf("unexpected runtime app definition: %+v", defs)
 	}
 	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
@@ -242,6 +255,7 @@ func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
 	for _, appID := range []string{
 		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinAppAuthoringID,
 		BuiltinCaptureID,
+		BuiltinComputerUseID,
 		RuntimeCanvasID,
 	} {
 		t.Run(appID, func(t *testing.T) {

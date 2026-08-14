@@ -17,7 +17,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 10
+	currentSchemaVersion       = 11
 )
 
 var (
@@ -235,6 +235,17 @@ var schemaMigrations = map[int]schemaMigration{
 			}
 		}
 		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_archived_at ON sessions(archived_at)`)
+		return err
+	},
+	11: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS computer_app_grants (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				app_id TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				PRIMARY KEY(session_id, app_id)
+			)
+		`)
 		return err
 	},
 }
@@ -613,7 +624,9 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 var currentSchemaContract = func() schemaContract {
-	out := extendSchemaContract(schemaV5Contract, nil)
+	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"computer_app_grants": {"session_id", "app_id", "created_at"},
+	})
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
 	out.indexes = append(out.indexes, "sessions_archived_at")

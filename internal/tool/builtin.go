@@ -11,6 +11,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/browser"
+	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/lsp"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
@@ -70,6 +71,11 @@ const (
 	BrowserClick      = "builtin_browser_click"
 	BrowserType       = "builtin_browser_type"
 	BrowserScroll     = "builtin_browser_scroll"
+	ComputerListApps  = "builtin_computer_list_apps"
+	ComputerLaunchApp = "builtin_computer_launch_app"
+	ComputerQuitApp   = "builtin_computer_quit_app"
+	ComputerObserve   = "builtin_computer_observe"
+	ComputerAct       = "builtin_computer_act"
 	RequestUserInput  = "builtin_request_user_input"
 )
 
@@ -123,6 +129,7 @@ type BuiltinRunner struct {
 	historyMessages          HistoryMessageSource
 	browserState             BrowserStateStore
 	browser                  browser.Service
+	computer                 computer.Controller
 	languageService          lsp.Service
 	goServerResolver         GoServerResolver
 	typeScriptServerResolver TypeScriptServerResolver
@@ -207,6 +214,12 @@ func WithHistorySearch(source HistorySearchSource) BuiltinOption {
 func WithBrowser(service browser.Service) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.browser = service
+	}
+}
+
+func WithComputer(controller computer.Controller) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.computer = controller
 	}
 }
 
@@ -605,6 +618,36 @@ func BuiltinDefinitions() []provider.ToolDef {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
+		{
+			Name:        ComputerListApps,
+			Description: "List macOS applications and windows currently discoverable by Computer Use, including permissions and each app's controllable state. This is an inventory, not an authorization or allowlist: there is no per-app setting. Apps with controllable=false are blocked by the native safety policy. If a running app is absent, treat it as a discovery error rather than asking the user to allow it. This is read-only.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        ComputerLaunchApp,
+			Description: "Launch one installed macOS application by appID. This is the only supported launch path for an app that will be used through Computer Use; never substitute command_run, open, osascript, or AppleScript. Opening and operating the same app share one session approval. If this session newly starts it, the result includes a launchID and PID and only that launchID may later be quit by this session. If it was already running, no launchID is returned and Pudding does not own or close it.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"appID":{"type":"string","minLength":1,"description":"Installed application bundle identifier, such as com.apple.calculator."}},"required":["appID"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        ComputerQuitApp,
+			Description: "Request a normal quit for an application newly launched by this exact session, using its launchID. Never force-quits. If closed=false, the app is still open, commonly because it needs user attention such as an unsaved-changes confirmation; stop and ask the user to handle it.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"launchID":{"type":"string","minLength":1,"description":"Session-owned launchID returned by builtin_computer_launch_app."}},"required":["launchID"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        ComputerObserve,
+			Description: "Observe one explicit macOS application window through Accessibility. Returns a short-lived observationID and stable element IDs. Optionally capture one screenshot frame; no keyboard or mouse input is monitored.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"appID":{"type":"string","minLength":1,"description":"Application bundle identifier returned by builtin_computer_list_apps."},"windowID":{"type":"integer","minimum":1,"description":"Explicit window ID returned by builtin_computer_list_apps."},"maxElements":{"type":"integer","minimum":1,"maximum":1000,"description":"Maximum accessibility elements, default 200."},"includeScreenshot":{"type":"boolean","description":"Capture one frame of this window. Defaults false and requires Screen Recording permission."}},"required":["appID","windowID"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        ComputerAct,
+			Description: "Perform one approved Accessibility action on an element from a fresh Computer Use observation. Supports only press and set_value. The observation is consumed once, actions are never retried automatically, and the result includes a fresh observation when available.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"appID":{"type":"string","minLength":1},"windowID":{"type":"integer","minimum":1},"observationID":{"type":"string","minLength":1,"description":"Fresh observationID returned by builtin_computer_observe or a prior successful action."},"elementID":{"type":"string","minLength":1,"description":"Element ID from that exact observation."},"action":{"type":"string","enum":["press","set_value"]},"value":{"type":"string","maxLength":20000,"description":"Required only for set_value; omitted for press."}},"required":["appID","windowID","observationID","elementID","action"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
 	}
 }
 
@@ -719,6 +762,16 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.browserType(ctx, call)
 	case BrowserScroll:
 		return r.browserScroll(ctx, call)
+	case ComputerListApps:
+		return r.computerListApps(ctx, call)
+	case ComputerLaunchApp:
+		return r.computerLaunchApp(ctx, call)
+	case ComputerQuitApp:
+		return r.computerQuitApp(ctx, call)
+	case ComputerObserve:
+		return r.computerObserve(ctx, call)
+	case ComputerAct:
+		return r.computerAct(ctx, call)
 	default:
 		out.Ok = false
 		out.Content = fmt.Sprintf("unknown tool: %s", call.Name)

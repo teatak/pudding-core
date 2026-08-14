@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -38,6 +39,48 @@ func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []
 }
 
 func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
+	if name == ComputerLaunchApp {
+		args, err := decodeComputerLaunchAppArgs(raw)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		return ToolRisk{
+			Class: RiskClassWrite, Operation: "computer_launch_app", Scope: "computer",
+			Paths: compactRiskPaths(args.AppID), Summary: "Launch one local macOS application.",
+		}, true
+	}
+	if name == ComputerQuitApp {
+		args, err := decodeComputerQuitAppArgs(raw)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		return ToolRisk{
+			Class: RiskClassWrite, Operation: "computer_quit_app", Scope: "computer",
+			Paths: compactRiskPaths(args.LaunchID), Summary: "Normally quit one session-owned macOS application.",
+		}, true
+	}
+	if name == ComputerObserve {
+		args, err := decodeComputerObserveArgs(raw)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		return ToolRisk{
+			Class: RiskClassRead, Operation: "computer_observe", Scope: "computer",
+			Paths:   compactRiskPaths(args.AppID, fmt.Sprintf("window:%d", args.WindowID)),
+			Summary: "Read one local macOS application window.",
+		}, true
+	}
+	if name == ComputerAct {
+		args, err := decodeComputerActArgs(raw)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		return ToolRisk{
+			Class: RiskClassWrite, Operation: "computer_" + args.Action, Scope: "computer",
+			Paths:   compactRiskPaths(args.AppID, fmt.Sprintf("window:%d", args.WindowID), args.ElementID),
+			Summary: "Perform one action in a local macOS application.",
+		}, true
+	}
 	if name == AppSave {
 		request, err := decodeAppSaveRequest(raw)
 		if err != nil {

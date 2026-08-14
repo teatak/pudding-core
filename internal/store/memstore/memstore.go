@@ -33,6 +33,7 @@ type Memstore struct {
 	savedCanvas    map[string]*store.SavedCanvasItem         // id → globally saved canvas item
 	browser        map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
 	browserHistory map[string]*store.BrowserHistoryEntry     // id → global browser history
+	computerGrants map[string]map[string]struct{}            // sessionID → approved app IDs
 	events         map[string][]event.Event                  // sessionID → seq 升序
 	seq            map[string]int64
 	settings       map[string]string
@@ -55,6 +56,7 @@ func New() *Memstore {
 		savedCanvas:    make(map[string]*store.SavedCanvasItem),
 		browser:        make(map[string]map[string]*store.BrowserState),
 		browserHistory: make(map[string]*store.BrowserHistoryEntry),
+		computerGrants: make(map[string]map[string]struct{}),
 		events:         make(map[string][]event.Event),
 		seq:            make(map[string]int64),
 		settings:       make(map[string]string),
@@ -392,6 +394,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.queued, id)
 	delete(m.susage, id)
 	delete(m.browser, id)
+	delete(m.computerGrants, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for key, item := range m.canvas {
@@ -410,6 +413,41 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 			delete(m.fileChanges, tid)
 		}
 	}
+	return nil
+}
+
+func (m *Memstore) HasComputerAppGrant(_ context.Context, sessionID, appID string) (bool, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	appID = strings.TrimSpace(appID)
+	if sessionID == "" || appID == "" {
+		return false, store.ErrInvalidComputerAppGrant
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return false, store.ErrNotFound
+	}
+	_, ok := m.computerGrants[sessionID][appID]
+	return ok, nil
+}
+
+func (m *Memstore) GrantComputerApp(_ context.Context, sessionID, appID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	appID = strings.TrimSpace(appID)
+	if sessionID == "" || appID == "" {
+		return store.ErrInvalidComputerAppGrant
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return store.ErrNotFound
+	}
+	grants := m.computerGrants[sessionID]
+	if grants == nil {
+		grants = make(map[string]struct{})
+		m.computerGrants[sessionID] = grants
+	}
+	grants[appID] = struct{}{}
 	return nil
 }
 

@@ -185,6 +185,7 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 	var b strings.Builder
 	b.WriteString("## Available Apps\n\n")
 	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
+	b.WriteString("An App's `requires` label is its minimum capability, not an exact mode. Code includes Work, and Work includes Chat. When the current mode already satisfies the minimum, load the App directly without requesting another capability.\n")
 	b.WriteString("When an unloaded app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
 	b.WriteString("Apps marked `loaded for this session` are already active. Do not call `builtin_app_load` again for their default skill; if the current mode is below the App's required capability, request that capability instead. Reload only when intentionally selecting a different `skill_id`.\n")
 	b.WriteString("After an App is no longer relevant to the current task, call `builtin_app_unload(app_id=\"<loaded app id>\")` to remove its tools from later model steps. This does not uninstall the App or delete its connections.\n")

@@ -460,7 +460,7 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
 
 function toolAttachmentsRenderInside(name: string | undefined) {
   // The legacy name is display-only for canonical history; the backend no longer registers it.
-  return name === "builtin_media_read" || name === "builtin_attachment_read_image";
+  return name === "builtin_media_read" || name === "builtin_attachment_read_image" || name === "builtin_computer_observe";
 }
 
 function dedupeAttachmentParts(parts: TurnPartVM[]): TurnPartVM[] {
@@ -956,6 +956,11 @@ function processToolGroup(tool: Extract<TurnPartVM, { type: "tool_use" }>, t: (k
     builtin_browser_scroll: "transcript.processToolBrowser",
     builtin_browser_status: "transcript.processToolBrowser",
     builtin_browser_type: "transcript.processToolBrowser",
+	builtin_computer_list_apps: "transcript.processToolComputer",
+	builtin_computer_launch_app: "transcript.processToolComputer",
+	builtin_computer_quit_app: "transcript.processToolComputer",
+	builtin_computer_observe: "transcript.processToolComputer",
+	builtin_computer_act: "transcript.processToolComputer",
     builtin_graphql_request: "transcript.processToolData",
     builtin_rest_request: "transcript.processToolData",
     builtin_web_fetch: "transcript.processToolBrowser",
@@ -996,7 +1001,6 @@ function ToolUsePart({
 }) {
   const { locale, t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
-  const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
   const liveResult = result;
   const toolName = part.name || part.resultName || "";
@@ -1052,9 +1056,9 @@ function ToolUsePart({
         ) : null}
         {showRawInfo ? (
           <RawToolDataCard
-            args={args}
+            args={part.argsText || part.args}
             defaultOpen={rawDefaultOpen}
-            result={liveResult?.text || ""}
+            result={liveResult?.value ?? liveResult?.text}
             toolName={toolName}
             onOpenChange={onRawOpenChange}
           />
@@ -1097,18 +1101,6 @@ function ToolAttachmentMediaPreview({
       </div>
       <ImageLightbox images={images} openIndex={openIndex} onOpenIndexChange={setOpenIndex} />
     </>
-  );
-}
-
-function ToolNameLine({ name }: { name: string }) {
-  const { t } = useI18n();
-  return (
-    <div className="mb-2 flex min-w-0 items-center gap-2 text-[11px] leading-5">
-      <span className="shrink-0 whitespace-nowrap font-medium text-muted-foreground/80">{t("transcript.tool")}</span>
-      <code className="min-w-0 truncate whitespace-nowrap rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-        {name}
-      </code>
-    </div>
   );
 }
 
@@ -1304,7 +1296,7 @@ function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen
       type="button"
       onClick={onOpen}
     >
-      <img alt={image.name} className="h-full w-full object-cover" decoding="async" loading="lazy" src={image.url} />
+      <img alt={image.name} className="h-full w-full object-contain" decoding="async" loading="lazy" src={image.url} />
     </button>
   );
 }
@@ -1640,34 +1632,6 @@ function makeHighlightedCodeNonTabbable(html: string) {
   });
 }
 
-function formatToolArgs(value: unknown) {
-  if (value == null || value === "") {
-    return "";
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return "";
-    }
-    const parsed = parseJSON(trimmed);
-    if (parsed.ok) {
-      if (isEmptyObject(parsed.value)) {
-        return "";
-      }
-      return JSON.stringify(parsed.value, null, 2);
-    }
-    return trimmed;
-  }
-  if (isEmptyObject(value)) {
-    return "";
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
 function formatToolResult(content: string | undefined) {
   if (!content) {
     return null;
@@ -1693,10 +1657,6 @@ function parseJSON(value: string): { ok: true; value: unknown } | { ok: false } 
   } catch {
     return { ok: false };
   }
-}
-
-function isEmptyObject(value: unknown) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
 }
 
 function fieldCount(value: unknown): number | null {
@@ -1803,6 +1763,8 @@ function capabilityToolSummary(
       return t("transcript.approvalApproved");
     case "denied":
       return t("transcript.approvalDenied");
+    case "already_available":
+      return t("transcript.capabilityAlreadyAvailable");
     default:
       return "";
   }
@@ -1875,18 +1837,28 @@ function resultRecordCount(value: Record<string, unknown>) {
   return arrays.length === 1 ? arrays[0].length : null;
 }
 
-function rawToolCopyText(toolName: string, args: string, result: string, t: (key: string) => string) {
-  const lines: string[] = [];
-  if (toolName) {
-    lines.push(`${t("transcript.tool")}: ${toolName}`);
+function normalizeRawToolValue(value: unknown) {
+  if (typeof value !== "string") {
+    return value ?? null;
   }
-  if (args) {
-    lines.push("", `${t("transcript.toolArgs")}:`, args);
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
   }
-  if (result) {
-    lines.push("", `${t("transcript.toolResult")}:`, result);
-  }
-  return lines.join("\n").trim();
+  const parsed = parseJSON(trimmed);
+  return parsed.ok ? parsed.value : trimmed;
+}
+
+function rawToolJSON(toolName: string, args: unknown, result: unknown) {
+  return JSON.stringify(
+    {
+      tool: toolName,
+      input: normalizeRawToolValue(args),
+      output: normalizeRawToolValue(result),
+    },
+    null,
+    2,
+  );
 }
 
 function RawToolDataCard({
@@ -1896,9 +1868,9 @@ function RawToolDataCard({
   toolName,
   onOpenChange,
 }: {
-  args: string;
+  args: unknown;
   defaultOpen: boolean;
-  result: string;
+  result: unknown;
   toolName: string;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -1907,7 +1879,7 @@ function RawToolDataCard({
     defaultOpen,
     onOpenChange,
   );
-  const copyText = rawToolCopyText(toolName, args, result, t);
+  const rawJSON = rawToolJSON(toolName, args, result);
   return (
     <div className="group/raw-data relative min-w-0 max-w-full">
       <details
@@ -1926,24 +1898,13 @@ function RawToolDataCard({
         </summary>
         {open ? (
           <div className="min-w-0 max-w-full border-t border-border/50 p-2">
-            {toolName ? <ToolNameLine name={toolName} /> : null}
-            {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
-            {result ? <ToolDetailBlock label={t("transcript.toolResult")} text={result} /> : null}
+            <pre className="block max-h-80 w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">
+              {rawJSON}
+            </pre>
           </div>
         ) : null}
       </details>
-      <ToolHoverCopyButton className="absolute right-1 top-1 group-hover/raw-data:opacity-100" text={copyText} />
-    </div>
-  );
-}
-
-function ToolDetailBlock({ label, text }: { label: string; text: string }) {
-  return (
-    <div className="mb-2 min-w-0 max-w-full last:mb-0">
-      <div className="mb-1 text-[11px] font-medium text-muted-foreground/80">{label}</div>
-      <pre className="block max-h-56 w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">
-        {text}
-      </pre>
+      <ToolHoverCopyButton className="absolute right-1 top-1 group-hover/raw-data:opacity-100" text={rawJSON} />
     </div>
   );
 }

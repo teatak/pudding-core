@@ -27,8 +27,8 @@ func TestToolDefAllowedForModeUsesCumulativeCapabilityLevels(t *testing.T) {
 
 func TestRequestCapabilitySchemaOnlyExposesWorkAndCode(t *testing.T) {
 	definition := RequestCapabilityDefinition()
-	if !strings.Contains(definition.Description, "do not call this tool") {
-		t.Fatalf("definition must discourage redundant Code requests: %q", definition.Description)
+	if !strings.Contains(definition.Description, "allowed as a no-op") || !strings.Contains(definition.Description, "already_available") {
+		t.Fatalf("definition must explain Code-to-Work no-op behavior: %q", definition.Description)
 	}
 	var schema struct {
 		Properties map[string]struct {
@@ -42,6 +42,9 @@ func TestRequestCapabilitySchemaOnlyExposesWorkAndCode(t *testing.T) {
 	got := schema.Properties["targetMode"].Enum
 	if len(got) != 2 || got[0] != "work" || got[1] != "code" {
 		t.Fatalf("targetMode enum = %+v", got)
+	}
+	if !strings.Contains(schema.Properties["targetMode"].Description, "Code already includes Work") {
+		t.Fatalf("targetMode description must explain cumulative capabilities: %q", schema.Properties["targetMode"].Description)
 	}
 	if !strings.Contains(schema.Properties["projectDirs"].Description, "session-isolated temporary workspace") || !strings.Contains(schema.Properties["projectDirs"].Description, "do not call with an empty list") {
 		t.Fatalf("projectDirs description must explain scratch access and discourage redundant Code requests: %q", schema.Properties["projectDirs"].Description)

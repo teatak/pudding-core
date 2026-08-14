@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
     }
   },
   getHomeDirectory: () => ipcRenderer.invoke("pudding:desktop:get-home-directory"),
+	getDesktopPermissions: () => ipcRenderer.invoke("pudding:desktop:permissions:get"),
+	requestDesktopPermission: (permission) => ipcRenderer.invoke("pudding:desktop:permissions:request", permission),
+	openDesktopPermissionSettings: (permission) => ipcRenderer.invoke("pudding:desktop:permissions:open-settings", permission),
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   openSystemTerminal: (path) => ipcRenderer.invoke("pudding:desktop:open-system-terminal", path),
   revealPath: (path) => ipcRenderer.invoke("pudding:desktop:reveal-path", path),

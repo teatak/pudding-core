@@ -3,14 +3,19 @@ import { useSyncExternalStore } from "react";
 import { consumeLaunchParam } from "@/state/launchParams";
 
 export type Theme = "light" | "dark" | "system";
+export const ACCENT_THEMES = ["blue", "indigo", "red", "emerald", "orange", "neutral"] as const;
+export type AccentTheme = (typeof ACCENT_THEMES)[number];
 type ResolvedTheme = "light" | "dark";
 type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
 type NativeThemeState = { theme: Theme; resolved: ResolvedTheme };
 
 const STORAGE_KEY = "pudding.theme";
+const ACCENT_STORAGE_KEY = "pudding.accent-theme";
 const FALLBACK_STYLE_ID = "pudding-theme-fallback";
 const listeners = new Set<() => void>();
+const accentListeners = new Set<() => void>();
 let themeSyncStarted = false;
+let accentThemeSyncStarted = false;
 let nativeTheme: Theme | null = null;
 let nativeResolvedTheme: ResolvedTheme | null = null;
 
@@ -20,6 +25,30 @@ export function readStoredTheme(): Theme {
   }
   const value = window.localStorage.getItem(STORAGE_KEY);
   return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
+export function readStoredAccentTheme(): AccentTheme {
+  if (typeof window === "undefined") {
+    return "blue";
+  }
+  const value = window.localStorage.getItem(ACCENT_STORAGE_KEY);
+  if (value === "cyan" || value === "green") {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, "blue");
+    return "blue";
+  }
+  if (value === "violet") {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, "blue");
+    return "blue";
+  }
+  if (value === "amber" || value === "yellow") {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, "red");
+    return "red";
+  }
+  if (value === "fuchsia") {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, "orange");
+    return "orange";
+  }
+  return isAccentTheme(value) ? value : "blue";
 }
 
 declare global {
@@ -104,6 +133,33 @@ export function setTheme(theme: Theme) {
   setLocalTheme(theme);
 }
 
+export function applyAccentTheme(accent: AccentTheme) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.documentElement.dataset.accent = accent;
+}
+
+export function setAccentTheme(accent: AccentTheme) {
+  window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+  applyAccentTheme(accent);
+  accentListeners.forEach((listener) => listener());
+}
+
+export function startAccentThemeSync() {
+  if (typeof window === "undefined" || accentThemeSyncStarted) {
+    return;
+  }
+  accentThemeSyncStarted = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key !== ACCENT_STORAGE_KEY) {
+      return;
+    }
+    applyAccentTheme(readStoredAccentTheme());
+    accentListeners.forEach((listener) => listener());
+  });
+}
+
 function subscribe(listener: () => void) {
   startThemeSync();
   listeners.add(listener);
@@ -121,6 +177,18 @@ export function useTheme() {
   const value = useSyncExternalStore(subscribe, snapshot, snapshot);
   const [theme, resolved] = value.split(":") as [Theme, ResolvedTheme];
   return { theme, resolved };
+}
+
+export function useAccentTheme() {
+  return useSyncExternalStore(subscribeAccentTheme, readStoredAccentTheme, readStoredAccentTheme);
+}
+
+function subscribeAccentTheme(listener: () => void) {
+  startAccentThemeSync();
+  accentListeners.add(listener);
+  return () => {
+    accentListeners.delete(listener);
+  };
 }
 
 function setLocalTheme(theme: Theme) {
@@ -156,6 +224,10 @@ function electronThemeBridge() {
 
 function isTheme(value: unknown): value is Theme {
   return value === "light" || value === "dark" || value === "system";
+}
+
+function isAccentTheme(value: unknown): value is AccentTheme {
+  return ACCENT_THEMES.some((accent) => accent === value);
 }
 
 function isResolvedTheme(value: unknown): value is ResolvedTheme {

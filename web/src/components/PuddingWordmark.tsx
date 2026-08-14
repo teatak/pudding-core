@@ -9,7 +9,7 @@ export function PuddingWordmark({ className }: { className?: string }) {
     >
       <svg
         aria-hidden="true"
-        className="size-6 shrink-0 text-[#584cff] dark:text-[#818cf8]"
+        className="size-6 shrink-0 text-[var(--brand-accent)]"
         fill="currentColor"
         viewBox="0 0 120 120"
       >

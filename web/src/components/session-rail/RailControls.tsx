@@ -202,6 +202,8 @@ export function CollapsibleSessionGroupLabel({
   active = false,
   activity,
   collapsed,
+  dropTargetActive = false,
+  interactionDisabled = false,
   icon,
   label,
   actions,
@@ -216,6 +218,8 @@ export function CollapsibleSessionGroupLabel({
   active?: boolean;
   activity?: SessionGroupActivity;
   collapsed: boolean;
+  dropTargetActive?: boolean;
+  interactionDisabled?: boolean;
   icon: "chat" | "pinned" | "project";
   label: string;
   actions?: ReactNode;
@@ -234,11 +238,13 @@ export function CollapsibleSessionGroupLabel({
       data-active={active}
       data-project-dragging={dragging || undefined}
       className={cn(
-        "group/project-label relative h-8 min-h-8 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label relative h-8 min-h-8 gap-1 px-0 text-sm",
+        !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         icon === "project" && "font-normal text-sidebar-foreground!",
         icon !== "project" && "font-normal text-sidebar-foreground/45!",
         dragging && "opacity-45",
         active && "text-sidebar-accent-foreground",
+        dropTargetActive && "pudding-session-drop-project-active",
       )}
     >
       <button
@@ -247,7 +253,7 @@ export function CollapsibleSessionGroupLabel({
         type="button"
         onDragEnd={onDragEnd}
         onDragStart={onDragStart}
-        onClick={onToggle}
+        onClick={interactionDisabled ? undefined : onToggle}
       >
         {icon === "project" ? (
           <Icon
@@ -255,15 +261,17 @@ export function CollapsibleSessionGroupLabel({
           />
         ) : null}
         <span className="min-w-0 truncate">{label}</span>
-        <ChevronRight
-          className={cn(
-            "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
-            !collapsed && "rotate-90",
-          )}
-        />
+        {!dropTargetActive && !interactionDisabled ? (
+          <ChevronRight
+            className={cn(
+              "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
+              !collapsed && "rotate-90",
+            )}
+          />
+        ) : null}
       </button>
-      {actions}
-      {onAction ? (
+      {!dropTargetActive && !interactionDisabled ? actions : null}
+      {onAction && !dropTargetActive && !interactionDisabled ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -281,7 +289,7 @@ export function CollapsibleSessionGroupLabel({
           <TooltipContent side="right">{actionLabel || label}</TooltipContent>
         </Tooltip>
       ) : null}
-      {activity ? (
+      {activity && !dropTargetActive && !interactionDisabled ? (
         <span
           aria-label={activity === "running" ? t("session.processing") : t("session.completed")}
           className="flex size-6 shrink-0 items-center justify-center text-sidebar-foreground/55"
@@ -299,12 +307,14 @@ export function CollapsibleSessionGroupLabel({
 
 export function ProjectSortHeader({
   collapsed,
+  interactionDisabled = false,
   mode,
   onCreateProject,
   onModeChange,
   onToggle,
 }: {
   collapsed: boolean;
+  interactionDisabled?: boolean;
   mode: ProjectSortMode;
   onCreateProject: () => void;
   onModeChange: (mode: ProjectSortMode) => void;
@@ -324,63 +334,74 @@ export function ProjectSortHeader({
 
   return (
     <SidebarGroup className="px-2 py-0">
-      <SidebarGroupLabel className="group/project-section h-8 min-h-8 gap-1 px-0 text-sm font-normal text-sidebar-foreground/45! hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground">
+      <SidebarGroupLabel
+        className={cn(
+          "group/project-section h-8 min-h-8 gap-1 px-0 text-sm font-normal text-sidebar-foreground/45!",
+          !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground",
+        )}
+      >
         <button
           className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-1 rounded-md px-2 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
           type="button"
-          onClick={onToggle}
+          onClick={interactionDisabled ? undefined : onToggle}
         >
           <span className="min-w-0 truncate">{t("project.manage")}</span>
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
-              !collapsed && "rotate-90",
-            )}
-          />
+          {!interactionDisabled ? (
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
+                !collapsed && "rotate-90",
+              )}
+            />
+          ) : null}
         </button>
-        <DropdownMenu open={open} onOpenChange={setOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label={`${t("project.sortLabel")}：${modeLabel}`}
-              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-              type="button"
-            >
-              <ArrowUpDown className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup
-              value={mode}
-              onValueChange={(value) => onModeChange(value as ProjectSortMode)}
-            >
-              <DropdownMenuRadioItem value="activity">
-                {t("project.sortRecentUsage")}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="name">
-                {t("project.sortNameAsc")}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="name-desc">
-                {t("project.sortNameDesc")}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="custom">
-                {t("project.sortCustom")}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              aria-label={t("project.add")}
-              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-              type="button"
-              onClick={onCreateProject}
-            >
-              <FolderPlus className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("project.add")}</TooltipContent>
-        </Tooltip>
+        {!interactionDisabled ? (
+          <>
+            <DropdownMenu open={open} onOpenChange={setOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label={`${t("project.sortLabel")}：${modeLabel}`}
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  type="button"
+                >
+                  <ArrowUpDown className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  value={mode}
+                  onValueChange={(value) => onModeChange(value as ProjectSortMode)}
+                >
+                  <DropdownMenuRadioItem value="activity">
+                    {t("project.sortRecentUsage")}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="name">
+                    {t("project.sortNameAsc")}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="name-desc">
+                    {t("project.sortNameDesc")}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="custom">
+                    {t("project.sortCustom")}
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={t("project.add")}
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                  type="button"
+                  onClick={onCreateProject}
+                >
+                  <FolderPlus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{t("project.add")}</TooltipContent>
+            </Tooltip>
+          </>
+        ) : null}
       </SidebarGroupLabel>
     </SidebarGroup>
   );

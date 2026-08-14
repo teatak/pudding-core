@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed brand-assets language-servers language-servers-ready desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
+.PHONY: test schema-check tidy clean embed brand-assets language-servers language-servers-ready computer-use-helper-dev computer-use-helper-test computer-use-fixture-dev computer-use-fixture-smoke computer-use-product-smoke computer-use-calculator-smoke computer-use-calculator-existing-smoke desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-computer-use-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-update-test desktop-preview-computer-use-update-test desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
 
 brand-assets:
 	@bash scripts/render-brand-assets.sh
@@ -36,6 +36,48 @@ language-servers:
 language-servers-ready:
 	@bash scripts/prepare-language-servers.sh --ensure
 
+# macOS Computer Use C0 Helper。开发构建使用稳定 identifier 的本地签名。
+computer-use-helper-dev:
+	@swift build --package-path native/macos/computer-use-helper --scratch-path bin/computer-use-helper-build -c debug
+	@bash packaging/macos/create-computer-use-app.sh bin/computer-use-helper-build/debug/PuddingComputerUseHelper "bin/Pudding Computer Use.app" com.teatak.pudding.dev.computer-use-helper "Pudding Computer Use (Dev)"
+	@identity="$${PUDDING_COMPUTER_USE_DEV_IDENTITY:-Pudding Dev Local}"; \
+	if ! security find-identity -v -p codesigning | grep -Fq "\"$$identity\""; then \
+		echo "warning: Computer Use dev signing identity '$$identity' not found; using ad-hoc signing (Accessibility must be added manually)." >&2; \
+		identity="-"; \
+	fi; \
+	codesign --force --deep --sign "$$identity" "bin/Pudding Computer Use.app"
+	@rm -f bin/PuddingComputerUseHelper
+
+computer-use-helper-test:
+	@swift test --package-path native/macos/computer-use-helper --scratch-path bin/computer-use-helper-build
+
+# 确定性 macOS GUI fixture,只用于 Computer Use 开发和真实 TCC smoke。
+computer-use-fixture-dev: computer-use-helper-dev
+	@bash packaging/macos/create-computer-use-app.sh \
+		bin/computer-use-helper-build/debug/PuddingComputerUseFixture \
+		"bin/Pudding Computer Use Fixture.app" \
+		com.teatak.pudding.computer-use-fixture \
+		"Pudding Computer Use Fixture" \
+		native/macos/computer-use-helper/Sources/PuddingComputerUseFixture/Info.plist
+	@identity="$${PUDDING_COMPUTER_USE_DEV_IDENTITY:-Pudding Dev Local}"; \
+	if ! security find-identity -v -p codesigning | grep -Fq "\"$$identity\""; then identity="-"; fi; \
+	codesign --force --deep --sign "$$identity" "bin/Pudding Computer Use Fixture.app"
+
+computer-use-fixture-smoke: computer-use-fixture-dev
+	@node scripts/computer-use-fixture-smoke.cjs
+
+# 产品链路 smoke: scripted model -> session approval -> Engine/Manager -> Electron bridge -> Helper -> fixture。
+computer-use-product-smoke: computer-use-fixture-dev
+	@node scripts/computer-use-product-smoke.cjs
+
+# 真实系统 App smoke:在 Calculator 中执行 1+1=2,并验证 session-owned quit。
+computer-use-calculator-smoke: computer-use-helper-dev
+	@node scripts/computer-use-product-smoke.cjs --calculator
+
+# 已运行 App smoke:session 可以操作 Calculator,但不能取得 launchID 或关闭它。
+computer-use-calculator-existing-smoke: computer-use-helper-dev
+	@node scripts/computer-use-product-smoke.cjs --calculator-existing
+
 # 分架构准备发布 runtime。x64 在 Apple Silicon 上交叉编译。
 desktop-runtime-arm64: schema-check embed
 	@PUDDING_PACKAGING_PIPELINE=1 bash packaging/macos/prepare-runtime.sh arm64
@@ -57,6 +99,10 @@ desktop-verify:
 desktop-update-test: desktop-verify
 	@PUDDING_RELEASE_CHANNEL=stable node scripts/run-update-test.cjs
 
+# 要求升级前后都包含 Computer Use Helper,并比较完整 designated requirement。
+desktop-computer-use-update-test: desktop-verify
+	@PUDDING_RELEASE_CHANNEL=stable PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY=1 node scripts/run-update-test.cjs
+
 # 本机完成测试、tag、签名、公证，并上传 Draft Release。
 desktop-publish:
 	@PUDDING_RELEASE_CHANNEL=stable node scripts/release-local.cjs start
@@ -67,6 +113,13 @@ desktop-preview-bundle: desktop-runtimes
 
 desktop-preview-verify:
 	@PUDDING_PACKAGING_PIPELINE=1 PUDDING_RELEASE_CHANNEL=preview node scripts/package-desktop.cjs --verify-only
+
+desktop-preview-update-test: desktop-preview-verify
+	@PUDDING_RELEASE_CHANNEL=preview node scripts/run-update-test.cjs
+
+# Preview beta 间升级时要求 Computer Use Helper 的完整 designated requirement 保持不变。
+desktop-preview-computer-use-update-test: desktop-preview-verify
+	@PUDDING_RELEASE_CHANNEL=preview PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY=1 node scripts/run-update-test.cjs
 
 desktop-preview-publish:
 	@PUDDING_RELEASE_CHANNEL=preview node scripts/release-local.cjs start

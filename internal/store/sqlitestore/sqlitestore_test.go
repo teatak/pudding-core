@@ -33,6 +33,32 @@ func createTestSession(t *testing.T, st store.Store, id string) {
 	}
 }
 
+func TestComputerAppGrantPersistsAndCascadesWithSession(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_computer_grant")
+	if err := st.GrantComputerApp(ctx, "sess_computer_grant", "com.example.Calculator"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if granted, err := reopened.HasComputerAppGrant(ctx, "sess_computer_grant", "com.example.Calculator"); err != nil || !granted {
+		t.Fatalf("persisted Computer Use grant: granted=%v err=%v", granted, err)
+	}
+	if err := reopened.DeleteSession(ctx, "sess_computer_grant"); err != nil {
+		t.Fatal(err)
+	}
+	if granted, err := reopened.HasComputerAppGrant(ctx, "sess_computer_grant", "com.example.Calculator"); err != nil || granted {
+		t.Fatalf("deleted session grant: granted=%v err=%v", granted, err)
+	}
+}
+
 func TestSessionProjectPersists(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()

@@ -1,4 +1,4 @@
-import { BookOpen, Globe, PackagePlus, PanelsTopLeft, ScanLine } from "@/components/icons";
+import { BookOpen, Globe, MousePointerClick, PackagePlus, PanelsTopLeft, ScanLine } from "@/components/icons";
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
@@ -68,6 +68,7 @@ function builtinAppIcon(appID: string) {
   if (appID === "skill-authoring") return BookOpen;
   if (appID === "app-authoring") return PackagePlus;
   if (appID === "capture") return ScanLine;
+  if (appID === "computer-use") return MousePointerClick;
   return Globe;
 }
 
@@ -83,6 +84,9 @@ export function builtinAppIconClass(appID: string) {
   }
   if (appID === "capture") {
     return "bg-[#FFF0F5] text-[#B43A68] shadow-none dark:bg-[#D34C7E]/16 dark:text-[#F08DB1]";
+  }
+  if (appID === "computer-use") {
+    return "bg-[#FFF4E8] text-[#C76A16] shadow-none dark:bg-[#E47D22]/16 dark:text-[#F3A55F]";
   }
   return "bg-[#EEF6FF] text-[#2672E8] shadow-none dark:bg-[#2672E8]/16 dark:text-[#7DB5FF]";
 }

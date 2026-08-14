@@ -43,6 +43,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
   # Go's linker signature can be rejected when Electron launches the freshly
   # rebuilt binary. Replace it with an explicit local ad-hoc signature.
   codesign --force --sign - --identifier com.teatak.pudding.dev.daemon bin/puddingd || exit 1
+  echo ">> building Computer Use helper"
+  make computer-use-helper-dev || exit 1
 fi
 
 ensure_vite || exit 1

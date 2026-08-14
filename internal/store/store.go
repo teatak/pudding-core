@@ -26,6 +26,7 @@ var (
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
 	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
+	ErrInvalidComputerAppGrant  = errors.New("store: invalid Computer Use app grant")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
 )
 
@@ -209,6 +210,15 @@ func NormalizeSessionProviderModel(s *Session) error {
 	}
 	s.ReasoningEffort = strings.TrimSpace(s.ReasoningEffort)
 	s.ReasoningModelKey = strings.TrimSpace(s.ReasoningModelKey)
+	s.ProjectID = strings.TrimSpace(s.ProjectID)
+	if s.ProjectID != "" {
+		if s.ActiveMode == "" {
+			s.ActiveMode = ModeCode
+		}
+		if s.ModeLease == "" {
+			s.ModeLease = ModeLeaseSession
+		}
+	}
 	if s.ActiveMode == "" {
 		s.ActiveMode = ModeChat
 	}
@@ -222,7 +232,6 @@ func NormalizeSessionProviderModel(s *Session) error {
 	if s.ModeLease == ModeLeaseNone {
 		s.ActiveMode = ModeChat
 	}
-	s.ProjectID = strings.TrimSpace(s.ProjectID)
 	s.LoadedAppIDs = NormalizeAppIDs(s.LoadedAppIDs)
 	return nil
 }
@@ -267,6 +276,12 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 	if upd.ProjectID != nil {
 		projectID := strings.TrimSpace(*upd.ProjectID)
 		upd.ProjectID = &projectID
+		if projectID != "" {
+			mode := ModeCode
+			lease := ModeLeaseSession
+			upd.ActiveMode = &mode
+			upd.ModeLease = &lease
+		}
 	}
 	if upd.LoadedAppIDs != nil {
 		ids := NormalizeAppIDs(*upd.LoadedAppIDs)
@@ -2132,6 +2147,8 @@ type Store interface {
 	RestoreSession(ctx context.Context, id string) (*Session, error)
 	ListExpiredArchivedSessionIDs(ctx context.Context, cutoff time.Time) ([]string, error)
 	DeleteSession(ctx context.Context, id string) error
+	HasComputerAppGrant(ctx context.Context, sessionID, appID string) (bool, error)
+	GrantComputerApp(ctx context.Context, sessionID, appID string) error
 
 	// BeginTurn:幂等检查(clientMessageID 重复则返回 Duplicate)→ 校验无
 	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn

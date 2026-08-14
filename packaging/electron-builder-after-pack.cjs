@@ -18,6 +18,18 @@ module.exports = async function afterPack(context) {
   }
   const runtimeRoot = path.join(root, "dist", "runtime", arch);
   const daemonPath = path.join(appRoot, "bin", "puddingd");
+  const computerUseHelperAppPath = path.join(appRoot, "bin", "Pudding Computer Use.app");
+  const computerUseHelperPath = path.join(
+    computerUseHelperAppPath,
+    "Contents",
+    "MacOS",
+    "PuddingComputerUseHelper",
+  );
+  const computerUseHelperInfoPlistPath = path.join(
+    computerUseHelperAppPath,
+    "Contents",
+    "Info.plist",
+  );
   const languageServersPath = path.join(appRoot, "language-servers");
   const launcherPath = path.join(languageServersPath, "typescript-language-server");
   const electronNodePath = path.join(languageServersPath, "node");
@@ -25,10 +37,15 @@ module.exports = async function afterPack(context) {
   fs.mkdirSync(path.dirname(daemonPath), { recursive: true });
   fs.copyFileSync(path.join(runtimeRoot, "puddingd"), daemonPath);
   copyDirectoryWithPortableSymlinks(
+    path.join(runtimeRoot, "Pudding Computer Use.app"),
+    computerUseHelperAppPath,
+  );
+  copyDirectoryWithPortableSymlinks(
     path.join(runtimeRoot, "language-servers"),
     languageServersPath,
   );
   setMinimumSystemVersion(infoPlistPath, arch);
+  syncNestedBundleVersion(infoPlistPath, computerUseHelperInfoPlistPath);
 
   execFileSync("bash", [
     path.join(root, "packaging", "macos", "bundle-dylibs.sh"),
@@ -50,6 +67,7 @@ exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-langua
   fs.rmSync(electronNodePath, { force: true });
   fs.symlinkSync(`../../../MacOS/${appName}`, electronNodePath);
   fs.chmodSync(daemonPath, 0o755);
+  fs.chmodSync(computerUseHelperPath, 0o755);
   removeUnusedPrivacyUsageDescriptions(infoPlistPath);
   makeBundleOwnerWritable(appPath);
 };
@@ -63,6 +81,18 @@ function setMinimumSystemVersion(infoPlistPath, arch) {
     minimumVersion,
     infoPlistPath,
   ]);
+}
+
+function syncNestedBundleVersion(outerInfoPlistPath, nestedInfoPlistPath) {
+  for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
+    const value = execFileSync("plutil", ["-extract", key, "raw", outerInfoPlistPath], {
+      encoding: "utf8",
+    }).trim();
+    if (!value) {
+      throw new Error(`outer app is missing ${key}`);
+    }
+    execFileSync("plutil", ["-replace", key, "-string", value, nestedInfoPlistPath]);
+  }
 }
 
 function copyDirectoryWithPortableSymlinks(sourceRoot, destinationRoot) {
@@ -151,3 +181,4 @@ module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;
 module.exports.copyDirectoryWithPortableSymlinks = copyDirectoryWithPortableSymlinks;
 module.exports.removeUnusedPrivacyUsageDescriptions = removeUnusedPrivacyUsageDescriptions;
 module.exports.setMinimumSystemVersion = setMinimumSystemVersion;
+module.exports.syncNestedBundleVersion = syncNestedBundleVersion;

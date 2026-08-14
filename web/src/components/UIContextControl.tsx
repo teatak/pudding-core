@@ -42,7 +42,7 @@ export function UIContextControl({
             className={cn(
               "size-4",
               enabled &&
-                "[&_path:first-child]:fill-indigo-600 [&_path:first-child]:stroke-indigo-600 dark:[&_path:first-child]:fill-indigo-400 dark:[&_path:first-child]:stroke-indigo-400",
+                "[&_path:first-child]:fill-primary [&_path:first-child]:stroke-primary",
             )}
           />
         </Button>

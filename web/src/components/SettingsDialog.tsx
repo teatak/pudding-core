@@ -4,8 +4,9 @@ import {
   AudioLines,
   BookOpen,
   Globe,
-  Info,
-  MessageSquareText,
+	Info,
+	MessageSquareText,
+	ShieldCheck,
   Settings,
   Settings2,
   SlidersHorizontal,
@@ -20,6 +21,7 @@ import { AboutSettings } from "@/components/settings/AboutSettings";
 import { ArchivedSessionsSettings } from "@/components/settings/ArchivedSessionsSettings";
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { BrowserSettings } from "@/components/settings/BrowserSettings";
+import { PermissionsSettings } from "@/components/settings/PermissionsSettings";
 import { ProviderSettings } from "@/components/settings/ProviderSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ToolsSettings } from "@/components/settings/ToolsSettings";
@@ -96,6 +98,11 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
   {
     labelKey: "settings.group.system",
     sections: [
+	  {
+		id: "permissions",
+		icon: ShieldCheck,
+		labelKey: "settings.section.permissions",
+	  },
       {
         id: "browser",
         icon: Globe,
@@ -264,6 +271,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
                 ) : null}
                 {active === "skills" ? <SkillsSettings token={token} /> : null}
                 {active === "tools" ? <ToolsSettings token={token} onDirtyChange={setActiveDirty} /> : null}
+				{active === "permissions" ? <PermissionsSettings /> : null}
                 {active === "browser" ? <BrowserSettings /> : null}
                 {active === "about" ? <AboutSettings token={token} /> : null}
               </div>
@@ -359,7 +367,7 @@ function SettingsSidebar({
   const { t } = useI18n();
 
   return (
-    <Sidebar collapsible="none" className="flex shrink-0 border-r">
+    <Sidebar collapsible="none" className="pudding-settings-sidebar flex shrink-0 border-r">
       <SidebarContent>
         {SETTINGS_GROUPS.map((group) => (
           <SidebarGroup key={group.labelKey} className="p-3 pb-0 last:pb-3">

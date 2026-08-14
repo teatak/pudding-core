@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_archived_at
     ON sessions(archived_at);
 
+CREATE TABLE IF NOT EXISTS computer_app_grants (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    app_id     TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, app_id)
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id            TEXT PRIMARY KEY,
     name          TEXT    NOT NULL DEFAULT '',

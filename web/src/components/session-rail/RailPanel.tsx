@@ -16,7 +16,7 @@ import {
   Search,
   Settings,
 } from "@/components/icons";
-import { sessionGroupActivity } from "@/components/session-rail/activity";
+import { isSessionTurnRunning, sessionGroupActivity } from "@/components/session-rail/activity";
 import {
   CollapsibleSessionGroupLabel,
   dragPreviewTransform,
@@ -48,6 +48,7 @@ import {
   SessionListError,
   SessionListSkeleton,
 } from "@/components/session-rail/SessionItems";
+import { SessionProjectPickerDialog } from "@/components/session-rail/SessionProjectPickerDialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
@@ -112,6 +113,7 @@ type RailPanelProps = {
   draftActive: boolean;
   draftProjectID?: string;
   archivePending: boolean;
+  projectChangePendingID: string | undefined;
   onCreate: () => void;
   onCreateProject: () => void;
   onSearch: () => void;
@@ -120,17 +122,17 @@ type RailPanelProps = {
   onOpenSplit: (id: string) => void;
   onArchive: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => Promise<void>;
+  onPlacementChange: (id: string, projectID: string) => Promise<void>;
+  onProjectChange: (id: string, projectID: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
 };
 
-type SessionDropGroup = "pinned" | "unpinned";
-
-type SessionDropTarget = {
-  group: SessionDropGroup;
-  index: number;
-};
+type SessionDropTarget =
+  | { kind: "pinned"; index: number }
+  | { kind: "recent" }
+  | { kind: "project"; projectID: string };
 
 type ProjectDropTarget = {
   index: number;
@@ -151,6 +153,7 @@ export function RailPanel({
   draftActive,
   draftProjectID,
   archivePending,
+  projectChangePendingID,
   onCreate,
   onCreateProject,
   onSearch,
@@ -159,6 +162,8 @@ export function RailPanel({
   onOpenSplit,
   onArchive,
   onPinChange,
+  onPlacementChange,
+  onProjectChange,
   onRename,
   onOverlayOpenChange,
   onRefetch,
@@ -169,6 +174,7 @@ export function RailPanel({
   const runningTurns = useOverlayStore((state) => state.runningTurns);
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const [draggingSessionID, setDraggingSessionID] = useState<string | null>(null);
+  const [projectPickerSessionID, setProjectPickerSessionID] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<SessionDropTarget | null>(null);
   const [dragPreview, setDragPreview] = useState<{
     id: string;
@@ -210,11 +216,19 @@ export function RailPanel({
   );
   const projectGroups = sortProjectGroups(groupedProjects, projectSortMode, customProjectOrder);
   const projectNamesByID = new Map(projects.map((project) => [project.id, project.name]));
+  const projectPickerSession = projectPickerSessionID
+    ? displayedSessions.find((session) => session.id === projectPickerSessionID)
+    : undefined;
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
   const draggedSession = draggingSessionID
     ? displayedSessions.find((session) => session.id === draggingSessionID)
     : undefined;
-  const isDraggingPinned = Boolean(draggedSession?.pinned);
+  const draggedSessionRunning = Boolean(
+    draggedSession && isSessionTurnRunning(draggedSession, runningTurns, turnPhases),
+  );
+  const recentDropEnabled = Boolean(
+    draggedSession && !draggedSessionRunning && (draggedSession.pinned || draggedSession.projectID),
+  );
   const pinnedCollapsed = collapsedGroups.has("pinned");
   const chatCollapsed = collapsedGroups.has("chat");
   const projectsCollapsed = collapsedGroups.has("projects");
@@ -464,15 +478,22 @@ export function RailPanel({
 
   function findDropTarget(clientX: number, clientY: number): SessionDropTarget | null {
     const target = document.elementFromPoint(clientX, clientY);
-    const group = target?.closest<HTMLElement>("[data-session-drop-group]");
-    const value = group?.dataset.sessionDropGroup;
-    if (!group || (value !== "pinned" && value !== "unpinned")) {
+    const zone = target?.closest<HTMLElement>("[data-session-drop-target]");
+    const kind = zone?.dataset.sessionDropTarget;
+    if (!zone || !kind) {
       return null;
     }
-    if (value === "unpinned") {
-      return { group: value, index: 0 };
+    if (kind === "recent") {
+      return { kind };
     }
-    const itemElements = Array.from(group.querySelectorAll<HTMLElement>("[data-session-item-id]")).filter(
+    if (kind === "project") {
+      const projectID = zone.dataset.sessionProjectId;
+      return projectID ? { kind, projectID } : null;
+    }
+    if (kind !== "pinned") {
+      return null;
+    }
+    const itemElements = Array.from(zone.querySelectorAll<HTMLElement>("[data-session-item-id]")).filter(
       (item) => item.dataset.sessionItemId !== draggingSessionID,
     );
     const index = itemElements.findIndex((item) => {
@@ -480,7 +501,7 @@ export function RailPanel({
       return clientY < rect.top + rect.height / 2;
     });
     return {
-      group: value,
+      kind,
       index: index === -1 ? itemElements.length : index,
     };
   }
@@ -522,16 +543,23 @@ export function RailPanel({
       clearDragState();
       return;
     }
-    if (!target || target.group !== "pinned") {
-      if (session.pinned) {
-        const nextOrder = pinnedSessions
-          .filter((item) => item.id !== sessionID)
-          .map((item) => item.id);
+    if (!target) {
+      clearDragState();
+      return;
+    }
+    if (target.kind !== "pinned") {
+      const nextOrder = session.pinned
+        ? pinnedSessions.filter((item) => item.id !== sessionID).map((item) => item.id)
+        : null;
+      if (nextOrder) {
         setOptimisticPinnedOrder(nextOrder);
-        void onPinChange(session.id, false, 0).finally(() => {
-          releaseOptimisticPinnedOrder(nextOrder);
-        });
       }
+      const projectID = target.kind === "project" ? target.projectID : "";
+      void onPlacementChange(session.id, projectID).finally(() => {
+        if (nextOrder) {
+          releaseOptimisticPinnedOrder(nextOrder);
+        }
+      });
       clearDragState();
       return;
     }
@@ -654,34 +682,44 @@ export function RailPanel({
             ) : (
               <>
                 {showPinnedGroup ? (
-                  <Collapsible asChild open={!pinnedCollapsed}>
+                  <Collapsible asChild open={Boolean(draggingSessionID) || !pinnedCollapsed}>
                     <SidebarGroup
-                      className="px-2 py-0"
-                      data-session-drop-group="pinned"
+                      className="rounded-md px-2 py-0"
+                      data-session-drop-target={draggingSessionID ? "pinned" : undefined}
                     >
                       <CollapsibleSessionGroupLabel
                         activity={pinnedCollapsed
                           ? sessionGroupActivity(pinnedSessions, runningTurns, turnPhases, completedSessions)
                           : undefined}
-                        collapsed={pinnedCollapsed}
+                        collapsed={draggingSessionID ? false : pinnedCollapsed}
                         icon="pinned"
+                        interactionDisabled={Boolean(draggingSessionID)}
                         label={t("session.pinned")}
                         onToggle={() => toggleGroupCollapsed("pinned")}
                       />
-                      <CollapsibleContent className="pudding-session-group-content overflow-hidden">
+                      <CollapsibleContent
+                        className={cn(
+                          "pudding-session-group-content",
+                          draggingSessionID ? "overflow-visible" : "overflow-hidden",
+                        )}
+                      >
                         <SidebarGroupContent className="pt-0.5">
                           <SessionItems
                             archivePending={archivePending}
+                            hasProjects={projects.length > 0}
+                            projectChangePendingID={projectChangePendingID}
                             projectNamesByID={projectNamesByID}
                             selectedSessionID={selectedSessionID}
                             sessions={pinnedSessions}
                             showEmptyState={false}
                             draggingSessionID={draggingSessionID}
-                            dropIndex={dragTarget?.group === "pinned" ? dragTarget.index : null}
+                            dropIndex={dragTarget?.kind === "pinned" ? dragTarget.index : null}
                             showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
                             onArchive={onArchive}
                             onOpenSplit={onOpenSplit}
+                            onOpenProjectPicker={setProjectPickerSessionID}
                             onPinChange={onPinChange}
+                            onProjectChange={onProjectChange}
                             onPointerDragCancel={clearDragState}
                             onPointerDragEnd={handlePointerDrop}
                             onPointerDragMove={handlePointerDragMove}
@@ -695,43 +733,49 @@ export function RailPanel({
                   </Collapsible>
                 ) : null}
                 <div
-                  className={cn(
-                    "flex flex-col gap-0.5 rounded-md",
-                    isDraggingPinned && "min-h-10",
-                    isDraggingPinned &&
-                    dragTarget?.group === "unpinned" &&
-                    "pudding-session-drop-indicator-active ring-1 ring-inset ring-sidebar-ring/60",
-                  )}
-                  data-session-drop-group="unpinned"
+                  className="flex flex-col gap-0.5 rounded-md"
                 >
                   {sessions.length === 0 && projects.length === 0 ? (
                     <SessionEmptyState />
-                  ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
-                    <Collapsible asChild open={!chatCollapsed}>
-                      <SidebarGroup className="px-2 py-0">
+                  ) : chatSessions.length > 0 || recentDropEnabled ? (
+                    <Collapsible asChild open={recentDropEnabled || !chatCollapsed}>
+                      <SidebarGroup className="rounded-md px-2 py-0">
                         <CollapsibleSessionGroupLabel
                           activity={chatCollapsed
                             ? sessionGroupActivity(chatSessions, runningTurns, turnPhases, completedSessions)
                             : undefined}
-                          collapsed={chatCollapsed}
+                          collapsed={recentDropEnabled ? false : chatCollapsed}
                           icon="chat"
+                          interactionDisabled={Boolean(draggingSessionID)}
                           label={t("session.chats")}
                           onToggle={() => toggleGroupCollapsed("chat")}
                         />
                         <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                          <SidebarGroupContent className={cn("pt-0.5", isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
+                          <SidebarGroupContent
+                            className={cn(
+                              "rounded-md pt-0.5",
+                              recentDropEnabled && "min-h-8",
+                              dragTarget?.kind === "recent" &&
+                                "pudding-session-drop-row pudding-session-drop-row-active",
+                            )}
+                            data-session-drop-target={recentDropEnabled ? "recent" : undefined}
+                          >
                             <SessionItems
                               archivePending={archivePending}
+                              hasProjects={projects.length > 0}
+                              projectChangePendingID={projectChangePendingID}
                               projectNamesByID={projectNamesByID}
                               selectedSessionID={selectedSessionID}
                               sessions={chatSessions}
                               showEmptyState={sessions.length === 0}
                               draggingSessionID={draggingSessionID}
                               dropIndex={null}
-                              showEmptyDropTarget={Boolean(isDraggingPinned && chatSessions.length === 0 && sessions.length > 0)}
+                              showEmptyDropTarget={Boolean(recentDropEnabled && chatSessions.length === 0)}
                               onArchive={onArchive}
                               onOpenSplit={onOpenSplit}
+                              onOpenProjectPicker={setProjectPickerSessionID}
                               onPinChange={onPinChange}
+                              onProjectChange={onProjectChange}
                               onPointerDragCancel={clearDragState}
                               onPointerDragEnd={handlePointerDrop}
                               onPointerDragMove={handlePointerDragMove}
@@ -745,9 +789,10 @@ export function RailPanel({
                     </Collapsible>
                   ) : null}
                   {projectGroups.length > 0 ? (
-                    <Collapsible open={!projectsCollapsed}>
+                    <Collapsible open={Boolean(draggingSessionID) || !projectsCollapsed}>
                       <ProjectSortHeader
-                        collapsed={projectsCollapsed}
+                        collapsed={draggingSessionID ? false : projectsCollapsed}
+                        interactionDisabled={Boolean(draggingSessionID)}
                         mode={projectSortMode}
                         onCreateProject={onCreateProject}
                         onModeChange={changeProjectSortMode}
@@ -766,45 +811,73 @@ export function RailPanel({
                           {projectDropTarget ? (
                             <span
                               aria-hidden="true"
-                              className="pointer-events-none absolute right-4 left-4 z-20 h-px -translate-y-1/2 bg-primary"
+                              className="pointer-events-none absolute right-3 left-3 z-20 h-0 overflow-visible"
                               style={{ top: projectDropTarget.top }}
-                            />
+                            >
+                              <span className="absolute top-0 right-0 left-2 h-0.5 -translate-y-1/2 rounded-full bg-primary" />
+                              <span className="absolute top-0 left-0.5 size-2.5 -translate-y-1/2 rounded-full border-2 border-primary bg-sidebar" />
+                            </span>
                           ) : null}
                           {projectGroups.map((group) => {
                             const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
                             const hasSessions = group.sessions.length > 0;
+                            const isDraggedSessionSourceProject = Boolean(
+                              draggedSession &&
+                              !draggedSession.pinned &&
+                              group.project &&
+                              draggedSession.projectID === group.project.id,
+                            );
+                            const projectDropEnabled = Boolean(
+                              draggedSession &&
+                              !draggedSessionRunning &&
+                              group.project &&
+                              (draggedSession.pinned || draggedSession.projectID !== group.project.id),
+                            );
                             return (
                               <Collapsible
                                 key={group.key}
                                 asChild
-                                open={draggingProjectKey ? false : !projectCollapsed}
+                                open={draggingProjectKey || draggingSessionID ? false : !projectCollapsed}
                               >
                                 <SidebarGroup
-                                  className="px-2 py-0"
+                                  className="rounded-md px-2 py-0"
                                   data-project-group-key={group.key}
                                 >
-                                  <CollapsibleSessionGroupLabel
-                                    active={draftActive && draftProjectID === group.projectID}
-                                    activity={projectCollapsed
-                                      ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
-                                      : undefined}
-                                    actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
-                                    collapsed={projectCollapsed}
-                                    icon="project"
-                                    label={group.label}
-                                    reorderable={projectSortMode === "custom"}
-                                    dragging={draggingProjectKey === group.key}
-                                    actionLabel={t("session.create")}
-                                    onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
-                                    onDragEnd={clearProjectDragState}
-                                    onDragStart={(event) => handleProjectDragStart(event, group.key)}
-                                    onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
-                                  />
+                                  <div
+                                    className="rounded-md"
+                                    data-session-drop-target={projectDropEnabled ? "project" : undefined}
+                                    data-session-project-id={projectDropEnabled ? group.project?.id : undefined}
+                                  >
+                                    <CollapsibleSessionGroupLabel
+                                      active={draftActive && draftProjectID === group.projectID}
+                                      activity={projectCollapsed || draggingSessionID
+                                        ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
+                                        : undefined}
+                                      actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
+                                      collapsed={draggingSessionID ? true : projectCollapsed}
+                                      dropTargetActive={
+                                        dragTarget?.kind === "project" &&
+                                        dragTarget.projectID === group.project?.id
+                                      }
+                                      interactionDisabled={isDraggedSessionSourceProject}
+                                      icon="project"
+                                      label={group.label}
+                                      reorderable={projectSortMode === "custom"}
+                                      dragging={draggingProjectKey === group.key}
+                                      actionLabel={t("session.create")}
+                                      onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
+                                      onDragEnd={clearProjectDragState}
+                                      onDragStart={(event) => handleProjectDragStart(event, group.key)}
+                                      onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
+                                    />
+                                  </div>
                                   {hasSessions ? (
                                     <CollapsibleContent className="pudding-session-group-content overflow-hidden">
                                       <SidebarGroupContent className="pt-0.5">
                                         <SessionItems
                                           archivePending={archivePending}
+                                          hasProjects={projects.length > 0}
+                                          projectChangePendingID={projectChangePendingID}
                                           projectNamesByID={projectNamesByID}
                                           selectedSessionID={selectedSessionID}
                                           sessions={group.sessions}
@@ -814,7 +887,9 @@ export function RailPanel({
                                           showEmptyDropTarget={false}
                                           onArchive={onArchive}
                                           onOpenSplit={onOpenSplit}
+                                          onOpenProjectPicker={setProjectPickerSessionID}
                                           onPinChange={onPinChange}
+                                          onProjectChange={onProjectChange}
                                           onPointerDragCancel={clearDragState}
                                           onPointerDragEnd={handlePointerDrop}
                                           onPointerDragMove={handlePointerDragMove}
@@ -862,6 +937,23 @@ export function RailPanel({
             </div>
           </SidebarFooter>
         </Sidebar>
+        <SessionProjectPickerDialog
+          open={Boolean(projectPickerSessionID)}
+          pending={projectChangePendingID === projectPickerSessionID}
+          projects={projects}
+          session={projectPickerSession}
+          onOpenChange={(open) => {
+            if (!open) {
+              setProjectPickerSessionID(null);
+            }
+          }}
+          onSelect={(projectID) => {
+            if (!projectPickerSessionID) {
+              return Promise.resolve();
+            }
+            return onProjectChange(projectPickerSessionID, projectID);
+          }}
+        />
       </SidebarProvider>
     </RailOverlayHoldContext.Provider>
   );

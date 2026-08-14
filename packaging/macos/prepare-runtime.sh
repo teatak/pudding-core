@@ -17,13 +17,18 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ARCH="$1"
 GOARCH="$ARCH"
+SWIFT_ARCH="$ARCH"
 if [[ "$ARCH" == "x64" ]]; then
   GOARCH="amd64"
+  SWIFT_ARCH="x86_64"
 fi
 
 OUT_DIR="$ROOT/dist/runtime/$ARCH"
 LANGUAGE_SERVER_DIR="$OUT_DIR/language-servers"
 DAEMON_PATH="$OUT_DIR/puddingd"
+COMPUTER_USE_HELPER_APP="$OUT_DIR/Pudding Computer Use.app"
+COMPUTER_USE_HELPER_PATH="$COMPUTER_USE_HELPER_APP/Contents/MacOS/PuddingComputerUseHelper"
+COMPUTER_USE_HELPER_BUILD_DIR="$ROOT/dist/build/computer-use-helper-$ARCH"
 MODULE="github.com/teatak/pudding-core"
 BUILD_TAGS="sqlite_fts5 webrtcaec"
 LDFLAGS="-X $MODULE/internal/buildinfo.channel=release"
@@ -56,6 +61,24 @@ else
     go build -tags "$BUILD_TAGS" -ldflags "$LDFLAGS" -o "$DAEMON_PATH" ./cmd/puddingd
 fi
 
+rm -rf "$COMPUTER_USE_HELPER_BUILD_DIR"
+swift build \
+  --package-path "$ROOT/native/macos/computer-use-helper" \
+  --scratch-path "$COMPUTER_USE_HELPER_BUILD_DIR" \
+  --configuration release \
+  --arch "$SWIFT_ARCH"
+COMPUTER_USE_HELPER_BIN_DIR=$(swift build \
+  --package-path "$ROOT/native/macos/computer-use-helper" \
+  --scratch-path "$COMPUTER_USE_HELPER_BUILD_DIR" \
+  --configuration release \
+  --arch "$SWIFT_ARCH" \
+  --show-bin-path)
+bash "$ROOT/packaging/macos/create-computer-use-app.sh" \
+  "$COMPUTER_USE_HELPER_BIN_DIR/PuddingComputerUseHelper" \
+  "$COMPUTER_USE_HELPER_APP" \
+  com.teatak.pudding.computer-use-helper \
+  "Pudding Computer Use"
+
 PUDDING_LANGUAGE_SERVER_OUT_DIR="$LANGUAGE_SERVER_DIR" \
   PUDDING_LANGUAGE_SERVER_GOOS=darwin \
   PUDDING_LANGUAGE_SERVER_GOARCH="$GOARCH" \
@@ -65,7 +88,7 @@ expected_arch="$ARCH"
 if [[ "$ARCH" == "x64" ]]; then
   expected_arch="x86_64"
 fi
-for binary in "$DAEMON_PATH" "$LANGUAGE_SERVER_DIR/gopls"; do
+for binary in "$DAEMON_PATH" "$COMPUTER_USE_HELPER_PATH" "$LANGUAGE_SERVER_DIR/gopls"; do
   if ! lipo -archs "$binary" | grep -qw "$expected_arch"; then
     echo "runtime binary has the wrong architecture: $binary" >&2
     exit 1

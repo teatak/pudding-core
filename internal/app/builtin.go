@@ -7,6 +7,7 @@ const (
 	BuiltinSkillAuthoringID = "skill-authoring"
 	BuiltinAppAuthoringID   = "app-authoring"
 	BuiltinCaptureID        = "capture"
+	BuiltinComputerUseID    = "computer-use"
 )
 
 const (
@@ -25,6 +26,11 @@ const (
 	toolAppSave           = "builtin_app_save"
 	toolCameraCapture     = "builtin_camera_capture"
 	toolDesktopScreenshot = "builtin_desktop_screenshot"
+	toolComputerListApps  = "builtin_computer_list_apps"
+	toolComputerLaunchApp = "builtin_computer_launch_app"
+	toolComputerQuitApp   = "builtin_computer_quit_app"
+	toolComputerObserve   = "builtin_computer_observe"
+	toolComputerAct       = "builtin_computer_act"
 )
 
 type builtinDefinition struct {
@@ -153,6 +159,57 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 			Tools: []ToolRef{
 				{Name: toolDesktopScreenshot},
 				{Name: toolCameraCapture},
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:           KindApp,
+			ID:             BuiltinComputerUseID,
+			Name:           "Computer Use",
+			Description:    "Observe and operate local macOS applications through explicit Accessibility actions.",
+			Source:         SourceBuiltin,
+			Enabled:        true,
+			CanUninstall:   false,
+			RequiredMode:   "work",
+			DefaultSkillID: BuiltinComputerUseID,
+			Tools: []ToolRef{
+				{Name: toolComputerListApps},
+				{Name: toolComputerLaunchApp},
+				{Name: toolComputerQuitApp},
+				{Name: toolComputerObserve},
+				{Name: toolComputerAct},
+			},
+			Skills: []SkillRef{{
+				ID:          BuiltinComputerUseID,
+				Name:        "Computer Use",
+				Description: "Observe and operate explicit macOS app windows.",
+				Path:        "skills/computer-use/SKILL.md",
+			}},
+		},
+		skills: map[string]SkillDetail{
+			BuiltinComputerUseID: {
+				ID:          BuiltinComputerUseID,
+				Name:        "Computer Use",
+				Description: "Observe and operate explicit macOS app windows.",
+				Path:        "skills/computer-use/SKILL.md",
+				Content: `# Computer Use
+
+Use Pudding's Computer Use for the complete lifecycle of a local macOS GUI app when no structured API, connector, or browser tool can do the job.
+
+- Open a target app only with builtin_computer_launch_app. Never use builtin_command_run, open, osascript, or AppleScript to launch, activate, operate, or quit an app intended for Computer Use. This keeps opening and operating under one session-and-app approval.
+- Launch an app only when needed. A launchID is returned only when this session newly starts the app; an already-running app is never owned or closed by Pudding.
+- Quit only with a launchID returned to this session. Quit is always normal, never forced. If closed=false, stop and ask the user to handle the app's confirmation or unsaved changes.
+- List applications, then choose an explicit appID and windowID. Never target an app whose controllable field is false.
+- The apps result is a live discovery inventory, not an authorization or allowlist. There is no per-app Computer Use setting. If a running app is absent, report a discovery failure; never ask the user to add or allow it in settings.
+- Observe immediately before every action and use element IDs only from that observation.
+- The first launch, quit, observation, or action for an app requires inline user approval. Approval grants this session launch, observe, operate, and owned-quit access to that app; do not request approval again for the same app in the same session. A different session or app requires a new approval.
+- Never retry an action after an error or unknown outcome.
+- Supported actions are Accessibility press and set_value only.
+- Never operate Pudding itself, terminals, password or secure fields, permission dialogs, or macOS security settings.
+- Request a one-frame screenshot only when the accessibility tree is insufficient.
+- This capability does not monitor keyboard or mouse input and does not record or learn workflows.
+`,
 			},
 		},
 	},

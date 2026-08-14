@@ -24,6 +24,7 @@ import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { onDesktopMenuCommand } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
+import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
 import {
@@ -266,6 +267,64 @@ export function SessionRail({
     onError: () => toast.error(t("session.archiveFailed")),
   });
 
+  const sessionPlacementMutation = useMutation({
+    mutationFn: ({
+      id,
+      projectID,
+      pinned,
+      pinnedOrder,
+    }: {
+      id: string;
+      projectID: string;
+      pinned?: boolean;
+      pinnedOrder?: number;
+    }) => updateSession(token, id, { projectID, pinned, pinnedOrder }),
+    onMutate: async ({ id, projectID, pinned, pinnedOrder }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.session(id) }),
+      ]);
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      const previousSession = queryClient.getQueryData<Session>(queryKeys.session(id));
+      const applyPlacement = (session: Session): Session => {
+        if (session.id !== id) {
+          return session;
+        }
+        const next: Session = { ...session, projectID };
+        if (projectID) {
+          next.activeMode = "code";
+          next.modeLease = "session";
+        }
+        if (pinned !== undefined) {
+          next.pinned = pinned;
+        }
+        if (pinnedOrder !== undefined) {
+          next.pinnedOrder = pinnedOrder;
+        }
+        return next;
+      };
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) =>
+        previous ? { sessions: previous.sessions.map(applyPlacement) } : previous,
+      );
+      queryClient.setQueryData<Session>(queryKeys.session(id), (previous) =>
+        previous ? applyPlacement(previous) : previous,
+      );
+      return { previousSession, previousSessions };
+    },
+    onSuccess: async (updated) => {
+      await syncSessionProjectState(queryClient, token, updated.id, updated);
+    },
+    onError: (_error, { id }, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
+      }
+      if (context?.previousSession) {
+        queryClient.setQueryData(queryKeys.session(id), context.previousSession);
+      }
+      toast.error(t("session.projectChangeFailed"));
+    },
+  });
+
   function collapse(next: boolean) {
     setRailCollapsed(next);
     hover.close();
@@ -351,6 +410,9 @@ export function SessionRail({
         isError={sessionsQuery.isError}
         isLoading={sessionsQuery.isLoading}
         projects={projects}
+        projectChangePendingID={
+          sessionPlacementMutation.isPending ? sessionPlacementMutation.variables?.id : undefined
+        }
         selectedSessionID={selectedSessionID}
         sessions={sessions}
         token={token}
@@ -379,6 +441,14 @@ export function SessionRail({
           });
         }}
         onPinChange={changePinned}
+        onPlacementChange={(id, projectID) =>
+          sessionPlacementMutation
+            .mutateAsync({ id, projectID, pinned: false, pinnedOrder: 0 })
+            .then(() => undefined)
+        }
+        onProjectChange={(id, projectID) =>
+          sessionPlacementMutation.mutateAsync({ id, projectID }).then(() => undefined)
+        }
         onRefetch={() => {
           void sessionsQuery.refetch();
           void projectsQuery.refetch();

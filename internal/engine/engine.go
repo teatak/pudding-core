@@ -229,15 +229,16 @@ func (e *Engine) Stop() {
 }
 
 func (e *Engine) ReleaseSessionResources(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
 	e.mu.Lock()
 	for key := range e.queuedRuntimeIDs {
-		if strings.HasPrefix(key, strings.TrimSpace(sessionID)+"\x00") {
+		if strings.HasPrefix(key, sessionID+"\x00") {
 			delete(e.queuedRuntimeIDs, key)
 		}
 	}
 	e.mu.Unlock()
 	if cleaner, ok := e.tools.(tool.SessionResourceCleaner); ok {
-		cleaner.CloseSession(strings.TrimSpace(sessionID))
+		cleaner.CloseSession(sessionID)
 	}
 }
 
@@ -1986,7 +1987,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			}
 		}
 		risk = refineToolRisk(call.Name, risk, approvalDetails)
-		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk)
+		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk, approvalDetails)
 		call.CommandSandbox = commandSandboxModeForProject(project)
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)

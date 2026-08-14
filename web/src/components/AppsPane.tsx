@@ -130,6 +130,7 @@ import {
 } from "@/lib/appVersions";
 import { openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
+import { openSettingsDialog } from "@/lib/settingsDialog";
 import { cn } from "@/lib/utils";
 
 type AuthType = AppConnectionPayload["authType"];
@@ -1395,6 +1396,12 @@ function AppDetail({
                 ))}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {app.id === "computer-use" ? (
+                  <Button size="sm" type="button" variant="outline" onClick={() => openSettingsDialog({ section: "permissions" })}>
+                    <Settings2 className="size-3.5" />
+                    {t("apps.computerUse.permissions")}
+                  </Button>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
                   <Switch

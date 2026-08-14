@@ -11,7 +11,15 @@ import {
   AppDropdownMenuItem as DropdownMenuItem,
   AppDropdownMenuSeparator as DropdownMenuSeparator,
 } from "@/components/AppMenu";
-import { Archive, Ellipsis, FolderClosed, Pin, SquareTerminal } from "@/components/icons";
+import {
+  Archive,
+  Ellipsis,
+  FolderClosed,
+  FolderInput,
+  FolderMinus,
+  Pin,
+  SquareTerminal,
+} from "@/components/icons";
 import { useRailOverlayHold } from "@/components/session-rail/overlayHold";
 import { Spinner } from "@/components/Spinner";
 import {
@@ -38,10 +46,14 @@ type SessionItemProps = {
   running: boolean;
   completed: boolean;
   archivePending: boolean;
+  hasProjects: boolean;
+  projectChangePending: boolean;
   suppressInteractiveState: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
+  onOpenProjectPicker: () => void;
   onPinChange: (pinned: boolean) => void;
+  onRemoveProject: () => Promise<void>;
   onArchive: () => void;
   onRename: (title: string) => Promise<void>;
   onPointerDragStart: (clientX: number, clientY: number) => void;
@@ -57,10 +69,14 @@ export function SessionItem({
   running,
   completed,
   archivePending,
+  hasProjects,
+  projectChangePending,
   suppressInteractiveState,
   onSelect,
   onOpenSplit,
+  onOpenProjectPicker,
   onPinChange,
+  onRemoveProject,
   onArchive,
   onRename,
   onPointerDragStart,
@@ -387,6 +403,27 @@ export function SessionItem({
                   <DropdownMenuSeparator />
                 </>
               ) : null}
+              <DropdownMenuItem
+                disabled={running || projectChangePending || !hasProjects}
+                title={running ? t("session.projectChangeRunning") : undefined}
+                onSelect={onOpenProjectPicker}
+              >
+                <FolderInput />
+                {projectName ? t("session.moveToProject") : t("session.addToProject")}
+              </DropdownMenuItem>
+              {projectName ? (
+                <DropdownMenuItem
+                  disabled={running || projectChangePending}
+                  title={running ? t("session.projectChangeRunning") : undefined}
+                  onSelect={() => {
+                    void onRemoveProject().catch(() => undefined);
+                  }}
+                >
+                  <FolderMinus />
+                  {t("session.removeFromProject")}
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => onPinChange(!session.pinned)}>
                 <Pin className="rotate-45" />
                 {session.pinned ? t("session.unpin") : t("session.pin")}

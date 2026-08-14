@@ -1003,6 +1003,7 @@ func (r *BuiltinRunner) CloseSession(sessionID string) {
 	if r.processes != nil {
 		r.processes.CloseSession(sessionID)
 	}
+	r.releaseComputerSession(sessionID)
 	if sessionID != "" {
 		r.patchMu.Lock()
 		for key, prepared := range r.preparedPatches {

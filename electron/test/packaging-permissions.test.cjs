@@ -10,6 +10,7 @@ const {
   makeBundleOwnerWritable,
   removeUnusedPrivacyUsageDescriptions,
   setMinimumSystemVersion,
+  syncNestedBundleVersion,
 } = require("../../packaging/electron-builder-after-pack.cjs");
 
 test("packaging rewrites copied runtime symlinks to stay inside the app", () => {
@@ -127,6 +128,39 @@ test("packaging records architecture-specific macOS requirements", {
       }).trim(),
       "15.5",
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaging synchronizes the nested Computer Use bundle version", {
+  skip: process.platform !== "darwin",
+}, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-computer-use-version-"));
+  const outerInfoPlistPath = path.join(root, "Pudding.app", "Contents", "Info.plist");
+  const helperInfoPlistPath = path.join(root, "Pudding Computer Use.app", "Contents", "Info.plist");
+  try {
+    for (const [filePath, version] of [[outerInfoPlistPath, "0.2.0"], [helperInfoPlistPath, "1.0"]]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(
+        filePath,
+        `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>${version}</string>
+<key>CFBundleVersion</key><string>${version}</string>
+</dict></plist>`,
+      );
+    }
+
+    syncNestedBundleVersion(outerInfoPlistPath, helperInfoPlistPath);
+
+    for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
+      assert.equal(
+        execFileSync("plutil", ["-extract", key, "raw", helperInfoPlistPath], { encoding: "utf8" }).trim(),
+        "0.2.0",
+      );
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

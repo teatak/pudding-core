@@ -3460,6 +3460,30 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestPatchSessionProjectBindingPromotesCodeMode(t *testing.T) {
+	srv, _ := newTestServer(t)
+	project := decodeJSON[store.Project](t, req(t, http.MethodPost, srv.URL+"/projects", map[string]any{
+		"name": "demo", "rootDirs": []string{t.TempDir()}, "approvalMode": "auto",
+	}))
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{
+		"title": "chat", "provider": "gem", "model": "m1",
+	}))
+
+	bound := decodeJSON[store.Session](t, req(t, http.MethodPatch, srv.URL+"/sessions/"+sess.ID, map[string]string{
+		"projectID": project.ID,
+	}))
+	if bound.ProjectID != project.ID || bound.ActiveMode != store.ModeCode || bound.ModeLease != store.ModeLeaseSession {
+		t.Fatalf("binding a project must promote the session to Code mode: %+v", bound)
+	}
+
+	unbound := decodeJSON[store.Session](t, req(t, http.MethodPatch, srv.URL+"/sessions/"+sess.ID, map[string]string{
+		"projectID": "",
+	}))
+	if unbound.ProjectID != "" || unbound.ActiveMode != store.ModeCode || unbound.ModeLease != store.ModeLeaseSession {
+		t.Fatalf("removing a project must preserve the current mode: %+v", unbound)
+	}
+}
+
 func TestUnloadSessionAppIsSessionScopedAndIdempotent(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()

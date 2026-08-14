@@ -377,7 +377,10 @@ BrowserHost 生命周期收口审查(更新于 2026-07-13):
   不会实际关闭服务。完整检查/下载流程可先安装旧版,
   用更高的 `PUDDING_APP_VERSION` 构建新包,再运行 `make desktop-update-test`。该命令会启动本地
   Range feed、拉起 `/Applications/Pudding.app`,并在更新重启后自动检查安装版本、
-  Developer ID 签名、公证票据、Gatekeeper 和包内权限。新旧版本必须使用同一 Developer ID。
+  Developer ID 签名、公证票据、Gatekeeper、包内权限和 Computer Use Helper。首个含 Helper 的
+  正式版本发布后,后续升级使用 `make desktop-computer-use-update-test`,额外要求升级前后 Helper 的
+  bundle identifier、Team ID 和完整 designated requirement 一致。Preview 对应使用
+  `make desktop-preview-update-test` 和 `make desktop-preview-computer-use-update-test`。新旧版本必须使用同一 Developer ID。
 - 2026-07-14 验证:Apple Silicon 可交叉编译 arm64/x64 daemon、WebRTC、PortAudio 和 gopls;
   完整发布门禁会继续逐架构校验 DMG/ZIP/update metadata、签名、公证和 Gatekeeper。
 

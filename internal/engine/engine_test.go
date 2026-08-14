@@ -1063,7 +1063,14 @@ func TestSubmitPreservesStateOnlyContinuationAfterToolResult(t *testing.T) {
 
 func TestEngineReleasesToolResources(t *testing.T) {
 	runner := &recordingToolRunner{}
-	eng := New(memstore.New(), event.NewHub(), mapResolver{}, memstore.New(), WithTools(runner))
+	ms := memstore.New()
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_resources", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.GrantComputerApp(context.Background(), "sess_resources", "com.example.App"); err != nil {
+		t.Fatal(err)
+	}
+	eng := New(ms, event.NewHub(), mapResolver{}, ms, WithTools(runner))
 	eng.ReleaseSessionResources(" sess_resources ")
 	eng.Stop()
 	eng.Stop()
@@ -1072,6 +1079,127 @@ func TestEngineReleasesToolResources(t *testing.T) {
 	}
 	if runner.closeCount != 1 {
 		t.Fatalf("tool resources must close once, got %d", runner.closeCount)
+	}
+	if granted, err := ms.HasComputerAppGrant(context.Background(), "sess_resources", "com.example.App"); err != nil || !granted {
+		t.Fatalf("session resource release must preserve persistent Computer Use app grants: granted=%v err=%v", granted, err)
+	}
+}
+
+func TestComputerToolApprovalGrantsSessionApp(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	const sessionID = "sess_computer_grant"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := New(ms, hub, mapResolver{}, ms)
+	sub, unsub := hub.Subscribe(sessionID)
+	defer unsub()
+	pending := &pendingApproval{
+		req: ApprovalRequest{
+			ID: "appr_computer", SessionID: sessionID, TurnID: "turn_1", CallID: "call_1",
+			Kind: ApprovalKindToolCall, Payload: json.RawMessage(`{"scope":"computer","appID":"com.example.Calculator"}`),
+		},
+		ch: make(chan approvalDecision, 1),
+	}
+	eng.approvals[pending.req.ID] = pending
+	if _, err := eng.ApproveApprovalWithSession(ctx, sessionID, pending.req.ID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if granted, err := ms.HasComputerAppGrant(ctx, sessionID, "com.example.Calculator"); err != nil || !granted {
+		t.Fatalf("approved Computer Use app grant was not recorded: granted=%v err=%v", granted, err)
+	}
+	decision := <-pending.ch
+	if decision.scope != ApprovalScopeSession {
+		t.Fatalf("Computer Use app approval scope = %q, want session", decision.scope)
+	}
+	select {
+	case resolved := <-sub:
+		if resolved.Kind != event.ApprovalResolved || !strings.Contains(string(resolved.Payload), `"scope":"session"`) {
+			t.Fatalf("unexpected Computer Use approval event: %+v", resolved)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Computer Use approval resolution was not emitted")
+	}
+	restarted := New(ms, event.NewHub(), mapResolver{}, ms)
+	risk := tool.ToolRisk{Class: tool.RiskClassRead, Scope: "computer"}
+	if _, required, err := restarted.toolCallApprovalRequired(ctx, sessionID, risk, map[string]any{"appID": "com.example.Calculator"}); err != nil || required {
+		t.Fatalf("restarted engine must reuse the persisted session app grant: required=%v err=%v", required, err)
+	}
+}
+
+type blockingComputerGrantStore struct {
+	store.Store
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingComputerGrantStore) GrantComputerApp(ctx context.Context, sessionID, appID string) error {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.Store.GrantComputerApp(ctx, sessionID, appID)
+}
+
+func TestComputerToolApprovalHasSingleResolutionWinner(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	const sessionID = "sess_computer_approval_race"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	blockingStore := &blockingComputerGrantStore{
+		Store:   ms,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	eng := New(blockingStore, event.NewHub(), mapResolver{}, ms)
+	pending := &pendingApproval{
+		req: ApprovalRequest{
+			ID: "appr_computer_race", SessionID: sessionID, TurnID: "turn_1", CallID: "call_1",
+			Kind: ApprovalKindToolCall, Payload: json.RawMessage(`{"scope":"computer","appID":"com.example.Calculator"}`),
+		},
+		ch: make(chan approvalDecision, 1),
+	}
+	eng.approvals[pending.req.ID] = pending
+
+	approveResult := make(chan error, 1)
+	go func() {
+		_, err := eng.ApproveApprovalWithSession(ctx, sessionID, pending.req.ID, ApprovalScopeTurn, nil)
+		approveResult <- err
+	}()
+	select {
+	case <-blockingStore.entered:
+	case <-time.After(time.Second):
+		t.Fatal("approve did not claim the pending approval")
+	}
+	if err := eng.DenyApproval(ctx, sessionID, pending.req.ID, "denied"); !errors.Is(err, ErrApprovalNotFound) {
+		t.Fatalf("concurrent deny error = %v, want ErrApprovalNotFound", err)
+	}
+	close(blockingStore.release)
+	select {
+	case err := <-approveResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approve did not finish")
+	}
+	if granted, err := ms.HasComputerAppGrant(ctx, sessionID, "com.example.Calculator"); err != nil || !granted {
+		t.Fatalf("winning approval did not persist the app grant: granted=%v err=%v", granted, err)
+	}
+	select {
+	case decision := <-pending.ch:
+		if !decision.approved || decision.scope != ApprovalScopeSession {
+			t.Fatalf("unexpected approval decision: %+v", decision)
+		}
+	default:
+		t.Fatal("winning approval did not notify the waiting tool call")
 	}
 }
 
@@ -2264,6 +2392,35 @@ func TestCodeCapabilityApprovalWithoutProjectUsesSessionScratch(t *testing.T) {
 	}
 }
 
+func TestCodeRequestingWorkReportsAlreadyAvailableWithoutDowngrade(t *testing.T) {
+	ms := memstore.New()
+	eng := New(ms, event.NewHub(), mapResolver{}, ms)
+	ctx := context.Background()
+	sid := "sess_code_requests_work"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "test", Model: "test", ActiveMode: store.ModeCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_code", tool.Call{
+		SessionID: sid,
+		TurnID:    "turn_code",
+		CallID:    "call_work",
+		Name:      tool.RequestCapability,
+		Args:      json.RawMessage(`{"targetMode":"work","reason":"需要加载 Computer Use"}`),
+	}, store.ModeCode)
+	if !result.Ok || upgraded || mode != store.ModeCode ||
+		!strings.Contains(result.Content, `"status":"already_available"`) ||
+		!strings.Contains(result.Content, `"currentMode":"code"`) ||
+		!strings.Contains(result.Content, `"targetMode":"work"`) {
+		t.Fatalf("unexpected Code-to-Work result: result=%+v mode=%q upgraded=%t", result, mode, upgraded)
+	}
+	if pending := eng.PendingApprovals(sid); len(pending) != 0 {
+		t.Fatalf("Code-to-Work no-op must not request approval: %+v", pending)
+	}
+}
+
 func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
@@ -2903,38 +3060,56 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	highRisk := tool.ToolRisk{Class: tool.RiskClassCommand}
 	projectWrite := tool.ToolRisk{Class: tool.RiskClassWrite, LowRisk: true}
 	protectedWrite := tool.ToolRisk{Class: tool.RiskClassWrite}
+	computerRead := tool.ToolRisk{Class: tool.RiskClassRead, Scope: "computer"}
+	computerWrite := tool.ToolRisk{Class: tool.RiskClassWrite, Scope: "computer"}
 
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk); err != nil || required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || required {
 		t.Fatalf("auto should allow read tools: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk, nil); err != nil || required {
 		t.Fatalf("auto should allow low-risk command: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, projectWrite); err != nil || required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, projectWrite, nil); err != nil || required {
 		t.Fatalf("auto should allow low-risk project write: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, protectedWrite); err != nil || !required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, protectedWrite, nil); err != nil || !required {
 		t.Fatalf("auto should ask for protected project write: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk); err != nil || !required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk, nil); err != nil || !required {
 		t.Fatalf("auto should ask for other commands: required=%v err=%v", required, err)
 	}
 	ask := store.ApprovalAsk
 	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &ask}); err != nil {
 		t.Fatal(err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || !required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk, nil); err != nil || !required {
 		t.Fatalf("ask should require command approval: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk); err != nil || !required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || !required {
 		t.Fatalf("ask should require read approval: required=%v err=%v", required, err)
 	}
 	full := store.ApprovalFull
 	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &full}); err != nil {
 		t.Fatal(err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk); err != nil || required {
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk, nil); err != nil || required {
 		t.Fatalf("full should allow command: required=%v err=%v", required, err)
+	}
+	computerDetails := map[string]any{"appID": "com.example.Calculator"}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerWrite, computerDetails); err != nil || !required {
+		t.Fatalf("Computer Use writes must require approval in full mode: required=%v err=%v", required, err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerRead, computerDetails); err != nil || !required {
+		t.Fatalf("Computer Use observations must require approval in full mode: required=%v err=%v", required, err)
+	}
+	if err := ms.GrantComputerApp(ctx, sid, "com.example.Calculator"); err != nil {
+		t.Fatal(err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerRead, computerDetails); err != nil || required {
+		t.Fatalf("approved Computer Use app should not ask again: required=%v err=%v", required, err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerWrite, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
+		t.Fatalf("a different Computer Use app must require approval: required=%v err=%v", required, err)
 	}
 }
 
