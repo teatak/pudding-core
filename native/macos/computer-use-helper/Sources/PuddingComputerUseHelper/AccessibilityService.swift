@@ -177,15 +177,24 @@ final class AccessibilityService {
     let allWindows = windows(of: appElement)
     let appWindows: [AXUIElement]
     if let requestedWindowID {
-      appWindows = allWindows.filter { window in
-        if windowID(of: window) == requestedWindowID {
-          return true
-        }
-        return targetWindow.map { matches(window: window, target: $0) } ?? false
+      let candidates = allWindows.enumerated().map { index, window in
+        ApplicationWindowSnapshot(
+          index: index,
+          windowID: windowID(of: window),
+          title: attributeString(window, kAXTitleAttribute as CFString),
+          frame: frame(of: window)
+        )
       }
-      guard !appWindows.isEmpty else {
+      guard
+        let resolvedIndex = WindowResolver.resolveIndex(
+          requestedWindowID: requestedWindowID,
+          targetWindow: targetWindow,
+          candidates: candidates
+        )
+      else {
         throw HelperError.windowNotFound(requestedWindowID)
       }
+      appWindows = [allWindows[resolvedIndex]]
     } else {
       appWindows = allWindows
     }
@@ -317,26 +326,6 @@ final class AccessibilityService {
       return number
     }
     return nil
-  }
-
-  private func matches(window: AXUIElement, target: CapturableWindowSnapshot) -> Bool {
-    guard let sourceFrame = frame(of: window) else {
-      return false
-    }
-    let frameMatches =
-      abs(sourceFrame.x - target.frame.x) <= 2
-      && abs(sourceFrame.y - target.frame.y) <= 2
-      && abs(sourceFrame.width - target.frame.width) <= 2
-      && abs(sourceFrame.height - target.frame.height) <= 2
-    guard frameMatches else {
-      return false
-    }
-    guard let targetTitle = target.title, !targetTitle.isEmpty,
-      let sourceTitle = attributeString(window, kAXTitleAttribute as CFString), !sourceTitle.isEmpty
-    else {
-      return true
-    }
-    return sourceTitle == targetTitle
   }
 
   private func frame(of element: AXUIElement) -> FrameSnapshot? {
