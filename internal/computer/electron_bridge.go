@@ -29,16 +29,16 @@ type ElectronBridgeService struct {
 }
 
 type bridgeApplication struct {
-	BundleID     string   `json:"bundleID"`
-	Name         string   `json:"name"`
-	PID          int32    `json:"pid"`
-	Active       bool     `json:"active"`
-	Controllable bool     `json:"controllable"`
-	Windows      []Window `json:"windows"`
+	BundleID     string `json:"bundleID"`
+	Name         string `json:"name"`
+	Running      bool   `json:"running"`
+	Active       bool   `json:"active"`
+	Controllable bool   `json:"controllable"`
 }
 
 type bridgeCapturableWindow struct {
 	WindowID        uint32  `json:"windowID"`
+	PID             int32   `json:"pid"`
 	BundleID        *string `json:"bundleID,omitempty"`
 	ApplicationName *string `json:"applicationName,omitempty"`
 	Title           *string `json:"title,omitempty"`
@@ -46,9 +46,7 @@ type bridgeCapturableWindow struct {
 }
 
 type bridgeAppList struct {
-	Permissions       Permissions              `json:"permissions"`
-	Apps              []bridgeApplication      `json:"apps"`
-	CapturableWindows []bridgeCapturableWindow `json:"capturableWindows"`
+	Apps []bridgeApplication `json:"apps"`
 }
 
 type bridgeObservation struct {
@@ -62,18 +60,35 @@ type bridgeObservation struct {
 	Elements   []Element `json:"elements"`
 }
 
+type bridgeObservationCapture struct {
+	Observation  bridgeObservation `json:"observation"`
+	Capture      *Capture          `json:"capture,omitempty"`
+	CaptureError *bridgeFailure    `json:"captureError,omitempty"`
+}
+
 type bridgeNativeAction struct {
-	BundleID  string `json:"bundleID"`
-	ElementID string `json:"elementID"`
-	Action    string `json:"action"`
-	Completed bool   `json:"completed"`
+	BundleID   string   `json:"bundleID"`
+	ElementID  string   `json:"elementID"`
+	Action     string   `json:"action"`
+	Completed  bool     `json:"completed"`
+	X          *float64 `json:"x,omitempty"`
+	Y          *float64 `json:"y,omitempty"`
+	ToX        *float64 `json:"toX,omitempty"`
+	ToY        *float64 `json:"toY,omitempty"`
+	Button     string   `json:"button,omitempty"`
+	ClickCount int      `json:"clickCount,omitempty"`
+	DeltaX     *int     `json:"deltaX,omitempty"`
+	DeltaY     *int     `json:"deltaY,omitempty"`
 }
 
 type bridgeNativeUse struct {
-	BundleID      string `json:"bundleID"`
-	Name          string `json:"name"`
-	PID           int32  `json:"pid"`
-	NewlyLaunched bool   `json:"newlyLaunched"`
+	BundleID      string                   `json:"bundleID"`
+	Name          string                   `json:"name"`
+	PID           int32                    `json:"pid"`
+	NewlyLaunched bool                     `json:"newlyLaunched"`
+	WindowStatus  string                   `json:"windowStatus"`
+	WindowError   *bridgeFailure           `json:"windowError,omitempty"`
+	Windows       []bridgeCapturableWindow `json:"windows"`
 }
 
 type bridgeNativeQuit struct {
@@ -85,6 +100,13 @@ type bridgeNativeQuit struct {
 type bridgeError struct {
 	Error     string `json:"error"`
 	Code      string `json:"code"`
+	Retryable bool   `json:"retryable"`
+	Outcome   string `json:"outcome"`
+}
+
+type bridgeFailure struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
 	Outcome   string `json:"outcome"`
 }
@@ -122,22 +144,28 @@ func (s *ElectronBridgeService) ListApps(ctx context.Context, sessionID string) 
 	if err := s.post(ctx, "/computer/apps/list", map[string]any{"sessionID": sessionID}, &raw); err != nil {
 		return AppList{}, err
 	}
-	out := AppList{Permissions: raw.Permissions, Apps: make([]Application, 0, len(raw.Apps)), CapturableWindows: make([]CapturableWindow, 0, len(raw.CapturableWindows))}
+	out := AppList{Apps: make([]Application, 0, len(raw.Apps))}
 	for _, item := range raw.Apps {
-		out.Apps = append(out.Apps, Application{AppID: item.BundleID, Name: item.Name, PID: item.PID, Active: item.Active, Controllable: item.Controllable, Windows: item.Windows})
-	}
-	for _, item := range raw.CapturableWindows {
-		out.CapturableWindows = append(out.CapturableWindows, CapturableWindow{WindowID: item.WindowID, AppID: item.BundleID, ApplicationName: item.ApplicationName, Title: item.Title, Frame: item.Frame})
+		out.Apps = append(out.Apps, Application{AppID: item.BundleID, Name: item.Name, Running: item.Running, Active: item.Active, Controllable: item.Controllable})
 	}
 	return out, nil
 }
 
-func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID string) (NativeUse, error) {
+func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID string, foreground bool) (NativeUse, error) {
 	var raw bridgeNativeUse
-	if err := s.post(ctx, "/computer/apps/use", map[string]any{"sessionID": sessionID, "appID": appID}, &raw); err != nil {
+	if err := s.request(ctx, http.MethodPost, "/computer/apps/use", map[string]any{"sessionID": sessionID, "appID": appID, "foreground": foreground}, &raw, "unknown"); err != nil {
 		return NativeUse{}, err
 	}
-	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched}, nil
+	windows := make([]CapturableWindow, 0, len(raw.Windows))
+	for _, item := range raw.Windows {
+		windows = append(windows, CapturableWindow{WindowID: item.WindowID, PID: item.PID, AppID: item.BundleID, ApplicationName: item.ApplicationName, Title: item.Title, Frame: item.Frame})
+	}
+	var windowError *Failure
+	if raw.WindowError != nil {
+		failure := Failure{Code: raw.WindowError.Code, Message: raw.WindowError.Message, Retryable: raw.WindowError.Retryable, Outcome: validOutcome(raw.WindowError.Outcome)}
+		windowError = &failure
+	}
+	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched, WindowStatus: raw.WindowStatus, WindowError: windowError, Windows: windows}, nil
 }
 
 func (s *ElectronBridgeService) QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error) {
@@ -157,10 +185,27 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, appID st
 	return Observation{AppID: raw.BundleID, WindowID: raw.WindowID, Name: raw.Name, PID: raw.PID, ObservedAt: raw.ObservedAt, Truncated: raw.Truncated, Windows: raw.Windows, Elements: raw.Elements}, nil
 }
 
-func (s *ElectronBridgeService) Capture(ctx context.Context, sessionID, appID string, windowID uint32, output string) (Capture, error) {
-	var out Capture
-	err := s.post(ctx, "/computer/capture", map[string]any{"sessionID": sessionID, "appID": appID, "windowID": windowID, "output": output}, &out)
-	return out, err
+func (s *ElectronBridgeService) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error) {
+	var raw bridgeObservationCapture
+	err := s.post(ctx, "/computer/observe-capture", map[string]any{
+		"sessionID": sessionID, "appID": appID, "windowID": windowID,
+		"maxElements": maxElements, "output": output,
+	}, &raw)
+	if err != nil {
+		return NativeObservationCapture{}, err
+	}
+	observation := Observation{
+		AppID: raw.Observation.BundleID, WindowID: raw.Observation.WindowID,
+		Name: raw.Observation.Name, PID: raw.Observation.PID,
+		ObservedAt: raw.Observation.ObservedAt, Truncated: raw.Observation.Truncated,
+		Windows: raw.Observation.Windows, Elements: raw.Observation.Elements,
+	}
+	var captureError *Failure
+	if raw.CaptureError != nil {
+		failure := Failure{Code: raw.CaptureError.Code, Message: raw.CaptureError.Message, Retryable: raw.CaptureError.Retryable, Outcome: validOutcome(raw.CaptureError.Outcome)}
+		captureError = &failure
+	}
+	return NativeObservationCapture{Observation: observation, Capture: raw.Capture, CaptureError: captureError}, nil
 }
 
 func (s *ElectronBridgeService) Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (NativeAction, error) {
@@ -172,11 +217,34 @@ func (s *ElectronBridgeService) Act(ctx context.Context, sessionID, appID string
 	if err := s.request(ctx, http.MethodPost, "/computer/act", body, &raw, "unknown"); err != nil {
 		return NativeAction{}, err
 	}
-	return NativeAction{AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed}, nil
+	return NativeAction{AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed, X: raw.X, Y: raw.Y}, nil
 }
 
-func (s *ElectronBridgeService) ReleaseSession(ctx context.Context, sessionID string) error {
-	return s.post(ctx, "/computer/session/release", map[string]any{"sessionID": sessionID}, nil)
+func (s *ElectronBridgeService) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer ScreenshotPointer) (NativeAction, error) {
+	body := map[string]any{
+		"sessionID": sessionID, "appID": appID, "windowID": windowID,
+		"action": pointer.Action, "x": pointer.X, "y": pointer.Y,
+		"captureWidth": pointer.CaptureWidth, "captureHeight": pointer.CaptureHeight,
+		"scaleFactor": pointer.ScaleFactor,
+	}
+	if pointer.ToX != nil {
+		body["toX"], body["toY"] = *pointer.ToX, *pointer.ToY
+	}
+	if pointer.Button != "" {
+		body["button"], body["clickCount"] = pointer.Button, pointer.ClickCount
+	}
+	if pointer.DeltaX != nil {
+		body["deltaX"], body["deltaY"] = *pointer.DeltaX, *pointer.DeltaY
+	}
+	var raw bridgeNativeAction
+	if err := s.request(ctx, http.MethodPost, "/computer/pointer", body, &raw, "unknown"); err != nil {
+		return NativeAction{}, err
+	}
+	return NativeAction{
+		AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed,
+		X: raw.X, Y: raw.Y, ToX: raw.ToX, ToY: raw.ToY, Button: raw.Button,
+		ClickCount: raw.ClickCount, DeltaX: raw.DeltaX, DeltaY: raw.DeltaY,
+	}, nil
 }
 
 func (s *ElectronBridgeService) post(ctx context.Context, path string, in, out any) error {

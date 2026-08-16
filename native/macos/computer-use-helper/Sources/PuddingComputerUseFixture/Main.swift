@@ -2,12 +2,57 @@ import AppKit
 
 private let fixtureBundleID = "com.teatak.pudding.computer-use-fixture"
 
+final class PointerGestureView: NSView {
+  var report: ((String) -> Void)?
+  private var dragging = false
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+  override func mouseDown(with event: NSEvent) {
+    dragging = false
+    report?(event.clickCount >= 2 ? "double click" : "left click")
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    report?("right click")
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    dragging = true
+    report?("dragged")
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    guard dragging else { return }
+    dragging = false
+    let location = convert(event.locationInWindow, from: nil)
+    report?(location.x >= bounds.midX ? "drag released right" : "drag released left")
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    if event.scrollingDeltaY < 0 {
+      report?("scrolled down")
+    } else if event.scrollingDeltaY > 0 {
+      report?("scrolled up")
+    } else {
+      report?(event.scrollingDeltaX < 0 ? "scrolled right" : "scrolled left")
+    }
+  }
+}
+
 @MainActor
-final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
+final class FixtureAppDelegate: NSObject, NSApplicationDelegate, NSTableViewDataSource,
+  NSTableViewDelegate
+{
   private var primaryWindow: NSWindow?
   private var secondaryWindow: NSWindow?
   private var count = 0
   private let countValue = NSTextField(labelWithString: "0")
+  private let confirmedValue = NSTextField(labelWithString: "not confirmed")
+  private let selectedValue = NSTextField(labelWithString: "no row selected")
+  private let pointerValue = NSTextField(labelWithString: "no pointer action")
+  private let rowCount = 500
+  private weak var tableView: NSTableView?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard Bundle.main.bundleIdentifier == fixtureBundleID else {
@@ -44,6 +89,37 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
     secondaryWindow?.close()
   }
 
+  @objc private func confirmInput(_ sender: NSTextField) {
+    confirmedValue.stringValue = sender.stringValue
+    tableView?.scrollRowToVisible(250)
+  }
+
+  func numberOfRows(in tableView: NSTableView) -> Int {
+    rowCount
+  }
+
+  func tableView(
+    _ tableView: NSTableView,
+    viewFor tableColumn: NSTableColumn?,
+    row: Int
+  ) -> NSView? {
+    let identifier = NSUserInterfaceItemIdentifier("fixture.table-cell")
+    let field = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField
+      ?? NSTextField(labelWithString: "")
+    field.identifier = identifier
+    field.stringValue = "Deterministic row \(row + 1)"
+    field.setAccessibilityIdentifier("fixture.row.\(row + 1)")
+    field.setAccessibilityLabel("Fixture row \(row + 1)")
+    return field
+  }
+
+  func tableViewSelectionDidChange(_ notification: Notification) {
+    guard let tableView = notification.object as? NSTableView else { return }
+    selectedValue.stringValue = tableView.selectedRow >= 0
+      ? "selected row \(tableView.selectedRow + 1)"
+      : "no row selected"
+  }
+
   private func makePrimaryWindow() -> NSWindow {
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 520, height: 500),
@@ -71,7 +147,14 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
     let input = NSTextField(string: "initial")
     input.frame = NSRect(x: 160, y: 401, width: 320, height: 28)
     identify(input, id: "fixture.text-input", label: "Fixture text input")
+    input.target = self
+    input.action = #selector(confirmInput(_:))
     content.addSubview(input)
+    window.initialFirstResponder = input
+
+    confirmedValue.frame = NSRect(x: 160, y: 382, width: 320, height: 18)
+    identify(confirmedValue, id: "fixture.confirmed-value", label: "Fixture confirmed value")
+    content.addSubview(confirmedValue)
 
     let secureLabel = NSTextField(labelWithString: "Secure value")
     secureLabel.frame = NSRect(x: 24, y: 360, width: 130, height: 22)
@@ -111,18 +194,43 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
     identify(checkbox, id: "fixture.checkbox", label: "Fixture checkbox")
     content.addSubview(checkbox)
 
+    selectedValue.frame = NSRect(x: 24, y: 238, width: 200, height: 18)
+    identify(selectedValue, id: "fixture.selected-value", label: "Fixture selected value")
+    content.addSubview(selectedValue)
+
+    let pointerTarget = PointerGestureView(frame: NSRect(x: 228, y: 252, width: 252, height: 36))
+    pointerTarget.wantsLayer = true
+    pointerTarget.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+    pointerTarget.layer?.cornerRadius = 8
+    pointerTarget.setAccessibilityElement(true)
+    pointerTarget.setAccessibilityRole(.group)
+    identify(pointerTarget, id: "fixture.pointer-target", label: "Fixture pointer target")
+    pointerTarget.report = { [weak self] value in
+      self?.pointerValue.stringValue = value
+    }
+    content.addSubview(pointerTarget)
+
+    pointerValue.frame = NSRect(x: 228, y: 234, width: 252, height: 18)
+    identify(pointerValue, id: "fixture.pointer-value", label: "Fixture pointer value")
+    content.addSubview(pointerValue)
+
     let scrollView = NSScrollView(frame: NSRect(x: 24, y: 24, width: 456, height: 210))
     scrollView.hasVerticalScroller = true
     scrollView.borderType = .bezelBorder
     identify(scrollView, id: "fixture.scroll", label: "Fixture scroll area")
-    let document = NSView(frame: NSRect(x: 0, y: 0, width: 430, height: 520))
-    for index in 0..<20 {
-      let row = NSTextField(labelWithString: "Deterministic row \(index + 1)")
-      row.frame = NSRect(x: 12, y: 488 - (index * 24), width: 300, height: 20)
-      identify(row, id: "fixture.row.\(index + 1)", label: "Fixture row \(index + 1)")
-      document.addSubview(row)
-    }
-    scrollView.documentView = document
+    let table = NSTableView(frame: scrollView.bounds)
+    let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("fixture.table-column"))
+    column.title = "Rows"
+    column.width = 430
+    table.addTableColumn(column)
+    table.headerView = nil
+    table.rowHeight = 24
+    table.allowsMultipleSelection = false
+    table.dataSource = self
+    table.delegate = self
+    tableView = table
+    identify(table, id: "fixture.table", label: "Fixture table")
+    scrollView.documentView = table
     content.addSubview(scrollView)
     return window
   }

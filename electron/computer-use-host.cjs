@@ -7,8 +7,9 @@ const supportedCommands = new Set([
   "use_app",
   "quit_app",
   "observe",
-  "capture",
+  "observe_capture",
   "act",
+  "pointer",
 ]);
 
 class ComputerUseError extends Error {
@@ -27,12 +28,15 @@ class ComputerUseHost {
     this.spawnProcess = options.spawnProcess || spawn;
     this.platform = options.platform || process.platform;
     this.defaultTimeoutMs = positiveInteger(options.defaultTimeoutMs, 15_000);
+    this.pointerDrainTimeoutMs = positiveInteger(options.pointerDrainTimeoutMs, 1_000);
     this.maximumMessageBytes = positiveInteger(options.maximumMessageBytes, 1024 * 1024);
     this.child = null;
     this.stdoutBuffer = "";
     this.pending = new Map();
     this.nextRequestID = 1;
     this.stopPromise = null;
+    this.requestQueue = Promise.resolve();
+    this.generation = 0;
   }
 
   permissions(params = {}, options = {}) {
@@ -59,12 +63,16 @@ class ComputerUseHost {
     return this.request("observe", params, options);
   }
 
-  capture(params, options = {}) {
-    return this.request("capture", params, options);
+  observeCapture(params, options = {}) {
+    return this.request("observe_capture", params, options);
   }
 
   act(params, options = {}) {
     return this.request("act", params, options);
+  }
+
+  pointer(params, options = {}) {
+    return this.request("pointer", params, options);
   }
 
   request(command, params = {}, options = {}) {
@@ -92,11 +100,27 @@ class ComputerUseHost {
         outcome: "not_started",
       }));
     }
-    const signal = options.signal;
-    if (signal?.aborted) {
+    if (options.signal?.aborted) {
       return Promise.reject(cancelledError("not_started"));
     }
 
+    const generation = this.generation;
+    const operation = this.requestQueue.then(() => {
+      if (generation !== this.generation || options.signal?.aborted) {
+        throw cancelledError("not_started");
+      }
+      return this.sendRequest(command, params, options);
+    });
+    this.requestQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  sendRequest(command, params, options) {
+    const signal = options.signal;
+    const outcome = uncertainOutcome(command);
+    if (signal?.aborted) {
+      return Promise.reject(cancelledError("not_started"));
+    }
     const id = `computer-${this.nextRequestID++}`;
     const line = JSON.stringify({ id, command, params });
     if (Buffer.byteLength(line, "utf8") > this.maximumMessageBytes) {
@@ -117,19 +141,33 @@ class ComputerUseHost {
       const pending = {
         resolve,
         reject,
+        command,
         timer: null,
+        drainTimer: null,
+        abortError: null,
         signal,
         abortListener: null,
+        outcome,
       };
       pending.timer = setTimeout(() => {
-        this.abortRequest(id, new ComputerUseError("Computer Use request timed out", {
+        const error = new ComputerUseError("Computer Use request timed out", {
           code: "computer_action_timeout",
-          outcome: "unknown",
-        }));
+          outcome,
+        });
+        if (command === "pointer") {
+          this.drainPointerRequest(id, error);
+        } else {
+          this.abortRequest(id, error);
+        }
       }, timeoutMs);
       if (signal) {
         pending.abortListener = () => {
-          this.abortRequest(id, cancelledError("unknown"));
+          const error = cancelledError(outcome);
+          if (command === "pointer") {
+            this.drainPointerRequest(id, error);
+          } else {
+            this.abortRequest(id, error);
+          }
         };
         signal.addEventListener("abort", pending.abortListener, { once: true });
       }
@@ -150,6 +188,7 @@ class ComputerUseHost {
     if (this.stopPromise) {
       return this.stopPromise;
     }
+    this.generation += 1;
     const attempt = this.stopProcess();
     this.stopPromise = attempt;
     const clear = () => {
@@ -238,6 +277,10 @@ class ComputerUseHost {
     }
     this.pending.delete(id);
     cleanupPending(pending);
+    if (pending.abortError) {
+      pending.reject(pending.abortError);
+      return true;
+    }
     if (response.ok) {
       pending.resolve(response.result);
       return true;
@@ -249,6 +292,23 @@ class ComputerUseHost {
       outcome: validOutcome(detail.outcome),
     }));
     return true;
+  }
+
+  drainPointerRequest(id, error) {
+    const pending = this.pending.get(id);
+    if (!pending || pending.abortError) {
+      return;
+    }
+    pending.abortError = error;
+    clearTimeout(pending.timer);
+    pending.timer = null;
+    if (pending.signal && pending.abortListener) {
+      pending.signal.removeEventListener("abort", pending.abortListener);
+      pending.abortListener = null;
+    }
+    pending.drainTimer = setTimeout(() => {
+      this.abortRequest(id, error);
+    }, this.pointerDrainTimeoutMs);
   }
 
   abortRequest(id, error) {
@@ -265,7 +325,7 @@ class ComputerUseHost {
           ? error
           : new ComputerUseError("Computer Use helper was stopped with another request", {
               code: "computer_helper_crashed",
-              outcome: "unknown",
+              outcome: pending.outcome,
             }),
       );
     }
@@ -281,7 +341,7 @@ class ComputerUseHost {
     this.stdoutBuffer = "";
     for (const pending of this.pending.values()) {
       cleanupPending(pending);
-      pending.reject(error);
+      pending.reject(withOutcome(error, pending.outcome));
     }
     this.pending.clear();
     terminateChild(child);
@@ -293,7 +353,7 @@ class ComputerUseHost {
     this.stdoutBuffer = "";
     for (const pending of this.pending.values()) {
       cleanupPending(pending);
-      pending.reject(cancelledError("unknown"));
+      pending.reject(cancelledError(pending.outcome));
     }
     this.pending.clear();
     if (!child || child.exitCode !== null) {
@@ -323,6 +383,7 @@ class ComputerUseHost {
 
 function cleanupPending(pending) {
   clearTimeout(pending.timer);
+  clearTimeout(pending.drainTimer);
   if (pending.signal && pending.abortListener) {
     pending.signal.removeEventListener("abort", pending.abortListener);
   }
@@ -337,6 +398,23 @@ function terminateChild(child) {
 function cancelledError(outcome) {
   return new ComputerUseError("Computer Use request was cancelled", {
     code: "computer_action_cancelled",
+    outcome,
+  });
+}
+
+function uncertainOutcome(command) {
+  return command === "use_app" || command === "quit_app" || command === "act" || command === "pointer"
+    ? "unknown"
+    : "not_started";
+}
+
+function withOutcome(error, outcome) {
+  if (!(error instanceof ComputerUseError) || error.outcome !== "unknown" || outcome === "unknown") {
+    return error;
+  }
+  return new ComputerUseError(error.message, {
+    code: error.code,
+    retryable: error.retryable,
     outcome,
   });
 }

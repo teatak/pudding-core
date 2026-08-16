@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Search, Trash } from "@/components/icons";
+import { Archive, Ellipsis, Search, Trash } from "@/components/icons";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -23,8 +23,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
 import { Spinner } from "@/components/Spinner";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+} from "@/components/AppMenu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useSessionMessageSearch } from "@/hooks/useSessionMessageSearch";
 import { useI18n } from "@/i18n";
@@ -197,22 +202,40 @@ export function ArchivedSessionsSettings({ token }: { token: string }) {
         <section key={group.id} className={SETTINGS_CARD_CLASS}>
           <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3 py-1.5">
             <h3 className="min-w-0 truncate text-sm font-normal">{group.label}</h3>
-            <Button
-              className="shrink-0 text-destructive hover:text-destructive"
-              disabled={busy}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={() => setClearTarget({
-                id: group.id,
-                kind: "group",
-                label: group.label,
-                sessionIDs: group.allSessionIDs,
-              })}
-            >
-              {clearMutation.isPending && clearMutation.variables.id === group.id ? <Spinner /> : <Trash />}
-              {t("archivedSessions.clearAll")}
-            </Button>
+            <span className="flex shrink-0 items-center gap-1">
+              <span className="text-xs text-muted-foreground">
+                {t("archivedSessions.sessionCount").replace("{count}", String(group.allSessionIDs.length))}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    aria-label={t("archivedSessions.projectActions")}
+                    disabled={busy}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {clearMutation.isPending && clearMutation.variables.id === group.id
+                      ? <Spinner />
+                      : <Ellipsis />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setClearTarget({
+                      id: group.id,
+                      kind: "group",
+                      label: group.label,
+                      sessionIDs: group.allSessionIDs,
+                    })}
+                  >
+                    <Trash />
+                    {t("archivedSessions.clearProject")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
           </div>
           <div className="divide-y divide-border/70">
             {group.sessions.map((session) => (
@@ -233,24 +256,24 @@ export function ArchivedSessionsSettings({ token }: { token: string }) {
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
                   <Button
+                    aria-label={t("archivedSessions.delete")}
                     disabled={busy}
-                    size="sm"
+                    size="icon-sm"
                     type="button"
                     variant="ghost"
-                    onClick={() => restoreMutation.mutate(session.id)}
+                    onClick={() => setDeleteTarget(session)}
                   >
-                    {restoreMutation.isPending && restoreMutation.variables === session.id ? <Spinner /> : <ArchiveRestore />}
-                    {t("archivedSessions.restore")}
+                    <Trash />
                   </Button>
                   <Button
                     disabled={busy}
                     size="sm"
                     type="button"
                     variant="ghost"
-                    onClick={() => setDeleteTarget(session)}
+                    onClick={() => restoreMutation.mutate(session.id)}
                   >
-                    <Trash />
-                    {t("archivedSessions.delete")}
+                    {restoreMutation.isPending && restoreMutation.variables === session.id ? <Spinner /> : null}
+                    {t("archivedSessions.restore")}
                   </Button>
                 </span>
               </div>

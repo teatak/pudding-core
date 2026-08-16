@@ -4,6 +4,7 @@ final class HelperRuntime {
   private let accessibility = AccessibilityService()
   private let screenCapture = ScreenCaptureService()
   private let applicationLifecycle = ApplicationLifecycleService()
+  private let pointer = PointerService()
 
   func execute(_ command: HelperCommand) async throws -> AnyEncodable {
     switch command {
@@ -16,57 +17,64 @@ final class HelperRuntime {
           promptScreenRecording: promptScreenRecording
         ))
     case .listApps:
-      let permissions = ComputerPermissions.snapshot(
-        promptAccessibility: false,
-        promptScreenRecording: false
-      )
-      let inventory =
-        permissions.screenRecording
-        ? try await screenCapture.inventory()
-        : nil
-      return AnyEncodable(
-        ListAppsOutput(
-          permissions: permissions,
-          apps: accessibility.listApplications(current: inventory?.applications),
-          capturableWindows: inventory?.windows ?? []
-        ))
+      return AnyEncodable(ListAppsOutput(apps: applicationLifecycle.listApplications()))
     case .applicationIdentity(let bundleID):
       return AnyEncodable(try applicationLifecycle.identity(bundleID: bundleID))
-    case .useApp(let bundleID):
-      return AnyEncodable(try await applicationLifecycle.use(bundleID: bundleID))
+    case .useApp(let bundleID, let foreground):
+      return AnyEncodable(
+        try await applicationLifecycle.use(bundleID: bundleID, foreground: foreground)
+      )
     case .quitApp(let bundleID, let pid):
       return AnyEncodable(try await applicationLifecycle.quit(bundleID: bundleID, pid: pid))
     case .observe(let bundleID, let windowID, let maxElements):
       let targetWindow = try await screenCapture.window(
         bundleID: bundleID,
-        windowID: windowID ?? 0
+        windowID: windowID
       )
-      guard let resolvedWindowID = targetWindow?.windowID ?? windowID else {
-        return AnyEncodable(
-          try accessibility.observe(
-            bundleID: bundleID,
-            windowID: nil,
-            targetWindow: nil,
-            maxElements: maxElements
-          ))
-      }
       return try await withWindowActivity(
         bundleID: bundleID,
-        windowID: resolvedWindowID,
+        windowID: targetWindow.windowID,
         operation: {
           try accessibility.observe(
             bundleID: bundleID,
-            windowID: windowID,
+            windowID: targetWindow.windowID,
             targetWindow: targetWindow,
             maxElements: maxElements
           )
         })
-    case .capture(let bundleID, let windowID, let output):
+    case .observeCapture(let bundleID, let windowID, let maxElements, let output):
+      let targetWindow = try await screenCapture.window(
+        bundleID: bundleID,
+        windowID: windowID
+      )
       return try await withWindowActivity(
         bundleID: bundleID,
-        windowID: windowID,
+        windowID: targetWindow.windowID,
         operation: {
-          try await screenCapture.capture(bundleID: bundleID, windowID: windowID, output: output)
+          let observation = try accessibility.observe(
+            bundleID: bundleID,
+            windowID: targetWindow.windowID,
+            targetWindow: targetWindow,
+            maxElements: maxElements
+          )
+          do {
+            let capture = try await screenCapture.capture(
+              bundleID: bundleID,
+              windowID: targetWindow.windowID,
+              output: output
+            )
+            return ObservationCaptureSnapshot(
+              observation: observation,
+              capture: capture,
+              captureError: nil
+            )
+          } catch {
+            return ObservationCaptureSnapshot(
+              observation: observation,
+              capture: nil,
+              captureError: errorDetail(for: error)
+            )
+          }
         })
     case .act(let bundleID, let windowID, let elementID, let action, let value):
       let targetWindow = try await screenCapture.window(bundleID: bundleID, windowID: windowID)
@@ -81,6 +89,61 @@ final class HelperRuntime {
             elementID: elementID,
             action: action,
             value: value
+          )
+        })
+    case .pointer(
+      let bundleID,
+      let windowID,
+      let input,
+      let captureWidth,
+      let captureHeight,
+      let scaleFactor
+    ):
+      return try await withWindowActivity(
+        bundleID: bundleID,
+        windowID: windowID,
+        operation: {
+          let targetWindow = try await screenCapture.window(
+            bundleID: bundleID,
+            windowID: windowID
+          )
+          let currentScaleFactor = screenCapture.backingScaleFactor(
+            for: CGRect(
+              x: targetWindow.frame.x,
+              y: targetWindow.frame.y,
+              width: targetWindow.frame.width,
+              height: targetWindow.frame.height
+            ))
+          let start = try PointerCoordinatePolicy.globalPoint(
+            frame: targetWindow.frame,
+            currentScaleFactor: currentScaleFactor,
+            x: input.x,
+            y: input.y,
+            captureWidth: captureWidth,
+            captureHeight: captureHeight,
+            captureScaleFactor: scaleFactor
+          )
+          let end: CGPoint?
+          if let toX = input.toX, let toY = input.toY {
+            end = try PointerCoordinatePolicy.globalPoint(
+              frame: targetWindow.frame,
+              currentScaleFactor: currentScaleFactor,
+              x: toX,
+              y: toY,
+              captureWidth: captureWidth,
+              captureHeight: captureHeight,
+              captureScaleFactor: scaleFactor
+            )
+          } else {
+            end = nil
+          }
+          return try pointer.perform(
+            bundleID: bundleID,
+            pid: targetWindow.pid,
+            windowID: windowID,
+            input: input,
+            start: start,
+            end: end
           )
         })
     }

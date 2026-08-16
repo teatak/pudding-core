@@ -529,6 +529,40 @@ func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
 	}
 }
 
+func TestBuildAddsComputerUseScreenshotGuidanceOnlyWithoutImageSupport(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		image bool
+		want  bool
+	}{
+		{name: "unsupported", image: false, want: true},
+		{name: "supported", image: true, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := memstore.New()
+			ctx := context.Background()
+			if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+				t.Fatal(err)
+			}
+			req, err := New(ms, nil).BuildForProviderWithTools(
+				ctx,
+				"s1",
+				"mock",
+				"mock",
+				string(store.ModeWork),
+				[]provider.ToolDef{{Name: tool.ComputerObserve}},
+				provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: tc.image}},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(req.System, noImageComputerUseGuidance); got != tc.want {
+				t.Fatalf("screenshot guidance present = %v, want %v: %q", got, tc.want, req.System)
+			}
+		})
+	}
+}
+
 func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()

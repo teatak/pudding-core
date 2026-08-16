@@ -60,6 +60,7 @@ export type TranscriptTurnVM = {
   turnID?: string;
   user?: UserInputVM;
   fileChanges?: TurnFileChange[];
+  fileChangeState?: "applied" | "undone";
   sequence?: TranscriptTurnSequenceItem[];
 };
 

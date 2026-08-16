@@ -29,6 +29,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		9:  "ba7c7608f0c8e450cf193174b80fd7701800309bee57a35b25979d0529eaa7e3",
 		10: "6af6b54cb36da3f00c3d37a334040cd2611688218439afbedd6e567362540e7a",
 		11: "393fa5bed1711a7383d4a9d538a18a0a0322d54bdd52cae94e9a664252fe7d95",
+		12: "8f28c4af75aeafedf3fe75f9d0dd4b064acbc6040330260e74836d57469c5b80",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -86,6 +87,58 @@ func TestOpenMigratesVersionTenComputerAppGrants(t *testing.T) {
 	}
 	if granted, err := reopened.HasComputerAppGrant(context.Background(), "sess_v10", "com.example.Calculator"); err != nil || !granted {
 		t.Fatalf("migrated Computer Use grant: granted=%v err=%v", granted, err)
+	}
+}
+
+func TestOpenMigratesVersionElevenTurnFileReplaySnapshots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, st, "sess_v11")
+	beginTestTurn(t, st, "sess_v11", "turn_v11", "msg_v11", "client_v11")
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_v11", Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{RootPath: "/tmp/project", Path: "old.txt", Kind: store.FileChangeAdded, NewContent: "old"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		DROP TABLE turn_file_change_states;
+		ALTER TABLE turn_file_changes DROP COLUMN snapshot_version;
+		ALTER TABLE turn_file_changes DROP COLUMN old_digest;
+		ALTER TABLE turn_file_changes DROP COLUMN new_digest;
+		ALTER TABLE turn_file_changes DROP COLUMN old_mode;
+		ALTER TABLE turn_file_changes DROP COLUMN new_mode;
+		ALTER TABLE turn_file_changes DROP COLUMN old_type;
+		ALTER TABLE turn_file_changes DROP COLUMN new_type;
+		ALTER TABLE turn_file_changes DROP COLUMN old_binary;
+		ALTER TABLE turn_file_changes DROP COLUMN new_binary;
+		ALTER TABLE turn_file_changes DROP COLUMN old_data;
+		ALTER TABLE turn_file_changes DROP COLUMN new_data;
+		PRAGMA user_version = 11;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	turn, err := reopened.GetConversationTurn(context.Background(), "sess_v11", "turn_v11")
+	if err != nil || len(turn.FileChanges) != 1 {
+		t.Fatalf("migrated turn=%+v err=%v", turn, err)
+	}
+	if turn.FileChangeState != store.TurnFileChangesApplied || turn.FileChanges[0].Reversible {
+		t.Fatalf("migrated state=%q change=%+v", turn.FileChangeState, turn.FileChanges[0])
 	}
 }
 

@@ -62,6 +62,7 @@ import {
   steerResponse,
   conversationTurn,
   turnFileChange,
+  turnFileChangeActionResponse,
   dailyUsageResponse,
   desktopAboutResponse,
   userPromptResponse,
@@ -144,6 +145,7 @@ import {
   type PendingApproval,
   type ConversationTurn,
   type TurnFileChange,
+  type TurnFileChangeActionResponse,
   type ProviderModel,
   type ProviderProfile,
   type Project,
@@ -763,6 +765,24 @@ export function getTurnFileChange(token: string, sessionID: string, turnID: stri
     token,
     `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}/file-changes/${encodeURIComponent(changeID)}`,
     turnFileChange,
+  );
+}
+
+export function undoTurnFileChanges(token: string, sessionID: string, turnID: string): Promise<TurnFileChangeActionResponse> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}/file-changes/undo`,
+    turnFileChangeActionResponse,
+    { method: "POST" },
+  );
+}
+
+export function redoTurnFileChanges(token: string, sessionID: string, turnID: string): Promise<TurnFileChangeActionResponse> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}/file-changes/redo`,
+    turnFileChangeActionResponse,
+    { method: "POST" },
   );
 }
 

@@ -1,6 +1,8 @@
 const crypto = require("node:crypto");
 const http = require("node:http");
 
+const maximumRequestBodyBytes = 256 * 1024;
+
 class ComputerUseBridgeServer {
   constructor(host) {
     this.host = host;
@@ -152,12 +154,15 @@ class ComputerUseBridgeServer {
   }
 
   route(path, body, signal) {
-    const sessionID = requiredSessionID(body);
+    requiredSessionID(body);
     switch (path) {
       case "/computer/apps/list":
         return this.host.listApps({ signal });
       case "/computer/apps/use":
-        return this.host.useApp({ bundleID: body.appID }, { signal });
+        return this.host.useApp({
+          bundleID: body.appID,
+          foreground: body.foreground === true,
+        }, { signal });
       case "/computer/apps/quit":
         return this.host.quitApp({ bundleID: body.appID, pid: body.pid }, { signal });
       case "/computer/observe":
@@ -166,10 +171,11 @@ class ComputerUseBridgeServer {
           windowID: body.windowID,
           maxElements: body.maxElements,
         }, { signal });
-      case "/computer/capture":
-        return this.host.capture({
+      case "/computer/observe-capture":
+        return this.host.observeCapture({
           bundleID: body.appID,
           windowID: body.windowID,
+          maxElements: body.maxElements,
           output: body.output,
         }, { signal });
       case "/computer/act":
@@ -180,8 +186,23 @@ class ComputerUseBridgeServer {
           action: body.action,
           value: body.value,
         }, { signal });
-      case "/computer/session/release":
-        return { ok: true, sessionID };
+      case "/computer/pointer":
+        return this.host.pointer({
+          bundleID: body.appID,
+          windowID: body.windowID,
+          action: body.action,
+          x: body.x,
+          y: body.y,
+          toX: body.toX,
+          toY: body.toY,
+          button: body.button,
+          clickCount: body.clickCount,
+          deltaX: body.deltaX,
+          deltaY: body.deltaY,
+          captureWidth: body.captureWidth,
+          captureHeight: body.captureHeight,
+          scaleFactor: body.scaleFactor,
+        }, { signal });
       default:
         throw invalidRequest("Computer Use bridge route not found");
     }
@@ -195,7 +216,7 @@ function readJSON(request) {
     request.setEncoding("utf8");
     request.on("data", (chunk) => {
       raw += chunk;
-      if (Buffer.byteLength(raw, "utf8") > 64 * 1024) {
+      if (Buffer.byteLength(raw, "utf8") > maximumRequestBodyBytes) {
         reject(invalidRequest("Computer Use request body is too large"));
         request.destroy();
       }
@@ -262,6 +283,7 @@ function classifyComputerUseError(error) {
       status = 404;
       break;
     case "computer_observation_stale":
+    case "computer_app_not_foreground":
     case "computer_element_not_actionable":
       status = 409;
       break;

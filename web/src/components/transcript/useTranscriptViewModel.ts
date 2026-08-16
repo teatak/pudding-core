@@ -196,6 +196,7 @@ export function useTranscriptViewModel({
         items.push({
           anchorID: turn.id,
           fileChanges: turn.fileChanges,
+          fileChangeState: turn.fileChangeState,
           key: `turn:${turn.id}`,
           kind: overlay ? "live" : phaseForTurn ? "phase" : "canonical",
           sequence,
@@ -258,6 +259,7 @@ export function useTranscriptViewModel({
         turnID: turn.id,
         user,
         fileChanges: turn.fileChanges,
+        fileChangeState: turn.fileChangeState,
       };
       seenCanonicalTurnIDs.add(turn.id);
       canonicalTurnCache.set(turn.id, { duration, item, phase: phaseForTurn, turn });

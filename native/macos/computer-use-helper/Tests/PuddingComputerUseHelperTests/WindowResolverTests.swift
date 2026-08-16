@@ -79,6 +79,7 @@ private func window(
 private func target(title: String?) -> CapturableWindowSnapshot {
   CapturableWindowSnapshot(
     windowID: 12448,
+    pid: 42,
     bundleID: "com.apple.mail",
     applicationName: "Mail",
     title: title,

@@ -95,7 +95,13 @@ function TranscriptTurnView({
             ),
           )}
           {turn.turnID && turn.fileChanges?.length ? (
-            <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
+            <TurnFileChanges
+              changes={turn.fileChanges}
+              fileChangeState={turn.fileChangeState}
+              sessionID={sessionID}
+              token={token}
+              turnID={turn.turnID}
+            />
           ) : null}
           {metaAssistant ? (
             <div className="-mt-3">
@@ -155,6 +161,7 @@ function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM)
     previous.turnID === next.turnID &&
     previous.clientMessageID === next.clientMessageID &&
     previous.fileChanges === next.fileChanges &&
+    previous.fileChangeState === next.fileChangeState &&
     compactEqual(previous.compact, next.compact) &&
     userEqual(previous.user, next.user) &&
     assistantEqual(previous.assistant, next.assistant) &&

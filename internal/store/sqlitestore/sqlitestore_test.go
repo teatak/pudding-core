@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1170,6 +1171,10 @@ func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
 			Origin:    store.FileChangeOriginCommandObserved,
 			Additions: 1, Deletions: 1, OldSize: 12, NewSize: 11,
 			OldContent: "package old\n", NewContent: "package new\n",
+			SnapshotVersion: 1,
+			OldDigest:       fmt.Sprintf("%x", sha256.Sum256([]byte("package old\n"))),
+			NewDigest:       fmt.Sprintf("%x", sha256.Sum256([]byte("package new\n"))),
+			OldMode:         0o644, NewMode: 0o644, OldType: "file", NewType: "file",
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -1183,7 +1188,7 @@ func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
 		t.Fatalf("file changes = %+v", turn.FileChanges)
 	}
 	summary := turn.FileChanges[0]
-	if summary.Path != "main.go" || summary.Kind != store.FileChangeModified ||
+	if summary.Path != "main.go" || summary.Kind != store.FileChangeModified || !summary.Reversible ||
 		summary.Origin != store.FileChangeOriginCommandObserved || summary.OldContent != "" || summary.NewContent != "" {
 		t.Fatalf("file change summary = %+v", summary)
 	}
@@ -1192,11 +1197,50 @@ func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if detail.Origin != store.FileChangeOriginCommandObserved ||
-		detail.OldContent != "package old\n" || detail.NewContent != "package new\n" {
+		detail.OldContent != "package old\n" || detail.NewContent != "package new\n" || detail.OldMode != 0o644 {
 		t.Fatalf("file change detail = %+v", detail)
 	}
 	if _, err := st.GetTurnFileChange(context.Background(), "other_session", "turn_changes", summary.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-session file change error = %v", err)
+	}
+	if turn.FileChangeState != store.TurnFileChangesApplied {
+		t.Fatalf("file change state = %q", turn.FileChangeState)
+	}
+	if err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone); err != nil {
+		t.Fatal(err)
+	}
+	turn, err = st.GetConversationTurn(context.Background(), "sess_changes", "turn_changes")
+	if err != nil || turn.FileChangeState != store.TurnFileChangesUndone {
+		t.Fatalf("updated file change state = %q err=%v", turn.FileChangeState, err)
+	}
+	if err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone); !errors.Is(err, store.ErrTurnFileChangeConflict) {
+		t.Fatalf("stale state update error = %v", err)
+	}
+}
+
+func TestFinishTurnPersistsBinarySnapshots(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_binary_changes")
+	beginTestTurn(t, st, "sess_binary_changes", "turn_binary_changes", "msg_binary_changes", "client_binary_changes")
+	oldData, newData := []byte{0, 1, 2}, []byte{0, 1, 3}
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_binary_changes", Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{
+			RootPath: "/tmp/project", Path: "image.bin", Kind: store.FileChangeModified,
+			Binary: true, OldBinary: true, NewBinary: true, SnapshotVersion: 1,
+			OldDigest: fmt.Sprintf("%x", sha256.Sum256(oldData)), NewDigest: fmt.Sprintf("%x", sha256.Sum256(newData)),
+			OldMode: 0o644, NewMode: 0o644, OldType: "file", NewType: "file", OldData: oldData, NewData: newData,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := st.GetConversationTurn(context.Background(), "sess_binary_changes", "turn_binary_changes")
+	if err != nil || len(turn.FileChanges) != 1 || !turn.FileChanges[0].Reversible {
+		t.Fatalf("binary summary=%+v err=%v", turn.FileChanges, err)
+	}
+	detail, err := st.GetTurnFileChange(context.Background(), "sess_binary_changes", "turn_binary_changes", turn.FileChanges[0].ID)
+	if err != nil || string(detail.OldData) != string(oldData) || string(detail.NewData) != string(newData) || !detail.OldBinary || !detail.NewBinary {
+		t.Fatalf("binary detail=%+v err=%v", detail, err)
 	}
 }
 

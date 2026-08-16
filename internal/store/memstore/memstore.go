@@ -18,49 +18,51 @@ import (
 )
 
 type Memstore struct {
-	mu             sync.Mutex
-	sessions       map[string]*store.Session
-	projects       map[string]*store.Project
-	turns          map[string]*store.Turn
-	fileChanges    map[string][]*store.TurnFileChange // turnID → root/path order
-	messages       map[string][]*store.Message        // sessionID → 时间升序
-	queued         map[string][]*store.QueuedInput
-	usage          map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	ucalibration   map[usageCalibrationKey]*store.UsageCalibrationStat
-	susage         map[string]*store.SessionUsageStat        // sessionID → session stats
-	canvas         map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
-	closed         map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
-	savedCanvas    map[string]*store.SavedCanvasItem         // id → globally saved canvas item
-	browser        map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
-	browserHistory map[string]*store.BrowserHistoryEntry     // id → global browser history
-	computerGrants map[string]map[string]struct{}            // sessionID → approved app IDs
-	events         map[string][]event.Event                  // sessionID → seq 升序
-	seq            map[string]int64
-	settings       map[string]string
-	profiles       map[string]*store.ProviderProfile
+	mu               sync.Mutex
+	sessions         map[string]*store.Session
+	projects         map[string]*store.Project
+	turns            map[string]*store.Turn
+	fileChanges      map[string][]*store.TurnFileChange // turnID → root/path order
+	fileChangeStates map[string]store.TurnFileChangeState
+	messages         map[string][]*store.Message // sessionID → 时间升序
+	queued           map[string][]*store.QueuedInput
+	usage            map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	ucalibration     map[usageCalibrationKey]*store.UsageCalibrationStat
+	susage           map[string]*store.SessionUsageStat        // sessionID → session stats
+	canvas           map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
+	closed           map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
+	savedCanvas      map[string]*store.SavedCanvasItem         // id → globally saved canvas item
+	browser          map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	browserHistory   map[string]*store.BrowserHistoryEntry     // id → global browser history
+	computerGrants   map[string]map[string]struct{}            // sessionID → approved app IDs
+	events           map[string][]event.Event                  // sessionID → seq 升序
+	seq              map[string]int64
+	settings         map[string]string
+	profiles         map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:       make(map[string]*store.Session),
-		projects:       make(map[string]*store.Project),
-		turns:          make(map[string]*store.Turn),
-		fileChanges:    make(map[string][]*store.TurnFileChange),
-		messages:       make(map[string][]*store.Message),
-		queued:         make(map[string][]*store.QueuedInput),
-		usage:          make(map[usageKey]*store.UsageHourlyStat),
-		ucalibration:   make(map[usageCalibrationKey]*store.UsageCalibrationStat),
-		susage:         make(map[string]*store.SessionUsageStat),
-		canvas:         make(map[string]*store.CanvasItem),
-		closed:         make(map[string]*store.ClosedCanvasItem),
-		savedCanvas:    make(map[string]*store.SavedCanvasItem),
-		browser:        make(map[string]map[string]*store.BrowserState),
-		browserHistory: make(map[string]*store.BrowserHistoryEntry),
-		computerGrants: make(map[string]map[string]struct{}),
-		events:         make(map[string][]event.Event),
-		seq:            make(map[string]int64),
-		settings:       make(map[string]string),
-		profiles:       make(map[string]*store.ProviderProfile),
+		sessions:         make(map[string]*store.Session),
+		projects:         make(map[string]*store.Project),
+		turns:            make(map[string]*store.Turn),
+		fileChanges:      make(map[string][]*store.TurnFileChange),
+		fileChangeStates: make(map[string]store.TurnFileChangeState),
+		messages:         make(map[string][]*store.Message),
+		queued:           make(map[string][]*store.QueuedInput),
+		usage:            make(map[usageKey]*store.UsageHourlyStat),
+		ucalibration:     make(map[usageCalibrationKey]*store.UsageCalibrationStat),
+		susage:           make(map[string]*store.SessionUsageStat),
+		canvas:           make(map[string]*store.CanvasItem),
+		closed:           make(map[string]*store.ClosedCanvasItem),
+		savedCanvas:      make(map[string]*store.SavedCanvasItem),
+		browser:          make(map[string]map[string]*store.BrowserState),
+		browserHistory:   make(map[string]*store.BrowserHistoryEntry),
+		computerGrants:   make(map[string]map[string]struct{}),
+		events:           make(map[string][]event.Event),
+		seq:              make(map[string]int64),
+		settings:         make(map[string]string),
+		profiles:         make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -411,6 +413,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 		if t.SessionID == id {
 			delete(m.turns, tid)
 			delete(m.fileChanges, tid)
+			delete(m.fileChangeStates, tid)
 		}
 	}
 	return nil
@@ -946,8 +949,19 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 			Origin:    store.NormalizeFileChangeOrigin(input.Origin),
 			Additions: input.Additions, Deletions: input.Deletions, Binary: input.Binary, TooLarge: input.TooLarge,
 			OldSize: input.OldSize, NewSize: input.NewSize, OldContent: input.OldContent, NewContent: input.NewContent,
+			SnapshotVersion: input.SnapshotVersion, OldDigest: input.OldDigest, NewDigest: input.NewDigest,
+			OldMode: input.OldMode, NewMode: input.NewMode, OldType: input.OldType, NewType: input.NewType,
+			OldBinary: input.OldBinary, NewBinary: input.NewBinary,
+			OldData: append([]byte(nil), input.OldData...), NewData: append([]byte(nil), input.NewData...),
 			CreatedAt: now,
 		})
+	}
+	if len(m.fileChanges[turn.ID]) > 0 {
+		m.fileChangeStates[turn.ID] = store.TurnFileChangesApplied
+		for _, change := range m.fileChanges[turn.ID] {
+			change.Reversible = memTurnFileChangeReversible(change)
+		}
+		store.MarkUnsafeTurnFileChangeLayouts(m.fileChanges[turn.ID])
 	}
 	sort.Slice(m.fileChanges[turn.ID], func(i, j int) bool {
 		left, right := m.fileChanges[turn.ID][i], m.fileChanges[turn.ID][j]
@@ -2121,7 +2135,7 @@ func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurn
 	}
 	out := make([]*store.ConversationTurn, 0, end-start)
 	for _, turn := range turns[start:end] {
-		out = append(out, conversationTurnFromMem(turn, m.messages[sessionID], m.fileChanges[turn.ID]))
+		out = append(out, conversationTurnFromMem(turn, m.messages[sessionID], m.fileChanges[turn.ID], m.fileChangeStates[turn.ID]))
 	}
 	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
 }
@@ -2136,7 +2150,7 @@ func (m *Memstore) GetConversationTurn(_ context.Context, sessionID string, turn
 	if !ok || turn.SessionID != sessionID {
 		return nil, store.ErrNotFound
 	}
-	return conversationTurnFromMem(turn, m.messages[sessionID], m.fileChanges[turn.ID]), nil
+	return conversationTurnFromMem(turn, m.messages[sessionID], m.fileChanges[turn.ID], m.fileChangeStates[turn.ID]), nil
 }
 
 func (m *Memstore) GetTurnFileChange(_ context.Context, sessionID string, turnID string, changeID string) (*store.TurnFileChange, error) {
@@ -2154,7 +2168,7 @@ func (m *Memstore) GetTurnFileChange(_ context.Context, sessionID string, turnID
 	return nil, store.ErrNotFound
 }
 
-func conversationTurnFromMem(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange) *store.ConversationTurn {
+func conversationTurnFromMem(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange, fileChangeState store.TurnFileChangeState) *store.ConversationTurn {
 	out := &store.ConversationTurn{
 		ID:              turn.ID,
 		SessionID:       turn.SessionID,
@@ -2168,6 +2182,7 @@ func conversationTurnFromMem(turn *store.Turn, messages []*store.Message, fileCh
 		UpdatedAt:       turn.UpdatedAt,
 		Messages:        make([]*store.Message, 0, 2),
 		FileChanges:     make([]*store.TurnFileChange, 0, len(fileChanges)),
+		FileChangeState: fileChangeState,
 	}
 	for _, change := range fileChanges {
 		out.FileChanges = append(out.FileChanges, cloneTurnFileChange(change, false))
@@ -2186,11 +2201,35 @@ func cloneTurnFileChange(change *store.TurnFileChange, withContent bool) *store.
 		return nil
 	}
 	copy := *change
+	copy.OldData = append([]byte(nil), change.OldData...)
+	copy.NewData = append([]byte(nil), change.NewData...)
 	if !withContent {
 		copy.OldContent = ""
 		copy.NewContent = ""
 	}
 	return &copy
+}
+
+func memTurnFileChangeReversible(change *store.TurnFileChange) bool {
+	if change == nil || change.SnapshotVersion != 1 || change.TooLarge {
+		return false
+	}
+	valid := func(kind, digest string) bool { return kind == "" || (kind == "file" && digest != "") }
+	return valid(change.OldType, change.OldDigest) && valid(change.NewType, change.NewDigest)
+}
+
+func (m *Memstore) UpdateTurnFileChangeState(_ context.Context, sessionID, turnID string, expected, next store.TurnFileChangeState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	turn, ok := m.turns[turnID]
+	if !ok || turn.SessionID != sessionID {
+		return store.ErrNotFound
+	}
+	if m.fileChangeStates[turnID] != expected {
+		return store.ErrTurnFileChangeConflict
+	}
+	m.fileChangeStates[turnID] = next
+	return nil
 }
 
 func (m *Memstore) turnOutputStatsLocked(sessionID, turnID string) (int, string) {

@@ -17,3 +17,10 @@ import Testing
   #expect(identity.name == "Finder")
   #expect(NSImage(data: data) != nil)
 }
+
+@Test func applicationInventoryIncludesInstalledAppsThatNeedNotBeRunning() {
+  let apps = ApplicationLifecycleService().listApplications()
+  let calculator = apps.first(where: { $0.bundleID == "com.apple.calculator" })
+  #expect(calculator != nil)
+  #expect(calculator?.name.isEmpty == false)
+}

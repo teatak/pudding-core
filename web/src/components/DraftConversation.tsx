@@ -91,6 +91,7 @@ import { fetchUserMessageCatalog, localizeUserMessage, USER_MESSAGES_STALE_TIME_
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
 import { useDraftStore, type DraftAttachment, type DraftModelValue } from "@/state/draftStore";
+import { useMascotVisible } from "@/state/mascotStore";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
 
@@ -112,6 +113,7 @@ const emptyDraftModel: DraftModelValue = {};
 
 export function DraftConversation({ token, projectID }: { token: string; projectID?: string }) {
   const { locale, t } = useI18n();
+  const mascotVisible = useMascotVisible();
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -238,12 +240,8 @@ export function DraftConversation({ token, projectID }: { token: string; project
       onDrop={handleDrop}
     >
       <div className="pudding-draft-body">
-        {!showPresetSetup ? (
-          <div className="mb-3 flex justify-center">
-            <Mascot className="size-24" pointerTracking />
-          </div>
-        ) : null}
         <div className="pudding-draft-title" aria-busy={userMessagesQuery.isPending}>
+          {mascotVisible && !showPresetSetup ? <Mascot className="pudding-draft-mascot" pointerTracking /> : null}
           {userMessagesQuery.isPending ? (
             <Skeleton className="h-8 w-72 max-w-[60vw]" />
           ) : (

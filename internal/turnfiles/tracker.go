@@ -53,7 +53,10 @@ type fileKey struct {
 type fileSnapshot struct {
 	binary   bool
 	content  string
+	data     []byte
 	digest   string
+	mode     uint32
+	typeName string
 	size     int64
 	tooLarge bool
 }
@@ -409,7 +412,10 @@ func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, 
 			return fileSnapshot{}, false
 		}
 		data := []byte(target)
-		return snapshotFromBytes(data, remainingContentBytes), true
+		snapshot := snapshotFromBytes(data, remainingContentBytes)
+		snapshot.mode = uint32(info.Mode().Perm())
+		snapshot.typeName = "symlink"
+		return snapshot, true
 	}
 	if !info.Mode().IsRegular() {
 		return fileSnapshot{}, false
@@ -429,7 +435,7 @@ func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, 
 	}
 	if openedInfo.Size() > maxSnapshotContentBytes {
 		identity := fmt.Sprintf("large:%d:%d", openedInfo.Size(), openedInfo.ModTime().UnixNano())
-		return fileSnapshot{digest: identity, size: openedInfo.Size(), tooLarge: true}, true
+		return fileSnapshot{digest: identity, mode: uint32(openedInfo.Mode().Perm()), typeName: "file", size: openedInfo.Size(), tooLarge: true}, true
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxSnapshotContentBytes+1))
 	if err != nil {
@@ -441,30 +447,38 @@ func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, 
 			latestInfo = openedInfo
 		}
 		identity := fmt.Sprintf("large:%d:%d", latestInfo.Size(), latestInfo.ModTime().UnixNano())
-		return fileSnapshot{digest: identity, size: latestInfo.Size(), tooLarge: true}, true
+		return fileSnapshot{digest: identity, mode: uint32(latestInfo.Mode().Perm()), typeName: "file", size: latestInfo.Size(), tooLarge: true}, true
 	}
 	if int64(len(data)) > *remainingContentBytes {
 		snapshot := snapshotFromBytes(data, nil)
 		snapshot.content = ""
+		snapshot.data = nil
 		snapshot.tooLarge = true
+		snapshot.mode = uint32(openedInfo.Mode().Perm())
+		snapshot.typeName = "file"
 		return snapshot, true
 	}
-	return snapshotFromBytes(data, remainingContentBytes), true
+	snapshot := snapshotFromBytes(data, remainingContentBytes)
+	snapshot.mode = uint32(openedInfo.Mode().Perm())
+	snapshot.typeName = "file"
+	return snapshot, true
 }
 
 func snapshotFromBytes(data []byte, remainingContentBytes *int64) fileSnapshot {
 	sum := sha256.Sum256(data)
 	binary := !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0
 	file := fileSnapshot{binary: binary, digest: fmt.Sprintf("%x", sum), size: int64(len(data))}
-	if !binary {
-		if remainingContentBytes == nil || int64(len(data)) <= *remainingContentBytes {
-			file.content = string(data)
-			if remainingContentBytes != nil {
-				*remainingContentBytes -= int64(len(data))
-			}
+	if remainingContentBytes == nil || int64(len(data)) <= *remainingContentBytes {
+		if binary {
+			file.data = append([]byte(nil), data...)
 		} else {
-			file.tooLarge = true
+			file.content = string(data)
 		}
+		if remainingContentBytes != nil {
+			*remainingContentBytes -= int64(len(data))
+		}
+	} else {
+		file.tooLarge = true
 	}
 	return file
 }
@@ -549,19 +563,36 @@ func sortedFileKeys(files map[fileKey]fileSnapshot) []fileKey {
 
 func buildChange(kind store.FileChangeKind, key fileKey, originalPath string, oldFile, newFile fileSnapshot) store.TurnFileChangeInput {
 	change := store.TurnFileChangeInput{
-		RootPath:     key.root,
-		Path:         key.path,
-		OriginalPath: originalPath,
-		Kind:         kind,
-		Binary:       oldFile.binary || newFile.binary,
-		TooLarge:     oldFile.tooLarge || newFile.tooLarge,
-		OldSize:      oldFile.size,
-		NewSize:      newFile.size,
+		RootPath:        key.root,
+		Path:            key.path,
+		OriginalPath:    originalPath,
+		Kind:            kind,
+		Binary:          oldFile.binary || newFile.binary,
+		TooLarge:        oldFile.tooLarge || newFile.tooLarge,
+		OldSize:         oldFile.size,
+		NewSize:         newFile.size,
+		SnapshotVersion: 1,
+		OldDigest:       oldFile.digest,
+		NewDigest:       newFile.digest,
+		OldMode:         oldFile.mode,
+		NewMode:         newFile.mode,
+		OldType:         oldFile.typeName,
+		NewType:         newFile.typeName,
+		OldBinary:       oldFile.binary,
+		NewBinary:       newFile.binary,
+		OldData:         append([]byte(nil), oldFile.data...),
+		NewData:         append([]byte(nil), newFile.data...),
 	}
-	if !change.Binary && !change.TooLarge {
-		change.OldContent = oldFile.content
-		change.NewContent = newFile.content
-		change.Additions, change.Deletions = lineStats(change.OldContent, change.NewContent)
+	if !change.TooLarge {
+		if !oldFile.binary {
+			change.OldContent = oldFile.content
+		}
+		if !newFile.binary {
+			change.NewContent = newFile.content
+		}
+		if !change.Binary {
+			change.Additions, change.Deletions = lineStats(change.OldContent, change.NewContent)
+		}
 	}
 	return change
 }

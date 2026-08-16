@@ -386,3 +386,23 @@ func TestNextUsageCalibrationRatioUsesBoundedEWMA(t *testing.T) {
 		t.Fatalf("outlier was not bounded: %f", got)
 	}
 }
+
+func TestMarkUnsafeTurnFileChangeLayouts(t *testing.T) {
+	changes := []*TurnFileChange{
+		{RootPath: "/project", Path: "entry", Reversible: true},
+		{RootPath: "/project", Path: "entry/child.txt", Reversible: true},
+	}
+	MarkUnsafeTurnFileChangeLayouts(changes)
+	if changes[0].Reversible || changes[1].Reversible {
+		t.Fatalf("ancestor file layout remained reversible: %+v", changes)
+	}
+
+	independent := []*TurnFileChange{
+		{RootPath: "/project", Path: "one.txt", Reversible: true},
+		{RootPath: "/project", Path: "folder/two.txt", Reversible: true},
+	}
+	MarkUnsafeTurnFileChangeLayouts(independent)
+	if !independent[0].Reversible || !independent[1].Reversible {
+		t.Fatalf("independent files became irreversible: %+v", independent)
+	}
+}

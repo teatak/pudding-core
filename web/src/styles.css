@@ -207,9 +207,8 @@ textarea:focus-visible,
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --mascot-body: oklch(0.61 0.19 277);
-    --mascot-face: oklch(0.95 0.02 20);
     --mascot-cheek: oklch(0.74 0.13 16 / 78%);
-    --mascot-feature-outline: oklch(0.3 0.018 270);
+    --mascot-feature-outline: oklch(0.43 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 20%);
     --mascot-shadow: oklch(0.52 0.18 277 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
@@ -745,9 +744,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --mascot-body: oklch(0.7 0.17 277);
-    --mascot-face: oklch(0.88 0.027 20);
     --mascot-cheek: oklch(0.67 0.13 16 / 82%);
-    --mascot-feature-outline: oklch(0.22 0.014 270);
+    --mascot-feature-outline: oklch(0.48 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 28%);
     --mascot-shadow: oklch(0.46 0.05 277 / 10%);
     --phase-submitting: oklch(0.879 0.169 91.605);
@@ -1522,6 +1520,10 @@ html:has(
     @apply flex items-center justify-center gap-3;
 }
 
+.pudding-draft-mascot {
+    @apply size-12 shrink-0 overflow-visible;
+}
+
 .pudding-draft-heading {
     @apply text-2xl leading-tight font-medium text-foreground;
 }
@@ -1558,6 +1560,10 @@ html:has(
 @container (min-width: 42rem) {
     .pudding-draft-heading {
         @apply text-3xl;
+    }
+
+    .pudding-draft-mascot {
+        @apply size-14;
     }
 
     .pudding-draft-stack {
@@ -1641,6 +1647,10 @@ html:has(
 @container (min-width: 56rem) {
     .pudding-draft-heading {
         @apply text-4xl;
+    }
+
+    .pudding-draft-mascot {
+        @apply size-16;
     }
 
     .pudding-provider-preset-grid {

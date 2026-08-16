@@ -160,6 +160,52 @@ func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
 	}
 }
 
+func TestUndoRedoTurnFileChanges(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	root := t.TempDir()
+	path := filepath.Join(root, "main.txt")
+	if err := os.WriteFile(path, []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "project", RootDirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ProjectID: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{SessionID: "session", TurnID: "turn", UserMessageID: "message", ClientMessageID: "client", UserText: "change"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: "turn", Status: store.TurnCompleted, FileChanges: []store.TurnFileChangeInput{{
+		RootPath: root, Path: "main.txt", Kind: store.FileChangeModified,
+		OldContent: "old\n", NewContent: "new\n", OldMode: 0o644, NewMode: 0o644,
+		OldType: "file", NewType: "file", SnapshotVersion: 1,
+		OldDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("old\n"))),
+		NewDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("new\n"))),
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
+	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
+
+	for _, action := range []struct{ name, want string }{{"undo", "old\n"}, {"redo", "new\n"}} {
+		req := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, nil)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", action.name, recorder.Code, recorder.Body.String())
+		}
+		content, err := os.ReadFile(path)
+		if err != nil || string(content) != action.want {
+			t.Fatalf("%s content=%q err=%v", action.name, content, err)
+		}
+	}
+}
+
 func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
 	return newConfigTestServerWithGitHub(t, nil)
 }

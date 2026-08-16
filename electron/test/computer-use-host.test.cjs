@@ -5,15 +5,20 @@ const test = require("node:test");
 
 const { ComputerUseHost } = require("../computer-use-host.cjs");
 
-test("ComputerUseHost correlates out-of-order helper responses", async () => {
+test("ComputerUseHost serializes requests to the sequential helper", async () => {
   const fake = new FakeHelper();
   const host = createHost(fake);
   const permissions = host.permissions();
   const apps = host.listApps();
+  await fake.waitForRequests(1);
+
+  assert.equal(fake.requests.length, 1);
+  assert.equal(fake.requests[0].command, "permissions");
+  fake.respond(fake.requests[0].id, { accessibility: false, screenRecording: true });
   await fake.waitForRequests(2);
 
+  assert.equal(fake.requests[1].command, "list_apps");
   fake.respond(fake.requests[1].id, { apps: ["TextEdit"] });
-  fake.respond(fake.requests[0].id, { accessibility: false, screenRecording: true });
 
   assert.deepEqual(await permissions, { accessibility: false, screenRecording: true });
   assert.deepEqual(await apps, { apps: ["TextEdit"] });
@@ -43,15 +48,34 @@ test("ComputerUseHost preserves structured helper errors", async () => {
 test("ComputerUseHost sends lifecycle commands", async () => {
   const fake = new FakeHelper();
   const host = createHost(fake);
-  const launched = host.useApp({ bundleID: "com.apple.calculator" });
+  const launched = host.useApp({ bundleID: "com.apple.calculator", foreground: false });
   const quit = host.quitApp({ bundleID: "com.apple.calculator", pid: 42 });
-  await fake.waitForRequests(2);
+  await fake.waitForRequests(1);
   assert.equal(fake.requests[0].command, "use_app");
+  assert.equal(fake.requests[0].params.foreground, false);
+  fake.respond(fake.requests[0].id, { pid: 42, newlyLaunched: true, windows: [{ windowID: 7 }] });
+  await fake.waitForRequests(2);
   assert.equal(fake.requests[1].command, "quit_app");
-  fake.respond(fake.requests[0].id, { pid: 42, newlyLaunched: true });
   fake.respond(fake.requests[1].id, { pid: 42, closed: true });
   assert.equal((await launched).newlyLaunched, true);
   assert.equal((await quit).closed, true);
+  await host.stop();
+});
+
+test("ComputerUseHost sends pointer actions", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake);
+  const pointer = host.pointer({
+    bundleID: "com.example.App", windowID: 42, action: "click", x: 12, y: 34,
+    button: "left", clickCount: 2,
+    captureWidth: 200, captureHeight: 100, scaleFactor: 2,
+  });
+  await fake.waitForRequests(1);
+  assert.equal(fake.requests[0].command, "pointer");
+  assert.equal(fake.requests[0].params.x, 12);
+  assert.equal(fake.requests[0].params.clickCount, 2);
+  fake.respond(fake.requests[0].id, { bundleID: "com.example.App", action: "click", completed: true, x: 12, y: 34, button: "left", clickCount: 2 });
+  assert.equal((await pointer).completed, true);
   await host.stop();
 });
 
@@ -113,7 +137,7 @@ test("ComputerUseHost terminates the helper on timeout", async () => {
 
   await assert.rejects(host.listApps(), (error) => {
     assert.equal(error.code, "computer_action_timeout");
-    assert.equal(error.outcome, "unknown");
+    assert.equal(error.outcome, "not_started");
     return true;
   });
   assert.equal(fake.killed, true);
@@ -170,6 +194,66 @@ test("ComputerUseHost aborts an in-flight action and starts a fresh helper", asy
   second.respond(second.requests[0].id, { accessibility: true, screenRecording: true });
   assert.deepEqual(await recovered, { accessibility: true, screenRecording: true });
   assert.equal(helpers.length, 0);
+  await host.stop();
+});
+
+test("ComputerUseHost drains an in-flight pointer before reporting cancellation", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake);
+  const controller = new AbortController();
+  const action = host.pointer(
+    { bundleID: "com.example.App", windowID: 42, action: "drag", x: 1, y: 2, toX: 3, toY: 4 },
+    { signal: controller.signal },
+  );
+  const rejected = assert.rejects(action, (error) => {
+    assert.equal(error.code, "computer_action_cancelled");
+    assert.equal(error.outcome, "unknown");
+    return true;
+  });
+  await fake.waitForRequests(1);
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fake.killed, false);
+  fake.respond(fake.requests[0].id, { completed: true });
+  await rejected;
+  assert.equal(fake.killed, false);
+  await host.stop();
+});
+
+test("ComputerUseHost terminates a pointer that does not drain after timeout", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake, { defaultTimeoutMs: 10, pointerDrainTimeoutMs: 10 });
+
+  await assert.rejects(
+    host.pointer({ bundleID: "com.example.App", windowID: 42, action: "click", x: 1, y: 2 }),
+    (error) => {
+      assert.equal(error.code, "computer_action_timeout");
+      assert.equal(error.outcome, "unknown");
+      return true;
+    },
+  );
+  assert.equal(fake.killed, true);
+});
+
+test("ComputerUseHost cancels a queued request without stopping the active helper", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake);
+  const first = host.permissions();
+  const controller = new AbortController();
+  const queued = host.listApps({ signal: controller.signal });
+  await fake.waitForRequests(1);
+  controller.abort();
+
+  fake.respond(fake.requests[0].id, { accessibility: true, screenRecording: true });
+  assert.deepEqual(await first, { accessibility: true, screenRecording: true });
+  await assert.rejects(queued, (error) => {
+    assert.equal(error.code, "computer_action_cancelled");
+    assert.equal(error.outcome, "not_started");
+    return true;
+  });
+  assert.equal(fake.requests.length, 1);
+  assert.equal(fake.killed, false);
   await host.stop();
 });
 

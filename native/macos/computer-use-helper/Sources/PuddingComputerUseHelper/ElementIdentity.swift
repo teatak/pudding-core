@@ -1,7 +1,23 @@
 import CryptoKit
 import Foundation
 
+struct ElementPathComponent: Equatable {
+  let index: Int
+  let stable: Bool
+}
+
 enum ElementIdentity {
+  static func visibleRowPathComponents(indices: [Int?]) -> [ElementPathComponent] {
+    let resolved = indices.compactMap { $0 }
+    let stable = resolved.count == indices.count
+      && resolved.allSatisfy { $0 >= 0 }
+      && Set(resolved).count == resolved.count
+    if stable {
+      return resolved.map { ElementPathComponent(index: $0, stable: true) }
+    }
+    return indices.indices.map { ElementPathComponent(index: $0, stable: false) }
+  }
+
   static func make(
     windowIndex: Int,
     path: [Int],

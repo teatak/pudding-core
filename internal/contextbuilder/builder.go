@@ -25,6 +25,8 @@ type Builder struct {
 	attachmentHome string
 }
 
+const noImageComputerUseGuidance = "The current model cannot receive image inputs. Do not request Computer Use screenshots for your own visual inspection because the screenshot bytes will not be visible to you. Capture one only when the user explicitly asks to receive a screenshot."
+
 type Option func(*Builder)
 
 func WithAttachmentHome(home string) Option {
@@ -134,6 +136,9 @@ func (b *Builder) build(
 	if len(configs) > 0 {
 		cfg = configs[0]
 	}
+	if !imageAttachmentsAllowed(cfg) && toolIncluded(allowedTools, tool.ComputerObserve) {
+		system.SystemInstruction = appendInstruction(system.SystemInstruction, noImageComputerUseGuidance)
+	}
 	req := provider.Request{
 		Model:    model,
 		System:   system.SystemInstruction,
@@ -210,6 +215,22 @@ func (b *Builder) build(
 	}
 	flushAssistant()
 	return req, nil
+}
+
+func toolIncluded(allowedTools map[string]struct{}, name string) bool {
+	if allowedTools == nil {
+		return false
+	}
+	_, ok := allowedTools[name]
+	return ok
+}
+
+func appendInstruction(existing, instruction string) string {
+	existing = strings.TrimSpace(existing)
+	if existing == "" {
+		return instruction
+	}
+	return existing + "\n\n" + instruction
 }
 
 func providerStateMatches(state *store.ProviderState, providerName, model string) bool {

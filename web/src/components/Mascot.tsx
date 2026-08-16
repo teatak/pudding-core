@@ -52,14 +52,13 @@ const FACE_Z_OFFSET_PX = 4;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
-const BODY_PATH = "M45 34 C54 31 74 31 83 34 C97 34 105 42 106 56 L108 84 C109 99 99 108 84 109 C71 111 57 111 44 109 C29 108 19 99 20 84 L22 56 C23 42 31 34 45 34 Z";
+const BODY_PATH = "M52 34 C56 34 72 34 76 34 C90 34 102 42 106 56 L108 84 C109 99 99 108 84 109 C71 111 57 111 44 109 C29 108 19 99 20 84 L22 56 C26 42 38 34 52 34 Z";
 const LEFT_ARM_PATH = "M30 85 C21 90 13 99 13 106";
 const RIGHT_ARM_PATH = "M98 85 C107 90 115 99 115 106";
 const LEFT_PALM_X = 13;
 const RIGHT_PALM_X = 115;
 const PALM_Y = 107;
-const MOUTH_PATH = "M56 88.5 Q64 91.5 72 88.5";
-const FACE_PAD_PATH = "M39 54 C47 50 81 50 89 54 C96 58 99 82 94 92 C87 102 41 102 34 92 C29 82 32 58 39 54 Z";
+const MOUTH_PATH = "M59 88.5 Q64 91 69 88.5";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -659,15 +658,6 @@ export function Mascot({
                 </svg>
               ) : null}
 
-              <span data-slot="face-pad" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <path
-                    d={FACE_PAD_PATH}
-                    fill="var(--mascot-face)"
-                  />
-                </svg>
-              </span>
-
               <span data-slot="cheeks" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
                   <ellipse cx="41" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
@@ -694,11 +684,11 @@ export function Mascot({
                     <rect height="9" rx="3" width="13" x="70" y="65" />
                   </g>
                   <g ref={pupilMotionRef} fill="var(--mascot-feature-outline)">
-                    <circle cx="51.5" cy="69.5" r="2.3" />
-                    <circle cx="76.5" cy="69.5" r="2.3" />
+                    <ellipse cx="51.5" cy="70" rx="3" ry="3.6" />
+                    <ellipse cx="76.5" cy="70" rx="3" ry="3.6" />
                     <g fill="#ffffff">
-                      <circle cx="51.5" cy="69.5" r="0.6" />
-                      <circle cx="76.5" cy="69.5" r="0.6" />
+                      <circle cx="50.7" cy="69" r="0.7" />
+                      <circle cx="75.7" cy="69" r="0.7" />
                     </g>
                   </g>
                 </svg>
@@ -724,14 +714,14 @@ export function Mascot({
                     fill="none"
                     stroke="var(--mascot-feature-outline)"
                     strokeLinecap="round"
-                    strokeWidth="6.2"
+                    strokeWidth="5.4"
                   />
                   <path
                     d={MOUTH_PATH}
                     fill="none"
                     stroke="#ffffff"
                     strokeLinecap="round"
-                    strokeWidth="3.5"
+                    strokeWidth="3"
                   />
                 </svg>
               </span>

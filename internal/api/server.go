@@ -33,11 +33,13 @@ import (
 	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
+	"github.com/teatak/pudding-core/internal/turnfiles"
 )
 
 type Server struct {
 	engine     *engine.Engine
 	store      store.Store
+	turnFiles  *turnfiles.Replayer
 	config     engine.ConfigSource
 	home       string
 	providers  providerWriter
@@ -71,7 +73,7 @@ type voiceController interface {
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
+	return &Server{engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
 }
 
 func (s *Server) WithOAuthBroker(client *oauthbroker.Client) *Server {
@@ -204,6 +206,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/turns/:turnID/file-changes/:changeID").GET(s.getTurnFileChange)
+	app.Route("/sessions/:id/turns/:turnID/file-changes/undo").POST(s.undoTurnFileChanges)
+	app.Route("/sessions/:id/turns/:turnID/file-changes/redo").POST(s.redoTurnFileChanges)
 	app.Route("/sessions/:id/messages/search").POST(s.searchMessagesInSession)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/processes").GET(s.listBackgroundProcesses)
@@ -1195,6 +1199,42 @@ func (s *Server) getTurnFileChange(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, change)
+	return nil
+}
+
+func (s *Server) undoTurnFileChanges(c *cart.Context) error {
+	return s.replayTurnFileChanges(c, turnfiles.ReplayUndo)
+}
+
+func (s *Server) redoTurnFileChanges(c *cart.Context) error {
+	return s.replayTurnFileChanges(c, turnfiles.ReplayRedo)
+}
+
+func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.ReplayDirection) error {
+	id, _ := c.Param("id")
+	turnID, _ := c.Param("turnID")
+	_, roots, ok := s.sessionProject(c)
+	if !ok {
+		return nil
+	}
+	paths := make([]string, 0, len(roots))
+	for _, root := range roots {
+		paths = append(paths, root.Path)
+	}
+	state, err := s.turnFiles.Apply(c.Request.Context(), id, turnID, direction, paths)
+	if err != nil {
+		switch {
+		case errors.Is(err, turnfiles.ErrReplayUnauthorized):
+			return projectFileError(c, http.StatusForbidden, "turn_file_changes_unauthorized")
+		case errors.Is(err, turnfiles.ErrReplayConflict), errors.Is(err, store.ErrTurnFileChangeConflict), errors.Is(err, turnfiles.ErrReplayInvalidState), errors.Is(err, store.ErrTurnRunning):
+			return projectFileError(c, http.StatusConflict, "turn_file_changes_conflict")
+		case errors.Is(err, turnfiles.ErrReplayNotReversible):
+			return projectFileError(c, http.StatusUnprocessableEntity, "turn_file_changes_not_reversible")
+		default:
+			return s.fail(c, err)
+		}
+	}
+	c.JSON(http.StatusOK, map[string]any{"state": state})
 	return nil
 }
 

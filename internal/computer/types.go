@@ -8,6 +8,22 @@ import (
 const (
 	ActionPress    = "press"
 	ActionSetValue = "set_value"
+	ActionSelect   = "select"
+	ActionSubmit   = "submit"
+	ActionClick    = "click"
+	ActionDrag     = "drag"
+	ActionScroll   = "scroll"
+
+	PointerButtonLeft  = "left"
+	PointerButtonRight = "right"
+
+	MaxAppIDBytes            = 512
+	MaxActionValueCharacters = 20_000
+
+	WindowStatusReady              = "ready"
+	WindowStatusNone               = "none"
+	WindowStatusPermissionRequired = "permission_required"
+	WindowStatusFailed             = "failed"
 )
 
 type Permissions struct {
@@ -30,16 +46,16 @@ type Window struct {
 }
 
 type Application struct {
-	AppID        string   `json:"appID"`
-	Name         string   `json:"name"`
-	PID          int32    `json:"pid"`
-	Active       bool     `json:"active"`
-	Controllable bool     `json:"controllable"`
-	Windows      []Window `json:"windows"`
+	AppID        string `json:"appID"`
+	Name         string `json:"name"`
+	Running      bool   `json:"running"`
+	Active       bool   `json:"active"`
+	Controllable bool   `json:"controllable"`
 }
 
 type CapturableWindow struct {
 	WindowID        uint32  `json:"windowID"`
+	PID             int32   `json:"pid"`
 	AppID           *string `json:"appID,omitempty"`
 	ApplicationName *string `json:"applicationName,omitempty"`
 	Title           *string `json:"title,omitempty"`
@@ -47,23 +63,27 @@ type CapturableWindow struct {
 }
 
 type AppList struct {
-	Permissions       Permissions        `json:"permissions"`
-	Apps              []Application      `json:"apps"`
-	CapturableWindows []CapturableWindow `json:"capturableWindows"`
+	Apps []Application `json:"apps"`
 }
 
 type NativeUse struct {
-	AppID         string `json:"appID"`
-	Name          string `json:"name"`
-	PID           int32  `json:"pid"`
-	NewlyLaunched bool   `json:"newlyLaunched"`
+	AppID         string             `json:"appID"`
+	Name          string             `json:"name"`
+	PID           int32              `json:"pid"`
+	NewlyLaunched bool               `json:"newlyLaunched"`
+	WindowStatus  string             `json:"windowStatus"`
+	WindowError   *Failure           `json:"windowError,omitempty"`
+	Windows       []CapturableWindow `json:"windows"`
 }
 
 type UseResult struct {
-	LaunchID *string `json:"launchID,omitempty"`
-	AppID    string  `json:"appID"`
-	Name     string  `json:"name"`
-	PID      int32   `json:"pid"`
+	LaunchID     *string            `json:"launchID,omitempty"`
+	AppID        string             `json:"appID"`
+	Name         string             `json:"name"`
+	PID          int32              `json:"pid"`
+	WindowStatus string             `json:"windowStatus"`
+	WindowError  *Failure           `json:"windowError,omitempty"`
+	Windows      []CapturableWindow `json:"windows"`
 }
 
 type NativeQuit struct {
@@ -81,19 +101,21 @@ type QuitResult struct {
 }
 
 type Element struct {
-	ElementID   string   `json:"elementID"`
-	WindowIndex int      `json:"windowIndex"`
-	WindowID    *uint32  `json:"windowID,omitempty"`
-	Role        *string  `json:"role,omitempty"`
-	Subrole     *string  `json:"subrole,omitempty"`
-	Label       *string  `json:"label,omitempty"`
-	Description *string  `json:"description,omitempty"`
-	Value       *string  `json:"value,omitempty"`
-	Secure      bool     `json:"secure"`
-	Enabled     *bool    `json:"enabled,omitempty"`
-	Focused     *bool    `json:"focused,omitempty"`
-	Frame       *Frame   `json:"frame,omitempty"`
-	Actions     []string `json:"actions"`
+	ElementID      string   `json:"elementID"`
+	WindowIndex    int      `json:"windowIndex"`
+	WindowID       *uint32  `json:"windowID,omitempty"`
+	Role           *string  `json:"role,omitempty"`
+	Subrole        *string  `json:"subrole,omitempty"`
+	Label          *string  `json:"label,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	Value          *string  `json:"value,omitempty"`
+	ValueTruncated bool     `json:"valueTruncated"`
+	Secure         bool     `json:"secure"`
+	Enabled        *bool    `json:"enabled,omitempty"`
+	Focused        *bool    `json:"focused,omitempty"`
+	Selected       *bool    `json:"selected,omitempty"`
+	Frame          *Frame   `json:"frame,omitempty"`
+	Actions        []string `json:"actions"`
 }
 
 type Observation struct {
@@ -121,11 +143,50 @@ type Capture struct {
 	ScaleFactor float64 `json:"scaleFactor"`
 }
 
+type NativeObservationCapture struct {
+	Observation  Observation `json:"observation"`
+	Capture      *Capture    `json:"capture,omitempty"`
+	CaptureError *Failure    `json:"captureError,omitempty"`
+}
+
+type ManagedObservationCapture struct {
+	Observation  ManagedObservation `json:"observation"`
+	Capture      *Capture           `json:"capture,omitempty"`
+	CaptureError *Failure           `json:"captureError,omitempty"`
+}
+
 type NativeAction struct {
-	AppID     string `json:"appID"`
-	ElementID string `json:"elementID"`
-	Action    string `json:"action"`
-	Completed bool   `json:"completed"`
+	AppID      string   `json:"appID"`
+	ElementID  string   `json:"elementID"`
+	Action     string   `json:"action"`
+	Completed  bool     `json:"completed"`
+	X          *float64 `json:"x,omitempty"`
+	Y          *float64 `json:"y,omitempty"`
+	ToX        *float64 `json:"toX,omitempty"`
+	ToY        *float64 `json:"toY,omitempty"`
+	Button     string   `json:"button,omitempty"`
+	ClickCount int      `json:"clickCount,omitempty"`
+	DeltaX     *int     `json:"deltaX,omitempty"`
+	DeltaY     *int     `json:"deltaY,omitempty"`
+}
+
+type PointerInput struct {
+	Action     string
+	X          float64
+	Y          float64
+	ToX        *float64
+	ToY        *float64
+	Button     string
+	ClickCount int
+	DeltaX     *int
+	DeltaY     *int
+}
+
+type ScreenshotPointer struct {
+	PointerInput
+	CaptureWidth  int
+	CaptureHeight int
+	ScaleFactor   float64
 }
 
 type Failure struct {
@@ -144,22 +205,23 @@ type ActionResult struct {
 type Service interface {
 	Permissions(ctx context.Context) (Permissions, error)
 	ListApps(ctx context.Context, sessionID string) (AppList, error)
-	UseApp(ctx context.Context, sessionID, appID string) (NativeUse, error)
+	UseApp(ctx context.Context, sessionID, appID string, foreground bool) (NativeUse, error)
 	QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error)
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error)
-	Capture(ctx context.Context, sessionID, appID string, windowID uint32, output string) (Capture, error)
+	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error)
 	Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (NativeAction, error)
-	ReleaseSession(ctx context.Context, sessionID string) error
+	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer ScreenshotPointer) (NativeAction, error)
 }
 
 type Controller interface {
 	ListApps(ctx context.Context, sessionID string) (AppList, error)
-	UseApp(ctx context.Context, sessionID, appID string) (UseResult, error)
+	UseApp(ctx context.Context, sessionID, appID string, foreground bool) (UseResult, error)
 	OwnedLaunchAppID(sessionID, launchID string) (string, bool)
 	QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error)
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (ManagedObservation, error)
-	Capture(ctx context.Context, sessionID, appID string, windowID uint32, output string) (Capture, error)
+	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (ManagedObservationCapture, error)
 	Act(ctx context.Context, sessionID, appID string, windowID uint32, observationID, elementID, action string, value *string) (ActionResult, error)
+	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, observationID string, pointer PointerInput) (ActionResult, error)
 	ReleaseSession(ctx context.Context, sessionID string) error
 }
 

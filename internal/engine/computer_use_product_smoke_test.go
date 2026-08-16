@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ type computerUseSmokeScenario struct {
 	name          string
 	appID         string
 	expectOwned   bool
+	foreground    bool
 	windowMatches func(computer.CapturableWindow) bool
 	actions       []computerUseSmokeAction
 }
@@ -58,16 +60,20 @@ type computerUseSmokeAction struct {
 	value   *string
 	matches func(computer.Element) bool
 	verify  func([]computer.Element) error
+	pointer bool
 }
 
 func fixtureSmokeScenario() computerUseSmokeScenario {
 	fixtureValue := fmt.Sprintf("pudding-product-smoke-%d", time.Now().UnixNano())
 	return computerUseSmokeScenario{
-		name: "fixture", appID: computerUseFixtureAppID, expectOwned: true,
+		name: "fixture", appID: computerUseFixtureAppID, expectOwned: true, foreground: true,
 		windowMatches: func(window computer.CapturableWindow) bool {
 			return window.Title != nil && *window.Title == "Computer Use Fixture"
 		},
 		actions: []computerUseSmokeAction{
+			{
+				callID: "call_computer_pointer_click", action: computer.ActionClick, pointer: true,
+			},
 			{
 				callID: "call_computer_set_value", action: computer.ActionSetValue, value: &fixtureValue,
 				matches: func(element computer.Element) bool {
@@ -78,6 +84,32 @@ func fixtureSmokeScenario() computerUseSmokeScenario {
 						return errors.New("fixture text value did not persist in the action's fresh observation")
 					}
 					return nil
+				},
+			},
+			{
+				callID: "call_computer_submit", action: computer.ActionSubmit,
+				matches: func(element computer.Element) bool {
+					return element.Role != nil && *element.Role == "AXTextField"
+				},
+				verify: func(elements []computer.Element) error {
+					if !smokeHasNamedValue(elements, "Fixture confirmed value", fixtureValue) {
+						return errors.New("fixture submit did not submit the text field")
+					}
+					return nil
+				},
+			},
+			{
+				callID: "call_computer_select", action: computer.ActionSelect,
+				matches: func(element computer.Element) bool {
+					return element.Role != nil && *element.Role == "AXRow"
+				},
+				verify: func(elements []computer.Element) error {
+					for _, element := range elements {
+						if element.Role != nil && *element.Role == "AXRow" && element.Selected != nil && *element.Selected {
+							return nil
+						}
+					}
+					return errors.New("fixture select did not select a table row")
 				},
 			},
 			{
@@ -159,7 +191,7 @@ func runComputerUseSmoke(t *testing.T, enabledEnv string, scenario computerUseSm
 		t.Fatal(err)
 	}
 	manager := computer.NewManager(bridge)
-	runner := tool.NewBuiltinRunner(tool.WithComputer(manager))
+	runner := tool.NewBuiltinRunner(tool.WithComputer(manager), tool.WithHomeDir(t.TempDir()))
 	client := &computerUseSmokeClient{scenario: scenario}
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -181,7 +213,7 @@ func runComputerUseSmoke(t *testing.T, enabledEnv string, scenario computerUseSm
 		DisplayName: providerName, Protocol: "openai-compatible",
 		Models: []store.ProviderModel{{
 			ID:           modelName,
-			Capabilities: &store.ModelCaps{Tools: true},
+			Capabilities: &store.ModelCaps{Image: true, Tools: true},
 			Limits:       &store.ModelLimits{MaxToolLoops: 64},
 		}},
 	}); err != nil {
@@ -263,14 +295,14 @@ func (r computerUseSmokeResolver) Resolve(_ context.Context, name string) (provi
 }
 
 type computerUseSmokeClient struct {
-	mu           sync.Mutex
-	scenario     computerUseSmokeScenario
-	requests     int
-	stage        int
-	listAttempts int
-	launchID     string
-	windowID     uint32
-	err          error
+	mu         sync.Mutex
+	scenario   computerUseSmokeScenario
+	requests   int
+	stage      int
+	launchID   string
+	windowID   uint32
+	screenshot *computer.Capture
+	err        error
 }
 
 func (c *computerUseSmokeClient) Name() string { return "computer-use-" + c.scenario.name + "-smoke" }
@@ -280,7 +312,6 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	defer c.mu.Unlock()
 	c.requests++
 	stage := c.stage + 1
-	advance := true
 
 	var name, callID string
 	var args any
@@ -298,7 +329,7 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 			}
 		}
 		name, callID = tool.ComputerUseApp, "call_computer_use"
-		args = map[string]any{"appID": c.scenario.appID}
+		args = map[string]any{"appID": c.scenario.appID, "foreground": c.scenario.foreground}
 	case stage == 3:
 		var result struct {
 			OK     bool               `json:"ok"`
@@ -319,55 +350,41 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 		if result.Result.LaunchID != nil {
 			c.launchID = *result.Result.LaunchID
 		}
-		name, callID = tool.ComputerListApps, "call_computer_list_apps"
-		args = map[string]any{}
-	case stage == 4:
-		var result struct {
-			OK     bool             `json:"ok"`
-			Result computer.AppList `json:"result"`
-		}
-		if err := decodeSmokeToolResult(req, tool.ComputerListApps, &result); err != nil {
-			return c.fail(err)
-		}
-		if !result.OK || !result.Result.Permissions.Accessibility || !result.Result.Permissions.ScreenRecording {
-			return c.fail(fmt.Errorf("Computer Use permissions are incomplete: %+v", result.Result.Permissions))
-		}
-		for _, window := range result.Result.CapturableWindows {
+		for _, window := range result.Result.Windows {
 			if window.AppID != nil && *window.AppID == c.scenario.appID && c.scenario.windowMatches(window) {
 				c.windowID = window.WindowID
 				break
 			}
 		}
 		if c.windowID == 0 {
-			c.listAttempts++
-			if c.listAttempts >= 40 {
-				return c.fail(fmt.Errorf("%s window was not discovered through the product tool", c.scenario.name))
-			}
-			advance = false
-			select {
-			case <-ctx.Done():
-				return c.fail(ctx.Err())
-			case <-time.After(150 * time.Millisecond):
-			}
-			name, callID = tool.ComputerListApps, fmt.Sprintf("call_computer_list_apps_retry_%d", c.listAttempts)
-			args = map[string]any{}
-			break
+			return c.fail(fmt.Errorf("%s app use did not return its target window", c.scenario.name))
 		}
 		name, callID = tool.ComputerObserve, "call_computer_observe"
-		args = map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "maxElements": 300}
-	case stage >= 5 && stage <= 5+len(c.scenario.actions):
-		completedActions := stage - 5
+		args = map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "maxElements": 300, "includeScreenshot": true}
+	case stage >= 4 && stage <= 4+len(c.scenario.actions):
+		completedActions := stage - 4
 		var observation *computer.ManagedObservation
 		if completedActions == 0 {
 			var result struct {
 				OK          bool                        `json:"ok"`
 				Observation computer.ManagedObservation `json:"observation"`
+				Screenshot  *struct {
+					WindowID      uint32  `json:"windowID"`
+					Width         int     `json:"width"`
+					Height        int     `json:"height"`
+					ScaleFactor   float64 `json:"scaleFactor"`
+					AttachmentKey string  `json:"attachmentKey"`
+				} `json:"screenshot"`
 			}
 			if err := decodeSmokeToolResult(req, tool.ComputerObserve, &result); err != nil {
 				return c.fail(err)
 			}
-			if !result.OK {
+			if !result.OK || result.Screenshot == nil || result.Screenshot.WindowID != c.windowID || result.Screenshot.AttachmentKey == "" {
 				return c.fail(errors.New("Computer Use observation failed"))
+			}
+			c.screenshot = &computer.Capture{
+				WindowID: result.Screenshot.WindowID, Width: result.Screenshot.Width,
+				Height: result.Screenshot.Height, ScaleFactor: result.Screenshot.ScaleFactor,
 			}
 			observation = &result.Observation
 		} else {
@@ -379,8 +396,14 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 			if observation == nil {
 				return c.fail(errors.New("Computer Use action did not return a fresh observation"))
 			}
-			if err := c.scenario.actions[completedActions-1].verify(observation.Snapshot.Elements); err != nil {
-				return c.fail(err)
+			completed := c.scenario.actions[completedActions-1]
+			if result.Action.Action != completed.action {
+				return c.fail(fmt.Errorf("Computer Use returned action %q, want %q", result.Action.Action, completed.action))
+			}
+			if completed.verify != nil {
+				if err := completed.verify(observation.Snapshot.Elements); err != nil {
+					return c.fail(err)
+				}
 			}
 		}
 		if completedActions == len(c.scenario.actions) {
@@ -393,6 +416,17 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 			break
 		}
 		action := c.scenario.actions[completedActions]
+		if action.pointer {
+			pointerArgs, err := smokePointerClickArgs(*observation, c.screenshot)
+			if err != nil {
+				return c.fail(err)
+			}
+			pointerArgs["appID"] = c.scenario.appID
+			pointerArgs["windowID"] = c.windowID
+			pointerArgs["observationID"] = observation.ObservationID
+			name, callID, args = tool.ComputerAct, action.callID, pointerArgs
+			break
+		}
 		element := smokeElement(observation.Snapshot.Elements, action.action, action.matches)
 		if element == nil {
 			return c.fail(fmt.Errorf("%s action target %s was not observed", c.scenario.name, action.callID))
@@ -423,9 +457,7 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	default:
 		return c.fail(fmt.Errorf("unexpected provider stage %d", stage))
 	}
-	if advance {
-		c.stage = stage
-	}
+	c.stage = stage
 
 	rawArgs, err := json.Marshal(args)
 	if err != nil {
@@ -434,11 +466,53 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	return smokeToolStream(callID, name, string(rawArgs)), nil
 }
 
+func smokePointerClickArgs(observation computer.ManagedObservation, capture *computer.Capture) (map[string]any, error) {
+	if capture == nil || capture.Width <= 0 || capture.Height <= 0 || !isPositiveFinite(capture.ScaleFactor) {
+		return nil, errors.New("Computer Use screenshot geometry is missing")
+	}
+	var windowFrame *computer.Frame
+	for index := range observation.Snapshot.Windows {
+		window := &observation.Snapshot.Windows[index]
+		if window.WindowID != nil && *window.WindowID == capture.WindowID {
+			windowFrame = window.Frame
+			break
+		}
+	}
+	var targetFrame *computer.Frame
+	for index := range observation.Snapshot.Elements {
+		element := &observation.Snapshot.Elements[index]
+		if smokeElementName(*element) == "Fixture pointer target" {
+			targetFrame = element.Frame
+			break
+		}
+	}
+	if windowFrame == nil || targetFrame == nil {
+		return nil, errors.New("fixture pointer geometry was not observed")
+	}
+	x := (targetFrame.X - windowFrame.X + targetFrame.Width/2) * capture.ScaleFactor
+	y := (targetFrame.Y - windowFrame.Y + targetFrame.Height/2) * capture.ScaleFactor
+	if !isFiniteCoordinate(x, capture.Width) || !isFiniteCoordinate(y, capture.Height) {
+		return nil, errors.New("fixture pointer coordinate is outside the screenshot")
+	}
+	return map[string]any{
+		"action": computer.ActionClick, "x": x, "y": y,
+		"button": computer.PointerButtonLeft, "clickCount": 1,
+	}, nil
+}
+
+func isPositiveFinite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0
+}
+
+func isFiniteCoordinate(value float64, limit int) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value < float64(limit)
+}
+
 func (c *computerUseSmokeClient) finalStage() int {
 	if c.scenario.expectOwned {
-		return 6 + len(c.scenario.actions)
+		return 5 + len(c.scenario.actions)
 	}
-	return 5 + len(c.scenario.actions)
+	return 4 + len(c.scenario.actions)
 }
 
 func (c *computerUseSmokeClient) fail(err error) (<-chan provider.Chunk, error) {

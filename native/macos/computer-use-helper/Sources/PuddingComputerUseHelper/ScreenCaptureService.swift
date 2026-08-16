@@ -2,40 +2,10 @@ import AppKit
 import Foundation
 @preconcurrency import ScreenCaptureKit
 
-struct ScreenCaptureApplication {
-  let bundleID: String
-  let name: String
-  let pid: pid_t
-}
-
-struct ScreenCaptureInventory {
-  let applications: [ScreenCaptureApplication]
-  let windows: [CapturableWindowSnapshot]
-}
-
 final class ScreenCaptureService {
-  func inventory() async throws -> ScreenCaptureInventory {
+  func window(bundleID: String, windowID: UInt32) async throws -> CapturableWindowSnapshot {
     guard CGPreflightScreenCaptureAccess() else {
       throw HelperError.permissionRequired("screen_recording")
-    }
-    let content = try await SCShareableContent.excludingDesktopWindows(
-      true,
-      onScreenWindowsOnly: true
-    )
-    let applications = content.applications.map { application in
-      ScreenCaptureApplication(
-        bundleID: application.bundleIdentifier,
-        name: application.applicationName,
-        pid: application.processID
-      )
-    }
-    let windows = content.windows.map(windowSnapshot)
-    return ScreenCaptureInventory(applications: applications, windows: windows)
-  }
-
-  func window(bundleID: String, windowID: UInt32) async throws -> CapturableWindowSnapshot? {
-    guard CGPreflightScreenCaptureAccess() else {
-      return nil
     }
     let content = try await SCShareableContent.excludingDesktopWindows(
       true,
@@ -44,9 +14,39 @@ final class ScreenCaptureService {
     guard let window = content.windows.first(where: {
       $0.windowID == windowID && $0.owningApplication?.bundleIdentifier == bundleID
     }) else {
-      return nil
+      throw HelperError.windowNotFound(windowID)
     }
     return windowSnapshot(window)
+  }
+
+  func waitForWindows(bundleID: String, pid: pid_t) async throws -> [CapturableWindowSnapshot] {
+    guard CGPreflightScreenCaptureAccess() else {
+      return []
+    }
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(3))
+    var previousWindowIDs: [UInt32] = []
+    while true {
+      let content = try await SCShareableContent.excludingDesktopWindows(
+        true,
+        onScreenWindowsOnly: true
+      )
+      let windows = content.windows
+        .filter { window in
+          window.owningApplication?.bundleIdentifier == bundleID
+            && window.owningApplication?.processID == pid
+        }
+        .map(windowSnapshot)
+      let windowIDs = windows.map(\.windowID).sorted()
+      if !windowIDs.isEmpty, windowIDs == previousWindowIDs {
+        return windows
+      }
+      if clock.now >= deadline {
+        return windows
+      }
+      previousWindowIDs = windowIDs
+      try await Task.sleep(for: .milliseconds(100))
+    }
   }
 
   func capture(bundleID: String, windowID: UInt32, output: String) async throws -> CaptureSnapshot {
@@ -110,7 +110,7 @@ final class ScreenCaptureService {
     )
   }
 
-  private func backingScaleFactor(for frame: CGRect) -> Double {
+  func backingScaleFactor(for frame: CGRect) -> Double {
     let target = NSScreen.screens.max { left, right in
       left.frame.intersection(frame).area < right.frame.intersection(frame).area
     }
@@ -120,9 +120,10 @@ final class ScreenCaptureService {
   private func windowSnapshot(_ window: SCWindow) -> CapturableWindowSnapshot {
     CapturableWindowSnapshot(
       windowID: window.windowID,
+      pid: window.owningApplication?.processID ?? 0,
       bundleID: window.owningApplication?.bundleIdentifier,
       applicationName: window.owningApplication?.applicationName,
-      title: window.title,
+      title: ValueSanitizer.bounded(window.title),
       frame: FrameSnapshot(
         x: window.frame.origin.x,
         y: window.frame.origin.y,

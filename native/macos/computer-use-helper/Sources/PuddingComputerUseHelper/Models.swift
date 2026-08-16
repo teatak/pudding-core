@@ -6,18 +6,15 @@ struct PermissionSnapshot: Codable, Equatable {
 }
 
 struct ListAppsOutput: Codable, Equatable {
-  let permissions: PermissionSnapshot
-  let apps: [RunningApplicationSnapshot]
-  let capturableWindows: [CapturableWindowSnapshot]
+  let apps: [ApplicationSnapshot]
 }
 
-struct RunningApplicationSnapshot: Codable, Equatable {
+struct ApplicationSnapshot: Codable, Equatable {
   let bundleID: String
   let name: String
-  let pid: Int32
+  let running: Bool
   let active: Bool
   let controllable: Bool
-  let windows: [ApplicationWindowSnapshot]
 }
 
 struct ApplicationIdentitySnapshot: Codable, Equatable {
@@ -53,9 +50,11 @@ struct ObservedElementSnapshot: Codable, Equatable {
   let label: String?
   let description: String?
   let value: String?
+  let valueTruncated: Bool
   let secure: Bool
   let enabled: Bool?
   let focused: Bool?
+  let selected: Bool?
   let frame: FrameSnapshot?
   let actions: [String]
 }
@@ -69,6 +68,7 @@ struct FrameSnapshot: Codable, Equatable {
 
 struct CapturableWindowSnapshot: Codable, Equatable {
   let windowID: UInt32
+  let pid: Int32
   let bundleID: String?
   let applicationName: String?
   let title: String?
@@ -83,11 +83,27 @@ struct CaptureSnapshot: Codable, Equatable {
   let scaleFactor: Double
 }
 
+struct ObservationCaptureSnapshot: Codable, Equatable {
+  let observation: ObservationSnapshot
+  let capture: CaptureSnapshot?
+  let captureError: ErrorDetail?
+}
+
 struct UseApplicationSnapshot: Codable, Equatable {
   let bundleID: String
   let name: String
   let pid: Int32
   let newlyLaunched: Bool
+  let windowStatus: WindowDiscoveryStatus
+  let windowError: ErrorDetail?
+  let windows: [CapturableWindowSnapshot]
+}
+
+enum WindowDiscoveryStatus: String, Codable, Equatable {
+  case ready
+  case none
+  case permissionRequired = "permission_required"
+  case failed
 }
 
 struct QuitApplicationSnapshot: Codable, Equatable {
@@ -101,6 +117,21 @@ struct ActionSnapshot: Codable, Equatable {
   let elementID: String
   let action: ElementAction
   let completed: Bool
+}
+
+struct PointerSnapshot: Codable, Equatable {
+  let bundleID: String
+  let elementID: String
+  let action: String
+  let completed: Bool
+  let x: Double
+  let y: Double
+  let toX: Double?
+  let toY: Double?
+  let button: String?
+  let clickCount: Int?
+  let deltaX: Int?
+  let deltaY: Int?
 }
 
 enum ActionOutcome: String, Codable, Equatable {
@@ -133,6 +164,9 @@ enum HelperError: Error, LocalizedError {
   case ambiguousElement(String)
   case actionFailed(String)
   case captureFailed(String)
+  case coordinateSourceStale(String)
+  case appNotForeground(String, String)
+  case responseTooLarge
   case applicationNotInstalled(String)
   case useFailed(String)
 
@@ -154,6 +188,12 @@ enum HelperError: Error, LocalizedError {
       return "computer_action_failed"
     case .captureFailed:
       return "computer_capture_failed"
+    case .coordinateSourceStale:
+      return "computer_observation_stale"
+    case .appNotForeground:
+      return "computer_app_not_foreground"
+    case .responseTooLarge:
+      return "computer_invalid_response"
     case .applicationNotInstalled:
       return "computer_app_not_installed"
     case .useFailed:
@@ -181,6 +221,12 @@ enum HelperError: Error, LocalizedError {
       return "action failed: \(reason)"
     case .captureFailed(let reason):
       return "capture failed: \(reason)"
+    case .coordinateSourceStale(let reason):
+      return "coordinate source is stale: \(reason)"
+    case .appNotForeground(let bundleID, let foregroundApplication):
+      return "application must be foreground for pointer input: \(bundleID); current foreground app: \(foregroundApplication)"
+    case .responseTooLarge:
+      return "Computer Use response is too large"
     case .applicationNotInstalled(let bundleID):
       return "application is not installed: \(bundleID)"
     case .useFailed(let reason):
@@ -202,25 +248,48 @@ func errorDetail(for error: Error) -> ErrorDetail {
   let helperError = error as? HelperError
   return ErrorDetail(
     code: helperError?.code ?? "computer_invalid_request",
-    message: error.localizedDescription,
+    message: ValueSanitizer.bounded(error.localizedDescription, limit: 2_048)
+      ?? "Computer Use request failed",
     retryable: false,
     outcome: helperError?.outcome ?? .notStarted
   )
 }
 
 enum ValueSanitizer {
-  static func string(_ value: Any?, secure: Bool, limit: Int = 500) -> String? {
+  static func string(_ value: Any?, secure: Bool, limit: Int = 256) -> String? {
     guard !secure else { return nil }
-    let raw: String
+    guard let raw = rawString(value) else { return nil }
+    return bounded(raw, limit: limit)
+  }
+
+  static func isTruncated(_ value: Any?, secure: Bool, limit: Int = 256) -> Bool {
+    guard !secure, let raw = rawString(value) else { return false }
+    return raw.utf8.count > limit
+  }
+
+  static func bounded(_ value: String?, limit: Int = 256) -> String? {
+    guard let value else { return nil }
+    guard value.utf8.count > limit else { return value }
+    guard limit > 0 else { return "" }
+    var bytes = 0
+    var end = value.startIndex
+    for character in value {
+      let nextBytes = String(character).utf8.count
+      guard bytes + nextBytes <= limit else { break }
+      bytes += nextBytes
+      end = value.index(after: end)
+    }
+    return String(value[..<end])
+  }
+
+  private static func rawString(_ value: Any?) -> String? {
     switch value {
     case let text as String:
-      raw = text
+      return text
     case let number as NSNumber:
-      raw = number.stringValue
+      return number.stringValue
     default:
       return nil
     }
-    guard raw.count > limit else { return raw }
-    return String(raw.prefix(limit))
   }
 }

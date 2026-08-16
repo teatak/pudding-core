@@ -17,7 +17,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 11
+	currentSchemaVersion       = 12
 )
 
 var (
@@ -248,6 +248,48 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	12: func(tx *sql.Tx) error {
+		columns := []struct{ name, definition string }{
+			{"snapshot_version", "INTEGER NOT NULL DEFAULT 0"},
+			{"old_digest", "TEXT NOT NULL DEFAULT ''"},
+			{"new_digest", "TEXT NOT NULL DEFAULT ''"},
+			{"old_mode", "INTEGER NOT NULL DEFAULT 0"},
+			{"new_mode", "INTEGER NOT NULL DEFAULT 0"},
+			{"old_type", "TEXT NOT NULL DEFAULT ''"},
+			{"new_type", "TEXT NOT NULL DEFAULT ''"},
+			{"old_binary", "INTEGER NOT NULL DEFAULT 0"},
+			{"new_binary", "INTEGER NOT NULL DEFAULT 0"},
+			{"old_data", "BLOB NOT NULL DEFAULT X''"},
+			{"new_data", "BLOB NOT NULL DEFAULT X''"},
+		}
+		for _, column := range columns {
+			if err := addTableColumnIfMissing(tx, "turn_file_changes", column.name, column.definition); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS turn_file_change_states (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+				state TEXT NOT NULL DEFAULT 'applied',
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY(session_id, turn_id)
+			);
+			INSERT OR IGNORE INTO turn_file_change_states(session_id,turn_id,state,updated_at)
+			SELECT session_id,turn_id,'applied',MAX(created_at)
+			FROM turn_file_changes GROUP BY session_id,turn_id;
+		`)
+		return err
+	},
+}
+
+func addTableColumnIfMissing(tx *sql.Tx, table, column, definition string) error {
+	exists, err := tableColumnExists(tx, table, column)
+	if err != nil || exists {
+		return err
+	}
+	_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }
 
 func removeLoadedAppIDs(tx *sql.Tx, removedIDs ...string) error {

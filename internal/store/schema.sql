@@ -77,11 +77,30 @@ CREATE TABLE IF NOT EXISTS turn_file_changes (
     new_size      INTEGER NOT NULL DEFAULT 0,
     old_content   TEXT    NOT NULL DEFAULT '',
     new_content   TEXT    NOT NULL DEFAULT '',
+    snapshot_version INTEGER NOT NULL DEFAULT 0,
+    old_digest    TEXT    NOT NULL DEFAULT '',
+    new_digest    TEXT    NOT NULL DEFAULT '',
+    old_mode      INTEGER NOT NULL DEFAULT 0,
+    new_mode      INTEGER NOT NULL DEFAULT 0,
+    old_type      TEXT    NOT NULL DEFAULT '',
+    new_type      TEXT    NOT NULL DEFAULT '',
+    old_binary    INTEGER NOT NULL DEFAULT 0,
+    new_binary    INTEGER NOT NULL DEFAULT 0,
+    old_data      BLOB    NOT NULL DEFAULT X'',
+    new_data      BLOB    NOT NULL DEFAULT X'',
     created_at    INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS turn_file_changes_turn
     ON turn_file_changes(session_id, turn_id, path);
+
+CREATE TABLE IF NOT EXISTS turn_file_change_states (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id    TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    state      TEXT NOT NULL DEFAULT 'applied',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, turn_id)
+);
 
 CREATE TABLE IF NOT EXISTS queued_inputs (
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

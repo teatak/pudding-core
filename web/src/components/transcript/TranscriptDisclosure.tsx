@@ -20,7 +20,7 @@ type TranscriptDisclosureProps = {
 
 export function TranscriptActivityIcon({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65", className)}>
+    <span className={cn("relative z-[1] inline-flex h-6 w-[18px] shrink-0 items-center justify-center text-muted-foreground/65 [&_svg]:size-3.5! [&_[data-slot=identity-icon]]:size-[18px]! [&_[data-slot=spinner]]:size-3!", className)}>
       {children}
     </span>
   );
@@ -62,7 +62,7 @@ export function TranscriptDisclosure({
 
   if (!expandable) {
     return (
-      <div className={cn("grid h-6 w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5] text-muted-foreground", className)}>
+      <div className={cn("grid h-6 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5] text-muted-foreground", className)}>
         {row}
       </div>
     );
@@ -80,7 +80,7 @@ export function TranscriptDisclosure({
       }}
     >
       <summary
-        className="inline-grid h-6 max-w-full cursor-default list-none grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        className="inline-grid h-6 max-w-full cursor-default list-none grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
         tabIndex={-1}
         onClick={onSummaryClick}
         onKeyDown={onSummaryKeyDown}

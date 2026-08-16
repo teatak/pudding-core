@@ -25,11 +25,16 @@ import {
 } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useQuery } from "@tanstack/react-query";
 
-import { type ContentPart, type Message } from "@/api/client";
+import { appIconURL, listApps, type AppDefinition, type ContentPart, type Message } from "@/api/client";
+import { queryKeys } from "@/api/queryKeys";
+import { AppIdentityIcon } from "@/components/AppIdentity";
+import { AppIcon } from "@/components/AppIcon";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { useDesktopApplicationIdentity } from "@/hooks/useDesktopApplicationIdentity";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { openExternalURL } from "@/lib/desktopBridge";
@@ -177,6 +182,7 @@ function renderTranscriptPart({
           key={partKey}
           defaultOpen={(disclosure?.isOpen(disclosureKey) || false) || (!groupHasState && Boolean(childIsOpen))}
           hiddenParts={part.hiddenParts}
+          token={token}
           renderPart={(hiddenPart, hiddenIndex, childShowsActivitySpinner) => {
             const hiddenKey = hiddenPart.key || `${hiddenPart.type}:${hiddenIndex}`;
             return renderTranscriptPart({
@@ -238,7 +244,7 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
     if (part.type === "approval") {
       continue;
     }
-    if (part.type === "tool_use" && toolAttachmentsRenderInside(part.name || part.resultName)) {
+    if (part.type === "tool_use" && toolHasInlineAttachments(part)) {
       flush();
       out.push(part);
       continue;
@@ -262,8 +268,170 @@ function ProcessActivityGlyph({ active, icon: Icon }: { active: boolean; icon: L
   return active ? <Spinner className="size-3" /> : <Icon aria-hidden="true" className="size-3.5" />;
 }
 
+function ToolActivityGlyph({ active, appID, icon: Icon }: { active: boolean; appID?: string; icon: LucideIcon }) {
+  if (active) {
+    return <Spinner className="size-4" />;
+  }
+  return appID ? <DesktopAppActivityIcon appID={appID} fallbackIcon={Icon} /> : <Icon aria-hidden="true" className="size-4" />;
+}
+
+type ProcessAppIdentity =
+  | { app: AppDefinition; kind: "pudding" }
+  | { appID: string; kind: "desktop" };
+
+function ProcessCompactActivityGlyph({
+  active,
+  app,
+  icon: Icon,
+  token,
+}: {
+  active: boolean;
+  app?: ProcessAppIdentity;
+  icon: LucideIcon;
+  token: string;
+}) {
+  if (active) {
+    return <Spinner className="size-4" />;
+  }
+  if (app?.kind === "pudding") {
+    return (
+      <span className="inline-flex size-4 [&_[data-slot=identity-icon]]:size-4">
+        <AppIdentityIcon app={app.app} iconSrc={appIconURL(token, app.app)} size="xs" />
+      </span>
+    );
+  }
+  return app?.kind === "desktop" ? (
+    <DesktopAppActivityIcon appID={app.appID} fallbackIcon={Icon} />
+  ) : (
+    <Icon aria-hidden="true" className="size-4" />
+  );
+}
+
+function DesktopAppActivityIcon({ appID, fallbackIcon: FallbackIcon }: { appID: string; fallbackIcon: LucideIcon }) {
+  const identity = useDesktopApplicationIdentity(appID);
+  return identity?.iconURL ? (
+    <AppIcon className="size-4 rounded-[4px]" size="xs" src={identity.iconURL} />
+  ) : (
+    <FallbackIcon aria-hidden="true" className="size-4" />
+  );
+}
+
 function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIcon {
   return toolIcon(part.name || part.resultName);
+}
+
+const computerTargetToolNames = new Set([
+  "builtin_computer_use_app",
+  "builtin_computer_quit_app",
+  "builtin_computer_observe",
+  "builtin_computer_act",
+]);
+
+function computerToolAppID(part: Extract<TurnPartVM, { type: "tool_use" }>) {
+  const toolName = part.name || part.resultName || "";
+  if (!computerTargetToolNames.has(toolName)) {
+    return undefined;
+  }
+  return appIDFromToolValue(part.argsText || part.args) || appIDFromToolValue(formatToolResult(part.resultContent)?.value);
+}
+
+const processAppNeutralToolNames = new Set(["request_capability"]);
+
+function processToolAppIDs(part: Extract<TurnPartVM, { type: "tool_use" }>, apps: AppDefinition[]) {
+  const name = part.name || part.resultName || "";
+  if (name === "builtin_app_load" || name === "builtin_app_unload") {
+    const appID = snakeCaseAppIDFromToolValue(part.argsText || part.args);
+    return appID && apps.some((app) => app.id === appID) ? [appID] : [];
+  }
+  const endpoint = endpointFromToolValue(part.argsText || part.args);
+  return apps
+    .filter(
+      (app) =>
+        (endpoint && Object.prototype.hasOwnProperty.call(app.endpoints || {}, endpoint)) ||
+        app.tools?.some((tool) => tool.name === name),
+    )
+    .map((app) => app.id);
+}
+
+function sharedProcessAppIdentity(parts: TurnPartVM[], apps: AppDefinition[]): ProcessAppIdentity | undefined {
+  const tools = parts.filter((part): part is Extract<TurnPartVM, { type: "tool_use" }> => part.type === "tool_use");
+  if (tools.length === 0 || apps.length === 0) {
+    return undefined;
+  }
+
+  const desktopAppIDs = new Set(tools.map(computerToolAppID).filter((appID): appID is string => Boolean(appID)));
+  if (desktopAppIDs.size > 1) {
+    return undefined;
+  }
+  if (desktopAppIDs.size === 1) {
+    const compatible = tools.every((tool) => {
+      const name = tool.name || tool.resultName || "";
+      if (processAppNeutralToolNames.has(name)) {
+        return true;
+      }
+      const desktopAppID = computerToolAppID(tool);
+      const appIDs = processToolAppIDs(tool, apps);
+      return Boolean(desktopAppID) || (appIDs.length === 1 && appIDs[0] === "computer-use");
+    });
+    return compatible ? { appID: [...desktopAppIDs][0], kind: "desktop" } : undefined;
+  }
+
+  const appIDs = new Set<string>();
+  for (const tool of tools) {
+    const name = tool.name || tool.resultName || "";
+    if (processAppNeutralToolNames.has(name)) {
+      continue;
+    }
+    const candidates = processToolAppIDs(tool, apps);
+    if (candidates.length === 0) {
+      return undefined;
+    }
+    candidates.forEach((appID) => appIDs.add(appID));
+  }
+  if (appIDs.size !== 1) {
+    return undefined;
+  }
+  const app = apps.find((candidate) => candidate.id === [...appIDs][0]);
+  return app ? { app, kind: "pudding" } : undefined;
+}
+
+function snakeCaseAppIDFromToolValue(value: unknown): string | undefined {
+  const normalized = normalizeRawToolValue(value);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    return undefined;
+  }
+  const appID = (normalized as Record<string, unknown>).app_id;
+  return typeof appID === "string" && appID.trim() ? appID.trim() : undefined;
+}
+
+function endpointFromToolValue(value: unknown): string | undefined {
+  const normalized = normalizeRawToolValue(value);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    return undefined;
+  }
+  const endpoint = (normalized as Record<string, unknown>).endpoint;
+  return typeof endpoint === "string" && endpoint.trim() ? endpoint.trim() : undefined;
+}
+
+function appIDFromToolValue(value: unknown): string | undefined {
+  const normalized = normalizeRawToolValue(value);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    return undefined;
+  }
+  const record = normalized as Record<string, unknown>;
+  if (typeof record.appID === "string" && record.appID.trim()) {
+    return record.appID.trim();
+  }
+  for (const key of ["result", "observation"]) {
+    const nested = record[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const appID = (nested as Record<string, unknown>).appID;
+      if (typeof appID === "string" && appID.trim()) {
+        return appID.trim();
+      }
+    }
+  }
+  return undefined;
 }
 
 export function partsFromMessages(messages: Message[]): TurnPartVM[] {
@@ -461,6 +629,10 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
 function toolAttachmentsRenderInside(name: string | undefined) {
   // The legacy name is display-only for canonical history; the backend no longer registers it.
   return name === "builtin_media_read" || name === "builtin_attachment_read_image" || name === "builtin_computer_observe";
+}
+
+function toolHasInlineAttachments(part: Extract<TurnPartVM, { type: "tool_use" }>) {
+  return Boolean(part.attachments?.length) && toolAttachmentsRenderInside(part.name || part.resultName);
 }
 
 function dedupeAttachmentParts(parts: TurnPartVM[]): TurnPartVM[] {
@@ -722,25 +894,34 @@ function ProcessCompactPart({
   defaultOpen,
   hiddenParts,
   renderPart,
+  token,
   onOpenChange,
 }: {
   defaultOpen: boolean;
   hiddenParts: TurnPartVM[];
   renderPart: (part: TurnPartVM, index: number, showActivitySpinner: boolean) => ReactNode;
+  token: string;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
+  const appsQuery = useQuery({
+    queryKey: queryKeys.apps(),
+    queryFn: () => listApps(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
   const activePart = currentProcessPart(hiddenParts);
   const activeTool = activePart?.type === "tool_use" ? activePart : undefined;
   const elapsed = useElapsedDuration(activeTool?.phase === "running" ? activeTool.phaseUpdatedAt : undefined, locale);
   const title = processCompactTitle(hiddenParts, activePart, elapsed, t);
-  const Icon = title.failed ? CircleAlert : ListChecks;
+  const Icon = title.failed ? CircleAlert : processCompactIcon(hiddenParts, t);
+  const app = title.failed ? undefined : sharedProcessAppIdentity(hiddenParts, appsQuery.data?.apps || []);
   return (
     <TranscriptDisclosure
       className="text-muted-foreground/70"
       contentClassName="py-0"
-      icon={<ProcessActivityGlyph active={title.active && !open} icon={Icon} />}
+      icon={<ProcessCompactActivityGlyph active={title.active && !open} app={app} icon={Icon} token={token} />}
       open={open}
       summary={title.summary || undefined}
       title={title.label}
@@ -839,6 +1020,15 @@ function processCompactLabel(parts: TurnPartVM[], t: (key: string) => string) {
 
   const separator = " · ";
   return groups.map((group) => processToolGroupLabel(group, t)).join(separator);
+}
+
+function processCompactIcon(parts: TurnPartVM[], t: (key: string) => string): LucideIcon {
+  const tools = parts.filter((part): part is Extract<TurnPartVM, { type: "tool_use" }> => part.type === "tool_use");
+  if (tools.length === 0) {
+    return Lightbulb;
+  }
+  const groups = new Set(tools.map((tool) => processToolGroup(tool, t).key));
+  return groups.size === 1 ? toolPartIcon(tools[0]) : ListChecks;
 }
 
 function processFileToolsLabel(
@@ -1013,6 +1203,7 @@ function ToolUsePart({
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
   const Icon = toolPartIcon(part);
+  const appID = computerToolAppID(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const toneClass = "text-muted-foreground";
   const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
@@ -1020,7 +1211,7 @@ function ToolUsePart({
     return (
       <TranscriptDisclosure
         className={toneClass}
-        icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Icon} />}
+        icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
         summary={title.summary || undefined}
         summaryClassName={summaryClass}
         title={title.label}
@@ -1030,7 +1221,7 @@ function ToolUsePart({
   return (
     <TranscriptDisclosure
       className={toneClass}
-      icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Icon} />}
+      icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
       open={open}
       summary={title.summary || undefined}
       summaryClassName={summaryClass}

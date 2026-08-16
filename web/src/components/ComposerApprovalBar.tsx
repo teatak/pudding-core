@@ -12,8 +12,9 @@ import { GitCommitDiffDialog, type GitCommitApproval } from "@/components/GitCom
 import { PatchDiffDialog, type PatchApproval } from "@/components/PatchDiffDialog";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { useDesktopApplicationIdentity } from "@/hooks/useDesktopApplicationIdentity";
 import { useI18n } from "@/i18n";
-import { getDesktopApplicationIdentity, pickDirectories, type DesktopApplicationIdentity } from "@/lib/desktopBridge";
+import { pickDirectories } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import type { AssistantOverlay, AssistantOverlayPart } from "@/state/overlayStore";
@@ -402,33 +403,20 @@ function ComputerApprovalTarget({
   onApprove: () => void;
   onDeny: () => void;
 }) {
-  const [identity, setIdentity] = useState<DesktopApplicationIdentity | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setIdentity(null);
-    void getDesktopApplicationIdentity(appID).then((next) => {
-      if (!cancelled && next?.appID === appID) {
-        setIdentity(next);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [appID]);
+  const identity = useDesktopApplicationIdentity(appID);
 
   return (
-    <div className="grid min-w-0 gap-1">
+    <div className="grid min-w-0 gap-1.5">
       <div className="flex min-w-0 items-center gap-1.5 px-0.5 text-[11px] font-medium text-muted-foreground">
         <ShieldCheck className="size-3.5 shrink-0" />
         <span className="truncate">{heading}</span>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <AppIcon
-          className="shrink-0 bg-foreground/[0.08] ring-1 ring-inset ring-foreground/10"
-          size="md"
-          src={identity?.iconURL}
-        />
+        {identity?.iconURL ? (
+          <AppIcon className="shrink-0" size="md" src={identity.iconURL} />
+        ) : (
+          <span aria-hidden="true" className="size-8 shrink-0" />
+        )}
         <div className="min-w-0 flex-1 truncate text-sm font-medium" title={appID}>
           {identity?.name || appID}
         </div>
@@ -676,6 +664,8 @@ function toolCallReason(operation: string, sandboxBypass: boolean, t: (key: stri
     case "computer_quit_app":
     case "computer_press":
     case "computer_set_value":
+    case "computer_select":
+    case "computer_submit":
       return t(`transcript.approvalToolCall.${operation}`);
     default:
       return "";

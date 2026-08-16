@@ -25,7 +25,6 @@ import {
 } from "@/components/AppMenu";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
-import { PhaseDot } from "@/components/PhaseDot";
 import { SessionAppsControl } from "@/components/SessionAppsControl";
 import { SessionModeIcon } from "@/components/SessionModeIcon";
 import { Spinner } from "@/components/Spinner";
@@ -40,7 +39,7 @@ import { useI18n } from "@/i18n";
 import { onDesktopMenuCommand } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
-import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
+import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 import {
   clearWorkspaceActivity,
@@ -339,20 +338,17 @@ export function ChatPane({
       >
         <div className="flex h-8 min-w-0 max-w-(--chat-title-max-w) flex-1 items-center overflow-visible text-sm font-normal">
           {selectedSession ? (
-            <>
-              <HeaderSessionTitle
-                key={selectedSession.id}
-                archivePending={archiveMutation.isPending}
-                projectName={headerProjectName}
-                renamePending={renameMutation.isPending}
-                session={selectedSession}
-                onArchive={() => archiveMutation.mutate(selectedSession.id)}
-                onOpenProject={openProjects}
-                onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
-                onSearch={openConversationSearch}
-              />
-              <HeaderStatus session={selectedSession} />
-            </>
+            <HeaderSessionTitle
+              key={selectedSession.id}
+              archivePending={archiveMutation.isPending}
+              projectName={headerProjectName}
+              renamePending={renameMutation.isPending}
+              session={selectedSession}
+              onArchive={() => archiveMutation.mutate(selectedSession.id)}
+              onOpenProject={openProjects}
+              onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
+              onSearch={openConversationSearch}
+            />
           ) : (
             <div className="no-drag-region relative z-30 inline-flex h-8 min-w-0 max-w-full items-center gap-1 overflow-visible text-sm font-normal">
               {headerProjectName ? (
@@ -648,28 +644,6 @@ function LoadingState() {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
       <Spinner className="size-5" aria-label={t("common.loading")} />
-    </div>
-  );
-}
-
-// header 单行状态点(docs/design.md 第 5 节):running 双源取或
-// (sessions 快照兜底 + overlay 实时);estimatedSteps/currentStep 协议
-// 落地后在此渲染细进度条,字段缺省时只显示状态点。
-function HeaderStatus({ session }: { session: Session | undefined }) {
-  const liveRunning = useOverlayStore((state) =>
-    session ? Boolean(state.runningTurns[session.id]) : false,
-  );
-  const livePhase = useOverlayStore((state) => (session ? state.turnPhases[session.id] : undefined));
-  if (!session) {
-    return null;
-  }
-  const running = session.running || liveRunning || isTurnPhaseActive(livePhase);
-  if (!running) {
-    return null;
-  }
-  return (
-    <div className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-      <PhaseDot phase={livePhase?.phase} size="sm" />
     </div>
   );
 }

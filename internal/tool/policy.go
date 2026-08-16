@@ -46,7 +46,7 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		}
 		return ToolRisk{
 			Class: RiskClassWrite, Operation: "computer_use_app", Scope: "computer",
-			Paths: compactRiskPaths(args.AppID), Summary: "Open or activate one local macOS application.",
+			Paths: compactRiskPaths(args.AppID), Summary: "Start or access one local macOS application.",
 		}, true
 	}
 	if name == ComputerQuitApp {

@@ -4,15 +4,56 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/computer"
 )
 
+func TestComputerActionGuidanceChainsTheReturnedObservation(t *testing.T) {
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Name != ComputerAct {
+			continue
+		}
+		if !strings.Contains(definition.Description, "use it for the next semantic action") ||
+			!strings.Contains(definition.Description, "select") ||
+			!strings.Contains(definition.Description, "submit") ||
+			!strings.Contains(definition.Description, "exactly one Return") ||
+			!strings.Contains(definition.Description, "Pointer actions") ||
+			!strings.Contains(definition.Description, "double-click") {
+			t.Fatalf("unexpected Computer Act guidance: %s", definition.Description)
+		}
+		return
+	}
+	t.Fatal("Computer Act definition not found")
+}
+
+func TestComputerUseAppDefaultsToBackground(t *testing.T) {
+	args, err := decodeComputerUseAppArgs([]byte(`{"appID":"com.example.App"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args.Foreground {
+		t.Fatal("foreground must default to false")
+	}
+
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Name == ComputerUseApp {
+			if !strings.Contains(definition.Description, "background by default") ||
+				!strings.Contains(definition.Description, "before necessary pointer input") {
+				t.Fatalf("unexpected Computer Use App guidance: %s", definition.Description)
+			}
+			return
+		}
+	}
+	t.Fatal("Computer Use App definition not found")
+}
+
 type fakeComputerController struct {
 	lastSession string
 	released    string
 	acted       bool
+	foreground  bool
 }
 
 func (f *fakeComputerController) ListApps(_ context.Context, sessionID string) (computer.AppList, error) {
@@ -20,10 +61,12 @@ func (f *fakeComputerController) ListApps(_ context.Context, sessionID string) (
 	return computer.AppList{Apps: []computer.Application{{AppID: "com.example.App", Name: "Example"}}}, nil
 }
 
-func (f *fakeComputerController) UseApp(_ context.Context, sessionID, appID string) (computer.UseResult, error) {
+func (f *fakeComputerController) UseApp(_ context.Context, sessionID, appID string, foreground bool) (computer.UseResult, error) {
 	f.lastSession = sessionID
+	f.foreground = foreground
 	launchID := "launch_1"
-	return computer.UseResult{LaunchID: &launchID, AppID: appID, Name: "Example", PID: 42}, nil
+	windowAppID := appID
+	return computer.UseResult{LaunchID: &launchID, AppID: appID, Name: "Example", PID: 42, WindowStatus: computer.WindowStatusReady, Windows: []computer.CapturableWindow{{WindowID: 7, PID: 42, AppID: &windowAppID}}}, nil
 }
 
 func (f *fakeComputerController) OwnedLaunchAppID(sessionID, launchID string) (string, bool) {
@@ -41,18 +84,31 @@ func (f *fakeComputerController) Observe(_ context.Context, sessionID, appID str
 	return computer.ManagedObservation{ObservationID: "obs_1", Snapshot: computer.Observation{AppID: appID, WindowID: &windowID, Elements: []computer.Element{{ElementID: "button", WindowID: &windowID, Actions: []string{computer.ActionPress}}}}}, nil
 }
 
-func (f *fakeComputerController) Capture(_ context.Context, sessionID, _ string, windowID uint32, output string) (computer.Capture, error) {
+func (f *fakeComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string) (computer.ManagedObservationCapture, error) {
 	f.lastSession = sessionID
 	if err := os.WriteFile(output, tinyPNG, 0o600); err != nil {
-		return computer.Capture{}, err
+		return computer.ManagedObservationCapture{}, err
 	}
-	return computer.Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1}, nil
+	return computer.ManagedObservationCapture{
+		Observation: computer.ManagedObservation{ObservationID: "obs_capture", Snapshot: computer.Observation{AppID: appID, WindowID: &windowID}},
+		Capture:     &computer.Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1},
+	}, nil
 }
 
 func (f *fakeComputerController) Act(_ context.Context, sessionID, appID string, _ uint32, _ string, elementID, action string, _ *string) (computer.ActionResult, error) {
 	f.lastSession = sessionID
 	f.acted = true
 	return computer.ActionResult{Action: computer.NativeAction{AppID: appID, ElementID: elementID, Action: action, Completed: true}}, nil
+}
+
+func (f *fakeComputerController) Pointer(_ context.Context, sessionID, appID string, _ uint32, _ string, pointer computer.PointerInput) (computer.ActionResult, error) {
+	f.lastSession = sessionID
+	f.acted = true
+	return computer.ActionResult{Action: computer.NativeAction{
+		AppID: appID, Action: pointer.Action, Completed: true, X: &pointer.X, Y: &pointer.Y,
+		ToX: pointer.ToX, ToY: pointer.ToY, Button: pointer.Button, ClickCount: pointer.ClickCount,
+		DeltaX: pointer.DeltaX, DeltaY: pointer.DeltaY,
+	}}, nil
 }
 
 func (f *fakeComputerController) ReleaseSession(_ context.Context, sessionID string) error {
@@ -67,9 +123,15 @@ func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {
 	if !listed.Ok || fake.lastSession != "session_a" {
 		t.Fatalf("list result=%+v session=%q", listed, fake.lastSession)
 	}
-	used := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "use", Name: ComputerUseApp, Args: json.RawMessage(`{"appID":"com.example.App"}`)})
-	if !used.Ok || fake.lastSession != "session_a" {
+	used := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "use", Name: ComputerUseApp, Args: json.RawMessage(`{"appID":"com.example.App","foreground":true}`)})
+	if !used.Ok || fake.lastSession != "session_a" || !fake.foreground {
 		t.Fatalf("use result=%+v session=%q", used, fake.lastSession)
+	}
+	var envelope struct {
+		Result computer.UseResult `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(used.Content), &envelope); err != nil || len(envelope.Result.Windows) != 1 || envelope.Result.Windows[0].WindowID != 7 {
+		t.Fatalf("use content=%s err=%v", used.Content, err)
 	}
 	quit := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "quit", Name: ComputerQuitApp, Args: json.RawMessage(`{"launchID":"launch_1"}`)})
 	if !quit.Ok || fake.lastSession != "session_a" {
@@ -82,6 +144,14 @@ func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {
 	acted := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "act", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"button","action":"press"}`)})
 	if !acted.Ok || !fake.acted {
 		t.Fatalf("unexpected act result: %+v", acted)
+	}
+	clicked := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "click", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_capture","action":"click","x":0.5,"y":0.5}`)})
+	if !clicked.Ok {
+		t.Fatalf("unexpected click result: %+v", clicked)
+	}
+	scrolled := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "scroll", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_capture","action":"scroll","x":0.5,"y":0.5,"deltaY":120}`)})
+	if !scrolled.Ok {
+		t.Fatalf("unexpected scroll result: %+v", scrolled)
 	}
 	runner.CloseSession("session_a")
 	if fake.released != "session_a" {
@@ -96,7 +166,7 @@ func TestComputerLifecycleRiskAndApprovalDetails(t *testing.T) {
 		t.Fatalf("unexpected use risk: %+v ok=%v", useRisk, ok)
 	}
 	useDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), useCall)
-	if err != nil || useDetails["appID"] != "com.example.App" {
+	if err != nil || useDetails["appID"] != "com.example.App" || useDetails["foreground"] != false {
 		t.Fatalf("unexpected use details: %+v err=%v", useDetails, err)
 	}
 
@@ -124,6 +194,31 @@ func TestComputerActRiskAndApprovalDetails(t *testing.T) {
 	if details["appID"] != "com.example.App" || details["valuePreview"] != "hello" || details["valueCharacters"] != 5 {
 		t.Fatalf("unexpected approval details: %+v", details)
 	}
+	for _, action := range []string{computer.ActionSelect, computer.ActionSubmit} {
+		raw, err := json.Marshal(map[string]any{
+			"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+			"elementID": "target", "action": action,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		risk, ok := ClassifyToolCall(ComputerAct, raw)
+		if !ok || risk.Operation != "computer_"+action || risk.Class != RiskClassWrite {
+			t.Fatalf("unexpected %s risk: %+v ok=%v", action, risk, ok)
+		}
+	}
+	clickCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":12,"y":34}`)}
+	clickRisk, ok := ClassifyToolCall(clickCall.Name, clickCall.Args)
+	clickDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), clickCall)
+	if !ok || clickRisk.Operation != "computer_click" || err != nil || clickDetails["x"] != float64(12) || clickDetails["y"] != float64(34) {
+		t.Fatalf("unexpected click risk=%+v details=%+v err=%v", clickRisk, clickDetails, err)
+	}
+	dragCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":12,"y":34,"toX":56,"toY":78}`)}
+	dragRisk, ok := ClassifyToolCall(dragCall.Name, dragCall.Args)
+	dragDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), dragCall)
+	if !ok || dragRisk.Operation != "computer_drag" || err != nil || dragDetails["toX"] != float64(56) || dragDetails["toY"] != float64(78) {
+		t.Fatalf("unexpected drag risk=%+v details=%+v err=%v", dragRisk, dragDetails, err)
+	}
 }
 
 func TestComputerObserveRiskAndApprovalDetails(t *testing.T) {
@@ -138,6 +233,88 @@ func TestComputerObserveRiskAndApprovalDetails(t *testing.T) {
 	}
 	if details["appID"] != "com.example.App" || details["windowID"] != uint32(42) || details["includeScreenshot"] != true {
 		t.Fatalf("unexpected approval details: %+v", details)
+	}
+}
+
+func TestComputerToolArgumentsEnforceSharedSizeLimits(t *testing.T) {
+	validValue := strings.Repeat("🙂", computer.MaxActionValueCharacters)
+	validRaw, err := json.Marshal(map[string]any{
+		"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+		"elementID": "field", "action": computer.ActionSetValue, "value": validValue,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeComputerActArgs(validRaw); err != nil {
+		t.Fatalf("schema-limit value rejected: %v", err)
+	}
+
+	oversizedRaw, err := json.Marshal(map[string]any{
+		"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+		"elementID": "field", "action": computer.ActionSetValue,
+		"value": strings.Repeat("🙂", computer.MaxActionValueCharacters+1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeComputerActArgs(oversizedRaw); err == nil {
+		t.Fatal("oversized action value was accepted")
+	}
+
+	for _, action := range []string{computer.ActionSelect, computer.ActionSubmit} {
+		raw, err := json.Marshal(map[string]any{
+			"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+			"elementID": "target", "action": action,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = decodeComputerActArgs(raw); err != nil {
+			t.Fatalf("%s action rejected: %v", action, err)
+		}
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"target","action":"submit","value":"x"}`)); err == nil {
+		t.Fatal("submit action value was accepted")
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"target","action":"confirm"}`)); err == nil {
+		t.Fatal("removed confirm action was accepted")
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2}`)); err != nil {
+		t.Fatalf("coordinate click rejected: %v", err)
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"clickCount":2}`)); err != nil {
+		t.Fatalf("double click rejected: %v", err)
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"button":"right"}`)); err != nil {
+		t.Fatalf("right click rejected: %v", err)
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":1,"y":2,"toX":3,"toY":4}`)); err != nil {
+		t.Fatalf("drag rejected: %v", err)
+	}
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"scroll","x":1,"y":2,"deltaY":120}`)); err != nil {
+		t.Fatalf("scroll rejected: %v", err)
+	}
+	for _, raw := range []string{
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1}`,
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"elementID":"button"}`,
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"button","action":"press","x":1,"y":2}`,
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"button":"right","clickCount":2}`,
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":1,"y":2,"toX":3}`,
+		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"scroll","x":1,"y":2}`,
+	} {
+		if _, err = decodeComputerActArgs([]byte(raw)); err == nil {
+			t.Fatalf("invalid coordinate action accepted: %s", raw)
+		}
+	}
+
+	oversizedAppID, err := json.Marshal(map[string]string{
+		"appID": strings.Repeat("a", computer.MaxAppIDBytes+1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeComputerUseAppArgs(oversizedAppID); err == nil {
+		t.Fatal("oversized appID was accepted")
 	}
 }
 

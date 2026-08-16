@@ -28,6 +28,7 @@ var (
 	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
 	ErrInvalidComputerAppGrant  = errors.New("store: invalid Computer Use app grant")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
+	ErrTurnFileChangeConflict   = errors.New("store: turn file change state conflict")
 )
 
 // EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
@@ -1577,18 +1578,19 @@ type SteerQueuedInputResult struct {
 }
 
 type ConversationTurn struct {
-	ID              string            `json:"id"`
-	SessionID       string            `json:"sessionID"`
-	ClientMessageID string            `json:"clientMessageID"`
-	Status          TurnStatus        `json:"status"`
-	Provider        string            `json:"provider,omitempty"`
-	Model           string            `json:"model,omitempty"`
-	Mode            AgentMode         `json:"mode,omitempty"`
-	Error           string            `json:"error,omitempty"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	UpdatedAt       time.Time         `json:"updatedAt"`
-	Messages        []*Message        `json:"messages"`
-	FileChanges     []*TurnFileChange `json:"fileChanges,omitempty"`
+	ID              string              `json:"id"`
+	SessionID       string              `json:"sessionID"`
+	ClientMessageID string              `json:"clientMessageID"`
+	Status          TurnStatus          `json:"status"`
+	Provider        string              `json:"provider,omitempty"`
+	Model           string              `json:"model,omitempty"`
+	Mode            AgentMode           `json:"mode,omitempty"`
+	Error           string              `json:"error,omitempty"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	UpdatedAt       time.Time           `json:"updatedAt"`
+	Messages        []*Message          `json:"messages"`
+	FileChanges     []*TurnFileChange   `json:"fileChanges,omitempty"`
+	FileChangeState TurnFileChangeState `json:"fileChangeState,omitempty"`
 }
 
 type TurnPage struct {
@@ -1678,6 +1680,12 @@ type FinishTurnInput struct {
 
 type FileChangeKind string
 type FileChangeOrigin string
+type TurnFileChangeState string
+
+const (
+	TurnFileChangesApplied TurnFileChangeState = "applied"
+	TurnFileChangesUndone  TurnFileChangeState = "undone"
+)
 
 const (
 	FileChangeAdded    FileChangeKind = "added"
@@ -1699,39 +1707,103 @@ func NormalizeFileChangeOrigin(origin FileChangeOrigin) FileChangeOrigin {
 }
 
 type TurnFileChangeInput struct {
-	RootPath     string
-	Path         string
-	OriginalPath string
-	Kind         FileChangeKind
-	Origin       FileChangeOrigin
-	Additions    int
-	Deletions    int
-	Binary       bool
-	TooLarge     bool
-	OldSize      int64
-	NewSize      int64
-	OldContent   string
-	NewContent   string
+	RootPath        string
+	Path            string
+	OriginalPath    string
+	Kind            FileChangeKind
+	Origin          FileChangeOrigin
+	Additions       int
+	Deletions       int
+	Binary          bool
+	TooLarge        bool
+	OldSize         int64
+	NewSize         int64
+	OldContent      string
+	NewContent      string
+	SnapshotVersion int
+	OldDigest       string
+	NewDigest       string
+	OldMode         uint32
+	NewMode         uint32
+	OldType         string
+	NewType         string
+	OldBinary       bool
+	NewBinary       bool
+	OldData         []byte
+	NewData         []byte
 }
 
 type TurnFileChange struct {
-	ID           string           `json:"id"`
-	SessionID    string           `json:"sessionID"`
-	TurnID       string           `json:"turnID"`
-	RootPath     string           `json:"rootPath"`
-	Path         string           `json:"path"`
-	OriginalPath string           `json:"originalPath,omitempty"`
-	Kind         FileChangeKind   `json:"kind"`
-	Origin       FileChangeOrigin `json:"origin"`
-	Additions    int              `json:"additions"`
-	Deletions    int              `json:"deletions"`
-	Binary       bool             `json:"binary"`
-	TooLarge     bool             `json:"tooLarge"`
-	OldSize      int64            `json:"oldSize"`
-	NewSize      int64            `json:"newSize"`
-	OldContent   string           `json:"oldContent,omitempty"`
-	NewContent   string           `json:"newContent,omitempty"`
-	CreatedAt    time.Time        `json:"createdAt"`
+	ID              string           `json:"id"`
+	SessionID       string           `json:"sessionID"`
+	TurnID          string           `json:"turnID"`
+	RootPath        string           `json:"rootPath"`
+	Path            string           `json:"path"`
+	OriginalPath    string           `json:"originalPath,omitempty"`
+	Kind            FileChangeKind   `json:"kind"`
+	Origin          FileChangeOrigin `json:"origin"`
+	Additions       int              `json:"additions"`
+	Deletions       int              `json:"deletions"`
+	Binary          bool             `json:"binary"`
+	TooLarge        bool             `json:"tooLarge"`
+	OldSize         int64            `json:"oldSize"`
+	NewSize         int64            `json:"newSize"`
+	OldContent      string           `json:"oldContent,omitempty"`
+	NewContent      string           `json:"newContent,omitempty"`
+	SnapshotVersion int              `json:"snapshotVersion"`
+	Reversible      bool             `json:"reversible"`
+	OldDigest       string           `json:"-"`
+	NewDigest       string           `json:"-"`
+	OldMode         uint32           `json:"-"`
+	NewMode         uint32           `json:"-"`
+	OldType         string           `json:"-"`
+	NewType         string           `json:"-"`
+	OldBinary       bool             `json:"-"`
+	NewBinary       bool             `json:"-"`
+	OldData         []byte           `json:"-"`
+	NewData         []byte           `json:"-"`
+	CreatedAt       time.Time        `json:"createdAt"`
+}
+
+// MarkUnsafeTurnFileChangeLayouts disables whole-turn replay when one tracked
+// file path is an ancestor of, or collides with, another endpoint. Those
+// layouts represent file/directory transformations that cannot be restored by
+// a regular-file-only transaction.
+func MarkUnsafeTurnFileChangeLayouts(changes []*TurnFileChange) {
+	type endpoint struct {
+		path string
+	}
+	endpoints := make([]endpoint, 0, len(changes)*2)
+	for _, change := range changes {
+		if change == nil {
+			continue
+		}
+		root := filepath.Clean(change.RootPath)
+		endpoints = append(endpoints, endpoint{path: root + "\x00" + filepath.ToSlash(filepath.Clean(change.Path))})
+		if change.Kind == FileChangeRenamed && strings.TrimSpace(change.OriginalPath) != "" {
+			endpoints = append(endpoints, endpoint{path: root + "\x00" + filepath.ToSlash(filepath.Clean(change.OriginalPath))})
+		}
+	}
+	unsafe := false
+	for i := range endpoints {
+		for j := i + 1; j < len(endpoints); j++ {
+			left, right := endpoints[i].path, endpoints[j].path
+			if left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/") {
+				unsafe = true
+				break
+			}
+		}
+		if unsafe {
+			break
+		}
+	}
+	if unsafe {
+		for _, change := range changes {
+			if change != nil {
+				change.Reversible = false
+			}
+		}
+	}
 }
 
 type AppendTurnOutputInput struct {
@@ -2221,6 +2293,7 @@ type Store interface {
 	// GetTurnFileChange returns one historical file diff and always verifies the
 	// explicit session and turn scope before exposing snapshot content.
 	GetTurnFileChange(ctx context.Context, sessionID string, turnID string, changeID string) (*TurnFileChange, error)
+	UpdateTurnFileChangeState(ctx context.Context, sessionID string, turnID string, expected, next TurnFileChangeState) error
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

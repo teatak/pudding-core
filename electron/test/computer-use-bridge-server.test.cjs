@@ -72,10 +72,10 @@ test("Computer Use bridge routes app lifecycle targets", async () => {
     const launch = await fetch(`${identity.url}/computer/apps/use`, {
       method: "POST",
       headers: authenticatedHeaders(identity.token),
-      body: JSON.stringify({ sessionID: "sess-c", appID: "com.apple.calculator" }),
+      body: JSON.stringify({ sessionID: "sess-c", appID: "com.apple.calculator", foreground: true }),
     });
     assert.equal(launch.status, 200);
-    assert.deepEqual(host.launched, { bundleID: "com.apple.calculator" });
+    assert.deepEqual(host.launched, { bundleID: "com.apple.calculator", foreground: true });
 
     const quit = await fetch(`${identity.url}/computer/apps/quit`, {
       method: "POST",
@@ -84,6 +84,57 @@ test("Computer Use bridge routes app lifecycle targets", async () => {
     });
     assert.equal(quit.status, 200);
     assert.deepEqual(host.quit, { bundleID: "com.apple.calculator", pid: 42 });
+  } finally {
+    await bridge.stop();
+  }
+});
+
+test("Computer Use bridge accepts the full set_value schema limit", async () => {
+  const host = new FakeComputerUseHost();
+  const bridge = new ComputerUseBridgeServer(host);
+  const identity = await bridge.start();
+  try {
+    const value = "🙂".repeat(20_000);
+    const response = await fetch(`${identity.url}/computer/act`, {
+      method: "POST",
+      headers: authenticatedHeaders(identity.token),
+      body: JSON.stringify({
+        sessionID: "sess-large-value",
+        appID: "com.example.App",
+        windowID: 42,
+        elementID: "field",
+        action: "set_value",
+        value,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(host.acted.value, value);
+  } finally {
+    await bridge.stop();
+  }
+});
+
+test("Computer Use bridge routes screenshot pointer actions", async () => {
+  const host = new FakeComputerUseHost();
+  const bridge = new ComputerUseBridgeServer(host);
+  const identity = await bridge.start();
+  try {
+    const response = await fetch(`${identity.url}/computer/pointer`, {
+      method: "POST",
+      headers: authenticatedHeaders(identity.token),
+      body: JSON.stringify({
+        sessionID: "sess-pointer", appID: "com.example.App", windowID: 42,
+        action: "drag", x: 12, y: 34, toX: 56, toY: 78,
+        captureWidth: 200, captureHeight: 100, scaleFactor: 2,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(host.pointerAction, {
+      bundleID: "com.example.App", windowID: 42,
+      action: "drag", x: 12, y: 34, toX: 56, toY: 78,
+      button: undefined, clickCount: undefined, deltaX: undefined, deltaY: undefined,
+      captureWidth: 200, captureHeight: 100, scaleFactor: 2,
+    });
   } finally {
     await bridge.stop();
   }
@@ -149,6 +200,21 @@ test("Computer Use bridge exposes permission errors with outcome", () => {
   });
 });
 
+test("Computer Use bridge exposes foreground pointer conflicts", () => {
+  assert.deepEqual(classifyComputerUseError({
+    code: "computer_app_not_foreground",
+    message: "application must be foreground for pointer input: com.example.App",
+    retryable: false,
+    outcome: "not_started",
+  }), {
+    status: 409,
+    code: "computer_app_not_foreground",
+    message: "application must be foreground for pointer input: com.example.App",
+    retryable: false,
+    outcome: "not_started",
+  });
+});
+
 function authenticatedHeaders(token) {
   return {
     authorization: `Bearer ${token}`,
@@ -159,8 +225,10 @@ function authenticatedHeaders(token) {
 class FakeComputerUseHost {
   constructor() {
     this.observed = null;
+    this.acted = null;
     this.launched = null;
     this.quit = null;
+    this.clicked = null;
   }
 
   permissions() {
@@ -173,7 +241,7 @@ class FakeComputerUseHost {
 
   useApp(params) {
     this.launched = params;
-    return { ...params, pid: 42, newlyLaunched: true };
+    return { ...params, pid: 42, newlyLaunched: true, windows: [{ windowID: 7 }] };
   }
 
   quitApp(params) {
@@ -186,11 +254,20 @@ class FakeComputerUseHost {
     return { bundleID: params.bundleID, windows: [], elements: [] };
   }
 
-  capture() {
-    return { width: 100, height: 100 };
+  observeCapture(params) {
+    return {
+      observation: { bundleID: params.bundleID, windowID: params.windowID, elements: [] },
+      capture: { windowID: params.windowID, width: 100, height: 100 },
+    };
   }
 
-  act() {
+  act(params) {
+    this.acted = params;
     return { completed: true };
+  }
+
+  pointer(params) {
+    this.pointerAction = params;
+    return { bundleID: params.bundleID, action: params.action, completed: true, x: params.x, y: params.y };
   }
 }

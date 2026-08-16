@@ -240,11 +240,39 @@ func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
 	for _, change := range changes {
 		byPath[change.Path] = change
 	}
-	if change := byPath["image.bin"]; !change.Binary || change.OldContent != "" || change.NewContent != "" {
+	if change := byPath["image.bin"]; !change.Binary || change.OldContent != "" || change.NewContent != "" ||
+		string(change.OldData) != string([]byte{0, 1, 2}) || string(change.NewData) != string([]byte{0, 1, 3}) ||
+		change.SnapshotVersion != 1 || change.OldDigest == "" || change.NewDigest == "" || change.OldType != "file" || change.NewType != "file" {
 		t.Fatalf("binary change = %+v", change)
 	}
 	if change := byPath["large.txt"]; !change.TooLarge || change.OldContent != "" || change.NewContent != "" {
 		t.Fatalf("large change = %+v", change)
+	}
+}
+
+func TestTrackerKeepsEachSideOfTextBinaryConversion(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "mixed.dat")
+	if err := os.WriteFile(path, []byte("text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracker := New()
+	if err := tracker.BeginCall("turn_mixed", "call_mixed", []string{root}, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte{0, 1, 2}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.EndCall("turn_mixed", "call_mixed"); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := tracker.Finish("turn_mixed")
+	if err != nil || len(changes) != 1 {
+		t.Fatalf("changes=%+v err=%v", changes, err)
+	}
+	change := changes[0]
+	if change.OldBinary || !change.NewBinary || change.OldContent != "text\n" || string(change.NewData) != string([]byte{0, 1, 2}) {
+		t.Fatalf("mixed change=%+v", change)
 	}
 }
 

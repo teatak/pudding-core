@@ -2,7 +2,7 @@
 
 > 状态:C0–C3 已实现,C4 确定性 Fixture smoke 已通过,真实应用与发布验收待实施
 >
-> 日期:2026-08-13
+> 日期:2026-08-14
 >
 > 范围:macOS 桌面应用观察与操作。
 >
@@ -16,9 +16,9 @@
 2. Go daemon 负责 session 路由、工具生命周期、审批和全局动作串行化。
 3. Electron main 负责 macOS 原生能力和权限界面,通过签名 Swift Helper 调用 Accessibility 与 ScreenCaptureKit。
 4. 所有操作显式携带 `sessionID`、`appID`、`windowID` 和 `observationID`;后端不保存“当前应用”或“当前焦点”。
-5. 原生操作只使用 AXUIElement `press` 与 `set_value`;截图只用于观察,不按截图坐标发送输入。
-6. 写操作不自动重试。结果不确定时返回明确错误,下一步必须先重新观察。
-7. 当前能力不监听键盘或鼠标,不发送 CGEvent,不录制或回放操作。
+5. 原生操作优先使用 AXUIElement `press`、`set_value`、`select` 与受限 `submit`;仅当截图观察明确提供坐标且目标 App 保持前台时允许受限指针动作。
+6. 写操作不自动重试。结果不确定时返回明确错误,下一步先通过 `use_app` 刷新窗口并观察当前状态。
+7. 当前能力不监听键盘或鼠标,不录制或回放操作;仅 `submit` 在 AXConfirm 不可用时向已验证的目标进程发送一次无修饰键的 Return。
 8. 应用生命周期采用 session ownership:只有当前 session 新启动并取得 `launchID` 的进程才能普通退出;已运行应用永不归属,永不强杀。
 
 ### 0.1 当前 C0 落地
@@ -26,11 +26,11 @@
 已实现 `native/macos/computer-use-helper`:
 
 - 无提示读取 Accessibility 与 Screen Recording 权限状态,权限请求必须通过显式参数触发。
-- 列出当前 GUI App;权限允许时列出 AX 窗口与 ScreenCaptureKit 可截取窗口。
-- 观察指定 bundle ID 的有限 AX 树,普通值截断,secure text field 永不返回值。
+- 列出已安装的前台 GUI App 身份与运行状态,不读取窗口标题或内容;窗口只由 `use_app` 返回。
+- 观察指定 bundle ID 的有限 AX 树,表格和 outline 优先返回可见行,普通值截断,secure text field 永不返回值。
 - 使用当前元素路径与语义特征生成指纹 ID;界面结构变化时动作拒绝匹配,不按旧遍历序号误操作。
-- 仅支持 AX `press` 与 `set_value`,不发送 CGEvent 键盘、鼠标或滚轮事件。
-- 截取显式 `windowID` 到 PNG,不录屏、不监听用户输入、不录制或回放工作流。
+- 仅支持 `press`、`set_value`、`select`、受限 `submit` 与截图绑定的单击、左键双击、右键、左键拖拽和滚轮;不开放任意键盘或组合键。
+- 在一次原生请求中观察显式 `windowID` 并按需截取同一窗口到 PNG,不录屏、不监听用户输入、不录制或回放工作流。
 - 按 bundle ID 启动应用,并按精确 bundle ID + PID 发出普通退出请求;原生层不保存 session ownership。
 
 开发命令:
@@ -47,8 +47,8 @@ make computer-use-helper-dev
 当前也已完成 C1 原生 Host:
 
 - Helper 支持串行 NDJSON 常驻协议,每个请求和响应显式携带 request ID。
-- Electron `ComputerUseHost` 按需启动 Helper,负责请求对账、消息大小、超时、取消、崩溃和退出清理。
-- 超时、取消或协议失步会终止当前 Helper;已发送动作返回 `outcome=unknown`,不会自动重试。
+- Electron `ComputerUseHost` 按需启动 Helper并将所有请求排成单队列,负责消息大小、超时、取消、崩溃和退出清理。
+- 超时、取消或协议失步会终止当前 Helper;已发送写操作返回 `outcome=unknown`,只读操作返回 `outcome=not_started`,均不自动重试。
 - 开发启动自动构建并使用 `Pudding Computer Use.app`;arm64/x86_64 发布 runtime 都包含该后台 App。
 - Mach-O 内嵌固定 identifier `com.teatak.pudding.computer-use-helper`,发布校验拒绝身份漂移。
 
@@ -61,7 +61,7 @@ make computer-use-helper-dev
 - 动作传输中断返回 `outcome=unknown` 且不可重试;成功后观察失败仍明确保留动作已完成事实。
 - transcript 已有可读显示名、图标、分组和简中/繁中/英文文案。
 
-当前已通过确定性 Fixture App 和 Calculator 验证真实 AX `press`/`set_value`、session-owned quit 与已运行 App 非 ownership 分支。签名安装包和跨版本升级实测仍属于 C4。
+当前已通过确定性 Fixture App 和 Calculator 验证真实 `press`/`set_value`/`select`/`submit`、session-owned quit 与已运行 App 非 ownership 分支。签名安装包和跨版本升级实测仍属于 C4。
 
 ## 1. 背景与现有基础
 
@@ -75,7 +75,7 @@ Pudding 已具备 Computer Use 上层闭环的大部分基础:
 
 当前缺口集中在 macOS 原生控制层:
 
-- 枚举应用与窗口。
+- 枚举已安装应用,并在明确使用某个 App 时发现其窗口。
 - 读取并归一化 Accessibility 树。
 - 对 AX 元素执行点击和赋值。
 - 按应用或窗口截图。
@@ -91,6 +91,8 @@ MVP 支持:
 - 截取指定窗口或应用画面并作为 session attachment 送入模型上下文。
 - 对支持 `AXPress` 的 AX 元素执行一次 press。
 - 设置可编辑 AX 元素值。
+- 选择可选中的表格行或列表项。
+- 对支持 `AXConfirm` 的输入框执行确认提交。
 - 每次动作后返回最新窗口摘要和新的 observation。
 - 用户可随时取消当前 turn,取消尚未开始的动作和正在等待的原生调用。
 
@@ -171,9 +173,9 @@ Helper 不保存业务 session、模型上下文或用户消息。
 
 本机应用 UI 是全局资源,不能按 session 并行写入:
 
-- 读操作可按实现能力并行,首版统一串行以减少状态。
+- 原生读写请求统一经过 Electron Host 单队列,与串行 Helper 保持一致。
 - 所有写操作经过 daemon 全局队列。
-- 队列项必须携带 `sessionID` 和 `callID`。
+- daemon bridge 请求必须显式携带 `sessionID`;Helper 请求携带独立 request ID。
 - 取消 session 只移除该 session 的待执行项,不能影响其它 session。
 - 不存在 daemon 级 active session 或 focus session。
 
@@ -205,24 +207,25 @@ native/macos/computer-use-helper/
 - bundle ID、进程 ID、应用名称。
 - window identifier、标题、frame、focused 状态。
 - element role、subrole、title、description、identifier、value 摘要、enabled、focused、frame。
-- 支持的 AX actions,例如 `AXPress`。
+- 支持的 AX actions,例如 `AXPress` 与 `AXConfirm`,以及可写 selection 属性。
 
 归一化时:
 
-- 默认只返回可见窗口和有限深度的交互元素。
-- secure text field 只返回角色和位置,绝不返回值。
-- 普通文本设置字符上限,超限标记 truncated。
+- 默认只返回可见窗口和有限深度的交互元素;table/outline 使用 `AXVisibleRows`,并以每行的绝对 `AXIndex` 生成路径。缺少唯一绝对索引的可见行子树仅可读取,不暴露动作。
+- secure text field 只返回角色和位置,绝不返回值或任何动作。
+- 普通文本设置 UTF-8 字节上限,AX value 超限时标记 `valueTruncated`。
 - `elementID` 是当前 observation 内的短 ID,不是长期实体 ID。
 - 不把原始 AX 指针暴露给 daemon 或模型。
 
 ### 5.3 截图
 
-使用 ScreenCaptureKit 截取明确的 window 或 app:
+使用 ScreenCaptureKit 截取明确的 window:
 
 - 默认只截目标窗口,不截取其它应用。
 - 返回逻辑坐标、像素尺寸和 scale factor。
 - 截图存储继续复用 session attachment 主链路。
 - 模型不需要视觉信息时只使用 AX observation,减少隐私暴露和 token 成本。
+- 模型请求截图时,AX observation 与截图在同一个 Helper 请求内完成,不在两次调用之间暴露可插入的 Computer Use 操作。
 
 Computer Use 窗口截图由 Helper 的 ScreenCaptureKit 单一路径实现。现有全桌面截图是不同能力,不作为 Computer Use 失败后的 fallback。
 
@@ -234,10 +237,13 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 | --- | --- | --- |
 | `press` | AX `AXPress` | action 返回成功且目标仍属于指定 app/window |
 | `set_value` | AX set value | 重新读取值与期望一致 |
+| `select` | AX `AXSelected=true` 或父容器 `AXSelectedRows` | 重新读取 selection 包含目标元素 |
+| `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | App 必须活跃,元素必须已聚焦、启用、非安全且为可编辑单行文本控件;action 返回成功后重新观察 |
+| `click` / `drag` / `scroll` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 只接受同一 `observe-capture` 截图左上角像素坐标;执行前重新校验窗口尺寸和 scale factor;窗口只移动时按新 origin 映射;成功只代表事件已投递 |
 
 规则:
 
-- `press` 或 `set_value` 失败不自动改用坐标、键盘、AppleScript 或剪贴板。
+- 任一动作失败都不自动改用坐标、键盘、AppleScript 或剪贴板;坐标点击必须由模型显式选择且绑定截图 observation。
 - 所有写操作执行前验证目标应用仍存在、窗口仍匹配、observation 未过期。
 - 动作执行后重新观察,但不以第二个动作修复第一个动作。
 
@@ -273,6 +279,8 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 - 默认 TTL 30 秒,每个 session 最多保留 16 个未过期 observation;超限直接失败。
 - action 必须传 `observationID`。
 - Helper 在动作前重新遍历指定窗口并按指纹重新解析元素;找不到或不唯一时拒绝执行。
+- 首个 action 前显式 observe 一次;每次成功 action 返回的新 observation 直接作为下一次 action 的输入,连续操作之间不重复 observe。
+- action 只返回 `observationError`、或当前 observation stale/过期时,才重新 observe。
 - 模型收到 stale 后必须重新 observe,不能重复原动作。
 - observation registry 位于 Go daemon 内存,是短期路由缓存;真实界面始终以当前 AX 树为事实源。
 
@@ -282,11 +290,11 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 ### `builtin_computer_list_apps`
 
-列出可见应用、窗口、授权状态和稳定 `appID`。不隐式选择应用。
+仅在需要从应用名发现 `appID` 时使用。列出已安装前台应用的身份、运行状态和可控状态,不返回权限、窗口标题或窗口内容。
 
 ### `builtin_computer_use_app`
 
-按 `appID` 使用应用：未运行时启动，已运行时激活，并在没有可见窗口时请求重新打开。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
+按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者后续需要坐标指针动作时传 `foreground=true`；该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
 
 ### `builtin_computer_quit_app`
 
@@ -304,7 +312,7 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 }
 ```
 
-返回 observation。`windowID` 必填,不能使用当前焦点猜测。
+返回 observation。`windowID` 必填,不能使用当前焦点猜测。`includeScreenshot=true` 时,AX 观察和窗口截图在同一个 Helper 请求内完成。
 
 ### `builtin_computer_act`
 
@@ -321,7 +329,7 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 }
 ```
 
-`action` 只允许 `press` 和 `set_value`;`press` 禁止传 `value`,`set_value` 必须传 `value`。单一 action 工具让审批、串行化和 transcript 展示共用一个入口。
+`action` 只允许 `press`、`set_value`、`select`、`submit`、`click`、`drag` 和 `scroll`;只有 `set_value` 必须传 `value`。指针动作禁止 `elementID`/`value`,必须传同一截图 observation 中的坐标,原点为窗口截图左上角。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。指针动作要求目标 App 已显式切到前台,只确认事件投递,不宣称 App 状态已改变。截图 observation 只能消费一次,动作后的普通 observation 不能继续指针操作。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一 action 工具让审批、串行化和 transcript 展示共用一个入口。
 
 新增工具时必须同步:
 
@@ -338,12 +346,13 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 
 | 路由 | 用途 |
 | --- | --- |
-| `POST /computer/apps/list` | 列应用和窗口 |
-| `POST /computer/apps/use` | 启动、激活或重新打开一个明确 bundle ID |
+| `POST /computer/apps/list` | 列已安装应用身份与运行状态,不读窗口内容 |
+| `POST /computer/apps/use` | 默认后台启动或复用一个明确 bundle ID；显式 `foreground=true` 时激活或重新打开，为坐标指针动作建立前台目标，并返回当前可发现窗口及 window ID |
 | `POST /computer/apps/quit` | 普通退出一个明确 bundle ID + PID |
-| `POST /computer/observe` | AX observation,可选截图 |
+| `POST /computer/observe` | AX observation |
+| `POST /computer/observe-capture` | 同一次 Helper 请求内完成 AX observation 与窗口截图 |
 | `POST /computer/act` | 执行一个显式动作 |
-| `POST /computer/session/release` | 释放 session observations,并尽力普通退出 session-owned apps |
+| `POST /computer/pointer` | 执行一次由截图尺寸与 scale factor 约束的 click、drag 或 scroll |
 | `GET /computer/permissions` | 读取权限状态 |
 
 所有请求:
@@ -373,6 +382,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - `computer_window_not_found`
 - `computer_observation_not_found`
 - `computer_observation_stale`
+- `computer_app_not_foreground`
 - `computer_element_not_found`
 - `computer_element_not_actionable`
 - `computer_secure_input_blocked`
@@ -393,7 +403,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - Screen Recording:读取目标窗口画面。
 - Accessibility:读取 AX 树并执行 AX 动作。
 
-当前不监听键盘或鼠标,因此不申请 Input Monitoring。C0 也不发送合成键盘、鼠标或滚轮事件。
+当前不监听键盘或鼠标,因此不申请 Input Monitoring。只发送两类受限合成事件：目标进程的单次 Return，以及目标 App 已前台时截图绑定的单击、左键双击、右键、左键拖拽和滚轮；不开放任意键盘或组合键。
 
 设置页显示每项权限状态。未授权时由用户点击“申请权限”显式调用系统 API;若仍未授权则打开对应系统设置。Pudding 不尝试自动点击系统权限提示或管理员认证。
 
@@ -405,7 +415,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 
 - Helper 当前硬拒绝 Pudding 自身/父应用、终端、常见密码管理器、Keychain Access 和系统安全授权进程。
 - 其余可控应用由模型显式指定 bundle ID 和 window ID。目标 GUI App 的启动和退出必须使用 Computer Use 工具,不得使用 shell `open`、`osascript` 或 AppleScript。每个 session 首次启动、观察、操作或退出一个 app 时申请一次确认,该确认同时授权当前 session 后续启动、观察、操作和 session-owned 退出同一 app。
-- `apps` 是实时发现清单,不是授权列表;应用缺失属于发现错误,不得引导用户去设置页添加应用。
+- `apps` 是已安装应用身份清单,不是授权列表;窗口只以 `use_app` 返回值为准,不得用 `list_apps` 刷新窗口或引导用户去设置页添加应用。
 - 浏览器任务优先使用 Pudding Browser;只有用户明确要求现有外部浏览器登录状态时才使用 Computer Use。
 - 目标应用在动作前和动作后都必须与请求 bundle ID 一致。
 
@@ -414,7 +424,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - secure text field 的值永不进入 observation、日志、tool result 或 attachment。
 - Helper 日志不记录输入文本、截图 bytes 或完整 AX value。
 - 截图只保存到当前 session attachment 目录。
-- app/window 标题按现有本地日志策略处理,错误日志默认不输出完整 AX tree。
+- AX 值与 app/window 标题按 UTF-8 字节上限截断,结果标记值截断状态;Helper 响应另有整体大小上限,错误日志不输出完整 AX tree。
 - 取消 turn 后停止新截图和新动作。
 
 ### 10.4 审批
@@ -485,13 +495,13 @@ MVP:
 
 - 能列出目标窗口和交互元素。
 - 能对 TextEdit 执行一次 `AXPress`/set value。
-- 没有 AppleScript 或坐标 fallback。
+- 没有 AppleScript 或自动坐标 fallback;受限坐标点击只能显式使用同一截图 observation。
 
 ### C1 Helper 与 Electron Host,7–9 天
 
 - 实现 NDJSON Helper 协议。
 - 实现 app/window list、observe、window screenshot。
-- 实现 AX press/set value;CGEvent 输入动作在当前范围内不启用。
+- 实现 AX press/set value/select、受限 submit 和截图绑定的受限指针动作;不开放通用 CGEvent 输入动作。
 - 实现 Helper 生命周期、超时、崩溃和取消。
 - 完成 Helper 嵌套签名和 notarization 验证。
 
@@ -517,7 +527,7 @@ MVP:
 - 针对 TextEdit、Calculator、Notes 和一个确定性 fixture app 做 smoke。
 - 完成打包、签名、notarization 和升级测试。
 
-当前已新增 `PuddingComputerUseFixture`，提供可编辑文本框、secure field、按钮、checkbox、scroll view 和两个窗口。以下命令通过实际签名 Helper 验证 launch、窗口发现、`set_value`、`press`、secure field 脱敏和普通 quit：
+当前已新增 `PuddingComputerUseFixture`，提供可编辑文本框、500 行虚拟表格、secure field、按钮、checkbox 和两个窗口。以下命令通过实际签名 Helper 验证 launch、窗口发现、可见行遍历、`set_value`、`submit`、`select`、`press`、secure field 脱敏和普通 quit：
 
 ```bash
 make computer-use-fixture-smoke
@@ -543,7 +553,7 @@ make computer-use-calculator-existing-smoke
 
 这些 smoke 都依赖本机已向开发版 `Pudding Computer Use.app` 授予 Accessibility 与 Screen Recording，不进入无 TCC 环境的普通单元测试。目标 App 必须在运行前关闭，测试不会接管或关闭原本已运行的 App。
 
-自动回归已覆盖：Helper crash 后重启、请求 timeout、在途 cancel 终止 Helper、排队动作 cancel 后不进入原生层，以及权限撤销或目标 App 退出后不重试旧动作。
+自动回归已覆盖：Helper crash 后重启、请求 timeout、在途 cancel 终止 Helper、原生请求串行化、排队请求取消不影响在途请求、权限撤销或目标 App 退出后不重试旧动作,以及 observe+capture 单请求协议。
 
 发布链路会在签名前把嵌套 Helper 的版本同步为外层 Pudding 版本。`make desktop-verify` 对 staged app、ZIP 和 DMG 中的 Helper 统一检查 bundle ID、Developer ID/Team ID、designated requirement、`LSUIElement`、屏幕捕获用途说明、架构和可移植依赖。
 
@@ -576,6 +586,7 @@ Preview 对应使用 `make desktop-preview-update-test` 和 `make desktop-previe
 - scroll view。
 - 两个窗口。
 - 点击后改变明确状态的按钮。
+- 能分别记录单击、双击、右键、拖拽和滚轮的指针靶区。
 - 可移动和缩放的窗口。
 
 测试不依赖第三方应用的易变布局。TextEdit、Calculator、Notes 只作为发布 smoke。
@@ -587,6 +598,7 @@ Preview 对应使用 `make desktop-preview-update-test` 和 `make desktop-previe
 - action timeout 不执行第二种动作。
 - 多 session 同时写入时严格串行且不串目标。
 - session cancel 后没有迟到点击或输入。
+- 单击、双击、右键、拖拽和滚轮分别到达前台 Fixture，后台目标一律拒绝。
 - secure field 内容不出现在日志、结果和截图元数据中。
 - Pudding 自身和终端始终无法成为动作目标。
 
@@ -595,7 +607,7 @@ Preview 对应使用 `make desktop-preview-update-test` 和 `make desktop-previe
 满足以下条件才算完成:
 
 1. release 签名构建可完成权限授权,重启和升级后状态符合预期。
-2. 模型能在显式指定的 TextEdit/fixture app 中连续完成 observe、press 和 set value。
+2. 模型能在显式指定的 TextEdit/fixture app 中连续完成 observe、press、set value、select 和 submit。
 3. 每个动作都显式带 session/app/window/observation,不存在后端 focus 状态。
 4. 多 session 并发请求不会把动作发送到错误应用或窗口。
 5. 写操作失败没有自动 fallback 或自动重试。

@@ -575,6 +575,8 @@ export const turnFileChange = z.object({
   newSize: z.number().int().nonnegative(),
   oldContent: z.string().optional(),
   newContent: z.string().optional(),
+  snapshotVersion: z.number().int().nonnegative().default(0),
+  reversible: z.boolean().default(false),
   createdAt: z.string(),
 });
 export type TurnFileChange = z.infer<typeof turnFileChange>;
@@ -609,8 +611,14 @@ export const conversationTurn = z.object({
   updatedAt: z.string(),
   messages: z.array(message),
   fileChanges: z.array(turnFileChange).optional(),
+  fileChangeState: z.enum(["applied", "undone"]).optional(),
 });
 export type ConversationTurn = z.infer<typeof conversationTurn>;
+
+export const turnFileChangeActionResponse = z.object({
+  state: z.enum(["applied", "undone"]),
+});
+export type TurnFileChangeActionResponse = z.infer<typeof turnFileChangeActionResponse>;
 
 export const queuedInputStatus = z.enum(["queued", "editing", "cancelled", "promoted"]);
 
