@@ -104,6 +104,51 @@ func TestAttachmentsFromPartsDeduplicatesToolDisplayAndContextAttachment(t *test
 	}
 }
 
+func TestCloneHelpersRewriteAttachmentsAndCompactMessageIDs(t *testing.T) {
+	source := Attachment{
+		ID:            "att_1",
+		Name:          "photo.jpg",
+		AttachmentKey: "sessions/source/blobs/photo.jpg",
+		URL:           "/sessions/source/attachments/blobs/photo.jpg",
+		MIME:          "image/jpeg",
+		Size:          4,
+	}
+	target := source
+	target.AttachmentKey = "sessions/target/blobs/photo.jpg"
+	target.URL = "/sessions/target/attachments/blobs/photo.jpg"
+	parts := ReplaceContentPartAttachments([]ContentPart{
+		AttachmentPart(source),
+		{Type: ContentPartToolResult, CallID: "call_1", Content: `{"attachmentKey":"sessions/source/blobs/photo.jpg","url":"/sessions/source/attachments/blobs/photo.jpg"}`, Attachments: []Attachment{source}},
+	}, map[string]Attachment{source.AttachmentKey: target})
+	attachments := AttachmentsFromParts(parts)
+	if len(attachments) != 1 || attachments[0].AttachmentKey != target.AttachmentKey || attachments[0].URL != target.URL {
+		t.Fatalf("attachments were not rewritten: %+v", attachments)
+	}
+	if !strings.Contains(parts[1].Content, target.AttachmentKey) || !strings.Contains(parts[1].Content, target.URL) {
+		t.Fatalf("tool result references were not rewritten: %s", parts[1].Content)
+	}
+
+	metadata := CompactMessageMetadataWithCounts([]string{"old_1"}, []string{"old_2"}, 1, 1)
+	metadata = RemapCompactMessageMetadata(metadata, map[string]string{"old_1": "new_1", "old_2": "new_2"})
+	compact, ok := CompactMetadataFromMessage(&Message{Metadata: metadata})
+	if !ok || len(compact.SourceMessageIDs) != 1 || compact.SourceMessageIDs[0] != "new_1" || len(compact.TailMessageIDs) != 1 || compact.TailMessageIDs[0] != "new_2" {
+		t.Fatalf("compact metadata was not remapped: %+v", compact)
+	}
+}
+
+func TestMessagesThroughBoundaryIncludesOnlyTrailingProtocolState(t *testing.T) {
+	state := &ProviderState{Provider: "mock", Model: "model", Kind: "native", Data: json.RawMessage(`{"state":1}`)}
+	messages := []*Message{
+		{ID: "visible", TurnID: "turn_1", Role: RoleTool, Parts: []ContentPart{{Type: ContentPartToolResult, CallID: "call_1"}}},
+		{ID: "protocol", TurnID: "turn_1", Role: RoleAssistant, ProviderState: state},
+		{ID: "later", TurnID: "turn_1", Role: RoleAssistant, Parts: TextPart("later")},
+	}
+	prefix, ok := MessagesThroughBoundary(messages, "visible")
+	if !ok || len(prefix) != 2 || prefix[1].ID != "protocol" {
+		t.Fatalf("unexpected clone boundary: %+v", prefix)
+	}
+}
+
 func TestUserInputPartsPreserveUIContext(t *testing.T) {
 	parts := UserInputParts("检查这个", []ContentPart{
 		{

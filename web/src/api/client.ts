@@ -190,6 +190,11 @@ const createSessionRequest = z.object({
   projectID: z.string().optional(),
 });
 
+const cloneSessionRequest = z.object({
+  throughMessageID: z.string().min(1),
+  titleSuffix: z.string().min(1),
+});
+
 const sessionPatchRequest = z.object({
   title: z.string().optional(),
   provider: z.string().optional(),
@@ -675,6 +680,18 @@ export function createSession(
   return request(token, "/sessions", session, {
     method: "POST",
     body: JSON.stringify(createSessionRequest.parse(body)),
+  });
+}
+
+export function cloneSessionAtMessage(
+  token: string,
+  sessionID: string,
+  throughMessageID: string,
+  titleSuffix: string,
+): Promise<Session> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/clone`, session, {
+    method: "POST",
+    body: JSON.stringify(cloneSessionRequest.parse({ throughMessageID, titleSuffix })),
   });
 }
 

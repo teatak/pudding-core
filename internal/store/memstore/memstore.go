@@ -163,6 +163,92 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	return nil
 }
 
+func (m *Memstore) CloneSession(_ context.Context, in store.CloneSessionInput) (*store.Session, error) {
+	if err := store.NormalizeCloneSessionInput(&in); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	source, ok := m.sessions[in.SourceSessionID]
+	if !ok || source.ArchivedAt != nil {
+		return nil, store.ErrNotFound
+	}
+	if _, exists := m.sessions[in.TargetSessionID]; exists {
+		return nil, store.ErrInvalidSession
+	}
+	sourceMessages := m.messages[in.SourceSessionID]
+	prefix, ok := store.MessagesThroughBoundary(sourceMessages, in.ThroughMessageID)
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+
+	now := time.Now()
+	target := cloneSession(source)
+	target.ID = in.TargetSessionID
+	target.Title = store.CloneSessionTitle(source.Title, in.TitleSuffix)
+	target.CreatedAt = now
+	target.UpdatedAt = now
+	target.LastActivityAt = now
+	target.Pinned = false
+	target.PinnedOrder = 0
+	target.ArchivedAt = nil
+	target.Running = false
+	target.BackgroundProcessCount = 0
+
+	messageIDs := make(map[string]string, len(prefix))
+	for _, message := range prefix {
+		messageIDs[message.ID] = store.NewID("msg")
+	}
+	sourceTurns := make(map[string]*store.Turn)
+	for _, message := range prefix {
+		if message.TurnID == "" || sourceTurns[message.TurnID] != nil {
+			continue
+		}
+		sourceTurn, exists := m.turns[message.TurnID]
+		if !exists || sourceTurn.SessionID != in.SourceSessionID {
+			return nil, store.ErrNotFound
+		}
+		sourceTurns[message.TurnID] = sourceTurn
+	}
+	turnIDs := make(map[string]string)
+	for _, message := range prefix {
+		if message.TurnID == "" {
+			continue
+		}
+		if _, exists := turnIDs[message.TurnID]; exists {
+			continue
+		}
+		sourceTurn := sourceTurns[message.TurnID]
+		newTurnID := store.NewID("turn")
+		turnIDs[message.TurnID] = newTurnID
+		turn := cloneTurn(sourceTurn)
+		turn.ID = newTurnID
+		turn.SessionID = in.TargetSessionID
+		if turn.Status == store.TurnRunning {
+			turn.Status = store.TurnCancelled
+		}
+		if turn.ClientMessageID == "compact:"+message.TurnID {
+			turn.ClientMessageID = "compact:" + newTurnID
+		}
+		m.turns[newTurnID] = turn
+	}
+
+	targetMessages := make([]*store.Message, 0, len(prefix))
+	for _, sourceMessage := range prefix {
+		message := cloneMessage(sourceMessage)
+		message.ID = messageIDs[sourceMessage.ID]
+		message.SessionID = in.TargetSessionID
+		message.TurnID = turnIDs[sourceMessage.TurnID]
+		message.Parts = store.ReplaceContentPartAttachments(message.Parts, in.AttachmentReplacements)
+		message.Metadata = store.RemapCompactMessageMetadata(message.Metadata, messageIDs)
+		targetMessages = append(targetMessages, message)
+	}
+	m.sessions[target.ID] = target
+	m.messages[target.ID] = targetMessages
+	return cloneSession(target), nil
+}
+
 func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -81,6 +81,34 @@ type SessionUpdate struct {
 	PinnedOrder *int64 `json:"pinnedOrder"`
 }
 
+// CloneSessionInput creates an independent session from canonical history up to
+// and including ThroughMessageID. AttachmentReplacements is keyed by the source
+// attachment key and must point at the copied blob owned by TargetSessionID.
+type CloneSessionInput struct {
+	SourceSessionID        string
+	ThroughMessageID       string
+	TargetSessionID        string
+	TitleSuffix            string
+	AttachmentReplacements map[string]Attachment
+}
+
+func NormalizeCloneSessionInput(in *CloneSessionInput) error {
+	if in == nil {
+		return ErrInvalidSession
+	}
+	in.SourceSessionID = strings.TrimSpace(in.SourceSessionID)
+	in.ThroughMessageID = strings.TrimSpace(in.ThroughMessageID)
+	in.TargetSessionID = strings.TrimSpace(in.TargetSessionID)
+	if in.SourceSessionID == "" || in.ThroughMessageID == "" || in.TargetSessionID == "" || strings.TrimSpace(in.TitleSuffix) == "" || in.SourceSessionID == in.TargetSessionID {
+		return ErrInvalidSession
+	}
+	return nil
+}
+
+func CloneSessionTitle(sourceTitle, suffix string) string {
+	return sourceTitle + suffix
+}
+
 type SessionListScope string
 
 const (
@@ -1173,6 +1201,104 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 	return out
 }
 
+func ReplaceContentPartAttachments(parts []ContentPart, replacements map[string]Attachment) []ContentPart {
+	out := CloneContentParts(parts)
+	references := make(map[string]string)
+	addReferences := func(source Attachment) {
+		if source.AttachmentKey == "" {
+			return
+		}
+		target, ok := replacements[source.AttachmentKey]
+		if !ok {
+			return
+		}
+		references[source.AttachmentKey] = target.AttachmentKey
+		if source.URL != "" && target.URL != "" {
+			references[source.URL] = target.URL
+		}
+	}
+	for _, part := range out {
+		if part.Type == ContentPartAttachment {
+			addReferences(Attachment{AttachmentKey: part.AttachmentKey, URL: part.URL})
+		}
+		if part.Type == ContentPartToolResult {
+			for _, item := range part.Attachments {
+				addReferences(item)
+			}
+		}
+	}
+	replaceReferences := func(value string) string {
+		for source, target := range references {
+			value = strings.ReplaceAll(value, source, target)
+		}
+		return value
+	}
+	for i := range out {
+		part := &out[i]
+		part.Content = replaceReferences(part.Content)
+		if len(part.Args) > 0 {
+			replaced := json.RawMessage(replaceReferences(string(part.Args)))
+			if json.Valid(replaced) {
+				part.Args = replaced
+			}
+		}
+		if part.Type == ContentPartAttachment {
+			if replacement, ok := replacements[part.AttachmentKey]; ok {
+				*part = AttachmentPart(replacement)
+			}
+			continue
+		}
+		if part.Type != ContentPartToolResult {
+			continue
+		}
+		for j := range part.Attachments {
+			if replacement, ok := replacements[part.Attachments[j].AttachmentKey]; ok {
+				part.Attachments[j] = replacement
+			}
+		}
+	}
+	return NormalizeContentParts(out)
+}
+
+func RemapCompactMessageMetadata(metadata json.RawMessage, messageIDs map[string]string) json.RawMessage {
+	if len(metadata) == 0 || !json.Valid(metadata) {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &fields); err != nil {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	rawCompact, ok := fields["compact"]
+	if !ok {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	var compact CompactMetadata
+	if err := json.Unmarshal(rawCompact, &compact); err != nil {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	remap := func(source []string) []string {
+		out := make([]string, 0, len(source))
+		for _, id := range source {
+			if next := messageIDs[id]; next != "" {
+				out = append(out, next)
+			}
+		}
+		return out
+	}
+	compact.SourceMessageIDs = remap(compact.SourceMessageIDs)
+	compact.TailMessageIDs = remap(compact.TailMessageIDs)
+	rawCompact, err := json.Marshal(compact)
+	if err != nil {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	fields["compact"] = rawCompact
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return append(json.RawMessage(nil), metadata...)
+	}
+	return out
+}
+
 func TextFromParts(parts []ContentPart) string {
 	var b strings.Builder
 	for _, part := range parts {
@@ -1455,6 +1581,24 @@ func IsProtocolOnlyMessage(message *Message) bool {
 		strings.TrimSpace(message.Text) == "" &&
 		len(message.Parts) == 0 &&
 		ValidProviderState(message.ProviderState)
+}
+
+// MessagesThroughBoundary returns the canonical prefix represented by one
+// visible message node. Protocol-only messages immediately following that node
+// in the same turn belong to the node and must travel with it.
+func MessagesThroughBoundary(messages []*Message, throughMessageID string) ([]*Message, bool) {
+	throughMessageID = strings.TrimSpace(throughMessageID)
+	for i, message := range messages {
+		if message == nil || message.ID != throughMessageID {
+			continue
+		}
+		end := i + 1
+		for end < len(messages) && messages[end].TurnID == message.TurnID && IsProtocolOnlyMessage(messages[end]) {
+			end++
+		}
+		return messages[:end], true
+	}
+	return nil, false
 }
 
 func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment {
@@ -2211,6 +2355,7 @@ type Store interface {
 	DeleteProject(ctx context.Context, id string) error
 
 	CreateSession(ctx context.Context, s *Session) error
+	CloneSession(ctx context.Context, in CloneSessionInput) (*Session, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
 	// ListSessions 默认只返回 active session；内部维护任务必须显式使用 all。
 	ListSessions(ctx context.Context, options ...SessionListOptions) ([]*Session, error)

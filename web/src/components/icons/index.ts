@@ -163,6 +163,7 @@ export {
   Sheet,
   SlidersHorizontal,
   Sparkles,
+  Split,
   Square,
   SquareMousePointer,
   SquareTerminal,

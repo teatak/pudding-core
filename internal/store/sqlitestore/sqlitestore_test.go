@@ -1114,6 +1114,113 @@ func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	}
 }
 
+func TestCloneSessionCopiesCanonicalPrefixAsIndependentHistory(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{
+		ID:              "sess_source",
+		Title:           "Source",
+		Provider:        "mock",
+		Model:           "model",
+		ReasoningEffort: "high",
+		ActiveMode:      store.ModeCode,
+		ModeLease:       store.ModeLeaseSession,
+		LoadedAppIDs:    []string{"app_1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appendCompletedTestTurn(t, st, "sess_source", 1)
+	appendCompletedTestTurn(t, st, "sess_source", 2)
+	sourceTurns, err := st.ListTurnsPage(ctx, "sess_source", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary := sourceTurns.Turns[0].Messages[len(sourceTurns.Turns[0].Messages)-1]
+
+	cloned, err := st.CloneSession(ctx, store.CloneSessionInput{
+		SourceSessionID:  "sess_source",
+		ThroughMessageID: boundary.ID,
+		TargetSessionID:  "sess_clone",
+		TitleSuffix:      "（副本）",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cloned.ID != "sess_clone" || cloned.Title != "Source（副本）" || cloned.Provider != "mock" || cloned.Model != "model" || cloned.ReasoningEffort != "high" {
+		t.Fatalf("cloned session config = %+v", cloned)
+	}
+	if cloned.Pinned || cloned.ArchivedAt != nil || cloned.Running || !sameStrings(cloned.LoadedAppIDs, []string{"app_1"}) {
+		t.Fatalf("cloned session runtime state = %+v", cloned)
+	}
+	targetTurns, err := st.ListTurnsPage(ctx, cloned.ID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targetTurns.Turns) != 1 {
+		t.Fatalf("cloned turns = %+v", targetTurns.Turns)
+	}
+	if got := messageLabels(targetTurns.Turns[0].Messages); !sameStrings(got, []string{"user:hello", "assistant:assistant 1"}) {
+		t.Fatalf("cloned messages = %v", got)
+	}
+	for i, message := range targetTurns.Turns[0].Messages {
+		if message.SessionID != cloned.ID || message.ID == sourceTurns.Turns[0].Messages[i].ID {
+			t.Fatalf("message was not independently cloned: %+v", message)
+		}
+	}
+	if seq, err := st.LatestSeq(ctx, cloned.ID); err != nil || seq != 0 {
+		t.Fatalf("clone should not copy lifecycle events: seq=%d err=%v", seq, err)
+	}
+}
+
+func TestCloneSessionKeepsTrailingProtocolState(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_protocol_source")
+	beginTestTurn(t, st, "sess_protocol_source", "turn_protocol", "msg_protocol_user", "client_protocol")
+	state := &store.ProviderState{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Kind:     "openai_responses",
+		Data:     json.RawMessage(`[{"type":"reasoning","encrypted_content":"cipher"}]`),
+	}
+	output, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: "turn_protocol",
+		Parts: []store.ContentPart{{
+			Type:    store.ContentPartToolResult,
+			CallID:  "call_1",
+			Name:    "tool",
+			Ok:      true,
+			Content: `{"ok":true}`,
+		}},
+		ProviderState: state,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Messages) != 2 || !store.IsProtocolOnlyMessage(output.Messages[1]) {
+		t.Fatalf("source protocol anchor = %+v", output.Messages)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "turn_protocol", Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	cloned, err := st.CloneSession(ctx, store.CloneSessionInput{
+		SourceSessionID:  "sess_protocol_source",
+		ThroughMessageID: output.Messages[0].ID,
+		TargetSessionID:  "sess_protocol_clone",
+		TitleSuffix:      "（副本）",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := st.ListMessages(ctx, cloned.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 || !store.IsProtocolOnlyMessage(messages[2]) || string(messages[2].ProviderState.Data) != string(state.Data) {
+		t.Fatalf("cloned protocol state = %+v", messages)
+	}
+}
+
 func TestListTurnsPageUsesStableOrder(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")

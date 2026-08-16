@@ -221,6 +221,130 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 	})
 }
 
+func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*store.Session, error) {
+	if err := store.NormalizeCloneSessionInput(&in); err != nil {
+		return nil, err
+	}
+	var out *store.Session
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		source, err := getSessionTx(ctx, tx, in.SourceSessionID)
+		if err != nil {
+			return err
+		}
+		var targetExists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)`, in.TargetSessionID).Scan(&targetExists); err != nil {
+			return err
+		}
+		if targetExists {
+			return store.ErrInvalidSession
+		}
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+messageSelectColumns+` FROM messages
+			 WHERE session_id=?
+			 ORDER BY created_at ASC,rowid ASC`,
+			in.SourceSessionID,
+		)
+		if err != nil {
+			return err
+		}
+		messages := make([]*store.Message, 0)
+		for rows.Next() {
+			message, scanErr := scanMessage(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return scanErr
+			}
+			messages = append(messages, message)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		messages, ok := store.MessagesThroughBoundary(messages, in.ThroughMessageID)
+		if !ok {
+			return store.ErrNotFound
+		}
+
+		now := time.Now()
+		target := *source
+		target.ID = in.TargetSessionID
+		target.Title = store.CloneSessionTitle(source.Title, in.TitleSuffix)
+		target.LoadedAppIDs = append([]string(nil), source.LoadedAppIDs...)
+		target.CreatedAt = now
+		target.UpdatedAt = now
+		target.LastActivityAt = now
+		target.Pinned = false
+		target.PinnedOrder = 0
+		target.ArchivedAt = nil
+		target.Running = false
+		target.BackgroundProcessCount = 0
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			target.ID, target.Title, target.Provider, target.Model, target.ReasoningEffort, target.ReasoningModelKey, target.ActiveMode, target.ModeLease, target.ProjectID, encodeStringList(target.LoadedAppIDs), 0, 0, unixMS(now), unixMS(now), unixMS(now),
+		); err != nil {
+			return err
+		}
+
+		messageIDs := make(map[string]string, len(messages))
+		for _, message := range messages {
+			messageIDs[message.ID] = store.NewID("msg")
+		}
+		turnIDs := make(map[string]string)
+		for _, sourceMessage := range messages {
+			if sourceMessage.TurnID == "" {
+				continue
+			}
+			if _, exists := turnIDs[sourceMessage.TurnID]; exists {
+				continue
+			}
+			sourceTurn, err := scanTurn(tx.QueryRowContext(ctx,
+				`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
+				in.SourceSessionID, sourceMessage.TurnID,
+			))
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			newTurnID := store.NewID("turn")
+			turnIDs[sourceTurn.ID] = newTurnID
+			status := sourceTurn.Status
+			if status == store.TurnRunning {
+				status = store.TurnCancelled
+			}
+			clientMessageID := sourceTurn.ClientMessageID
+			if clientMessageID == "compact:"+sourceTurn.ID {
+				clientMessageID = "compact:" + newTurnID
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+				newTurnID, target.ID, clientMessageID, status, sourceTurn.Provider, sourceTurn.Model, sourceTurn.Mode, string(normalizeJSON(sourceTurn.ModelConfig)), sourceTurn.Error, unixMS(sourceTurn.CreatedAt), unixMS(sourceTurn.UpdatedAt),
+			); err != nil {
+				return err
+			}
+		}
+		for _, sourceMessage := range messages {
+			message := *sourceMessage
+			message.ID = messageIDs[sourceMessage.ID]
+			message.SessionID = target.ID
+			message.TurnID = turnIDs[sourceMessage.TurnID]
+			message.Parts = store.ReplaceContentPartAttachments(sourceMessage.Parts, in.AttachmentReplacements)
+			message.Metadata = store.RemapCompactMessageMetadata(sourceMessage.Metadata, messageIDs)
+			message.ProviderState = store.CloneProviderState(sourceMessage.ProviderState)
+			if err := insertMessageTx(ctx, tx, &message); err != nil {
+				return err
+			}
+		}
+		out = &target
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

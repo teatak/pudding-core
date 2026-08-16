@@ -276,9 +276,9 @@ export function AppsPane({ token }: { token: string }) {
         if (a.source !== b.source) {
           return a.source === "builtin" ? -1 : 1;
         }
-        return appDisplayName(a, t).localeCompare(appDisplayName(b, t));
+        return a.name.localeCompare(b.name, "en");
       }),
-    [appsQuery.data?.apps, t],
+    [appsQuery.data?.apps],
   );
   const builtinApps = useMemo(() => apps.filter((app) => app.source === "builtin"), [apps]);
   const allInstalledApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
@@ -286,9 +286,9 @@ export function AppsPane({ token }: { token: string }) {
   const catalogApps = useMemo(
     () =>
       [...(catalogQuery.data?.items || [])].sort((a, b) =>
-        appRegistryTitle(a, locale).localeCompare(appRegistryTitle(b, locale)),
+        appRegistryTitle(a, "en").localeCompare(appRegistryTitle(b, "en"), "en"),
       ),
-    [catalogQuery.data?.items, locale],
+    [catalogQuery.data?.items],
   );
   const catalogByLocalID = useMemo(
     () => new Map(catalogApps.map((app) => [appRegistryLocalID(app), app])),

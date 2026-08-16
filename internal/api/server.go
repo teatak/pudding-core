@@ -191,6 +191,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
 	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
+	app.Route("/sessions/:id/clone").POST(s.cloneSession)
 	app.Route("/sessions/:id/archive").POST(s.archiveSession)
 	app.Route("/sessions/:id/restore").POST(s.restoreSession)
 	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)

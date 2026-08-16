@@ -1,9 +1,10 @@
-import { Archive, CircleAlert } from "@/components/icons";
+import { Archive, CircleAlert, Split } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Spinner } from "@/components/Spinner";
+import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
 
@@ -91,7 +92,16 @@ function CanonicalAssistantOutput({
   );
 }
 
-export function AssistantOutputMeta({ assistant }: { assistant: AssistantOutputVM }) {
+export function AssistantOutputMeta({
+  assistant,
+  cloningMessageID,
+  onCloneMessage,
+}: {
+  assistant: AssistantOutputVM;
+  cloningMessageID?: string;
+  onCloneMessage?: (messageID: string) => void;
+}) {
+  const { t } = useI18n();
   if (assistant.kind !== "canonical" || assistant.messages.some(isCompactMessage)) {
     return null;
   }
@@ -106,6 +116,23 @@ export function AssistantOutputMeta({ assistant }: { assistant: AssistantOutputV
       hoverGroup="assistant-turn"
       model={assistant.model}
       text={assistantTextFromMessages(assistant.messages)}
+      trailingActions={
+        onCloneMessage ? (
+          <Button
+            aria-label={t("transcript.cloneToNewChat")}
+            className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+            disabled={Boolean(cloningMessageID)}
+            size="icon-xs"
+            tabIndex={-1}
+            title={t("transcript.cloneToNewChat")}
+            type="button"
+            variant="ghost"
+            onClick={() => onCloneMessage(lastMessage.id)}
+          >
+            {cloningMessageID === lastMessage.id ? <Spinner className="size-3" /> : <Split className="size-3 rotate-90" />}
+          </Button>
+        ) : null
+      }
     />
   );
 }

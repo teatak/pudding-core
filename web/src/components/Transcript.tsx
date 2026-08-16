@@ -1,12 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
-import { getSettings, type ContentPart } from "@/api/client";
+import { cloneSessionAtMessage, getSettings, type ContentPart, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { TranscriptView } from "@/components/transcript/TranscriptView";
 import type { TranscriptSearchState, TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
+import { useI18n } from "@/i18n";
 import { transcriptDisplaySettings } from "@/lib/appSettings";
+import type { AppSearch } from "@/lib/route";
 import { useOverlayStore } from "@/state/overlayStore";
 import {
   consumeTranscriptTurnReveal,
@@ -30,6 +34,9 @@ export function Transcript({
   submitSignal = 0,
   token,
 }: TranscriptProps) {
+  const navigate = useNavigate({ from: "/" });
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
   const disclosureByKeyRef = useRef<Record<string, boolean>>({});
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
@@ -47,6 +54,31 @@ export function Transcript({
     queryFn: () => getSettings(token),
     enabled: Boolean(token),
     staleTime: 30_000,
+  });
+  const cloneMutation = useMutation({
+    mutationFn: (messageID: string) => cloneSessionAtMessage(token, sessionID, messageID, t("session.cloneTitleSuffix")),
+    onSuccess: async (cloned) => {
+      queryClient.setQueryData<Session>(queryKeys.session(cloned.id), cloned);
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => ({
+        sessions: [cloned, ...(previous?.sessions.filter((session) => session.id !== cloned.id) || [])],
+      }));
+      await navigate({
+        to: "/",
+        search: (previous) => {
+          const next = { ...(previous as AppSearch) };
+          if (searchSlot === "split") {
+            next.split = cloned.id;
+          } else {
+            next.session = cloned.id;
+            delete next.draft;
+            delete next.project;
+          }
+          return next;
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+    onError: () => toast.error(t("transcript.cloneFailed")),
   });
   const displaySettings = useMemo(
     () => transcriptDisplaySettings(settingsQuery.data?.settings),
@@ -97,6 +129,7 @@ export function Transcript({
   );
 
   const handleAssistantRevealComplete = useCallback((turnID: string) => markAssistantRevealed(turnID), [markAssistantRevealed]);
+  const handleCloneMessage = useCallback((messageID: string) => cloneMutation.mutate(messageID), [cloneMutation.mutate]);
   const handleTurnRevealComplete = useCallback(
     (serial: number) => consumeTranscriptTurnReveal(sessionID, serial),
     [sessionID],
@@ -172,6 +205,7 @@ export function Transcript({
       turnReveal={turnReveal}
       turns={transcript.turnVMs}
       onAssistantRevealComplete={handleAssistantRevealComplete}
+      onCloneMessage={handleCloneMessage}
       onJumpLatest={moveToLatest}
       onLatestChange={handleLatestChange}
       onLoadHistory={loadHistory}
@@ -180,6 +214,7 @@ export function Transcript({
       onQueuedEditStart={startQueuedEdit}
       onQueuedSteer={runningTurnID ? guideQueued : undefined}
       onQueuedSave={saveQueued}
+      cloningMessageID={cloneMutation.isPending ? cloneMutation.variables : undefined}
     />
   );
 }

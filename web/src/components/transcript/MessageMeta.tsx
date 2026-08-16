@@ -32,6 +32,7 @@ export function MessageMeta({
   model,
   persistentStatus,
   text,
+  trailingActions,
   uiContext,
 }: {
   actions?: ReactNode;
@@ -43,6 +44,7 @@ export function MessageMeta({
   model?: TurnModelVM;
   persistentStatus?: ReactNode;
   text: string;
+  trailingActions?: ReactNode;
   uiContext?: UIContextPart;
 }) {
   const { t } = useI18n();
@@ -67,7 +69,7 @@ export function MessageMeta({
       )}
     >
       <div className="flex items-center gap-1">
-        <div className={cn("flex items-center", align === "start" && "w-4 justify-center")}>
+        <div className={cn("flex items-center", align === "start" && !actions && !trailingActions && "w-4 justify-center")}>
           {actions}
           {hideStandardDetails ? null : (
             <>
@@ -90,6 +92,7 @@ export function MessageMeta({
               >
                 {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
               </Button>
+              {trailingActions}
               {uiContext ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

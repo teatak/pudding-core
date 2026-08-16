@@ -20,6 +20,7 @@ import type {
 export function TranscriptView({
   disclosure,
   displaySettings,
+  cloningMessageID,
   hasMoreHistory,
   hasItems,
   isError,
@@ -30,6 +31,7 @@ export function TranscriptView({
   jumpLatestSignal,
   newMessageCount,
   onAssistantRevealComplete,
+  onCloneMessage,
   onJumpLatest,
   onLatestChange,
   onLoadHistory,
@@ -48,6 +50,7 @@ export function TranscriptView({
 }: {
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
+  cloningMessageID?: string;
   hasMoreHistory: boolean;
   hasItems: boolean;
   isError: boolean;
@@ -58,6 +61,7 @@ export function TranscriptView({
   jumpLatestSignal: number;
   newMessageCount: number;
   onAssistantRevealComplete?: (turnID: string) => void;
+  onCloneMessage?: (messageID: string) => void;
   onJumpLatest: () => void;
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
@@ -110,10 +114,12 @@ export function TranscriptView({
           <TranscriptList
             disclosure={disclosure}
             displaySettings={displaySettings}
+            cloningMessageID={cloningMessageID}
             hasMoreHistory={hasMoreHistory}
             isLoadingHistory={isLoadingHistory}
             jumpLatestSignal={jumpLatestSignal}
             onAssistantRevealComplete={onAssistantRevealComplete}
+            onCloneMessage={onCloneMessage}
             onLatestChange={onLatestChange}
             onLoadHistory={onLoadHistory}
             onTurnRevealComplete={onTurnRevealComplete}

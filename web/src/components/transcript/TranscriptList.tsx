@@ -26,6 +26,7 @@ const TURN_REVEAL_TOP_RATIO = 0.38;
 type HistoryLoadState = "idle" | "loading" | "settling";
 
 export const TranscriptList = memo(function TranscriptList({
+  cloningMessageID,
   disclosure,
   displaySettings,
   footer,
@@ -33,6 +34,7 @@ export const TranscriptList = memo(function TranscriptList({
   isLoadingHistory,
   jumpLatestSignal,
   onAssistantRevealComplete,
+  onCloneMessage,
   onLatestChange,
   onLoadHistory,
   onTurnRevealComplete,
@@ -48,6 +50,7 @@ export const TranscriptList = memo(function TranscriptList({
   turnReveal,
   turns,
 }: {
+  cloningMessageID?: string;
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
   footer?: ReactNode;
@@ -55,6 +58,7 @@ export const TranscriptList = memo(function TranscriptList({
   isLoadingHistory: boolean;
   jumpLatestSignal: number;
   onAssistantRevealComplete?: (turnID: string) => void;
+  onCloneMessage?: (messageID: string) => void;
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
   onTurnRevealComplete?: (serial: number) => void;
@@ -540,10 +544,12 @@ export const TranscriptList = memo(function TranscriptList({
                 role="listitem"
               >
                 <TranscriptTurn
+                  cloningMessageID={cloningMessageID}
                   disclosure={disclosure}
                   displaySettings={displaySettings}
                   sessionID={sessionID}
                   onAssistantRevealComplete={onAssistantRevealComplete}
+                  onCloneMessage={onCloneMessage}
                   onQueuedCancel={onQueuedCancel}
                   onQueuedEditStart={onQueuedEditStart}
                   onQueuedSteer={onQueuedSteer}

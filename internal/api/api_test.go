@@ -24,6 +24,7 @@ import (
 	"time"
 
 	appsvc "github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/desktopcamera"
@@ -3503,6 +3504,88 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	}))
 	if projectSession.ActiveMode != store.ModeCode || projectSession.ModeLease != store.ModeLeaseSession || projectSession.ProjectID != project.ID {
 		t.Fatalf("project session must start in Code mode: %+v", projectSession)
+	}
+}
+
+func TestCloneSessionAtMessageCopiesPrefixAndAttachment(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
+	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:           "sess_clone_source",
+		Title:        "Clone source",
+		Provider:     "mock",
+		Model:        "model",
+		LoadedAppIDs: []string{"app_1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	attachmentService := attachment.NewService(homeDir)
+	stored, err := attachmentService.StoreReader("sess_clone_source", "note.txt", "text/plain", strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_clone_source",
+		TurnID:          "turn_clone_1",
+		UserMessageID:   "msg_clone_1",
+		ClientMessageID: "client_clone_1",
+		UserText:        "first",
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_clone_1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("first answer"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appendAPITestTurn(t, ms, "sess_clone_source", 2)
+	firstTurn, err := ms.GetConversationTurn(ctx, "sess_clone_source", "turn_clone_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary := firstTurn.Messages[len(firstTurn.Messages)-1].ID
+	body, err := json.Marshal(cloneSessionReq{ThroughMessageID: boundary, TitleSuffix: "（副本）"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/sessions/sess_clone_source/clone", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var cloned store.Session
+	if err := json.Unmarshal(recorder.Body.Bytes(), &cloned); err != nil {
+		t.Fatal(err)
+	}
+	if cloned.ID == "sess_clone_source" || cloned.Title != "Clone source（副本）" || !reflect.DeepEqual(cloned.LoadedAppIDs, []string{"app_1"}) {
+		t.Fatalf("cloned session = %+v", cloned)
+	}
+	targetTurns, err := ms.ListTurnsPage(ctx, cloned.ID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targetTurns.Turns) != 1 || len(targetTurns.Turns[0].Messages) != 2 {
+		t.Fatalf("cloned turns = %+v", targetTurns.Turns)
+	}
+	attachments := store.AttachmentsFromParts(targetTurns.Turns[0].Messages[0].Parts)
+	if len(attachments) != 1 || !strings.HasPrefix(attachments[0].AttachmentKey, "sessions/"+cloned.ID+"/blobs/") {
+		t.Fatalf("cloned attachments = %+v", attachments)
+	}
+	path, ok, err := attachmentService.Path(cloned.ID, attachments[0].AttachmentKey)
+	if err != nil || !ok {
+		t.Fatalf("cloned attachment path: path=%q ok=%v err=%v", path, ok, err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" {
+		t.Fatalf("cloned attachment data=%q err=%v", data, err)
 	}
 }
 

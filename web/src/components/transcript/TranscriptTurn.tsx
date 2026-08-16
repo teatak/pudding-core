@@ -9,10 +9,12 @@ import type { AssistantOutputVM, TranscriptDisplaySettings, TranscriptTurnVM, Tu
 import { UserInput } from "./UserInput";
 
 function TranscriptTurnView({
+  cloningMessageID,
   disclosure,
   displaySettings,
   onAssistantContentGrow,
   onAssistantRevealComplete,
+  onCloneMessage,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSteer,
@@ -21,10 +23,12 @@ function TranscriptTurnView({
   token,
   turn,
 }: {
+  cloningMessageID?: string;
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
   onAssistantContentGrow?: () => void;
   onAssistantRevealComplete?: (turnID: string) => void;
+  onCloneMessage?: (messageID: string) => void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
@@ -105,7 +109,11 @@ function TranscriptTurnView({
           ) : null}
           {metaAssistant ? (
             <div className="-mt-3">
-              <AssistantOutputMeta assistant={metaAssistant} />
+              <AssistantOutputMeta
+                assistant={metaAssistant}
+                cloningMessageID={cloningMessageID}
+                onCloneMessage={onCloneMessage}
+              />
             </div>
           ) : null}
           {turn.compact ? (
@@ -139,10 +147,12 @@ function TurnGuide({ attachmentLabel, label, user }: { attachmentLabel: string; 
 
 export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
   return (
+    previous.cloningMessageID === next.cloningMessageID &&
     previous.disclosure === next.disclosure &&
     previous.displaySettings === next.displaySettings &&
     previous.onAssistantContentGrow === next.onAssistantContentGrow &&
     previous.onAssistantRevealComplete === next.onAssistantRevealComplete &&
+    previous.onCloneMessage === next.onCloneMessage &&
     previous.onQueuedCancel === next.onQueuedCancel &&
     previous.onQueuedEditStart === next.onQueuedEditStart &&
     previous.onQueuedSteer === next.onQueuedSteer &&
