@@ -14,7 +14,7 @@ import {
   denyComputerUsePermissionGuide,
   getComputerUsePermissionGuide,
   onComputerUsePermissionGuide,
-  openDesktopPermissionSettings,
+  requestDesktopPermission,
   restartDesktopApp,
   type ComputerUsePermission,
   type ComputerUsePermissionGuide as Guide,
@@ -44,10 +44,10 @@ export function ComputerUsePermissionGuide() {
   if (!guide) return null;
 
   const deny = () => void denyComputerUsePermissionGuide(guide.requestID);
-  const openSettings = async (permission: ComputerUsePermission) => {
+  const requestPermission = async (permission: ComputerUsePermission) => {
     setOpening(permission);
     try {
-      await openDesktopPermissionSettings(permission);
+      await requestDesktopPermission(permission);
     } catch {
       // Keep the guide open so the user can retry.
     } finally {
@@ -72,7 +72,7 @@ export function ComputerUsePermissionGuide() {
               opening={opening === item.permission}
               permission={item.permission}
               required={guide.required.includes(item.permission)}
-              onOpen={openSettings}
+              onOpen={requestPermission}
             />
           ))}
         </div>
@@ -119,7 +119,7 @@ function PermissionItem({
       ) : (
         <Button disabled={opening} size="sm" type="button" variant="outline" onClick={() => void onOpen(permission)}>
           {opening ? <Spinner className="size-3.5" /> : <ExternalLink className="size-3.5" />}
-          {t("settings.permissions.openSettings")}
+          {t("settings.permissions.requestPermission")}
         </Button>
       )}
     </div>

@@ -50,7 +50,7 @@ test("desktop permission state uses Computer Use as the screen recording source"
   assert.equal("speaker" in state, false);
 });
 
-test("media permission request uses the native API while Computer Use opens System Settings", async () => {
+test("desktop permission request uses the owning native API", async () => {
   const computerUseCalls = [];
   const mediaCalls = [];
   let accessibility = false;
@@ -69,11 +69,9 @@ test("media permission request uses the native API while Computer Use opens Syst
     getMediaAccessStatus: (permission) => mediaCalls.includes(permission) ? "granted" : "not-determined",
   };
 
-  await assert.rejects(
-    requestDesktopPermission(host, preferences, "accessibility", "darwin"),
-    /System Settings/,
-  );
-  assert.deepEqual(computerUseCalls, []);
+  const accessibilityState = await requestDesktopPermission(host, preferences, "accessibility", "darwin");
+  assert.equal(accessibilityState.accessibility, true);
+  assert.deepEqual(computerUseCalls[0], { promptAccessibility: true, promptScreenRecording: false });
   assert.deepEqual(mediaCalls, []);
 
   const cameraState = await requestDesktopPermission(host, preferences, "camera", "darwin");
