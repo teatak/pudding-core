@@ -1144,6 +1144,7 @@ html:has(
     font-weight: 500;
 }
 
+.pudding-session-rail [data-slot="sidebar-menu-button"]:active:not(:disabled),
 .pudding-session-rail [data-slot="sidebar-menu-button"][data-active="true"] {
     background-color: var(--sidebar-hover-background);
     color: var(--foreground);
@@ -1485,7 +1486,7 @@ html:has(
     font-weight: 500;
 }
 
-.pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible) {
+.pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible, :active:not(:disabled)) {
     background-color: var(--sidebar-accent);
     color: var(--foreground);
     font-weight: 500;
@@ -1501,7 +1502,7 @@ html:has(
     font-weight: 500;
 }
 
-.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible),
+.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible, :active:not(:disabled)),
 .pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"][data-active="true"] {
     color: var(--foreground);
     font-weight: 500;
