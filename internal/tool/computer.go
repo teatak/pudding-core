@@ -153,22 +153,18 @@ func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
 		return computerToolError(out, err)
 	}
 	payload := map[string]any{"ok": true, "observation": combined.Observation}
-	if combined.CaptureError != nil {
-		payload["screenshotError"] = combined.CaptureError
+	captured := *combined.Capture
+	stored, storeErr := attachment.NewService(r.homeDir).StorePath(call.SessionID, captured.Output)
+	if storeErr != nil {
+		payload["screenshotError"] = computer.ErrorFailure(storeErr)
 	} else {
-		captured := *combined.Capture
-		stored, storeErr := attachment.NewService(r.homeDir).StorePath(call.SessionID, captured.Output)
-		if storeErr != nil {
-			payload["screenshotError"] = computer.ErrorFailure(storeErr)
-		} else {
-			stored.Origin = attachment.OriginTool
-			out.Attachments = []store.Attachment{stored}
-			out.ContextAttachments = []store.Attachment{stored}
-			payload["screenshot"] = map[string]any{
-				"windowID": captured.WindowID, "width": captured.Width, "height": captured.Height,
-				"scaleFactor": captured.ScaleFactor, "attachmentKey": stored.AttachmentKey, "url": stored.URL,
-				"coordinateSpace": "window_screenshot_pixels_top_left",
-			}
+		stored.Origin = attachment.OriginTool
+		out.Attachments = []store.Attachment{stored}
+		out.ContextAttachments = []store.Attachment{stored}
+		payload["screenshot"] = map[string]any{
+			"windowID": captured.WindowID, "width": captured.Width, "height": captured.Height,
+			"scaleFactor": captured.ScaleFactor, "attachmentKey": stored.AttachmentKey, "url": stored.URL,
+			"coordinateSpace": "window_screenshot_pixels_top_left",
 		}
 	}
 	out.Ok = true
@@ -218,12 +214,19 @@ func (r *BuiltinRunner) computerReady(call Call, out Result) *Result {
 func computerToolError(out Result, err error) Result {
 	failure := computer.ErrorFailure(err)
 	out.Ok = false
-	out.Content = jsonString(map[string]any{
+	payload := map[string]any{
 		"ok": false, "code": failure.Code, "error": failure.Message,
 		"retryable": failure.Retryable, "outcome": failure.Outcome,
-	})
+	}
+	if failure.Permission != "" {
+		payload["permission"] = failure.Permission
+	}
+	if len(failure.Permissions) > 0 {
+		payload["permissions"] = failure.Permissions
+	}
+	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 5
+	out.SummaryCount = len(payload)
 	return out
 }
 

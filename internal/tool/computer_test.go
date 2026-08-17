@@ -49,6 +49,24 @@ func TestComputerUseAppDefaultsToBackground(t *testing.T) {
 	t.Fatal("Computer Use App definition not found")
 }
 
+func TestComputerPermissionFailuresRemainStructured(t *testing.T) {
+	result := computerToolError(Result{}, &computer.OperationError{
+		Code:        "computer_permission_denied",
+		Message:     "Computer Use permission was not granted",
+		Permissions: []string{"accessibility", "screenRecording"},
+		Outcome:     "not_started",
+	})
+	var payload struct {
+		Code        string   `json:"code"`
+		Permissions []string `json:"permissions"`
+		Outcome     string   `json:"outcome"`
+	}
+	if result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil ||
+		payload.Code != "computer_permission_denied" || payload.Outcome != "not_started" || len(payload.Permissions) != 2 {
+		t.Fatalf("unexpected permission result: %+v content=%s", result, result.Content)
+	}
+}
+
 type fakeComputerController struct {
 	lastSession string
 	released    string

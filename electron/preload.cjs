@@ -50,6 +50,19 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
 	getDesktopPermissions: () => ipcRenderer.invoke("pudding:desktop:permissions:get"),
 	requestDesktopPermission: (permission) => ipcRenderer.invoke("pudding:desktop:permissions:request", permission),
 	openDesktopPermissionSettings: (permission) => ipcRenderer.invoke("pudding:desktop:permissions:open-settings", permission),
+  getComputerUsePermissionGuide: () => ipcRenderer.invoke("pudding:desktop:computer-use-permission-guide:get"),
+  denyComputerUsePermissionGuide: (requestID) => ipcRenderer.invoke("pudding:desktop:computer-use-permission-guide:deny", requestID),
+  restartDesktopApp: () => ipcRenderer.invoke("pudding:desktop:restart"),
+  onDesktopPermissionsUpdated: (listener) => {
+    const wrapped = (_event, state) => listener(state);
+    ipcRenderer.on("pudding:desktop:permissions-updated", wrapped);
+    return () => ipcRenderer.off("pudding:desktop:permissions-updated", wrapped);
+  },
+  onComputerUsePermissionGuide: (listener) => {
+    const wrapped = (_event, guide) => listener(guide);
+    ipcRenderer.on("pudding:desktop:computer-use-permission-guide", wrapped);
+    return () => ipcRenderer.off("pudding:desktop:computer-use-permission-guide", wrapped);
+  },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   openSystemTerminal: (path) => ipcRenderer.invoke("pudding:desktop:open-system-terminal", path),
   revealPath: (path) => ipcRenderer.invoke("pudding:desktop:reveal-path", path),

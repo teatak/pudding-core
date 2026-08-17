@@ -37,10 +37,10 @@ const { installConsoleFileLogging } = require("./file-logger.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { ComputerUseBridgeServer } = require("./computer-use-bridge-server.cjs");
 const { ComputerUseHost } = require("./computer-use-host.cjs");
+const { ComputerUsePermissionCoordinator } = require("./computer-use-permissions.cjs");
 const {
+  DesktopPermissionController,
   desktopPermissionSettingsURL,
-  desktopPermissionState,
-  requestDesktopPermission,
 } = require("./desktop-permissions.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
@@ -138,7 +138,25 @@ const browserCredentialVault = new BrowserCredentialVault({
 const browserCredentials = new BrowserCredentialController({ vault: browserCredentialVault });
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const computerUseHost = new ComputerUseHost({ binaryPath: resolveComputerUseHelperBinary() });
-const computerUseBridgeServer = new ComputerUseBridgeServer(computerUseHost);
+let computerUsePermissionCoordinator = null;
+const desktopPermissionController = new DesktopPermissionController({
+  computerUseHost,
+  systemPreferences,
+  onStateChange: (state) => {
+    broadcastToTrustedRenderers("pudding:desktop:permissions-updated", state);
+    computerUsePermissionCoordinator?.reconcile(state);
+  },
+});
+computerUsePermissionCoordinator = new ComputerUsePermissionCoordinator({
+  permissions: desktopPermissionController,
+  restartHelper: () => computerUseHost.stop(),
+  onGuideChange: (guide) => {
+    broadcastToTrustedRenderers("pudding:desktop:computer-use-permission-guide", guide);
+  },
+});
+const computerUseBridgeServer = new ComputerUseBridgeServer(computerUseHost, {
+  permissionCoordinator: computerUsePermissionCoordinator,
+});
 const projectFileWatcher = new ProjectFileWatcher();
 
 let daemonProcess = null;
@@ -223,6 +241,7 @@ app.on("second-instance", (_event, commandLine) => {
 });
 
 function activateApplication() {
+  void refreshComputerUsePermissions();
   if (!hasSingleInstanceLock) {
     return;
   }
@@ -242,6 +261,17 @@ function activateApplication() {
       console.error("[electron] activate failed", error);
       app.quit();
     });
+}
+
+async function refreshComputerUsePermissions() {
+  if (!computerUsePermissionCoordinator.currentGuide() && !desktopPermissionController.currentState().supported) {
+    return;
+  }
+  try {
+    await computerUsePermissionCoordinator.refresh();
+  } catch (error) {
+    console.warn("[electron] Computer Use permission refresh failed", error);
+  }
 }
 
 app.on("window-all-closed", () => {
@@ -308,6 +338,7 @@ function createMainWindow() {
     },
   });
   mainWindow = window;
+  window.on("focus", () => void refreshComputerUsePermissions());
   window.once("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
@@ -1163,12 +1194,12 @@ ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID) =
 
 ipcMain.handle("pudding:desktop:permissions:get", (event) => {
   assertTrustedSender(event);
-  return desktopPermissionState(computerUseHost, systemPreferences);
+  return desktopPermissionController.refresh();
 });
 
 ipcMain.handle("pudding:desktop:permissions:request", (event, permission) => {
   assertTrustedSender(event);
-  return requestDesktopPermission(computerUseHost, systemPreferences, permission);
+  return desktopPermissionController.request(permission);
 });
 
 ipcMain.handle("pudding:desktop:permissions:open-settings", async (event, permission) => {
@@ -1178,6 +1209,23 @@ ipcMain.handle("pudding:desktop:permissions:open-settings", async (event, permis
     return false;
   }
   await shell.openExternal(url);
+  return true;
+});
+
+ipcMain.handle("pudding:desktop:computer-use-permission-guide:get", (event) => {
+  assertTrustedSender(event);
+  return computerUsePermissionCoordinator.currentGuide();
+});
+
+ipcMain.handle("pudding:desktop:computer-use-permission-guide:deny", (event, requestID) => {
+  assertTrustedSender(event);
+  return computerUsePermissionCoordinator.deny(requestID);
+});
+
+ipcMain.handle("pudding:desktop:restart", (event) => {
+  assertTrustedSender(event);
+  app.relaunch();
+  app.quit();
   return true;
 });
 

@@ -8,6 +8,48 @@ const permissionSettingsURLs = Object.freeze({
 
 const mediaPermissions = new Set(["camera", "microphone"]);
 
+class DesktopPermissionController {
+  constructor(options) {
+    this.computerUseHost = options.computerUseHost;
+    this.systemPreferences = options.systemPreferences;
+    this.platform = options.platform || process.platform;
+    this.onStateChange = options.onStateChange || (() => {});
+    this.state = unsupportedState();
+  }
+
+  currentState() {
+    return this.state;
+  }
+
+  async refresh() {
+    const next = await desktopPermissionState(
+      this.computerUseHost,
+      this.systemPreferences,
+      this.platform,
+    );
+    return this.commit(next);
+  }
+
+  async request(permission) {
+    const next = await requestDesktopPermission(
+      this.computerUseHost,
+      this.systemPreferences,
+      permission,
+      this.platform,
+    );
+    return this.commit(next);
+  }
+
+  commit(next) {
+    const changed = !samePermissionState(this.state, next);
+    this.state = next;
+    if (changed) {
+      this.onStateChange(next);
+    }
+    return next;
+  }
+}
+
 async function desktopPermissionState(computerUseHost, systemPreferences, platform = process.platform) {
   if (platform !== "darwin") {
     return unsupportedState();
@@ -62,7 +104,17 @@ function unsupportedState() {
   };
 }
 
+function samePermissionState(left, right) {
+  return left.supported === right.supported &&
+    left.accessibility === right.accessibility &&
+    left.screenRecording === right.screenRecording &&
+    left.desktopScreenRecording === right.desktopScreenRecording &&
+    left.camera === right.camera &&
+    left.microphone === right.microphone;
+}
+
 module.exports = {
+  DesktopPermissionController,
   desktopPermissionSettingsURL,
   desktopPermissionState,
   requestDesktopPermission,

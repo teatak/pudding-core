@@ -80,6 +80,9 @@ final class ApplicationLifecycleService {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
       throw HelperError.applicationNotInstalled(bundleID)
     }
+    guard CGPreflightScreenCaptureAccess() else {
+      throw HelperError.permissionRequired("screen_recording")
+    }
     do {
       let application: NSRunningApplication
       let newlyLaunched: Bool
@@ -107,18 +110,14 @@ final class ApplicationLifecycleService {
         error: ErrorDetail?,
         windows: [CapturableWindowSnapshot]
       )
-      if !CGPreflightScreenCaptureAccess() {
-        discovery = (.permissionRequired, nil, [])
-      } else {
-        do {
-          let windows = try await screenCapture.waitForWindows(
-            bundleID: bundleID,
-            pid: application.processIdentifier
-          )
-          discovery = (windows.isEmpty ? .none : .ready, nil, windows)
-        } catch {
-          discovery = (.failed, errorDetail(for: error), [])
-        }
+      do {
+        let windows = try await screenCapture.waitForWindows(
+          bundleID: bundleID,
+          pid: application.processIdentifier
+        )
+        discovery = (windows.isEmpty ? .none : .ready, nil, windows)
+      } catch {
+        discovery = (.failed, errorDetail(for: error), [])
       }
       if foreground {
         try await activate(

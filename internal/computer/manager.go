@@ -198,20 +198,17 @@ func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, w
 	if err != nil {
 		return ManagedObservationCapture{}, err
 	}
-	if (native.Capture == nil) == (native.CaptureError == nil) {
+	if native.Capture == nil {
 		return ManagedObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use observe-capture returned an invalid capture result", Outcome: "unknown"}
 	}
 	if native.Capture != nil && !validCapture(*native.Capture, windowID, output) {
 		return ManagedObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use capture returned an invalid result", Outcome: "unknown"}
 	}
-	if native.CaptureError != nil && (strings.TrimSpace(native.CaptureError.Code) == "" || strings.TrimSpace(native.CaptureError.Message) == "") {
-		return ManagedObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use observe-capture returned an invalid capture error", Outcome: "unknown"}
-	}
 	managed, err := m.storeObservation(sessionID, appID, windowID, maxElements, native.Observation, native.Capture)
 	if err != nil {
 		return ManagedObservationCapture{}, err
 	}
-	return ManagedObservationCapture{Observation: managed, Capture: native.Capture, CaptureError: native.CaptureError}, nil
+	return ManagedObservationCapture{Observation: managed, Capture: native.Capture}, nil
 }
 
 func validCapture(captured Capture, windowID uint32, output string) bool {
@@ -426,7 +423,7 @@ func validWindowDiscovery(status string, failure *Failure, windowCount int) bool
 	switch status {
 	case WindowStatusReady:
 		return windowCount > 0 && failure == nil
-	case WindowStatusNone, WindowStatusPermissionRequired:
+	case WindowStatusNone:
 		return windowCount == 0 && failure == nil
 	case WindowStatusFailed:
 		return windowCount == 0 && failure != nil && strings.TrimSpace(failure.Code) != "" && strings.TrimSpace(failure.Message) != ""

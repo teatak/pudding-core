@@ -4,7 +4,15 @@ const test = require("node:test");
 const {
   ComputerUseBridgeServer,
   classifyComputerUseError,
+  permissionsForRoute,
 } = require("../computer-use-bridge-server.cjs");
+
+test("Computer Use routes declare their native permission requirements", () => {
+  assert.deepEqual(permissionsForRoute("/computer/apps/list"), []);
+  assert.deepEqual(permissionsForRoute("/computer/apps/use"), ["screenRecording"]);
+  assert.deepEqual(permissionsForRoute("/computer/observe-capture"), ["accessibility", "screenRecording"]);
+  assert.deepEqual(permissionsForRoute("/computer/act"), ["accessibility", "screenRecording"]);
+});
 
 test("Computer Use bridge requires authentication and explicit session routing", async () => {
   const host = new FakeComputerUseHost();
@@ -189,12 +197,15 @@ test("Computer Use bridge exposes permission errors with outcome", () => {
   assert.deepEqual(classifyComputerUseError({
     code: "computer_permission_required",
     message: "permission required: accessibility",
+    permission: "accessibility",
     retryable: false,
     outcome: "not_started",
   }), {
     status: 403,
     code: "computer_permission_required",
     message: "permission required: accessibility",
+    permission: "accessibility",
+    permissions: [],
     retryable: false,
     outcome: "not_started",
   });
@@ -204,12 +215,16 @@ test("Computer Use bridge exposes foreground pointer conflicts", () => {
   assert.deepEqual(classifyComputerUseError({
     code: "computer_app_not_foreground",
     message: "application must be foreground for pointer input: com.example.App",
+    permission: "",
+    permissions: [],
     retryable: false,
     outcome: "not_started",
   }), {
     status: 409,
     code: "computer_app_not_foreground",
     message: "application must be foreground for pointer input: com.example.App",
+    permission: "",
+    permissions: [],
     retryable: false,
     outcome: "not_started",
   });

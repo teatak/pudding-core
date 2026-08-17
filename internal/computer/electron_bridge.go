@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 const maximumBridgeResponseBytes = 4 << 20
@@ -61,9 +60,8 @@ type bridgeObservation struct {
 }
 
 type bridgeObservationCapture struct {
-	Observation  bridgeObservation `json:"observation"`
-	Capture      *Capture          `json:"capture,omitempty"`
-	CaptureError *bridgeFailure    `json:"captureError,omitempty"`
+	Observation bridgeObservation `json:"observation"`
+	Capture     *Capture          `json:"capture,omitempty"`
 }
 
 type bridgeNativeAction struct {
@@ -98,17 +96,20 @@ type bridgeNativeQuit struct {
 }
 
 type bridgeError struct {
-	Error     string `json:"error"`
-	Code      string `json:"code"`
-	Retryable bool   `json:"retryable"`
-	Outcome   string `json:"outcome"`
+	Error       string   `json:"error"`
+	Code        string   `json:"code"`
+	Permission  string   `json:"permission"`
+	Permissions []string `json:"permissions"`
+	Retryable   bool     `json:"retryable"`
+	Outcome     string   `json:"outcome"`
 }
 
 type bridgeFailure struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
-	Outcome   string `json:"outcome"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	Permission string `json:"permission"`
+	Retryable  bool   `json:"retryable"`
+	Outcome    string `json:"outcome"`
 }
 
 func NewElectronBridgeService(cfg ElectronBridgeConfig) (*ElectronBridgeService, error) {
@@ -128,7 +129,7 @@ func NewElectronBridgeService(cfg ElectronBridgeConfig) (*ElectronBridgeService,
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = &http.Client{}
 	}
 	return &ElectronBridgeService{endpoint: endpoint, token: token, client: client}, nil
 }
@@ -162,7 +163,7 @@ func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID str
 	}
 	var windowError *Failure
 	if raw.WindowError != nil {
-		failure := Failure{Code: raw.WindowError.Code, Message: raw.WindowError.Message, Retryable: raw.WindowError.Retryable, Outcome: validOutcome(raw.WindowError.Outcome)}
+		failure := Failure{Code: raw.WindowError.Code, Message: raw.WindowError.Message, Permission: raw.WindowError.Permission, Retryable: raw.WindowError.Retryable, Outcome: validOutcome(raw.WindowError.Outcome)}
 		windowError = &failure
 	}
 	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched, WindowStatus: raw.WindowStatus, WindowError: windowError, Windows: windows}, nil
@@ -200,12 +201,7 @@ func (s *ElectronBridgeService) ObserveCapture(ctx context.Context, sessionID, a
 		ObservedAt: raw.Observation.ObservedAt, Truncated: raw.Observation.Truncated,
 		Windows: raw.Observation.Windows, Elements: raw.Observation.Elements,
 	}
-	var captureError *Failure
-	if raw.CaptureError != nil {
-		failure := Failure{Code: raw.CaptureError.Code, Message: raw.CaptureError.Message, Retryable: raw.CaptureError.Retryable, Outcome: validOutcome(raw.CaptureError.Outcome)}
-		captureError = &failure
-	}
-	return NativeObservationCapture{Observation: observation, Capture: raw.Capture, CaptureError: captureError}, nil
+	return NativeObservationCapture{Observation: observation, Capture: raw.Capture}, nil
 }
 
 func (s *ElectronBridgeService) Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (NativeAction, error) {
@@ -285,7 +281,7 @@ func (s *ElectronBridgeService) request(ctx context.Context, method, path string
 		if json.Unmarshal(data, &failure) != nil || strings.TrimSpace(failure.Code) == "" {
 			return &OperationError{Code: "computer_unavailable", Message: fmt.Sprintf("Computer Use bridge returned HTTP %d", resp.StatusCode), Outcome: uncertainOutcome}
 		}
-		return &OperationError{Code: failure.Code, Message: failure.Error, Retryable: failure.Retryable, Outcome: validOutcome(failure.Outcome)}
+		return &OperationError{Code: failure.Code, Message: failure.Error, Permission: failure.Permission, Permissions: failure.Permissions, Retryable: failure.Retryable, Outcome: validOutcome(failure.Outcome)}
 	}
 	if out == nil || len(data) == 0 {
 		return nil

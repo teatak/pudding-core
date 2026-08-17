@@ -35,6 +35,15 @@ export type DesktopPermissionState = {
 
 export type DesktopPermission = "accessibility" | "screenRecording" | "desktopScreenRecording" | "camera" | "microphone";
 
+export type ComputerUsePermission = "accessibility" | "screenRecording";
+
+export type ComputerUsePermissionGuide = {
+  requestID: string;
+  required: ComputerUsePermission[];
+  restartRequired: boolean;
+  permissions: Array<{ permission: ComputerUsePermission; allowed: boolean }>;
+};
+
 export type DesktopApplicationIdentity = {
   appID: string;
   name: string;
@@ -48,6 +57,11 @@ type ElectronDesktopBridge = {
 	getDesktopPermissions?: () => Promise<DesktopPermissionState>;
 	requestDesktopPermission?: (permission: DesktopPermission) => Promise<DesktopPermissionState>;
 	openDesktopPermissionSettings?: (permission: DesktopPermission) => Promise<boolean>;
+  getComputerUsePermissionGuide?: () => Promise<ComputerUsePermissionGuide | null>;
+  denyComputerUsePermissionGuide?: (requestID: string) => Promise<boolean>;
+  restartDesktopApp?: () => Promise<boolean>;
+  onDesktopPermissionsUpdated?: (listener: (state: DesktopPermissionState) => void) => () => void;
+  onComputerUsePermissionGuide?: (listener: (guide: ComputerUsePermissionGuide | null) => void) => () => void;
   getUpdateState?: () => Promise<DesktopUpdateState>;
   setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
   downloadUpdate?: () => Promise<boolean>;
@@ -169,6 +183,26 @@ export async function requestDesktopPermission(permission: DesktopPermission) {
 		return null;
 	}
 	return bridge.requestDesktopPermission(permission);
+}
+
+export async function getComputerUsePermissionGuide() {
+  return desktopBridge()?.getComputerUsePermissionGuide?.() ?? null;
+}
+
+export async function denyComputerUsePermissionGuide(requestID: string) {
+  return desktopBridge()?.denyComputerUsePermissionGuide?.(requestID) ?? false;
+}
+
+export async function restartDesktopApp() {
+  return desktopBridge()?.restartDesktopApp?.() ?? false;
+}
+
+export function onDesktopPermissionsUpdated(listener: (state: DesktopPermissionState) => void) {
+  return desktopBridge()?.onDesktopPermissionsUpdated?.(listener) ?? (() => {});
+}
+
+export function onComputerUsePermissionGuide(listener: (guide: ComputerUsePermissionGuide | null) => void) {
+  return desktopBridge()?.onComputerUsePermissionGuide?.(listener) ?? (() => {});
 }
 
 export async function showDesktopEditorContextMenu(request: DesktopEditorContextMenuRequest) {

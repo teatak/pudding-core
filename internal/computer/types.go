@@ -20,10 +20,9 @@ const (
 	MaxAppIDBytes            = 512
 	MaxActionValueCharacters = 20_000
 
-	WindowStatusReady              = "ready"
-	WindowStatusNone               = "none"
-	WindowStatusPermissionRequired = "permission_required"
-	WindowStatusFailed             = "failed"
+	WindowStatusReady  = "ready"
+	WindowStatusNone   = "none"
+	WindowStatusFailed = "failed"
 )
 
 type Permissions struct {
@@ -144,15 +143,13 @@ type Capture struct {
 }
 
 type NativeObservationCapture struct {
-	Observation  Observation `json:"observation"`
-	Capture      *Capture    `json:"capture,omitempty"`
-	CaptureError *Failure    `json:"captureError,omitempty"`
+	Observation Observation `json:"observation"`
+	Capture     *Capture    `json:"capture,omitempty"`
 }
 
 type ManagedObservationCapture struct {
-	Observation  ManagedObservation `json:"observation"`
-	Capture      *Capture           `json:"capture,omitempty"`
-	CaptureError *Failure           `json:"captureError,omitempty"`
+	Observation ManagedObservation `json:"observation"`
+	Capture     *Capture           `json:"capture,omitempty"`
 }
 
 type NativeAction struct {
@@ -190,10 +187,12 @@ type ScreenshotPointer struct {
 }
 
 type Failure struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
-	Outcome   string `json:"outcome"`
+	Code        string   `json:"code"`
+	Message     string   `json:"message"`
+	Permission  string   `json:"permission,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+	Retryable   bool     `json:"retryable"`
+	Outcome     string   `json:"outcome"`
 }
 
 type ActionResult struct {
@@ -226,11 +225,13 @@ type Controller interface {
 }
 
 type OperationError struct {
-	Code      string
-	Message   string
-	Retryable bool
-	Outcome   string
-	Cause     error
+	Code        string
+	Message     string
+	Permission  string
+	Permissions []string
+	Retryable   bool
+	Outcome     string
+	Cause       error
 }
 
 func (e *OperationError) Error() string { return e.Message }
@@ -239,7 +240,7 @@ func (e *OperationError) Unwrap() error { return e.Cause }
 func ErrorFailure(err error) Failure {
 	var operationErr *OperationError
 	if errors.As(err, &operationErr) {
-		return Failure{Code: operationErr.Code, Message: operationErr.Message, Retryable: operationErr.Retryable, Outcome: validOutcome(operationErr.Outcome)}
+		return Failure{Code: operationErr.Code, Message: operationErr.Message, Permission: operationErr.Permission, Permissions: operationErr.Permissions, Retryable: operationErr.Retryable, Outcome: validOutcome(operationErr.Outcome)}
 	}
 	return Failure{Code: "computer_unavailable", Message: err.Error(), Outcome: "unknown"}
 }

@@ -56,6 +56,26 @@ func TestElectronBridgePreservesActionOutcome(t *testing.T) {
 	}
 }
 
+func TestElectronBridgePreservesStructuredPermissionFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]any{
+			"error": "Computer Use permission was not granted", "code": "computer_permission_denied",
+			"permissions": []string{"accessibility", "screenRecording"}, "outcome": "not_started",
+		})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
+	failure := ErrorFailure(err)
+	if failure.Code != "computer_permission_denied" || failure.Outcome != "not_started" || len(failure.Permissions) != 2 {
+		t.Fatalf("unexpected permission failure: %#v", failure)
+	}
+}
+
 func TestElectronBridgeRoutesApplicationLifecycle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
@@ -118,7 +138,7 @@ func TestElectronBridgeRoutesAtomicObserveCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := service.ObserveCapture(context.Background(), "session_a", "com.example.App", 7, 50, "/tmp/window.png")
-	if err != nil || result.Observation.PID != 42 || result.Capture == nil || result.Capture.Width != 100 || result.CaptureError != nil {
+	if err != nil || result.Observation.PID != 42 || result.Capture == nil || result.Capture.Width != 100 {
 		t.Fatalf("unexpected observe-capture: %#v err=%v", result, err)
 	}
 }

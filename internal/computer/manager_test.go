@@ -280,21 +280,6 @@ func TestManagerRejectsWindowFromAnotherProcess(t *testing.T) {
 	assertOperationCode(t, err, "computer_invalid_response")
 }
 
-func TestManagerAcceptsUseWithoutWindowsWhenPermissionIsMissing(t *testing.T) {
-	appID := "com.example.App"
-	service := &fakeService{launch: NativeUse{
-		AppID:         appID,
-		Name:          "Example",
-		PID:           42,
-		NewlyLaunched: true,
-		WindowStatus:  WindowStatusPermissionRequired,
-	}}
-	used, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false)
-	if err != nil || used.LaunchID == nil || used.WindowStatus != WindowStatusPermissionRequired || len(used.Windows) != 0 {
-		t.Fatalf("unexpected use result: %#v err=%v", used, err)
-	}
-}
-
 func TestManagerRequiresFailureDetailsForFailedWindowDiscovery(t *testing.T) {
 	appID := "com.example.App"
 	service := &fakeService{launch: NativeUse{
@@ -445,7 +430,7 @@ func TestManagerDoesNotRetryNativeActionFailures(t *testing.T) {
 		err  *OperationError
 	}{
 		{name: "permission revoked", err: &OperationError{
-			Code: "computer_permission_required", Message: "permission required: accessibility", Outcome: "not_started",
+			Code: "computer_permission_required", Message: "permission required: accessibility", Permission: "accessibility", Outcome: "not_started",
 		}},
 		{name: "application exited", err: &OperationError{
 			Code: "computer_app_not_found", Message: "application not found", Outcome: "not_started",

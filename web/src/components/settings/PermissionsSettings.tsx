@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import {
 	getDesktopPermissions,
+	onDesktopPermissionsUpdated,
 	openDesktopPermissionSettings,
 	requestDesktopPermission,
 	type DesktopPermission,
@@ -65,7 +66,9 @@ export function PermissionsSettings() {
 	}
 
 	useEffect(() => {
+		const unsubscribe = onDesktopPermissionsUpdated(setState);
 		void refresh();
+		return unsubscribe;
 	}, []);
 
 	return (

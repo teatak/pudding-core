@@ -18,6 +18,7 @@ struct PuddingComputerUseHelper {
         ok: false,
         code: detail.code,
         message: detail.message,
+        permission: detail.permission,
         retryable: detail.retryable,
         outcome: detail.outcome
       )

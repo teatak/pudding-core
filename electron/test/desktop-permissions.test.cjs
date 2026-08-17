@@ -2,10 +2,36 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  DesktopPermissionController,
   desktopPermissionSettingsURL,
   desktopPermissionState,
   requestDesktopPermission,
 } = require("../desktop-permissions.cjs");
+
+test("desktop permission controller is the shared state source", async () => {
+  let accessibility = false;
+  const updates = [];
+  const controller = new DesktopPermissionController({
+    computerUseHost: {
+      permissions: async (params) => {
+        accessibility ||= params?.promptAccessibility === true;
+        return { accessibility, screenRecording: false };
+      },
+    },
+    systemPreferences: {
+      getMediaAccessStatus: () => "denied",
+    },
+    platform: "darwin",
+    onStateChange: (state) => updates.push(state),
+  });
+
+  const initial = await controller.refresh();
+  assert.equal(initial.accessibility, false);
+  const granted = await controller.request("accessibility");
+  assert.equal(granted.accessibility, true);
+  assert.equal(controller.currentState().accessibility, true);
+  assert.equal(updates.length, 2);
+});
 
 test("desktop permission state combines Computer Use and media permissions", async () => {
   const state = await desktopPermissionState(

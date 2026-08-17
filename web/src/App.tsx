@@ -23,6 +23,7 @@ import { OAuthReturnHandler } from "@/components/OAuthReturnHandler";
 import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { ComputerUsePermissionGuide } from "@/components/ComputerUsePermissionGuide";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -899,6 +900,7 @@ export function App() {
             onOpenChange={setProjectCreateOpen}
           />
           <SettingsDialog token={token} showTrigger={false} />
+          <ComputerUsePermissionGuide />
           <AppToaster />
         </TooltipProvider>
       </BrowserRuntimeProvider>

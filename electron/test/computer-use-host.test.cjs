@@ -33,12 +33,14 @@ test("ComputerUseHost preserves structured helper errors", async () => {
   fake.fail(fake.requests[0].id, {
     code: "computer_permission_required",
     message: "permission required: accessibility",
+    permission: "accessibility",
     retryable: false,
     outcome: "not_started",
   });
 
   await assert.rejects(result, (error) => {
     assert.equal(error.code, "computer_permission_required");
+    assert.equal(error.permission, "accessibility");
     assert.equal(error.outcome, "not_started");
     return true;
   });

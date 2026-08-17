@@ -17,6 +17,7 @@ class ComputerUseError extends Error {
     super(message);
     this.name = "ComputerUseError";
     this.code = options.code || "computer_unavailable";
+    this.permission = String(options.permission || "").trim();
     this.retryable = Boolean(options.retryable);
     this.outcome = options.outcome || "unknown";
   }
@@ -288,6 +289,7 @@ class ComputerUseHost {
     const detail = response.error || {};
     pending.reject(new ComputerUseError(String(detail.message || "Computer Use request failed"), {
       code: String(detail.code || "computer_unavailable"),
+      permission: String(detail.permission || ""),
       retryable: Boolean(detail.retryable),
       outcome: validOutcome(detail.outcome),
     }));
@@ -414,6 +416,7 @@ function withOutcome(error, outcome) {
   }
   return new ComputerUseError(error.message, {
     code: error.code,
+    permission: error.permission,
     retryable: error.retryable,
     outcome,
   });

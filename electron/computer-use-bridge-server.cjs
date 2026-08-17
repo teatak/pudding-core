@@ -4,8 +4,9 @@ const http = require("node:http");
 const maximumRequestBodyBytes = 256 * 1024;
 
 class ComputerUseBridgeServer {
-  constructor(host) {
+  constructor(host, options = {}) {
     this.host = host;
+    this.permissionCoordinator = options.permissionCoordinator || null;
     this.server = null;
     this.startPromise = null;
     this.stopPromise = null;
@@ -135,7 +136,11 @@ class ComputerUseBridgeServer {
         return;
       }
       const body = await readJSON(request);
-      const result = await this.route(path, body, controller.signal);
+      const operation = () => this.route(path, body, controller.signal);
+      const requiredPermissions = permissionsForRoute(path);
+      const result = this.permissionCoordinator
+        ? await this.permissionCoordinator.run(requiredPermissions, operation, { signal: controller.signal })
+        : await operation();
       writeJSON(response, 200, result || { ok: true });
     } catch (error) {
       if (response.writableEnded || response.destroyed) {
@@ -145,6 +150,8 @@ class ComputerUseBridgeServer {
       writeJSON(response, failure.status, {
         error: failure.message,
         code: failure.code,
+        ...(failure.permission ? { permission: failure.permission } : {}),
+        ...(failure.permissions.length > 0 ? { permissions: failure.permissions } : {}),
         retryable: failure.retryable,
         outcome: failure.outcome,
       });
@@ -265,6 +272,10 @@ function classifyComputerUseError(error) {
   const message = String(error?.message || "Computer Use unavailable");
   const outcome = validOutcome(error?.outcome);
   const retryable = Boolean(error?.retryable);
+  const permission = String(error?.permission || "").trim();
+  const permissions = Array.isArray(error?.permissions)
+    ? error.permissions.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
   let status = 500;
   switch (code) {
     case "computer_invalid_request":
@@ -272,6 +283,7 @@ function classifyComputerUseError(error) {
       break;
     case "computer_unauthorized":
     case "computer_permission_required":
+    case "computer_permission_denied":
     case "computer_action_blocked":
       status = 403;
       break;
@@ -300,7 +312,21 @@ function classifyComputerUseError(error) {
     default:
       status = 500;
   }
-  return { status, code, message, retryable, outcome };
+  return { status, code, message, permission, permissions, retryable, outcome };
+}
+
+function permissionsForRoute(path) {
+  switch (path) {
+    case "/computer/apps/use":
+      return ["screenRecording"];
+    case "/computer/observe":
+    case "/computer/observe-capture":
+    case "/computer/act":
+    case "/computer/pointer":
+      return ["accessibility", "screenRecording"];
+    default:
+      return [];
+  }
 }
 
 function validOutcome(value) {
@@ -309,4 +335,4 @@ function validOutcome(value) {
     : "unknown";
 }
 
-module.exports = { ComputerUseBridgeServer, classifyComputerUseError };
+module.exports = { ComputerUseBridgeServer, classifyComputerUseError, permissionsForRoute };

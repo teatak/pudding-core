@@ -57,24 +57,15 @@ final class HelperRuntime {
             targetWindow: targetWindow,
             maxElements: maxElements
           )
-          do {
-            let capture = try await screenCapture.capture(
-              bundleID: bundleID,
-              windowID: targetWindow.windowID,
-              output: output
-            )
-            return ObservationCaptureSnapshot(
-              observation: observation,
-              capture: capture,
-              captureError: nil
-            )
-          } catch {
-            return ObservationCaptureSnapshot(
-              observation: observation,
-              capture: nil,
-              captureError: errorDetail(for: error)
-            )
-          }
+          let capture = try await screenCapture.capture(
+            bundleID: bundleID,
+            windowID: targetWindow.windowID,
+            output: output
+          )
+          return ObservationCaptureSnapshot(
+            observation: observation,
+            capture: capture
+          )
         })
     case .act(let bundleID, let windowID, let elementID, let action, let value):
       let targetWindow = try await screenCapture.window(bundleID: bundleID, windowID: windowID)

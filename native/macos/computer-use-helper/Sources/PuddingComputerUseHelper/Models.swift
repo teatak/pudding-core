@@ -85,8 +85,7 @@ struct CaptureSnapshot: Codable, Equatable {
 
 struct ObservationCaptureSnapshot: Codable, Equatable {
   let observation: ObservationSnapshot
-  let capture: CaptureSnapshot?
-  let captureError: ErrorDetail?
+  let capture: CaptureSnapshot
 }
 
 struct UseApplicationSnapshot: Codable, Equatable {
@@ -102,7 +101,6 @@ struct UseApplicationSnapshot: Codable, Equatable {
 enum WindowDiscoveryStatus: String, Codable, Equatable {
   case ready
   case none
-  case permissionRequired = "permission_required"
   case failed
 }
 
@@ -142,6 +140,7 @@ enum ActionOutcome: String, Codable, Equatable {
 struct ErrorDetail: Codable, Equatable {
   let code: String
   let message: String
+  let permission: String?
   let retryable: Bool
   let outcome: ActionOutcome
 }
@@ -150,6 +149,7 @@ struct ErrorSnapshot: Codable, Equatable {
   let ok: Bool
   let code: String
   let message: String
+  let permission: String?
   let retryable: Bool
   let outcome: ActionOutcome
 }
@@ -201,6 +201,11 @@ enum HelperError: Error, LocalizedError {
     }
   }
 
+  var permission: String? {
+    guard case .permissionRequired(let permission) = self else { return nil }
+    return permission
+  }
+
   var errorDescription: String? {
     switch self {
     case .permissionRequired(let permission):
@@ -250,6 +255,7 @@ func errorDetail(for error: Error) -> ErrorDetail {
     code: helperError?.code ?? "computer_invalid_request",
     message: ValueSanitizer.bounded(error.localizedDescription, limit: 2_048)
       ?? "Computer Use request failed",
+    permission: helperError?.permission,
     retryable: false,
     outcome: helperError?.outcome ?? .notStarted
   )

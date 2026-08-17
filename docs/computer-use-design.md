@@ -361,7 +361,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - 除 permissions 外必须携带 `sessionID`。
 - body 设置严格大小上限。
 - 不接受任意脚本、shell command 或 AppleScript。
-- 错误返回稳定 `code`、`message`、`retryable` 和 `outcome`。
+- 错误返回稳定 `code`、`message`、`retryable` 和 `outcome`;权限错误另带机器可读的 `permission` 或 `permissions`。
 
 `outcome`:
 
@@ -375,6 +375,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 
 - `computer_unavailable`
 - `computer_permission_required`
+- `computer_permission_denied`
 - `computer_app_not_found`
 - `computer_app_not_installed`
 - `computer_launch_not_owned`
@@ -400,12 +401,12 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 
 需要:
 
-- Screen Recording:读取目标窗口画面。
+- Screen & System Audio Recording:识别目标窗口并按需读取单帧画面。
 - Accessibility:读取 AX 树并执行 AX 动作。
 
 当前不监听键盘或鼠标,因此不申请 Input Monitoring。只发送两类受限合成事件：目标进程的单次 Return，以及目标 App 已前台时截图绑定的单击、左键双击、右键、左键拖拽和滚轮；不开放任意键盘或组合键。
 
-设置页显示每项权限状态。未授权时由用户点击“申请权限”显式调用系统 API;若仍未授权则打开对应系统设置。Pudding 不尝试自动点击系统权限提示或管理员认证。
+Swift Helper 是 Computer Use 两项权限的系统事实源;Pudding 主进程的桌面截图权限单独显示,不得代替 Helper 权限。只有实际 Computer Use 请求缺少相关权限时才显示结构化引导,模型不生成权限说明。引导和设置页读取同一 Electron 权限控制器;用户切回 Pudding 后自动复检,齐全时恢复原请求。只有系统已报告授权、重启 Helper 后仍返回同一权限错误时才显示 Pudding 重启按钮。Pudding 不尝试自动点击系统权限提示或管理员认证。
 
 ### 10.2 应用策略
 
