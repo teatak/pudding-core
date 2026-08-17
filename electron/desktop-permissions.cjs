@@ -11,16 +11,22 @@ class DesktopPermissionController {
   constructor(options) {
     this.computerUseHost = options.computerUseHost;
     this.systemPreferences = options.systemPreferences;
+    this.openSettings = options.openSettings || (async () => false);
+    this.restartComputerUse = options.restartComputerUse || (async () => {});
     this.platform = options.platform || process.platform;
     this.onStateChange = options.onStateChange || (() => {});
     this.state = unsupportedState();
+    this.requestedScreenRecording = false;
   }
 
   currentState() {
     return this.state;
   }
 
-  async refresh() {
+  async refresh(options = {}) {
+    if (options.restartComputerUse === true) {
+      await this.restartComputerUse();
+    }
     const next = await desktopPermissionState(
       this.computerUseHost,
       this.systemPreferences,
@@ -30,12 +36,20 @@ class DesktopPermissionController {
   }
 
   async request(permission) {
+    const normalized = String(permission || "").trim();
+    if (normalized === "screenRecording" && this.requestedScreenRecording) {
+      await this.openSettings(normalized);
+      return this.refresh();
+    }
     const next = await requestDesktopPermission(
       this.computerUseHost,
       this.systemPreferences,
       permission,
       this.platform,
     );
+    if (normalized === "screenRecording") {
+      this.requestedScreenRecording = true;
+    }
     return this.commit(next);
   }
 
@@ -63,7 +77,12 @@ async function desktopPermissionState(computerUseHost, systemPreferences, platfo
   };
 }
 
-async function requestDesktopPermission(computerUseHost, systemPreferences, permission, platform = process.platform) {
+async function requestDesktopPermission(
+  computerUseHost,
+  systemPreferences,
+  permission,
+  platform = process.platform,
+) {
   if (platform !== "darwin") {
     throw new Error("macOS permissions are unavailable on this platform");
   }

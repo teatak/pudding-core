@@ -139,9 +139,19 @@ const browserCredentials = new BrowserCredentialController({ vault: browserCrede
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const computerUseHost = new ComputerUseHost({ binaryPath: resolveComputerUseHelperBinary() });
 let computerUsePermissionCoordinator = null;
+async function openDesktopPermissionSettings(permission) {
+  const url = desktopPermissionSettingsURL(permission);
+  if (!url) {
+    return false;
+  }
+  await shell.openExternal(url);
+  return true;
+}
 const desktopPermissionController = new DesktopPermissionController({
   computerUseHost,
   systemPreferences,
+  openSettings: openDesktopPermissionSettings,
+  restartComputerUse: () => computerUseHost.stop(),
   onStateChange: (state) => {
     broadcastToTrustedRenderers("pudding:desktop:permissions-updated", state);
     computerUsePermissionCoordinator?.reconcile(state);
@@ -1194,7 +1204,7 @@ ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID) =
 
 ipcMain.handle("pudding:desktop:permissions:get", (event) => {
   assertTrustedSender(event);
-  return desktopPermissionController.refresh();
+  return desktopPermissionController.refresh({ restartComputerUse: true });
 });
 
 ipcMain.handle("pudding:desktop:permissions:request", (event, permission) => {
@@ -1204,12 +1214,7 @@ ipcMain.handle("pudding:desktop:permissions:request", (event, permission) => {
 
 ipcMain.handle("pudding:desktop:permissions:open-settings", async (event, permission) => {
   assertTrustedSender(event);
-  const url = desktopPermissionSettingsURL(permission);
-  if (!url) {
-    return false;
-  }
-  await shell.openExternal(url);
-  return true;
+  return openDesktopPermissionSettings(permission);
 });
 
 ipcMain.handle("pudding:desktop:computer-use-permission-guide:get", (event) => {
