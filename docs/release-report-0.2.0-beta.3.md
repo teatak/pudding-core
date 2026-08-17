@@ -10,13 +10,16 @@
 
 **应作为第三个 0.2.0 preview 发布。** 本版修正 macOS 权限设置页重复展示屏幕录制权限的问题。
 运行时检查确认 Pudding daemon 与 Computer Use Helper 的 responsible process 均为主应用，因此辅助功能和
-屏幕录制最终归属 `com.teatak.pudding`。设置页现在只保留一条屏幕录制权限事实源。
+屏幕录制最终归属 `com.teatak.pudding`。设置页现在只保留一条屏幕录制权限事实源，并直接引导用户在
+macOS 系统设置中完成辅助功能与屏幕录制授权。
 
 ## 改动摘要
 
 - 合并 Computer Use 窗口截图与桌面截图重复展示的屏幕录制权限。
 - 删除 `desktopScreenRecording` 独立状态、请求分支和前端类型。
 - 统一屏幕录制说明，使其同时覆盖指定 App 窗口和桌面画面。
+- 辅助功能与屏幕录制入口直接打开对应的系统设置，不再触发无效的程序内授权请求。
+- 相机和麦克风继续使用 macOS 原生媒体权限请求。
 - 更新简体中文、繁体中文和英文权限文案。
 
 ## 影响范围
@@ -24,8 +27,8 @@
 | 范围 | 影响 | 说明 |
 | --- | --- | --- |
 | macOS 权限 | 中 | 屏幕录制权限只保留一条状态和系统设置入口。 |
-| Electron | 低 | 删除重复权限状态及请求分支。 |
-| 设置页 | 中 | 移除“桌面截图”重复权限项。 |
+| Electron | 低 | 删除重复权限状态及辅助功能、屏幕录制的无效请求分支。 |
+| 设置页 | 中 | 移除“桌面截图”重复权限项，非媒体权限统一打开系统设置。 |
 | SQLite | 无 | schema 和持久化数据结构均未变化。 |
 
 ## 数据与兼容性
@@ -54,6 +57,8 @@
 - Show Screen & System Audio Recording as one permission across Computer Use and desktop screenshots.
 - Remove the duplicate desktop screenshot permission state and settings row.
 - Clarify that screen access is used only for explicitly requested app-window or desktop captures.
+- Open System Settings directly for Accessibility and Screen & System Audio Recording authorization.
+- Keep native in-app permission requests for Camera and Microphone.
 
 ### Reliability
 
