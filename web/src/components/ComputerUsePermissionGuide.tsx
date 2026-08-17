@@ -48,8 +48,10 @@ export function ComputerUsePermissionGuide() {
   const openSettings = async (permission: ComputerUsePermission) => {
     setOpening(permission);
     try {
-      await requestDesktopPermission(permission);
-      await openDesktopPermissionSettings(permission);
+      const state = await requestDesktopPermission(permission);
+      if (!state?.[permission]) {
+        await openDesktopPermissionSettings(permission);
+      }
     } catch {
       // Keep the guide open so the user can retry.
     } finally {
