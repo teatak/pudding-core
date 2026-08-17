@@ -6,6 +6,7 @@ const permissionSettingsURLs = Object.freeze({
 });
 
 const mediaPermissions = new Set(["camera", "microphone"]);
+const settingsOnlyPermissions = new Set(["accessibility", "screenRecording"]);
 
 class DesktopPermissionController {
   constructor(options) {
@@ -71,13 +72,11 @@ async function requestDesktopPermission(computerUseHost, systemPreferences, perm
   if (!Object.hasOwn(permissionSettingsURLs, normalized)) {
     throw new Error("Unsupported macOS permission");
   }
+  if (settingsOnlyPermissions.has(normalized)) {
+    throw new Error("This macOS permission must be granted in System Settings");
+  }
   if (mediaPermissions.has(normalized)) {
     await systemPreferences.askForMediaAccess(normalized);
-  } else {
-    await computerUseHost.permissions({
-      promptAccessibility: normalized === "accessibility",
-      promptScreenRecording: normalized === "screenRecording",
-    });
   }
   return desktopPermissionState(computerUseHost, systemPreferences, platform);
 }

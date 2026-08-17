@@ -15,7 +15,6 @@ import {
   getComputerUsePermissionGuide,
   onComputerUsePermissionGuide,
   openDesktopPermissionSettings,
-  requestDesktopPermission,
   restartDesktopApp,
   type ComputerUsePermission,
   type ComputerUsePermissionGuide as Guide,
@@ -48,10 +47,7 @@ export function ComputerUsePermissionGuide() {
   const openSettings = async (permission: ComputerUsePermission) => {
     setOpening(permission);
     try {
-      const state = await requestDesktopPermission(permission);
-      if (!state?.[permission]) {
-        await openDesktopPermissionSettings(permission);
-      }
+      await openDesktopPermissionSettings(permission);
     } catch {
       // Keep the guide open so the user can retry.
     } finally {

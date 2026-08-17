@@ -13,10 +13,7 @@ test("desktop permission controller is the shared state source", async () => {
   const updates = [];
   const controller = new DesktopPermissionController({
     computerUseHost: {
-      permissions: async (params) => {
-        accessibility ||= params?.promptAccessibility === true;
-        return { accessibility, screenRecording: false };
-      },
+      permissions: async () => ({ accessibility, screenRecording: false }),
     },
     systemPreferences: {
       getMediaAccessStatus: () => "denied",
@@ -27,7 +24,8 @@ test("desktop permission controller is the shared state source", async () => {
 
   const initial = await controller.refresh();
   assert.equal(initial.accessibility, false);
-  const granted = await controller.request("accessibility");
+  accessibility = true;
+  const granted = await controller.refresh();
   assert.equal(granted.accessibility, true);
   assert.equal(controller.currentState().accessibility, true);
   assert.equal(updates.length, 2);
@@ -52,7 +50,7 @@ test("desktop permission state uses Computer Use as the screen recording source"
   assert.equal("speaker" in state, false);
 });
 
-test("desktop permission request uses the owning native API", async () => {
+test("media permission request uses the native API while Computer Use opens System Settings", async () => {
   const computerUseCalls = [];
   const mediaCalls = [];
   let accessibility = false;
@@ -71,9 +69,11 @@ test("desktop permission request uses the owning native API", async () => {
     getMediaAccessStatus: (permission) => mediaCalls.includes(permission) ? "granted" : "not-determined",
   };
 
-  const accessibilityState = await requestDesktopPermission(host, preferences, "accessibility", "darwin");
-  assert.equal(accessibilityState.accessibility, true);
-  assert.deepEqual(computerUseCalls[0], { promptAccessibility: true, promptScreenRecording: false });
+  await assert.rejects(
+    requestDesktopPermission(host, preferences, "accessibility", "darwin"),
+    /System Settings/,
+  );
+  assert.deepEqual(computerUseCalls, []);
   assert.deepEqual(mediaCalls, []);
 
   const cameraState = await requestDesktopPermission(host, preferences, "camera", "darwin");

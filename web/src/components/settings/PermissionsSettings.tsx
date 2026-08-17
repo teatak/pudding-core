@@ -92,6 +92,7 @@ export function PermissionsSettings() {
 								description={t("settings.permissions.accessibilityDesc")}
 								label={t("settings.permissions.accessibility")}
 								permission="accessibility"
+								requestable={false}
 								requesting={pendingPermission === "accessibility"}
 								onRequest={requestPermission}
 							/>
@@ -100,6 +101,7 @@ export function PermissionsSettings() {
 								description={t("settings.permissions.screenRecordingDesc")}
 								label={t("settings.permissions.screenRecording")}
 								permission="screenRecording"
+								requestable={false}
 								requesting={pendingPermission === "screenRecording"}
 								onRequest={requestPermission}
 							/>
