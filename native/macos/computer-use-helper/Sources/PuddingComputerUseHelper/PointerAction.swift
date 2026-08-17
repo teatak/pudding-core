@@ -73,31 +73,17 @@ enum PointerWindowResolver {
 enum PointerCoordinatePolicy {
   static func globalPoint(
     frame: FrameSnapshot,
-    currentScaleFactor: Double,
     x: Double,
-    y: Double,
-    captureWidth: Int,
-    captureHeight: Int,
-    captureScaleFactor: Double
+    y: Double
   ) throws -> CGPoint {
     guard frame.width > 0, frame.height > 0,
-      currentScaleFactor.isFinite, currentScaleFactor > 0,
-      captureScaleFactor.isFinite, captureScaleFactor > 0,
-      captureWidth > 0, captureHeight > 0,
-      x.isFinite, y.isFinite, x >= 0, y >= 0,
-      x < Double(captureWidth), y < Double(captureHeight)
+      x.isFinite, y.isFinite, x >= 0, y >= 0, x < 1, y < 1
     else {
-      throw HelperError.coordinateSourceStale("invalid screenshot coordinates")
-    }
-    guard abs(currentScaleFactor - captureScaleFactor) <= 0.01,
-      abs(frame.width * captureScaleFactor - Double(captureWidth)) <= 1,
-      abs(frame.height * captureScaleFactor - Double(captureHeight)) <= 1
-    else {
-      throw HelperError.coordinateSourceStale("window size or display scale changed")
+      throw HelperError.invalidPointerInput("invalid normalized window coordinates")
     }
     return CGPoint(
-      x: frame.x + x / captureScaleFactor,
-      y: frame.y + y / captureScaleFactor
+      x: frame.x + x * frame.width,
+      y: frame.y + y * frame.height
     )
   }
 }
@@ -226,7 +212,7 @@ final class PointerService {
     for (index, pair) in events.enumerated() {
       guard targetIsCurrent() else {
         throw index == 0
-          ? HelperError.coordinateSourceStale("target window is no longer topmost")
+          ? HelperError.pointerTargetChanged("target window is no longer topmost")
           : HelperError.actionFailed("pointer target changed during a double-click")
       }
       postEvent(pair.0)
@@ -264,7 +250,7 @@ final class PointerService {
       source: source, type: .leftMouseUp, point: end, button: .left, clickState: 1)
 
     guard targetIsCurrent() else {
-      throw HelperError.coordinateSourceStale("target window is no longer topmost")
+      throw HelperError.pointerTargetChanged("target window is no longer topmost")
     }
     postEvent(down)
     wait(40_000)
@@ -354,7 +340,7 @@ final class PointerService {
           let name = NSRunningApplication(processIdentifier: $0.pid)?.localizedName ?? "unknown"
           return "app=\(name), pid=\($0.pid), windowID=\($0.windowID)"
         } ?? "none"
-        throw HelperError.coordinateSourceStale(
+        throw HelperError.pointerTargetChanged(
           "target window pid=\(pid), windowID=\(windowID) is not topmost at "
             + "x=\(point.x), y=\(point.y); found \(actualDescription)"
         )

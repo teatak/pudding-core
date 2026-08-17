@@ -122,7 +122,7 @@ test("Computer Use bridge accepts the full set_value schema limit", async () => 
   }
 });
 
-test("Computer Use bridge routes screenshot pointer actions", async () => {
+test("Computer Use bridge routes normalized-window pointer actions", async () => {
   const host = new FakeComputerUseHost();
   const bridge = new ComputerUseBridgeServer(host);
   const identity = await bridge.start();
@@ -132,16 +132,14 @@ test("Computer Use bridge routes screenshot pointer actions", async () => {
       headers: authenticatedHeaders(identity.token),
       body: JSON.stringify({
         sessionID: "sess-pointer", appID: "com.example.App", windowID: 42,
-        action: "drag", x: 12, y: 34, toX: 56, toY: 78,
-        captureWidth: 200, captureHeight: 100, scaleFactor: 2,
+        action: "drag", x: 0.12, y: 0.34, toX: 0.56, toY: 0.78,
       }),
     });
     assert.equal(response.status, 200);
     assert.deepEqual(host.pointerAction, {
       bundleID: "com.example.App", windowID: 42,
-      action: "drag", x: 12, y: 34, toX: 56, toY: 78,
+      action: "drag", x: 0.12, y: 0.34, toX: 0.56, toY: 0.78,
       button: undefined, clickCount: undefined, deltaX: undefined, deltaY: undefined,
-      captureWidth: 200, captureHeight: 100, scaleFactor: 2,
     });
   } finally {
     await bridge.stop();
@@ -223,6 +221,23 @@ test("Computer Use bridge exposes foreground pointer conflicts", () => {
     status: 409,
     code: "computer_app_not_foreground",
     message: "application must be foreground for pointer input: com.example.App",
+    permission: "",
+    permissions: [],
+    retryable: false,
+    outcome: "not_started",
+  });
+});
+
+test("Computer Use bridge exposes changed pointer targets", () => {
+  assert.deepEqual(classifyComputerUseError({
+    code: "computer_pointer_target_changed",
+    message: "pointer target changed",
+    retryable: false,
+    outcome: "not_started",
+  }), {
+    status: 409,
+    code: "computer_pointer_target_changed",
+    message: "pointer target changed",
     permission: "",
     permissions: [],
     retryable: false,

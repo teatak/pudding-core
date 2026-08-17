@@ -206,9 +206,6 @@ class ComputerUseBridgeServer {
           clickCount: body.clickCount,
           deltaX: body.deltaX,
           deltaY: body.deltaY,
-          captureWidth: body.captureWidth,
-          captureHeight: body.captureHeight,
-          scaleFactor: body.scaleFactor,
         }, { signal });
       default:
         throw invalidRequest("Computer Use bridge route not found");
@@ -291,10 +288,9 @@ function classifyComputerUseError(error) {
     case "computer_app_not_installed":
     case "computer_window_not_found":
     case "computer_element_not_found":
-    case "computer_observation_not_found":
       status = 404;
       break;
-    case "computer_observation_stale":
+    case "computer_pointer_target_changed":
     case "computer_app_not_foreground":
     case "computer_element_not_actionable":
       status = 409;

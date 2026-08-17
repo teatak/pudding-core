@@ -10,12 +10,17 @@ import (
 	"github.com/teatak/pudding-core/internal/computer"
 )
 
-func TestComputerActionGuidanceChainsTheReturnedObservation(t *testing.T) {
+func TestComputerActionGuidanceLeavesObservationTimingToTheModel(t *testing.T) {
 	for _, definition := range BuiltinDefinitions() {
 		if definition.Name != ComputerAct {
 			continue
 		}
-		if !strings.Contains(definition.Description, "use it for the next semantic action") ||
+		if !strings.Contains(definition.Description, "do not automatically observe afterward") ||
+			!strings.Contains(definition.Description, "call builtin_computer_observe only when") ||
+			strings.Contains(definition.Description, "observationID") ||
+			!strings.Contains(definition.Description, "action_sequence") ||
+			!strings.Contains(definition.Description, "2 to 32") ||
+			!strings.Contains(definition.Description, "Pointer actions cannot be sequenced") ||
 			!strings.Contains(definition.Description, "select") ||
 			!strings.Contains(definition.Description, "submit") ||
 			!strings.Contains(definition.Description, "exactly one Return") ||
@@ -67,10 +72,30 @@ func TestComputerPermissionFailuresRemainStructured(t *testing.T) {
 	}
 }
 
+func TestComputerActionSequenceFailurePreservesPartialResult(t *testing.T) {
+	failedIndex := 1
+	result := computerActionSequenceFailure(Result{}, computer.ActionSequenceResult{
+		Actions:        []computer.NativeAction{{AppID: "com.example.App", ElementID: "first", Action: computer.ActionPress, Completed: true}},
+		CompletedCount: 1,
+		FailedIndex:    &failedIndex,
+		Failure:        &computer.Failure{Code: "computer_action_blocked", Message: "blocked", Outcome: "completed"},
+	})
+	var payload struct {
+		OK      bool                          `json:"ok"`
+		Code    string                        `json:"code"`
+		Outcome string                        `json:"outcome"`
+		Result  computer.ActionSequenceResult `json:"result"`
+	}
+	if result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil || payload.OK || payload.Code != "computer_action_blocked" || payload.Outcome != "completed" || payload.Result.CompletedCount != 1 {
+		t.Fatalf("unexpected sequence failure: %+v content=%s", result, result.Content)
+	}
+}
+
 type fakeComputerController struct {
 	lastSession string
 	released    string
 	acted       bool
+	sequence    []computer.SemanticAction
 	foreground  bool
 }
 
@@ -97,29 +122,40 @@ func (f *fakeComputerController) QuitApp(_ context.Context, sessionID, launchID 
 	return computer.QuitResult{LaunchID: launchID, AppID: "com.example.App", Name: "Example", PID: 42, Closed: true}, nil
 }
 
-func (f *fakeComputerController) Observe(_ context.Context, sessionID, appID string, windowID uint32, _ int) (computer.ManagedObservation, error) {
+func (f *fakeComputerController) Observe(_ context.Context, sessionID, appID string, windowID uint32, _ int) (computer.Observation, error) {
 	f.lastSession = sessionID
-	return computer.ManagedObservation{ObservationID: "obs_1", Snapshot: computer.Observation{AppID: appID, WindowID: &windowID, Elements: []computer.Element{{ElementID: "button", WindowID: &windowID, Actions: []string{computer.ActionPress}}}}}, nil
+	return computer.Observation{AppID: appID, WindowID: &windowID, Elements: []computer.Element{{ElementID: "button", WindowID: &windowID, Actions: []string{computer.ActionPress}}}}, nil
 }
 
-func (f *fakeComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string) (computer.ManagedObservationCapture, error) {
+func (f *fakeComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string) (computer.NativeObservationCapture, error) {
 	f.lastSession = sessionID
 	if err := os.WriteFile(output, tinyPNG, 0o600); err != nil {
-		return computer.ManagedObservationCapture{}, err
+		return computer.NativeObservationCapture{}, err
 	}
-	return computer.ManagedObservationCapture{
-		Observation: computer.ManagedObservation{ObservationID: "obs_capture", Snapshot: computer.Observation{AppID: appID, WindowID: &windowID}},
+	return computer.NativeObservationCapture{
+		Observation: computer.Observation{AppID: appID, WindowID: &windowID},
 		Capture:     &computer.Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1},
 	}, nil
 }
 
-func (f *fakeComputerController) Act(_ context.Context, sessionID, appID string, _ uint32, _ string, elementID, action string, _ *string) (computer.ActionResult, error) {
+func (f *fakeComputerController) Act(_ context.Context, sessionID, appID string, _ uint32, elementID, action string, _ *string) (computer.ActionResult, error) {
 	f.lastSession = sessionID
 	f.acted = true
 	return computer.ActionResult{Action: computer.NativeAction{AppID: appID, ElementID: elementID, Action: action, Completed: true}}, nil
 }
 
-func (f *fakeComputerController) Pointer(_ context.Context, sessionID, appID string, _ uint32, _ string, pointer computer.PointerInput) (computer.ActionResult, error) {
+func (f *fakeComputerController) ActSequence(_ context.Context, sessionID, appID string, _ uint32, actions []computer.SemanticAction) (computer.ActionSequenceResult, error) {
+	f.lastSession = sessionID
+	f.acted = true
+	f.sequence = append([]computer.SemanticAction(nil), actions...)
+	native := make([]computer.NativeAction, 0, len(actions))
+	for _, action := range actions {
+		native = append(native, computer.NativeAction{AppID: appID, ElementID: action.ElementID, Action: action.Action, Completed: true})
+	}
+	return computer.ActionSequenceResult{Actions: native, CompletedCount: len(native)}, nil
+}
+
+func (f *fakeComputerController) Pointer(_ context.Context, sessionID, appID string, _ uint32, pointer computer.PointerInput) (computer.ActionResult, error) {
 	f.lastSession = sessionID
 	f.acted = true
 	return computer.ActionResult{Action: computer.NativeAction{
@@ -159,15 +195,19 @@ func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {
 	if !observed.Ok || len(observed.Attachments) != 1 || len(observed.ContextAttachments) != 1 {
 		t.Fatalf("unexpected observe result: %+v", observed)
 	}
-	acted := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "act", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"button","action":"press"}`)})
+	acted := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "act", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"elementID":"button","action":"press"}`)})
 	if !acted.Ok || !fake.acted {
 		t.Fatalf("unexpected act result: %+v", acted)
 	}
-	clicked := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "click", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_capture","action":"click","x":0.5,"y":0.5}`)})
+	sequenced := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "sequence", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"button","action":"press"},{"elementID":"button","action":"press"}]}`)})
+	if !sequenced.Ok || len(fake.sequence) != 2 || fake.sequence[0].ElementID != "button" {
+		t.Fatalf("unexpected sequence result: %+v actions=%+v", sequenced, fake.sequence)
+	}
+	clicked := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "click", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"click","x":0.5,"y":0.5}`)})
 	if !clicked.Ok {
 		t.Fatalf("unexpected click result: %+v", clicked)
 	}
-	scrolled := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "scroll", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_capture","action":"scroll","x":0.5,"y":0.5,"deltaY":120}`)})
+	scrolled := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "scroll", Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"scroll","x":0.5,"y":0.5,"deltaY":120}`)})
 	if !scrolled.Ok {
 		t.Fatalf("unexpected scroll result: %+v", scrolled)
 	}
@@ -200,7 +240,7 @@ func TestComputerLifecycleRiskAndApprovalDetails(t *testing.T) {
 }
 
 func TestComputerActRiskAndApprovalDetails(t *testing.T) {
-	call := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"field","action":"set_value","value":"hello"}`)}
+	call := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"elementID":"field","action":"set_value","value":"hello"}`)}
 	risk, ok := ClassifyToolCall(call.Name, call.Args)
 	if !ok || risk.Class != RiskClassWrite || risk.Scope != "computer" || risk.LowRisk || risk.Operation != "computer_set_value" {
 		t.Fatalf("unexpected risk: %+v ok=%v", risk, ok)
@@ -214,7 +254,7 @@ func TestComputerActRiskAndApprovalDetails(t *testing.T) {
 	}
 	for _, action := range []string{computer.ActionSelect, computer.ActionSubmit} {
 		raw, err := json.Marshal(map[string]any{
-			"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+			"appID": "com.example.App", "windowID": 42,
 			"elementID": "target", "action": action,
 		})
 		if err != nil {
@@ -225,17 +265,27 @@ func TestComputerActRiskAndApprovalDetails(t *testing.T) {
 			t.Fatalf("unexpected %s risk: %+v ok=%v", action, risk, ok)
 		}
 	}
-	clickCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":12,"y":34}`)}
+	clickCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"click","x":0.12,"y":0.34}`)}
 	clickRisk, ok := ClassifyToolCall(clickCall.Name, clickCall.Args)
 	clickDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), clickCall)
-	if !ok || clickRisk.Operation != "computer_click" || err != nil || clickDetails["x"] != float64(12) || clickDetails["y"] != float64(34) {
+	if !ok || clickRisk.Operation != "computer_click" || err != nil || clickDetails["x"] != 0.12 || clickDetails["y"] != 0.34 {
 		t.Fatalf("unexpected click risk=%+v details=%+v err=%v", clickRisk, clickDetails, err)
 	}
-	dragCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":12,"y":34,"toX":56,"toY":78}`)}
+	dragCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"drag","x":0.12,"y":0.34,"toX":0.56,"toY":0.78}`)}
 	dragRisk, ok := ClassifyToolCall(dragCall.Name, dragCall.Args)
 	dragDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), dragCall)
-	if !ok || dragRisk.Operation != "computer_drag" || err != nil || dragDetails["toX"] != float64(56) || dragDetails["toY"] != float64(78) {
+	if !ok || dragRisk.Operation != "computer_drag" || err != nil || dragDetails["toX"] != 0.56 || dragDetails["toY"] != 0.78 {
 		t.Fatalf("unexpected drag risk=%+v details=%+v err=%v", dragRisk, dragDetails, err)
+	}
+	sequenceCall := Call{Name: ComputerAct, Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"first","action":"press"},{"elementID":"field","action":"set_value","value":"hello"}]}`)}
+	sequenceRisk, ok := ClassifyToolCall(sequenceCall.Name, sequenceCall.Args)
+	sequenceDetails, err := NewBuiltinRunner().ApprovalDetails(context.Background(), sequenceCall)
+	if !ok || sequenceRisk.Operation != "computer_action_sequence" || sequenceRisk.Summary != "Perform an ordered action sequence in a local macOS application." || err != nil || sequenceDetails["actionCount"] != 2 {
+		t.Fatalf("unexpected sequence risk=%+v details=%+v err=%v", sequenceRisk, sequenceDetails, err)
+	}
+	sequenceActions, ok := sequenceDetails["actions"].([]map[string]any)
+	if !ok || len(sequenceActions) != 2 || sequenceActions[1]["valuePreview"] != "hello" {
+		t.Fatalf("unexpected sequence approval actions: %#v", sequenceDetails["actions"])
 	}
 }
 
@@ -257,7 +307,7 @@ func TestComputerObserveRiskAndApprovalDetails(t *testing.T) {
 func TestComputerToolArgumentsEnforceSharedSizeLimits(t *testing.T) {
 	validValue := strings.Repeat("🙂", computer.MaxActionValueCharacters)
 	validRaw, err := json.Marshal(map[string]any{
-		"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+		"appID": "com.example.App", "windowID": 42,
 		"elementID": "field", "action": computer.ActionSetValue, "value": validValue,
 	})
 	if err != nil {
@@ -268,7 +318,7 @@ func TestComputerToolArgumentsEnforceSharedSizeLimits(t *testing.T) {
 	}
 
 	oversizedRaw, err := json.Marshal(map[string]any{
-		"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+		"appID": "com.example.App", "windowID": 42,
 		"elementID": "field", "action": computer.ActionSetValue,
 		"value": strings.Repeat("🙂", computer.MaxActionValueCharacters+1),
 	})
@@ -281,7 +331,7 @@ func TestComputerToolArgumentsEnforceSharedSizeLimits(t *testing.T) {
 
 	for _, action := range []string{computer.ActionSelect, computer.ActionSubmit} {
 		raw, err := json.Marshal(map[string]any{
-			"appID": "com.example.App", "windowID": 42, "observationID": "obs_1",
+			"appID": "com.example.App", "windowID": 42,
 			"elementID": "target", "action": action,
 		})
 		if err != nil {
@@ -291,34 +341,58 @@ func TestComputerToolArgumentsEnforceSharedSizeLimits(t *testing.T) {
 			t.Fatalf("%s action rejected: %v", action, err)
 		}
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"target","action":"submit","value":"x"}`)); err == nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"elementID":"target","action":"submit","value":"x"}`)); err == nil {
 		t.Fatal("submit action value was accepted")
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"target","action":"confirm"}`)); err == nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"elementID":"target","action":"confirm"}`)); err == nil {
 		t.Fatal("removed confirm action was accepted")
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2}`)); err != nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1,"y":0.2}`)); err != nil {
 		t.Fatalf("coordinate click rejected: %v", err)
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"clickCount":2}`)); err != nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1,"y":0.2,"clickCount":2}`)); err != nil {
 		t.Fatalf("double click rejected: %v", err)
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"button":"right"}`)); err != nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1,"y":0.2,"button":"right"}`)); err != nil {
 		t.Fatalf("right click rejected: %v", err)
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":1,"y":2,"toX":3,"toY":4}`)); err != nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"drag","x":0.1,"y":0.2,"toX":0.3,"toY":0.4}`)); err != nil {
 		t.Fatalf("drag rejected: %v", err)
 	}
-	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"scroll","x":1,"y":2,"deltaY":120}`)); err != nil {
+	if _, err = decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"scroll","x":0.1,"y":0.2,"deltaY":120}`)); err != nil {
 		t.Fatalf("scroll rejected: %v", err)
 	}
+	sequence, err := decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"button","action":"press"},{"elementID":"field","action":"set_value","value":"hello"},{"elementID":"field","action":"submit"}]}`))
+	if err != nil || len(sequence.Actions) != 3 || sequence.Actions[1].Value == nil || *sequence.Actions[1].Value != "hello" {
+		t.Fatalf("action sequence rejected: %+v err=%v", sequence, err)
+	}
+	tooManyActions := make([]map[string]string, computer.MaxActionSequenceSteps+1)
+	for index := range tooManyActions {
+		tooManyActions[index] = map[string]string{"elementID": "button", "action": computer.ActionPress}
+	}
+	tooManyRaw, err := json.Marshal(map[string]any{
+		"appID": "com.example.App", "windowID": 42,
+		"action": computer.ActionSequence, "actions": tooManyActions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeComputerActArgs(tooManyRaw); err == nil {
+		t.Fatal("oversized action sequence was accepted")
+	}
 	for _, raw := range []string{
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1}`,
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"elementID":"button"}`,
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","elementID":"button","action":"press","x":1,"y":2}`,
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"click","x":1,"y":2,"button":"right","clickCount":2}`,
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"drag","x":1,"y":2,"toX":3}`,
-		`{"appID":"com.example.App","windowID":42,"observationID":"obs_1","action":"scroll","x":1,"y":2}`,
+		`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1}`,
+		`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1,"y":0.2,"elementID":"button"}`,
+		`{"appID":"com.example.App","windowID":42,"elementID":"button","action":"press","x":0.1,"y":0.2}`,
+		`{"appID":"com.example.App","windowID":42,"action":"click","x":0.1,"y":0.2,"button":"right","clickCount":2}`,
+		`{"appID":"com.example.App","windowID":42,"action":"drag","x":0.1,"y":0.2,"toX":0.3}`,
+		`{"appID":"com.example.App","windowID":42,"action":"scroll","x":0.1,"y":0.2}`,
+		`{"appID":"com.example.App","windowID":42,"action":"click","x":1,"y":0.2}`,
+		`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"button","action":"press"}]}`,
+		`{"appID":"com.example.App","windowID":42,"action":"action_sequence","elementID":"button","actions":[{"elementID":"button","action":"press"},{"elementID":"button","action":"press"}]}`,
+		`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"button","action":"press"},{"elementID":"button","action":"click"}]}`,
+		`{"appID":"com.example.App","windowID":42,"action":"action_sequence","actions":[{"elementID":"button","action":"press"},{"elementID":"button","action":"action_sequence"}]}`,
+		`{"appID":"com.example.App","windowID":42,"elementID":"button","action":"press","actions":[{"elementID":"button","action":"press"},{"elementID":"button","action":"press"}]}`,
 	} {
 		if _, err = decodeComputerActArgs([]byte(raw)); err == nil {
 			t.Fatalf("invalid coordinate action accepted: %s", raw)

@@ -82,14 +82,7 @@ final class HelperRuntime {
             value: value
           )
         })
-    case .pointer(
-      let bundleID,
-      let windowID,
-      let input,
-      let captureWidth,
-      let captureHeight,
-      let scaleFactor
-    ):
+    case .pointer(let bundleID, let windowID, let input):
       return try await withWindowActivity(
         bundleID: bundleID,
         windowID: windowID,
@@ -98,32 +91,17 @@ final class HelperRuntime {
             bundleID: bundleID,
             windowID: windowID
           )
-          let currentScaleFactor = screenCapture.backingScaleFactor(
-            for: CGRect(
-              x: targetWindow.frame.x,
-              y: targetWindow.frame.y,
-              width: targetWindow.frame.width,
-              height: targetWindow.frame.height
-            ))
           let start = try PointerCoordinatePolicy.globalPoint(
             frame: targetWindow.frame,
-            currentScaleFactor: currentScaleFactor,
             x: input.x,
-            y: input.y,
-            captureWidth: captureWidth,
-            captureHeight: captureHeight,
-            captureScaleFactor: scaleFactor
+            y: input.y
           )
           let end: CGPoint?
           if let toX = input.toX, let toY = input.toY {
             end = try PointerCoordinatePolicy.globalPoint(
               frame: targetWindow.frame,
-              currentScaleFactor: currentScaleFactor,
               x: toX,
-              y: toY,
-              captureWidth: captureWidth,
-              captureHeight: captureHeight,
-              captureScaleFactor: scaleFactor
+              y: toY
             )
           } else {
             end = nil

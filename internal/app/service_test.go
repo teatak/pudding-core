@@ -147,7 +147,13 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "before necessary pointer input") ||
 		!strings.Contains(computerSkill.Content, "Success confirms event delivery") ||
 		!strings.Contains(computerSkill.Content, "never call builtin_computer_list_apps to refresh windows") ||
-		!strings.Contains(computerSkill.Content, "without inserting another builtin_computer_observe") ||
+		!strings.Contains(computerSkill.Content, "Observations are state snapshots") ||
+		!strings.Contains(computerSkill.Content, "Actions do not automatically observe afterward") ||
+		!strings.Contains(computerSkill.Content, "Reuse known element IDs") ||
+		!strings.Contains(computerSkill.Content, "normalized current-window coordinates") ||
+		strings.Contains(computerSkill.Content, "observationID") ||
+		!strings.Contains(computerSkill.Content, "use action_sequence instead of separate calls") ||
+		!strings.Contains(computerSkill.Content, "Do not narrate routine Computer Use progress") ||
 		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
 		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)
 	}

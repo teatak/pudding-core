@@ -152,19 +152,19 @@ func TestElectronBridgeRoutesPointerAction(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request["action"] != ActionDrag || request["x"] != float64(12) || request["y"] != float64(34) || request["toX"] != float64(56) || request["toY"] != float64(78) || request["captureWidth"] != float64(200) || request["captureHeight"] != float64(100) || request["scaleFactor"] != float64(2) {
+		if request["action"] != ActionDrag || request["x"] != 0.12 || request["y"] != 0.34 || request["toX"] != 0.56 || request["toY"] != 0.78 {
 			t.Fatalf("unexpected request: %#v", request)
 		}
-		writeJSON(w, map[string]any{"bundleID": "com.example.App", "elementID": "", "action": ActionDrag, "completed": true, "x": 12, "y": 34, "toX": 56, "toY": 78})
+		writeJSON(w, map[string]any{"bundleID": "com.example.App", "elementID": "", "action": ActionDrag, "completed": true, "x": 0.12, "y": 0.34, "toX": 0.56, "toY": 0.78})
 	}))
 	defer server.Close()
 	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	toX, toY := 56.0, 78.0
-	result, err := service.Pointer(context.Background(), "session_a", "com.example.App", 7, ScreenshotPointer{PointerInput: PointerInput{Action: ActionDrag, X: 12, Y: 34, ToX: &toX, ToY: &toY}, CaptureWidth: 200, CaptureHeight: 100, ScaleFactor: 2})
-	if err != nil || result.Action != ActionDrag || result.X == nil || *result.X != 12 || result.ToX == nil || *result.ToX != 56 {
+	toX, toY := 0.56, 0.78
+	result, err := service.Pointer(context.Background(), "session_a", "com.example.App", 7, PointerInput{Action: ActionDrag, X: 0.12, Y: 0.34, ToX: &toX, ToY: &toY})
+	if err != nil || result.Action != ActionDrag || result.X == nil || *result.X != 0.12 || result.ToX == nil || *result.ToX != 0.56 {
 		t.Fatalf("unexpected pointer action: %#v err=%v", result, err)
 	}
 }

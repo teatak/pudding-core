@@ -334,20 +334,16 @@ async function main() {
       (window) => window.windowID === primary.windowID,
     );
     assert(target?.frame && observedWindow?.frame, "fixture pointer target geometry was not observed");
-    const scale = pointerCapture.capture.scaleFactor;
-    const screenshotPoint = (fractionX, fractionY) => ({
-      x: (target.frame.x - observedWindow.frame.x + target.frame.width * fractionX) * scale,
-      y: (target.frame.y - observedWindow.frame.y + target.frame.height * fractionY) * scale,
+    const windowPoint = (fractionX, fractionY) => ({
+      x: (target.frame.x - observedWindow.frame.x + target.frame.width * fractionX) / observedWindow.frame.width,
+      y: (target.frame.y - observedWindow.frame.y + target.frame.height * fractionY) / observedWindow.frame.height,
     });
-    const start = screenshotPoint(0.25, 0.5);
-    const center = screenshotPoint(0.5, 0.5);
-    const end = screenshotPoint(0.75, 0.5);
+    const start = windowPoint(0.25, 0.5);
+    const center = windowPoint(0.5, 0.5);
+    const end = windowPoint(0.75, 0.5);
     const pointerBase = {
       bundleID: fixtureBundleID,
       windowID: primary.windowID,
-      captureWidth: pointerCapture.capture.width,
-      captureHeight: pointerCapture.capture.height,
-      scaleFactor: scale,
     };
     await client.request("use_app", { bundleID: fixtureBundleID, foreground: true });
     for (const test of [

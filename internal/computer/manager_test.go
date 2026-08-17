@@ -14,9 +14,10 @@ type fakeService struct {
 	observes     int
 	actions      int
 	pointers     int
-	lastPointer  ScreenshotPointer
+	lastPointer  PointerInput
 	observeErr   error
 	actErr       error
+	actErrAt     int
 	lastSession  string
 	foreground   bool
 	list         AppList
@@ -78,13 +79,13 @@ func (f *fakeService) Act(_ context.Context, sessionID, appID string, _ uint32, 
 	defer f.mu.Unlock()
 	f.actions++
 	f.lastSession = sessionID
-	if f.actErr != nil {
+	if f.actErr != nil && (f.actErrAt == 0 || f.actions == f.actErrAt) {
 		return NativeAction{}, f.actErr
 	}
 	return NativeAction{AppID: appID, ElementID: elementID, Action: action, Completed: true}, nil
 }
 
-func (f *fakeService) Pointer(_ context.Context, sessionID, appID string, _ uint32, pointer ScreenshotPointer) (NativeAction, error) {
+func (f *fakeService) Pointer(_ context.Context, sessionID, appID string, _ uint32, pointer PointerInput) (NativeAction, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pointers++
@@ -102,65 +103,111 @@ func (f *fakeService) ReleaseSession(_ context.Context, sessionID string) error 
 	return nil
 }
 
-func TestManagerRoutesSessionAndConsumesObservationOnce(t *testing.T) {
+func TestManagerRoutesSessionAndReusesStableElementID(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
+	_, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Action.Completed || result.Observation == nil || service.lastSession != "session_a" {
+	if !result.Action.Completed || service.lastSession != "session_a" {
 		t.Fatalf("unexpected result: %#v session=%q", result, service.lastSession)
 	}
-	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-	assertOperationCode(t, err, "computer_observation_not_found")
-	if service.actions != 1 {
-		t.Fatalf("actions = %d, want 1", service.actions)
+	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.actions != 2 || service.observes != 1 {
+		t.Fatalf("actions=%d observations=%d, want 2 and 1", service.actions, service.observes)
 	}
 }
 
-func TestManagerPointerRequiresAndConsumesScreenshotObservation(t *testing.T) {
+func TestManagerActionSequenceDoesNotObserveAutomatically(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
+	_, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := "hello"
+	result, err := manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
+		{ElementID: "button", Action: ActionPress},
+		{ElementID: "row", Action: ActionSelect},
+		{ElementID: "field", Action: ActionSetValue, Value: &value},
+		{ElementID: "field", Action: ActionSubmit},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failure != nil || result.FailedIndex != nil || result.CompletedCount != 4 || len(result.Actions) != 4 {
+		t.Fatalf("unexpected sequence result: %#v", result)
+	}
+	if service.actions != 4 || service.observes != 1 {
+		t.Fatalf("native actions=%d observations=%d, want 4 and 1", service.actions, service.observes)
+	}
+	_, err = manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
+		{ElementID: "button", Action: ActionPress},
+		{ElementID: "button", Action: ActionPress},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.actions != 6 || service.observes != 1 {
+		t.Fatalf("native actions=%d observations=%d, want 6 and 1", service.actions, service.observes)
+	}
+}
 
-	plain, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
+func TestManagerActionSequenceStopsAtFirstFailureWithoutObserving(t *testing.T) {
+	service := &fakeService{
+		actErr:   &OperationError{Code: "computer_action_blocked", Message: "blocked", Outcome: "not_started"},
+		actErrAt: 2,
+	}
+	manager := NewManager(service)
+	_, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, plain.ObservationID, PointerInput{Action: ActionClick, X: 0, Y: 0, Button: PointerButtonLeft, ClickCount: 1})
-	assertOperationCode(t, err, "computer_coordinate_source_required")
-	if service.pointers != 0 {
-		t.Fatalf("native pointer actions = %d, want 0", service.pointers)
+	result, err := manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
+		{ElementID: "button", Action: ActionPress},
+		{ElementID: "row", Action: ActionSelect},
+		{ElementID: "field", Action: ActionSubmit},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if result.Failure == nil || result.Failure.Code != "computer_action_blocked" || result.Failure.Outcome != "completed" || result.FailedIndex == nil || *result.FailedIndex != 1 || result.CompletedCount != 1 || len(result.Actions) != 1 {
+		t.Fatalf("unexpected partial sequence result: %#v", result)
+	}
+	if service.actions != 2 || service.observes != 1 {
+		t.Fatalf("native actions=%d observations=%d, want 2 and 1", service.actions, service.observes)
+	}
+}
 
-	captured, err := manager.ObserveCapture(context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/click.png")
+func TestManagerPointerUsesCurrentWindowCoordinatesWithoutObservation(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
+	result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, captured.Observation.ObservationID, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Action.Completed || result.Action.Action != ActionClick || result.Action.ClickCount != 2 || result.Observation == nil || service.pointers != 1 {
+	if !result.Action.Completed || result.Action.Action != ActionClick || result.Action.ClickCount != 2 || service.pointers != 1 {
 		t.Fatalf("unexpected pointer result: %#v pointers=%d", result, service.pointers)
 	}
-	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, captured.Observation.ObservationID, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 1})
-	assertOperationCode(t, err, "computer_observation_not_found")
+	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 1})
+	if err != nil || service.pointers != 2 {
+		t.Fatalf("second pointer result: err=%v pointers=%d", err, service.pointers)
+	}
 }
 
 func TestManagerPointerRejectsOutOfBounds(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	captured, err := manager.ObserveCapture(context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/click.png")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, captured.Observation.ObservationID, PointerInput{Action: ActionClick, X: 1, Y: 0, Button: PointerButtonLeft, ClickCount: 1})
-	assertOperationCode(t, err, "computer_coordinate_out_of_bounds")
+	_, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 1, Y: 0, Button: PointerButtonLeft, ClickCount: 1})
+	assertOperationCode(t, err, "computer_invalid_request")
 	if service.pointers != 0 {
 		t.Fatalf("native pointer actions = %d, want 0", service.pointers)
 	}
@@ -175,11 +222,7 @@ func TestManagerRoutesDragAndScroll(t *testing.T) {
 	} {
 		service := &fakeService{}
 		manager := NewManager(service)
-		captured, err := manager.ObserveCapture(context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/pointer.png")
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, captured.Observation.ObservationID, pointer)
+		result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, pointer)
 		if err != nil || result.Action.Action != pointer.Action || service.pointers != 1 {
 			t.Fatalf("action=%s result=%#v pointers=%d err=%v", pointer.Action, result, service.pointers, err)
 		}
@@ -197,11 +240,7 @@ func TestManagerAcceptsSelectAndSubmitActions(t *testing.T) {
 		t.Run(tc.action, func(t *testing.T) {
 			service := &fakeService{}
 			manager := NewManager(service)
-			observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, tc.elementID, tc.action, nil)
+			result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, tc.elementID, tc.action, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,6 +248,25 @@ func TestManagerAcceptsSelectAndSubmitActions(t *testing.T) {
 				t.Fatalf("unexpected result: %#v", result)
 			}
 		})
+	}
+}
+
+func TestManagerKeepsDuplicateStableElementsReadOnly(t *testing.T) {
+	windowID := uint32(42)
+	observed, err := validateObservation("com.example.App", windowID, Observation{
+		AppID: "com.example.App", WindowID: &windowID,
+		Elements: []Element{
+			{ElementID: "same-label", WindowID: &windowID, Actions: []string{ActionPress}},
+			{ElementID: "same-label", WindowID: &windowID, Actions: []string{ActionPress}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, element := range observed.Elements {
+		if len(element.Actions) != 0 {
+			t.Fatalf("duplicate stable element remained actionable: %#v", element)
+		}
 	}
 }
 
@@ -329,95 +387,17 @@ func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 	assertOperationCode(t, err, "computer_launch_not_owned")
 }
 
-func TestManagerRejectsCrossSessionAndExpiredObservation(t *testing.T) {
-	manager := NewManager(&fakeService{})
-	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
-	manager.now = func() time.Time { return now }
-	observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = manager.Act(context.Background(), "session_b", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-	assertOperationCode(t, err, "computer_observation_not_found")
-
-	observed, err = manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(observationTTL)
-	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-	assertOperationCode(t, err, "computer_observation_stale")
-}
-
-func TestManagerKeepsObservationUsableBeyondThirtySeconds(t *testing.T) {
-	service := &fakeService{}
-	manager := NewManager(service)
-	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
-	manager.now = func() time.Time { return now }
-	observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.ExpiresAt != now.Add(2*time.Minute).Format(time.RFC3339Nano) {
-		t.Fatalf("expiresAt = %q, want a two-minute lifetime", observed.ExpiresAt)
-	}
-
-	now = now.Add(31 * time.Second)
-	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Action.Completed || result.Observation == nil {
-		t.Fatalf("unexpected action result: %#v", result)
-	}
-}
-
-func TestManagerExpiresScreenshotCoordinatesAfterFifteenSeconds(t *testing.T) {
-	manager := NewManager(&fakeService{})
-	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
-	manager.now = func() time.Time { return now }
-	observed, err := manager.ObserveCapture(context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/pointer.png")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.Observation.ExpiresAt != now.Add(captureObservationTTL).Format(time.RFC3339Nano) {
-		t.Fatalf("expiresAt = %q, want a fifteen-second screenshot lifetime", observed.Observation.ExpiresAt)
-	}
-
-	now = now.Add(captureObservationTTL)
-	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, observed.Observation.ObservationID, PointerInput{
-		Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 1,
-	})
-	assertOperationCode(t, err, "computer_observation_stale")
-}
-
-func TestManagerReportsCompletedActionWhenReobserveFails(t *testing.T) {
-	service := &fakeService{observeErr: &OperationError{Code: "computer_helper_crashed", Message: "crashed", Retryable: true, Outcome: "unknown"}}
-	manager := NewManager(service)
-	observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ObservationError == nil || result.ObservationError.Outcome != "completed" || result.ObservationError.Retryable {
-		t.Fatalf("unexpected observation error: %#v", result.ObservationError)
-	}
-}
-
-func TestManagerStoresObservationFromAtomicObserveCapture(t *testing.T) {
+func TestManagerReturnsStatelessAtomicObserveCapture(t *testing.T) {
 	manager := NewManager(&fakeService{})
 	result, err := manager.ObserveCapture(
 		context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/window.png",
 	)
-	if err != nil || result.Observation.ObservationID == "" || result.Capture == nil || result.Capture.WindowID != 42 {
+	if err != nil || result.Observation.AppID != "com.example.App" || result.Capture == nil || result.Capture.WindowID != 42 {
 		t.Fatalf("unexpected observe-capture: %#v err=%v", result, err)
 	}
 	acted, err := manager.Act(
 		context.Background(), "session_a", "com.example.App", 42,
-		result.Observation.ObservationID, "button", ActionPress, nil,
+		"button", ActionPress, nil,
 	)
 	if err != nil || !acted.Action.Completed {
 		t.Fatalf("unexpected chained action: %#v err=%v", acted, err)
@@ -440,89 +420,56 @@ func TestManagerDoesNotRetryNativeActionFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &fakeService{actErr: tt.err}
 			manager := NewManager(service)
-			observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
+			_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
 			assertOperationCode(t, err, tt.err.Code)
 			failure := ErrorFailure(err)
 			if failure.Outcome != "not_started" || failure.Retryable {
 				t.Fatalf("unexpected native failure: %#v", failure)
 			}
-			_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil)
-			assertOperationCode(t, err, "computer_observation_not_found")
-			if service.actions != 1 || service.observes != 1 {
+			if service.actions != 1 || service.observes != 0 {
 				t.Fatalf("native failure retried work: actions=%d observes=%d", service.actions, service.observes)
 			}
 		})
 	}
 }
 
-func TestManagerBlocksSecureTextActionsBeforeNativeAction(t *testing.T) {
-	for _, action := range []string{ActionPress, ActionSetValue, ActionSelect, ActionSubmit} {
-		t.Run(action, func(t *testing.T) {
-			service := &fakeService{}
-			manager := NewManager(service)
-			observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, element := range observed.Snapshot.Elements {
-				if element.Secure && len(element.Actions) != 0 {
-					t.Fatalf("secure actions = %v, want none", element.Actions)
-				}
-			}
-			var value *string
-			if action == ActionSetValue {
-				secret := "secret"
-				value = &secret
-			}
-			_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "secure", action, value)
-			assertOperationCode(t, err, "computer_element_not_actionable")
-			if service.actions != 0 {
-				t.Fatalf("actions = %d, want 0", service.actions)
-			}
-		})
-	}
-}
-
-func TestManagerRejectsOversizedActionValueBeforeConsumingObservation(t *testing.T) {
-	service := &fakeService{}
-	manager := NewManager(service)
+func TestManagerHidesSecureTextActionsFromObservation(t *testing.T) {
+	manager := NewManager(&fakeService{})
 	observed, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, element := range observed.Elements {
+		if element.Secure && len(element.Actions) != 0 {
+			t.Fatalf("secure actions = %v, want none", element.Actions)
+		}
+	}
+}
+
+func TestManagerRejectsOversizedActionValue(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
 	value := strings.Repeat("🙂", MaxActionValueCharacters+1)
-	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionSetValue, &value)
+	_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionSetValue, &value)
 	assertOperationCode(t, err, "computer_invalid_request")
 	if service.actions != 0 {
 		t.Fatalf("actions = %d, want 0", service.actions)
 	}
-	if _, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, observed.ObservationID, "button", ActionPress, nil); err != nil {
-		t.Fatalf("oversized value consumed observation: %v", err)
+	if _, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil); err != nil {
+		t.Fatalf("valid action failed after oversized value: %v", err)
 	}
 }
 
 func TestManagerSerializesActionsAcrossSessions(t *testing.T) {
 	service := &serialActionService{started: make(chan string, 2), release: make(chan struct{}, 2)}
 	manager := NewManager(service)
-	first, err := manager.Observe(context.Background(), "session_a", "com.example.First", 41, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := manager.Observe(context.Background(), "session_b", "com.example.Second", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
 	done := make(chan error, 2)
 	go func() {
-		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, first.ObservationID, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, "button", ActionPress, nil)
 		done <- err
 	}()
 	go func() {
-		_, err := manager.Act(context.Background(), "session_b", "com.example.Second", 42, second.ObservationID, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_b", "com.example.Second", 42, "button", ActionPress, nil)
 		done <- err
 	}()
 	select {
@@ -552,17 +499,9 @@ func TestManagerSerializesActionsAcrossSessions(t *testing.T) {
 func TestManagerCancelledQueuedActionNeverReachesNativeService(t *testing.T) {
 	service := &serialActionService{started: make(chan string, 2), release: make(chan struct{}, 1)}
 	manager := NewManager(service)
-	first, err := manager.Observe(context.Background(), "session_a", "com.example.First", 41, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := manager.Observe(context.Background(), "session_b", "com.example.Second", 42, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, first.ObservationID, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, "button", ActionPress, nil)
 		firstDone <- err
 	}()
 	select {
@@ -574,7 +513,7 @@ func TestManagerCancelledQueuedActionNeverReachesNativeService(t *testing.T) {
 	queuedContext, cancelQueued := context.WithCancel(context.Background())
 	queuedDone := make(chan error, 1)
 	go func() {
-		_, err := manager.Act(queuedContext, "session_b", "com.example.Second", 42, second.ObservationID, "button", ActionPress, nil)
+		_, err := manager.Act(queuedContext, "session_b", "com.example.Second", 42, "button", ActionPress, nil)
 		queuedDone <- err
 	}()
 	cancelQueued()
@@ -630,7 +569,7 @@ func (s *serialActionService) Act(_ context.Context, _ string, appID string, _ u
 	<-s.release
 	return NativeAction{AppID: appID, ElementID: elementID, Action: action, Completed: true}, nil
 }
-func (s *serialActionService) Pointer(_ context.Context, _ string, appID string, _ uint32, pointer ScreenshotPointer) (NativeAction, error) {
+func (s *serialActionService) Pointer(_ context.Context, _ string, appID string, _ uint32, pointer PointerInput) (NativeAction, error) {
 	s.started <- appID
 	<-s.release
 	return NativeAction{AppID: appID, Action: pointer.Action, Completed: true, X: &pointer.X, Y: &pointer.Y, ToX: pointer.ToX, ToY: pointer.ToY, Button: pointer.Button, ClickCount: pointer.ClickCount, DeltaX: pointer.DeltaX, DeltaY: pointer.DeltaY}, nil

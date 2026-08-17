@@ -19,10 +19,7 @@ enum HelperCommand: Equatable {
   case pointer(
     bundleID: String,
     windowID: UInt32,
-    input: PointerInput,
-    captureWidth: Int,
-    captureHeight: Int,
-    scaleFactor: Double
+    input: PointerInput
   )
 }
 
@@ -59,8 +56,8 @@ struct PointerInput: Equatable {
     deltaX: Int?,
     deltaY: Int?
   ) throws -> PointerInput {
-    guard x.isFinite, y.isFinite, x >= 0, y >= 0 else {
-      throw ArgumentError.invalidOption("coordinates", "must be finite and non-negative")
+    guard normalized(x), normalized(y) else {
+      throw ArgumentError.invalidOption("coordinates", "must be between 0 inclusive and 1 exclusive")
     }
     switch action {
     case .click:
@@ -76,8 +73,8 @@ struct PointerInput: Equatable {
         action: action, x: x, y: y, toX: nil, toY: nil,
         button: resolvedButton, clickCount: resolvedCount, deltaX: nil, deltaY: nil)
     case .drag:
-      guard let toX, let toY, toX.isFinite, toY.isFinite, toX >= 0, toY >= 0 else {
-        throw ArgumentError.invalidOption("drag", "finite non-negative toX and toY are required")
+      guard let toX, let toY, normalized(toX), normalized(toY) else {
+        throw ArgumentError.invalidOption("drag", "toX and toY must be between 0 inclusive and 1 exclusive")
       }
       guard button == nil, clickCount == nil, deltaX == nil, deltaY == nil else {
         throw ArgumentError.invalidOption("action", "drag accepts only start and end coordinates")
@@ -103,6 +100,10 @@ struct PointerInput: Equatable {
         action: action, x: x, y: y, toX: nil, toY: nil,
         button: nil, clickCount: nil, deltaX: resolvedX, deltaY: resolvedY)
     }
+  }
+
+  private static func normalized(_ value: Double) -> Bool {
+    value.isFinite && value >= 0 && value < 1
   }
 }
 
@@ -333,9 +334,6 @@ struct ArgumentParser {
       var clickCount: Int?
       var deltaX: Int?
       var deltaY: Int?
-      var captureWidth: Int?
-      var captureHeight: Int?
-      var scaleFactor: Double?
       while let option = cursor.next() {
         let raw: String
         switch option {
@@ -361,16 +359,15 @@ struct ArgumentParser {
             throw ArgumentError.invalidOption(option, raw)
           }
           button = parsed
-        case "--x", "--y", "--to-x", "--to-y", "--scale-factor":
+        case "--x", "--y", "--to-x", "--to-y":
           raw = try cursor.requireValue(option)
-          guard let parsed = Double(raw), parsed.isFinite, parsed >= 0 else {
+          guard let parsed = Double(raw), parsed.isFinite, parsed >= 0, parsed < 1 else {
             throw ArgumentError.invalidOption(option, raw)
           }
           if option == "--x" { x = parsed }
           if option == "--y" { y = parsed }
           if option == "--to-x" { toX = parsed }
           if option == "--to-y" { toY = parsed }
-          if option == "--scale-factor" { scaleFactor = parsed }
         case "--click-count":
           raw = try cursor.requireValue(option)
           guard let parsed = Int(raw) else {
@@ -384,20 +381,9 @@ struct ArgumentParser {
           }
           if option == "--delta-x" { deltaX = parsed }
           if option == "--delta-y" { deltaY = parsed }
-        case "--capture-width", "--capture-height":
-          raw = try cursor.requireValue(option)
-          guard let parsed = Int(raw), parsed > 0 else {
-            throw ArgumentError.invalidOption(option, raw)
-          }
-          if option == "--capture-width" { captureWidth = parsed }
-          if option == "--capture-height" { captureHeight = parsed }
         default:
           throw ArgumentError.unknownOption(option)
         }
-      }
-      let resolvedScaleFactor = try require(scaleFactor, "--scale-factor")
-      guard resolvedScaleFactor > 0 else {
-        throw ArgumentError.invalidOption("--scale-factor", String(resolvedScaleFactor))
       }
       let input = try PointerInput.validated(
         action: try require(action, "--action"),
@@ -413,10 +399,7 @@ struct ArgumentParser {
       return .pointer(
         bundleID: try require(bundleID, "--bundle-id"),
         windowID: try require(windowID, "--window-id"),
-        input: input,
-        captureWidth: try require(captureWidth, "--capture-width"),
-        captureHeight: try require(captureHeight, "--capture-height"),
-        scaleFactor: resolvedScaleFactor
+        input: input
       )
     default:
       throw ArgumentError.unknownCommand(command)

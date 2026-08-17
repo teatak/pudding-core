@@ -15,8 +15,8 @@
 1. Computer Use 作为内置 App 按需加载,不把桌面控制工具常驻全部会话。
 2. Go daemon 负责 session 路由、工具生命周期、审批和全局动作串行化。
 3. Electron main 负责 macOS 原生能力和权限界面,通过签名 Swift Helper 调用 Accessibility 与 ScreenCaptureKit。
-4. 所有操作显式携带 `sessionID`、`appID`、`windowID` 和 `observationID`;后端不保存“当前应用”或“当前焦点”。
-5. 原生操作优先使用 AXUIElement `press`、`set_value`、`select` 与受限 `submit`;仅当截图观察明确提供坐标且目标 App 保持前台时允许受限指针动作。
+4. 所有操作显式携带 `sessionID`、`appID` 和 `windowID`;后端不保存 observation、“当前应用”或“当前焦点”。
+5. 原生操作优先使用 AXUIElement `press`、`set_value`、`select` 与受限 `submit`;仅当模型掌握明确的窗口归一化坐标且目标 App 保持前台时允许受限指针动作。
 6. 写操作不自动重试。结果不确定时返回明确错误,下一步先通过 `use_app` 刷新窗口并观察当前状态。
 7. 当前能力不监听键盘或鼠标,不录制或回放操作;仅 `submit` 在 AXConfirm 不可用时向已验证的目标进程发送一次无修饰键的 Return。
 8. 应用生命周期采用 session ownership:只有当前 session 新启动并取得 `launchID` 的进程才能普通退出;已运行应用永不归属,永不强杀。
@@ -29,7 +29,7 @@
 - 列出已安装的前台 GUI App 身份与运行状态,不读取窗口标题或内容;窗口只由 `use_app` 返回。
 - 观察指定 bundle ID 的有限 AX 树,表格和 outline 优先返回可见行,普通值截断,secure text field 永不返回值。
 - 使用当前元素路径与语义特征生成指纹 ID;界面结构变化时动作拒绝匹配,不按旧遍历序号误操作。
-- 仅支持 `press`、`set_value`、`select`、受限 `submit` 与截图绑定的单击、左键双击、右键、左键拖拽和滚轮;不开放任意键盘或组合键。
+- 仅支持 `press`、`set_value`、`select`、受限 `submit` 与当前窗口归一化坐标的单击、左键双击、右键、左键拖拽和滚轮;不开放任意键盘或组合键。
 - 在一次原生请求中观察显式 `windowID` 并按需截取同一窗口到 PNG,不录屏、不监听用户输入、不录制或回放工作流。
 - 按 bundle ID 启动应用,并按精确 bundle ID + PID 发出普通退出请求;原生层不保存 session ownership。
 
@@ -55,10 +55,10 @@ make computer-use-helper-dev
 当前也已完成 C2 daemon 与模型工具:
 
 - Electron 暴露独立 loopback bearer-token bridge;除权限查询外所有请求必须显式带 `sessionID`。
-- Go `computer.Manager` 保存 session-scoped 短期 observation,动作快照单次消费,所有 session 的写动作全局串行。
+- Go `computer.Manager` 不保存 observation;所有 session 的写动作全局串行。
 - 内置 App ID 为 `computer-use`,包含 `list_apps`、`use_app`、`quit_app`、`observe`、`act` 五个 Work 模式工具。
 - 每个 session 首次访问一个 app 时统一审批观察和操作;同 session 后续访问同 app 不再重复审批,项目的“完全允许”模式也不能跳过首次审批。
-- 动作传输中断返回 `outcome=unknown` 且不可重试;成功后观察失败仍明确保留动作已完成事实。
+- 动作传输中断返回 `outcome=unknown` 且不可重试;动作成功后不自动观察,由模型按任务需要决定何时重新读取界面。
 - transcript 已有可读显示名、图标、分组和简中/繁中/英文文案。
 
 当前已通过确定性 Fixture App 和 Calculator 验证真实 `press`/`set_value`/`select`/`submit`、session-owned quit 与已运行 App 非 ownership 分支。签名安装包和跨版本升级实测仍属于 C4。
@@ -93,7 +93,7 @@ MVP 支持:
 - 设置可编辑 AX 元素值。
 - 选择可选中的表格行或列表项。
 - 对支持 `AXConfirm` 的输入框执行确认提交。
-- 每次动作后返回最新窗口摘要和新的 observation。
+- observation 是按需读取的界面状态快照;动作后是否重新观察由模型根据任务需要决定。
 - 用户可随时取消当前 turn,取消尚未开始的动作和正在等待的原生调用。
 
 产品级目标:
@@ -139,7 +139,7 @@ session turn
 - 动作审批、取消和超时。
 - 全局写操作队列。
 - 截图 attachment 存储和 canonical turn part。
-- session 关闭时释放该 session 的 observation,并尽力普通退出 session-owned app。
+- session 关闭时尽力普通退出 session-owned app。
 
 不负责:
 
@@ -163,8 +163,8 @@ session turn
 
 - 调用 Accessibility 和 ScreenCaptureKit。
 - 生成归一化 observation。
-- 解析 `elementID` 并执行唯一指定动作。
-- 在动作前再次验证应用、窗口和 observation。
+- 针对当前 Accessibility 树实时解析 `elementID` 并执行唯一指定动作。
+- 在动作前再次验证应用、窗口和元素。
 - 通过 NDJSON stdin/stdout 与 Electron main 通讯,不监听网络端口。
 
 Helper 不保存业务 session、模型上下文或用户消息。
@@ -214,7 +214,8 @@ native/macos/computer-use-helper/
 - 默认只返回可见窗口和有限深度的交互元素;table/outline 使用 `AXVisibleRows`,并以每行的绝对 `AXIndex` 生成路径。缺少唯一绝对索引的可见行子树仅可读取,不暴露动作。
 - secure text field 只返回角色和位置,绝不返回值或任何动作。
 - 普通文本设置 UTF-8 字节上限,AX value 超限时标记 `valueTruncated`。
-- `elementID` 是当前 observation 内的短 ID,不是长期实体 ID。
+- `elementID` 是指定 App 窗口内的稳定元素引用。优先由 AX identifier 生成,其次由 role/subrole + label 生成;仅在元素没有 identifier 和 label 时使用结构路径。frame、value 和普通树路径变化不会改变已有 identifier/label 元素的 ID。
+- 相同 role/subrole + label 无法唯一解析时拒绝动作,不使用位置或其它隐式 fallback 猜测目标。
 - 不把原始 AX 指针暴露给 daemon 或模型。
 
 ### 5.3 截图
@@ -238,14 +239,16 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 | `press` | AX `AXPress` | action 返回成功且目标仍属于指定 app/window |
 | `set_value` | AX set value | 重新读取值与期望一致 |
 | `select` | AX `AXSelected=true` 或父容器 `AXSelectedRows` | 重新读取 selection 包含目标元素 |
-| `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | App 必须活跃,元素必须已聚焦、启用、非安全且为可编辑单行文本控件;action 返回成功后重新观察 |
-| `click` / `drag` / `scroll` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 只接受同一 `observe-capture` 截图左上角像素坐标;执行前重新校验窗口尺寸和 scale factor;窗口只移动时按新 origin 映射;成功只代表事件已投递 |
+| `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | App 必须活跃,元素必须已聚焦、启用、非安全且为可编辑单行文本控件 |
+| `click` / `drag` / `scroll` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 接受当前窗口左上角为 `0,0`、右下角趋近 `1,1` 的归一化坐标;执行前实时校验目标 App 前台且目标窗口在坐标处最上层;成功只代表事件已投递 |
 
 规则:
 
-- 任一动作失败都不自动改用坐标、键盘、AppleScript 或剪贴板;坐标点击必须由模型显式选择且绑定截图 observation。
-- 所有写操作执行前验证目标应用仍存在、窗口仍匹配、observation 未过期。
-- 动作执行后重新观察,但不以第二个动作修复第一个动作。
+- 任一动作失败都不自动改用坐标、键盘、AppleScript 或剪贴板;坐标点击必须由模型显式选择。
+- 所有写操作执行前由 Helper 基于实时系统状态验证目标应用、窗口和元素。
+- 单动作只返回动作结果,不自动观察。模型仅在目标未知、必须检查 UI 变化或结果不确定时调用 observe。
+- `action_sequence` 只接受 2–32 个 `press`、`set_value`、`select` 或 `submit`。每一步都针对实时 AX 树重新解析稳定 `elementID`,后续目标不依赖中间状态发现时可连续执行。
+- 序列不是事务:遇到首个失败立即停止,已完成动作不回滚、不重试;结果明确返回 `completedCount`、`failedIndex`、已确认动作和失败信息。
 
 ## 6. Observation 契约
 
@@ -256,7 +259,6 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
   "sessionID": "sess_x",
   "appID": "com.apple.TextEdit",
   "windowID": 42,
-  "observationID": "obs_x",
   "observedAt": "2026-08-13T08:00:00Z",
   "screenshot": null,
   "text": "window 'Untitled'\n[1] AXTextArea ...",
@@ -275,14 +277,12 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 
 约束:
 
-- observation 只在产生它的 `sessionID + appID + windowID` 内有效。
-- 默认 TTL 30 秒,每个 session 最多保留 16 个未过期 observation;超限直接失败。
-- action 必须传 `observationID`。
-- Helper 在动作前重新遍历指定窗口并按指纹重新解析元素;找不到或不唯一时拒绝执行。
-- 首个 action 前显式 observe 一次;每次成功 action 返回的新 observation 直接作为下一次 action 的输入,连续操作之间不重复 observe。
-- action 只返回 `observationError`、或当前 observation stale/过期时,才重新 observe。
-- 模型收到 stale 后必须重新 observe,不能重复原动作。
-- observation registry 位于 Go daemon 内存,是短期路由缓存;真实界面始终以当前 AX 树为事实源。
+- observation 是无服务端状态的界面快照,不是授权令牌或动作前置条件。
+- `elementID` 由元素的稳定 Accessibility 身份生成;模型可在同一 App 窗口仍存在时复用已知 ID。
+- Helper 在每次语义动作前重新遍历指定窗口并按稳定身份解析元素;找不到、不唯一、不再支持该动作或属于 secure 控件时拒绝执行。
+- 模型自主决定观察时机：仅在目标未知、必须检查 UI 变化或结果不确定时 observe。已知稳定目标可直接操作或使用 `action_sequence`。
+- pointer 不依赖 observation token;坐标使用当前窗口归一化空间,Helper 执行前验证前台 App 和最上层目标窗口。
+- daemon 不保存 observation registry 或过期时间;当前 AX 树和当前窗口几何是唯一事实源。
 
 ## 7. 模型工具
 
@@ -322,14 +322,32 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 {
   "appID": "com.apple.TextEdit",
   "windowID": 42,
-  "observationID": "obs_x",
   "action": "set_value",
   "elementID": "ax_...",
   "value": "hello"
 }
 ```
 
-`action` 只允许 `press`、`set_value`、`select`、`submit`、`click`、`drag` 和 `scroll`;只有 `set_value` 必须传 `value`。指针动作禁止 `elementID`/`value`,必须传同一截图 observation 中的坐标,原点为窗口截图左上角。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。指针动作要求目标 App 已显式切到前台,只确认事件投递,不宣称 App 状态已改变。截图 observation 只能消费一次,动作后的普通 observation 不能继续指针操作。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一 action 工具让审批、串行化和 transcript 展示共用一个入口。
+`action` 只允许 `press`、`set_value`、`select`、`submit`、`click`、`drag`、`scroll` 和 `action_sequence`;只有单个 `set_value` 必须传顶层 `value`。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。指针动作要求目标 App 已显式切到前台,只确认事件投递,不宣称 App 状态已改变。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一 action 工具让审批、串行化和 transcript 展示共用一个入口。
+
+批量语义动作仍使用同一工具,传 `action=action_sequence` 和 `actions` 数组:
+
+```json
+{
+  "appID": "com.apple.calculator",
+  "windowID": 42,
+  "action": "action_sequence",
+  "actions": [
+    {"elementID": "ax_clear", "action": "press"},
+    {"elementID": "ax_4", "action": "press"},
+    {"elementID": "ax_plus", "action": "press"},
+    {"elementID": "ax_4", "action": "press"},
+    {"elementID": "ax_equals", "action": "press"}
+  ]
+}
+```
+
+序列禁止 pointer action、嵌套 sequence 和顶层 `elementID`/`value`;每个子动作执行前均在实时 AX 树中解析和验证目标。中途失败不会回滚已完成动作,也不会自动尝试剩余动作。
 
 新增工具时必须同步:
 
@@ -352,7 +370,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 | `POST /computer/observe` | AX observation |
 | `POST /computer/observe-capture` | 同一次 Helper 请求内完成 AX observation 与窗口截图 |
 | `POST /computer/act` | 执行一个显式动作 |
-| `POST /computer/pointer` | 执行一次由截图尺寸与 scale factor 约束的 click、drag 或 scroll |
+| `POST /computer/pointer` | 执行一次使用当前窗口归一化坐标的 click、drag 或 scroll |
 | `GET /computer/permissions` | 读取权限状态 |
 
 所有请求:
@@ -381,8 +399,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - `computer_launch_not_owned`
 - `computer_window_required`
 - `computer_window_not_found`
-- `computer_observation_not_found`
-- `computer_observation_stale`
+- `computer_pointer_target_changed`
 - `computer_app_not_foreground`
 - `computer_element_not_found`
 - `computer_element_not_actionable`
@@ -404,7 +421,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - Screen & System Audio Recording:识别目标窗口并按需读取单帧画面。
 - Accessibility:读取 AX 树并执行 AX 动作。
 
-当前不监听键盘或鼠标,因此不申请 Input Monitoring。只发送两类受限合成事件：目标进程的单次 Return，以及目标 App 已前台时截图绑定的单击、左键双击、右键、左键拖拽和滚轮；不开放任意键盘或组合键。
+当前不监听键盘或鼠标,因此不申请 Input Monitoring。只发送两类受限合成事件：目标进程的单次 Return，以及目标 App 已前台时基于当前窗口归一化坐标的单击、左键双击、右键、左键拖拽和滚轮；不开放任意键盘或组合键。
 
 Swift Helper 是 Computer Use 两项权限的系统事实源;Pudding 主进程的桌面截图权限单独显示,不得代替 Helper 权限。只有实际 Computer Use 请求缺少相关权限时才显示结构化引导,模型不生成权限说明。引导和设置页读取同一 Electron 权限控制器;用户切回 Pudding 后自动复检,齐全时恢复原请求。只有系统已报告授权、重启 Helper 后仍返回同一权限错误时才显示 Pudding 重启按钮。Pudding 不尝试自动点击系统权限提示或管理员认证。
 
@@ -502,7 +519,7 @@ MVP:
 
 - 实现 NDJSON Helper 协议。
 - 实现 app/window list、observe、window screenshot。
-- 实现 AX press/set value/select、受限 submit 和截图绑定的受限指针动作;不开放通用 CGEvent 输入动作。
+- 实现 AX press/set value/select、受限 submit 和当前窗口归一化坐标的受限指针动作;不开放通用 CGEvent 输入动作。
 - 实现 Helper 生命周期、超时、崩溃和取消。
 - 完成 Helper 嵌套签名和 notarization 验证。
 

@@ -32,20 +32,20 @@ type computerQuitAppArgs struct {
 }
 
 type computerActArgs struct {
-	AppID         string   `json:"appID"`
-	WindowID      uint32   `json:"windowID"`
-	ObservationID string   `json:"observationID"`
-	ElementID     string   `json:"elementID"`
-	Action        string   `json:"action"`
-	Value         *string  `json:"value"`
-	X             *float64 `json:"x"`
-	Y             *float64 `json:"y"`
-	ToX           *float64 `json:"toX"`
-	ToY           *float64 `json:"toY"`
-	Button        string   `json:"button"`
-	ClickCount    *int     `json:"clickCount"`
-	DeltaX        *int     `json:"deltaX"`
-	DeltaY        *int     `json:"deltaY"`
+	AppID      string                    `json:"appID"`
+	WindowID   uint32                    `json:"windowID"`
+	ElementID  string                    `json:"elementID"`
+	Action     string                    `json:"action"`
+	Value      *string                   `json:"value"`
+	Actions    []computer.SemanticAction `json:"actions"`
+	X          *float64                  `json:"x"`
+	Y          *float64                  `json:"y"`
+	ToX        *float64                  `json:"toX"`
+	ToY        *float64                  `json:"toY"`
+	Button     string                    `json:"button"`
+	ClickCount *int                      `json:"clickCount"`
+	DeltaX     *int                      `json:"deltaX"`
+	DeltaY     *int                      `json:"deltaY"`
 }
 
 func (r *BuiltinRunner) computerListApps(ctx context.Context, call Call) Result {
@@ -128,7 +128,7 @@ func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
 		out.Ok = true
 		out.Content = jsonString(payload)
 		out.SummaryKind = SummaryReturnedItems
-		out.SummaryCount = len(observed.Snapshot.Elements)
+		out.SummaryCount = len(observed.Elements)
 		return out
 	}
 
@@ -143,7 +143,7 @@ func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
 		out.Ok = true
 		out.Content = jsonString(payload)
 		out.SummaryKind = SummaryReturnedItems
-		out.SummaryCount = len(observed.Snapshot.Elements)
+		out.SummaryCount = len(observed.Elements)
 		return out
 	}
 	defer os.RemoveAll(tempDir)
@@ -164,13 +164,13 @@ func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
 		payload["screenshot"] = map[string]any{
 			"windowID": captured.WindowID, "width": captured.Width, "height": captured.Height,
 			"scaleFactor": captured.ScaleFactor, "attachmentKey": stored.AttachmentKey, "url": stored.URL,
-			"coordinateSpace": "window_screenshot_pixels_top_left",
+			"coordinateSpace": "window_normalized_top_left",
 		}
 	}
 	out.Ok = true
 	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedItems
-	out.SummaryCount = len(combined.Observation.Snapshot.Elements)
+	out.SummaryCount = len(combined.Observation.Elements)
 	return out
 }
 
@@ -183,11 +183,26 @@ func (r *BuiltinRunner) computerAct(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	if args.Action == computer.ActionSequence {
+		result, sequenceErr := r.computer.ActSequence(ctx, call.SessionID, args.AppID, args.WindowID, args.Actions)
+		if sequenceErr != nil {
+			return computerToolError(out, sequenceErr)
+		}
+		if result.Failure != nil {
+			return computerActionSequenceFailure(out, result)
+		}
+		out.Ok = true
+		out.Content = jsonString(map[string]any{"ok": true, "result": result})
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = 2
+		return out
+	}
+
 	var result computer.ActionResult
 	if isComputerPointerAction(args.Action) {
-		result, err = r.computer.Pointer(ctx, call.SessionID, args.AppID, args.WindowID, args.ObservationID, args.pointerInput())
+		result, err = r.computer.Pointer(ctx, call.SessionID, args.AppID, args.WindowID, args.pointerInput())
 	} else {
-		result, err = r.computer.Act(ctx, call.SessionID, args.AppID, args.WindowID, args.ObservationID, args.ElementID, args.Action, args.Value)
+		result, err = r.computer.Act(ctx, call.SessionID, args.AppID, args.WindowID, args.ElementID, args.Action, args.Value)
 	}
 	if err != nil {
 		return computerToolError(out, err)
@@ -195,7 +210,26 @@ func (r *BuiltinRunner) computerAct(ctx context.Context, call Call) Result {
 	out.Ok = true
 	out.Content = jsonString(map[string]any{"ok": true, "result": result})
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 2
+	out.SummaryCount = 1
+	return out
+}
+
+func computerActionSequenceFailure(out Result, result computer.ActionSequenceResult) Result {
+	failure := result.Failure
+	payload := map[string]any{
+		"ok": false, "code": failure.Code, "error": failure.Message,
+		"retryable": failure.Retryable, "outcome": failure.Outcome, "result": result,
+	}
+	if failure.Permission != "" {
+		payload["permission"] = failure.Permission
+	}
+	if len(failure.Permissions) > 0 {
+		payload["permissions"] = failure.Permissions
+	}
+	out.Ok = false
+	out.Content = jsonString(payload)
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = len(payload)
 	return out
 }
 
@@ -278,25 +312,43 @@ func decodeComputerActArgs(raw []byte) (computerActArgs, error) {
 		return args, err
 	}
 	args.AppID = strings.TrimSpace(args.AppID)
-	args.ObservationID = strings.TrimSpace(args.ObservationID)
 	args.ElementID = strings.TrimSpace(args.ElementID)
 	args.Action = strings.TrimSpace(args.Action)
 	args.Button = strings.TrimSpace(args.Button)
 	if err := validateComputerToolAppID(args.AppID); err != nil {
 		return args, err
 	}
-	if args.WindowID == 0 || args.ObservationID == "" {
-		return args, fmt.Errorf("appID, windowID, and observationID are required")
+	if args.WindowID == 0 {
+		return args, fmt.Errorf("appID and windowID are required")
 	}
 	if !validComputerToolAction(args.Action) {
-		return args, fmt.Errorf("action must be press, set_value, select, submit, click, drag, or scroll")
+		return args, fmt.Errorf("action must be press, set_value, select, submit, click, drag, scroll, or action_sequence")
+	}
+	if args.Action == computer.ActionSequence {
+		if args.ElementID != "" || args.Value != nil || hasComputerPointerFields(args) {
+			return args, fmt.Errorf("elementID, value, and pointer fields must be omitted for action_sequence")
+		}
+		if len(args.Actions) < 2 || len(args.Actions) > computer.MaxActionSequenceSteps {
+			return args, fmt.Errorf("action_sequence requires between 2 and 32 actions")
+		}
+		for index := range args.Actions {
+			action, actionErr := validateComputerSequenceAction(args.Actions[index])
+			if actionErr != nil {
+				return args, fmt.Errorf("actions[%d]: %w", index, actionErr)
+			}
+			args.Actions[index] = action
+		}
+		return args, nil
+	}
+	if len(args.Actions) != 0 {
+		return args, fmt.Errorf("actions is allowed only for action_sequence")
 	}
 	if isComputerPointerAction(args.Action) {
 		if args.ElementID != "" || args.Value != nil {
 			return args, fmt.Errorf("elementID and value must be omitted for pointer actions")
 		}
-		if args.X == nil || args.Y == nil || math.IsNaN(*args.X) || math.IsInf(*args.X, 0) || math.IsNaN(*args.Y) || math.IsInf(*args.Y, 0) || *args.X < 0 || *args.Y < 0 {
-			return args, fmt.Errorf("finite non-negative x and y are required for pointer actions")
+		if args.X == nil || args.Y == nil || !normalizedComputerCoordinate(*args.X) || !normalizedComputerCoordinate(*args.Y) {
+			return args, fmt.Errorf("x and y must be normalized window coordinates between 0 inclusive and 1 exclusive")
 		}
 		switch args.Action {
 		case computer.ActionClick:
@@ -317,8 +369,8 @@ func decodeComputerActArgs(raw []byte) (computerActArgs, error) {
 				return args, fmt.Errorf("clickCount must be 1, or 2 for the left button")
 			}
 		case computer.ActionDrag:
-			if args.ToX == nil || args.ToY == nil || !finiteNonNegativeNumber(*args.ToX) || !finiteNonNegativeNumber(*args.ToY) {
-				return args, fmt.Errorf("finite non-negative toX and toY are required for drag")
+			if args.ToX == nil || args.ToY == nil || !normalizedComputerCoordinate(*args.ToX) || !normalizedComputerCoordinate(*args.ToY) {
+				return args, fmt.Errorf("toX and toY must be normalized window coordinates between 0 inclusive and 1 exclusive")
 			}
 			if args.Button != "" || args.ClickCount != nil || args.DeltaX != nil || args.DeltaY != nil {
 				return args, fmt.Errorf("drag accepts only x, y, toX, and toY")
@@ -361,19 +413,46 @@ func decodeComputerActArgs(raw []byte) (computerActArgs, error) {
 
 func validComputerToolAction(action string) bool {
 	switch action {
-	case computer.ActionPress, computer.ActionSetValue, computer.ActionSelect, computer.ActionSubmit, computer.ActionClick, computer.ActionDrag, computer.ActionScroll:
+	case computer.ActionPress, computer.ActionSetValue, computer.ActionSelect, computer.ActionSubmit, computer.ActionClick, computer.ActionDrag, computer.ActionScroll, computer.ActionSequence:
 		return true
 	default:
 		return false
 	}
 }
 
+func validateComputerSequenceAction(action computer.SemanticAction) (computer.SemanticAction, error) {
+	action.ElementID = strings.TrimSpace(action.ElementID)
+	action.Action = strings.TrimSpace(action.Action)
+	if action.ElementID == "" {
+		return action, fmt.Errorf("elementID is required")
+	}
+	switch action.Action {
+	case computer.ActionPress, computer.ActionSetValue, computer.ActionSelect, computer.ActionSubmit:
+	default:
+		return action, fmt.Errorf("action must be press, set_value, select, or submit")
+	}
+	if action.Action == computer.ActionSetValue && action.Value == nil {
+		return action, fmt.Errorf("value is required for set_value")
+	}
+	if action.Action != computer.ActionSetValue && action.Value != nil {
+		return action, fmt.Errorf("value is allowed only for set_value")
+	}
+	if action.Value != nil && utf8.RuneCountInString(*action.Value) > computer.MaxActionValueCharacters {
+		return action, fmt.Errorf("value is too long")
+	}
+	return action, nil
+}
+
+func hasComputerPointerFields(args computerActArgs) bool {
+	return args.X != nil || args.Y != nil || args.ToX != nil || args.ToY != nil || args.Button != "" || args.ClickCount != nil || args.DeltaX != nil || args.DeltaY != nil
+}
+
 func isComputerPointerAction(action string) bool {
 	return action == computer.ActionClick || action == computer.ActionDrag || action == computer.ActionScroll
 }
 
-func finiteNonNegativeNumber(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+func normalizedComputerCoordinate(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value < 1
 }
 
 func (args computerActArgs) pointerInput() computer.PointerInput {
@@ -436,8 +515,7 @@ func computerActApprovalDetails(call Call) (map[string]any, error) {
 		return nil, err
 	}
 	details := map[string]any{
-		"appID": args.AppID, "windowID": args.WindowID, "observationID": args.ObservationID,
-		"action": args.Action,
+		"appID": args.AppID, "windowID": args.WindowID, "action": args.Action,
 	}
 	if args.ElementID != "" {
 		details["elementID"] = args.ElementID
@@ -467,6 +545,23 @@ func computerActApprovalDetails(call Call) (map[string]any, error) {
 		}
 		details["valuePreview"] = preview
 		details["valueCharacters"] = len([]rune(*args.Value))
+	}
+	if len(args.Actions) > 0 {
+		actions := make([]map[string]any, 0, len(args.Actions))
+		for _, action := range args.Actions {
+			item := map[string]any{"elementID": action.ElementID, "action": action.Action}
+			if action.Value != nil {
+				preview := *action.Value
+				if len([]rune(preview)) > 200 {
+					preview = string([]rune(preview)[:200]) + "…"
+				}
+				item["valuePreview"] = preview
+				item["valueCharacters"] = len([]rune(*action.Value))
+			}
+			actions = append(actions, item)
+		}
+		details["actionCount"] = len(actions)
+		details["actions"] = actions
 	}
 	return details, nil
 }

@@ -90,12 +90,6 @@ struct ProtocolRequest: Decodable, Equatable {
       }
       let x = try required(params.x, "x")
       let y = try required(params.y, "y")
-      let captureWidth = try required(params.captureWidth, "captureWidth")
-      let captureHeight = try required(params.captureHeight, "captureHeight")
-      let scaleFactor = try required(params.scaleFactor, "scaleFactor")
-      guard captureWidth > 0, captureHeight > 0, scaleFactor.isFinite, scaleFactor > 0 else {
-        throw ArgumentError.invalidOption("capture", "dimensions and scale factor must be positive")
-      }
       let button: PointerButton?
       if let rawButton = params.button {
         guard let parsed = PointerButton(rawValue: rawButton) else {
@@ -119,10 +113,7 @@ struct ProtocolRequest: Decodable, Equatable {
       return .pointer(
         bundleID: try bundleID(params.bundleID),
         windowID: try positiveWindowID(params.windowID),
-        input: input,
-        captureWidth: captureWidth,
-        captureHeight: captureHeight,
-        scaleFactor: scaleFactor
+        input: input
       )
     default:
       throw ArgumentError.unknownCommand(command)
@@ -176,9 +167,6 @@ struct ProtocolParameters: Codable, Equatable {
   var clickCount: Int? = nil
   var deltaX: Int? = nil
   var deltaY: Int? = nil
-  var captureWidth: Int? = nil
-  var captureHeight: Int? = nil
-  var scaleFactor: Double? = nil
 }
 
 private struct ProtocolSuccess: Encodable {

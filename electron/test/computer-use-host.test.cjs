@@ -68,15 +68,14 @@ test("ComputerUseHost sends pointer actions", async () => {
   const fake = new FakeHelper();
   const host = createHost(fake);
   const pointer = host.pointer({
-    bundleID: "com.example.App", windowID: 42, action: "click", x: 12, y: 34,
+    bundleID: "com.example.App", windowID: 42, action: "click", x: 0.12, y: 0.34,
     button: "left", clickCount: 2,
-    captureWidth: 200, captureHeight: 100, scaleFactor: 2,
   });
   await fake.waitForRequests(1);
   assert.equal(fake.requests[0].command, "pointer");
-  assert.equal(fake.requests[0].params.x, 12);
+  assert.equal(fake.requests[0].params.x, 0.12);
   assert.equal(fake.requests[0].params.clickCount, 2);
-  fake.respond(fake.requests[0].id, { bundleID: "com.example.App", action: "click", completed: true, x: 12, y: 34, button: "left", clickCount: 2 });
+  fake.respond(fake.requests[0].id, { bundleID: "com.example.App", action: "click", completed: true, x: 0.12, y: 0.34, button: "left", clickCount: 2 });
   assert.equal((await pointer).completed, true);
   await host.stop();
 });

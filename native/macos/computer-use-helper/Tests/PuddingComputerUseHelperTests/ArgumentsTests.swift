@@ -128,16 +128,12 @@ import Testing
     try ArgumentParser.parse([
       "pointer", "--bundle-id", "com.example.App", "--window-id", "42",
       "--action", "click", "--button", "left", "--click-count", "2",
-      "--x", "12", "--y", "34", "--capture-width", "200",
-      "--capture-height", "100", "--scale-factor", "2",
+      "--x", "0.12", "--y", "0.34",
     ]) == .pointer(
       bundleID: "com.example.App",
       windowID: 42,
       input: PointerInput(
-        action: .click, x: 12, y: 34, toX: nil, toY: nil,
-        button: .left, clickCount: 2, deltaX: nil, deltaY: nil),
-      captureWidth: 200,
-      captureHeight: 100,
-      scaleFactor: 2
+        action: .click, x: 0.12, y: 0.34, toX: nil, toY: nil,
+        button: .left, clickCount: 2, deltaX: nil, deltaY: nil)
     ))
 }

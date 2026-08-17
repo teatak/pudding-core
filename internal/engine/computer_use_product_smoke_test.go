@@ -295,14 +295,14 @@ func (r computerUseSmokeResolver) Resolve(_ context.Context, name string) (provi
 }
 
 type computerUseSmokeClient struct {
-	mu         sync.Mutex
-	scenario   computerUseSmokeScenario
-	requests   int
-	stage      int
-	launchID   string
-	windowID   uint32
-	screenshot *computer.Capture
-	err        error
+	mu          sync.Mutex
+	scenario    computerUseSmokeScenario
+	requests    int
+	stage       int
+	launchID    string
+	windowID    uint32
+	observation computer.Observation
+	err         error
 }
 
 func (c *computerUseSmokeClient) Name() string { return "computer-use-" + c.scenario.name + "-smoke" }
@@ -361,52 +361,62 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 		}
 		name, callID = tool.ComputerObserve, "call_computer_observe"
 		args = map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "maxElements": 300, "includeScreenshot": true}
-	case stage >= 4 && stage <= 4+len(c.scenario.actions):
-		completedActions := stage - 4
-		var observation *computer.ManagedObservation
-		if completedActions == 0 {
-			var result struct {
-				OK          bool                        `json:"ok"`
-				Observation computer.ManagedObservation `json:"observation"`
-				Screenshot  *struct {
-					WindowID      uint32  `json:"windowID"`
-					Width         int     `json:"width"`
-					Height        int     `json:"height"`
-					ScaleFactor   float64 `json:"scaleFactor"`
-					AttachmentKey string  `json:"attachmentKey"`
-				} `json:"screenshot"`
-			}
-			if err := decodeSmokeToolResult(req, tool.ComputerObserve, &result); err != nil {
-				return c.fail(err)
-			}
-			if !result.OK || result.Screenshot == nil || result.Screenshot.WindowID != c.windowID || result.Screenshot.AttachmentKey == "" {
-				return c.fail(errors.New("Computer Use observation failed"))
-			}
-			c.screenshot = &computer.Capture{
-				WindowID: result.Screenshot.WindowID, Width: result.Screenshot.Width,
-				Height: result.Screenshot.Height, ScaleFactor: result.Screenshot.ScaleFactor,
-			}
-			observation = &result.Observation
-		} else {
+	case stage == 4:
+		var result struct {
+			OK          bool                 `json:"ok"`
+			Observation computer.Observation `json:"observation"`
+			Screenshot  *struct {
+				WindowID      uint32 `json:"windowID"`
+				AttachmentKey string `json:"attachmentKey"`
+			} `json:"screenshot"`
+		}
+		if err := decodeSmokeToolResult(req, tool.ComputerObserve, &result); err != nil {
+			return c.fail(err)
+		}
+		if !result.OK || result.Screenshot == nil || result.Screenshot.WindowID != c.windowID || result.Screenshot.AttachmentKey == "" {
+			return c.fail(errors.New("Computer Use observation failed"))
+		}
+		c.observation = result.Observation
+		var actionErr error
+		name, callID, args, actionErr = c.smokeActionCall(c.scenario.actions[0])
+		if actionErr != nil {
+			return c.fail(actionErr)
+		}
+	case stage >= 5 && stage <= 4+2*len(c.scenario.actions):
+		step := stage - 5
+		actionIndex := step / 2
+		if step%2 == 0 {
 			result, err := decodeSmokeActionResult(req)
 			if err != nil {
 				return c.fail(err)
 			}
-			observation = result.Observation
-			if observation == nil {
-				return c.fail(errors.New("Computer Use action did not return a fresh observation"))
-			}
-			completed := c.scenario.actions[completedActions-1]
+			completed := c.scenario.actions[actionIndex]
 			if result.Action.Action != completed.action {
 				return c.fail(fmt.Errorf("Computer Use returned action %q, want %q", result.Action.Action, completed.action))
 			}
-			if completed.verify != nil {
-				if err := completed.verify(observation.Snapshot.Elements); err != nil {
-					return c.fail(err)
-				}
+			name, callID = tool.ComputerObserve, completed.callID+"_verify"
+			args = map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "maxElements": 300}
+			break
+		}
+
+		var result struct {
+			OK          bool                 `json:"ok"`
+			Observation computer.Observation `json:"observation"`
+		}
+		if err := decodeSmokeToolResult(req, tool.ComputerObserve, &result); err != nil {
+			return c.fail(err)
+		}
+		if !result.OK {
+			return c.fail(errors.New("Computer Use verification observation failed"))
+		}
+		c.observation = result.Observation
+		completed := c.scenario.actions[actionIndex]
+		if completed.verify != nil {
+			if err := completed.verify(c.observation.Elements); err != nil {
+				return c.fail(err)
 			}
 		}
-		if completedActions == len(c.scenario.actions) {
+		if actionIndex+1 == len(c.scenario.actions) {
 			if !c.scenario.expectOwned {
 				c.stage = stage
 				return smokeTextStream("Computer Use " + c.scenario.name + " smoke completed without closing the app."), nil
@@ -415,32 +425,11 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 			args = map[string]any{"launchID": c.launchID}
 			break
 		}
-		action := c.scenario.actions[completedActions]
-		if action.pointer {
-			pointerArgs, err := smokePointerClickArgs(*observation, c.screenshot)
-			if err != nil {
-				return c.fail(err)
-			}
-			pointerArgs["appID"] = c.scenario.appID
-			pointerArgs["windowID"] = c.windowID
-			pointerArgs["observationID"] = observation.ObservationID
-			name, callID, args = tool.ComputerAct, action.callID, pointerArgs
-			break
+		var actionErr error
+		name, callID, args, actionErr = c.smokeActionCall(c.scenario.actions[actionIndex+1])
+		if actionErr != nil {
+			return c.fail(actionErr)
 		}
-		element := smokeElement(observation.Snapshot.Elements, action.action, action.matches)
-		if element == nil {
-			return c.fail(fmt.Errorf("%s action target %s was not observed", c.scenario.name, action.callID))
-		}
-		name, callID = tool.ComputerAct, action.callID
-		actionArgs := map[string]any{
-			"appID": c.scenario.appID, "windowID": c.windowID,
-			"observationID": observation.ObservationID, "elementID": element.ElementID,
-			"action": action.action,
-		}
-		if action.value != nil {
-			actionArgs["value"] = *action.value
-		}
-		args = actionArgs
 	case stage == c.finalStage():
 		var result struct {
 			OK     bool                `json:"ok"`
@@ -466,21 +455,42 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	return smokeToolStream(callID, name, string(rawArgs)), nil
 }
 
-func smokePointerClickArgs(observation computer.ManagedObservation, capture *computer.Capture) (map[string]any, error) {
-	if capture == nil || capture.Width <= 0 || capture.Height <= 0 || !isPositiveFinite(capture.ScaleFactor) {
-		return nil, errors.New("Computer Use screenshot geometry is missing")
+func (c *computerUseSmokeClient) smokeActionCall(action computerUseSmokeAction) (string, string, any, error) {
+	if action.pointer {
+		args, err := smokePointerClickArgs(c.observation, c.windowID)
+		if err != nil {
+			return "", "", nil, err
+		}
+		args["appID"] = c.scenario.appID
+		args["windowID"] = c.windowID
+		return tool.ComputerAct, action.callID, args, nil
 	}
+	element := smokeElement(c.observation.Elements, action.action, action.matches)
+	if element == nil {
+		return "", "", nil, fmt.Errorf("%s action target %s was not observed", c.scenario.name, action.callID)
+	}
+	args := map[string]any{
+		"appID": c.scenario.appID, "windowID": c.windowID,
+		"elementID": element.ElementID, "action": action.action,
+	}
+	if action.value != nil {
+		args["value"] = *action.value
+	}
+	return tool.ComputerAct, action.callID, args, nil
+}
+
+func smokePointerClickArgs(observation computer.Observation, windowID uint32) (map[string]any, error) {
 	var windowFrame *computer.Frame
-	for index := range observation.Snapshot.Windows {
-		window := &observation.Snapshot.Windows[index]
-		if window.WindowID != nil && *window.WindowID == capture.WindowID {
+	for index := range observation.Windows {
+		window := &observation.Windows[index]
+		if window.WindowID != nil && *window.WindowID == windowID {
 			windowFrame = window.Frame
 			break
 		}
 	}
 	var targetFrame *computer.Frame
-	for index := range observation.Snapshot.Elements {
-		element := &observation.Snapshot.Elements[index]
+	for index := range observation.Elements {
+		element := &observation.Elements[index]
 		if smokeElementName(*element) == "Fixture pointer target" {
 			targetFrame = element.Frame
 			break
@@ -489,10 +499,13 @@ func smokePointerClickArgs(observation computer.ManagedObservation, capture *com
 	if windowFrame == nil || targetFrame == nil {
 		return nil, errors.New("fixture pointer geometry was not observed")
 	}
-	x := (targetFrame.X - windowFrame.X + targetFrame.Width/2) * capture.ScaleFactor
-	y := (targetFrame.Y - windowFrame.Y + targetFrame.Height/2) * capture.ScaleFactor
-	if !isFiniteCoordinate(x, capture.Width) || !isFiniteCoordinate(y, capture.Height) {
-		return nil, errors.New("fixture pointer coordinate is outside the screenshot")
+	if windowFrame.Width <= 0 || windowFrame.Height <= 0 {
+		return nil, errors.New("fixture window geometry is invalid")
+	}
+	x := (targetFrame.X - windowFrame.X + targetFrame.Width/2) / windowFrame.Width
+	y := (targetFrame.Y - windowFrame.Y + targetFrame.Height/2) / windowFrame.Height
+	if !isNormalizedCoordinate(x) || !isNormalizedCoordinate(y) {
+		return nil, errors.New("fixture pointer coordinate is outside the window")
 	}
 	return map[string]any{
 		"action": computer.ActionClick, "x": x, "y": y,
@@ -500,19 +513,15 @@ func smokePointerClickArgs(observation computer.ManagedObservation, capture *com
 	}, nil
 }
 
-func isPositiveFinite(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0
-}
-
-func isFiniteCoordinate(value float64, limit int) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value < float64(limit)
+func isNormalizedCoordinate(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value < 1
 }
 
 func (c *computerUseSmokeClient) finalStage() int {
 	if c.scenario.expectOwned {
-		return 5 + len(c.scenario.actions)
+		return 5 + 2*len(c.scenario.actions)
 	}
-	return 4 + len(c.scenario.actions)
+	return 4 + 2*len(c.scenario.actions)
 }
 
 func (c *computerUseSmokeClient) fail(err error) (<-chan provider.Chunk, error) {

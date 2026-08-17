@@ -168,7 +168,7 @@ import Testing
   #expect(try request.helperCommand() == .applicationIdentity(bundleID: "com.apple.Notes"))
 }
 
-@Test func protocolPointerRoutesActionAndCaptureGeometry() throws {
+@Test func protocolPointerRoutesNormalizedWindowCoordinates() throws {
   let request = ProtocolRequest(
     id: "req-click",
     command: "pointer",
@@ -176,13 +176,10 @@ import Testing
       bundleID: "com.example.App",
       windowID: 42,
       action: "drag",
-      x: 12,
-      y: 34,
-      toX: 56,
-      toY: 78,
-      captureWidth: 200,
-      captureHeight: 100,
-      scaleFactor: 2
+      x: 0.12,
+      y: 0.34,
+      toX: 0.56,
+      toY: 0.78
     )
   )
   #expect(
@@ -190,19 +187,15 @@ import Testing
       bundleID: "com.example.App",
       windowID: 42,
       input: PointerInput(
-        action: .drag, x: 12, y: 34, toX: 56, toY: 78,
-        button: nil, clickCount: nil, deltaX: nil, deltaY: nil),
-      captureWidth: 200,
-      captureHeight: 100,
-      scaleFactor: 2
+        action: .drag, x: 0.12, y: 0.34, toX: 0.56, toY: 0.78,
+        button: nil, clickCount: nil, deltaX: nil, deltaY: nil)
     ))
 }
 
 @Test func protocolPointerRejectsMixedOrUnsafeGestures() {
   let common = ProtocolParameters(
     bundleID: "com.example.App", windowID: 42, action: "click",
-    x: 12, y: 34, button: "right", clickCount: 2,
-    captureWidth: 200, captureHeight: 100, scaleFactor: 2)
+    x: 0.12, y: 0.34, button: "right", clickCount: 2)
   #expect(throws: ArgumentError.self) {
     try ProtocolRequest(id: "right-double", command: "pointer", params: common).helperCommand()
   }
@@ -211,7 +204,7 @@ import Testing
       id: "drag-missing-end", command: "pointer",
       params: ProtocolParameters(
         bundleID: "com.example.App", windowID: 42, action: "drag",
-        x: 12, y: 34, captureWidth: 200, captureHeight: 100, scaleFactor: 2)
+        x: 0.12, y: 0.34)
     ).helperCommand()
   }
   #expect(throws: ArgumentError.self) {
@@ -219,8 +212,7 @@ import Testing
       id: "scroll-zero", command: "pointer",
       params: ProtocolParameters(
         bundleID: "com.example.App", windowID: 42, action: "scroll",
-        x: 12, y: 34, deltaX: 0, deltaY: 0,
-        captureWidth: 200, captureHeight: 100, scaleFactor: 2)
+        x: 0.12, y: 0.34, deltaX: 0, deltaY: 0)
     ).helperCommand()
   }
 }

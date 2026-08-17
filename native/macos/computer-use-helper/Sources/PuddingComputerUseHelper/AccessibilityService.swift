@@ -259,8 +259,7 @@ final class AccessibilityService {
           role: role,
           subrole: subrole,
           identifier: identifier,
-          label: label,
-          frame: elementFrame
+          label: label
         )
         let secure = subrole == (kAXSecureTextFieldSubrole as String)
         let actions = identityStable

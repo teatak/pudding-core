@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class WindowActivityIndicator {
   static let shared = WindowActivityIndicator()
-  private static let idleReleaseDelay = Duration.seconds(5)
+  private static let idleReleaseDelay = Duration.seconds(30)
 
   private struct Target: Equatable {
     let bundleID: String

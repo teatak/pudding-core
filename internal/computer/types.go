@@ -13,12 +13,14 @@ const (
 	ActionClick    = "click"
 	ActionDrag     = "drag"
 	ActionScroll   = "scroll"
+	ActionSequence = "action_sequence"
 
 	PointerButtonLeft  = "left"
 	PointerButtonRight = "right"
 
 	MaxAppIDBytes            = 512
 	MaxActionValueCharacters = 20_000
+	MaxActionSequenceSteps   = 32
 
 	WindowStatusReady  = "ready"
 	WindowStatusNone   = "none"
@@ -128,12 +130,6 @@ type Observation struct {
 	Elements   []Element `json:"elements"`
 }
 
-type ManagedObservation struct {
-	ObservationID string      `json:"observationID"`
-	ExpiresAt     string      `json:"expiresAt"`
-	Snapshot      Observation `json:"snapshot"`
-}
-
 type Capture struct {
 	WindowID    uint32  `json:"windowID"`
 	Output      string  `json:"output"`
@@ -145,11 +141,6 @@ type Capture struct {
 type NativeObservationCapture struct {
 	Observation Observation `json:"observation"`
 	Capture     *Capture    `json:"capture,omitempty"`
-}
-
-type ManagedObservationCapture struct {
-	Observation ManagedObservation `json:"observation"`
-	Capture     *Capture           `json:"capture,omitempty"`
 }
 
 type NativeAction struct {
@@ -179,13 +170,6 @@ type PointerInput struct {
 	DeltaY     *int
 }
 
-type ScreenshotPointer struct {
-	PointerInput
-	CaptureWidth  int
-	CaptureHeight int
-	ScaleFactor   float64
-}
-
 type Failure struct {
 	Code        string   `json:"code"`
 	Message     string   `json:"message"`
@@ -196,9 +180,20 @@ type Failure struct {
 }
 
 type ActionResult struct {
-	Action           NativeAction        `json:"action"`
-	Observation      *ManagedObservation `json:"observation,omitempty"`
-	ObservationError *Failure            `json:"observationError,omitempty"`
+	Action NativeAction `json:"action"`
+}
+
+type SemanticAction struct {
+	ElementID string  `json:"elementID"`
+	Action    string  `json:"action"`
+	Value     *string `json:"value,omitempty"`
+}
+
+type ActionSequenceResult struct {
+	Actions        []NativeAction `json:"actions"`
+	CompletedCount int            `json:"completedCount"`
+	FailedIndex    *int           `json:"failedIndex,omitempty"`
+	Failure        *Failure       `json:"failure,omitempty"`
 }
 
 type Service interface {
@@ -209,7 +204,7 @@ type Service interface {
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error)
 	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error)
 	Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (NativeAction, error)
-	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer ScreenshotPointer) (NativeAction, error)
+	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (NativeAction, error)
 }
 
 type Controller interface {
@@ -217,10 +212,11 @@ type Controller interface {
 	UseApp(ctx context.Context, sessionID, appID string, foreground bool) (UseResult, error)
 	OwnedLaunchAppID(sessionID, launchID string) (string, bool)
 	QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error)
-	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (ManagedObservation, error)
-	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (ManagedObservationCapture, error)
-	Act(ctx context.Context, sessionID, appID string, windowID uint32, observationID, elementID, action string, value *string) (ActionResult, error)
-	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, observationID string, pointer PointerInput) (ActionResult, error)
+	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error)
+	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error)
+	Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (ActionResult, error)
+	ActSequence(ctx context.Context, sessionID, appID string, windowID uint32, actions []SemanticAction) (ActionSequenceResult, error)
+	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (ActionResult, error)
 	ReleaseSession(ctx context.Context, sessionID string) error
 }
 

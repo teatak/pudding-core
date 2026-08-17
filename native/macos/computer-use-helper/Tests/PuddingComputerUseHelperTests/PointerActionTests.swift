@@ -3,41 +3,29 @@ import Testing
 
 @testable import PuddingComputerUseHelper
 
-@Test func pointerCoordinatesMapScreenshotPixelsAndAllowWindowMovement() throws {
+@Test func pointerCoordinatesMapNormalizedCurrentWindowPosition() throws {
   let point = try PointerCoordinatePolicy.globalPoint(
     frame: FrameSnapshot(x: 300, y: 400, width: 100, height: 50),
-    currentScaleFactor: 2,
-    x: 40,
-    y: 20,
-    captureWidth: 200,
-    captureHeight: 100,
-    captureScaleFactor: 2
+    x: 0.4,
+    y: 0.2
   )
-  #expect(point.x == 320)
+  #expect(point.x == 340)
   #expect(point.y == 410)
 }
 
-@Test func pointerCoordinatesRejectChangedGeometryAndOutOfBoundsPixels() {
+@Test func pointerCoordinatesRejectInvalidWindowOrNormalizedCoordinates() {
   #expect(throws: HelperError.self) {
     try PointerCoordinatePolicy.globalPoint(
-      frame: FrameSnapshot(x: 0, y: 0, width: 120, height: 50),
-      currentScaleFactor: 2,
-      x: 40,
-      y: 20,
-      captureWidth: 200,
-      captureHeight: 100,
-      captureScaleFactor: 2
+      frame: FrameSnapshot(x: 0, y: 0, width: 0, height: 50),
+      x: 0.4,
+      y: 0.2
     )
   }
   #expect(throws: HelperError.self) {
     try PointerCoordinatePolicy.globalPoint(
       frame: FrameSnapshot(x: 0, y: 0, width: 100, height: 50),
-      currentScaleFactor: 2,
-      x: 200,
-      y: 20,
-      captureWidth: 200,
-      captureHeight: 100,
-      captureScaleFactor: 2
+      x: 1,
+      y: 0.2
     )
   }
 }
@@ -154,7 +142,7 @@ import Testing
       start: CGPoint(x: 10, y: 20), end: nil)
     Issue.record("expected target-window rejection")
   } catch let error as HelperError {
-    #expect(error.code == "computer_observation_stale")
+    #expect(error.code == "computer_pointer_target_changed")
     #expect(error.outcome == .notStarted)
   }
 }

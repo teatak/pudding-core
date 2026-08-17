@@ -10,26 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 )
-
-const (
-	observationTTL            = 2 * time.Minute
-	captureObservationTTL     = 15 * time.Second
-	maxObservationsPerSession = 16
-)
-
-type observationRecord struct {
-	managed     ManagedObservation
-	sessionID   string
-	appID       string
-	windowID    uint32
-	maxElements int
-	actions     map[string]map[string]bool
-	capture     *Capture
-	expiresAt   time.Time
-}
 
 type launchRecord struct {
 	launchID string
@@ -40,19 +22,15 @@ type launchRecord struct {
 
 type Manager struct {
 	service  Service
-	now      func() time.Time
 	write    chan struct{}
 	mu       sync.Mutex
-	items    map[string]map[string]observationRecord
 	launches map[string]map[string]launchRecord
 }
 
 func NewManager(service Service) *Manager {
 	return &Manager{
 		service:  service,
-		now:      time.Now,
 		write:    make(chan struct{}, 1),
-		items:    map[string]map[string]observationRecord{},
 		launches: map[string]map[string]launchRecord{},
 	}
 }
@@ -164,78 +142,64 @@ func (m *Manager) OwnedLaunchAppID(sessionID, launchID string) (string, bool) {
 	return record.appID, true
 }
 
-func (m *Manager) Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (ManagedObservation, error) {
+func (m *Manager) Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
-		return ManagedObservation{}, err
+		return Observation{}, err
 	}
 	if maxElements == 0 {
 		maxElements = 200
 	}
 	if maxElements < 1 || maxElements > 1_000 {
-		return ManagedObservation{}, invalid("maxElements must be between 1 and 1000")
+		return Observation{}, invalid("maxElements must be between 1 and 1000")
 	}
 	snapshot, err := m.service.Observe(ctx, sessionID, appID, windowID, maxElements)
 	if err != nil {
-		return ManagedObservation{}, err
+		return Observation{}, err
 	}
-	return m.storeObservation(sessionID, appID, windowID, maxElements, snapshot, nil)
+	return validateObservation(appID, windowID, snapshot)
 }
 
-func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (ManagedObservationCapture, error) {
+func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
-		return ManagedObservationCapture{}, err
+		return NativeObservationCapture{}, err
 	}
 	if maxElements == 0 {
 		maxElements = 200
 	}
 	if maxElements < 1 || maxElements > 1_000 {
-		return ManagedObservationCapture{}, invalid("maxElements must be between 1 and 1000")
+		return NativeObservationCapture{}, invalid("maxElements must be between 1 and 1000")
 	}
 	if strings.TrimSpace(output) == "" {
-		return ManagedObservationCapture{}, invalid("output is required")
+		return NativeObservationCapture{}, invalid("output is required")
 	}
 	native, err := m.service.ObserveCapture(ctx, sessionID, appID, windowID, maxElements, output)
 	if err != nil {
-		return ManagedObservationCapture{}, err
+		return NativeObservationCapture{}, err
 	}
 	if native.Capture == nil {
-		return ManagedObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use observe-capture returned an invalid capture result", Outcome: "unknown"}
+		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use observe-capture returned an invalid capture result", Outcome: "unknown"}
 	}
 	if native.Capture != nil && !validCapture(*native.Capture, windowID, output) {
-		return ManagedObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use capture returned an invalid result", Outcome: "unknown"}
+		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use capture returned an invalid result", Outcome: "unknown"}
 	}
-	managed, err := m.storeObservation(sessionID, appID, windowID, maxElements, native.Observation, native.Capture)
+	validated, err := validateObservation(appID, windowID, native.Observation)
 	if err != nil {
-		return ManagedObservationCapture{}, err
+		return NativeObservationCapture{}, err
 	}
-	return ManagedObservationCapture{Observation: managed, Capture: native.Capture}, nil
+	return NativeObservationCapture{Observation: validated, Capture: native.Capture}, nil
 }
 
 func validCapture(captured Capture, windowID uint32, output string) bool {
 	return captured.WindowID == windowID && filepath.Clean(captured.Output) == filepath.Clean(output) && captured.Width > 0 && captured.Height > 0 && captured.ScaleFactor > 0
 }
 
-func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uint32, observationID, elementID, action string, value *string) (ActionResult, error) {
+func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (ActionResult, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
 		return ActionResult{}, err
 	}
-	observationID = strings.TrimSpace(observationID)
-	elementID = strings.TrimSpace(elementID)
-	action = strings.TrimSpace(action)
-	if observationID == "" || elementID == "" {
-		return ActionResult{}, invalid("observationID and elementID are required")
-	}
-	if !validAction(action) {
-		return ActionResult{}, invalid("action must be press, set_value, select, or submit")
-	}
-	if action == ActionSetValue && value == nil {
-		return ActionResult{}, invalid("value is required for set_value")
-	}
-	if action != ActionSetValue && value != nil {
-		return ActionResult{}, invalid("value is allowed only for set_value")
-	}
-	if value != nil && utf8.RuneCountInString(*value) > MaxActionValueCharacters {
-		return ActionResult{}, invalid("value is too long")
+	semantic, err := validateSemanticAction(SemanticAction{ElementID: elementID, Action: action, Value: value})
+	if err != nil {
+		return ActionResult{}, err
 	}
 
 	if err := m.acquireWrite(ctx, "action"); err != nil {
@@ -243,38 +207,90 @@ func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uin
 	}
 	defer m.releaseWrite()
 
-	record, err := m.takeObservation(sessionID, observationID)
+	native, err := m.service.Act(ctx, sessionID, appID, windowID, semantic.ElementID, semantic.Action, semantic.Value)
 	if err != nil {
 		return ActionResult{}, err
 	}
-	if record.appID != appID || record.windowID != windowID {
-		return ActionResult{}, &OperationError{Code: "computer_observation_stale", Message: "observation does not match the requested application and window", Outcome: "not_started"}
-	}
-	allowed := record.actions[elementID]
-	if allowed == nil {
-		return ActionResult{}, &OperationError{Code: "computer_element_not_found", Message: "element is not present in the observation", Outcome: "not_started"}
-	}
-	if !allowed[action] {
-		return ActionResult{}, &OperationError{Code: "computer_element_not_actionable", Message: "element does not support the requested action", Outcome: "not_started"}
-	}
-
-	native, err := m.service.Act(ctx, sessionID, appID, windowID, elementID, action, value)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	if !native.Completed || native.AppID != appID || native.ElementID != elementID || native.Action != action {
+	if !matchesSemanticResult(native, appID, semantic) {
 		return ActionResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use action returned an invalid result", Outcome: "unknown"}
 	}
-	return m.finishAction(ctx, sessionID, appID, windowID, record, native), nil
+	return ActionResult{Action: native}, nil
 }
 
-func (m *Manager) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, observationID string, pointer PointerInput) (ActionResult, error) {
+func (m *Manager) ActSequence(ctx context.Context, sessionID, appID string, windowID uint32, actions []SemanticAction) (ActionSequenceResult, error) {
+	if err := validateTarget(sessionID, appID, windowID); err != nil {
+		return ActionSequenceResult{}, err
+	}
+	if len(actions) < 2 || len(actions) > MaxActionSequenceSteps {
+		return ActionSequenceResult{}, invalid("action_sequence requires between 2 and 32 actions")
+	}
+	validated := make([]SemanticAction, len(actions))
+	for index, action := range actions {
+		resolved, err := validateSemanticAction(action)
+		if err != nil {
+			return ActionSequenceResult{}, invalid(fmt.Sprintf("actions[%d]: %s", index, err.Error()))
+		}
+		validated[index] = resolved
+	}
+
+	if err := m.acquireWrite(ctx, "action sequence"); err != nil {
+		return ActionSequenceResult{}, err
+	}
+	defer m.releaseWrite()
+
+	result := ActionSequenceResult{Actions: make([]NativeAction, 0, len(validated))}
+	for index, action := range validated {
+		native, actionErr := m.service.Act(ctx, sessionID, appID, windowID, action.ElementID, action.Action, action.Value)
+		if actionErr != nil {
+			failure := ErrorFailure(actionErr)
+			if result.CompletedCount > 0 && failure.Outcome == "not_started" {
+				failure.Outcome = "completed"
+				failure.Retryable = false
+			}
+			result.FailedIndex = &index
+			result.Failure = &failure
+			return result, nil
+		}
+		if !matchesSemanticResult(native, appID, action) {
+			failure := ErrorFailure(&OperationError{Code: "computer_invalid_response", Message: "Computer Use action sequence returned an invalid result", Outcome: "unknown"})
+			result.FailedIndex = &index
+			result.Failure = &failure
+			return result, nil
+		}
+		result.Actions = append(result.Actions, native)
+		result.CompletedCount++
+	}
+	return result, nil
+}
+
+func validateSemanticAction(action SemanticAction) (SemanticAction, error) {
+	action.ElementID = strings.TrimSpace(action.ElementID)
+	action.Action = strings.TrimSpace(action.Action)
+	if action.ElementID == "" {
+		return action, invalid("elementID is required")
+	}
+	if !validAction(action.Action) {
+		return action, invalid("action must be press, set_value, select, or submit")
+	}
+	if action.Action == ActionSetValue && action.Value == nil {
+		return action, invalid("value is required for set_value")
+	}
+	if action.Action != ActionSetValue && action.Value != nil {
+		return action, invalid("value is allowed only for set_value")
+	}
+	if action.Value != nil && utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters {
+		return action, invalid("value is too long")
+	}
+	return action, nil
+}
+
+func matchesSemanticResult(native NativeAction, appID string, action SemanticAction) bool {
+	return native.Completed && native.AppID == appID && native.ElementID == action.ElementID && native.Action == action.Action
+}
+
+func (m *Manager) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (ActionResult, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
 		return ActionResult{}, err
-	}
-	observationID = strings.TrimSpace(observationID)
-	if observationID == "" {
-		return ActionResult{}, invalid("observationID is required")
 	}
 	if err := validatePointerInput(pointer); err != nil {
 		return ActionResult{}, err
@@ -284,37 +300,19 @@ func (m *Manager) Pointer(ctx context.Context, sessionID, appID string, windowID
 	}
 	defer m.releaseWrite()
 
-	record, err := m.takeObservation(sessionID, observationID)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	if record.appID != appID || record.windowID != windowID {
-		return ActionResult{}, &OperationError{Code: "computer_observation_stale", Message: "observation does not match the requested application and window", Outcome: "not_started"}
-	}
-	if record.capture == nil {
-		return ActionResult{}, &OperationError{Code: "computer_coordinate_source_required", Message: "pointer input requires a screenshot from the same observation", Outcome: "not_started"}
-	}
-	if !pointInCapture(pointer.X, pointer.Y, record.capture) ||
-		(pointer.Action == ActionDrag && !pointInCapture(*pointer.ToX, *pointer.ToY, record.capture)) {
-		return ActionResult{}, &OperationError{Code: "computer_coordinate_out_of_bounds", Message: "coordinate is outside the observed screenshot", Outcome: "not_started"}
-	}
-	screenshotPointer := ScreenshotPointer{
-		PointerInput: pointer, CaptureWidth: record.capture.Width,
-		CaptureHeight: record.capture.Height, ScaleFactor: record.capture.ScaleFactor,
-	}
-	native, err := m.service.Pointer(ctx, sessionID, appID, windowID, screenshotPointer)
+	native, err := m.service.Pointer(ctx, sessionID, appID, windowID, pointer)
 	if err != nil {
 		return ActionResult{}, err
 	}
 	if !matchesPointerResult(native, appID, pointer) {
 		return ActionResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use pointer action returned an invalid result", Outcome: "unknown"}
 	}
-	return m.finishAction(ctx, sessionID, appID, windowID, record, native), nil
+	return ActionResult{Action: native}, nil
 }
 
 func validatePointerInput(pointer PointerInput) error {
-	if math.IsNaN(pointer.X) || math.IsInf(pointer.X, 0) || math.IsNaN(pointer.Y) || math.IsInf(pointer.Y, 0) || pointer.X < 0 || pointer.Y < 0 {
-		return invalid("x and y must be finite non-negative screenshot pixel coordinates")
+	if !normalizedCoordinate(pointer.X) || !normalizedCoordinate(pointer.Y) {
+		return invalid("x and y must be normalized window coordinates between 0 inclusive and 1 exclusive")
 	}
 	switch pointer.Action {
 	case ActionClick:
@@ -328,8 +326,8 @@ func validatePointerInput(pointer PointerInput) error {
 			return invalid("clickCount must be 1, or 2 for the left button")
 		}
 	case ActionDrag:
-		if pointer.ToX == nil || pointer.ToY == nil || !finiteNonNegative(*pointer.ToX) || !finiteNonNegative(*pointer.ToY) {
-			return invalid("drag requires finite non-negative toX and toY")
+		if pointer.ToX == nil || pointer.ToY == nil || !normalizedCoordinate(*pointer.ToX) || !normalizedCoordinate(*pointer.ToY) {
+			return invalid("drag requires normalized toX and toY between 0 inclusive and 1 exclusive")
 		}
 		if pointer.Button != "" || pointer.ClickCount != 0 || pointer.DeltaX != nil || pointer.DeltaY != nil {
 			return invalid("drag accepts only start and end coordinates")
@@ -347,12 +345,8 @@ func validatePointerInput(pointer PointerInput) error {
 	return nil
 }
 
-func finiteNonNegative(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
-}
-
-func pointInCapture(x, y float64, capture *Capture) bool {
-	return x >= 0 && y >= 0 && x < float64(capture.Width) && y < float64(capture.Height)
+func normalizedCoordinate(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value < 1
 }
 
 func matchesPointerResult(native NativeAction, appID string, pointer PointerInput) bool {
@@ -375,28 +369,6 @@ func matchesPointerResult(native NativeAction, appID string, pointer PointerInpu
 	}
 }
 
-func (m *Manager) finishAction(ctx context.Context, sessionID, appID string, windowID uint32, record observationRecord, native NativeAction) ActionResult {
-	result := ActionResult{Action: native}
-	latest, observeErr := m.service.Observe(ctx, sessionID, appID, windowID, record.maxElements)
-	if observeErr != nil {
-		failure := ErrorFailure(observeErr)
-		failure.Outcome = "completed"
-		failure.Retryable = false
-		result.ObservationError = &failure
-		return result
-	}
-	managed, storeErr := m.storeObservation(sessionID, appID, windowID, record.maxElements, latest, nil)
-	if storeErr != nil {
-		failure := ErrorFailure(storeErr)
-		failure.Outcome = "completed"
-		failure.Retryable = false
-		result.ObservationError = &failure
-		return result
-	}
-	result.Observation = &managed
-	return result
-}
-
 func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
 	if err := validateSessionID(sessionID); err != nil {
 		return err
@@ -407,7 +379,6 @@ func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
 	defer m.releaseWrite()
 	m.mu.Lock()
 	owned := m.launches[sessionID]
-	delete(m.items, sessionID)
 	delete(m.launches, sessionID)
 	m.mu.Unlock()
 	var errs []error
@@ -472,61 +443,33 @@ func (m *Manager) deleteLaunch(sessionID, launchID string) {
 	}
 }
 
-func (m *Manager) storeObservation(sessionID, appID string, windowID uint32, maxElements int, snapshot Observation, capture *Capture) (ManagedObservation, error) {
+func validateObservation(appID string, windowID uint32, snapshot Observation) (Observation, error) {
 	if snapshot.AppID != appID || snapshot.WindowID == nil || *snapshot.WindowID != windowID {
-		return ManagedObservation{}, &OperationError{Code: "computer_invalid_response", Message: "observation target does not match the request", Outcome: "unknown"}
+		return Observation{}, &OperationError{Code: "computer_invalid_response", Message: "observation target does not match the request", Outcome: "unknown"}
 	}
-	actions := make(map[string]map[string]bool, len(snapshot.Elements))
+	counts := make(map[string]int, len(snapshot.Elements))
 	for index := range snapshot.Elements {
 		element := &snapshot.Elements[index]
 		if element.ElementID == "" || element.WindowID == nil || *element.WindowID != windowID {
-			return ManagedObservation{}, &OperationError{Code: "computer_invalid_response", Message: "observation contains an invalid element target", Outcome: "unknown"}
+			return Observation{}, &OperationError{Code: "computer_invalid_response", Message: "observation contains an invalid element target", Outcome: "unknown"}
 		}
-		if _, exists := actions[element.ElementID]; exists {
-			return ManagedObservation{}, &OperationError{Code: "computer_invalid_response", Message: "observation contains duplicate element IDs", Outcome: "unknown"}
-		}
-		allowed := map[string]bool{}
-		if element.Secure {
+		counts[element.ElementID]++
+	}
+	for index := range snapshot.Elements {
+		element := &snapshot.Elements[index]
+		if element.Secure || counts[element.ElementID] > 1 {
 			element.Actions = nil
 		} else {
+			valid := element.Actions[:0]
 			for _, action := range element.Actions {
 				if validAction(action) {
-					allowed[action] = true
+					valid = append(valid, action)
 				}
 			}
+			element.Actions = valid
 		}
-		actions[element.ElementID] = allowed
 	}
-	id, err := newObservationID()
-	if err != nil {
-		return ManagedObservation{}, err
-	}
-	now := m.now()
-	ttl := observationTTL
-	if capture != nil {
-		ttl = captureObservationTTL
-	}
-	expiresAt := now.Add(ttl)
-	managed := ManagedObservation{ObservationID: id, ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano), Snapshot: snapshot}
-	var storedCapture *Capture
-	if capture != nil {
-		copied := *capture
-		storedCapture = &copied
-	}
-	record := observationRecord{managed: managed, sessionID: sessionID, appID: appID, windowID: windowID, maxElements: maxElements, actions: actions, capture: storedCapture, expiresAt: expiresAt}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupLocked(now)
-	items := m.items[sessionID]
-	if items == nil {
-		items = map[string]observationRecord{}
-		m.items[sessionID] = items
-	}
-	if len(items) >= maxObservationsPerSession {
-		return ManagedObservation{}, &OperationError{Code: "computer_observation_limit", Message: "too many live Computer Use observations in this session", Outcome: "not_started"}
-	}
-	items[id] = record
-	return managed, nil
+	return snapshot, nil
 }
 
 func validAction(action string) bool {
@@ -535,40 +478,6 @@ func validAction(action string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func (m *Manager) takeObservation(sessionID, observationID string) (observationRecord, error) {
-	now := m.now()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	items := m.items[sessionID]
-	record, ok := items[observationID]
-	if ok {
-		delete(items, observationID)
-		if len(items) == 0 {
-			delete(m.items, sessionID)
-		}
-	}
-	if !ok {
-		return observationRecord{}, &OperationError{Code: "computer_observation_not_found", Message: "observation was not found or was already consumed", Outcome: "not_started"}
-	}
-	if !now.Before(record.expiresAt) {
-		return observationRecord{}, &OperationError{Code: "computer_observation_stale", Message: "observation has expired", Outcome: "not_started"}
-	}
-	return record, nil
-}
-
-func (m *Manager) cleanupLocked(now time.Time) {
-	for sessionID, items := range m.items {
-		for id, record := range items {
-			if !now.Before(record.expiresAt) {
-				delete(items, id)
-			}
-		}
-		if len(items) == 0 {
-			delete(m.items, sessionID)
-		}
 	}
 }
 
@@ -600,10 +509,6 @@ func validateApp(sessionID, appID string) error {
 		return invalid("appID is too long")
 	}
 	return nil
-}
-
-func newObservationID() (string, error) {
-	return newRandomID("obs_")
 }
 
 func newLaunchID() (string, error) {

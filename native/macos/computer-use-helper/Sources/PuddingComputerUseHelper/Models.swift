@@ -164,7 +164,8 @@ enum HelperError: Error, LocalizedError {
   case ambiguousElement(String)
   case actionFailed(String)
   case captureFailed(String)
-  case coordinateSourceStale(String)
+  case invalidPointerInput(String)
+  case pointerTargetChanged(String)
   case appNotForeground(String, String)
   case responseTooLarge
   case applicationNotInstalled(String)
@@ -188,8 +189,10 @@ enum HelperError: Error, LocalizedError {
       return "computer_action_failed"
     case .captureFailed:
       return "computer_capture_failed"
-    case .coordinateSourceStale:
-      return "computer_observation_stale"
+    case .invalidPointerInput:
+      return "computer_invalid_request"
+    case .pointerTargetChanged:
+      return "computer_pointer_target_changed"
     case .appNotForeground:
       return "computer_app_not_foreground"
     case .responseTooLarge:
@@ -226,8 +229,10 @@ enum HelperError: Error, LocalizedError {
       return "action failed: \(reason)"
     case .captureFailed(let reason):
       return "capture failed: \(reason)"
-    case .coordinateSourceStale(let reason):
-      return "coordinate source is stale: \(reason)"
+    case .invalidPointerInput(let reason):
+      return "invalid pointer input: \(reason)"
+    case .pointerTargetChanged(let reason):
+      return "pointer target changed: \(reason)"
     case .appNotForeground(let bundleID, let foregroundApplication):
       return "application must be foreground for pointer input: \(bundleID); current foreground app: \(foregroundApplication)"
     case .responseTooLarge:

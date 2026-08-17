@@ -216,12 +216,10 @@ func (s *ElectronBridgeService) Act(ctx context.Context, sessionID, appID string
 	return NativeAction{AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed, X: raw.X, Y: raw.Y}, nil
 }
 
-func (s *ElectronBridgeService) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer ScreenshotPointer) (NativeAction, error) {
+func (s *ElectronBridgeService) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (NativeAction, error) {
 	body := map[string]any{
 		"sessionID": sessionID, "appID": appID, "windowID": windowID,
 		"action": pointer.Action, "x": pointer.X, "y": pointer.Y,
-		"captureWidth": pointer.CaptureWidth, "captureHeight": pointer.CaptureHeight,
-		"scaleFactor": pointer.ScaleFactor,
 	}
 	if pointer.ToX != nil {
 		body["toX"], body["toY"] = *pointer.ToX, *pointer.ToY
