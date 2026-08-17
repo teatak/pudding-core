@@ -28,12 +28,11 @@ export type DesktopPermissionState = {
 	supported: boolean;
 	accessibility: boolean;
 	screenRecording: boolean;
-	desktopScreenRecording: boolean;
 	camera: boolean;
 	microphone: boolean;
 };
 
-export type DesktopPermission = "accessibility" | "screenRecording" | "desktopScreenRecording" | "camera" | "microphone";
+export type DesktopPermission = "accessibility" | "screenRecording" | "camera" | "microphone";
 
 export type ComputerUsePermission = "accessibility" | "screenRecording";
 
@@ -164,7 +163,7 @@ export async function getDesktopApplicationIdentity(appID: string) {
 export async function getDesktopPermissions(): Promise<DesktopPermissionState> {
 	const bridge = desktopBridge();
 	if (!bridge?.getDesktopPermissions) {
-		return { supported: false, accessibility: false, screenRecording: false, desktopScreenRecording: false, camera: false, microphone: false };
+		return { supported: false, accessibility: false, screenRecording: false, camera: false, microphone: false };
 	}
 	return bridge.getDesktopPermissions();
 }

@@ -33,11 +33,11 @@ test("desktop permission controller is the shared state source", async () => {
   assert.equal(updates.length, 2);
 });
 
-test("desktop permission state combines Computer Use and media permissions", async () => {
+test("desktop permission state uses Computer Use as the screen recording source", async () => {
   const state = await desktopPermissionState(
     { permissions: async () => ({ accessibility: true, screenRecording: false, inputMonitoring: true }) },
     {
-      getMediaAccessStatus: (permission) => permission === "camera" || permission === "screen" ? "granted" : "denied",
+      getMediaAccessStatus: (permission) => permission === "camera" ? "granted" : "denied",
     },
     "darwin",
   );
@@ -45,7 +45,6 @@ test("desktop permission state combines Computer Use and media permissions", asy
     supported: true,
     accessibility: true,
     screenRecording: false,
-    desktopScreenRecording: true,
     camera: true,
     microphone: false,
   });
@@ -89,7 +88,6 @@ test("desktop permission request uses the owning native API", async () => {
 test("desktop permission settings URLs cover every managed macOS permission", () => {
   assert.match(desktopPermissionSettingsURL("accessibility", "darwin"), /Privacy_Accessibility$/);
   assert.match(desktopPermissionSettingsURL("screenRecording", "darwin"), /Privacy_ScreenCapture$/);
-  assert.match(desktopPermissionSettingsURL("desktopScreenRecording", "darwin"), /Privacy_ScreenCapture$/);
   assert.match(desktopPermissionSettingsURL("camera", "darwin"), /Privacy_Camera$/);
   assert.match(desktopPermissionSettingsURL("microphone", "darwin"), /Privacy_Microphone$/);
   assert.equal(desktopPermissionSettingsURL("speaker", "darwin"), "");

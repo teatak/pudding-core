@@ -20,7 +20,6 @@ const unavailableState: DesktopPermissionState = {
 	supported: false,
 	accessibility: false,
 	screenRecording: false,
-	desktopScreenRecording: false,
 	camera: false,
 	microphone: false,
 };
@@ -106,15 +105,6 @@ export function PermissionsSettings() {
 							/>
 						</PermissionGroup>
 						<PermissionGroup title={t("settings.permissions.mediaGroup")}>
-							<PermissionRow
-								allowed={state.desktopScreenRecording}
-								description={t("settings.permissions.desktopScreenRecordingDesc")}
-								label={t("settings.permissions.desktopScreenRecording")}
-								permission="desktopScreenRecording"
-								requestable={false}
-								requesting={false}
-								onRequest={requestPermission}
-							/>
 							<PermissionRow
 								allowed={state.camera}
 								description={t("settings.permissions.cameraDesc")}

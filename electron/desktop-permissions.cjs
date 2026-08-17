@@ -1,7 +1,6 @@
 const permissionSettingsURLs = Object.freeze({
   accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-  desktopScreenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   camera: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
   microphone: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
 });
@@ -59,7 +58,6 @@ async function desktopPermissionState(computerUseHost, systemPreferences, platfo
     supported: true,
     accessibility: Boolean(computerUse?.accessibility),
     screenRecording: Boolean(computerUse?.screenRecording),
-    desktopScreenRecording: systemPreferences.getMediaAccessStatus("screen") === "granted",
     camera: systemPreferences.getMediaAccessStatus("camera") === "granted",
     microphone: systemPreferences.getMediaAccessStatus("microphone") === "granted",
   };
@@ -75,8 +73,6 @@ async function requestDesktopPermission(computerUseHost, systemPreferences, perm
   }
   if (mediaPermissions.has(normalized)) {
     await systemPreferences.askForMediaAccess(normalized);
-  } else if (normalized === "desktopScreenRecording") {
-    throw new Error("Desktop Screen Recording must be granted in System Settings");
   } else {
     await computerUseHost.permissions({
       promptAccessibility: normalized === "accessibility",
@@ -98,7 +94,6 @@ function unsupportedState() {
     supported: false,
     accessibility: false,
     screenRecording: false,
-    desktopScreenRecording: false,
     camera: false,
     microphone: false,
   };
@@ -108,7 +103,6 @@ function samePermissionState(left, right) {
   return left.supported === right.supported &&
     left.accessibility === right.accessibility &&
     left.screenRecording === right.screenRecording &&
-    left.desktopScreenRecording === right.desktopScreenRecording &&
     left.camera === right.camera &&
     left.microphone === right.microphone;
 }
