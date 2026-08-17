@@ -42,23 +42,24 @@ const HEAD_ORIGIN_Y_PERCENT = (77 / 128) * 100;
 const HEAD_PERSPECTIVE_PX = 170;
 const HEAD_SHIFT_X_PERCENT = 2.7;
 const HEAD_SHIFT_Y_PERCENT = 1.35;
-const FACE_SHIFT_X = 12;
-const FACE_SHIFT_Y = 4;
-const FACE_YAW_SQUEEZE_X = 0.1;
-const FACE_YAW_ORIGIN_SHIFT_PERCENT = 12;
+const FACE_SHIFT_X = 4;
+const FACE_SHIFT_Y = 2;
+const FACE_YAW_SQUEEZE_X = 0.04;
+const FACE_YAW_ORIGIN_SHIFT_PERCENT = 6;
 const FACE_CENTER_X = 64;
 const FACE_CENTER_Y = 77;
-const FACE_Z_OFFSET_PX = 4;
+const FACE_Z_OFFSET_PX = 6;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
 const BODY_PATH = "M52 34 C56 34 72 34 76 34 C90 34 102 42 106 56 L108 84 C109 99 99 108 84 109 C71 111 57 111 44 109 C29 108 19 99 20 84 L22 56 C26 42 38 34 52 34 Z";
 const LEFT_ARM_PATH = "M30 85 C21 90 13 99 13 106";
 const RIGHT_ARM_PATH = "M98 85 C107 90 115 99 115 106";
-const LEFT_PALM_X = 13;
-const RIGHT_PALM_X = 115;
-const PALM_Y = 107;
+const LEFT_PALM_X = 14;
+const RIGHT_PALM_X = 114;
+const PALM_Y = 106;
 const MOUTH_PATH = "M59 88.5 Q64 91 69 88.5";
+const FACE_SCREEN_PATH = "M40 53 H88 C96 53 100 58 100 66 V88 C100 96 95 100 87 100 H41 C33 100 28 96 28 88 V66 C28 58 32 53 40 53 Z";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -541,7 +542,14 @@ export function Mascot({
                 strokeLinecap="round"
                 strokeWidth="9.5"
               />
-              <circle cx={LEFT_PALM_X} cy={PALM_Y} fill="var(--mascot-outline)" r="8" />
+              <ellipse
+                cx={LEFT_PALM_X}
+                cy={PALM_Y}
+                fill="var(--mascot-outline)"
+                rx="8"
+                ry="7"
+                transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
+              />
               <path
                 data-slot="arm-left-limb"
                 d={LEFT_ARM_PATH}
@@ -550,12 +558,14 @@ export function Mascot({
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
-              <circle
+              <ellipse
                 data-slot="arm-left-palm"
                 cx={LEFT_PALM_X}
                 cy={PALM_Y}
                 fill="var(--mascot-body)"
-                r="6"
+                rx="6"
+                ry="5"
+                transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
               />
             </svg>
           </span>
@@ -569,7 +579,14 @@ export function Mascot({
                 strokeLinecap="round"
                 strokeWidth="9.5"
               />
-              <circle cx={RIGHT_PALM_X} cy={PALM_Y} fill="var(--mascot-outline)" r="8" />
+              <ellipse
+                cx={RIGHT_PALM_X}
+                cy={PALM_Y}
+                fill="var(--mascot-outline)"
+                rx="8"
+                ry="7"
+                transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
+              />
               <path
                 data-slot="arm-right-limb"
                 d={RIGHT_ARM_PATH}
@@ -578,12 +595,14 @@ export function Mascot({
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
-              <circle
+              <ellipse
                 data-slot="arm-right-palm"
                 cx={RIGHT_PALM_X}
                 cy={PALM_Y}
                 fill="var(--mascot-body)"
-                r="6"
+                rx="6"
+                ry="5"
+                transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
               />
             </svg>
           </span>
@@ -638,8 +657,40 @@ export function Mascot({
             ) : null}
           </svg>
 
+          <svg data-slot="antenna-base-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+            <path
+              d="M59 35 L60.5 30 H67.5 L69 35 Z"
+              fill="var(--mascot-body)"
+              stroke="var(--mascot-outline)"
+              strokeLinejoin="round"
+              strokeWidth="2.25"
+            />
+          </svg>
+
           <span data-slot="face-layer" style={faceLayerStyle}>
             <span data-slot="face-motion" ref={faceMotionRef} style={faceMotionStyle}>
+              <span data-slot="face-screen-depth" style={compositeLayerStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <path
+                    d={FACE_SCREEN_PATH}
+                    fill="var(--mascot-screen-depth)"
+                    fillOpacity="0.62"
+                    transform="translate(0 2)"
+                  />
+                </svg>
+              </span>
+              <span data-slot="face-screen" style={compositeLayerStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <path
+                    d={FACE_SCREEN_PATH}
+                    fill="var(--mascot-screen)"
+                    fillOpacity="0.72"
+                    stroke="var(--mascot-screen-edge)"
+                    strokeOpacity="0.55"
+                    strokeWidth="1.5"
+                  />
+                </svg>
+              </span>
               {showFaceDebugFrame ? (
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
                   <rect
@@ -658,10 +709,20 @@ export function Mascot({
                 </svg>
               ) : null}
 
-              <span data-slot="cheeks" style={compositeLayerStyle}>
+              <span data-slot="status-lights" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <ellipse cx="41" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
-                  <ellipse cx="87" cy="82" fill="var(--mascot-cheek)" rx="5.75" ry="2.7" />
+                  <g
+                    fill="var(--mascot-status-light)"
+                    stroke="var(--mascot-status-light-edge)"
+                    strokeWidth="1.2"
+                  >
+                    <circle cx="41" cy="82" r="3.5" />
+                    <circle cx="87" cy="82" r="3.5" />
+                  </g>
+                  <g fill="#ffffff" fillOpacity="0.42">
+                    <circle cx="40" cy="81" r="0.9" />
+                    <circle cx="86" cy="81" r="0.9" />
+                  </g>
                 </svg>
               </span>
 

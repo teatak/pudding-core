@@ -207,9 +207,13 @@ textarea:focus-visible,
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --mascot-body: oklch(0.61 0.19 277);
-    --mascot-cheek: oklch(0.74 0.13 16 / 78%);
+    --mascot-status-light: oklch(0.72 0.14 16 / 88%);
+    --mascot-status-light-edge: color-mix(in oklch, var(--mascot-status-light), black 22%);
     --mascot-feature-outline: oklch(0.43 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 20%);
+    --mascot-screen: color-mix(in oklch, var(--mascot-body), black 14%);
+    --mascot-screen-depth: color-mix(in oklch, var(--mascot-body), black 32%);
+    --mascot-screen-edge: color-mix(in oklch, var(--mascot-body), white 24%);
     --mascot-shadow: oklch(0.52 0.18 277 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -744,9 +748,13 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --mascot-body: oklch(0.7 0.17 277);
-    --mascot-cheek: oklch(0.67 0.13 16 / 82%);
+    --mascot-status-light: oklch(0.62 0.12 16 / 82%);
+    --mascot-status-light-edge: color-mix(in oklch, var(--mascot-status-light), black 26%);
     --mascot-feature-outline: oklch(0.48 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 28%);
+    --mascot-screen: color-mix(in oklch, var(--mascot-body), black 12%);
+    --mascot-screen-depth: color-mix(in oklch, var(--mascot-body), black 36%);
+    --mascot-screen-edge: color-mix(in oklch, var(--mascot-body), white 18%);
     --mascot-shadow: oklch(0.46 0.05 277 / 10%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -1257,7 +1265,7 @@ html:has(
 }
 
 [data-slot="eyes"],
-[data-slot="cheeks"],
+[data-slot="status-lights"],
 [data-slot="mouth"],
 [data-slot="eyes-error"],
 [data-slot="mouth-error"] {
@@ -1269,12 +1277,12 @@ html:has(
     opacity: 0;
 }
 
-[data-slot="cheeks"] {
-    opacity: 0.7;
+[data-slot="status-lights"] {
+    opacity: 0.82;
 }
 
 [data-mood="error"] [data-slot="eyes"],
-[data-mood="error"] [data-slot="cheeks"],
+[data-mood="error"] [data-slot="status-lights"],
 [data-mood="error"] [data-slot="mouth"] {
     animation: none;
     opacity: 0;
@@ -1313,6 +1321,9 @@ html:has(
 [data-mood="error"] {
     --mascot-body: var(--destructive);
     --mascot-outline: color-mix(in oklch, var(--destructive), black 20%);
+    --mascot-screen: color-mix(in oklch, var(--destructive), black 14%);
+    --mascot-screen-depth: color-mix(in oklch, var(--destructive), black 32%);
+    --mascot-screen-edge: color-mix(in oklch, var(--destructive), white 22%);
 }
 
 @keyframes pudding-mascot-thinking-glow {

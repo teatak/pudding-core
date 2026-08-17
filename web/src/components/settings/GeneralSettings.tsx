@@ -28,7 +28,6 @@ import {
   setDesktopPreviewUpdatesEnabled,
 } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
-import { setMascotVisible, useMascotVisible } from "@/state/mascotStore";
 import { toast } from "sonner";
 
 import {
@@ -53,7 +52,6 @@ export function GeneralSettings({
 }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
-  const mascotVisible = useMascotVisible();
   const [promptContent, setPromptContent] = useState("");
   const [promptEdited, setPromptEdited] = useState(false);
   const [tailTurns, setTailTurns] = useState("2");
@@ -530,14 +528,6 @@ export function GeneralSettings({
             onChange={(next) =>
               saveBooleanSetting(SETTINGS_KEYS.showAppPreviewVersions, next, setShowPreviewAppVersions)
             }
-          />
-          <SettingsToggleRow
-            animate={settingsTransitionsReady}
-            checked={mascotVisible}
-            description={t("settings.general.showMascotDesc")}
-            id="pudding-show-mascot"
-            label={t("settings.general.showMascot")}
-            onChange={setMascotVisible}
           />
         </div>
       </section> : null}
