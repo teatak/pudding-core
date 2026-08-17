@@ -80,7 +80,7 @@ export function TranscriptDisclosure({
       }}
     >
       <summary
-        className="inline-grid h-6 max-w-full cursor-default list-none grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        className="grid h-6 w-fit max-w-full cursor-default list-none grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
         tabIndex={-1}
         onClick={onSummaryClick}
         onKeyDown={onSummaryKeyDown}

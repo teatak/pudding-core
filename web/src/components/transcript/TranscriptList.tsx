@@ -84,7 +84,7 @@ export const TranscriptList = memo(function TranscriptList({
   const revealedMessageElementsRef = useRef<HTMLElement[]>([]);
   const revealedTurnSerialRef = useRef(0);
   const revealClearTimerRef = useRef<number | null>(null);
-  const structure = useTranscriptStructure(turns);
+  const structure = useTranscriptStructure(sessionID, turns);
   const { itemKeys, turnIndexByID } = structure;
   const turnCount = itemKeys.length - 1;
   const lastTurnKey = itemKeys[turnCount - 1] || "";
@@ -817,17 +817,19 @@ function pointerHitsVerticalScrollbar(event: PointerEvent, element: HTMLElement)
   return event.clientX >= rect.right - scrollbarWidth && event.clientX <= rect.right;
 }
 
-function useTranscriptStructure(turns: TranscriptTurnVM[]) {
+function useTranscriptStructure(sessionID: string, turns: TranscriptTurnVM[]) {
+  const tailItemKey = `${TAIL_ITEM_KEY}:${sessionID}`;
   const structureRef = useRef<{
     itemKeys: string[];
     turnIndexByID: Map<string, number>;
   }>({
-    itemKeys: [TAIL_ITEM_KEY],
+    itemKeys: [tailItemKey],
     turnIndexByID: new Map(),
   });
   const current = structureRef.current;
   const structureChanged =
     current.itemKeys.length !== turns.length + 1 ||
+    current.itemKeys[current.itemKeys.length - 1] !== tailItemKey ||
     turns.some((turn, index) => current.itemKeys[index] !== turn.key);
   if (!structureChanged) {
     return current;
@@ -844,7 +846,7 @@ function useTranscriptStructure(turns: TranscriptTurnVM[]) {
     return turn.key;
   });
   const next = {
-    itemKeys: [...itemKeys, TAIL_ITEM_KEY],
+    itemKeys: [...itemKeys, tailItemKey],
     turnIndexByID: indexes,
   };
   structureRef.current = next;

@@ -5,6 +5,7 @@ import type { Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
 
@@ -118,19 +119,23 @@ export function AssistantOutputMeta({
       text={assistantTextFromMessages(assistant.messages)}
       trailingActions={
         onCloneMessage ? (
-          <Button
-            aria-label={t("transcript.cloneToNewChat")}
-            className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
-            disabled={Boolean(cloningMessageID)}
-            size="icon-xs"
-            tabIndex={-1}
-            title={t("transcript.cloneToNewChat")}
-            type="button"
-            variant="ghost"
-            onClick={() => onCloneMessage(lastMessage.id)}
-          >
-            {cloningMessageID === lastMessage.id ? <Spinner className="size-3" /> : <Split className="size-3 rotate-90" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={t("transcript.cloneToNewChat")}
+                className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+                disabled={Boolean(cloningMessageID)}
+                size="icon-xs"
+                tabIndex={-1}
+                type="button"
+                variant="ghost"
+                onClick={() => onCloneMessage(lastMessage.id)}
+              >
+                {cloningMessageID === lastMessage.id ? <Spinner className="size-3" /> : <Split className="size-3 rotate-90" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("transcript.cloneToNewChat")}</TooltipContent>
+          </Tooltip>
         ) : null
       }
     />

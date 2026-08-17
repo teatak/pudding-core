@@ -272,7 +272,7 @@ function ToolActivityGlyph({ active, appID, icon: Icon }: { active: boolean; app
   if (active) {
     return <Spinner className="size-4" />;
   }
-  return appID ? <DesktopAppActivityIcon appID={appID} fallbackIcon={Icon} /> : <Icon aria-hidden="true" className="size-4" />;
+  return appID ? <DesktopAppActivityIcon appID={appID} /> : <Icon aria-hidden="true" className="size-4" />;
 }
 
 type ProcessAppIdentity =
@@ -301,18 +301,18 @@ function ProcessCompactActivityGlyph({
     );
   }
   return app?.kind === "desktop" ? (
-    <DesktopAppActivityIcon appID={app.appID} fallbackIcon={Icon} />
+    <DesktopAppActivityIcon appID={app.appID} />
   ) : (
     <Icon aria-hidden="true" className="size-4" />
   );
 }
 
-function DesktopAppActivityIcon({ appID, fallbackIcon: FallbackIcon }: { appID: string; fallbackIcon: LucideIcon }) {
+function DesktopAppActivityIcon({ appID }: { appID: string }) {
   const identity = useDesktopApplicationIdentity(appID);
   return identity?.iconURL ? (
     <AppIcon className="size-4 rounded-[4px]" size="xs" src={identity.iconURL} />
   ) : (
-    <FallbackIcon aria-hidden="true" className="size-4" />
+    <span aria-hidden="true" className="block size-[18px]" />
   );
 }
 
