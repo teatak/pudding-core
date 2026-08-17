@@ -5,6 +5,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const root = path.resolve(__dirname, "..", "..");
+const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const currentReleaseChannel = packageMetadata.version.includes("-beta.") ? "preview" : "stable";
 
 test("desktop development and packaging use the same exact Electron version", () => {
   const webPackage = JSON.parse(fs.readFileSync(path.join(root, "web", "package.json"), "utf8"));
@@ -69,7 +71,10 @@ test("strips the Developer ID prefix before invoking Electron Builder", () => {
 });
 
 test("desktop packaging defaults to the stable GitHub update channel", () => {
-  const overrides = signedBuildEnv();
+  const overrides = signedBuildEnv({
+    PUDDING_APP_VERSION: "0.1.2",
+    PUDDING_RELEASE_CHANNEL: "",
+  });
   assert.equal(loadConfigValue("extraMetadata.puddingReleaseChannel", overrides), "stable");
   assert.equal(loadConfigValue("publish[0].channel", overrides), "latest");
   assert.equal(loadConfigValue("publish[0].releaseType", overrides), "release");
@@ -90,11 +95,17 @@ test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
 
 test("release channel rejects mismatched versions", () => {
   assert.throws(
-    () => loadConfigValue("publish[0].channel", signedBuildEnv({ PUDDING_RELEASE_CHANNEL: "preview" })),
+    () => loadConfigValue("publish[0].channel", signedBuildEnv({
+      PUDDING_APP_VERSION: "0.1.2",
+      PUDDING_RELEASE_CHANNEL: "preview",
+    })),
     /preview release version must match x\.y\.z-beta\.n/,
   );
   assert.throws(
-    () => loadConfigValue("publish[0].channel", signedBuildEnv({ PUDDING_APP_VERSION: "0.1.2-beta.1" })),
+    () => loadConfigValue("publish[0].channel", signedBuildEnv({
+      PUDDING_APP_VERSION: "0.1.2-beta.1",
+      PUDDING_RELEASE_CHANNEL: "stable",
+    })),
     /stable release version must match x\.y\.z/,
   );
 });
@@ -110,7 +121,7 @@ function loadConfigValue(pathExpression, overrides = {}) {
       PUDDING_PACKAGING_PIPELINE: "1",
       PUDDING_MAC_IDENTITY: "",
       PUDDING_APP_VERSION: "",
-      PUDDING_RELEASE_CHANNEL: "",
+      PUDDING_RELEASE_CHANNEL: currentReleaseChannel,
       PUDDING_UPDATE_MODE: "",
       APPLE_KEYCHAIN_PROFILE: "",
       APPLE_ID: "",

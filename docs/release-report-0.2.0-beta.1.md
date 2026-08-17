@@ -65,8 +65,9 @@ SQLite schema 从 v10 升至 v12。改动跨越原生进程、Electron bridge、
 
 - 审查 `v0.1.26..HEAD` 的 15 个提交、152 个文件和全部持久化调用点。
 - `go test -tags "sqlite_fts5 webrtcaec" ./...`。
-- `npm run test:electron`，162 项通过。
+- `npm run test:electron`，166 项通过。
 - `make computer-use-helper-test`，55 项 Swift/XCTest 测试通过。
+- Computer Use fixture、完整产品链路、Calculator session-owned 和既有 Calculator 非所有权 smoke 全部通过。
 - `web/` 下执行 `npm run build`。
 - `git diff --check v0.1.26..HEAD`。
 - 只读检查正式数据库：`PRAGMA user_version=10`、`PRAGMA quick_check=ok`。
@@ -74,11 +75,9 @@ SQLite schema 从 v10 升至 v12。改动跨越原生进程、Electron bridge、
 
 ## 剩余发版门槛
 
-1. 提交并推送 `0.2.0-beta.1` 版本号和本报告。
-2. 运行 Computer Use fixture、产品链路和 Calculator 真实权限 smoke。
-3. 构建并验证 arm64/x64 的 preview 签名公证包及嵌套 Helper 身份。
-4. 验证已安装稳定版升级到 preview，并确认更新后 Helper designated requirement。
-5. 核验 Draft 的英文功能清单与 9 个标准资产后发布为 GitHub Prerelease。
+1. 构建并验证 arm64/x64 的 preview 签名公证包及嵌套 Helper 身份。
+2. 验证已安装稳定版升级到 preview，并确认更新后 Helper designated requirement。
+3. 核验 Draft 的英文功能清单与 9 个标准资产后发布为 GitHub Prerelease。
 
 ## Release Notes
 

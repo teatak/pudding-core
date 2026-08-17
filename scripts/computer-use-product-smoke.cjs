@@ -45,6 +45,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function isRunningInventoryApp(app, appID) {
+  return app?.bundleID === appID && app.running === true;
+}
+
+function isRetainedLaunch(result, appID, pid) {
+  return result?.bundleID === appID && result.newlyLaunched === false && result.pid === pid;
+}
+
 function runGoSmoke(identity, scenario) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -75,9 +83,11 @@ function runGoSmoke(identity, scenario) {
 
 async function closeLeakedApp(host, appID, expectedPID = 0) {
   const inventory = await host.listApps().catch(() => null);
-  const app = inventory?.apps?.find((item) => item.bundleID === appID);
-  if (app?.pid > 0 && (!expectedPID || app.pid === expectedPID)) {
-    await host.quitApp({ bundleID: appID, pid: app.pid }).catch(() => {});
+  const app = inventory?.apps?.find((item) => isRunningInventoryApp(item, appID));
+  if (!app) return;
+  const running = await host.useApp({ bundleID: appID }).catch(() => null);
+  if (running?.pid > 0 && (!expectedPID || running.pid === expectedPID)) {
+    await host.quitApp({ bundleID: appID, pid: running.pid }).catch(() => {});
   }
 }
 
@@ -108,7 +118,7 @@ async function main() {
     );
     const before = await host.listApps();
     assert(
-      !before.apps.some((app) => app.bundleID === scenario.appID),
+      !before.apps.some((app) => isRunningInventoryApp(app, scenario.appID)),
       `${scenarioName} is already running; close it before the product smoke`,
     );
     if (scenario.prelaunch) {
@@ -123,9 +133,9 @@ async function main() {
     const identity = await bridge.start();
     await runGoSmoke(identity, scenario);
     if (scenario.prelaunch) {
-      const after = await host.listApps();
+      const retained = await host.useApp({ bundleID: scenario.appID });
       assert(
-        after.apps.some((app) => app.bundleID === scenario.appID && app.pid === cleanupPID),
+        isRetainedLaunch(retained, scenario.appID, cleanupPID),
         `${scenarioName} was closed even though the session did not own it`,
       );
     }
@@ -139,7 +149,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { closeLeakedApp, isRetainedLaunch, isRunningInventoryApp };
