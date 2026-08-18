@@ -108,7 +108,7 @@ function TranscriptTurnView({
             />
           ) : null}
           {metaAssistant ? (
-            <div className="-mt-3">
+            <div className="-mt-2">
               <AssistantOutputMeta
                 assistant={metaAssistant}
                 cloningMessageID={cloningMessageID}

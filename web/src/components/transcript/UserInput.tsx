@@ -312,15 +312,17 @@ export const UserInput = memo(function UserInput({
           </div>
         ) : null}
         {user.createdAt ? (
-          <MessageMeta
-            actions={actions}
-            align="end"
-            createdAt={user.createdAt}
-            hideStandardDetails={Boolean(queuedStatus)}
-            persistentStatus={queuedStatus}
-            text={metaText}
-            uiContext={uiContext}
-          />
+          <div className="mt-1">
+            <MessageMeta
+              actions={actions}
+              align="end"
+              createdAt={user.createdAt}
+              hideStandardDetails={Boolean(queuedStatus)}
+              persistentStatus={queuedStatus}
+              text={metaText}
+              uiContext={uiContext}
+            />
+          </div>
         ) : null}
       </div>
       <ImageLightbox images={imagePreviewItems} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
