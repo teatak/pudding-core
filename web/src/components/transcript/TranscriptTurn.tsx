@@ -57,7 +57,7 @@ function TranscriptTurnView({
         </div>
       ) : null}
       {turn.assistant || turn.sequence?.length || turn.fileChanges?.length || metaAssistant || turn.compact ? (
-        <div className="group/assistant-turn grid min-w-0 gap-3">
+        <div className="group/assistant-turn grid min-w-0 gap-1">
           {turn.assistant ? (
             <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
               <AssistantOutput
@@ -108,7 +108,7 @@ function TranscriptTurnView({
             />
           ) : null}
           {metaAssistant ? (
-            <div className="-mt-2">
+            <div>
               <AssistantOutputMeta
                 assistant={metaAssistant}
                 cloningMessageID={cloningMessageID}
