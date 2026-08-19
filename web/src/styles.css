@@ -114,7 +114,6 @@ textarea:focus-visible,
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-hover-background: oklch(0.92 0 0);
-    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--primary) 11%);
     --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 38%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.2 0 0);
@@ -686,7 +685,6 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-hover-background: oklch(0.305 0 0);
-    --sidebar-active-background: color-mix(in srgb, var(--sidebar), var(--primary) 18%);
     --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 42%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.95 0 0);
@@ -823,7 +821,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 }
 
 [data-slot="sidebar-menu-button"][data-active="true"] {
-    background-color: var(--sidebar-active-background);
+    background-color: var(--sidebar-hover-background);
     box-shadow: none;
 }
 
@@ -833,7 +831,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 }
 
 [data-slot="sidebar-menu-button"]:active:not(:disabled) {
-    background-color: var(--sidebar-active-background);
+    background-color: var(--sidebar-hover-background);
 }
 
 .pudding-settings-sidebar [data-slot="sidebar-menu-button"]:active:not(:disabled) {
@@ -841,7 +839,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 }
 
 [data-slot="sidebar-group-label"][data-active="true"] {
-    background-color: var(--sidebar-active-background);
+    background-color: var(--sidebar-hover-background);
     box-shadow: none;
     color: var(--sidebar-accent-foreground);
 }
