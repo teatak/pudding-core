@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import { getDesktopHomeDirectory } from "@/lib/desktopBridge";
 import {
   type DesktopUpdateState,
   activateDesktopUpdate,
@@ -409,12 +410,25 @@ export function ProjectSortHeader({
 
 export function RailProjectActionsMenu({ project, token }: { project: Project; token: string }) {
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [homeDirectory, setHomeDirectory] = useState("");
+
+  useEffect(() => {
+    let current = true;
+    void getDesktopHomeDirectory().then((dir) => {
+      if (current) setHomeDirectory(dir);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+
   useRailOverlayHold(overlayOpen);
   return (
     <ProjectActionsMenu
       project={project}
       surface="sidebar"
       token={token}
+      homeDirectory={homeDirectory}
       onOverlayOpenChange={setOverlayOpen}
     />
   );
