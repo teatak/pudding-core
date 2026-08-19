@@ -25,6 +25,9 @@ export function appDisplayName(app: AppDefinition, t: Translate) {
   if (app.id === "capture") {
     return t("apps.builtin.capture.name");
   }
+  if (app.id === "computer-use") {
+    return t("apps.builtin.computer-use.name" as any);
+  }
   return app.name;
 }
 
@@ -46,6 +49,9 @@ export function appDisplayDescription(app: AppDefinition, t: Translate) {
   }
   if (app.id === "capture") {
     return t("apps.builtin.capture.desc");
+  }
+  if (app.id === "computer-use") {
+    return t("apps.builtin.computer-use.desc" as any);
   }
   return app.description || "";
 }

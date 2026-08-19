@@ -416,10 +416,10 @@ export function GeneralSettings({
         </div>
       </section> : null}
 
-      <section className="grid gap-4">
+      {view === "advanced" ? <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>
-            {t(view === "general" ? "settings.general.display" : "settings.general.context")}
+            {t("settings.general.context")}
           </h3>
         </div>
         {settingsQuery.isError ? (
@@ -440,7 +440,7 @@ export function GeneralSettings({
           </Alert>
         ) : null}
         <div className={SETTINGS_GROUP_CLASS}>
-          {view === "advanced" ? <SettingsNumberField
+          <SettingsNumberField
             description={t("settings.general.tailTurnsDesc")}
             disabled={settingsDisabled}
             id="pudding-compact-tail-turns"
@@ -450,8 +450,8 @@ export function GeneralSettings({
             value={tailTurns}
             onBlur={() => saveNumberSetting(SETTINGS_KEYS.compactTailInputTurns, tailTurns, setTailTurns, 1, 50)}
             onChange={setTailTurns}
-          /> : null}
-          {view === "advanced" ? <SettingsNumberField
+          />
+          <SettingsNumberField
             description={t("settings.general.autoThresholdDesc")}
             disabled={settingsDisabled}
             id="pudding-auto-compact-threshold"
@@ -464,8 +464,18 @@ export function GeneralSettings({
               saveNumberSetting(SETTINGS_KEYS.compactAutoThresholdPercent, autoThreshold, setAutoThreshold, 0, 100)
             }
             onChange={setAutoThreshold}
-          /> : null}
-          {view === "general" ? <SettingsToggleRow
+          />
+        </div>
+      </section> : null}
+
+      {view === "advanced" ? <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>
+            {t("settings.general.display")}
+          </h3>
+        </div>
+        <div className={SETTINGS_GROUP_CLASS}>
+          <SettingsToggleRow
             animate={settingsTransitionsReady}
             checked={showCompactSummary}
             description={t("settings.general.showCompactSummaryDesc")}
@@ -474,8 +484,8 @@ export function GeneralSettings({
             label={t("settings.general.showCompactSummary")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showCompactSummary])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showCompactSummary, next, setShowCompactSummary)}
-          /> : null}
-          {view === "general" ? <SettingsToggleRow
+          />
+          <SettingsToggleRow
             animate={settingsTransitionsReady}
             checked={showReasoning}
             description={t("settings.general.showReasoningDesc")}
@@ -484,8 +494,8 @@ export function GeneralSettings({
             label={t("settings.general.showReasoning")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showReasoning])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
-          /> : null}
-          {view === "advanced" ? <SettingsToggleRow
+          />
+          <SettingsToggleRow
             animate={settingsTransitionsReady}
             checked={showRawToolInfo}
             description={t("settings.general.showRawToolInfoDesc")}
@@ -494,9 +504,9 @@ export function GeneralSettings({
             label={t("settings.general.showRawToolInfo")}
             pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showRawToolInfo])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showRawToolInfo, next, setShowRawToolInfo)}
-          /> : null}
+          />
         </div>
-      </section>
+      </section> : null}
 
       {view === "advanced" ? <section className="grid gap-4">
         <div className="grid gap-2">
