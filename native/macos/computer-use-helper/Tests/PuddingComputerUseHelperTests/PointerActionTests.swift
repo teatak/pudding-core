@@ -78,7 +78,7 @@ import Testing
 @Test func pointerInputPostsDragSequence() throws {
   var events: [(CGEventType, CGPoint)] = []
   let service = pointerService { events.append(($0.type, $0.location)) }
-  let input = try pointerInput(action: .drag, toX: 80, toY: 60)
+  let input = try pointerInput(action: .drag, toX: 0.8, toY: 0.6)
   let result = try service.perform(
     bundleID: "com.example.App", pid: 42, windowID: 7, input: input,
     start: CGPoint(x: 10, y: 20), end: CGPoint(x: 80, y: 60))
@@ -181,7 +181,7 @@ import Testing
     postEvent: { eventTypes.append($0.type) },
     wait: { _ in waits += 1 }
   )
-  let input = try pointerInput(action: .drag, toX: 80, toY: 60)
+  let input = try pointerInput(action: .drag, toX: 0.8, toY: 0.6)
 
   do {
     _ = try service.perform(
@@ -215,6 +215,6 @@ private func pointerInput(
   deltaY: Int? = nil
 ) throws -> PointerInput {
   try PointerInput.validated(
-    action: action, x: 10, y: 20, toX: toX, toY: toY,
+    action: action, x: 0.1, y: 0.2, toX: toX, toY: toY,
     button: button, clickCount: clickCount, deltaX: deltaX, deltaY: deltaY)
 }
