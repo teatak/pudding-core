@@ -145,6 +145,7 @@ export {
   Plus,
   Printer,
   RefreshCw,
+  Redo2,
   RotateCcw,
   RotateCw,
   Route,

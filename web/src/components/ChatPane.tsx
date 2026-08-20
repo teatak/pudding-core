@@ -631,7 +631,7 @@ function HeaderLeadingIcon({ children, label }: { children: React.ReactNode; lab
   return (
     <span
       aria-label={label}
-      className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-foreground/80!"
+      className="pudding-chrome-icon no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center"
       role={label ? "img" : undefined}
     >
       {children}

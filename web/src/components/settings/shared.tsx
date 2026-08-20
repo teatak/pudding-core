@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { Spinner } from "@/components/Spinner";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -25,6 +24,9 @@ export function SettingsControlRow({
   id: string;
   label: string;
 }) {
+  const labelID = `${id}-label`;
+  const descriptionID = `${id}-description`;
+
   return (
     <div
       className={cn(
@@ -32,11 +34,18 @@ export function SettingsControlRow({
         disabled && "opacity-60",
       )}
     >
-      <label className="grid min-w-0 gap-1" htmlFor={id}>
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
-      </label>
-      <div className="flex min-w-0 justify-start sm:justify-end">{children}</div>
+      <div className="grid min-w-0 gap-1">
+        <span id={labelID} className="text-sm font-medium">{label}</span>
+        <span id={descriptionID} className="text-xs leading-5 text-muted-foreground">{description}</span>
+      </div>
+      <div
+        aria-describedby={descriptionID}
+        aria-labelledby={labelID}
+        className="flex min-w-0 justify-start sm:justify-end"
+        role="group"
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -120,7 +129,6 @@ export function SettingsToggleRow({
   disabled,
   id,
   label,
-  pending = false,
   onChange,
 }: {
   animate?: boolean;
@@ -129,7 +137,6 @@ export function SettingsToggleRow({
   disabled?: boolean;
   id: string;
   label: string;
-  pending?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   const labelID = `${id}-label`;
@@ -145,12 +152,11 @@ export function SettingsToggleRow({
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
-        {pending ? <Spinner className="size-4 text-muted-foreground" /> : null}
         <Switch
           aria-describedby={descriptionID}
           aria-labelledby={labelID}
           checked={checked}
-          disabled={disabled || pending}
+          disabled={disabled}
           id={id}
           className={cn(!animate && "transition-none [&_[data-slot=switch-thumb]]:transition-none")}
           onCheckedChange={onChange}

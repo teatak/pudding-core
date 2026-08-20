@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, RotateCcw } from "@/components/icons";
+import { Monitor, Moon, RefreshCw, RotateCcw, Sun } from "@/components/icons";
 import { useEffect, useMemo, useState } from "react";
 
 import { getSettings, getUserPrompt, putSettings, putUserPrompt, resetSettings } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
@@ -18,8 +19,11 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useI18n } from "@/i18n";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { type Locale, useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
 import {
   type DesktopUpdateState,
@@ -28,9 +32,11 @@ import {
   setDesktopPreviewUpdatesEnabled,
 } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
+import { setTheme, type Theme, useTheme } from "@/theme/theme";
 import { toast } from "sonner";
 
 import {
+  SETTINGS_COMPACT_SELECT_CLASS,
   SETTINGS_NARROW_CONTENT_CLASS,
   SETTINGS_CARD_CLASS,
   SETTINGS_GROUP_CLASS,
@@ -51,7 +57,8 @@ export function GeneralSettings({
   view?: "general" | "advanced";
 }) {
   const queryClient = useQueryClient();
-  const { t } = useI18n();
+  const { locale, setLocale, t } = useI18n();
+  const { theme } = useTheme();
   const [promptContent, setPromptContent] = useState("");
   const [promptEdited, setPromptEdited] = useState(false);
   const [tailTurns, setTailTurns] = useState("2");
@@ -66,7 +73,6 @@ export function GeneralSettings({
   const [settingsTransitionsReady, setSettingsTransitionsReady] = useState(false);
   const [desktopUpdateTransitionReady, setDesktopUpdateTransitionReady] = useState(false);
   const [pendingSettingSaveCount, setPendingSettingSaveCount] = useState(0);
-  const [pendingSettingCounts, setPendingSettingCounts] = useState<Record<string, number>>({});
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
 
@@ -122,11 +128,11 @@ export function GeneralSettings({
   }, [desktopUpdateState]);
 
   useEffect(() => {
-    if (userPromptQuery.isSuccess) {
+    if (userPromptQuery.isSuccess && !promptEdited) {
       setPromptContent(savedPrompt);
       setPromptEdited(false);
     }
-  }, [savedPrompt, userPromptQuery.isSuccess]);
+  }, [promptEdited, savedPrompt, userPromptQuery.isSuccess]);
 
   useEffect(() => {
     if (!settingsQuery.isSuccess || pendingSettingSaveCount > 0) {
@@ -147,13 +153,12 @@ export function GeneralSettings({
   }, [pendingSettingSaveCount, savedSettings, settingsQuery.isSuccess]);
 
   const promptMutation = useMutation({
-    mutationFn: () => putUserPrompt(token, promptContent),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.userPrompt() });
-      toast.success(t("settings.general.personalizationSaved"));
-    },
+    scope: { id: "user-prompt" },
+    mutationFn: (content: string) => putUserPrompt(token, content),
+    onSuccess: (prompt) => queryClient.setQueryData(queryKeys.userPrompt(), prompt),
     onError: () => toast.error(t("settings.general.saveFailed")),
   });
+  const savePrompt = promptMutation.mutate;
 
   const settingsMutation = useMutation({
     scope: { id: "general-settings" },
@@ -223,30 +228,10 @@ export function GeneralSettings({
     onError: () => toast.error(t("settings.general.resetDefaultsFailed")),
   });
 
-  const updatePendingSettingCounts = (keys: string[], delta: number) => {
-    setPendingSettingCounts((current) => {
-      const next = { ...current };
-      keys.forEach((key) => {
-        const count = Math.max(0, (next[key] || 0) + delta);
-        if (count > 0) {
-          next[key] = count;
-        } else {
-          delete next[key];
-        }
-      });
-      return next;
-    });
-  };
-
   const saveSettingsPatch = (settings: Record<string, string>) => {
-    const keys = Object.keys(settings);
     setPendingSettingSaveCount((count) => count + 1);
-    updatePendingSettingCounts(keys, 1);
     settingsMutation.mutate(settings, {
-      onSettled: () => {
-        setPendingSettingSaveCount((count) => Math.max(0, count - 1));
-        updatePendingSettingCounts(keys, -1);
-      },
+      onSettled: () => setPendingSettingSaveCount((count) => Math.max(0, count - 1)),
     });
   };
 
@@ -300,6 +285,14 @@ export function GeneralSettings({
   const settingsDisabled = settingsQuery.isLoading || settingsQuery.isError || resetMutation.isPending;
 
   useEffect(() => {
+    if (view !== "general" || !promptDirty || userPromptQuery.isLoading || userPromptQuery.isError) {
+      return;
+    }
+    const timeoutID = window.setTimeout(() => savePrompt(promptContent), 600);
+    return () => window.clearTimeout(timeoutID);
+  }, [promptContent, promptDirty, savePrompt, userPromptQuery.isError, userPromptQuery.isLoading, view]);
+
+  useEffect(() => {
     onDirtyChange(view === "general" && promptDirty);
   }, [onDirtyChange, promptDirty, view]);
 
@@ -307,6 +300,86 @@ export function GeneralSettings({
 
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
+      {settingsQuery.isError ? (
+        <Alert variant="destructive">
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t("settings.general.loadFailed")}</span>
+            <Button
+              disabled={settingsQuery.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => void settingsQuery.refetch()}
+            >
+              {settingsQuery.isFetching ? <Spinner /> : <RefreshCw />}
+              {t("common.refresh")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {view === "general" ? <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.appearance")}</h3>
+        </div>
+        <div className={SETTINGS_GROUP_CLASS}>
+          <SettingsControlRow
+            description={t("settings.general.themeDesc")}
+            id="pudding-interface-theme"
+            label={t("settings.general.theme")}
+          >
+            <ToggleGroup
+              aria-label={t("settings.general.theme")}
+              className="rounded-lg bg-muted p-0.5"
+              id="pudding-interface-theme"
+              spacing={1}
+              type="single"
+              value={theme}
+              onValueChange={(value) => {
+                if (value) {
+                  setTheme(value as Theme);
+                }
+              }}
+            >
+              {([
+                ["system", Monitor, t("theme.system")],
+                ["light", Sun, t("theme.light")],
+                ["dark", Moon, t("theme.dark")],
+              ] as const).map(([value, Icon, label]) => (
+                <Tooltip key={value}>
+                  <TooltipTrigger asChild>
+                    <ToggleGroupItem
+                      aria-label={label}
+                      className="size-7 rounded-md px-0 text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground aria-checked:bg-background aria-checked:text-foreground aria-checked:shadow-sm aria-checked:hover:bg-background"
+                      value={value}
+                    >
+                      <Icon className="size-[18px]" />
+                    </ToggleGroupItem>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+                </Tooltip>
+              ))}
+            </ToggleGroup>
+          </SettingsControlRow>
+          <SettingsControlRow
+            description={t("settings.general.languageDesc")}
+            id="pudding-interface-language"
+            label={t("language.label")}
+          >
+            <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+              <SelectTrigger id="pudding-interface-language" className={SETTINGS_COMPACT_SELECT_CLASS}>
+                <SelectValue />
+              </SelectTrigger>
+              <DialogSelectContent>
+                <SelectItem value="zh-CN">{t("language.zhCN")}</SelectItem>
+                <SelectItem value="zh-TW">{t("language.zhTW")}</SelectItem>
+                <SelectItem value="en">{t("language.en")}</SelectItem>
+              </DialogSelectContent>
+            </Select>
+          </SettingsControlRow>
+        </div>
+      </section> : null}
+
       {view === "general" ? <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.personalization")}</h3>
@@ -341,17 +414,6 @@ export function GeneralSettings({
               setPromptEdited(true);
             }}
           />
-          <div className="flex justify-end">
-            <Button
-              disabled={userPromptQuery.isLoading || userPromptQuery.isError || promptMutation.isPending || !promptDirty}
-              size="sm"
-              type="button"
-              onClick={() => promptMutation.mutate()}
-            >
-              {promptMutation.isPending ? <Spinner /> : null}
-              {t("common.save")}
-            </Button>
-          </div>
         </div>
       </section> : null}
 
@@ -422,23 +484,6 @@ export function GeneralSettings({
             {t("settings.general.context")}
           </h3>
         </div>
-        {settingsQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertDescription className="flex items-center justify-between gap-3">
-              <span>{t("settings.general.loadFailed")}</span>
-              <Button
-                disabled={settingsQuery.isFetching}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => void settingsQuery.refetch()}
-              >
-                {settingsQuery.isFetching ? <Spinner /> : <RefreshCw />}
-                {t("common.refresh")}
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
         <div className={SETTINGS_GROUP_CLASS}>
           <SettingsNumberField
             description={t("settings.general.tailTurnsDesc")}
@@ -482,7 +527,6 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-compact-summary"
             label={t("settings.general.showCompactSummary")}
-            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showCompactSummary])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showCompactSummary, next, setShowCompactSummary)}
           />
           <SettingsToggleRow
@@ -492,7 +536,6 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-reasoning"
             label={t("settings.general.showReasoning")}
-            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showReasoning])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
           />
           <SettingsToggleRow
@@ -502,7 +545,6 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-raw-tool-info"
             label={t("settings.general.showRawToolInfo")}
-            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showRawToolInfo])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showRawToolInfo, next, setShowRawToolInfo)}
           />
         </div>
@@ -524,7 +566,6 @@ export function GeneralSettings({
             }
             id="pudding-receive-preview-updates"
             label={t("settings.general.receivePreviewUpdates")}
-            pending={previewUpdatesMutation.isPending}
             onChange={(next) => previewUpdatesMutation.mutate(next)}
           />
           <SettingsToggleRow
@@ -534,7 +575,6 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-preview-app-versions"
             label={t("settings.general.showPreviewAppVersions")}
-            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showAppPreviewVersions])}
             onChange={(next) =>
               saveBooleanSetting(SETTINGS_KEYS.showAppPreviewVersions, next, setShowPreviewAppVersions)
             }

@@ -20,7 +20,7 @@ const (
 	captureStopTimeout     = 2 * time.Second
 	captureFrameQueue      = 16
 	captureStallAfter      = 2 * time.Second
-	captureSignalTimeout   = 500 * time.Millisecond
+	captureSignalTimeout   = 2 * time.Second
 	capturePressureLogStep = 100
 	deviceCloseTimeout     = 2 * time.Second
 	deviceOpenAttempts     = 5

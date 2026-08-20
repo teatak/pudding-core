@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, FileImage, FileText, Files, RotateCw, Undo2 } from "@/components/icons";
+import { ChevronDown, FileImage, FileText, Files, Redo2, Undo2 } from "@/components/icons";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -67,7 +67,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
 
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background text-sm text-muted-foreground shadow-none">
-      <div className="flex min-h-14 items-center gap-3 bg-muted/25 px-3 py-2.5">
+      <div className="flex min-h-14 items-center gap-3 bg-transparent px-3 py-2.5 hover:bg-muted/25">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/70">
           <Files className="size-4" />
         </span>
@@ -91,11 +91,11 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
             type="button"
             onClick={() => actionMutation.mutate(state === "undone" ? "redo" : "undo")}
           >
-            {actionMutation.isPending ? <Spinner className="size-3.5" /> : state === "undone" ? <RotateCw className="size-3.5" /> : <Undo2 className="size-3.5" />}
+            {actionMutation.isPending ? <Spinner className="size-3.5" /> : state === "undone" ? <Redo2 className="size-3.5" /> : <Undo2 className="size-3.5" />}
             {state === "undone" ? t("transcript.turnFilesRedo") : t("transcript.turnFilesUndo")}
           </button>
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 font-medium text-foreground shadow-sm hover:bg-muted disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 font-medium text-foreground hover:bg-muted disabled:opacity-40"
             disabled={diffChanges.length === 0 && !previewable}
             type="button"
             onClick={openReview}
@@ -105,26 +105,28 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
           </button>
         </div>
       </div>
-      <div className="border-t border-border/70 bg-background px-1 py-1">
-        {visible.map((change) => {
-          const canOpen = !change.binary || Boolean(resourcePath(change, displayState));
-          return (
-            <button
-              key={change.id}
-              className="group/change-row relative isolate flex min-h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left hover:text-foreground disabled:pointer-events-none"
-              disabled={!canOpen}
-              type="button"
-              onClick={() => change.binary ? revealResource(sessionID, change, displayState) : openTurnFileChanges(sessionID, turnID, changes, change.id)}
-            >
-              <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 group-hover/change-row:opacity-100" />
-              {change.binary ? <FileImage className="relative z-[1] size-3.5 shrink-0" /> : null}
-              <code className="relative z-[1] min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
-              {change.additions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-added">+{change.additions}</span> : null}
-              {change.deletions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-deleted">−{change.deletions}</span> : null}
-            </button>
-          );
-        })}
-      </div>
+      {changes.length > 1 ? (
+        <div className="border-t border-border/70 bg-background">
+          {visible.map((change) => {
+            const canOpen = !change.binary || Boolean(resourcePath(change, displayState));
+            return (
+              <button
+                key={change.id}
+                className="group/change-row relative isolate flex min-h-8 w-full min-w-0 items-center gap-2 overflow-hidden px-3 text-left hover:text-foreground disabled:pointer-events-none"
+                disabled={!canOpen}
+                type="button"
+                onClick={() => change.binary ? revealResource(sessionID, change, displayState) : openTurnFileChanges(sessionID, turnID, changes, change.id)}
+              >
+                <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 group-hover/change-row:opacity-100" />
+                {change.binary ? <FileImage className="relative z-[1] size-3.5 shrink-0" /> : null}
+                <code className="relative z-[1] min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
+                {change.additions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-added">+{change.additions}</span> : null}
+                {change.deletions > 0 ? <span className="relative z-[1] shrink-0 text-xs text-git-deleted">−{change.deletions}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {collapsible ? (
         <button
           className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t border-border/70 bg-muted/20 px-3 text-left text-xs font-medium text-foreground/85 hover:text-foreground"

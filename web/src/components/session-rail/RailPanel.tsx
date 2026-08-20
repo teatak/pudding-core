@@ -21,9 +21,7 @@ import {
   CollapsibleSessionGroupLabel,
   dragPreviewTransform,
   ProjectSortHeader,
-  RailLanguageToggle,
   RailProjectActionsMenu,
-  RailThemeToggle,
   RailUpdateButton,
   SessionDragPreview,
 } from "@/components/session-rail/RailControls";
@@ -64,6 +62,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
+import { getDesktopHomeDirectory } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { cn } from "@/lib/utils";
@@ -189,6 +188,7 @@ export function RailPanel({
   const [projectDropTarget, setProjectDropTarget] = useState<ProjectDropTarget | null>(null);
   const [optimisticPinnedOrder, setOptimisticPinnedOrder] = useState<string[] | null>(null);
   const [contentFade, setContentFade] = useState({ top: false, bottom: false });
+  const [homeDirectory, setHomeDirectory] = useState("");
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
@@ -234,6 +234,16 @@ export function RailPanel({
   const projectsCollapsed = collapsedGroups.has("projects");
   const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
   const overlayHoldIDsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    let current = true;
+    void getDesktopHomeDirectory().then((directory) => {
+      if (current) setHomeDirectory(directory);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   function toggleGroupCollapsed(groupID: string) {
     setCollapsedGroups((previous) => {
@@ -853,7 +863,13 @@ export function RailPanel({
                                       activity={projectCollapsed || draggingSessionID
                                         ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
                                         : undefined}
-                                      actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
+                                      actions={group.project ? (
+                                        <RailProjectActionsMenu
+                                          homeDirectory={homeDirectory}
+                                          project={group.project}
+                                          token={token}
+                                        />
+                                      ) : undefined}
                                       collapsed={draggingSessionID ? true : projectCollapsed}
                                       dropTargetActive={
                                         dragTarget?.kind === "project" &&
@@ -922,9 +938,6 @@ export function RailPanel({
           <SidebarFooter>
             <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
             <div className="flex items-center gap-1">
-              <RailThemeToggle />
-              <RailLanguageToggle />
-              <div className="flex-1" />
               <Button
                 aria-label={t("settings.title")}
                 size="icon"

@@ -24,7 +24,6 @@ import {
   MessageCirclePlus,
   Package,
 } from "@/components/icons";
-import { LanguageToggle } from "@/components/LanguageToggle";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import type { SessionGroupActivity } from "@/components/session-rail/activity";
 import type {
@@ -33,7 +32,6 @@ import type {
 } from "@/components/session-rail/model";
 import { useRailOverlayHold } from "@/components/session-rail/overlayHold";
 import { Spinner } from "@/components/Spinner";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
@@ -49,7 +47,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
-import { getDesktopHomeDirectory } from "@/lib/desktopBridge";
 import {
   type DesktopUpdateState,
   activateDesktopUpdate,
@@ -62,12 +59,6 @@ import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
 
 export function dragPreviewTransform(clientX: number, clientY: number) {
   return `translate3d(${clientX + 12}px, ${clientY}px, 0) translateY(-50%)`;
-}
-
-export function RailThemeToggle() {
-  const [open, setOpen] = useState(false);
-  useRailOverlayHold(open);
-  return <ThemeToggle onOpenChange={setOpen} />;
 }
 
 export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean }) {
@@ -157,12 +148,6 @@ export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boo
       )}
     </Button>
   );
-}
-
-export function RailLanguageToggle() {
-  const [open, setOpen] = useState(false);
-  useRailOverlayHold(open);
-  return <LanguageToggle onOpenChange={setOpen} />;
 }
 
 export function SessionDragPreview({
@@ -408,19 +393,16 @@ export function ProjectSortHeader({
   );
 }
 
-export function RailProjectActionsMenu({ project, token }: { project: Project; token: string }) {
+export function RailProjectActionsMenu({
+  homeDirectory,
+  project,
+  token,
+}: {
+  homeDirectory: string;
+  project: Project;
+  token: string;
+}) {
   const [overlayOpen, setOverlayOpen] = useState(false);
-  const [homeDirectory, setHomeDirectory] = useState("");
-
-  useEffect(() => {
-    let current = true;
-    void getDesktopHomeDirectory().then((dir) => {
-      if (current) setHomeDirectory(dir);
-    });
-    return () => {
-      current = false;
-    };
-  }, []);
 
   useRailOverlayHold(overlayOpen);
   return (
