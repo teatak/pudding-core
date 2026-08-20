@@ -79,7 +79,7 @@ textarea:focus-visible,
 :root {
     --pudding-chat-column-inline-gap: 2.5rem;
     --pudding-chat-column-max-width: 48rem;
-    --pudding-composer-radius: 25px;
+    --pudding-composer-radius: 18px;
     --background: oklch(1 0 0);
     --foreground: oklch(0.18 0 0);
     --card: oklch(1 0 0);
@@ -646,9 +646,9 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --brand-accent-rgb: 129 140 248;
     --background: oklch(0.19 0 0);
     --foreground: oklch(0.95 0 0);
-    --card: oklch(0.245 0 0);
+    --card: oklch(0.26 0 0);
     --card-foreground: oklch(0.95 0 0);
-    --popover: oklch(0.255 0 0);
+    --popover: oklch(0.28 0 0);
     --popover-foreground: oklch(0.95 0 0);
     --primary: oklch(0.424 0.199 265.638);
     --primary-foreground: oklch(0.97 0.014 254.604);
@@ -656,10 +656,10 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --primary-active: color-mix(in oklch, var(--primary), black 8%);
     --markdown-link: var(--primary);
     --markdown-link-hover: oklch(0.82 0.13 250);
-    --secondary: oklch(0.315 0 0);
+    --secondary: oklch(0.3 0 0);
     --secondary-foreground: oklch(0.95 0 0);
     --secondary-hover: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
-    --muted: oklch(0.285 0 0);
+    --muted: oklch(0.28 0 0);
     --muted-foreground: oklch(0.69 0 0);
     --accent: oklch(0.305 0 0);
     --accent-foreground: oklch(0.95 0 0);
@@ -672,11 +672,11 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --chart-3: var(--primary);
     --chart-4: color-mix(in oklch, var(--primary), black 12%);
     --chart-5: color-mix(in oklch, var(--primary), black 24%);
-    --sidebar: oklch(0.245 0 0);
+    --sidebar: oklch(0.26 0 0);
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-hover-background: oklch(0.305 0 0);
+    --sidebar-hover-background: oklch(0.315 0 0);
     --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 42%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.95 0 0);
@@ -688,10 +688,10 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --control-hover-background: oklch(0.3 0 0);
-    --control-active-background: oklch(0.35 0 0);
+    --control-active-background: oklch(0.34 0 0);
     --control-selected-background: color-mix(in srgb, var(--background), var(--primary) 20%);
     --control-selected-border: color-mix(in srgb, var(--border), var(--primary) 48%);
-    --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
+    --workspace-background: var(--background);
     --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
     --workspace-tree-background: var(--workspace-panel-background);
@@ -714,9 +714,9 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --workspace-file-tab-hover-background: oklch(0.285 0 0);
     --workspace-tree-hover-background: oklch(0.285 0 0);
     --workspace-tree-active-background: var(--workspace-tree-hover-background);
-    --agent-console-background: oklch(0.225 0 0);
-    --agent-console-chrome-background: oklch(0.255 0 0);
-    --agent-console-border: oklch(0.46 0 0);
+    --agent-console-background: var(--card);
+    --agent-console-chrome-background: var(--popover);
+    --agent-console-border: var(--border);
     --agent-console-shadow: 0 1px 3px oklch(0 0 0 / 28%), 0 20px 52px -14px oklch(0 0 0 / 62%);
     --success: oklch(0.7 0.11 175);
     --warning: oklch(0.76 0.12 75);
@@ -731,7 +731,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --destructive-hover: color-mix(in oklch, var(--destructive), black 18%);
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
-    --floating-surface: oklch(0.25 0 0);
+    --floating-surface: var(--popover);
     --floating-hover: var(--control-hover-background);
     --floating-active: var(--floating-hover);
     --floating-selected: var(--floating-hover);

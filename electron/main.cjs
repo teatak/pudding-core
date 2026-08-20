@@ -36,6 +36,7 @@ const { probePuddingDaemon } = require("./daemon-health.cjs");
 const { installConsoleFileLogging } = require("./file-logger.cjs");
 const { MobileAccessBridge } = require("./mobile-access-bridge.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
+const { buildNativeMenuTemplate, normalizeNativeMenuPosition } = require("./native-menu.cjs");
 const { ComputerUseBridgeServer } = require("./computer-use-bridge-server.cjs");
 const { ComputerUseHost } = require("./computer-use-host.cjs");
 const { ComputerUsePermissionCoordinator } = require("./computer-use-permissions.cjs");
@@ -1274,6 +1275,24 @@ ipcMain.handle("pudding:desktop:editor-context-menu", (event, request) => {
   return new Promise((resolve) => {
     Menu.buildFromTemplate(template).popup({
       window,
+      callback: () => resolve(command),
+    });
+  });
+});
+
+ipcMain.handle("pudding:desktop:native-menu", (event, request) => {
+  const window = assertTrustedSender(event);
+  let command = null;
+  const template = buildNativeMenuTemplate(request?.items, (next) => {
+    command = next;
+  });
+  if (template.length === 0 || window.isDestroyed()) {
+    return null;
+  }
+  return new Promise((resolve) => {
+    Menu.buildFromTemplate(template).popup({
+      window,
+      ...normalizeNativeMenuPosition(request, window),
       callback: () => resolve(command),
     });
   });
