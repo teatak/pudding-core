@@ -106,7 +106,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
 
 function SessionAppIcon({ app, token }: { app: AppDefinition | undefined; token: string }) {
   return (
-    <span className="inline-grid size-7 place-items-center overflow-hidden rounded-full bg-[var(--agent-console-chrome-background)] [&_[data-slot=identity-icon]]:!size-7 [&_[data-slot=identity-icon]]:!rounded-full">
+    <span className="relative inline-grid size-7 place-items-center overflow-hidden rounded-full bg-[var(--agent-console-chrome-background)] after:pointer-events-none after:absolute after:inset-0 after:rounded-full after:border after:border-foreground/25 [&_[data-slot=identity-icon]]:!size-7 [&_[data-slot=identity-icon]]:!rounded-full">
       {app ? (
         <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="md" />
       ) : (
