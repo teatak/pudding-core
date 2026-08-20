@@ -49,6 +49,38 @@ test("an explicit fresh refresh restarts Computer Use before checking permission
   assert.deepEqual(order, ["restart", "permissions"]);
 });
 
+test("concurrent fresh refreshes share one Computer Use restart", async () => {
+  let releaseRestart;
+  const restartGate = new Promise((resolve) => {
+    releaseRestart = resolve;
+  });
+  let restartCount = 0;
+  let permissionCount = 0;
+  const controller = new DesktopPermissionController({
+    computerUseHost: {
+      permissions: async () => {
+        permissionCount += 1;
+        return { accessibility: true, screenRecording: true };
+      },
+    },
+    systemPreferences: { getMediaAccessStatus: () => "denied" },
+    platform: "darwin",
+    restartComputerUse: async () => {
+      restartCount += 1;
+      await restartGate;
+    },
+  });
+
+  const first = controller.refresh({ restartComputerUse: true });
+  const second = controller.refresh({ restartComputerUse: true });
+  assert.equal(restartCount, 1);
+  releaseRestart();
+  const [firstState, secondState] = await Promise.all([first, second]);
+
+  assert.equal(permissionCount, 1);
+  assert.deepEqual(firstState, secondState);
+});
+
 test("desktop permission state uses Computer Use as the screen recording source", async () => {
   const state = await desktopPermissionState(
     { permissions: async () => ({ accessibility: true, screenRecording: false, inputMonitoring: true }) },

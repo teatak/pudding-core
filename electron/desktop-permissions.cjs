@@ -17,6 +17,8 @@ class DesktopPermissionController {
     this.onStateChange = options.onStateChange || (() => {});
     this.state = unsupportedState();
     this.requestedScreenRecording = false;
+    this.refreshPromise = null;
+    this.refreshRestartsComputerUse = false;
   }
 
   currentState() {
@@ -24,7 +26,33 @@ class DesktopPermissionController {
   }
 
   async refresh(options = {}) {
-    if (options.restartComputerUse === true) {
+    const restartComputerUse = options.restartComputerUse === true;
+    if (this.refreshPromise) {
+      if (!restartComputerUse || this.refreshRestartsComputerUse) {
+        return this.refreshPromise;
+      }
+      try {
+        await this.refreshPromise;
+      } catch {
+        // The fresh refresh below is the caller's authoritative attempt.
+      }
+      return this.refresh(options);
+    }
+    const attempt = this.performRefresh(restartComputerUse);
+    this.refreshPromise = attempt;
+    this.refreshRestartsComputerUse = restartComputerUse;
+    try {
+      return await attempt;
+    } finally {
+      if (this.refreshPromise === attempt) {
+        this.refreshPromise = null;
+        this.refreshRestartsComputerUse = false;
+      }
+    }
+  }
+
+  async performRefresh(restartComputerUse) {
+    if (restartComputerUse) {
       await this.restartComputerUse();
     }
     const next = await desktopPermissionState(

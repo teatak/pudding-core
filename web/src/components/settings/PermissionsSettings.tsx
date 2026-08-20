@@ -37,7 +37,6 @@ export function PermissionsSettings() {
 		try {
 			setState(await getDesktopPermissions());
 		} catch {
-			setState(unavailableState);
 			setFailed(true);
 		} finally {
 			setLoading(false);
@@ -65,7 +64,10 @@ export function PermissionsSettings() {
 	}
 
 	useEffect(() => {
-		const unsubscribe = onDesktopPermissionsUpdated(setState);
+		const unsubscribe = onDesktopPermissionsUpdated((next) => {
+			setState(next);
+			setFailed(false);
+		});
 		void refresh();
 		return unsubscribe;
 	}, []);
