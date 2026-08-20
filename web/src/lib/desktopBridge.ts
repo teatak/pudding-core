@@ -49,9 +49,18 @@ export type DesktopApplicationIdentity = {
   iconURL: string;
 };
 
+export type MobilePairing = {
+  code: string;
+  url: string;
+  urls: string[];
+  expiresAt: string;
+  qrDataURL?: string;
+};
+
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
   getHomeDirectory?: () => Promise<string>;
+	createMobilePairing?: () => Promise<MobilePairing>;
 	getApplicationIdentity?: (appID: string) => Promise<DesktopApplicationIdentity | null>;
 	getDesktopPermissions?: () => Promise<DesktopPermissionState>;
 	requestDesktopPermission?: (permission: DesktopPermission) => Promise<DesktopPermissionState>;
@@ -145,6 +154,14 @@ export async function getDesktopHomeDirectory() {
   } catch {
     return "";
   }
+}
+
+export async function createDesktopMobilePairing() {
+  const bridge = desktopBridge();
+  if (!bridge?.createMobilePairing) {
+    throw new Error("mobile pairing is available only in the desktop app");
+  }
+  return bridge.createMobilePairing();
 }
 
 export async function getDesktopApplicationIdentity(appID: string) {

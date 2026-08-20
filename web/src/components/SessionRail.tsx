@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
+import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
 import { onDesktopMenuCommand } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
@@ -63,6 +64,7 @@ export function SessionRail({
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
   const responsiveCollapsed = useRailResponsiveCollapsed();
+  const hasHoverInput = useHasHoverInput();
   const hover = useHoverPopover();
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -489,12 +491,12 @@ export function SessionRail({
                   collapse(false);
                 }}
                 onMouseEnter={() => {
-                  if (collapsed) {
+                  if (collapsed && hasHoverInput) {
                     hover.openNow();
                   }
                 }}
                 onMouseLeave={() => {
-                  if (collapsed) {
+                  if (collapsed && hasHoverInput) {
                     hover.scheduleClose();
                   }
                 }}
@@ -509,7 +511,8 @@ export function SessionRail({
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className="flex h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col gap-0 border-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] ring-0 outline-none"
+            className="flex h-[min(48rem,var(--radix-popover-content-available-height))] max-h-[var(--radix-popover-content-available-height)] w-[260px] flex-col gap-0 border-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] ring-0 outline-none"
+            collisionPadding={12}
             side="bottom"
             sideOffset={11}
             onMouseEnter={hover.cancelClose}

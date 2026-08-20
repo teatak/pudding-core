@@ -214,18 +214,14 @@ const mobilePairingClaimResponse = z.object({
     createdAt: z.string(),
   }),
 });
-const mobilePairingResponse = z.object({
-  code: z.string(),
-  url: z.string(),
-  urls: z.array(z.string()),
-  expiresAt: z.string(),
-  qrDataURL: z.string().optional(),
-});
+const mobilePairingClaims = new Map<
+  string,
+  Promise<z.infer<typeof mobilePairingClaimResponse>>
+>();
 
 export type SubmitResult = z.infer<typeof submitResponse>;
 export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
-export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
 export type { AudioConfig, AudioConfigResponse, AudioInputMode, AudioRuntimeStatus, ClearASRRecordingsResponse };
 export type AppConnectionPayload = {
@@ -327,7 +323,11 @@ export function claimMobilePairing(
   code: string,
   body: { deviceName?: string } = {},
 ): Promise<z.infer<typeof mobilePairingClaimResponse>> {
-  return publicRequest(
+  const existing = mobilePairingClaims.get(code);
+  if (existing) {
+    return existing;
+  }
+  const claim = publicRequest(
     `/mobile/pairings/${encodeURIComponent(code)}/claim`,
     mobilePairingClaimResponse,
     {
@@ -335,12 +335,8 @@ export function claimMobilePairing(
       body: JSON.stringify(body),
     },
   );
-}
-
-export function createMobilePairing(token: string): Promise<MobilePairing> {
-  return request(token, "/mobile/pairings", mobilePairingResponse, {
-    method: "POST",
-  });
+  mobilePairingClaims.set(code, claim);
+  return claim;
 }
 
 export function listSessions(token: string): Promise<{ sessions: Session[] }> {

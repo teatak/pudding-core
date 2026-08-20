@@ -55,10 +55,9 @@ import (
 )
 
 type Options struct {
-	Home      string // 空 = 通道默认目录
-	Addr      string // 空 = 通道默认地址
-	Mock      bool
-	MobileLAN bool // true = 同一 HTTP 服务监听局域网接口
+	Home string // 空 = 通道默认目录
+	Addr string // 空 = 通道默认地址
+	Mock bool
 }
 
 type Daemon struct {
@@ -67,7 +66,6 @@ type Daemon struct {
 	server    *http.Server
 	listener  net.Listener
 	localAddr string
-	lanURLs   []string
 	token     string
 	homeDir   string
 	voice     *voice.Service
@@ -90,11 +88,7 @@ func Start(opts Options) (*Daemon, error) {
 	if addr == "" {
 		addr = home.DefaultAddr()
 	}
-	listenAddr := addr
-	if opts.MobileLAN {
-		listenAddr = lanListenAddr(addr)
-	}
-	ln, err := net.Listen("tcp", listenAddr)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +98,7 @@ func Start(opts Options) (*Daemon, error) {
 			_ = ln.Close()
 		}
 	}()
-	localAddr := localAddrFor(addr, ln.Addr().String(), opts.MobileLAN)
-	var lanURLs []string
-	if opts.MobileLAN {
-		lanURLs = lanURLsFor(ln.Addr().String())
-	}
+	localAddr := localAddrFor(ln.Addr().String())
 	environmentCtx, cancelEnvironment := context.WithTimeout(context.Background(), 5*time.Second)
 	environment, environmentErr := tool.CaptureCommandEnvironment(environmentCtx)
 	cancelEnvironment()
@@ -231,7 +221,7 @@ func Start(opts Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, err
 	}
-	pairing := mobileauth.NewManager(devices, append(lanURLs, "http://"+localAddr+"/"))
+	pairing := mobileauth.NewManager(devices, nil)
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
@@ -252,7 +242,6 @@ func Start(opts Options) (*Daemon, error) {
 		server:    server,
 		listener:  ln,
 		localAddr: localAddr,
-		lanURLs:   lanURLs,
 		token:     token,
 		homeDir:   dir,
 		voice:     voiceService,
@@ -270,8 +259,6 @@ func Start(opts Options) (*Daemon, error) {
 		"home", dir,
 		"addr", d.Addr(),
 		"listen", ln.Addr().String(),
-		"lan", opts.MobileLAN,
-		"lanURLs", d.LANURLs(),
 		"provider", providerLabel,
 		"store", "sqlite")
 	slog.Info("puddingd ready", "url", fmt.Sprintf("http://%s/", d.Addr()))
@@ -315,8 +302,6 @@ func newComputerController() (computer.Controller, error) {
 
 func (d *Daemon) Addr() string { return d.localAddr }
 
-func (d *Daemon) LANURLs() []string { return append([]string(nil), d.lanURLs...) }
-
 func (d *Daemon) Token() string { return d.token }
 
 func (d *Daemon) Home() string { return d.homeDir }
@@ -326,75 +311,11 @@ func (d *Daemon) OpenURL() string {
 	return fmt.Sprintf("http://%s/?token=%s", d.Addr(), d.token)
 }
 
-func lanListenAddr(addr string) string {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil || port == "" {
-		return addr
+func localAddrFor(actualAddr string) string {
+	if host, port, err := net.SplitHostPort(actualAddr); err == nil && isUnspecifiedHost(host) {
+		return net.JoinHostPort("127.0.0.1", port)
 	}
-	return net.JoinHostPort("0.0.0.0", port)
-}
-
-func localAddrFor(configuredAddr, actualAddr string, mobileLAN bool) string {
-	if !mobileLAN {
-		if host, port, err := net.SplitHostPort(actualAddr); err == nil && isUnspecifiedHost(host) {
-			return net.JoinHostPort("127.0.0.1", port)
-		}
-		return actualAddr
-	}
-	_, port, err := net.SplitHostPort(actualAddr)
-	if err != nil || port == "" {
-		return configuredAddr
-	}
-	return net.JoinHostPort("127.0.0.1", port)
-}
-
-func lanURLsFor(actualAddr string) []string {
-	_, port, err := net.SplitHostPort(actualAddr)
-	if err != nil || port == "" {
-		return nil
-	}
-	var urls []string
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ip := addrIP(addr)
-			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-				continue
-			}
-			if ip4 := ip.To4(); ip4 != nil {
-				ip = ip4
-			}
-			host := ip.String()
-			if seen[host] {
-				continue
-			}
-			seen[host] = true
-			urls = append(urls, "http://"+net.JoinHostPort(host, port)+"/")
-		}
-	}
-	return urls
-}
-
-func addrIP(addr net.Addr) net.IP {
-	switch v := addr.(type) {
-	case *net.IPNet:
-		return v.IP
-	case *net.IPAddr:
-		return v.IP
-	default:
-		return nil
-	}
+	return actualAddr
 }
 
 func defaultTTS(cfg config.AudioConfig) audiotts.Client {

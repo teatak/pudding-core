@@ -6,6 +6,7 @@ export type SettingsSectionID =
   | "tools"
 	| "permissions"
   | "browser"
+	| "mobile"
   | "usage"
   | "archives"
   | "advanced"

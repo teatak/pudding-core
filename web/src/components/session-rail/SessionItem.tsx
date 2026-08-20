@@ -35,6 +35,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -152,7 +153,7 @@ export function SessionItem({
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
+    if (event.button !== 0 || event.pointerType === "touch") {
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -472,20 +473,4 @@ export function SessionItem({
       ) : null}
     </SidebarMenuItem>
   );
-}
-
-function useHasHoverInput() {
-  const [hasHover, setHasHover] = useState(() =>
-    typeof window === "undefined" ? true : window.matchMedia("(hover: hover) and (pointer: fine)").matches,
-  );
-
-  useEffect(() => {
-    const media = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const update = () => setHasHover(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  return hasHover;
 }

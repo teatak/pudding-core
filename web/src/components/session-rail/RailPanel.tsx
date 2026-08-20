@@ -673,7 +673,7 @@ export function RailPanel({
           <SidebarContent
             ref={scrollContainerRef}
             className={cn(
-              "gap-0.5 pt-2 pb-2 overscroll-contain",
+              "touch-pan-y gap-0.5 pt-2 pb-2 overscroll-contain",
               contentFade.top && contentFade.bottom
                 ? "pudding-session-rail-content-fade-both"
                 : contentFade.top

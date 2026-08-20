@@ -164,6 +164,7 @@ export {
   Sheet,
   SlidersHorizontal,
   Sparkles,
+  Smartphone,
   Split,
   Square,
   SquareMousePointer,

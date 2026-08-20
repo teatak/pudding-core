@@ -34,6 +34,7 @@ const { configureManagedBrowserPermissions, managedBrowserPartition } = require(
 const { hardenManagedBrowserWebview } = require("./browser-webview-security.cjs");
 const { probePuddingDaemon } = require("./daemon-health.cjs");
 const { installConsoleFileLogging } = require("./file-logger.cjs");
+const { MobileAccessBridge } = require("./mobile-access-bridge.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { ComputerUseBridgeServer } = require("./computer-use-bridge-server.cjs");
 const { ComputerUseHost } = require("./computer-use-host.cjs");
@@ -168,6 +169,7 @@ const computerUseBridgeServer = new ComputerUseBridgeServer(computerUseHost, {
   permissionCoordinator: computerUsePermissionCoordinator,
 });
 const projectFileWatcher = new ProjectFileWatcher();
+const mobileAccessBridge = new MobileAccessBridge({ apiBase, webBase: devURL || apiBase });
 
 let daemonProcess = null;
 let daemonStartupPromise = null;
@@ -1183,6 +1185,15 @@ ipcMain.handle("pudding:desktop:get-home-directory", (event) => {
   return os.homedir();
 });
 
+ipcMain.handle("pudding:desktop:create-mobile-pairing", async (event) => {
+  assertTrustedSender(event);
+  const token = await readUsableToken();
+  if (!token) {
+    throw new Error("pudding daemon is unavailable");
+  }
+  return mobileAccessBridge.createPairing(token);
+});
+
 ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID) => {
   assertTrustedSender(event);
   const appID = String(rawAppID || "").trim();
@@ -1813,6 +1824,7 @@ async function stopDesktopResources() {
     browserBridgeServer.stop(),
     computerUseBridgeServer.stop(),
     computerUseHost.stop(),
+    mobileAccessBridge.stop(),
   ]);
   const failure = results.find((result) => result.status === "rejected");
   if (failure) {

@@ -142,6 +142,7 @@ type AppRegistryRelease = {
   package: string;
   package_sha256?: string;
   requires?: Record<string, string>;
+  targets?: string[];
   released_at?: string;
   channel?: string;
   preview?: boolean;
@@ -158,6 +159,7 @@ type AppRegistryItem = {
   package?: string;
   package_sha256?: string;
   releases?: AppRegistryRelease[];
+  targets?: string[];
   tags?: string[];
 };
 type AppRegistry = {
@@ -232,6 +234,7 @@ const OFFICIAL_APP_REGISTRY =
   "https://teatak.github.io/pudding-hub/apps/registry.json";
 const GITHUB_APP_ACCESS_SETTINGS_URL = "https://x-t.top/oauth/providers/github/install";
 const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
+const APP_CATALOG_TARGET = "desktop";
 
 export function AppsPane({ token }: { token: string }) {
   const { locale, t } = useI18n();
@@ -973,7 +976,9 @@ async function fetchAppRegistry(url: string): Promise<AppRegistry> {
   }
   const data = (await response.json()) as Partial<AppRegistry>;
   return {
-    items: Array.isArray(data.items) ? data.items.filter(isAppRegistryItem) : [],
+    items: Array.isArray(data.items)
+      ? data.items.filter(isAppRegistryItem).filter((item) => normalizedAppRegistryReleases(item).length > 0)
+      : [],
   };
 }
 
@@ -1196,12 +1201,15 @@ function normalizedAppRegistryReleases(item: AppRegistryItem): AppRegistryReleas
       manifest: item.manifest,
       package: item.package,
       package_sha256: item.package_sha256,
+      targets: item.targets,
     };
     if (!releases.some((release) => release.version === topLevel.version && release.package === topLevel.package)) {
       releases.push(topLevel);
     }
   }
-  return releases.sort(compareRegistryReleases);
+  return releases
+    .filter((release) => supportsAppRegistryTarget(release.targets, APP_CATALOG_TARGET))
+    .sort(compareRegistryReleases);
 }
 
 function normalizedAppRegistryRelease(value: AppRegistryRelease | undefined): AppRegistryRelease | null {
@@ -1217,7 +1225,18 @@ function normalizedAppRegistryRelease(value: AppRegistryRelease | undefined): Ap
     manifest: value?.manifest?.trim(),
     package_sha256: value?.package_sha256?.trim(),
     channel: value?.channel?.trim(),
+    targets: normalizedAppRegistryTargets(value?.targets),
   };
+}
+
+function normalizedAppRegistryTargets(values: string[] | undefined) {
+  return (values || []).map((value) => value.trim().toLowerCase()).filter(Boolean);
+}
+
+function supportsAppRegistryTarget(targets: string[] | undefined, target: string) {
+  const normalized = normalizedAppRegistryTargets(targets);
+  // targets predates the mobile catalog; an omitted value is a legacy desktop release.
+  return normalized.length === 0 ? target === "desktop" : normalized.includes(target);
 }
 
 function compareRegistryReleases(a: AppRegistryRelease, b: AppRegistryRelease) {

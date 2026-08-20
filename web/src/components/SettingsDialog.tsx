@@ -10,6 +10,7 @@ import {
   Settings,
   Settings2,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Wrench,
   X,
@@ -22,6 +23,7 @@ import { ArchivedSessionsSettings } from "@/components/settings/ArchivedSessions
 import { GeneralSettings } from "@/components/settings/GeneralSettings";
 import { BrowserSettings } from "@/components/settings/BrowserSettings";
 import { PermissionsSettings } from "@/components/settings/PermissionsSettings";
+import { MobileSettings } from "@/components/settings/MobileSettings";
 import { ProviderSettings } from "@/components/settings/ProviderSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { ToolsSettings } from "@/components/settings/ToolsSettings";
@@ -107,6 +109,11 @@ const SETTINGS_GROUPS: Array<{ labelKey: string; sections: SettingsSection[] }> 
         id: "browser",
         icon: Globe,
         labelKey: "settings.section.browser",
+      },
+      {
+        id: "mobile",
+        icon: Smartphone,
+        labelKey: "settings.section.mobile",
       },
       {
         id: "usage",
@@ -273,6 +280,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
                 {active === "tools" ? <ToolsSettings token={token} onDirtyChange={setActiveDirty} /> : null}
 				{active === "permissions" ? <PermissionsSettings /> : null}
                 {active === "browser" ? <BrowserSettings /> : null}
+                {active === "mobile" ? <MobileSettings /> : null}
                 {active === "about" ? <AboutSettings token={token} /> : null}
               </div>
             </main>
