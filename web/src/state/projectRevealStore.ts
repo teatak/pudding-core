@@ -49,7 +49,7 @@ const useProjectRevealStore = create<ProjectRevealState>((set) => ({
 
 export function requestProjectFileReveal(input: ProjectFileRevealInput) {
   useProjectRevealStore.getState().request(input);
-  setWorkspaceOpen(true);
+  setWorkspaceOpen(input.sessionID, true);
 }
 
 export function consumeProjectFileReveal(sessionID: string, serial: number) {

@@ -201,7 +201,7 @@ export function Composer({
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
-  const workspaceOpen = useWorkspaceOpen();
+  const workspaceOpen = useWorkspaceOpen(sessionID);
   const workspaceActivities = useWorkspaceActivities(sessionID);
   const uiContextEnabled = useUIContextEnabled();
   const visibleUIContext = useVisibleUIContext(sessionID);
@@ -248,8 +248,7 @@ export function Composer({
       && activeTurnPlan,
   );
   const showWorkspaceActivities = Boolean(
-    !showApprovalPanel
-      && !showInputFlowPanel
+    !showInputFlowPanel
       && !showTurnProgress
       && !workspaceOpen
       && workspaceActivities.length > 0,
@@ -1045,7 +1044,8 @@ export function Composer({
       ) : null}
       <ChatColumn
         className={cn(
-          "pointer-events-auto relative z-10",
+          "pointer-events-auto relative",
+          mentionMenuOpen || slashMenuOpen ? "z-40" : "z-10",
           floating && "w-full max-w-none",
         )}
       >

@@ -23,6 +23,9 @@ import {
   useElectronRequiredBrowserTabs,
   type ElectronBrowserSurfaceTab,
 } from "@/browser/useElectronRequiredBrowserTabs";
+import { Camera, Check } from "@/components/icons";
+import { Spinner } from "@/components/Spinner";
+import { useI18n } from "@/i18n";
 
 type RuntimeEntry = {
   handle: ElectronWebviewRuntimeHandle;
@@ -35,9 +38,12 @@ type ActiveViewport = {
 };
 
 type AutomationLease = {
+  action: "click" | "screenshot";
+  captureStatus: "running" | "success";
   complete: (ok: boolean) => void;
   completed: boolean;
   key: string;
+  presentationFrameReady: boolean;
 };
 
 type BrowserRuntimeContextValue = {
@@ -52,6 +58,7 @@ type BrowserRuntimeContextValue = {
 };
 
 const emptyRuntimeTabs: ElectronBrowserSurfaceTab[] = [];
+const screenshotPreviewExitDelayMs = 2_000;
 
 const BrowserRuntimeContext = createContext<BrowserRuntimeContextValue | null>(null);
 
@@ -69,6 +76,7 @@ export function BrowserRuntimeProvider({
   const runtimesRef = useRef(new Map<string, RuntimeEntry>());
   const viewportRef = useRef<ActiveViewport | null>(null);
   const automationFrameRef = useRef<number | undefined>(undefined);
+  const automationHideTimerRef = useRef<number | undefined>(undefined);
   const automationLeaseRef = useRef<AutomationLease | null>(null);
 
   useEffect(() => {
@@ -102,9 +110,16 @@ export function BrowserRuntimeProvider({
 
     runtimesRef.current.forEach((runtime, key) => {
       if (automation?.key === key) {
-        applyRuntimePresentation(runtime, "automation", viewport?.key === key);
+        if (automation.action === "screenshot") {
+          runtime.host.dataset.captureStatus = automation.captureStatus;
+          applyRuntimePresentation(runtime, "preview", false);
+        } else {
+          delete runtime.host.dataset.captureStatus;
+          applyRuntimePresentation(runtime, "automation", viewport?.key === key);
+        }
         return;
       }
+      delete runtime.host.dataset.captureStatus;
       if (!automation && viewport?.key === key) {
         applyRuntimePresentation(runtime, "visible", true);
         return;
@@ -176,19 +191,23 @@ export function BrowserRuntimeProvider({
       void bridge.completeAutomationLifecycle?.({ requestID, ok }).catch(() => undefined);
     };
     const stopStart = bridge.onAutomationStart((event) => {
-      if (event.action !== "click" || !event.requestID) {
+      if ((event.action !== "click" && event.action !== "screenshot") || !event.requestID) {
         return;
       }
+      window.clearTimeout(automationHideTimerRef.current);
       window.cancelAnimationFrame(automationFrameRef.current || 0);
       const previousLease = automationLeaseRef.current;
       if (previousLease) {
         runtimesRef.current.get(previousLease.key)?.handle.releaseAutomationFocus();
         completeAutomationLease(previousLease, false);
       }
-      const lease = {
+      const lease: AutomationLease = {
+        action: event.action,
+        captureStatus: "running",
         complete: (ok: boolean) => complete(event.requestID || "", ok),
         completed: false,
         key: runtimeKey(event.sessionID, event.tabID),
+        presentationFrameReady: false,
       };
       automationLeaseRef.current = lease;
       applyPresentations();
@@ -199,9 +218,20 @@ export function BrowserRuntimeProvider({
         }
         const runtime = runtimesRef.current.get(lease.key);
         const rect = runtime?.host.getBoundingClientRect();
-        if (runtime && rect && rect.width > 0 && rect.height > 0 && runtime.handle.focusForAutomation()) {
-          completeAutomationLease(lease, true);
-          return;
+        if (runtime && rect && rect.width > 0 && rect.height > 0) {
+          if (
+            lease.action === "screenshot"
+            && runtime.handle.readyForCapture()
+          ) {
+            if (lease.presentationFrameReady) {
+              completeAutomationLease(lease, true);
+              return;
+            }
+            lease.presentationFrameReady = true;
+          } else if (lease.action === "click" && runtime.handle.focusForAutomation()) {
+            completeAutomationLease(lease, true);
+            return;
+          }
         }
         if (performance.now() >= deadline) {
           automationLeaseRef.current = null;
@@ -215,21 +245,34 @@ export function BrowserRuntimeProvider({
       automationFrameRef.current = window.requestAnimationFrame(focusWhenReady);
     });
     const stopEnd = bridge.onAutomationEnd((event) => {
-      if (event.action !== "click" || !event.requestID) {
+      if ((event.action !== "click" && event.action !== "screenshot") || !event.requestID) {
         return;
       }
       const lease = automationLeaseRef.current;
       if (lease?.key === runtimeKey(event.sessionID, event.tabID)) {
         window.cancelAnimationFrame(automationFrameRef.current || 0);
         runtimesRef.current.get(lease.key)?.handle.releaseAutomationFocus();
-        automationLeaseRef.current = null;
-        applyPresentations();
+        if (lease.action === "screenshot" && event.ok === true) {
+          lease.captureStatus = "success";
+          applyPresentations();
+          automationHideTimerRef.current = window.setTimeout(() => {
+            if (automationLeaseRef.current !== lease) {
+              return;
+            }
+            automationLeaseRef.current = null;
+            applyPresentations();
+          }, screenshotPreviewExitDelayMs);
+        } else {
+          automationLeaseRef.current = null;
+          applyPresentations();
+        }
       }
       complete(event.requestID, true);
     });
     return () => {
       stopStart();
       stopEnd();
+      window.clearTimeout(automationHideTimerRef.current);
       window.cancelAnimationFrame(automationFrameRef.current || 0);
       const lease = automationLeaseRef.current;
       if (lease) {
@@ -344,6 +387,7 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
   tab: ElectronBrowserSurfaceTab;
   token: string;
 }) {
+  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ElectronWebviewRuntimeHandle | null>(null);
   const key = runtimeKey(sessionID, tab.id);
@@ -361,12 +405,27 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
   return (
     <div
       ref={hostRef}
-      className="pudding-browser-runtime-host pointer-events-none invisible fixed top-0 left-0 h-[720px] w-[1024px] overflow-hidden opacity-0"
+      className="pudding-browser-runtime-host pointer-events-none invisible fixed top-0 left-0 overflow-hidden opacity-0"
       onFocusCapture={activateBrowserPageFindRegion}
       onPointerDownCapture={activateBrowserPageFindRegion}
       style={{ "--pudding-browser-anchor": anchorName } as CSSProperties}
     >
-      <ElectronWebviewBrowser ref={runtimeRef} activeTab={tab} sessionID={sessionID} token={token} />
+      <div className="pudding-browser-capture-chrome" role="status">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Camera className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium text-foreground">{t("transcript.toolBrowserScreenshot")}</span>
+          <span className="block truncate text-[11px] text-muted-foreground">{tab.title || tab.url}</span>
+        </span>
+        <Spinner className="pudding-browser-capture-progress size-3.5 shrink-0 text-muted-foreground" />
+      </div>
+      <div className="pudding-browser-runtime-surface">
+        <ElectronWebviewBrowser ref={runtimeRef} activeTab={tab} sessionID={sessionID} token={token} />
+      </div>
+      <span className="pudding-browser-capture-success hidden items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-2 ring-white/80">
+        <Check aria-hidden="true" className="size-5" strokeWidth={3} />
+      </span>
     </div>
   );
 });
@@ -400,7 +459,7 @@ function completeAutomationLease(lease: AutomationLease, ok: boolean) {
 
 function applyRuntimePresentation(
   runtime: RuntimeEntry,
-  mode: "standby" | "visible" | "automation",
+  mode: "standby" | "visible" | "automation" | "preview",
   anchored: boolean,
 ) {
   const presentation = `${mode}:${anchored ? "anchored" : "standby"}`;
@@ -410,7 +469,7 @@ function applyRuntimePresentation(
   runtime.presentation = presentation;
   runtime.host.dataset.anchored = anchored ? "true" : "false";
   runtime.host.dataset.presentation = mode;
-  runtime.host.setAttribute("aria-hidden", mode === "visible" ? "false" : "true");
+  runtime.host.setAttribute("aria-hidden", mode === "visible" || mode === "preview" ? "false" : "true");
 }
 
 function mergeRuntimeTabs(

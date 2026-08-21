@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Ellipsis, FolderCog, FolderMinus } from "@/components/icons";
-import { useEffect, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -13,8 +13,14 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ProjectFormDialog } from "@/components/ProjectFormDialog";
+import { RailIconAction } from "@/components/session-rail/RailIconAction";
 import { Spinner } from "@/components/Spinner";
 import {
+  AppContextMenuContent as ContextMenuContent,
+  AppContextMenuItem as ContextMenuItem,
+  AppContextMenuSeparator as ContextMenuSeparator,
+  AppContextMenuSubContent as ContextMenuSubContent,
+  AppContextMenuSubTrigger as ContextMenuSubTrigger,
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
   AppDropdownMenuSeparator as DropdownMenuSeparator,
@@ -32,11 +38,25 @@ import {
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuSub, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuSub, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
+
+type ProjectMenuCommand = "edit" | "delete" | `reveal:${number}` | `copy:${number}`;
+
+type ProjectMenuEntry =
+  | { type: "separator" }
+  | {
+      type: "item";
+      id: ProjectMenuCommand;
+      label: string;
+      disabled?: boolean;
+      icon?: ReactNode;
+    }
+  | { type: "submenu"; label: string; items: ProjectMenuEntry[] };
 
 export function ProjectActionsMenu({
   alwaysVisible = false,
@@ -56,11 +76,13 @@ export function ProjectActionsMenu({
   const { t } = useI18n();
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<"dropdown" | "context" | null>(null);
+  const menuOpen = openMenu !== null;
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const [directoryPaths, setDirectoryPaths] = useState(project.rootDirs);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const overlayOpen = menuOpen || editOpen || deleteOpen;
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
@@ -70,6 +92,36 @@ export function ProjectActionsMenu({
     onOverlayOpenChange?.(overlayOpen);
   }, [onOverlayOpenChange, overlayOpen]);
   useEffect(() => () => onOverlayOpenChange?.(false), [onOverlayOpenChange]);
+  useEffect(() => {
+    if (surface !== "sidebar") {
+      return;
+    }
+    const trigger = triggerRef.current;
+    const target = trigger?.closest<HTMLElement>("[data-project-menu-context-target=true]");
+    if (!trigger || !target) {
+      return;
+    }
+    const openFromContextMenu = (rawEvent: Event) => {
+      const event = rawEvent as MouseEvent;
+      if (event.target instanceof Node && trigger.contains(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      trigger.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        buttons: 2,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        screenX: event.screenX,
+        screenY: event.screenY,
+      }));
+    };
+    target.addEventListener("contextmenu", openFromContextMenu);
+    return () => target.removeEventListener("contextmenu", openFromContextMenu);
+  }, [surface]);
 
   const revealMutation = useMutation({
     mutationFn: (path: string) => revealDesktopPath(token, path),
@@ -187,83 +239,202 @@ export function ProjectActionsMenu({
       () => toast.error(t("project.pathCopyFailed")),
     );
   };
+  const pathMenuEntries = (index: number): ProjectMenuEntry[] => [
+    ...(isMac
+      ? [{
+          type: "item" as const,
+          id: `reveal:${index}` as const,
+          label: t("project.revealFinder"),
+          disabled: revealMutation.isPending,
+          icon: revealMutation.isPending ? <Spinner /> : undefined,
+        }]
+      : []),
+    {
+      type: "item",
+      id: `copy:${index}`,
+      label: t("project.copyPath"),
+    },
+  ];
+  const menuEntries: ProjectMenuEntry[] = [
+    ...(project.rootDirs.length === 1
+      ? pathMenuEntries(0)
+      : project.rootDirs.map((path, index) => ({
+          type: "submenu" as const,
+          label: projectDirectoryLabel(path, project.rootDirs),
+          items: pathMenuEntries(index),
+        }))),
+    {
+      type: "item",
+      id: "edit",
+      label: t("project.edit"),
+      icon: <FolderCog />,
+    },
+    { type: "separator" },
+    {
+      type: "item",
+      id: "delete",
+      label: t("project.delete"),
+      disabled: deleteMutation.isPending,
+      icon: <FolderMinus />,
+    },
+  ];
+
+  const runMenuCommand = (command: ProjectMenuCommand) => {
+    if (command === "edit") {
+      openEdit();
+      return;
+    }
+    if (command === "delete") {
+      setDeleteOpen(true);
+      return;
+    }
+    const match = /^(reveal|copy):(\d+)$/.exec(command);
+    const path = match ? project.rootDirs[Number(match[2])] : undefined;
+    if (!match || !path) {
+      return;
+    }
+    if (match[1] === "reveal") {
+      revealMutation.mutate(path);
+      return;
+    }
+    copyPaths([path]);
+  };
+
+  const setMenuSurfaceOpen = (menu: "dropdown" | "context", open: boolean) => {
+    setOpenMenu((current) => open ? menu : current === menu ? null : current);
+  };
+
+  const actionsButton = () => {
+    const props = {
+      "aria-expanded": menuOpen,
+      "aria-haspopup": "menu" as const,
+      "aria-label": t("project.actions"),
+      "data-project-actions-open": menuOpen,
+      "data-state": menuOpen ? "open" : "closed",
+      onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+      },
+    };
+    const icon = <Ellipsis className="size-3.5" />;
+    if (surface === "sidebar") {
+      return (
+        <RailIconAction
+          ref={triggerRef}
+          className={cn(
+            "group-hover/project-label:opacity-100 group-has-[[data-state=open]]/project-label:opacity-100",
+            alwaysVisible && "opacity-100",
+          )}
+          {...props}
+        >
+          {icon}
+        </RailIconAction>
+      );
+    }
+    return (
+      <Button
+        ref={triggerRef}
+        className={cn("data-[state=open]:bg-muted", alwaysVisible && "opacity-100")}
+        size="icon"
+        variant="ghost"
+        {...props}
+      >
+        {icon}
+      </Button>
+    );
+  };
+
+  const renderDropdownEntry = (entry: ProjectMenuEntry, key: string): ReactNode => {
+    if (entry.type === "separator") {
+      return <DropdownMenuSeparator key={key} />;
+    }
+    if (entry.type === "submenu") {
+      return (
+        <DropdownMenuSub key={key}>
+          <DropdownMenuSubTrigger>
+            <span className="min-w-0 truncate">{entry.label}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
+            {entry.items.map((item, index) => renderDropdownEntry(item, `${key}-${index}`))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      );
+    }
+    return (
+      <DropdownMenuItem
+        key={key}
+        disabled={entry.disabled}
+        onSelect={() => runMenuCommand(entry.id)}
+      >
+        {entry.icon}
+        {entry.label}
+      </DropdownMenuItem>
+    );
+  };
+
+  const renderContextEntry = (entry: ProjectMenuEntry, key: string): ReactNode => {
+    if (entry.type === "separator") {
+      return <ContextMenuSeparator key={key} />;
+    }
+    if (entry.type === "submenu") {
+      return (
+        <ContextMenuSub key={key}>
+          <ContextMenuSubTrigger>
+            <span className="min-w-0 truncate">{entry.label}</span>
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
+            {entry.items.map((item, index) => renderContextEntry(item, `${key}-${index}`))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      );
+    }
+    return (
+      <ContextMenuItem
+        key={key}
+        disabled={entry.disabled}
+        onSelect={() => runMenuCommand(entry.id)}
+      >
+        {entry.icon}
+        {entry.label}
+      </ContextMenuItem>
+    );
+  };
+
+  const dropdownContent = (
+    <DropdownMenuContent align="start" className="w-48">
+      {menuEntries.map((entry, index) => renderDropdownEntry(entry, String(index)))}
+    </DropdownMenuContent>
+  );
+  const menu = surface === "sidebar" ? (
+    <ContextMenu
+      open={openMenu === "context"}
+      onOpenChange={(open) => setMenuSurfaceOpen("context", open)}
+    >
+      <DropdownMenu
+        open={openMenu === "dropdown"}
+        onOpenChange={(open) => setMenuSurfaceOpen("dropdown", open)}
+      >
+        <ContextMenuTrigger asChild>
+          <DropdownMenuTrigger asChild>{actionsButton()}</DropdownMenuTrigger>
+        </ContextMenuTrigger>
+        {dropdownContent}
+      </DropdownMenu>
+      <ContextMenuContent className="w-48">
+        {menuEntries.map((entry, index) => renderContextEntry(entry, String(index)))}
+      </ContextMenuContent>
+    </ContextMenu>
+  ) : (
+    <DropdownMenu
+      open={openMenu === "dropdown"}
+      onOpenChange={(open) => setMenuSurfaceOpen("dropdown", open)}
+    >
+      <DropdownMenuTrigger asChild>{actionsButton()}</DropdownMenuTrigger>
+      {dropdownContent}
+    </DropdownMenu>
+  );
 
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            aria-label={t("project.actions")}
-            className={cn(
-              "opacity-0 group-hover/project-label:opacity-100 data-[state=open]:opacity-100 focus-visible:opacity-100",
-              surface === "sidebar"
-                ? "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring"
-                : "data-[state=open]:bg-muted",
-              alwaysVisible && "opacity-100",
-            )}
-            data-project-actions-open={menuOpen}
-            size={surface === "sidebar" ? "icon-xs" : "icon"}
-            type="button"
-            variant="ghost"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Ellipsis className="size-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48 space-y-1">
-          {project.rootDirs.length === 1 ? (
-            <>
-              {isMac ? (
-                <DropdownMenuItem
-                  disabled={revealMutation.isPending}
-                  onSelect={() => revealMutation.mutate(project.rootDirs[0])}
-                >
-                  {revealMutation.isPending ? <Spinner /> : null}
-                  {t("project.revealFinder")}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem onSelect={() => copyPaths([project.rootDirs[0]])}>
-                {t("project.copyPath")}
-              </DropdownMenuItem>
-            </>
-          ) : (
-            project.rootDirs.map((path) => (
-              <DropdownMenuSub key={path}>
-                <DropdownMenuSubTrigger>
-                  <span className="min-w-0 truncate">
-                    {projectDirectoryLabel(path, project.rootDirs)}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
-                  {isMac ? (
-                    <DropdownMenuItem
-                      disabled={revealMutation.isPending}
-                      onSelect={() => revealMutation.mutate(path)}
-                    >
-                      {revealMutation.isPending ? <Spinner /> : null}
-                      {t("project.revealFinder")}
-                    </DropdownMenuItem>
-                  ) : null}
-                  <DropdownMenuItem
-                    onSelect={() => copyPaths([path])}
-                  >
-                    {t("project.copyPath")}
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            ))
-          )}
-          <DropdownMenuItem onSelect={openEdit}>
-            <FolderCog />
-            {t("project.edit")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled={deleteMutation.isPending} onSelect={() => setDeleteOpen(true)}>
-            <FolderMinus />
-            {t("project.delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {menu}
       <ProjectFormDialog
         description={t("project.editDescription")}
         directoryPaths={directoryPaths}

@@ -82,6 +82,7 @@ type HostFocusSnapshot = {
 
 export type ElectronWebviewRuntimeHandle = {
   focusForAutomation: () => boolean;
+  readyForCapture: () => boolean;
   releaseAutomationFocus: () => void;
 };
 
@@ -183,6 +184,7 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
 
   useImperativeHandle(ref, () => ({
     focusForAutomation,
+    readyForCapture: () => Boolean(webviewRef.current?.isConnected && webviewReadyRef.current),
     releaseAutomationFocus,
   }), [focusForAutomation, releaseAutomationFocus]);
 

@@ -37,6 +37,10 @@ import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Spinner } from "@/components/Spinner";
 import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+} from "@/components/AppMenu";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,8 +56,6 @@ import {
 import { Field, FieldContent, FieldLabel, FieldTitle } from "@/components/ui/field";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";

@@ -56,7 +56,11 @@ import {
 } from "@/state/railStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
-import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
+import {
+  setWorkspaceOpen,
+  useActiveWorkspaceSessionID,
+  useWorkspaceOpen,
+} from "@/state/workspaceStore";
 
 type ConsoleDisplayMode = "full" | AgentConsoleMode;
 
@@ -162,7 +166,15 @@ export function App() {
     view,
   } = useSearch({ from: "/" });
   const { t } = useI18n();
-  const workspaceOpen = useWorkspaceOpen();
+  const appsActive = view === "apps";
+  const projectsActive = view === "projects";
+  const standaloneViewActive = appsActive || projectsActive;
+  const showSplit = !standaloneViewActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+  const workspaceSessionID = useActiveWorkspaceSessionID(
+    standaloneViewActive ? undefined : selectedSessionID,
+    showSplit ? splitSessionID : undefined,
+  );
+  const workspaceOpen = useWorkspaceOpen(workspaceSessionID);
   const agentConsoleMode = useAgentConsoleMode();
   const railCollapsed = useRailCollapsed();
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
@@ -187,10 +199,6 @@ export function App() {
   const centeredLayoutRef = useRef(centeredLayout);
   const previewTokenRef = useRef(token);
 
-  const appsActive = view === "apps";
-  const projectsActive = view === "projects";
-  const standaloneViewActive = appsActive || projectsActive;
-  const showSplit = !standaloneViewActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
   const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
   const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
   const workspaceRequestedOpen = canUseWorkspace && workspaceOpen;
@@ -693,7 +701,7 @@ export function App() {
               tabIndex={-1}
               type="button"
               variant="ghost"
-              onClick={() => setWorkspaceOpen(!workspaceRequestedOpen)}
+              onClick={() => setWorkspaceOpen(workspaceSessionID, !workspaceRequestedOpen)}
             >
               {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
             </Button>
@@ -734,6 +742,7 @@ export function App() {
       style={workspaceSurfaceStyle}
     >
       <WorkspacePane
+        activeSessionID={workspaceSessionID}
         reserveTopRightActions={
           workspaceOccupiesStageTopRight ? stageToolbarActionCount : 0
         }
@@ -797,7 +806,7 @@ export function App() {
           data-transition={workspaceTransition}
           tabIndex={-1}
           type="button"
-          onClick={() => setWorkspaceOpen(false)}
+          onClick={() => setWorkspaceOpen(workspaceSessionID, false)}
         />
       ) : null}
       {docked ? (

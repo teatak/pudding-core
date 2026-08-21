@@ -78,7 +78,7 @@ export function ChatPane({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
-  const workspaceOpen = useWorkspaceOpen();
+  const workspaceOpen = useWorkspaceOpen(sessionID);
   const floating = presentation === "floating";
   const clearSession = useOverlayStore((state) => state.clearSession);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);

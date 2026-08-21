@@ -244,7 +244,7 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
     if (part.type === "approval") {
       continue;
     }
-    if (part.type === "tool_use" && toolHasInlineAttachments(part)) {
+    if (part.type === "tool_use" && (isBrowserScreenshotTool(part.name || part.resultName) || toolHasInlineAttachments(part))) {
       flush();
       out.push(part);
       continue;
@@ -627,8 +627,15 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
 }
 
 function toolAttachmentsRenderInside(name: string | undefined) {
-  // The legacy name is display-only for canonical history; the backend no longer registers it.
-  return name === "builtin_media_read" || name === "builtin_attachment_read_image" || name === "builtin_computer_observe";
+  // builtin_attachment_read_image is display-only for canonical history; the backend no longer registers it.
+  return name === "builtin_media_read"
+    || name === "builtin_attachment_read_image"
+    || name === "builtin_browser_screenshot"
+    || name === "builtin_computer_observe";
+}
+
+function isBrowserScreenshotTool(name: string | undefined) {
+  return name === "builtin_browser_screenshot";
 }
 
 function toolHasInlineAttachments(part: Extract<TurnPartVM, { type: "tool_use" }>) {
@@ -1197,8 +1204,9 @@ function ToolUsePart({
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
   const codeTool = isCodeToolName(toolName);
   const mediaInspectionTool = toolAttachmentsRenderInside(toolName);
+  const screenshotTool = isBrowserScreenshotTool(toolName);
   const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_session";
-  const showDetails = codeTool || mediaInspectionTool || showRawInfo;
+  const showDetails = codeTool || (mediaInspectionTool && !screenshotTool) || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
@@ -1207,18 +1215,15 @@ function ToolUsePart({
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const toneClass = "text-muted-foreground";
   const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
-  if (!showDetails) {
-    return (
-      <TranscriptDisclosure
-        className={toneClass}
-        icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
-        summary={title.summary || undefined}
-        summaryClassName={summaryClass}
-        title={title.label}
-      />
-    );
-  }
-  return (
+  const disclosure = !showDetails ? (
+    <TranscriptDisclosure
+      className={toneClass}
+      icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
+      summary={title.summary || undefined}
+      summaryClassName={summaryClass}
+      title={title.label}
+    />
+  ) : (
     <TranscriptDisclosure
       className={toneClass}
       icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
@@ -1231,7 +1236,7 @@ function ToolUsePart({
       onToggle={handleToggle}
     >
       <div className="grid min-w-0 max-w-full gap-2">
-        {mediaInspectionTool ? <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} /> : null}
+        {mediaInspectionTool && !screenshotTool ? <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} /> : null}
         {codeTool ? (
           <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
             <CodeToolDetails
@@ -1256,6 +1261,15 @@ function ToolUsePart({
         ) : null}
       </div>
     </TranscriptDisclosure>
+  );
+  if (!screenshotTool) {
+    return disclosure;
+  }
+  return (
+    <div className="min-w-0 max-w-full">
+      {disclosure}
+      <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} />
+    </div>
   );
 }
 

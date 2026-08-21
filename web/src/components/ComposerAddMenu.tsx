@@ -23,7 +23,7 @@ export function ComposerAddButton({
       className={cn(
         "rounded-full border-0 bg-transparent text-foreground",
         composerControlStateClassName,
-        active && "bg-control-active text-foreground !shadow-none",
+        active && "!bg-control-active text-foreground !shadow-none",
       )}
       size="icon"
       type="button"

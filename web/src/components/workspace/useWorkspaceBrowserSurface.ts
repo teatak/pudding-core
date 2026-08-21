@@ -254,7 +254,7 @@ export function useWorkspaceBrowserSurface({
       return;
     }
     return bridge.onAutomationStart((event) => {
-      if (event.sessionID !== sessionID) {
+      if (event.sessionID !== sessionID || event.action === "screenshot") {
         return;
       }
       rememberSelectedBrowserTab(sessionID, event.tabID);

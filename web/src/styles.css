@@ -125,6 +125,10 @@ textarea:focus-visible,
        全屏时红绿灯隐藏、让位归零。 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
+    --browser-runtime-width: 1280px;
+    --browser-runtime-height: 720px;
+    --browser-capture-preview-scale: 0.1875;
+    --browser-capture-preview-height: 135px;
     --toolbar-edge-inset: 0.75rem;
     --rail-toggle-left: var(--toolbar-edge-inset);
     --rail-title-gap: 6px;
@@ -876,6 +880,11 @@ html[data-agent-console-resizing="true"] webview {
     height: anchor-size(height);
 }
 
+.pudding-browser-runtime-host {
+    width: var(--browser-runtime-width);
+    height: var(--browser-runtime-height);
+}
+
 .pudding-browser-runtime-host[data-anchored="true"] {
     position-anchor: var(--pudding-browser-anchor);
     top: anchor(top);
@@ -892,6 +901,78 @@ html[data-agent-console-resizing="true"] webview {
 
 .pudding-browser-runtime-host[data-presentation="automation"] {
     visibility: visible;
+}
+
+.pudding-browser-runtime-surface {
+    position: absolute;
+    inset: 0;
+}
+
+.pudding-browser-capture-chrome {
+    display: none;
+}
+
+.pudding-browser-keepalive-layer:has(.pudding-browser-runtime-host[data-presentation="preview"]) {
+    z-index: 45;
+}
+
+.pudding-browser-runtime-host[data-presentation="preview"] {
+    top: calc(var(--toolbar-h) + 0.75rem);
+    right: 1rem;
+    left: auto;
+    width: 16rem;
+    height: calc(2.5rem + var(--browser-capture-preview-height) + 0.5rem);
+    visibility: visible;
+    border: 1px solid color-mix(in oklch, var(--border), var(--foreground) 8%);
+    border-radius: 0.875rem;
+    background: color-mix(in oklch, var(--popover), transparent 4%);
+    box-shadow:
+        0 18px 48px rgb(0 0 0 / 18%),
+        0 2px 8px rgb(0 0 0 / 10%);
+    opacity: 1;
+    pointer-events: none;
+    backdrop-filter: blur(18px);
+}
+
+.pudding-browser-runtime-host[data-presentation="preview"] .pudding-browser-capture-chrome {
+    position: absolute;
+    z-index: 1;
+    inset: 0 0 auto;
+    display: flex;
+    height: 2.5rem;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0 0.625rem;
+    border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 18%);
+    background: color-mix(in oklch, var(--popover), transparent 2%);
+}
+
+.pudding-browser-runtime-host[data-presentation="preview"] .pudding-browser-runtime-surface {
+    top: 2.5rem;
+    right: auto;
+    bottom: auto;
+    left: 0.5rem;
+    width: var(--browser-runtime-width);
+    height: var(--browser-runtime-height);
+    overflow: hidden;
+    border-radius: 0.5rem;
+    transform: scale(var(--browser-capture-preview-scale));
+    transform-origin: top left;
+}
+
+.pudding-browser-runtime-host[data-capture-status="success"] .pudding-browser-capture-progress {
+    display: none;
+}
+
+.pudding-browser-runtime-host[data-capture-status="success"] .pudding-browser-capture-success {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    transform: translate(-50%, -50%);
 }
 
 .pudding-agent-console[data-mode="dock-left"],

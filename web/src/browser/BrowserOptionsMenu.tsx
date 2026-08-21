@@ -9,12 +9,14 @@ import {
   type ElectronBrowserZoom,
 } from "@/browser/electronBridge";
 import { Spinner } from "@/components/Spinner";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+  AppDropdownMenuSeparator as DropdownMenuSeparator,
+} from "@/components/AppMenu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";

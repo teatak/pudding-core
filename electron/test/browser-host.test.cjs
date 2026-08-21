@@ -811,6 +811,52 @@ test("rejects oversized full-page screenshots before capture", async () => {
   host.closeAll();
 });
 
+test("prepares and releases the webview surface around screenshots", async () => {
+  let required;
+  let prepared = true;
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return prepared;
+    },
+    (request) => {
+      required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
+    },
+  );
+  const request = { sessionID: "session-screenshot", tabID: "tab-screenshot", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(70);
+  const png = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47]).copy(png);
+  png.writeUInt32BE(2, 16);
+  png.writeUInt32BE(3, 20);
+  webContents.debugger.screenshotData = png.toString("base64");
+  await host.registerWebContents(required, webContents);
+  await opening;
+
+  const screenshot = await host.screenshot(request);
+  assert.equal(screenshot.width, 2);
+  assert.equal(screenshot.height, 3);
+  assert.deepEqual(lifecycle, ["start:screenshot", "end:screenshot:true"]);
+
+  prepared = false;
+  await assert.rejects(host.screenshot(request), /screenshot surface preparation failed/);
+  assert.deepEqual(lifecycle, [
+    "start:screenshot",
+    "end:screenshot:true",
+    "start:screenshot",
+    "end:screenshot:false",
+  ]);
+  host.closeAll();
+});
+
 test("rejects navigation immediately when the webview reports a main-frame load failure", async () => {
   let required;
   let latestSnapshot;

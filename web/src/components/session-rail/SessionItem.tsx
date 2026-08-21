@@ -1,5 +1,6 @@
 import {
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useEffect,
   useRef,
   useState,
@@ -7,8 +8,13 @@ import {
 
 import type { Session } from "@/api/client";
 import {
+  AppContextMenuContent as ContextMenuContent,
+  AppContextMenuItem as ContextMenuItem,
+  AppContextMenuLabel as ContextMenuLabel,
+  AppContextMenuSeparator as ContextMenuSeparator,
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
+  AppDropdownMenuLabel as DropdownMenuLabel,
   AppDropdownMenuSeparator as DropdownMenuSeparator,
 } from "@/components/AppMenu";
 import {
@@ -23,22 +29,39 @@ import {
 import { useRailOverlayHold } from "@/components/session-rail/overlayHold";
 import { Spinner } from "@/components/Spinner";
 import {
+  ContextMenu,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   DropdownMenu,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  SidebarMenuAction,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { RailIconAction } from "@/components/session-rail/RailIconAction";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
+
+type SessionMenuCommand = "move-project" | "remove-project" | "toggle-pin" | "open-split" | "rename";
+
+type SessionMenuEntry =
+  | { type: "label"; label: string; icon?: ReactNode }
+  | { type: "separator" }
+  | {
+      type: "item";
+      id: SessionMenuCommand;
+      label: string;
+      disabled?: boolean;
+      title?: string;
+      icon?: ReactNode;
+    };
 
 type SessionItemProps = {
   session: Session;
@@ -87,13 +110,14 @@ export function SessionItem({
 }: SessionItemProps) {
   const { t, locale } = useI18n();
   const actionsAlwaysVisible = !useHasHoverInput();
-  const [actionsOpen, setActionsOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<"dropdown" | "context" | null>(null);
+  const actionsOpen = openMenu !== null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
   const [pendingTitle, setPendingTitle] = useState<string | null>(null);
   const title = pendingTitle || session.title || t("session.untitled");
   const inputRef = useRef<HTMLInputElement>(null);
-  const editAfterMenuCloseRef = useRef(false);
+  const browserMenuCommandRef = useRef<SessionMenuCommand | null>(null);
   const pointerDragRef = useRef<{
     pointerID: number;
     startX: number;
@@ -102,6 +126,41 @@ export function SessionItem({
     cleanup?: () => void;
   } | null>(null);
   const suppressClickRef = useRef(false);
+  const sessionMenuEntries: SessionMenuEntry[] = [
+    ...(projectName
+      ? [
+          { type: "label" as const, label: projectName, icon: <FolderClosed className="size-3.5 shrink-0" /> },
+          { type: "separator" as const },
+        ]
+      : []),
+    {
+      type: "item",
+      id: "move-project",
+      label: projectName ? t("session.moveToProject") : t("session.addToProject"),
+      disabled: running || projectChangePending || !hasProjects,
+      title: running ? t("session.projectChangeRunning") : undefined,
+      icon: <FolderInput />,
+    },
+    ...(projectName
+      ? [{
+          type: "item" as const,
+          id: "remove-project" as const,
+          label: t("session.removeFromProject"),
+          disabled: running || projectChangePending,
+          title: running ? t("session.projectChangeRunning") : undefined,
+          icon: <FolderMinus />,
+        }]
+      : []),
+    { type: "separator" },
+    {
+      type: "item",
+      id: "toggle-pin",
+      label: session.pinned ? t("session.unpin") : t("session.pin"),
+      icon: <Pin className="rotate-45" />,
+    },
+    { type: "item", id: "open-split", label: t("session.openSplit") },
+    { type: "item", id: "rename", label: t("session.rename") },
+  ];
 
   useRailOverlayHold(actionsOpen);
 
@@ -132,6 +191,59 @@ export function SessionItem({
   function startEditing() {
     setDraft(session.title);
     setEditing(true);
+  }
+
+  function runSessionMenuCommand(command: SessionMenuCommand) {
+    switch (command) {
+      case "move-project":
+        onOpenProjectPicker();
+        return;
+      case "remove-project":
+        void onRemoveProject().catch(() => undefined);
+        return;
+      case "toggle-pin":
+        onPinChange(!session.pinned);
+        return;
+      case "open-split":
+        onOpenSplit();
+        return;
+      case "rename":
+        startEditing();
+    }
+  }
+
+  function flushBrowserMenuCommand() {
+    const command = browserMenuCommandRef.current;
+    browserMenuCommandRef.current = null;
+    if (command) {
+      runSessionMenuCommand(command);
+    }
+  }
+
+  function setMenuOpen(surface: "dropdown" | "context", open: boolean) {
+    setOpenMenu((current) => open ? surface : current === surface ? null : current);
+  }
+
+  function actionsButton() {
+    return (
+      <RailIconAction
+        aria-expanded={actionsOpen}
+        aria-haspopup="menu"
+        aria-label={t("session.actions")}
+        className={cn(
+          "absolute top-1 right-8 text-muted-foreground",
+          actionsAlwaysVisible && "opacity-100",
+          !actionsAlwaysVisible &&
+            !suppressInteractiveState &&
+            "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 md:opacity-0",
+          actionsOpen && "opacity-100 md:opacity-100",
+        )}
+        data-state={actionsOpen ? "open" : "closed"}
+        type="button"
+      >
+        <Ellipsis className="size-3.5!" />
+      </RailIconAction>
+    );
   }
 
   function cancelEditing() {
@@ -264,7 +376,7 @@ export function SessionItem({
     window.addEventListener("pointercancel", handleEnd);
   }
 
-  return (
+  const sessionItem = (
     <SidebarMenuItem className={suppressInteractiveState ? "pointer-events-none" : undefined}>
       {editing ? (
         <SidebarMenuButton asChild className="h-8 px-2 py-1" isActive>
@@ -342,7 +454,7 @@ export function SessionItem({
           <SidebarMenuBadge
             className={cn(
               "min-w-0 px-0 font-normal text-muted-foreground",
-              actionsAlwaysVisible ? "right-14" : "right-2",
+              actionsAlwaysVisible ? "right-16" : "right-2",
               !actionsAlwaysVisible &&
                 !suppressInteractiveState &&
                 "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
@@ -367,94 +479,56 @@ export function SessionItem({
               formatRelative(session.lastActivityAt || session.createdAt, locale)
             )}
           </SidebarMenuBadge>
-          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
-            <DropdownMenuTrigger asChild>
-              <SidebarMenuAction
-                aria-label={t("session.actions")}
-                className={cn(
-                  "right-7 rounded-sm bg-transparent text-muted-foreground after:hidden peer-hover/menu-button:text-muted-foreground peer-data-active/menu-button:text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground",
-                  actionsAlwaysVisible && "opacity-100",
-                  !actionsAlwaysVisible &&
-                    suppressInteractiveState &&
-                    "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
-                  actionsOpen && "opacity-100 md:opacity-100",
-                )}
-                showOnHover={!actionsAlwaysVisible}
-              >
-                <Ellipsis className="size-3.5!" />
-              </SidebarMenuAction>
-            </DropdownMenuTrigger>
+          <DropdownMenu open={openMenu === "dropdown"} onOpenChange={(open) => setMenuOpen("dropdown", open)}>
+            <DropdownMenuTrigger asChild>{actionsButton()}</DropdownMenuTrigger>
             <DropdownMenuContent
-              align="end"
+              align="start"
               onCloseAutoFocus={(event) => {
                 event.preventDefault();
-                if (!editAfterMenuCloseRef.current) {
-                  return;
-                }
-                editAfterMenuCloseRef.current = false;
-                startEditing();
+                flushBrowserMenuCommand();
               }}
             >
-              {projectName ? (
-                <>
-                  <DropdownMenuLabel className="flex min-h-7 max-w-64 items-center gap-1.5 px-1.5 py-1 text-[13px] font-normal">
-                    <FolderClosed className="size-3.5 shrink-0" />
-                    <span className="min-w-0 truncate">{projectName}</span>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
-              <DropdownMenuItem
-                disabled={running || projectChangePending || !hasProjects}
-                title={running ? t("session.projectChangeRunning") : undefined}
-                onSelect={onOpenProjectPicker}
-              >
-                <FolderInput />
-                {projectName ? t("session.moveToProject") : t("session.addToProject")}
-              </DropdownMenuItem>
-              {projectName ? (
-                <DropdownMenuItem
-                  disabled={running || projectChangePending}
-                  title={running ? t("session.projectChangeRunning") : undefined}
-                  onSelect={() => {
-                    void onRemoveProject().catch(() => undefined);
-                  }}
-                >
-                  <FolderMinus />
-                  {t("session.removeFromProject")}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => onPinChange(!session.pinned)}>
-                <Pin className="rotate-45" />
-                {session.pinned ? t("session.unpin") : t("session.pin")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onOpenSplit}>
-                {t("session.openSplit")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  editAfterMenuCloseRef.current = true;
-                }}
-              >
-                {t("session.rename")}
-              </DropdownMenuItem>
+              {sessionMenuEntries.map((entry, index) => {
+                if (entry.type === "separator") {
+                  return <DropdownMenuSeparator key={`separator-${index}`} />;
+                }
+                if (entry.type === "label") {
+                  return (
+                    <DropdownMenuLabel key={`label-${index}`} className="flex max-w-64 items-center">
+                      {entry.icon}
+                      <span className="min-w-0 truncate">{entry.label}</span>
+                    </DropdownMenuLabel>
+                  );
+                }
+                return (
+                    <DropdownMenuItem
+                      key={entry.id}
+                    disabled={entry.disabled}
+                    title={entry.title}
+                    onSelect={() => {
+                      browserMenuCommandRef.current = entry.id;
+                    }}
+                  >
+                    {entry.icon}
+                    {entry.label}
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuContent>
           </DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
-              <SidebarMenuAction
+              <RailIconAction
                 aria-label={t("session.archive")}
                 className={cn(
-                  "right-1.5 rounded-sm bg-transparent text-muted-foreground after:hidden peer-hover/menu-button:text-muted-foreground peer-data-active/menu-button:text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground",
+                  "absolute top-1 right-1 text-muted-foreground",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
-                    suppressInteractiveState &&
-                    "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
+                    !suppressInteractiveState &&
+                    "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 md:opacity-0",
                   actionsOpen && "opacity-100 md:opacity-100",
                 )}
                 disabled={archivePending}
-                showOnHover={!actionsAlwaysVisible}
                 type="button"
                 onClick={(event) => {
                   event.preventDefault();
@@ -463,7 +537,7 @@ export function SessionItem({
                 }}
               >
                 <Archive className="size-3.5!" />
-              </SidebarMenuAction>
+              </RailIconAction>
             </TooltipTrigger>
             <TooltipContent className="pointer-events-none" side="right" sideOffset={4}>
               {t("session.archive")}
@@ -472,5 +546,44 @@ export function SessionItem({
         </>
       ) : null}
     </SidebarMenuItem>
+  );
+
+  return (
+    <ContextMenu open={openMenu === "context"} onOpenChange={(open) => setMenuOpen("context", open)}>
+      <ContextMenuTrigger asChild>{sessionItem}</ContextMenuTrigger>
+      <ContextMenuContent
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          flushBrowserMenuCommand();
+        }}
+      >
+        {sessionMenuEntries.map((entry, index) => {
+          if (entry.type === "separator") {
+            return <ContextMenuSeparator key={`separator-${index}`} />;
+          }
+          if (entry.type === "label") {
+            return (
+              <ContextMenuLabel key={`label-${index}`} className="flex max-w-64 items-center">
+                {entry.icon}
+                <span className="min-w-0 truncate">{entry.label}</span>
+              </ContextMenuLabel>
+            );
+          }
+          return (
+            <ContextMenuItem
+              key={entry.id}
+              disabled={entry.disabled}
+              title={entry.title}
+              onSelect={() => {
+                browserMenuCommandRef.current = entry.id;
+              }}
+            >
+              {entry.icon}
+              {entry.label}
+            </ContextMenuItem>
+          );
+        })}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

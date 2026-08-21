@@ -13,11 +13,11 @@ import {
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import { RailIconAction } from "@/components/session-rail/RailIconAction";
 import { PanelLeft } from "@/components/icons";
 import { PuddingWordmark } from "@/components/PuddingWordmark";
 import { RailPanel } from "@/components/session-rail/RailPanel";
 import { SessionSearchDialog, type SessionSearchSelection } from "@/components/SessionSearchDialog";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
@@ -474,11 +474,10 @@ export function SessionRail({
         <Tooltip>
           <PopoverAnchor asChild>
             <TooltipTrigger asChild>
-              <Button
+              <RailIconAction
                 aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                size="icon-sm"
+                className="size-7 opacity-100"
                 tabIndex={-1}
-                variant="ghost"
                 onClick={() => {
                   if (responsiveCollapsed) {
                     hover.toggle();
@@ -502,7 +501,7 @@ export function SessionRail({
                 }}
               >
                 <PanelLeft />
-              </Button>
+              </RailIconAction>
             </TooltipTrigger>
           </PopoverAnchor>
           {!collapsed ? <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent> : null}

@@ -50,11 +50,19 @@ async function run() {
   host = new BrowserHost(
     undefined,
     undefined,
-    (event) => event.action === "click" ? prepareSmokeAutomationClick(event) : undefined,
+    (event) => event.action === "click"
+      ? prepareSmokeAutomationClick(event)
+      : event.action === "screenshot"
+        ? prepareSmokeScreenshot(event)
+        : undefined,
     (request) => {
       window.webContents.send("pudding-browser-smoke:webview-required", request);
     },
-    (event) => event.action === "click" ? finishSmokeAutomationClick() : undefined,
+    (event) => event.action === "click"
+      ? finishSmokeAutomationClick()
+      : event.action === "screenshot"
+        ? finishSmokeScreenshot(event)
+        : undefined,
     {
       resolveFavicon: ({ url, pageURL }) => resolveBrowserFavicon({
         url,
@@ -442,9 +450,21 @@ async function run() {
   await detachedClosed;
 
   currentCheck = "screenshot";
+  await window.webContents.executeJavaScript(`(() => {
+    const tabs = document.getElementById("tabs");
+    tabs.style.opacity = "0";
+    tabs.style.visibility = "hidden";
+  })()`);
   const screenshot = await host.screenshot({ sessionID: webTab.sessionID, tabID: webTab.tabID });
   assert.equal(screenshot.mime, "image/png");
   assert.ok(screenshot.size > 0);
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`(() => {
+      const tabs = document.getElementById("tabs");
+      return {opacity: tabs.style.opacity, visibility: tabs.style.visibility};
+    })()`),
+    { opacity: "0", visibility: "hidden" },
+  );
   currentCheck = "file grant revocation";
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
@@ -486,6 +506,42 @@ function prepareSmokeAutomationClick(event) {
     target?.focus({preventScroll: true});
     globalThis.__puddingSmokeWebviewFocusLease = {inertAncestors, previousStyle, target};
     return Boolean(target && document.activeElement === target);
+  })()`);
+}
+
+function prepareSmokeScreenshot(event) {
+  const browserKey = JSON.stringify(`${event.sessionID}:${event.tabID}`);
+  return window.webContents.executeJavaScript(`(async () => {
+    const tabs = document.getElementById("tabs");
+    const target = document.querySelector('webview[data-browser-key=' + JSON.stringify(${browserKey}) + ']');
+    globalThis.__puddingSmokeScreenshotLease = {
+      opacity: tabs.style.opacity,
+      transform: tabs.style.transform,
+      transformOrigin: tabs.style.transformOrigin,
+      visibility: tabs.style.visibility,
+    };
+    tabs.style.opacity = "1";
+    tabs.style.transform = "scale(0.1875)";
+    tabs.style.transformOrigin = "top left";
+    tabs.style.visibility = "visible";
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    return Boolean(target?.isConnected);
+  })()`);
+}
+
+function finishSmokeScreenshot(event) {
+  assert.equal(event.ok, true);
+  return window.webContents.executeJavaScript(`(() => {
+    const tabs = document.getElementById("tabs");
+    const lease = globalThis.__puddingSmokeScreenshotLease;
+    globalThis.__puddingSmokeScreenshotLease = null;
+    if (!lease) return false;
+    tabs.style.opacity = lease.opacity;
+    tabs.style.transform = lease.transform;
+    tabs.style.transformOrigin = lease.transformOrigin;
+    tabs.style.visibility = lease.visibility;
+    return true;
   })()`);
 }
 

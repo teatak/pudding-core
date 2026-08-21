@@ -47,7 +47,6 @@ import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
-import { useVisibleBrowserReveal } from "@/state/browserRevealStore";
 import { consumeCanvasReveal, useVisibleCanvasReveal } from "@/state/canvasRevealStore";
 import {
   closeFilePreview,
@@ -73,6 +72,7 @@ import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 
 type WorkspacePaneProps = {
   token: string;
+  activeSessionID?: string;
   sessionID?: string;
   secondarySessionID?: string;
   reserveTopRightActions?: 0 | 1 | 2;
@@ -80,13 +80,13 @@ type WorkspacePaneProps = {
 
 export const WorkspacePane = memo(function WorkspacePane({
   token,
+  activeSessionID,
   sessionID,
   secondarySessionID,
   reserveTopRightActions = 0,
 }: WorkspacePaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const workspaceOpen = useWorkspaceOpen();
   const actorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
   const retainedTokenRef = useRef(token);
@@ -101,38 +101,10 @@ export const WorkspacePane = memo(function WorkspacePane({
   const hadResourcesRef = useRef(false);
   const resourceSessionIDRef = useRef("");
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
-  const browserReveal = useVisibleBrowserReveal(sessionID, secondarySessionID);
   const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
-  const [workspaceSessionID, setWorkspaceSessionID] = useState(sessionID || secondarySessionID || "");
-  useEffect(() => {
-    if (projectFileReveal?.sessionID) {
-      setWorkspaceSessionID(projectFileReveal.sessionID);
-    }
-  }, [projectFileReveal?.serial]);
-  useEffect(() => {
-    if (browserReveal?.sessionID) {
-      setWorkspaceSessionID(browserReveal.sessionID);
-    }
-  }, [browserReveal?.serial]);
-  useEffect(() => {
-    if (canvasReveal?.sessionID) {
-      setWorkspaceSessionID(canvasReveal.sessionID);
-    }
-  }, [canvasReveal?.serial]);
-  useEffect(() => {
-    if (filePreviewReveal?.sessionID) {
-      setWorkspaceSessionID(filePreviewReveal.sessionID);
-    }
-  }, [filePreviewReveal?.serial]);
-  useEffect(() => {
-    setWorkspaceSessionID((current) =>
-      current && (current === sessionID || current === secondarySessionID)
-        ? current
-        : sessionID || secondarySessionID || "",
-    );
-  }, [secondarySessionID, sessionID]);
-  const actorSessionID = workspaceSessionID || sessionID || actorSessionIDRef.current;
+  const actorSessionID = activeSessionID || sessionID || secondarySessionID || actorSessionIDRef.current;
+  const workspaceOpen = useWorkspaceOpen(actorSessionID);
   useEffect(() => {
     if (actorSessionID) {
       actorSessionIDRef.current = actorSessionID;
@@ -846,7 +818,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     }
     if (hadResourcesRef.current) {
       hadResourcesRef.current = false;
-      setWorkspaceOpen(false);
+      setWorkspaceOpen(actorSessionID, false);
     }
   }, [actorSessionID, totalResourceCount]);
 

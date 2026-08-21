@@ -100,10 +100,10 @@ const useFilePreviewStore = create<FilePreviewState>((set) => ({
 
 export function openFilePreview(preview: FilePreviewInput) {
   const previewID = useFilePreviewStore.getState().openPreview(preview);
-  setWorkspaceOpen(true);
+  setWorkspaceOpen(preview.sessionID, true);
   window.requestAnimationFrame(() => {
     if (useFilePreviewStore.getState().previews[preview.sessionID]?.some((entry) => entry.id === previewID)) {
-      setWorkspaceOpen(true);
+      setWorkspaceOpen(preview.sessionID, true);
     }
   });
 }

@@ -46,7 +46,7 @@ export function requestCanvasReveal(
 
 export function openCanvasReveal(sessionID: string, itemID: string) {
   useCanvasRevealStore.getState().request(sessionID, itemID);
-  setWorkspaceOpen(true);
+  setWorkspaceOpen(sessionID, true);
 }
 
 export function consumeCanvasReveal(serial: number) {

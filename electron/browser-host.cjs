@@ -276,10 +276,23 @@ class BrowserHost {
   async screenshot(request) {
     const slot = this.requireLiveSlot(request);
     const fullPage = Boolean(request.fullPage);
-    const { viewport, dataBase64 } = await this.runCommand(slot, async () => ({
-      viewport: await viewportMetrics(slot),
-      dataBase64: await captureScreenshot(slot, fullPage),
-    }));
+    const { viewport, dataBase64 } = await this.runCommand(slot, async () => {
+      let succeeded = false;
+      try {
+        const prepared = await this.noteAutomationStart(slot, "screenshot");
+        if (prepared === false) {
+          throw new Error("browser_webview_not_ready: screenshot surface preparation failed");
+        }
+        const result = {
+          viewport: await viewportMetrics(slot),
+          dataBase64: await captureScreenshot(slot, fullPage),
+        };
+        succeeded = true;
+        return result;
+      } finally {
+        await this.noteAutomationEnd(slot, "screenshot", succeeded);
+      }
+    });
     const buffer = Buffer.from(dataBase64, "base64");
     const size = imageSize(buffer);
     return {
@@ -1170,17 +1183,21 @@ class BrowserHost {
     }, slot.webContents);
   }
 
-  noteAutomationEnd(slot, action) {
+  noteAutomationEnd(slot, action, ok) {
     if (automationCanProduceInput(action)) {
       slot.automatedInputDepth = Math.max(0, slot.automatedInputDepth - 1);
     }
-    return this.onAutomationEnd({
+    const event = {
       sessionID: slot.sessionID,
       tabID: slot.tabID,
       action,
       version: slot.version,
       createdAt: new Date().toISOString(),
-    }, slot.webContents);
+    };
+    if (typeof ok === "boolean") {
+      event.ok = ok;
+    }
+    return this.onAutomationEnd(event, slot.webContents);
   }
 
   noteCursor(slot, action, result) {

@@ -31,6 +31,7 @@ import type {
   ProjectSortMode,
 } from "@/components/session-rail/model";
 import { useRailOverlayHold } from "@/components/session-rail/overlayHold";
+import { RailIconAction } from "@/components/session-rail/RailIconAction";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
@@ -222,6 +223,7 @@ export function CollapsibleSessionGroupLabel({
   return (
     <SidebarGroupLabel
       data-active={active}
+      data-project-menu-context-target={actions ? "true" : undefined}
       data-project-dragging={dragging || undefined}
       className={cn(
         "group/project-label relative h-8 min-h-8 gap-1 px-0 text-sm",
@@ -260,17 +262,16 @@ export function CollapsibleSessionGroupLabel({
       {onAction && !dropTargetActive && !interactionDisabled ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <RailIconAction
               aria-label={actionLabel || label}
-              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-label:opacity-100 group-has-[[data-state=open]]/project-label:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
-              type="button"
+              className="mr-1 group-hover/project-label:opacity-100 group-has-[[data-state=open]]/project-label:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 onAction();
               }}
             >
               <MessageCirclePlus className="size-3.5" />
-            </button>
+            </RailIconAction>
           </TooltipTrigger>
           <TooltipContent side="right">{actionLabel || label}</TooltipContent>
         </Tooltip>
@@ -309,21 +310,37 @@ export function ProjectSortHeader({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   useRailOverlayHold(open);
-  const modeLabel =
-    mode === "activity"
-      ? t("project.sortRecentUsage")
-      : mode === "name"
-        ? t("project.sortNameAsc")
-        : mode === "name-desc"
-          ? t("project.sortNameDesc")
-          : t("project.sortCustom");
+  const sortOptions: Array<{ value: ProjectSortMode; label: string }> = [
+    { value: "activity", label: t("project.sortRecentUsage") },
+    { value: "name", label: t("project.sortNameAsc") },
+    { value: "name-desc", label: t("project.sortNameDesc") },
+    { value: "custom", label: t("project.sortCustom") },
+  ];
+  const modeLabel = sortOptions.find((option) => option.value === mode)?.label || t("project.sortCustom");
+
+  const sortButton = (
+    <RailIconAction
+      aria-expanded={open}
+      aria-haspopup="menu"
+      aria-label={`${t("project.sortLabel")}：${modeLabel}`}
+      className="text-sidebar-foreground/55 group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100"
+      data-state={open ? "open" : "closed"}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.click();
+      }}
+    >
+      <ArrowUpDown className="size-3.5" />
+    </RailIconAction>
+  );
 
   return (
     <SidebarGroup className="px-2 py-0">
       <SidebarGroupLabel
         className={cn(
           "group/project-section h-8 min-h-8 gap-1 px-0 text-sm font-normal text-sidebar-foreground/45!",
-          !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground",
+          !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-state=open]]:bg-sidebar-accent has-[[data-state=open]]:text-sidebar-accent-foreground",
         )}
       >
         <button
@@ -344,45 +361,29 @@ export function ProjectSortHeader({
         {!interactionDisabled ? (
           <>
             <DropdownMenu open={open} onOpenChange={setOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label={`${t("project.sortLabel")}：${modeLabel}`}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  type="button"
-                >
-                  <ArrowUpDown className="size-3.5" />
-                </button>
-              </DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild>{sortButton}</DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuRadioGroup
                   value={mode}
                   onValueChange={(value) => onModeChange(value as ProjectSortMode)}
                 >
-                  <DropdownMenuRadioItem value="activity">
-                    {t("project.sortRecentUsage")}
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="name">
-                    {t("project.sortNameAsc")}
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="name-desc">
-                    {t("project.sortNameDesc")}
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="custom">
-                    {t("project.sortCustom")}
-                  </DropdownMenuRadioItem>
+                  {sortOptions.map((option) => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <RailIconAction
                   aria-label={t("project.add")}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/55 opacity-0 outline-none transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                  type="button"
+                  className="mr-1 text-sidebar-foreground/55 group-hover/project-section:opacity-100"
                   onClick={onCreateProject}
                 >
                   <FolderPlus className="size-3.5" />
-                </button>
+                </RailIconAction>
               </TooltipTrigger>
               <TooltipContent side="right">{t("project.add")}</TooltipContent>
             </Tooltip>

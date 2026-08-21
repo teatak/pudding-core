@@ -17,23 +17,6 @@ export type DesktopEditorContextMenuRequest = {
   selectionText: string;
 };
 
-export type DesktopNativeMenuItem =
-  | { type: "separator" }
-  | {
-      id?: string;
-      label: string;
-      type?: "normal" | "checkbox" | "radio" | "label";
-      enabled?: boolean;
-      checked?: boolean;
-      submenu?: DesktopNativeMenuItem[];
-    };
-
-export type DesktopNativeMenuRequest = {
-  items: DesktopNativeMenuItem[];
-  x?: number;
-  y?: number;
-};
-
 export type DesktopUpdateState = {
   status: "unavailable" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing";
   receivePreviewUpdates: boolean;
@@ -98,7 +81,6 @@ type ElectronDesktopBridge = {
   openSystemTerminal?: (path: string) => Promise<boolean>;
   revealPath?: (path: string) => Promise<boolean>;
   showEditorContextMenu?: (request: DesktopEditorContextMenuRequest) => Promise<DesktopEditorCommand | null>;
-  showNativeMenu?: (request: DesktopNativeMenuRequest) => Promise<string | null>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
   setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
 };
@@ -246,22 +228,6 @@ export async function showDesktopEditorContextMenu(request: DesktopEditorContext
   }
   try {
     return await bridge.showEditorContextMenu(request);
-  } catch {
-    return null;
-  }
-}
-
-export function supportsDesktopNativeMenu() {
-  return Boolean(desktopBridge()?.showNativeMenu);
-}
-
-export async function showDesktopNativeMenu(request: DesktopNativeMenuRequest) {
-  const bridge = desktopBridge();
-  if (!bridge?.showNativeMenu) {
-    return null;
-  }
-  try {
-    return await bridge.showNativeMenu(request);
   } catch {
     return null;
   }

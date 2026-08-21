@@ -61,7 +61,7 @@ export function requestBrowserReveal(
 
 export function openBrowserReveal(sessionID: string, tabID?: string) {
   useBrowserRevealStore.getState().requestReveal(sessionID, tabID);
-  setWorkspaceOpen(true);
+  setWorkspaceOpen(sessionID, true);
 }
 
 export function retainBrowserActivities(sessionID: string, tabIDs: string[]) {
