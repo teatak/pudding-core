@@ -48,7 +48,7 @@ const FACE_YAW_SQUEEZE_X = 0.04;
 const FACE_YAW_ORIGIN_SHIFT_PERCENT = 6;
 const FACE_CENTER_X = 64;
 const FACE_CENTER_Y = 77;
-const FACE_Z_OFFSET_PX = 6;
+const FACE_Z_OFFSET_PX = 1;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -60,6 +60,8 @@ const RIGHT_PALM_X = 114;
 const PALM_Y = 106;
 const MOUTH_PATH = "M59 88.5 Q64 91 69 88.5";
 const FACE_SCREEN_PATH = "M40 53 H88 C96 53 100 58 100 66 V88 C100 96 95 100 87 100 H41 C33 100 28 96 28 88 V66 C28 58 32 53 40 53 Z";
+const FACE_SCREEN_GROOVE_TRANSFORM = "translate(64 77) scale(0.89) translate(-64 -77)";
+const FACE_SCREEN_INSET_TRANSFORM = "translate(64 77) scale(0.85) translate(-64 -77)";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -669,13 +671,15 @@ export function Mascot({
 
           <span data-slot="face-layer" style={faceLayerStyle}>
             <span data-slot="face-motion" ref={faceMotionRef} style={faceMotionStyle}>
-              <span data-slot="face-screen-depth" style={compositeLayerStyle}>
+              <span data-slot="face-screen-groove" style={compositeLayerStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
                   <path
                     d={FACE_SCREEN_PATH}
-                    fill="var(--mascot-screen-depth)"
-                    fillOpacity="0.62"
-                    transform="translate(0 2)"
+                    fill="none"
+                    stroke="var(--mascot-screen-groove)"
+                    strokeLinejoin="round"
+                    strokeWidth="5.5"
+                    transform={FACE_SCREEN_GROOVE_TRANSFORM}
                   />
                 </svg>
               </span>
@@ -688,6 +692,7 @@ export function Mascot({
                     stroke="var(--mascot-screen-edge)"
                     strokeOpacity="0.55"
                     strokeWidth="1.5"
+                    transform={FACE_SCREEN_INSET_TRANSFORM}
                   />
                 </svg>
               </span>

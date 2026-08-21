@@ -59,6 +59,7 @@ const (
 type Driver struct {
 	mu                 sync.Mutex
 	captureLifecycleMu sync.Mutex
+	playbackWriteMu    sync.Mutex
 	inputFormat        frame.Format
 	outputFormat       frame.Format
 	frameMillis        int
@@ -171,8 +172,13 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 	if framesPerBuffer <= 0 {
 		return errors.New("portaudio capture: invalid frame duration")
 	}
-	if err := requestMicrophonePermission(ctx); err != nil {
-		return fmt.Errorf("portaudio microphone permission: %w", err)
+	d.mu.Lock()
+	routingPrepared := d.routingArbitrating
+	d.mu.Unlock()
+	if !routingPrepared {
+		if err := requestMicrophonePermission(ctx); err != nil {
+			return fmt.Errorf("portaudio microphone permission: %w", err)
+		}
 	}
 
 	d.mu.Lock()
@@ -212,9 +218,7 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 			return fmt.Errorf("portaudio capture open: %w", captureErr)
 		}
 		if checkStartupSignal {
-			if err := d.ensureCaptureSignalLocked(ctx); err != nil {
-				return d.abortCaptureStartLocked(err)
-			}
+			d.verifyCaptureSignalAsyncLocked(ctx)
 		}
 		return nil
 	}
@@ -247,12 +251,10 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 		d.leaveCaptureRoutingArbitrationLocked()
 		return fmt.Errorf("portaudio capture open: %w", err)
 	}
-	if checkStartupSignal {
-		if err := d.ensureCaptureSignalLocked(ctx); err != nil {
-			return d.abortCaptureStartLocked(err)
-		}
-	}
 	d.ensureWatcherLocked()
+	if checkStartupSignal {
+		d.verifyCaptureSignalAsyncLocked(ctx)
+	}
 	return nil
 }
 
@@ -333,34 +335,42 @@ func (d *Driver) WritePlayback(ctx context.Context, pcm frame.PCM16) error {
 	if !pcm.Format.Valid() {
 		return errors.New("portaudio playback: invalid frame")
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if !d.playbackReady || d.playbackStream == nil || d.playbackBuffer == nil {
-		return driver.ErrNotStarted
-	}
 	if pcm.Format != d.outputFormat {
 		return fmt.Errorf("portaudio playback format mismatch: got=%+v want=%+v", pcm.Format, d.outputFormat)
 	}
-	bytesPerBuffer := len(d.playbackBuffer) * 2
-	for offset := 0; offset < len(pcm.Data); offset += bytesPerBuffer {
+	d.playbackWriteMu.Lock()
+	defer d.playbackWriteMu.Unlock()
+	for offset := 0; offset < len(pcm.Data); {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+		d.mu.Lock()
+		if !d.playbackReady || d.playbackStream == nil || d.playbackBuffer == nil {
+			d.mu.Unlock()
+			return driver.ErrNotStarted
+		}
+		bytesPerBuffer := len(d.playbackBuffer) * 2
 		end := offset + bytesPerBuffer
 		if end > len(pcm.Data) {
 			end = len(pcm.Data)
 		}
 		bytesToInt16LE(pcm.Data[offset:end], d.playbackBuffer)
-		if err := d.playbackStream.Write(); err != nil {
+		err := d.playbackStream.Write()
+		if err != nil && !isOutputUnderflow(err) {
+			d.needsRefresh = true
+		}
+		d.mu.Unlock()
+		if err != nil {
 			if isOutputUnderflow(err) {
 				slog.Debug("portaudio playback: output underflow")
+				offset = end
 				continue
 			}
-			d.needsRefresh = true
 			return fmt.Errorf("portaudio playback write: %w", err)
 		}
+		offset = end
 	}
 	return nil
 }
@@ -528,66 +538,61 @@ func (d *Driver) fallbackRefreshOpenLocked(reason string) (error, error) {
 	return captureErr, playbackErr
 }
 
-func (d *Driver) ensureCaptureSignalLocked(ctx context.Context) error {
-	state, err := d.captureHealth.waitForSignal(ctx, captureSignalTimeout)
-	if err != nil {
-		return err
+func (d *Driver) verifyCaptureSignalAsyncLocked(ctx context.Context) {
+	health := d.captureHealth
+	if health == nil {
+		return
 	}
-	if state == captureSignalReady {
-		return nil
+	go d.verifyCaptureSignal(ctx, health)
+}
+
+func (d *Driver) verifyCaptureSignal(ctx context.Context, initial *captureHealth) {
+	state, err := initial.waitForSignal(ctx, captureSignalTimeout)
+	if err != nil || state == captureSignalReady {
+		return
 	}
 
-	deviceName := d.deviceName
+	d.captureLifecycleMu.Lock()
+	d.mu.Lock()
+	if d.captureHealth != initial || d.captureHandler == nil || d.stream == nil {
+		d.mu.Unlock()
+		d.captureLifecycleMu.Unlock()
+		return
+	}
 	slog.Warn(
 		"portaudio capture: startup stream has no valid PCM, rebuilding",
-		"device", deviceName,
+		"device", d.deviceName,
 		"state", state.String(),
 		"wait", captureSignalTimeout,
 	)
 	captureErr, playbackErr := d.fallbackRefreshOpenLocked("capture startup has no valid PCM")
+	recovered := d.captureHealth
+	d.mu.Unlock()
+	d.captureLifecycleMu.Unlock()
+
 	if playbackErr != nil {
 		slog.Warn("portaudio playback: recovery reopen failed", "err", playbackErr)
 	}
 	if captureErr != nil {
-		return fmt.Errorf("%w: recovery reopen failed: %v", driver.ErrCaptureNoSignal, captureErr)
+		slog.Warn("portaudio capture: startup recovery reopen failed", "err", captureErr)
+		return
 	}
-
-	state, err = d.captureHealth.waitForSignal(ctx, captureSignalTimeout)
+	if recovered == nil {
+		return
+	}
+	state, err = recovered.waitForSignal(ctx, captureSignalTimeout)
 	if err != nil {
-		return err
+		return
 	}
 	if state == captureSignalReady {
-		slog.Info("portaudio capture: startup signal recovered", "device", d.deviceName)
-		return nil
+		slog.Info("portaudio capture: startup signal recovered", "device", d.InputDeviceName())
+		return
 	}
 	slog.Warn(
 		"portaudio capture: no valid PCM after recovery",
-		"device", d.deviceName,
+		"device", d.InputDeviceName(),
 		"state", state.String(),
 	)
-	return fmt.Errorf("%w: device %q remained %s after recovery", driver.ErrCaptureNoSignal, d.deviceName, state.String())
-}
-
-// abortCaptureStartLocked leaves d.mu locked for StartCapture's deferred unlock.
-func (d *Driver) abortCaptureStartLocked(startErr error) error {
-	d.captureCtx = nil
-	d.captureHandler = nil
-	stream, stop, done, closeCapture := d.detachCaptureLocked()
-	wasArbitrating := d.routingArbitrating
-	d.routingArbitrating = false
-	d.needsRefresh = true
-
-	d.mu.Unlock()
-	cleanupErr := stopDetachedCapture(stream, stop, done, closeCapture)
-	if wasArbitrating {
-		leaveCaptureRoutingArbitration()
-		slog.Info("portaudio capture: audio routing arbitration left")
-	}
-	d.mu.Lock()
-	if cleanupErr != nil {
-		return errors.Join(startErr, cleanupErr)
-	}
-	return startErr
 }
 
 func (d *Driver) arbitrateCaptureRoutingLocked(ctx context.Context) error {

@@ -46,12 +46,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/audio/driver"
 	"github.com/teatak/pudding-core/internal/audio/frame"
 )
 
 const routingArbitrationTimeoutSeconds = 5
+const inputRoutePrimeLead = 200 * time.Millisecond
 
 var (
 	errRoutingArbitrationFailed  = errors.New("audio routing arbitration failed")
@@ -85,9 +88,8 @@ func leaveCaptureRoutingArbitration() {
 	C.PuddingLeaveCaptureRoutingArbitration()
 }
 
-// PrimeInputRoute creates real output activity before capture starts. That is
-// the signal AirPods automatic switching uses to move playback from iPhone to
-// this Mac before the microphone stream is opened.
+// PrimeInputRoute creates real output activity, waits only for the route lead,
+// then lets the rest of the prompt continue while capture starts.
 func (d *Driver) PrimeInputRoute(ctx context.Context, pcm frame.PCM16) error {
 	if err := requestMicrophonePermission(ctx); err != nil {
 		return fmt.Errorf("portaudio prime input route: %w", err)
@@ -107,12 +109,34 @@ func (d *Driver) PrimeInputRoute(ctx context.Context, pcm frame.PCM16) error {
 		d.cancelInputRoutePrime()
 		return fmt.Errorf("portaudio prime input route: %w", err)
 	}
-	if err := d.WritePlayback(ctx, pcm); err != nil {
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- d.WritePlayback(ctx, pcm)
+	}()
+	timer := time.NewTimer(inputRoutePrimeLead)
+	defer timer.Stop()
+	select {
+	case err := <-writeDone:
+		if err == nil {
+			return nil
+		}
 		_ = d.StopPlayback(context.Background())
 		d.cancelInputRoutePrime()
 		return fmt.Errorf("portaudio prime input route: %w", err)
+	case <-timer.C:
+		go logInputRoutePromptResult(writeDone)
+		return nil
+	case <-ctx.Done():
+		_ = d.StopPlayback(context.Background())
+		d.cancelInputRoutePrime()
+		return ctx.Err()
 	}
-	return nil
+}
+
+func logInputRoutePromptResult(done <-chan error) {
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, driver.ErrNotStarted) {
+		slog.Warn("portaudio input route prompt playback failed", "err", err)
+	}
 }
 
 func (d *Driver) cancelInputRoutePrime() {

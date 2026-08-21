@@ -214,9 +214,9 @@ textarea:focus-visible,
     --mascot-status-light-edge: color-mix(in oklch, var(--mascot-status-light), black 22%);
     --mascot-feature-outline: oklch(0.43 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 20%);
-    --mascot-screen: color-mix(in oklch, var(--mascot-body), black 14%);
-    --mascot-screen-depth: color-mix(in oklch, var(--mascot-body), black 32%);
-    --mascot-screen-edge: color-mix(in oklch, var(--mascot-body), white 24%);
+    --mascot-screen: oklch(0.94 0.04 277);
+    --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 34%);
+    --mascot-screen-edge: color-mix(in oklch, var(--mascot-screen), white 18%);
     --mascot-shadow: oklch(0.52 0.18 277 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -746,9 +746,9 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --mascot-status-light-edge: color-mix(in oklch, var(--mascot-status-light), black 26%);
     --mascot-feature-outline: oklch(0.48 0.1 265);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 28%);
-    --mascot-screen: color-mix(in oklch, var(--mascot-body), black 12%);
-    --mascot-screen-depth: color-mix(in oklch, var(--mascot-body), black 36%);
-    --mascot-screen-edge: color-mix(in oklch, var(--mascot-body), white 18%);
+    --mascot-screen: oklch(0.89 0.04 277);
+    --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 40%);
+    --mascot-screen-edge: color-mix(in oklch, var(--mascot-screen), white 16%);
     --mascot-shadow: oklch(0.46 0.05 277 / 10%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -1403,7 +1403,7 @@ html:has(
     --mascot-body: var(--destructive);
     --mascot-outline: color-mix(in oklch, var(--destructive), black 20%);
     --mascot-screen: color-mix(in oklch, var(--destructive), black 14%);
-    --mascot-screen-depth: color-mix(in oklch, var(--destructive), black 32%);
+    --mascot-screen-groove: color-mix(in oklch, var(--destructive), black 34%);
     --mascot-screen-edge: color-mix(in oklch, var(--destructive), white 22%);
 }
 
