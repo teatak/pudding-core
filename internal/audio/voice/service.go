@@ -20,6 +20,7 @@ import (
 	"github.com/teatak/pudding-core/internal/audio/dsp/ns"
 	"github.com/teatak/pudding-core/internal/audio/dsp/resample"
 	"github.com/teatak/pudding-core/internal/audio/frame"
+	"github.com/teatak/pudding-core/internal/audio/prompt"
 	audioqueue "github.com/teatak/pudding-core/internal/audio/queue"
 	"github.com/teatak/pudding-core/internal/audio/tts"
 	"github.com/teatak/pudding-core/internal/engine"
@@ -646,6 +647,7 @@ func (s *Service) startInput(sessionID string) error {
 		return err
 	}
 	s.resetCaptureDSP()
+	s.primeInputRoute(ctx, sessionID)
 	if err := s.driver.StartCapture(ctx, func(pcm frame.PCM16) {
 		if !s.inputStreamActive(sessionID, streamID) {
 			return
@@ -664,6 +666,7 @@ func (s *Service) startInput(sessionID string) error {
 			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
 		}
 	}); err != nil {
+		s.stopUnownedPlayback()
 		cancel()
 		s.clearInputStream(streamID)
 		s.setInputLevel(0)
@@ -683,6 +686,32 @@ func (s *Service) startInput(sessionID string) error {
 	return nil
 }
 
+func (s *Service) primeInputRoute(ctx context.Context, sessionID string) {
+	primer, ok := s.driver.(driver.InputRoutePrimer)
+	if !ok {
+		return
+	}
+	pcm, err := prompt.Start(s.driver.OutputFormat())
+	if err != nil {
+		slog.Warn("voice: prepare input route prompt failed", "sessionID", sessionID, "err", err)
+		return
+	}
+	if err := primer.PrimeInputRoute(ctx, pcm); err != nil {
+		slog.Warn("voice: prime input route failed", "sessionID", sessionID, "err", err)
+		return
+	}
+	slog.Info("voice: input route primed", "sessionID", sessionID, "duration", pcm.Duration())
+}
+
+func (s *Service) stopUnownedPlayback() {
+	if s.manager.Snapshot().OutputOwner != "" {
+		return
+	}
+	if err := s.driver.StopPlayback(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("voice: stop unowned playback failed", "err", err)
+	}
+}
+
 func (s *Service) stopInput() {
 	s.mu.Lock()
 	cancel := s.inputCancel
@@ -697,6 +726,7 @@ func (s *Service) stopInput() {
 	}
 	s.setInputLevel(0)
 	if s.driver != nil {
+		s.stopUnownedPlayback()
 		if err := s.driver.StopCapture(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: stop input capture failed", "streamID", streamID, "err", err)
 		}

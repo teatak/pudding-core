@@ -16,6 +16,12 @@ var (
 
 type CaptureHandler func(frame.PCM16)
 
+// InputRoutePrimer prepares a wireless voice route before capture. A successful
+// call keeps its playback route open until StopPlayback.
+type InputRoutePrimer interface {
+	PrimeInputRoute(ctx context.Context, pcm frame.PCM16) error
+}
+
 // Driver owns local hardware access. Sessions may bind to capture/playback,
 // but they do not own the device implementation.
 type Driver interface {

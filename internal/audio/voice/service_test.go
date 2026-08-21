@@ -209,6 +209,28 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	}
 }
 
+func TestBindInputPrimesRouteBeforeCapture(t *testing.T) {
+	drv := &primingCaptureDriver{captureDriver: captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}}
+	svc := NewService(ServiceConfig{Driver: drv, ASR: asr.NewFake(1)})
+	defer svc.Close()
+
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(drv.calls, ","); got != "prime,capture" {
+		t.Fatalf("audio call order while active = %q, want prime,capture", got)
+	}
+	if drv.prompt.Format != drv.OutputFormat() || len(drv.prompt.Data) == 0 {
+		t.Fatalf("route prompt = %+v, want non-empty output-format PCM", drv.prompt)
+	}
+	if _, err := svc.BindInput("sess_input", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(drv.calls, ","); got != "prime,capture,stop-playback" {
+		t.Fatalf("audio call order after stop = %q, want prime,capture,stop-playback", got)
+	}
+}
+
 func TestCaptureFeedsLowEnergyFramesToVAD(t *testing.T) {
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
 	recASR := newRecordingASR()
@@ -908,6 +930,28 @@ func (d *captureDriver) CaptureActive() bool                              { retu
 func (d *captureDriver) StartPlayback(context.Context) error              { return nil }
 func (d *captureDriver) WritePlayback(context.Context, frame.PCM16) error { return nil }
 func (d *captureDriver) StopPlayback(context.Context) error               { return nil }
+
+type primingCaptureDriver struct {
+	captureDriver
+	calls  []string
+	prompt frame.PCM16
+}
+
+func (d *primingCaptureDriver) PrimeInputRoute(_ context.Context, pcm frame.PCM16) error {
+	d.calls = append(d.calls, "prime")
+	d.prompt = pcm
+	return nil
+}
+
+func (d *primingCaptureDriver) StartCapture(ctx context.Context, handler driver.CaptureHandler) error {
+	d.calls = append(d.calls, "capture")
+	return d.captureDriver.StartCapture(ctx, handler)
+}
+
+func (d *primingCaptureDriver) StopPlayback(context.Context) error {
+	d.calls = append(d.calls, "stop-playback")
+	return nil
+}
 
 type blockingTTS struct {
 	requestCh chan ttspkg.Request

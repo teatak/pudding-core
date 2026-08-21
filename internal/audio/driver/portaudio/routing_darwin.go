@@ -45,6 +45,10 @@ import "C"
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"github.com/teatak/pudding-core/internal/audio/driver"
+	"github.com/teatak/pudding-core/internal/audio/frame"
 )
 
 const routingArbitrationTimeoutSeconds = 5
@@ -79,4 +83,40 @@ func beginCaptureRoutingArbitration(ctx context.Context) (bool, error) {
 
 func leaveCaptureRoutingArbitration() {
 	C.PuddingLeaveCaptureRoutingArbitration()
+}
+
+// PrimeInputRoute creates real output activity before capture starts. That is
+// the signal AirPods automatic switching uses to move playback from iPhone to
+// this Mac before the microphone stream is opened.
+func (d *Driver) PrimeInputRoute(ctx context.Context, pcm frame.PCM16) error {
+	if err := requestMicrophonePermission(ctx); err != nil {
+		return fmt.Errorf("portaudio prime input route: %w", err)
+	}
+	d.mu.Lock()
+	if !d.initialized {
+		d.mu.Unlock()
+		return driver.ErrNotStarted
+	}
+	if err := d.arbitrateCaptureRoutingLocked(ctx); err != nil {
+		d.mu.Unlock()
+		return fmt.Errorf("portaudio prime input route: %w", err)
+	}
+	d.mu.Unlock()
+
+	if err := d.StartPlayback(ctx); err != nil {
+		d.cancelInputRoutePrime()
+		return fmt.Errorf("portaudio prime input route: %w", err)
+	}
+	if err := d.WritePlayback(ctx, pcm); err != nil {
+		_ = d.StopPlayback(context.Background())
+		d.cancelInputRoutePrime()
+		return fmt.Errorf("portaudio prime input route: %w", err)
+	}
+	return nil
+}
+
+func (d *Driver) cancelInputRoutePrime() {
+	d.mu.Lock()
+	d.leaveCaptureRoutingArbitrationLocked()
+	d.mu.Unlock()
 }
