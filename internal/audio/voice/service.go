@@ -726,7 +726,9 @@ func (s *Service) stopInput() {
 	}
 	s.setInputLevel(0)
 	if s.driver != nil {
-		s.stopUnownedPlayback()
+		if cancel != nil || streamID != "" {
+			s.stopUnownedPlayback()
+		}
 		if err := s.driver.StopCapture(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: stop input capture failed", "streamID", streamID, "err", err)
 		}
