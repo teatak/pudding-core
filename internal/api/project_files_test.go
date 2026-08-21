@@ -11,8 +11,64 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
 )
+
+func TestSessionWorkspaceListsTemporaryFilesWithoutProject(t *testing.T) {
+	srv, st, homeDir := newTestServerWithHome(t)
+	const sessionID = "sess_temporary_workspace"
+	if err := st.CreateSession(context.Background(), &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	scratch, err := home.PrepareCodeScratch(homeDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "result.md"), []byte("# Result\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := decodeJSON[struct {
+		ProjectID string            `json:"projectID"`
+		Roots     []projectRootView `json:"roots"`
+		Temporary bool              `json:"temporary"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sessionID+"/project/tree", nil))
+	if roots.ProjectID != "" || !roots.Temporary || len(roots.Roots) != 1 || !roots.Roots[0].Temporary || roots.Roots[0].Path != scratch {
+		t.Fatalf("unexpected temporary workspace: %+v", roots)
+	}
+	query := url.Values{"rootID": {roots.Roots[0].ID}, "path": {"result.md"}}
+	file := decodeJSON[projectFileView](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sessionID+"/project/file?"+query.Encode(), nil))
+	if file.Content != "# Result\n" || file.MIME != "text/markdown" {
+		t.Fatalf("unexpected temporary file: %+v", file)
+	}
+}
+
+func TestSessionWorkspaceKeepsTemporaryRootAfterBindingProject(t *testing.T) {
+	srv, st, homeDir := newTestServerWithHome(t)
+	projectRoot := t.TempDir()
+	const sessionID = "sess_bound_with_temporary_workspace"
+	createProjectSession(t, st, "proj_bound_with_temporary_workspace", sessionID, projectRoot)
+	scratch, err := home.PrepareCodeScratch(homeDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "artifact.txt"), []byte("artifact"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := decodeJSON[struct {
+		ProjectID string            `json:"projectID"`
+		Roots     []projectRootView `json:"roots"`
+		Temporary bool              `json:"temporary"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sessionID+"/project/tree", nil))
+	if roots.ProjectID != "proj_bound_with_temporary_workspace" || roots.Temporary || len(roots.Roots) != 2 {
+		t.Fatalf("unexpected bound workspace: %+v", roots)
+	}
+	if roots.Roots[0].Path != projectRoot || roots.Roots[0].Temporary || roots.Roots[1].Path != scratch || !roots.Roots[1].Temporary {
+		t.Fatalf("unexpected workspace root order: %+v", roots.Roots)
+	}
+}
 
 func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	srv, st := newTestServer(t)

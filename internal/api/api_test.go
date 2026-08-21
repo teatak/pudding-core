@@ -46,6 +46,11 @@ import (
 const testToken = "test-token"
 
 func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
+	srv, st, _ := newTestServerWithHome(t)
+	return srv, st
+}
+
+func newTestServerWithHome(t *testing.T) (*httptest.Server, store.Store, string) {
 	t.Helper()
 	ms := memstore.New()
 	homeDir := t.TempDir()
@@ -53,7 +58,7 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, engine.WithAttachmentHome(homeDir))
 	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
-	return srv, ms
+	return srv, ms, homeDir
 }
 
 func TestListProjectsReturnsEmptyArrayForSQLiteStore(t *testing.T) {

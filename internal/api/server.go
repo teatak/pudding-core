@@ -1214,7 +1214,7 @@ func (s *Server) redoTurnFileChanges(c *cart.Context) error {
 func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.ReplayDirection) error {
 	id, _ := c.Param("id")
 	turnID, _ := c.Param("turnID")
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}

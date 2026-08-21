@@ -13,6 +13,7 @@ import {
   listCanvasItems,
   listSavedCanvasItems,
   getSession,
+  listProjectBrowserRoots,
   putCanvasItem,
   openSavedCanvasItem,
   saveCanvasItem,
@@ -174,7 +175,16 @@ export const WorkspacePane = memo(function WorkspacePane({
     staleTime: 10_000,
   });
   const hasProject = Boolean(sessionQuery.data?.projectID);
-  const projectTabVisible = hasProject && !projectTabClosed;
+  const workspaceRootsQuery = useQuery({
+    enabled,
+    queryKey: queryKeys.projectBrowserRoots(actorSessionID),
+    queryFn: () => listProjectBrowserRoots(token, actorSessionID),
+    staleTime: 10_000,
+  });
+  const hasFileWorkspace = hasProject || Boolean(workspaceRootsQuery.data?.roots.length);
+  const temporaryFileWorkspace = !hasProject && Boolean(workspaceRootsQuery.data?.temporary);
+  const fileWorkspaceLabel = temporaryFileWorkspace ? t("workspace.sessionFiles") : t("workspace.project");
+  const projectTabVisible = hasFileWorkspace && !projectTabClosed;
   const projectRevealReady = !projectFileReveal || (
     validatedProjectReveal?.serial === projectFileReveal.serial
     && validatedProjectReveal.sessionID === projectFileReveal.sessionID
@@ -206,14 +216,14 @@ export const WorkspacePane = memo(function WorkspacePane({
     };
   }, [actorSessionID, projectFileReveal?.serial, queryClient, sessionQuery.refetch]);
   const projectTurnDiffPreviews = useMemo(
-    () => hasProject ? filePreviews.filter((preview) => preview.source === "turn-diff") : [],
-    [filePreviews, hasProject],
+    () => hasFileWorkspace ? filePreviews.filter((preview) => preview.source === "turn-diff") : [],
+    [filePreviews, hasFileWorkspace],
   );
   const surfaceFilePreviews = useMemo(
     () => filePreviews.filter((preview) => (
-      preview.source !== "turn-diff" || (!sessionQuery.isLoading && !hasProject)
+      preview.source !== "turn-diff" || (!sessionQuery.isLoading && !hasFileWorkspace)
     )),
-    [filePreviews, hasProject, sessionQuery.isLoading],
+    [filePreviews, hasFileWorkspace, sessionQuery.isLoading],
   );
   const workspaceFilePreviewTabs = useMemo(
     () => surfaceFilePreviews.map((preview) => ({
@@ -307,7 +317,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     () => mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs),
     [browserTabs, requiredBrowserTabs],
   );
-  const projectActive = activeSurface === "project" && hasProject;
+  const projectActive = activeSurface === "project" && hasFileWorkspace;
   useEffect(() => {
     if (retainedTokenRef.current === token) {
       return;
@@ -413,14 +423,14 @@ export const WorkspacePane = memo(function WorkspacePane({
       return;
     }
     setActiveFilePreviewID(filePreviewReveal.previewID);
-    if (preview.source === "turn-diff" && hasProject) {
+    if (preview.source === "turn-diff" && hasFileWorkspace) {
       setProjectTabClosed(actorSessionID, false);
       selectProjectSurface();
     } else {
       selectCanvasSurface();
     }
     consumeFilePreviewReveal(filePreviewReveal.serial);
-  }, [actorSessionID, filePreviewReveal, filePreviews, hasProject, selectCanvasSurface, selectProjectSurface, sessionQuery.isLoading]);
+  }, [actorSessionID, filePreviewReveal, filePreviews, hasFileWorkspace, selectCanvasSurface, selectProjectSurface, sessionQuery.isLoading]);
 
   useEffect(() => {
     if (activeFilePreviewID && !filePreviews.some((preview) => preview.id === activeFilePreviewID)) {
@@ -451,7 +461,7 @@ export const WorkspacePane = memo(function WorkspacePane({
   }, [createNewBrowserTab, setActiveFilePreviewID]);
 
   const activateProjectSurface = useCallback(() => {
-    if (!hasProject) {
+    if (!hasFileWorkspace) {
       return;
     }
     setProjectTabClosed(actorSessionID, false);
@@ -459,7 +469,7 @@ export const WorkspacePane = memo(function WorkspacePane({
       setActiveFilePreviewID(undefined);
     }
     selectProjectSurface();
-  }, [activeFilePreview?.source, actorSessionID, hasProject, selectProjectSurface, setActiveFilePreviewID]);
+  }, [activeFilePreview?.source, actorSessionID, hasFileWorkspace, selectProjectSurface, setActiveFilePreviewID]);
 
   const closeProjectSurface = useCallback(() => {
     if (!actorSessionID) return;
@@ -490,21 +500,21 @@ export const WorkspacePane = memo(function WorkspacePane({
   ]);
 
   useEffect(() => {
-    if (activeSurface === "project" && !sessionQuery.isLoading && !hasProject) {
+    if (activeSurface === "project" && !sessionQuery.isLoading && !hasFileWorkspace) {
       if (items.length > 0) {
         selectCanvasSurface();
       } else {
         selectWorkspaceSurface();
       }
     }
-  }, [activeSurface, hasProject, items.length, selectCanvasSurface, selectWorkspaceSurface, sessionQuery.isLoading]);
+  }, [activeSurface, hasFileWorkspace, items.length, selectCanvasSurface, selectWorkspaceSurface, sessionQuery.isLoading]);
 
   useEffect(() => {
-    if (projectFileReveal?.sessionID === actorSessionID && hasProject) {
+    if (projectFileReveal?.sessionID === actorSessionID && hasFileWorkspace) {
       setProjectTabClosed(actorSessionID, false);
       selectProjectSurface();
     }
-  }, [actorSessionID, hasProject, projectFileReveal?.serial, selectProjectSurface]);
+  }, [actorSessionID, hasFileWorkspace, projectFileReveal?.serial, selectProjectSurface]);
 
   const selectFilePreview = useCallback((previewID: string) => {
     selectCanvasSurface();
@@ -911,6 +921,7 @@ export const WorkspacePane = memo(function WorkspacePane({
           filePreviewActive={filePreviewActive}
           filePreviewTabs={workspaceFilePreviewTabs}
           orderScope={actorSessionID || "workspace"}
+          projectLabel={fileWorkspaceLabel}
           projectTabVisible={projectTabVisible}
           onCloseBrowser={closeWorkspaceBrowser}
           onCloseCanvasItem={closeWorkspaceCanvasItem}
@@ -925,7 +936,8 @@ export const WorkspacePane = memo(function WorkspacePane({
           <WorkspaceResourceMenu
             closedItems={closedItems}
             creatingBrowser={creatingBrowserTab}
-            hasProject={hasProject}
+            hasProject={hasFileWorkspace}
+            projectLabel={fileWorkspaceLabel}
             projectTabVisible={projectTabVisible}
             savedItems={savedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
@@ -952,7 +964,8 @@ export const WorkspacePane = memo(function WorkspacePane({
             closedItems={closedItems}
             disabled={!actorSessionID}
             creatingBrowser={creatingBrowserTab}
-            hasProject={hasProject}
+            hasProject={hasFileWorkspace}
+            projectLabel={fileWorkspaceLabel}
             savedItems={savedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
             onCreateBrowser={createBrowserSurface}
@@ -994,7 +1007,7 @@ export const WorkspacePane = memo(function WorkspacePane({
           <ProjectBrowserSurface
             active={projectActive}
             activeTurnDiffID={activeFilePreview?.source === "turn-diff" ? activeFilePreview.id : undefined}
-            projectAvailable={hasProject}
+            hasProject={hasProject}
             projectStateReady={projectRevealReady}
             sessionID={actorSessionID}
             token={token}
@@ -1006,7 +1019,7 @@ export const WorkspacePane = memo(function WorkspacePane({
           />
         ) : null}
         {mountedFilePreviews.filter((preview) => !(
-          hasProject && preview.sessionID === actorSessionID && preview.source === "turn-diff"
+          hasFileWorkspace && preview.sessionID === actorSessionID && preview.source === "turn-diff"
         )).map((preview) => (
           <FilePreviewSurface
             key={preview.id}

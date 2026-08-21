@@ -11,6 +11,7 @@ export function WorkspaceEmpty({
   disabled,
   creatingBrowser,
   hasProject,
+  projectLabel,
   closedItems,
   savedItems,
   onClearClosed,
@@ -24,6 +25,7 @@ export function WorkspaceEmpty({
   disabled: boolean;
   creatingBrowser: boolean;
   hasProject: boolean;
+  projectLabel: string;
   closedItems: ClosedCanvasItem[];
   savedItems: SavedCanvasItem[];
   onClearClosed: () => void;
@@ -53,7 +55,7 @@ export function WorkspaceEmpty({
                 onClick={onOpenProject}
               >
                 <Folders />
-                {t("workspace.project")}
+                {projectLabel}
               </Button>
             ) : null}
             <Button

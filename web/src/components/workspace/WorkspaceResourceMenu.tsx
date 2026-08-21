@@ -17,6 +17,7 @@ export function WorkspaceResourceMenu({
   closedItems,
   creatingBrowser,
   hasProject,
+  projectLabel,
   projectTabVisible,
   savedItems,
   onClearClosed,
@@ -30,6 +31,7 @@ export function WorkspaceResourceMenu({
   closedItems: ClosedCanvasItem[];
   creatingBrowser: boolean;
   hasProject: boolean;
+  projectLabel: string;
   projectTabVisible: boolean;
   savedItems: SavedCanvasItem[];
   onClearClosed: () => void;
@@ -62,7 +64,7 @@ export function WorkspaceResourceMenu({
         {hasProject && !projectTabVisible ? (
           <DropdownMenuItem className="h-8 px-2.5" onSelect={onOpenProject}>
             <Folders />
-            {t("workspace.project")}
+            {projectLabel}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem className="h-8 px-2.5" onSelect={onCreateBrowser}>

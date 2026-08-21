@@ -19,8 +19,8 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
-	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/turnfiles"
@@ -2286,18 +2286,13 @@ func eventAttachmentsFromStore(attachments []store.Attachment) []event.Attachmen
 }
 
 func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turnID string, mode store.AgentMode) ([]string, error) {
-	var dirs []string
-	sess, err := e.store.GetSession(ctx, sessionID)
+	workspace, err := sessionworkspace.Resolve(
+		ctx, e.store, e.attachmentHome, sessionID, sessionworkspace.ScratchExisting,
+	)
 	if err != nil {
 		return nil, err
 	}
-	if sess.ProjectID != "" {
-		project, err := e.store.GetProject(ctx, sess.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		dirs = append(dirs, project.RootDirs...)
-	}
+	dirs := append([]string(nil), workspace.RootDirs...)
 	e.mu.Lock()
 	grant := e.turnProjectAccess[turnID]
 	e.mu.Unlock()
@@ -2306,11 +2301,13 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 	if len(dirs) > 0 || store.NormalizeAgentMode(mode) != store.ModeCode {
 		return dirs, nil
 	}
-	root, err := home.PrepareCodeScratch(e.attachmentHome, sessionID)
+	workspace, err = sessionworkspace.Resolve(
+		ctx, e.store, e.attachmentHome, sessionID, sessionworkspace.ScratchEnsure,
+	)
 	if err != nil {
 		return nil, err
 	}
-	return []string{root}, nil
+	return workspace.RootDirs, nil
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {

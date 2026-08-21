@@ -13,13 +13,40 @@ const collapsedPanelPixels = 31;
 export function ProjectSidebar({ files, filesAction, git }: {
   files: ReactNode;
   filesAction?: ReactNode;
-  git: ReactNode;
+  git?: ReactNode;
 }) {
   const { t } = useI18n();
   const filesRef = usePanelRef();
   const gitRef = usePanelRef();
   const [filesCollapsed, setFilesCollapsed] = useState(false);
   const [gitCollapsed, setGitCollapsed] = useState(false);
+
+  if (!git) {
+    return (
+      <ResizablePanelGroup className="h-full min-h-0 bg-[var(--workspace-chrome-background)]" orientation="vertical">
+        <ResizablePanel
+          id="files"
+          className="min-h-0"
+          collapsedSize="31px"
+          collapsible
+          minSize="120px"
+          panelRef={filesRef}
+          onResize={({ inPixels }) => setFilesCollapsed(inPixels <= collapsedPanelPixels + 1)}
+        >
+          <ProjectSidebarSection
+            action={filesAction}
+            collapsed={filesCollapsed}
+            icon={<Folders />}
+            label={t("project.browserFiles")}
+            topBorder={false}
+            onToggle={() => togglePanel(filesRef.current, filesCollapsed)}
+          >
+            {files}
+          </ProjectSidebarSection>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    );
+  }
 
   return (
     <ResizablePanelGroup

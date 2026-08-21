@@ -62,7 +62,7 @@ function resolveProjectSurfaceMode(width: number): ProjectSurfaceMode {
 export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   active,
   activeTurnDiffID,
-  projectAvailable,
+  hasProject,
   projectStateReady,
   sessionID,
   token,
@@ -74,7 +74,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
 }: {
   active: boolean;
   activeTurnDiffID?: string;
-  projectAvailable: boolean;
+  hasProject: boolean;
   projectStateReady: boolean;
   sessionID: string;
   token: string;
@@ -131,12 +131,15 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
   ))), [dirtyKeys, workspace.tabs]);
   const rootsQuery = useQuery({
-    enabled: projectAvailable && projectStateReady && (active || Boolean(fileReveal)) && Boolean(sessionID && token),
+    enabled: projectStateReady && (active || Boolean(fileReveal)) && Boolean(sessionID && token),
     queryKey: queryKeys.projectBrowserRoots(sessionID),
     queryFn: () => listProjectBrowserRoots(token, sessionID),
     staleTime: 10_000,
   });
-  const roots = rootsQuery.data?.roots || [];
+  const roots = useMemo(
+    () => (rootsQuery.data?.roots || []).map((root) => root.temporary ? { ...root, name: t("workspace.sessionFiles") } : root),
+    [rootsQuery.data?.roots, t],
+  );
   const activeTurnDiff = turnDiffTabs.find((preview) => preview.id === activeTurnDiffID);
   const narrow = surfaceMode === "narrow";
   const compact = surfaceMode !== "wide";
@@ -160,9 +163,10 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   );
   const rootPaths = roots.map((root) => root.path);
   const rootWatchSignature = roots.map((root) => `${root.id}\0${root.path}`).join("\n");
+  const gitRoots = roots.filter((root) => !root.temporary);
   const gitQueries = useQueries({
-    queries: roots.map((root) => ({
-      enabled: active && Boolean(sessionID && token),
+    queries: gitRoots.map((root) => ({
+      enabled: hasProject && active && Boolean(sessionID && token),
       queryKey: queryKeys.projectGitStatus(sessionID, root.id),
       queryFn: () => getProjectGitStatus(token, sessionID, root.id),
       notifyOnChangeProps: ["data", "error"],
@@ -172,7 +176,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       staleTime: 5_000,
     })),
   });
-  const gitRepositories: ProjectGitRepositoryState[] = roots.map((root, index) => ({
+  const gitRepositories: ProjectGitRepositoryState[] = gitRoots.map((root, index) => ({
     // A failed background refresh must not replace the last successful status.
     error: gitQueries[index]?.data ? undefined : gitQueries[index]?.error,
     loading: gitQueries[index]?.isLoading || false,
@@ -268,20 +272,20 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     if (!fileReveal || !projectStateReady) {
       return;
     }
-    if (!projectAvailable) {
+    if (rootsQuery.isLoading || rootsQuery.isFetching) {
+      return;
+    }
+    if (rootsQuery.isError) {
+      toast.warning(t("project.browserLoadFailed"));
+      return;
+    }
+    if (roots.length === 0) {
       if (fileReveal.fallback) {
         openFilePreview(fileReveal.fallback);
       } else {
         toast.warning(t("project.browserRevealUnavailable"));
       }
       consumeProjectFileReveal(sessionID, fileReveal.serial);
-      return;
-    }
-    if (rootsQuery.isLoading || rootsQuery.isFetching) {
-      return;
-    }
-    if (rootsQuery.isError) {
-      toast.warning(t("project.browserLoadFailed"));
       return;
     }
     const selection = resolveProjectFileReveal(roots, fileReveal);
@@ -301,11 +305,12 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       toast.warning(t("project.browserRevealUnavailable"));
     }
     consumeProjectFileReveal(sessionID, fileReveal.serial);
-  }, [fileReveal?.serial, projectAvailable, projectStateReady, rootsQuery.isError, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
+  }, [fileReveal?.serial, projectStateReady, rootWatchSignature, rootsQuery.isError, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
   const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
   const refreshGitRoots = async (targetSessionID: string, rootIDs: string[]) => {
-    const uniqueRootIDs = Array.from(new Set(rootIDs));
+    const gitRootIDs = new Set(gitRoots.map((root) => root.id));
+    const uniqueRootIDs = Array.from(new Set(rootIDs)).filter((rootID) => gitRootIDs.has(rootID));
     const statuses = await Promise.all(uniqueRootIDs.map((rootID) => getProjectGitStatus(token, targetSessionID, rootID)));
     statuses.forEach((status) => queryClient.setQueryData(queryKeys.projectGitStatus(targetSessionID, status.rootID), status));
   };
@@ -624,7 +629,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           onToggle={workspace.toggleDirectory}
         />
       )}
-      git={(
+      git={hasProject ? (
         <ProjectGitSection
           dirtyRootIDs={dirtyRootIDs}
           repositories={gitRepositories}
@@ -636,7 +641,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
             setNarrowPane("viewer");
           }}
         />
-      )}
+      ) : undefined}
     />
   );
   const projectViewer = (

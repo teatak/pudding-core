@@ -52,7 +52,7 @@ func (s *Server) createProjectEntry(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -82,7 +82,7 @@ func (s *Server) renameProjectEntry(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (s *Server) copyProjectEntry(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -133,7 +133,7 @@ func (s *Server) moveProjectEntry(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -174,7 +174,7 @@ func resolveProjectTransfer(c *cart.Context, roots []projectRootView, req transf
 }
 
 func (s *Server) deleteProjectEntry(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -198,7 +198,7 @@ func (s *Server) putProjectFile(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}

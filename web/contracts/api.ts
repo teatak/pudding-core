@@ -64,12 +64,14 @@ export const projectBrowserRoot = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  temporary: z.boolean().optional(),
 });
 export type ProjectBrowserRoot = z.infer<typeof projectBrowserRoot>;
 
 export const projectBrowserRootsResponse = z.object({
   projectID: z.string(),
   roots: z.array(projectBrowserRoot),
+  temporary: z.boolean().optional(),
 });
 
 export const projectTreeEntry = z.object({

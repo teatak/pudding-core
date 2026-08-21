@@ -80,6 +80,25 @@ export function ProjectTree({
           <ProjectTreeStatus>{projectBrowserError(error, t)}</ProjectTreeStatus>
         ) : roots.length === 0 ? (
           <ProjectTreeStatus>{t("project.browserEmpty")}</ProjectTreeStatus>
+        ) : roots.length === 1 && roots[0].temporary ? (
+          <ProjectDirectoryNode
+            {...actions}
+            active={active}
+            depth={-1}
+            expandedKeys={expandedKeySet}
+            gitStatuses={gitStatuses}
+            hideSelf
+            isRoot
+            label={roots[0].name}
+            path="."
+            root={roots[0]}
+            selected={selected}
+            sessionID={sessionID}
+            token={token}
+            onOpenPinned={onOpenPinned}
+            onOpenPreview={onOpenPreview}
+            onToggle={onToggle}
+          />
         ) : roots.map((root) => (
           <ProjectDirectoryNode
             key={root.id}
@@ -109,6 +128,7 @@ function ProjectDirectoryNode({
   depth,
   expandedKeys,
   gitStatuses,
+  hideSelf = false,
   isRoot = false,
   label,
   path,
@@ -125,6 +145,7 @@ function ProjectDirectoryNode({
   depth: number;
   expandedKeys: ReadonlySet<string>;
   gitStatuses?: ReadonlyMap<string, ProjectGitStatusFile>;
+  hideSelf?: boolean;
   isRoot?: boolean;
   label: string;
   path: string;
@@ -138,7 +159,7 @@ function ProjectDirectoryNode({
 }) {
   const { t } = useI18n();
   const key = `${root.id}:${path}`;
-  const expanded = expandedKeys.has(key);
+  const expanded = hideSelf || expandedKeys.has(key);
   const [dropActive, setDropActive] = useState(false);
   const target: ProjectEntryTarget = { rootID: root.id, path, name: label, type: "dir" };
   const treeQuery = useQuery({
@@ -150,7 +171,7 @@ function ProjectDirectoryNode({
 
   return (
     <div>
-      <ProjectEntryContextMenu {...actions} isRoot={isRoot} target={target}>
+      {!hideSelf ? <ProjectEntryContextMenu {...actions} isRoot={isRoot} target={target}>
         <button
           className={cn(
             "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground",
@@ -200,7 +221,7 @@ function ProjectDirectoryNode({
           <ProjectFolderTypeIcon name={label} open={expanded} />
           <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         </button>
-      </ProjectEntryContextMenu>
+      </ProjectEntryContextMenu> : null}
       {expanded ? (
         <div className="relative">
           {!isRoot ? (

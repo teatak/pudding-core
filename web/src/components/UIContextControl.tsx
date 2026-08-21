@@ -42,7 +42,7 @@ export function UIContextControl({
             className={cn(
               "size-4",
               enabled &&
-                "[&_path:first-child]:fill-primary [&_path:first-child]:stroke-primary",
+                "[&_path:first-child]:fill-[var(--brand-accent)] [&_path:first-child]:stroke-[var(--brand-accent)]",
             )}
           />
         </Button>

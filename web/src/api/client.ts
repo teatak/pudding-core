@@ -385,7 +385,7 @@ export function getProject(token: string, projectID: string): Promise<Project> {
   return request(token, `/projects/${encodeURIComponent(projectID)}`, project);
 }
 
-export function listProjectBrowserRoots(token: string, sessionID: string): Promise<{ projectID: string; roots: ProjectBrowserRoot[] }> {
+export function listProjectBrowserRoots(token: string, sessionID: string): Promise<{ projectID: string; roots: ProjectBrowserRoot[]; temporary?: boolean }> {
   return request(
     token,
     `/sessions/${encodeURIComponent(sessionID)}/project/tree`,

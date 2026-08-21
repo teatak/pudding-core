@@ -90,6 +90,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   filePreviewActive,
   filePreviewTabs,
   orderScope,
+  projectLabel,
   projectTabVisible,
   onCloseBrowser,
   onCloseCanvasItem,
@@ -111,6 +112,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   filePreviewActive: boolean;
   filePreviewTabs: WorkspaceFilePreviewTab[];
   orderScope: string;
+  projectLabel: string;
   projectTabVisible: boolean;
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
@@ -190,6 +192,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
                 closingBrowserTabID={closingBrowserTabID}
                 closingCanvasItemID={closingCanvasItemID}
                 filePreviewActive={filePreviewActive}
+                projectLabel={projectLabel}
                 tab={tab}
                 onCloseBrowser={onCloseBrowser}
                 onCloseCanvasItem={onCloseCanvasItem}
@@ -216,6 +219,7 @@ function SortableSurfaceTabButton({
   closingBrowserTabID,
   closingCanvasItemID,
   filePreviewActive,
+  projectLabel,
   tab,
   onCloseBrowser,
   onCloseCanvasItem,
@@ -233,6 +237,7 @@ function SortableSurfaceTabButton({
   closingBrowserTabID?: string;
   closingCanvasItemID?: string;
   filePreviewActive: boolean;
+  projectLabel: string;
   tab: SurfaceTab;
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
@@ -249,7 +254,7 @@ function SortableSurfaceTabButton({
   const file = tab.kind === "file" ? tab.file : undefined;
   const widget = tab.kind === "widget" ? tab.widget : undefined;
   const label = project
-    ? t("workspace.project")
+    ? projectLabel
     : browser
       ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
       : widget

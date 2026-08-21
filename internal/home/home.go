@@ -104,6 +104,40 @@ func PrepareCodeScratch(dir, sessionID string) (string, error) {
 	return resolved, nil
 }
 
+// ExistingCodeScratch returns the validated session scratch directory without
+// creating it. The boolean is false when the session has not used one yet.
+func ExistingCodeScratch(dir, sessionID string) (string, bool, error) {
+	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionID) == "" {
+		return "", false, nil
+	}
+	base, err := codeScratchBase(dir, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	path := filepath.Join(base, safePathComponent(sessionID))
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("home: inspect code scratch: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", false, errors.New("home: code scratch must be a directory, not a symlink")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", false, fmt.Errorf("home: resolve code scratch: %w", err)
+	}
+	if !pathWithin(resolved, base) {
+		return "", false, errors.New("home: code scratch escapes temp directory")
+	}
+	return resolved, true, nil
+}
+
 func RemoveCodeScratch(dir, sessionID string) error {
 	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionID) == "" {
 		return nil

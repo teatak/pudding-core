@@ -18,6 +18,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/projectfs"
 	"github.com/teatak/pudding-core/internal/projectpath"
+	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -31,9 +32,10 @@ const (
 )
 
 type projectRootView struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Temporary bool   `json:"temporary,omitempty"`
 }
 
 type projectTreeEntry struct {
@@ -81,7 +83,7 @@ var projectTreeIgnoredDirs = map[string]struct{}{
 }
 
 func (s *Server) searchProjectFiles(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -146,15 +148,20 @@ func (s *Server) searchProjectFiles(c *cart.Context) error {
 }
 
 func (s *Server) listProjectTree(c *cart.Context) error {
-	project, roots, ok := s.sessionProject(c)
+	workspace, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
 	rootID := strings.TrimSpace(c.Request.URL.Query().Get("rootID"))
 	if rootID == "" {
+		projectID := ""
+		if workspace.Project != nil {
+			projectID = workspace.Project.ID
+		}
 		c.JSON(http.StatusOK, map[string]any{
-			"projectID": project.ID,
+			"projectID": projectID,
 			"roots":     roots,
+			"temporary": workspace.Temporary,
 		})
 		return nil
 	}
@@ -240,7 +247,7 @@ func (s *Server) listProjectTree(c *cart.Context) error {
 }
 
 func (s *Server) getProjectFile(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -274,7 +281,7 @@ func (s *Server) getProjectFile(c *cart.Context) error {
 }
 
 func (s *Server) getProjectResource(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -327,26 +334,35 @@ func projectPreviewResourceAllowed(contentType string) bool {
 
 func (s *Server) sessionProject(c *cart.Context) (*store.Project, []projectRootView, bool) {
 	sessionID, _ := c.Param("id")
-	session, err := s.store.GetSession(c.Request.Context(), strings.TrimSpace(sessionID))
+	workspace, err := sessionworkspace.Resolve(
+		c.Request.Context(), s.store, s.home, sessionID, sessionworkspace.ScratchDisabled,
+	)
 	if err != nil {
 		_ = s.fail(c, err)
 		return nil, nil, false
 	}
-	if strings.TrimSpace(session.ProjectID) == "" {
+	if workspace.Project == nil {
 		_ = projectFileError(c, http.StatusNotFound, "session_has_no_project")
 		return nil, nil, false
 	}
-	project, err := s.store.GetProject(c.Request.Context(), session.ProjectID)
-	if err != nil {
-		_ = s.fail(c, err)
-		return nil, nil, false
-	}
-	roots := projectRootViews(project.RootDirs)
+	roots := projectRootViews(workspace.RootDirs)
 	if len(roots) == 0 {
 		_ = projectFileError(c, http.StatusNotFound, "project_roots_unavailable")
 		return nil, nil, false
 	}
-	return project, roots, true
+	return workspace.Project, roots, true
+}
+
+func (s *Server) sessionWorkspace(c *cart.Context) (sessionworkspace.Workspace, []projectRootView, bool) {
+	sessionID, _ := c.Param("id")
+	workspace, err := sessionworkspace.Resolve(
+		c.Request.Context(), s.store, s.home, sessionID, sessionworkspace.ScratchExisting,
+	)
+	if err != nil {
+		_ = s.fail(c, err)
+		return sessionworkspace.Workspace{}, nil, false
+	}
+	return workspace, workspaceRootViews(workspace), true
 }
 
 func projectRootViews(paths []string) []projectRootView {
@@ -363,6 +379,14 @@ func projectRootViews(paths []string) []projectRootView {
 			Name: name,
 			Path: root,
 		})
+	}
+	return views
+}
+
+func workspaceRootViews(workspace sessionworkspace.Workspace) []projectRootView {
+	views := projectRootViews(workspace.RootDirs)
+	for index := range views {
+		views[index].Temporary = workspace.ScratchRoot != "" && views[index].Path == workspace.ScratchRoot
 	}
 	return views
 }
