@@ -63,19 +63,19 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
   };
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-muted/10 text-sm text-muted-foreground shadow-none">
-      <div className="flex min-h-14 items-center gap-3 bg-background px-3 py-2.5 hover:bg-muted/40 dark:bg-muted/30 dark:hover:bg-muted/40">
-        <button className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:pointer-events-none" disabled={!reviewable} type="button" onClick={openReview}>
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/70">
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card text-sm text-muted-foreground shadow-none dark:bg-background">
+      <div className="flex min-h-12 items-center gap-2 bg-background px-3 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
+        <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!reviewable} type="button" onClick={openReview}>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-foreground/65">
             <Files className="size-4" />
           </span>
-          <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-foreground">
               {singleChange ? <span className="shrink-0 font-medium">{t(statusLabelKey(singleChange.kind))}</span> : null}
               <span className={cn("truncate", singleChange ? "font-mono" : "font-medium")}>{summary}</span>
             </span>
             {additions > 0 || deletions > 0 ? (
-              <span className="mt-0.5 flex items-center gap-1.5 font-mono text-xs">
+              <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs opacity-85">
                 {additions > 0 ? <span className="text-git-added">+{additions}</span> : null}
                 {deletions > 0 ? <span className="text-git-deleted">−{deletions}</span> : null}
               </span>
@@ -84,7 +84,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={!reversible || actionMutation.isPending}
             title={!reversible ? t("transcript.turnFilesActionUnavailable") : undefined}
             type="button"
@@ -94,7 +94,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
             {state === "undone" ? t("transcript.turnFilesRedo") : t("transcript.turnFilesUndo")}
           </button>
           {changes.length === 1 ? <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-40"
             disabled={!previewable}
             type="button"
             onClick={() => previewable && revealResource(sessionID, previewable, displayState)}
@@ -103,7 +103,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
             {t("transcript.turnFilesPreview")}
           </button> : null}
           {reviewable ? <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/80 bg-background px-3 font-medium text-secondary-foreground hover:bg-secondary/70 dark:bg-secondary/50 dark:hover:bg-secondary/70"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-transparent px-3 font-medium text-foreground hover:bg-muted/60"
             type="button"
             onClick={openReview}
           >
@@ -113,35 +113,35 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
         </div>
       </div>
       {changes.length > 1 ? (
-        <div className="border-t border-border/70 bg-background dark:bg-muted/10">
+        <div className="border-t border-border/50">
           {visible.map((change) => {
             const relativePath = resourcePath(change, displayState);
             const diffable = diffChanges.some((candidate) => candidate.id === change.id);
             const label = turnFileChangeLabel(change, changes);
             return (
-              <div key={change.id} className="group/change-row flex min-h-9 w-full min-w-0 items-center text-muted-foreground/65 transition-colors hover:bg-muted/30 hover:text-muted-foreground">
+              <div key={change.id} className="group/change-row flex min-h-[38px] w-full min-w-0 items-center text-foreground/70 transition-colors hover:bg-muted/35 hover:text-foreground/90">
                 <button
-                  className="flex min-h-9 min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 text-left disabled:pointer-events-none"
+                  className="flex min-h-[38px] min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 text-left disabled:pointer-events-none"
                   disabled={!diffable}
                   type="button"
                   onClick={() => openTurnFileChanges(sessionID, turnID, changes, change.id)}
                 >
                   {change.binary ? <FileImage className="size-3.5 shrink-0" /> : null}
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground/80 group-hover/change-row:text-muted-foreground">{label}</code>
+                  <code className="min-w-0 flex-1 truncate font-mono text-xs">{label}</code>
                 </button>
                 <div className="flex shrink-0 items-center gap-2 pr-3">
                   {relativePath ? (
                     <button
                       aria-label={`${t("transcript.turnFilesPreview")} ${label}`}
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/change-row:opacity-100 focus-visible:opacity-100"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-0 hover:bg-muted/70 hover:text-foreground group-hover/change-row:opacity-100 focus-visible:opacity-100"
                       type="button"
                       onClick={() => revealResource(sessionID, change, displayState)}
                     >
                       <Eye className="size-3.5" />
                     </button>
                   ) : null}
-                  {change.additions > 0 ? <span className="shrink-0 text-xs text-git-added opacity-70 group-hover/change-row:opacity-100">+{change.additions}</span> : null}
-                  {change.deletions > 0 ? <span className="shrink-0 text-xs text-git-deleted opacity-70 group-hover/change-row:opacity-100">−{change.deletions}</span> : null}
+                  {change.additions > 0 ? <span className="shrink-0 text-xs text-git-added opacity-65 group-hover/change-row:opacity-85">+{change.additions}</span> : null}
+                  {change.deletions > 0 ? <span className="shrink-0 text-xs text-git-deleted opacity-65 group-hover/change-row:opacity-85">−{change.deletions}</span> : null}
                 </div>
               </div>
             );
@@ -150,7 +150,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
       ) : null}
       {collapsible ? (
         <button
-          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t border-border/70 bg-muted/20 px-3 text-left text-xs font-medium text-foreground/85 hover:text-foreground"
+          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t border-border/50 bg-transparent px-3 text-left text-xs font-medium text-foreground/85 hover:text-foreground"
           type="button"
           onClick={() => setExpanded((current) => !current)}
         >
