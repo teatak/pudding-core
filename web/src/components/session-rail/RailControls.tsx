@@ -379,7 +379,7 @@ export function ProjectSortHeader({
               <TooltipTrigger asChild>
                 <RailIconAction
                   aria-label={t("project.add")}
-                  className="mr-1 text-sidebar-foreground/55 group-hover/project-section:opacity-100"
+                  className="mr-1 text-sidebar-foreground/55 group-hover/project-section:opacity-100 group-has-[[data-state=open]]/project-section:opacity-100"
                   onClick={onCreateProject}
                 >
                   <FolderPlus className="size-3.5" />
