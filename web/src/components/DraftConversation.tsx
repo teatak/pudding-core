@@ -1308,7 +1308,7 @@ function DraftComposer({
                 )}
               </div>
             ) : null}
-            <div className="px-4 pt-4 pb-2">
+            <div className="px-3.5 pt-3 pb-2">
               <Textarea
                 autoFocus
                 data-composer-text-input="true"
@@ -1330,7 +1330,7 @@ function DraftComposer({
                 onSelect={handleTextCursorUpdate}
               />
             </div>
-            <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
+            <div className="flex min-w-0 items-center gap-1 px-1.5 pb-1.5">
               <ComposerAddButton
                 active={mentionMenuOpen}
                 busy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}

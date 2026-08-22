@@ -10,7 +10,6 @@ import {
 
 import type { Project, Session } from "@/api/client";
 import {
-  Archive,
   Folders,
   MessageCirclePlus,
   Package,
@@ -62,7 +61,6 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { getDesktopHomeDirectory } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
@@ -939,33 +937,15 @@ export function RailPanel({
           </SidebarContent>
           <SidebarFooter>
             <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
-            <div className="flex items-center justify-between gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <RailIconAction
-                    aria-label={t("settings.title")}
-                    className="size-8 opacity-100"
-                    tabIndex={-1}
-                    onClick={() => openSettingsDialog()}
-                  >
-                    <Settings />
-                  </RailIconAction>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t("settings.title")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <RailIconAction
-                    aria-label={t("settings.section.archives")}
-                    className="size-8 opacity-100"
-                    tabIndex={-1}
-                    onClick={() => openSettingsDialog({ section: "archives" })}
-                  >
-                    <Archive />
-                  </RailIconAction>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t("settings.section.archives")}</TooltipContent>
-              </Tooltip>
+            <div className="flex items-center">
+              <RailIconAction
+                aria-label={t("settings.title")}
+                className="size-8 opacity-100"
+                tabIndex={-1}
+                onClick={() => openSettingsDialog()}
+              >
+                <Settings />
+              </RailIconAction>
             </div>
           </SidebarFooter>
         </Sidebar>
