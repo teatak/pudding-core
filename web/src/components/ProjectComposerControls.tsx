@@ -117,7 +117,7 @@ function ProjectApprovalControl({
         <Button
           aria-label={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
           className={cn(
-            "pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal",
+            "pudding-composer-approval-control h-7 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal",
             composerControlStateClassName,
           )}
           disabled={!project || busy}

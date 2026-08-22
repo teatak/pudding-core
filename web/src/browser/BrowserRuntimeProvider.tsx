@@ -43,6 +43,7 @@ type AutomationLease = {
   complete: (ok: boolean) => void;
   completed: boolean;
   key: string;
+  previewDataURL: string;
   presentationFrameReady: boolean;
 };
 
@@ -112,14 +113,17 @@ export function BrowserRuntimeProvider({
       if (automation?.key === key) {
         if (automation.action === "screenshot") {
           runtime.host.dataset.captureStatus = automation.captureStatus;
+          applyRuntimeCapturePreview(runtime, automation.previewDataURL);
           applyRuntimePresentation(runtime, "preview", false);
         } else {
           delete runtime.host.dataset.captureStatus;
+          applyRuntimeCapturePreview(runtime, "");
           applyRuntimePresentation(runtime, "automation", viewport?.key === key);
         }
         return;
       }
       delete runtime.host.dataset.captureStatus;
+      applyRuntimeCapturePreview(runtime, "");
       if (!automation && viewport?.key === key) {
         applyRuntimePresentation(runtime, "visible", true);
         return;
@@ -207,6 +211,7 @@ export function BrowserRuntimeProvider({
         complete: (ok: boolean) => complete(event.requestID || "", ok),
         completed: false,
         key: runtimeKey(event.sessionID, event.tabID),
+        previewDataURL: "",
         presentationFrameReady: false,
       };
       automationLeaseRef.current = lease;
@@ -254,6 +259,7 @@ export function BrowserRuntimeProvider({
         runtimesRef.current.get(lease.key)?.handle.releaseAutomationFocus();
         if (lease.action === "screenshot" && event.ok === true) {
           lease.captureStatus = "success";
+          lease.previewDataURL = event.previewDataURL || "";
           applyPresentations();
           automationHideTimerRef.current = window.setTimeout(() => {
             if (automationLeaseRef.current !== lease) {
@@ -423,6 +429,17 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
       <div className="pudding-browser-runtime-surface">
         <ElectronWebviewBrowser ref={runtimeRef} activeTab={tab} sessionID={sessionID} token={token} />
       </div>
+      <div className="pudding-browser-capture-preview" aria-hidden="true">
+        <img
+          alt=""
+          className="pudding-browser-capture-preview-image h-full w-full object-contain"
+          data-browser-capture-preview="true"
+          hidden
+        />
+        <span className="pudding-browser-capture-placeholder flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <Camera className="size-5" />
+        </span>
+      </div>
       <span className="pudding-browser-capture-success hidden items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-2 ring-white/80">
         <Check aria-hidden="true" className="size-5" strokeWidth={3} />
       </span>
@@ -470,6 +487,20 @@ function applyRuntimePresentation(
   runtime.host.dataset.anchored = anchored ? "true" : "false";
   runtime.host.dataset.presentation = mode;
   runtime.host.setAttribute("aria-hidden", mode === "visible" || mode === "preview" ? "false" : "true");
+}
+
+function applyRuntimeCapturePreview(runtime: RuntimeEntry, source: string) {
+  const image = runtime.host.querySelector<HTMLImageElement>("[data-browser-capture-preview]");
+  if (!image) {
+    return;
+  }
+  if (!source) {
+    image.removeAttribute("src");
+    image.hidden = true;
+    return;
+  }
+  image.src = source;
+  image.hidden = false;
 }
 
 function mergeRuntimeTabs(

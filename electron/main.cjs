@@ -1081,14 +1081,15 @@ function sendCredentialFill(request, credential) {
 
 function requestBrowserAutomationLifecycle(phase, event, target) {
   const channel = `pudding:browser:automation-${phase}`;
+  const rendererEvent = browserAutomationRendererEvent(event);
   if (event?.action !== "click" && event?.action !== "screenshot") {
-    broadcastToTrustedRenderers(channel, event);
+    broadcastToTrustedRenderers(channel, rendererEvent);
     return undefined;
   }
   const sender = target?.hostWebContents;
   if (!sender || sender.isDestroyed() || !isTrustedRendererURL(sender.getURL())) {
     if (phase === "end") {
-      broadcastToTrustedRenderers(channel, event);
+      broadcastToTrustedRenderers(channel, rendererEvent);
     }
     return false;
   }
@@ -1108,11 +1109,27 @@ function requestBrowserAutomationLifecycle(phase, event, target) {
     timer.unref?.();
     browserAutomationLifecycleWaiters.set(requestID, { complete, senderID: sender.id });
     try {
-      sender.send(channel, { ...event, requestID });
+      sender.send(channel, { ...rendererEvent, requestID });
     } catch {
       complete(false);
     }
   });
+}
+
+function browserAutomationRendererEvent(event) {
+  const { previewDataBase64, ...rendererEvent } = event || {};
+  if (!previewDataBase64) {
+    return rendererEvent;
+  }
+  const image = nativeImage.createFromBuffer(Buffer.from(previewDataBase64, "base64"));
+  const size = image.getSize();
+  const scale = Math.min(240 / size.width, 135 / size.height);
+  const preview = image.resize({
+    width: Math.max(1, Math.round(size.width * scale)),
+    height: Math.max(1, Math.round(size.height * scale)),
+    quality: "good",
+  });
+  return { ...rendererEvent, previewDataURL: preview.toDataURL() };
 }
 
 ipcMain.handle("pudding:theme:get", (event) => {

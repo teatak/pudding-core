@@ -33,7 +33,7 @@ export function UIContextControl({
             composerControlStateClassName,
             enabled ? "text-muted-foreground" : "text-muted-foreground/45",
           )}
-          size="icon"
+          size="icon-sm"
           type="button"
           variant="ghost"
           onClick={() => onEnabledChange(!enabled)}

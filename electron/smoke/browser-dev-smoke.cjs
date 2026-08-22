@@ -458,6 +458,8 @@ async function run() {
   const screenshot = await host.screenshot({ sessionID: webTab.sessionID, tabID: webTab.tabID });
   assert.equal(screenshot.mime, "image/png");
   assert.ok(screenshot.size > 0);
+  assert.equal(screenshot.viewportWidth, 800);
+  assert.equal(screenshot.viewportHeight, 600);
   assert.deepEqual(
     await window.webContents.executeJavaScript(`(() => {
       const tabs = document.getElementById("tabs");
@@ -514,16 +516,28 @@ function prepareSmokeScreenshot(event) {
   return window.webContents.executeJavaScript(`(async () => {
     const tabs = document.getElementById("tabs");
     const target = document.querySelector('webview[data-browser-key=' + JSON.stringify(${browserKey}) + ']');
+    const cover = document.createElement("div");
+    cover.dataset.screenshotCover = "true";
+    Object.assign(cover.style, {
+      position: "fixed",
+      zIndex: "1",
+      inset: "0",
+      background: "white",
+    });
     globalThis.__puddingSmokeScreenshotLease = {
+      height: tabs.style.height,
       opacity: tabs.style.opacity,
-      transform: tabs.style.transform,
-      transformOrigin: tabs.style.transformOrigin,
+      overflow: tabs.style.overflow,
       visibility: tabs.style.visibility,
+      width: tabs.style.width,
+      cover,
     };
+    tabs.style.width = "256px";
+    tabs.style.height = "183px";
     tabs.style.opacity = "1";
-    tabs.style.transform = "scale(0.1875)";
-    tabs.style.transformOrigin = "top left";
+    tabs.style.overflow = "hidden";
     tabs.style.visibility = "visible";
+    document.body.appendChild(cover);
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
     return Boolean(target?.isConnected);
@@ -537,10 +551,12 @@ function finishSmokeScreenshot(event) {
     const lease = globalThis.__puddingSmokeScreenshotLease;
     globalThis.__puddingSmokeScreenshotLease = null;
     if (!lease) return false;
+    tabs.style.height = lease.height;
     tabs.style.opacity = lease.opacity;
-    tabs.style.transform = lease.transform;
-    tabs.style.transformOrigin = lease.transformOrigin;
+    tabs.style.overflow = lease.overflow;
     tabs.style.visibility = lease.visibility;
+    tabs.style.width = lease.width;
+    lease.cover.remove();
     return true;
   })()`);
 }

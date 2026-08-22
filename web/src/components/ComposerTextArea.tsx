@@ -428,9 +428,9 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
       ) : null}
       <Textarea
         data-composer-text-input="true"
-        className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+        className="block max-h-[120px] min-h-10 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:ring-0 dark:bg-transparent"
         placeholder={placeholder}
-        rows={1}
+        rows={2}
         name={textField.name}
         ref={setTextAreaRef}
         onBlur={handleTextBlur}

@@ -1089,7 +1089,7 @@ export function Composer({
               onRevealPath={revealLocalPath}
             />
             {floating ? null : (
-              <div className="px-3.5 pt-3 pb-2">{composerTextArea}</div>
+              <div className="px-3 pt-3.5 pb-2">{composerTextArea}</div>
             )}
             <ComposerToolbar
               addBusy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}

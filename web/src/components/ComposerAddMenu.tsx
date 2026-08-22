@@ -25,7 +25,7 @@ export function ComposerAddButton({
         composerControlStateClassName,
         active && "!bg-control-active text-foreground !shadow-none",
       )}
-      size="icon"
+      size="icon-sm"
       type="button"
       variant="ghost"
       onClick={onClick}

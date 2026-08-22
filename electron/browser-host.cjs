@@ -278,6 +278,7 @@ class BrowserHost {
     const fullPage = Boolean(request.fullPage);
     const { viewport, dataBase64 } = await this.runCommand(slot, async () => {
       let succeeded = false;
+      let previewDataBase64 = "";
       try {
         const prepared = await this.noteAutomationStart(slot, "screenshot");
         if (prepared === false) {
@@ -287,10 +288,13 @@ class BrowserHost {
           viewport: await viewportMetrics(slot),
           dataBase64: await captureScreenshot(slot, fullPage),
         };
+        previewDataBase64 = result.dataBase64;
         succeeded = true;
         return result;
       } finally {
-        await this.noteAutomationEnd(slot, "screenshot", succeeded);
+        await this.noteAutomationEnd(slot, "screenshot", succeeded, previewDataBase64
+          ? { previewDataBase64 }
+          : undefined);
       }
     });
     const buffer = Buffer.from(dataBase64, "base64");
@@ -1183,7 +1187,7 @@ class BrowserHost {
     }, slot.webContents);
   }
 
-  noteAutomationEnd(slot, action, ok) {
+  noteAutomationEnd(slot, action, ok, details) {
     if (automationCanProduceInput(action)) {
       slot.automatedInputDepth = Math.max(0, slot.automatedInputDepth - 1);
     }
@@ -1196,6 +1200,9 @@ class BrowserHost {
     };
     if (typeof ok === "boolean") {
       event.ok = ok;
+    }
+    if (details && typeof details === "object") {
+      Object.assign(event, details);
     }
     return this.onAutomationEnd(event, slot.webContents);
   }

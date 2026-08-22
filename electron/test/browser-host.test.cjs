@@ -815,6 +815,7 @@ test("prepares and releases the webview surface around screenshots", async () =>
   let required;
   let prepared = true;
   const lifecycle = [];
+  const screenshotPreviews = [];
   const host = new BrowserHost(
     undefined,
     undefined,
@@ -827,6 +828,7 @@ test("prepares and releases the webview surface around screenshots", async () =>
     },
     (event) => {
       lifecycle.push(`end:${event.action}:${event.ok}`);
+      screenshotPreviews.push(event.previewDataBase64 || "");
     },
   );
   const request = { sessionID: "session-screenshot", tabID: "tab-screenshot", url: "about:blank" };
@@ -845,6 +847,7 @@ test("prepares and releases the webview surface around screenshots", async () =>
   assert.equal(screenshot.width, 2);
   assert.equal(screenshot.height, 3);
   assert.deepEqual(lifecycle, ["start:screenshot", "end:screenshot:true"]);
+  assert.deepEqual(screenshotPreviews, [png.toString("base64")]);
 
   prepared = false;
   await assert.rejects(host.screenshot(request), /screenshot surface preparation failed/);
@@ -854,6 +857,7 @@ test("prepares and releases the webview surface around screenshots", async () =>
     "start:screenshot",
     "end:screenshot:false",
   ]);
+  assert.deepEqual(screenshotPreviews, [png.toString("base64"), ""]);
   host.closeAll();
 });
 

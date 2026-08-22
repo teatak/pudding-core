@@ -101,6 +101,7 @@ export type ElectronBrowserAutomationEvent = {
   tabID: string;
   action: "back" | "click" | "forward" | "open" | "reload" | "screenshot" | "scroll" | "type";
   ok?: boolean;
+  previewDataURL?: string;
   requestID?: string;
   version?: number;
   createdAt?: string;

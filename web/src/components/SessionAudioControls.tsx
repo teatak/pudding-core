@@ -509,7 +509,7 @@ export function AudioControlButtons({
               "rounded-full",
               !outputActive && composerControlStateClassName,
             )}
-            size="icon"
+            size="icon-sm"
             type="button"
             variant={outputActive ? "default" : "ghost"}
             onMouseDown={(event) => event.preventDefault()}
@@ -559,7 +559,7 @@ function AudioInputButton({
             !grouped && "rounded-full",
             !active && composerControlStateClassName,
           )}
-          size="icon"
+          size="icon-sm"
           type="button"
           variant={active ? "default" : grouped ? "outline" : "ghost"}
           onMouseDown={(event) => event.preventDefault()}

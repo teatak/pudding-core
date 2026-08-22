@@ -40,7 +40,7 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
             "relative rounded-full text-muted-foreground",
             composerControlStateClassName,
           )}
-          size="icon"
+          size="icon-sm"
           type="button"
           variant="ghost"
         >
