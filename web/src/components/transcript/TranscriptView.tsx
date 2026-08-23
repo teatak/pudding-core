@@ -97,7 +97,7 @@ export function TranscriptView({
   }
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
+    <div className="pudding-transcript-shell relative min-h-0 flex-1 overflow-hidden">
       <div
         ref={setViewportNode}
         className="pudding-transcript-viewport h-full overflow-x-hidden overflow-y-auto overscroll-none [contain:strict] [overflow-anchor:none]"
@@ -149,11 +149,14 @@ export function TranscriptView({
           aria-label={jumpLatestLabel}
           className={
             newMessageCount > 0
-              ? "absolute right-5 z-40 h-9 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
-              : "absolute right-5 z-40 rounded-full border border-border bg-card shadow-md hover:bg-muted"
+              ? "absolute z-40 h-9 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
+              : "absolute z-40 rounded-full border border-border bg-card shadow-md hover:bg-muted"
           }
           size={newMessageCount > 0 ? "default" : "icon"}
-          style={{ bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)" }}
+          style={{
+            bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)",
+            right: "var(--pudding-chat-column-edge)",
+          }}
           type="button"
           variant={newMessageCount > 0 ? "default" : "ghost"}
           onClick={onJumpLatest}

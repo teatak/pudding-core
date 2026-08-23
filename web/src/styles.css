@@ -680,8 +680,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-hover-background: oklch(0.285 0 0);
-    --sidebar-selected-background: oklch(0.315 0 0);
+    --sidebar-hover-background: var(--control-hover-background);
+    --sidebar-selected-background: var(--control-active-background);
     --sidebar-active-border: color-mix(in srgb, var(--border), var(--primary) 42%);
     --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.95 0 0);
@@ -1263,8 +1263,9 @@ html:has(
 
 .pudding-rail-toggle [data-slot="button"]:is(:hover, :focus-visible),
 .pudding-workspace-toggle [data-slot="button"]:is(:hover, :focus-visible),
+.pudding-toolbar-icon-button:is(:hover, :focus-visible, [aria-expanded="true"], [data-state="open"]),
 .pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):is(:hover, [aria-expanded="true"], [data-state="open"]) {
-    background-color: var(--accent);
+    background-color: var(--control-hover-background);
     font-weight: 400;
 }
 
@@ -1301,11 +1302,14 @@ html:has(
     background-color: var(--message-user-background);
 }
 
-.pudding-transcript-viewport {
+.pudding-transcript-shell {
     --pudding-chat-column-edge: max(
         calc(var(--pudding-chat-column-inline-gap) / 2),
         calc((100% - var(--pudding-chat-column-max-width)) / 2)
     );
+}
+
+.pudding-transcript-viewport {
     font-size: 0.875rem;
     letter-spacing: -0.004em;
     mask-composite: add;

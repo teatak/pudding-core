@@ -83,6 +83,10 @@ HTTP/SSE/WS 分工:
 - 核心业务协议走 daemon loopback HTTP REST / SSE / WebSocket。
 - desktop native/system capabilities 走 Electron IPC/preload bridge。
 
+测试约束:
+
+- 桌面 UI 开发和回归测试前先核对目标环境,避免把已安装的 `com.teatak.pudding` 发布版(daemon `9669`)误当成当前源码启动的开发版。需要测试开发版时,确认页面来自当前 Vite dev server;使用桌面自动化时按可执行文件路径选择 `web/node_modules/electron/dist/Electron.app`。
+
 ## 前端技术约束
 
 使用:

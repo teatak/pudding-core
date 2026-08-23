@@ -933,18 +933,16 @@ export function RailPanel({
               />
             ) : null}
           </SidebarContent>
-          <SidebarFooter>
+          <SidebarFooter className="flex-row items-center gap-1">
+            <RailIconAction
+              aria-label={t("settings.title")}
+              className="size-8 opacity-100"
+              tabIndex={-1}
+              onClick={() => openSettingsDialog()}
+            >
+              <Settings />
+            </RailIconAction>
             <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
-            <div className="flex items-center">
-              <RailIconAction
-                aria-label={t("settings.title")}
-                className="size-8 opacity-100"
-                tabIndex={-1}
-                onClick={() => openSettingsDialog()}
-              >
-                <Settings />
-              </RailIconAction>
-            </div>
           </SidebarFooter>
         </Sidebar>
         <SessionProjectPickerDialog

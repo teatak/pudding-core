@@ -1268,16 +1268,18 @@ function ToolUsePart({
   return (
     <div className="min-w-0 max-w-full">
       {disclosure}
-      <ToolAttachmentMediaPreview attachments={part.attachments || []} token={token} />
+      <ToolAttachmentMediaPreview attachments={part.attachments || []} imageVariant="screenshot" token={token} />
     </div>
   );
 }
 
 function ToolAttachmentMediaPreview({
   attachments,
+  imageVariant = "content",
   token,
 }: {
   attachments: NonNullable<Extract<TurnPartVM, { type: "tool_use" }>["attachments"]>;
+  imageVariant?: MarkdownImageCardVariant;
   token: string;
 }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
@@ -1298,7 +1300,7 @@ function ToolAttachmentMediaPreview({
     <>
       <div className="flex min-w-0 flex-wrap gap-2">
         {images.map((image, index) => (
-          <MarkdownImageCard key={image.id || image.url} image={image} onOpen={() => setOpenIndex(index)} />
+          <MarkdownImageCard key={image.id || image.url} image={image} variant={imageVariant} onOpen={() => setOpenIndex(index)} />
         ))}
         {otherMedia.map((attachment) => (
           <AttachmentPart key={attachment.attachmentKey || attachment.url || attachment.id} attachment={attachment} token={token} />
@@ -1493,15 +1495,33 @@ export function MarkdownBody({
   );
 }
 
-function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen: () => void }) {
+type MarkdownImageCardVariant = "content" | "screenshot";
+
+function MarkdownImageCard({
+  image,
+  onOpen,
+  variant = "content",
+}: {
+  image: ImageLightboxItem;
+  onOpen: () => void;
+  variant?: MarkdownImageCardVariant;
+}) {
   return (
     <button
-      className="my-2 block aspect-video w-36 overflow-hidden rounded-md border border-border/70 bg-muted/40"
-
+      className={cn(
+        "my-2 overflow-hidden rounded-md border border-border/70 bg-muted/40",
+        variant === "screenshot" ? "block aspect-video w-36" : "inline-flex max-h-36 max-w-36",
+      )}
       type="button"
       onClick={onOpen}
     >
-      <img alt={image.name} className="h-full w-full object-contain" decoding="async" loading="lazy" src={image.url} />
+      <img
+        alt={image.name}
+        className={variant === "screenshot" ? "h-full w-full object-contain" : "block h-auto max-h-36 w-auto max-w-36 object-contain"}
+        decoding="async"
+        loading="lazy"
+        src={image.url}
+      />
     </button>
   );
 }

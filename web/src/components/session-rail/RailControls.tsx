@@ -15,14 +15,15 @@ import {
   AppDropdownMenuSeparator as DropdownMenuSeparator,
 } from "@/components/AppMenu";
 import {
-  ArrowRight,
   ArrowUpDown,
   ChevronRight,
+  Download,
   FolderClosed,
   FolderOpen,
   FolderPlus,
   MessageCirclePlus,
   Package,
+  RotateCcw,
 } from "@/components/icons";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import type { SessionGroupActivity } from "@/components/session-rail/activity";
@@ -126,27 +127,38 @@ export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boo
     : downloading
       ? t("update.downloading")
       : t(installing ? "update.restarting" : "update.restart");
-  return (
-    <Button
-      className="relative mb-1 h-10 w-full justify-start gap-2 overflow-hidden px-2 font-normal disabled:opacity-100"
-      disabled={downloading || installing}
-      variant="secondary"
-      onClick={downloaded ? restart : download}
-    >
+  const content = (
+    <>
       <span className="truncate">
         {label}
         {available && state.version ? ` ${state.version}` : ""}
       </span>
       {downloading ? (
         <>
-          <Progress aria-label={label} className="ml-auto h-1.5 w-24 shrink-0 bg-primary/10" value={state.percent ?? 0} />
+          <Progress
+            aria-label={label}
+            className="h-1 w-14 shrink-0 bg-foreground/10 dark:bg-foreground/20"
+            value={state.percent ?? 0}
+          />
           <span className="w-8 shrink-0 text-right text-xs tabular-nums">{state.percent ?? 0}%</span>
         </>
       ) : installing ? (
-        <Spinner className="ml-auto size-4 shrink-0" />
+        <Spinner className="size-4 shrink-0" />
+      ) : available ? (
+        <Download className="size-4 shrink-0" />
       ) : (
-        <ArrowRight className="ml-auto size-4 shrink-0" />
+        <RotateCcw className="size-4 shrink-0" />
       )}
+    </>
+  );
+  const className =
+    "relative ml-auto h-8 min-w-0 items-center justify-start gap-2 overflow-hidden rounded-md px-2 text-[13px] font-normal";
+  if (downloading || installing) {
+    return <div className={cn("flex", className)}>{content}</div>;
+  }
+  return (
+    <Button className={cn(className, "w-auto max-w-full shrink-0")} variant="ghost" onClick={downloaded ? restart : download}>
+      {content}
     </Button>
   );
 }
