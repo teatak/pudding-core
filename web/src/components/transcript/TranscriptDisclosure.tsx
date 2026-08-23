@@ -20,7 +20,7 @@ type TranscriptDisclosureProps = {
 
 export function TranscriptActivityIcon({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("relative z-[1] inline-flex h-6 w-[18px] shrink-0 items-center justify-center text-muted-foreground/65 [&_svg]:size-3.5! [&_[data-slot=identity-icon]]:size-[18px]! [&_[data-slot=spinner]]:size-3!", className)}>
+    <span className={cn("relative z-[1] inline-flex h-6 w-[18px] shrink-0 items-center justify-center text-muted-foreground/65 [&_svg]:size-3.5! [&_[data-slot=identity-icon]]:size-4! [&_[data-slot=spinner]]:size-3!", className)}>
       {children}
     </span>
   );
