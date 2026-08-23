@@ -413,6 +413,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 }
 
 .pudding-composer-shell-floating {
+    --pudding-composer-radius: 20px;
     box-shadow: 0 2px 14px -7px rgb(0 0 0 / 0.18);
 }
 
@@ -1173,9 +1174,9 @@ html:has(
 
 [data-composer-presentation="floating"] [data-composer-text-input="true"] {
     field-sizing: fixed;
-    height: 1.5rem;
-    min-height: 1.5rem;
-    max-height: 1.5rem;
+    height: 1.25rem;
+    min-height: 1.25rem;
+    max-height: 1.25rem;
     overflow-y: auto;
 }
 

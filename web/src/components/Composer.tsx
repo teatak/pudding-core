@@ -1100,7 +1100,7 @@ export function Composer({
               context={workspaceOpen ? visibleUIContext : undefined}
               inputSlot={
                 floating ? (
-                  <div className="min-w-20 flex-1 px-1 py-1">{composerTextArea}</div>
+                  <div className="min-w-20 flex-1 px-1">{composerTextArea}</div>
                 ) : undefined
               }
               mentionMenuOpen={mentionMenuOpen}

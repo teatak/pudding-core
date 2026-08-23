@@ -78,7 +78,7 @@ export function ComposerToolbar({
   const floating = presentation === "floating";
 
   return (
-    <div className={floating ? "flex min-w-0 items-center gap-2 p-2" : "flex min-w-0 items-center gap-2 px-1.5 pb-1.5"}>
+    <div className={floating ? "flex min-w-0 items-center gap-2 p-1.5" : "flex min-w-0 items-center gap-2 px-1.5 pb-1.5"}>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <ComposerAddButton
           active={mentionMenuOpen}
