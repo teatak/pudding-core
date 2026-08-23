@@ -40,7 +40,7 @@ import {
   writeProjectSortMode,
 } from "@/components/session-rail/model";
 import { RailOverlayHoldContext } from "@/components/session-rail/overlayHold";
-import { RailIconAction } from "@/components/session-rail/RailIconAction";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import {
   SessionEmptyState,
   SessionItems,
@@ -934,14 +934,15 @@ export function RailPanel({
             ) : null}
           </SidebarContent>
           <SidebarFooter className="flex-row items-center gap-1">
-            <RailIconAction
+            <ShellActionButton
               aria-label={t("settings.title")}
-              className="size-8 opacity-100"
+              className="opacity-100"
+              size="icon"
               tabIndex={-1}
               onClick={() => openSettingsDialog()}
             >
               <Settings />
-            </RailIconAction>
+            </ShellActionButton>
             <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
           </SidebarFooter>
         </Sidebar>

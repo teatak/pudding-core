@@ -2,6 +2,7 @@ import { Globe } from "@/components/icons";
 
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import { useI18n } from "@/i18n";
 import { openBrowserReveal } from "@/state/browserRevealStore";
 import { openCanvasReveal } from "@/state/canvasRevealStore";
@@ -47,16 +48,16 @@ function WorkspaceActivityRow({
     : t(canvasKindKey(activity.resourceKind));
 
   return (
-    <button
+    <ShellActionButton
       aria-label={`${t("workspace.openArtifact")}: ${title}`}
-      className="no-drag-region group flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-1.5 pr-2 text-left transition-colors hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="no-drag-region group h-7 max-w-48 shrink-0 justify-start gap-1.5 rounded-md px-1.5 pr-2 text-left"
+      size="sm"
       title={`${title} · ${detail}`}
-      type="button"
       onClick={onOpen}
     >
       <WorkspaceActivityIcon activity={activity} />
       <span className="min-w-0 truncate text-xs font-medium">{title}</span>
-    </button>
+    </ShellActionButton>
   );
 }
 

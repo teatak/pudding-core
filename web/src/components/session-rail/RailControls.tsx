@@ -14,6 +14,7 @@ import {
   AppDropdownMenuRadioItem as DropdownMenuRadioItem,
   AppDropdownMenuSeparator as DropdownMenuSeparator,
 } from "@/components/AppMenu";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import {
   ArrowUpDown,
   ChevronRight,
@@ -34,7 +35,6 @@ import type {
 import { useRailOverlayHold } from "@/components/session-rail/overlayHold";
 import { RailIconAction } from "@/components/session-rail/RailIconAction";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -157,9 +157,9 @@ export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boo
     return <div className={cn("flex", className)}>{content}</div>;
   }
   return (
-    <Button className={cn(className, "w-auto max-w-full shrink-0")} variant="ghost" onClick={downloaded ? restart : download}>
+    <ShellActionButton className={cn(className, "w-auto max-w-full shrink-0")} onClick={downloaded ? restart : download}>
       {content}
-    </Button>
+    </ShellActionButton>
   );
 }
 

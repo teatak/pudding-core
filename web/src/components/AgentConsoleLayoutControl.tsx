@@ -6,7 +6,7 @@ import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuRadioItem as DropdownMenuRadioItem,
 } from "@/components/AppMenu";
-import { Button } from "@/components/ui/button";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import {
   DropdownMenu,
   DropdownMenuRadioGroup,
@@ -58,15 +58,14 @@ export function AgentConsoleLayoutControl() {
       >
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
+            <ShellActionButton
               aria-label={t("agentConsole.layout")}
               className="pudding-toolbar-icon-button no-drag-region"
               size="icon-sm"
               tabIndex={-1}
-              variant="ghost"
             >
               <Icon />
-            </Button>
+            </ShellActionButton>
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent side="bottom">{t("agentConsole.layout")}</TooltipContent>

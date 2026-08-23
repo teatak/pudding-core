@@ -22,10 +22,10 @@ import { ProjectCreateDialog } from "@/components/ProjectCreateDialog";
 import { OAuthReturnHandler } from "@/components/OAuthReturnHandler";
 import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ComputerUsePermissionGuide } from "@/components/ComputerUsePermissionGuide";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
-import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspacePane } from "@/components/workspace/WorkspacePane";
@@ -693,18 +693,16 @@ export function App() {
       <div className="pudding-workspace-toggle flex items-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
+            <ShellActionButton
               aria-label={workspaceToggleLabel}
               aria-pressed={workspaceRequestedOpen}
               className="no-drag-region pointer-events-auto"
               size="icon-sm"
               tabIndex={-1}
-              type="button"
-              variant="ghost"
               onClick={() => setWorkspaceOpen(workspaceSessionID, !workspaceRequestedOpen)}
             >
               {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
-            </Button>
+            </ShellActionButton>
           </TooltipTrigger>
           <TooltipContent align="end" side="bottom">
             {workspaceToggleLabel}

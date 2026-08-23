@@ -5,8 +5,8 @@ import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
 } from "@/components/AppMenu";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
@@ -49,16 +49,14 @@ export function WorkspaceResourceMenu({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button
+        <ShellActionButton
           aria-label={t("workspace.add")}
           className="pudding-toolbar-icon-button no-drag-region shrink-0 rounded-md"
           disabled={creating}
           size="icon-sm"
-          type="button"
-          variant="ghost"
         >
           {creating ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-        </Button>
+        </ShellActionButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64 space-y-0">
         {hasProject && !projectTabVisible ? (

@@ -93,6 +93,7 @@ import { AppIdentityIcon, BuiltinAppIcon, appDisplayDescription, appDisplayName 
 import { Spinner } from "@/components/Spinner";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { PageHeader } from "@/components/PageHeader";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -515,19 +516,17 @@ export function AppsPane({ token }: { token: string }) {
       <PageHeader
         icon={
           detailApp || detailCatalogApp ? (
-            <Button
+            <ShellActionButton
               aria-label={t("common.back")}
               className="pudding-toolbar-icon-button"
               size="icon-xs"
-              type="button"
-              variant="ghost"
               onClick={() => {
                 setDetailAppID(null);
                 setDetailCatalogID(null);
               }}
             >
               <ArrowLeft className="size-4" />
-            </Button>
+            </ShellActionButton>
           ) : (
             <Package />
           )

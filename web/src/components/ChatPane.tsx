@@ -27,8 +27,8 @@ import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
 import { SessionAppsControl } from "@/components/SessionAppsControl";
 import { SessionModeIcon } from "@/components/SessionModeIcon";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -370,11 +370,10 @@ export function ChatPane({
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
+                <ShellActionButton
                   aria-label={t("pane.closeSplit")}
                   className="pudding-toolbar-icon-button"
                   size="icon-sm"
-                  variant="ghost"
                   onClick={() =>
                     void navigate({
                       to: "/",
@@ -386,7 +385,7 @@ export function ChatPane({
                   }
                 >
                   <X />
-                </Button>
+                </ShellActionButton>
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("pane.closeSplit")}</TooltipContent>
             </Tooltip>
@@ -553,32 +552,30 @@ function HeaderSessionTitle({
             />
           </>
         ) : (
-          <button
-            type="button"
+          <ShellActionButton
             aria-label={t("session.rename")}
             className={cn(
-              "col-start-1 row-start-1 inline-flex h-7 min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left font-medium leading-6 select-none hover:bg-accent focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+              "col-start-1 row-start-1 h-7 min-w-0 shrink cursor-default justify-start rounded-md px-2 text-left text-sm leading-6",
               projectName ? "w-full" : "-ml-2 w-[calc(100%+1rem)]",
             )}
-
+            size="sm"
             onDoubleClick={startEditing}
           >
             <span className="min-w-0 truncate">{displayTitle}</span>
-          </button>
+          </ShellActionButton>
         )}
       </div>
       {editing ? null : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
+            <ShellActionButton
               aria-label={t("session.actions")}
-              className="pudding-toolbar-icon-button pudding-chat-title-action"
+              className="pudding-toolbar-icon-button"
               size="icon-sm"
               tabIndex={-1}
-              variant="ghost"
             >
               <Ellipsis />
-            </Button>
+            </ShellActionButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -615,13 +612,13 @@ function HeaderSessionTitle({
 function HeaderProjectLink({ name, onClick }: { name: string; onClick: () => void }) {
   return (
     <span className="flex min-w-0 max-w-56 shrink items-center gap-1 font-medium">
-      <button
-        className="no-drag-region pointer-events-auto -ml-2 h-(--toolbar-icon-button-size) min-w-0 max-w-full truncate rounded-md pr-2 pl-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        type="button"
+      <ShellActionButton
+        className="no-drag-region pointer-events-auto -ml-2 h-(--toolbar-icon-button-size) min-w-0 max-w-full shrink truncate rounded-md pr-2 pl-2 text-sm"
+        size="sm"
         onClick={onClick}
       >
         {name}
-      </button>
+      </ShellActionButton>
       <span className="shrink-0 text-muted-foreground">/</span>
     </span>
   );
