@@ -86,7 +86,6 @@ export function ProjectComposerControls({
       <ProjectApprovalControl
         busy={projectQuery.isLoading || updateApprovalMutation.isPending}
         project={projectQuery.data}
-        projectID={projectID}
         onChange={(approvalMode) => updateApprovalMutation.mutate(approvalMode)}
       />
     </>
@@ -95,49 +94,63 @@ export function ProjectComposerControls({
 
 function ProjectApprovalControl({
   project,
-  projectID,
   busy,
   onChange,
 }: {
   project: Project | undefined;
-  projectID: string;
   busy: boolean;
   onChange: (approvalMode: Project["approvalMode"]) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  if (!projectID) {
-    return null;
-  }
-  const value = project?.approvalMode || "auto";
-  const CurrentApprovalIcon = projectApprovalModeIcons[value];
+  const value = project?.approvalMode;
+  const CurrentApprovalIcon = value ? projectApprovalModeIcons[value] : null;
+  const currentLabel = value ? t(`composer.projectApproval.${value}`) : t("composer.projectApproval");
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          aria-label={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
+          aria-label={`${t("composer.projectApproval")}: ${currentLabel}`}
           className={cn(
-            "pudding-composer-approval-control h-7 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal",
+            "pudding-composer-approval-control h-7 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal text-foreground/70 hover:text-foreground",
             composerControlStateClassName,
+            value === "full" && "text-warning hover:text-warning",
           )}
           disabled={!project || busy}
           size="sm"
-
           type="button"
           variant="ghost"
         >
-          {busy ? <Spinner className="size-4" /> : <CurrentApprovalIcon className="size-4 shrink-0 text-muted-foreground" />}
-          <span className="pudding-composer-approval-label min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
+          {busy ? <Spinner className="size-4" /> : CurrentApprovalIcon ? (
+            <CurrentApprovalIcon
+              className={cn("size-4 shrink-0 text-muted-foreground", value === "full" && "text-warning")}
+            />
+          ) : null}
+          <span className="pudding-composer-approval-label min-w-0 truncate">{currentLabel}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 gap-1 p-1" collisionPadding={12} side="top" sideOffset={8}>
+      <PopoverContent
+        align="start"
+        aria-label={t("composer.projectApproval")}
+        className="w-64 gap-0.5 p-1.5"
+        collisionPadding={12}
+        role="radiogroup"
+        side="top"
+        sideOffset={8}
+      >
         {projectApprovalModes.map((mode) => {
           const ApprovalIcon = projectApprovalModeIcons[mode];
+          const selected = value === mode;
           return (
             <button
               key={mode}
-              aria-label={t("composer.projectApproval")}
-              className="relative flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
+              aria-checked={selected}
+              aria-label={t(`composer.projectApproval.${mode}`)}
+              className={cn(
+                "relative flex min-h-11 w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
+                selected && "bg-control-hover",
+              )}
+              role="radio"
               type="button"
               onClick={() => {
                 if (mode !== value) {
@@ -146,16 +159,18 @@ function ProjectApprovalControl({
                 setOpen(false);
               }}
             >
-              <ApprovalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <ApprovalIcon
+                className={cn("mt-0.5 size-4 shrink-0 text-muted-foreground", mode === "full" && "text-warning")}
+              />
               <span className="grid min-w-0 flex-1">
-                <span className={cn("font-medium leading-5", value === mode && "pr-5")}>
+                <span className={cn("text-[13px] leading-4 font-medium", selected && "pr-5", mode === "full" && "text-warning")}>
                   {t(`composer.projectApproval.${mode}`)}
                 </span>
-                <span className="text-[10px] leading-3.5 text-muted-foreground">
+                <span className="text-[11px] leading-4 text-muted-foreground">
                   {t(`composer.projectApproval.${mode}.desc`)}
                 </span>
               </span>
-              {value === mode ? <Check className="absolute top-1.5 right-2 size-3.5" /> : null}
+              {selected ? <Check className="absolute top-2 right-2 size-3.5" /> : null}
             </button>
           );
         })}

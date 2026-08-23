@@ -434,8 +434,8 @@ html[data-shell] :where(button, [data-slot="button"]) {
     }
 
     .pudding-composer-approval-control {
-        width: 2rem;
-        height: 2rem;
+        width: 1.75rem;
+        height: 1.75rem;
         max-width: none;
         padding-inline: 0;
     }
