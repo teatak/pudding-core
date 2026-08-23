@@ -64,7 +64,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
 
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card text-sm text-muted-foreground shadow-none dark:bg-background">
-      <div className="flex min-h-12 items-center gap-2 bg-background px-3 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
+      <div className="flex min-h-12 items-center gap-2 bg-background px-2 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
         <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!reviewable} type="button" onClick={openReview}>
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-foreground/65">
             <Files className="size-4" />

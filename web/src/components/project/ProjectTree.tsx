@@ -19,10 +19,11 @@ import {
 import { cn } from "@/lib/utils";
 
 import { ProjectEntryContextMenu } from "./ProjectContextMenu";
-import { ProjectFileTypeIcon, ProjectFolderTypeIcon } from "./ProjectFileTypeIcon";
+import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
 import { projectGitFileKey, projectGitStatusLabel, projectGitStatusTone } from "./git/gitStatus";
 import { projectBrowserError } from "./projectErrors";
 import { projectAbsolutePath, projectParentPath } from "./projectPaths";
+import { projectTreeFolderLabelInset, projectTreeGuideInset, projectTreeNodeInset } from "./projectTreeLayout";
 import type { ProjectEntryTarget, ProjectSelection } from "./types";
 
 type TreeActions = {
@@ -175,9 +176,10 @@ function ProjectDirectoryNode({
         <button
           className={cn(
             "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground",
+            label.startsWith(".") && "text-muted-foreground",
             dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
           )}
-          style={{ paddingLeft: `${7 + depth * 13}px` }}
+          style={{ paddingLeft: projectTreeNodeInset(depth) }}
 
           draggable
           type="button"
@@ -217,9 +219,10 @@ function ProjectDirectoryNode({
             if (canMoveProjectEntry(sourceTarget, target)) actions.onMove(sourceTarget, target);
           }}
         >
-          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-          <ProjectFolderTypeIcon name={label} open={expanded} />
-          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+          <span className="inline-flex size-4 shrink-0 items-center justify-center">
+            <ChevronRight className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+          </span>
+          <span className={cn("min-w-0 flex-1 truncate", isRoot && "font-medium")}>{label}</span>
         </button>
       </ProjectEntryContextMenu> : null}
       {expanded ? (
@@ -227,14 +230,14 @@ function ProjectDirectoryNode({
           {!isRoot ? (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-foreground/15"
-              style={{ left: `${14 + depth * 13}px` }}
+              className="pointer-events-none absolute inset-y-0 w-px bg-foreground/10"
+              style={{ left: projectTreeGuideInset(depth) }}
             />
           ) : null}
           {treeQuery.isLoading ? (
             null
           ) : treeQuery.isError ? (
-            <div className="px-3 py-1 text-[11px] text-destructive" style={{ paddingLeft: `${33 + depth * 13}px` }}>
+            <div className="px-3 py-1 text-[11px] text-destructive" style={{ paddingLeft: projectTreeFolderLabelInset(depth + 1) }}>
               {projectBrowserError(treeQuery.error, t)}
             </div>
           ) : (
@@ -272,7 +275,7 @@ function ProjectDirectoryNode({
               />
             ))}
             {treeQuery.data?.truncated ? (
-              <div className="px-3 py-1 text-[11px] text-warning" style={{ paddingLeft: `${33 + depth * 13}px` }}>
+              <div className="px-3 py-1 text-[11px] text-warning" style={{ paddingLeft: projectTreeFolderLabelInset(depth + 1) }}>
                 {t("project.browserTreeTruncated")}
               </div>
             ) : null}
@@ -317,13 +320,13 @@ function ProjectFileNode({
     <button
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "flex h-6 w-full min-w-0 select-none items-center gap-1.5 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
+        "flex h-6 w-full min-w-0 select-none items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
         dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
       )}
       disabled={disabled}
       draggable={!disabled}
-      style={{ paddingLeft: `${25 + depth * 13}px` }}
+      style={{ paddingLeft: projectTreeNodeInset(depth) }}
 
       type="button"
       onClick={onOpenPreview}

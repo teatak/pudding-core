@@ -10,9 +10,10 @@ import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-import { ProjectFileTypeIcon, ProjectFolderTypeIcon } from "./ProjectFileTypeIcon";
+import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
 import { projectBrowserError } from "./projectErrors";
 import { projectFileName, projectParentPath } from "./projectPaths";
+import { projectTreeFolderLabelInset, projectTreeNodeInset } from "./projectTreeLayout";
 
 const searchDelayMs = 180;
 
@@ -77,7 +78,7 @@ export function ProjectSearch({
           <Input
             ref={inputRef}
             aria-label={t("project.browserSearch")}
-            className="h-7 rounded-md bg-transparent pl-7 text-xs focus-visible:ring-0"
+            className="h-7 rounded-md bg-transparent pl-7 text-xs"
             placeholder={t("project.browserSearchPlaceholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -159,11 +160,12 @@ function SearchRootGroup({
       <CollapsibleTrigger asChild>
         <button
           className="flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
-          style={{ paddingLeft: 7 }}
+          style={{ paddingLeft: projectTreeNodeInset(0) }}
           type="button"
         >
-          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-          <ProjectFolderTypeIcon name={rootName} open={open} />
+          <span className="inline-flex size-4 shrink-0 items-center justify-center">
+            <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+          </span>
           <span className="min-w-0 flex-1 truncate">{rootName}</span>
           <ResultCount count={matchCount} />
         </button>
@@ -192,7 +194,7 @@ function SearchFileGroup({
       <CollapsibleTrigger asChild>
         <button
           className="flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
-          style={{ paddingLeft: 20 }}
+          style={{ paddingLeft: projectTreeNodeInset(1) }}
           type="button"
         >
           <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
@@ -211,7 +213,7 @@ function SearchFileGroup({
           <button
             key={`${match.line}:${match.lineStart}:${index}`}
             className="flex h-6 w-full min-w-0 items-center gap-2 pr-2 text-left hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
-            style={{ paddingLeft: 51 }}
+            style={{ paddingLeft: projectTreeFolderLabelInset(2) }}
             type="button"
             onClick={() => onOpen(match)}
           >

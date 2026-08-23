@@ -13,3 +13,18 @@ export function projectDocumentPreviewKind(path: string): ProjectDocumentPreview
 export function isProjectPDFPath(path: string) {
   return /\.pdf$/i.test(path);
 }
+
+export function isProjectImagePath(path: string) {
+  return /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(path);
+}
+
+export function projectFileSupportsPreview(path: string) {
+  return /\.(?:md|markdown)$/i.test(path)
+    || Boolean(projectDocumentPreviewKind(path))
+    || isProjectImagePath(path)
+    || isProjectPDFPath(path);
+}
+
+export function projectFileSupportsSource(path: string) {
+  return !isProjectImagePath(path) && !isProjectPDFPath(path);
+}

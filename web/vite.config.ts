@@ -67,10 +67,32 @@ function materialIconTheme(): Plugin {
       const manifestPath = path.join(packageRoot, "dist/material-icons.json");
       const source = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
         iconDefinitions: Record<string, { iconPath: string }>;
-        [key: string]: unknown;
+        file: string;
+        fileExtensions: Record<string, string>;
+        fileNames: Record<string, string>;
+        light?: {
+          fileExtensions?: Record<string, string>;
+          fileNames?: Record<string, string>;
+        };
       };
-      const { iconDefinitions, ...manifest } = source;
-      const icons = Object.fromEntries(Object.entries(iconDefinitions).map(([name, definition]) => {
+      const manifest = {
+        file: source.file,
+        fileExtensions: source.fileExtensions,
+        fileNames: source.fileNames,
+        light: {
+          fileExtensions: source.light?.fileExtensions,
+          fileNames: source.light?.fileNames,
+        },
+      };
+      const iconNames = new Set([
+        source.file,
+        ...Object.values(source.fileExtensions),
+        ...Object.values(source.fileNames),
+        ...Object.values(source.light?.fileExtensions || {}),
+        ...Object.values(source.light?.fileNames || {}),
+      ]);
+      const icons = Object.fromEntries(Array.from(iconNames).map((name) => {
+        const definition = source.iconDefinitions[name];
         const iconPath = path.resolve(path.dirname(manifestPath), definition.iconPath);
         const svg = fs.readFileSync(iconPath, "utf8");
         return [name, { markup: svg }];

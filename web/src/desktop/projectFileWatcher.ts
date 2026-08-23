@@ -19,7 +19,7 @@ declare global {
 
 let nextProjectFileSubscriptionID = 0;
 
-export function watchElectronProjectFile(path: string, onChange: () => void, onReady?: () => void) {
+export function watchElectronProjectFile(path: string, onChange: () => void) {
   const bridge = typeof window === "undefined" ? undefined : window.puddingElectronProjectFiles;
   if (!bridge) {
     return () => undefined;
@@ -38,7 +38,6 @@ export function watchElectronProjectFile(path: string, onChange: () => void, onR
       void bridge.unwatch({ id }).catch(() => undefined);
       return;
     }
-    onReady?.();
   }).catch(() => stopListening());
 
   return () => {

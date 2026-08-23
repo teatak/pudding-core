@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileDiff } from "@/components/icons";
+import { ChevronDown, Eye, FileCode2, FileDiff } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { getTurnFileChange, type TurnFileChange } from "@/api/client";
@@ -10,16 +10,39 @@ import {
 } from "@/components/AppMenu";
 import { TextDiffViewer } from "@/components/diff/TextDiffViewer";
 import { Spinner } from "@/components/Spinner";
+import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { projectFileSupportsPreview, projectFileSupportsSource } from "@/components/project/projectPreviewKinds";
 import { useI18n } from "@/i18n";
 import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import { selectTurnFileChange, type FilePreview } from "@/state/filePreviewStore";
 
-export function TurnFileDiffSurface({ active, preview, token }: { active: boolean; preview: FilePreview; token: string }) {
+export function TurnFileDiffSurface({
+  active,
+  preview,
+  token,
+  onOpenPreview,
+  onOpenSource,
+}: {
+  active: boolean;
+  preview: FilePreview;
+  token: string;
+  onOpenPreview?: () => void;
+  onOpenSource?: () => void;
+}) {
   const { t } = useI18n();
   const changes = turnFileDiffChanges(preview.fileChanges || []);
   const selected = changes.find((change) => change.id === preview.selectedFileChangeID) || changes[0];
+  const selectedIndex = selected ? changes.findIndex((change) => change.id === selected.id) : -1;
+  const currentFileAvailable = Boolean(selected && selected.kind !== "deleted");
+  const previewAvailable = Boolean(
+    currentFileAvailable && selected && onOpenPreview && projectFileSupportsPreview(selected.path),
+  );
+  const sourceAvailable = Boolean(
+    currentFileAvailable && selected && onOpenSource && projectFileSupportsSource(selected.path),
+  );
   const detailQuery = useQuery({
     enabled: active && Boolean(token && preview.turnID && selected?.id),
     queryKey: queryKeys.turnFileChange(preview.sessionID, preview.turnID || "", selected?.id || ""),
@@ -36,12 +59,12 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-2.5">
         <FileDiff className="size-4 shrink-0 text-muted-foreground" />
         {selected ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-muted" type="button">
+              <button className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-[var(--workspace-file-tab-hover-background)]" type="button">
                 <ChangeStatus change={selected} />
                 <code className="min-w-0 flex-1 truncate font-mono text-xs" >{turnFileChangeLabel(selected, changes)}</code>
                 <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -60,7 +83,21 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         ) : (
           <span className="text-xs text-muted-foreground">{t("turnFiles.empty")}</span>
         )}
-        <span className="shrink-0 text-[11px] text-muted-foreground">{changes.length}</span>
+        {selectedIndex >= 0 ? (
+          <span className="shrink-0 px-1 text-[11px] text-muted-foreground tabular-nums">
+            {selectedIndex + 1} / {changes.length}
+          </span>
+        ) : null}
+        {previewAvailable ? (
+          <DiffHeaderAction label={t("project.browserPreview")} onClick={onOpenPreview!}>
+            <Eye />
+          </DiffHeaderAction>
+        ) : null}
+        {sourceAvailable ? (
+          <DiffHeaderAction label={t("project.browserSource")} onClick={onOpenSource!}>
+            <FileCode2 />
+          </DiffHeaderAction>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-background">
         {detailQuery.isLoading ? (
@@ -84,6 +121,26 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         </div>
       ) : null}
     </div>
+  );
+}
+
+function DiffHeaderAction({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={label}
+          className="text-muted-foreground hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground"
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={onClick}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -307,6 +307,7 @@ function SortableSurfaceTabButton({
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
       data-active={selected}
+      data-workspace-resource-tab
       disabled={closePending}
       style={{
         transform: CSS.Transform.toString(horizontalTransform),

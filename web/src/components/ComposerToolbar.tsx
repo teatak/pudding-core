@@ -78,32 +78,34 @@ export function ComposerToolbar({
   const floating = presentation === "floating";
 
   return (
-    <div className={floating ? "flex min-w-0 items-center gap-1 p-2" : "flex min-w-0 items-center gap-1 px-1.5 pb-1.5"}>
-      <ComposerAddButton
-        active={mentionMenuOpen}
-        busy={addBusy}
-        label={t("composer.addMenuTitle")}
-        onClick={onAddClick}
-      />
-      {inputSlot}
-      {floating ? null : <ProjectComposerControls projectID={projectID} token={token} />}
-      {!floating && context ? (
-        <UIContextControl
-          context={context}
-          enabled={uiContextEnabled}
-          onEnabledChange={onUIContextEnabledChange}
+    <div className={floating ? "flex min-w-0 items-center gap-2 p-2" : "flex min-w-0 items-center gap-2 px-1.5 pb-1.5"}>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <ComposerAddButton
+          active={mentionMenuOpen}
+          busy={addBusy}
+          label={t("composer.addMenuTitle")}
+          onClick={onAddClick}
         />
-      ) : null}
-      {floating ? null : <BackgroundProcessControl sessionID={session.id} token={token} />}
-      {compacting ? (
-        <span
-          aria-live="polite"
-          className="min-w-0 max-w-40 truncate px-1 text-xs text-muted-foreground"
-          role="status"
-        >
-          {t("composer.compacting")}
-        </span>
-      ) : null}
+        {inputSlot}
+        {floating ? null : <ProjectComposerControls projectID={projectID} token={token} />}
+        {!floating && context ? (
+          <UIContextControl
+            context={context}
+            enabled={uiContextEnabled}
+            onEnabledChange={onUIContextEnabledChange}
+          />
+        ) : null}
+        {floating ? null : <BackgroundProcessControl sessionID={session.id} token={token} />}
+        {compacting ? (
+          <span
+            aria-live="polite"
+            className="min-w-0 max-w-40 truncate px-1 text-xs text-muted-foreground"
+            role="status"
+          >
+            {t("composer.compacting")}
+          </span>
+        ) : null}
+      </div>
       <div className="ml-auto flex min-w-0 items-center gap-1">
         {floating ? null : <ContextUsageRing token={token} sessionID={session.id} />}
         <ModelReasoningPicker

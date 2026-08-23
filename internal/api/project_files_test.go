@@ -94,6 +94,9 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=hidden\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, ".DS_Store"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# Demo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

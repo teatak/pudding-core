@@ -648,6 +648,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <ProjectFileViewer
       active={active}
       activeTurnDiff={activeTurnDiff}
+      activeTurnDiffSelection={activeTurnDiffSelection}
       absolutePath={selectedAbsolutePath}
       dirtyKeys={dirtyKeys}
       discardRequest={discardRequest}

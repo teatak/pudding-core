@@ -324,7 +324,7 @@ function strokeClass(tone: "ok" | "warning" | "danger") {
   if (tone === "warning") {
     return "stroke-amber-500";
   }
-  return "stroke-emerald-500";
+  return "stroke-muted-foreground";
 }
 
 function progressClass(tone: "ok" | "warning" | "danger") {

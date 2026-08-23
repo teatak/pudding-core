@@ -82,6 +82,10 @@ var projectTreeIgnoredDirs = map[string]struct{}{
 	"node_modules":  {},
 }
 
+var projectTreeIgnoredFiles = map[string]struct{}{
+	".DS_Store": {},
+}
+
 func (s *Server) searchProjectFiles(c *cart.Context) error {
 	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
@@ -193,6 +197,9 @@ func (s *Server) listProjectTree(c *cart.Context) error {
 	}
 	visibleEntries := entries[:0]
 	for _, entry := range entries {
+		if _, ignored := projectTreeIgnoredFiles[entry.Name()]; ignored {
+			continue
+		}
 		if entry.IsDir() {
 			if _, ignored := projectTreeIgnoredDirs[entry.Name()]; ignored {
 				continue

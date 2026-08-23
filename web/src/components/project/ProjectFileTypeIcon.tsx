@@ -1,16 +1,14 @@
-import { File, Folder, FolderOpen } from "@/components/icons";
+import { File } from "@/components/icons";
 import { useTheme } from "next-themes";
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore } from "react";
 
 import { cn } from "@/lib/utils";
 
 type IconLookup = Record<string, string>;
-type LookupName = "fileExtensions" | "fileNames" | "folderNames" | "folderNamesExpanded";
+type LookupName = "fileExtensions" | "fileNames";
 
 type MaterialIconManifest = Record<LookupName, IconLookup> & {
   file: string;
-  folder: string;
-  folderExpanded: string;
   light?: Partial<Record<LookupName, IconLookup>>;
 };
 
@@ -23,54 +21,10 @@ export function ProjectFileTypeIcon({ className, path }: { className?: string; p
   const resources = useMaterialIconTheme();
   const { resolvedTheme } = useTheme();
   const iconName = resources ? resolveFileIcon(resources.manifest, path, resolvedTheme === "light") : undefined;
-  return (
-    <ProjectEntrySvg
-      className={className}
-      fallback={<File />}
-      iconName={iconName}
-      resources={resources}
-    />
-  );
-}
-
-export function ProjectFolderTypeIcon({
-  className,
-  name,
-  open = false,
-}: {
-  className?: string;
-  name: string;
-  open?: boolean;
-}) {
-  const resources = useMaterialIconTheme();
-  const { resolvedTheme } = useTheme();
-  const iconName = resources
-    ? resolveFolderIcon(resources.manifest, name, open, resolvedTheme === "light")
-    : undefined;
-  return (
-    <ProjectEntrySvg
-      className={className}
-      fallback={open ? <FolderOpen /> : <Folder />}
-      iconName={iconName}
-      resources={resources}
-    />
-  );
-}
-
-function ProjectEntrySvg({
-  className,
-  fallback,
-  iconName,
-  resources,
-}: {
-  className?: string;
-  fallback: ReactNode;
-  iconName?: string;
-  resources?: MaterialIconBundle;
-}) {
   const icon = iconName ? resources?.icons[iconName] : undefined;
+
   if (!icon) {
-    return <span className={cn("inline-flex size-4 shrink-0 [&>svg]:size-4", className)}>{fallback}</span>;
+    return <span className={cn("inline-flex size-4 shrink-0 [&>svg]:size-4", className)}><File /></span>;
   }
   return (
     <span
@@ -95,13 +49,6 @@ function resolveFileIcon(manifest: MaterialIconManifest, path: string, light: bo
     if (icon) return icon;
   }
   return manifest.file;
-}
-
-function resolveFolderIcon(manifest: MaterialIconManifest, name: string, open: boolean, light: boolean) {
-  const key = name.toLowerCase();
-  const lookupName = open ? "folderNamesExpanded" : "folderNames";
-  return lookupIcon(manifest, lookupName, key, light)
-    || (open ? manifest.folderExpanded : manifest.folder);
 }
 
 function lookupIcon(manifest: MaterialIconManifest, lookupName: LookupName, key: string, light: boolean) {

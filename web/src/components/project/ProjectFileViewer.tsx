@@ -18,7 +18,7 @@ import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { projectBrowserError } from "./projectErrors";
 import { projectSelectionKey } from "./projectPaths";
-import { isProjectPDFPath, projectDocumentPreviewKind } from "./projectPreviewKinds";
+import { isProjectImagePath, isProjectPDFPath, projectDocumentPreviewKind } from "./projectPreviewKinds";
 import type { ProjectEditorReveal } from "./projectReveal";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
@@ -27,6 +27,8 @@ const ProjectDocumentPreview = lazy(() => import("./ProjectDocumentPreview").the
 const ProjectMarkdownEditor = lazy(() => import("./ProjectMarkdownEditor").then((module) => ({ default: module.ProjectMarkdownEditor })));
 
 type FileViewMode = "preview" | "source";
+
+const viewModeButtonClassName = "text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted! aria-pressed:text-foreground aria-pressed:shadow-none!";
 
 type FileDraft = {
   baseContent: string;
@@ -45,6 +47,7 @@ type SaveDraftRequest = {
 export function ProjectFileViewer({
   active,
   activeTurnDiff,
+  activeTurnDiffSelection,
   absolutePath,
   dirtyKeys,
   discardRequest,
@@ -68,6 +71,7 @@ export function ProjectFileViewer({
 }: {
   active: boolean;
   activeTurnDiff?: FilePreview;
+  activeTurnDiffSelection?: ProjectSelection;
   absolutePath?: string;
   dirtyKeys: ReadonlySet<string>;
   discardRequest?: { id: number; keys: string[]; sessionID: string };
@@ -156,7 +160,7 @@ export function ProjectFileViewer({
       else void fileQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git"] });
     };
-    return watchElectronProjectFile(absolutePath, refetch, refetch);
+    return watchElectronProjectFile(absolutePath, refetch);
   }, [absolutePath, active, draftKey, isResourcePreview]);
 
   useEffect(() => {
@@ -290,6 +294,12 @@ export function ProjectFileViewer({
       && !(isMarkdown && fileViewMode === "preview")
       && !(documentPreviewKind && fileViewMode === "preview"),
   );
+  const openTurnDiffFile = (mode: FileViewMode) => {
+    if (!activeTurnDiffSelection) return;
+    const key = `${sessionID}:${projectSelectionKey(activeTurnDiffSelection)}`;
+    setFileViewModes((current) => ({ ...current, [key]: mode }));
+    onOpenPreview(activeTurnDiffSelection);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
@@ -318,23 +328,29 @@ export function ProjectFileViewer({
       />
       {activeTurnDiff ? (
         <div className="relative min-h-0 flex-1">
-          <TurnFileDiffSurface active={active} preview={activeTurnDiff} token={token} />
+          <TurnFileDiffSurface
+            active={active}
+            preview={activeTurnDiff}
+            token={token}
+            onOpenPreview={activeTurnDiffSelection ? () => openTurnDiffFile("preview") : undefined}
+            onOpenSource={activeTurnDiffSelection ? () => openTurnDiffFile("source") : undefined}
+          />
         </div>
       ) : gitDiffSelection ? (
         <ProjectGitDiffViewer active={active} selection={gitDiffSelection} sessionID={sessionID} token={token} />
       ) : (
       <>
-      {fileSelection ? (
+      {fileSelection && !isImage ? (
         <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-file-editor-background)] px-2.5">
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || fileSelection.path}</code>
           {!isResourcePreview ? (
             <div className="flex shrink-0 items-center gap-1">
               {supportsViewMode ? (
                 <>
-                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "preview" }))}>
+                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "preview" }))}>
                     {isMarkdown ? <FilePenLine /> : <Eye />}
                   </Button>
-                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "source" }))}>
+                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "source" }))}>
                     <FileCode2 />
                   </Button>
                 </>
@@ -483,95 +499,103 @@ function ProjectImagePreview({ active, alt, src }: { active: boolean; alt: strin
     setZoomMode("custom");
   };
 
-  if (failed) return <ProjectViewerStatus>{t("project.browserUnsupportedFile")}</ProjectViewerStatus>;
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-[var(--workspace-file-editor-background)]">
-      <div
-        className="absolute top-3 right-3 z-10 flex items-center gap-0.5 rounded-lg bg-popover/90 p-1 text-popover-foreground shadow-sm ring-1 ring-foreground/10 backdrop-blur-sm"
-      >
-        <Button
-          aria-label={t("project.browserZoomOut")}
-          disabled={scale <= 0.1}
-          size="icon-sm"
-          title={t("project.browserZoomOut")}
-          type="button"
-          variant="ghost"
-          onClick={() => changeScale(1 / 1.2)}
-        >
-          <Minus />
-        </Button>
-        <Button
-          aria-label={t("project.browserZoomReset")}
-          className="min-w-12 px-1.5 text-xs tabular-nums"
-          size="sm"
-          title={t("project.browserZoomReset")}
-          type="button"
-          variant="ghost"
-          onClick={() => {
-            setCustomScale(1);
-            setZoomMode("custom");
-          }}
-        >
-          {Math.round(scale * 100)}%
-        </Button>
-        <Button
-          aria-label={t("project.browserZoomIn")}
-          disabled={scale >= 8}
-          size="icon-sm"
-          title={t("project.browserZoomIn")}
-          type="button"
-          variant="ghost"
-          onClick={() => changeScale(1.2)}
-        >
-          <Plus />
-        </Button>
-        <Button
-          aria-label={t("project.browserZoomFit")}
-          aria-pressed={zoomMode === "fit"}
-          className="aria-pressed:bg-muted"
-          size="icon-sm"
-          title={t("project.browserZoomFit")}
-          type="button"
-          variant="ghost"
-          onClick={() => setZoomMode("fit")}
-        >
-          <Maximize2 />
-        </Button>
+    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
+      <div className="flex h-8 shrink-0 items-center gap-2 px-2.5">
+        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs">{alt}</code>
+        {!failed ? (
+          <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+            <Button
+              aria-label={t("project.browserZoomOut")}
+              disabled={scale <= 0.1}
+              size="icon-sm"
+              title={t("project.browserZoomOut")}
+              type="button"
+              variant="ghost"
+              onClick={() => changeScale(1 / 1.2)}
+            >
+              <Minus />
+            </Button>
+            <Button
+              aria-label={t("project.browserZoomReset")}
+              className="min-w-12 px-1.5 text-xs tabular-nums"
+              size="sm"
+              title={t("project.browserZoomReset")}
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setCustomScale(1);
+                setZoomMode("custom");
+              }}
+            >
+              {layoutReady ? `${Math.round(scale * 100)}%` : null}
+            </Button>
+            <Button
+              aria-label={t("project.browserZoomIn")}
+              disabled={scale >= 8}
+              size="icon-sm"
+              title={t("project.browserZoomIn")}
+              type="button"
+              variant="ghost"
+              onClick={() => changeScale(1.2)}
+            >
+              <Plus />
+            </Button>
+            <Button
+              aria-label={t("project.browserZoomFit")}
+              aria-pressed={zoomMode === "fit"}
+              className={viewModeButtonClassName}
+              size="icon-sm"
+              title={t("project.browserZoomFit")}
+              type="button"
+              variant="ghost"
+              onClick={() => setZoomMode("fit")}
+            >
+              <Maximize2 />
+            </Button>
+          </div>
+        ) : null}
       </div>
-      <div
-        ref={viewportRef}
-        className="h-full min-h-0 overflow-auto"
-        onWheel={(event) => {
-          if (!event.ctrlKey && !event.metaKey) return;
-          event.preventDefault();
-          changeScale(event.deltaY < 0 ? 1.1 : 1 / 1.1);
-        }}
-      >
-        <div
-          className="flex min-h-full min-w-full items-center justify-center p-6"
-          style={{
-            height: layoutReady ? Math.max(viewportSize.height, imageHeight + 48) : undefined,
-            width: layoutReady ? Math.max(viewportSize.width, imageWidth + 48) : undefined,
-          }}
-        >
-          <img
-            alt={alt}
-            className="block shrink-0 object-contain"
-            draggable={false}
-            src={src}
-            style={{
-              height: layoutReady ? imageHeight : 0,
-              width: layoutReady ? imageWidth : 0,
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {failed ? (
+          <ProjectViewerStatus>{t("project.browserUnsupportedFile")}</ProjectViewerStatus>
+        ) : (
+          <div
+            ref={viewportRef}
+            className="h-full min-h-0 overflow-auto"
+            onWheel={(event) => {
+              if (!event.ctrlKey && !event.metaKey) return;
+              event.preventDefault();
+              changeScale(event.deltaY < 0 ? 1.1 : 1 / 1.1);
             }}
-            onError={() => setFailed(true)}
-            onLoad={(event) => {
-              setImageSize({
-                height: event.currentTarget.naturalHeight,
-                width: event.currentTarget.naturalWidth,
-              });
-            }}
-          />
-        </div>
+          >
+            <div
+              className="flex min-h-full min-w-full items-center justify-center p-6"
+              style={{
+                height: layoutReady ? Math.max(viewportSize.height, imageHeight + 48) : undefined,
+                width: layoutReady ? Math.max(viewportSize.width, imageWidth + 48) : undefined,
+              }}
+            >
+              <img
+                alt={alt}
+                className="block shrink-0 object-contain"
+                draggable={false}
+                src={src}
+                style={{
+                  height: layoutReady ? imageHeight : 0,
+                  width: layoutReady ? imageWidth : 0,
+                }}
+                onError={() => setFailed(true)}
+                onLoad={(event) => {
+                  setImageSize({
+                    height: event.currentTarget.naturalHeight,
+                    width: event.currentTarget.naturalWidth,
+                  });
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -583,10 +607,6 @@ function clampImageScale(scale: number) {
 
 function ProjectPDFPreview({ src, title }: { src: string; title: string }) {
   return <iframe className="h-full min-h-0 w-full border-0 bg-[var(--workspace-file-editor-background)]" src={src} title={title} />;
-}
-
-function isProjectImagePath(path: string) {
-  return /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(path);
 }
 
 function formatBytes(bytes: number) {

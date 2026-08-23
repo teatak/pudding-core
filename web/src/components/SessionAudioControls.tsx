@@ -508,6 +508,7 @@ export function AudioControlButtons({
             className={cn(
               "rounded-full",
               !outputActive && composerControlStateClassName,
+              !outputActive && "text-muted-foreground",
             )}
             size="icon-sm"
             type="button"
@@ -558,6 +559,7 @@ function AudioInputButton({
             "relative overflow-hidden",
             !grouped && "rounded-full",
             !active && composerControlStateClassName,
+            !active && "text-muted-foreground",
           )}
           size="icon-sm"
           type="button"
