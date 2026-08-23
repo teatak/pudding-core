@@ -673,7 +673,7 @@ export function RailPanel({
           <SidebarContent
             ref={scrollContainerRef}
             className={cn(
-              "touch-pan-y gap-0.5 pt-2 pb-2 overscroll-contain",
+              "touch-pan-y gap-2 pt-2 pb-2 overscroll-contain",
               contentFade.top && contentFade.bottom
                 ? "pudding-session-rail-content-fade-both"
                 : contentFade.top
@@ -742,9 +742,7 @@ export function RailPanel({
                     </SidebarGroup>
                   </Collapsible>
                 ) : null}
-                <div
-                  className="flex flex-col gap-0.5 rounded-md"
-                >
+                <div className="flex flex-col gap-2 rounded-md">
                   {sessions.length === 0 && projects.length === 0 ? (
                     <SessionEmptyState />
                   ) : chatSessions.length > 0 || recentDropEnabled ? (
@@ -813,7 +811,7 @@ export function RailPanel({
                         style={draggingProjectKey ? { overflow: "visible" } : undefined}
                       >
                         <div
-                          className="relative -my-2 flex flex-col gap-0.5 pt-2.5 pb-2"
+                          className="relative flex flex-col gap-0.5 py-1"
                           onDragLeave={handleProjectDragLeave}
                           onDragOver={handleProjectDragOver}
                           onDrop={handleProjectDrop}

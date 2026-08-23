@@ -226,12 +226,14 @@ export function CollapsibleSessionGroupLabel({
       data-project-menu-context-target={actions ? "true" : undefined}
       data-project-dragging={dragging || undefined}
       className={cn(
-        "group/project-label relative h-8 min-h-8 gap-1 px-0 text-sm",
-        !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label relative gap-1 px-0",
+        icon === "project" ? "h-8 min-h-8 text-sm" : "h-7 min-h-7 text-[13px]",
+        !interactionDisabled && "has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        !interactionDisabled && icon === "project" && "hover:bg-sidebar-accent",
         icon === "project" && "font-normal text-sidebar-foreground!",
         icon !== "project" && "font-normal text-sidebar-foreground/45!",
         dragging && "opacity-45",
-        active && "text-sidebar-accent-foreground",
+        active && "bg-[var(--sidebar-selected-background)] text-sidebar-accent-foreground",
         dropTargetActive && "pudding-session-drop-project-active",
       )}
     >
@@ -339,8 +341,8 @@ export function ProjectSortHeader({
     <SidebarGroup className="px-2 py-0">
       <SidebarGroupLabel
         className={cn(
-          "group/project-section h-8 min-h-8 gap-1 px-0 text-sm font-normal text-sidebar-foreground/45!",
-          !interactionDisabled && "hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-state=open]]:bg-sidebar-accent has-[[data-state=open]]:text-sidebar-accent-foreground",
+          "group/project-section h-7 min-h-7 gap-1 px-0 text-[13px] font-normal text-sidebar-foreground/45!",
+          !interactionDisabled && "has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-state=open]]:text-sidebar-accent-foreground",
         )}
       >
         <button

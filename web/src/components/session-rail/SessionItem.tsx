@@ -231,7 +231,7 @@ export function SessionItem({
         aria-haspopup="menu"
         aria-label={t("session.actions")}
         className={cn(
-          "absolute top-1 right-8 text-muted-foreground",
+          "absolute top-1/2 right-8 -translate-y-1/2 text-muted-foreground",
           actionsAlwaysVisible && "opacity-100",
           !actionsAlwaysVisible &&
             !suppressInteractiveState &&
@@ -379,7 +379,7 @@ export function SessionItem({
   const sessionItem = (
     <SidebarMenuItem className={suppressInteractiveState ? "pointer-events-none" : undefined}>
       {editing ? (
-        <SidebarMenuButton asChild className="h-8 px-2 py-1" isActive>
+        <SidebarMenuButton asChild className="h-[30px] px-2 py-1" isActive>
           <div className="cursor-text">
             <span aria-hidden="true" className="w-4 shrink-0" />
             <Input
@@ -407,17 +407,18 @@ export function SessionItem({
         <SidebarMenuButton
           asChild
           className={cn(
-            "h-8 px-2 py-1 focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-inset",
+            "h-[30px] px-2 py-1 focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-inset",
             running
-              ? "pr-28 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-28"
+              ? "pr-28 group-has-data-[sidebar=menu-action]/menu-item:pr-28"
               : actionsAlwaysVisible
-                ? "pr-28 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-28"
-                : "pr-16 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-16",
+                ? "pr-28 group-has-data-[sidebar=menu-action]/menu-item:pr-28"
+                : "pr-16 group-has-data-[sidebar=menu-action]/menu-item:pr-16",
             suppressInteractiveState
               ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
               : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent group-focus-within/menu-item:text-sidebar-accent-foreground",
+            actionsOpen && !selected && "bg-sidebar-accent text-sidebar-accent-foreground",
           )}
-          isActive={selected || actionsOpen}
+          isActive={selected}
         >
           <button
             data-rail-session-action
@@ -453,7 +454,7 @@ export function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "min-w-0 px-0 font-normal text-muted-foreground",
+              "top-1/2! min-w-0 -translate-y-1/2 px-0 font-normal text-muted-foreground",
               actionsAlwaysVisible ? "right-16" : "right-2",
               !actionsAlwaysVisible &&
                 !suppressInteractiveState &&
@@ -521,7 +522,7 @@ export function SessionItem({
               <RailIconAction
                 aria-label={t("session.archive")}
                 className={cn(
-                  "absolute top-1 right-1 text-muted-foreground",
+                  "absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
                     !suppressInteractiveState &&
