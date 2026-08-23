@@ -74,7 +74,7 @@ export function ProjectTree({
   const { t } = useI18n();
   const expandedKeySet = useMemo(() => new Set(expandedKeys), [expandedKeys]);
   return (
-    <div>
+    <div className="h-full min-h-0 overflow-auto">
         {loading ? (
           <ProjectTreeStatus><Spinner />{t("common.loading")}</ProjectTreeStatus>
         ) : error ? (

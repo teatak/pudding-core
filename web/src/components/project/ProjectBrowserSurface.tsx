@@ -1,5 +1,4 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, X } from "@/components/icons";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -33,7 +32,7 @@ import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitSection } from "./git/ProjectGitSection";
 import { projectGitFileKey } from "./git/gitStatus";
 import type { ProjectGitRepositoryState } from "./git/types";
-import { ProjectSidebar } from "./ProjectSidebar";
+import { ProjectSidebar, type ProjectSidebarView } from "./ProjectSidebar";
 import { ProjectSearch } from "./ProjectSearch";
 import { ProjectTree } from "./ProjectTree";
 import { projectBrowserError } from "./projectErrors";
@@ -98,7 +97,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   const [editorReveal, setEditorReveal] = useState<ProjectEditorReveal>();
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [sidebarView, setSidebarView] = useState<ProjectSidebarView>("files");
   const [surfaceMode, setSurfaceMode] = useState<ProjectSurfaceMode>("wide");
   const [narrowPane, setNarrowPane] = useState<"tree" | "viewer">("tree");
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -243,7 +242,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     setPendingCloseKeys([]);
     setResourceClipboard((current) => current?.sessionID === sessionID ? current : undefined);
     setDragMoveRequest(undefined);
-    setSearchOpen(false);
+    setSidebarView("files");
   }, [sessionID]);
   useEffect(() => {
     if (!active) return;
@@ -573,26 +572,12 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
+  const gitChangeCount = gitRepositories.reduce((count, repository) => count + (repository.status?.fileCount || 0), 0);
   const projectSidebar = (
     <ProjectSidebar
-      filesAction={(
-        <button
-          aria-label={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
-          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-          type="button"
-          onClick={() => setSearchOpen((current) => !current)}
-        >
-          {searchOpen ? <X className="size-3.5" /> : <Search className="size-3.5" />}
-        </button>
-      )}
+      activeView={sidebarView}
       files={(
-        searchOpen ? <ProjectSearch
-          roots={roots}
-          sessionID={sessionID}
-          token={token}
-          onClose={() => setSearchOpen(false)}
-          onOpen={openSearchMatch}
-        /> : <ProjectTree
+        <ProjectTree
           active={active}
           canPaste={resourceClipboard?.sessionID === sessionID}
           error={rootsQuery.error}
@@ -642,6 +627,17 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           }}
         />
       ) : undefined}
+      gitChangeCount={gitChangeCount}
+      search={(
+        <ProjectSearch
+          roots={roots}
+          sessionID={sessionID}
+          token={token}
+          onClose={() => setSidebarView("files")}
+          onOpen={openSearchMatch}
+        />
+      )}
+      onViewChange={setSidebarView}
     />
   );
   const projectViewer = (
@@ -681,7 +677,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <div
       ref={surfaceRef}
       aria-hidden={!active}
-      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
+      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
     >
       {narrow ? (
         <div className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]">
@@ -698,7 +694,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           <ResizablePanel id="tree" className="min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
             {projectSidebar}
           </ResizablePanel>
-          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize" />
+          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize bg-[var(--shell-divider)] after:cursor-ew-resize" />
           <ResizablePanel id="viewer" className="min-w-0" minSize={compact ? 240 : 280}>
             {projectViewer}
           </ResizablePanel>

@@ -1,7 +1,6 @@
 export const layoutStorageKeys = {
   agentConsoleDockSplitRatio: "pudding.agentConsoleDockSplitRatio",
   projectBrowserRatio: "pudding.projectBrowserRatio",
-  projectSidebarRatio: "pudding.projectSidebarRatio",
   splitRatio: "pudding.splitRatio",
 } as const;
 

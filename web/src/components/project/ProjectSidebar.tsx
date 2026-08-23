@@ -1,138 +1,100 @@
-import { ChevronDown, Folders, GitBranch } from "@/components/icons";
-import { useState, type ReactNode } from "react";
-import { usePanelRef } from "react-resizable-panels";
+import { Files, GitBranch, Search } from "@/components/icons";
+import type { ReactNode } from "react";
 
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
-import { layoutStorageKeys } from "@/lib/layoutConstants";
-import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 
-const collapsedPanelPixels = 31;
+export type ProjectSidebarView = "files" | "git" | "search";
 
-export function ProjectSidebar({ files, filesAction, git }: {
+export function ProjectSidebar({
+  activeView,
+  files,
+  git,
+  gitChangeCount,
+  search,
+  onViewChange,
+}: {
+  activeView: ProjectSidebarView;
   files: ReactNode;
-  filesAction?: ReactNode;
   git?: ReactNode;
+  gitChangeCount: number;
+  search: ReactNode;
+  onViewChange: (view: ProjectSidebarView) => void;
 }) {
   const { t } = useI18n();
-  const filesRef = usePanelRef();
-  const gitRef = usePanelRef();
-  const [filesCollapsed, setFilesCollapsed] = useState(false);
-  const [gitCollapsed, setGitCollapsed] = useState(false);
-
-  if (!git) {
-    return (
-      <ResizablePanelGroup className="h-full min-h-0 bg-[var(--workspace-chrome-background)]" orientation="vertical">
-        <ResizablePanel
-          id="files"
-          className="min-h-0"
-          collapsedSize="31px"
-          collapsible
-          minSize="120px"
-          panelRef={filesRef}
-          onResize={({ inPixels }) => setFilesCollapsed(inPixels <= collapsedPanelPixels + 1)}
-        >
-          <ProjectSidebarSection
-            action={filesAction}
-            collapsed={filesCollapsed}
-            icon={<Folders />}
-            label={t("project.browserFiles")}
-            topBorder={false}
-            onToggle={() => togglePanel(filesRef.current, filesCollapsed)}
-          >
-            {files}
-          </ProjectSidebarSection>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    );
-  }
+  const visibleView = activeView === "git" && !git ? "files" : activeView;
 
   return (
-    <ResizablePanelGroup
-      className="h-full min-h-0 bg-[var(--workspace-chrome-background)]"
-      defaultLayout={readPanelLayout(layoutStorageKeys.projectSidebarRatio, { files: 62, git: 38 }, { minPercent: 4, maxPercent: 96 })}
-      id="project-sidebar-layout"
-      orientation="vertical"
-      onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectSidebarRatio, layout)}
-    >
-        <ResizablePanel
-          id="files"
-          className="min-h-0"
-          collapsedSize="31px"
-          collapsible
-          minSize="120px"
-          panelRef={filesRef}
-          onResize={({ inPixels }) => {
-            setFilesCollapsed(inPixels <= collapsedPanelPixels + 1);
-          }}
-        >
-          <ProjectSidebarSection
-            action={filesAction}
-            collapsed={filesCollapsed}
-            icon={<Folders />}
-            label={t("project.browserFiles")}
-            topBorder={false}
-            onToggle={() => togglePanel(filesRef.current, filesCollapsed)}
-          >
-            {files}
-          </ProjectSidebarSection>
-        </ResizablePanel>
-        <ResizableHandle className="pudding-project-sidebar-handle" />
-        <ResizablePanel
-          id="git"
-          className="min-h-0"
-          collapsedSize="31px"
-          collapsible
-          minSize="120px"
-          panelRef={gitRef}
-          onResize={({ inPixels }) => {
-            setGitCollapsed(inPixels <= collapsedPanelPixels + 1);
-          }}
-        >
-          <ProjectSidebarSection collapsed={gitCollapsed} icon={<GitBranch />} label={t("project.git")} onToggle={() => togglePanel(gitRef.current, gitCollapsed)}>
-            {git}
-          </ProjectSidebarSection>
-        </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-}
-
-function ProjectSidebarSection({ action, children, collapsed, icon, label, topBorder = true, onToggle }: {
-  action?: ReactNode;
-  children: ReactNode;
-  collapsed: boolean;
-  icon: ReactNode;
-  label: string;
-  topBorder?: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className={cn(
-        "flex h-[calc(var(--workspace-subtoolbar-h)-1px)] shrink-0 items-center hover:bg-[var(--workspace-tree-hover-background)]",
-        topBorder && "border-t border-[var(--workspace-border-subtle)]",
-      )}>
-        <button className="flex h-full min-w-0 flex-1 items-center gap-1 pl-[7px] pr-2 text-left text-xs font-medium" type="button" onClick={onToggle}>
-          <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", collapsed && "-rotate-90")} />
-          <span className="[&>svg]:size-4 [&>svg]:text-muted-foreground">{icon}</span>
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-        </button>
-        {action ? <div className="mr-2 shrink-0">{action}</div> : null}
+    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-tree-background)]">
+      <nav
+        aria-label={t("workspace.project")}
+        className="flex h-(--workspace-subtoolbar-h) shrink-0 items-center gap-1 bg-sidebar px-1"
+      >
+        <ProjectActivityButton
+          active={visibleView === "files"}
+          icon={<Files />}
+          label={t("project.browserFiles")}
+          onClick={() => onViewChange("files")}
+        />
+        <ProjectActivityButton
+          active={visibleView === "search"}
+          icon={<Search />}
+          label={t("project.browserSearch")}
+          onClick={() => onViewChange("search")}
+        />
+        {git ? (
+          <ProjectActivityButton
+            active={visibleView === "git"}
+            badge={gitChangeCount}
+            icon={<GitBranch />}
+            label={t("project.git")}
+            onClick={() => onViewChange("git")}
+          />
+        ) : null}
+      </nav>
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        {visibleView === "search" ? search : visibleView === "git" ? git : files}
       </div>
-      {!collapsed ? <div className="min-h-0 flex-1 overflow-auto border-t border-[var(--workspace-border-subtle)] bg-[var(--workspace-tree-background)]">{children}</div> : null}
     </div>
   );
 }
 
-function togglePanel(
-  panel: ReturnType<typeof usePanelRef>["current"],
-  collapsed: boolean,
-) {
-  if (!panel) return;
-  if (collapsed) {
-    panel.expand();
-    return;
-  }
-  panel.collapse();
+function ProjectActivityButton({
+  active,
+  badge,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  badge?: number;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          aria-pressed={active}
+          className={cn(
+            "relative inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--control-hover-background)] hover:text-foreground [&>svg]:size-[18px]",
+            active && "bg-[var(--control-active-background)] text-foreground hover:bg-[var(--control-active-background)]",
+          )}
+          type="button"
+          onClick={onClick}
+        >
+          {icon}
+          {badge ? (
+            <span className="absolute top-0 right-0 inline-flex h-3.5 min-w-3.5 translate-x-1/4 -translate-y-1/4 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-semibold leading-none tabular-nums text-primary-foreground">
+              {badge > 99 ? "99+" : badge}
+            </span>
+          ) : null}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={4}>{label}</TooltipContent>
+    </Tooltip>
+  );
 }
