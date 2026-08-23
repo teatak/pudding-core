@@ -209,8 +209,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
-    --floating-hover: var(--control-hover-background);
-    --floating-active: var(--floating-hover);
+    --floating-hover: color-mix(in oklch, var(--control-hover-background), var(--control-active-background) 65%);
+    --floating-active: var(--control-active-background);
     --floating-selected: var(--floating-hover);
     --menu-item-gap: 0.25rem;
     --menu-outline: oklch(0 0 0 / 7%);
@@ -743,8 +743,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: var(--popover);
-    --floating-hover: var(--control-hover-background);
-    --floating-active: var(--floating-hover);
+    --floating-hover: color-mix(in oklch, var(--control-hover-background), var(--control-active-background) 65%);
+    --floating-active: var(--control-active-background);
     --floating-selected: var(--floating-hover);
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);

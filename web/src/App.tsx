@@ -206,8 +206,11 @@ export function App() {
   const [workspacePresent, setWorkspacePresent] = useState(workspaceRequestedOpen);
   const [workspaceTransition, setWorkspaceTransition] = useState<WorkspaceTransitionPhase>("idle");
   const workspaceRequestRef = useRef(workspaceRequestedOpen);
+  const workspaceSessionRef = useRef(workspaceSessionID);
   useLayoutEffect(() => {
-    if (!workspaceTransitionEnabled) {
+    const sessionChanged = workspaceSessionRef.current !== workspaceSessionID;
+    workspaceSessionRef.current = workspaceSessionID;
+    if (!workspaceTransitionEnabled || (sessionChanged && !workspaceRequestedOpen)) {
       workspaceRequestRef.current = workspaceRequestedOpen;
       setWorkspaceTransition("idle");
       setWorkspacePresent(workspaceRequestedOpen);
@@ -230,7 +233,7 @@ export function App() {
       }
     }, workspaceTransitionDelay());
     return () => window.clearTimeout(timer);
-  }, [workspaceRequestedOpen, workspaceTransitionEnabled]);
+  }, [workspaceRequestedOpen, workspaceSessionID, workspaceTransitionEnabled]);
   const effectiveWorkspaceOpen = canUseWorkspace && workspacePresent;
   const workspaceVisible = effectiveWorkspaceOpen && workspaceTransition !== "closing";
   const workspaceDockRequested =

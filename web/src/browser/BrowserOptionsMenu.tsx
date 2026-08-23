@@ -9,6 +9,7 @@ import {
   type ElectronBrowserZoom,
 } from "@/browser/electronBridge";
 import { Spinner } from "@/components/Spinner";
+import { ShellActionButton } from "@/components/ShellActionButton";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
@@ -153,16 +154,15 @@ export function BrowserOptionsMenu({
             }
           }}>
             <DropdownMenuTrigger asChild>
-              <Button
+              <ShellActionButton
                 aria-label={t("browser.options")}
                 className="relative h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
                 size="icon-sm"
                 type="button"
-                variant="ghost"
               >
                 <EllipsisVertical className="size-4" />
                 {prompt ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" /> : null}
-              </Button>
+              </ShellActionButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72" sideOffset={7}>
               <DropdownMenuItem onSelect={onOpenFind}>

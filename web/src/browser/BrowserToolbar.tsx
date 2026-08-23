@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, History, RefreshCw, Trash2 } from "@/components/icons";
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -47,7 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
-import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -144,6 +144,7 @@ export function BrowserToolbar({
     enabled: Boolean(active && historyOpen && token && sessionID),
     queryKey: queryKeys.browserHistory(deferredHistorySearch),
     queryFn: () => listBrowserHistory(token, sessionID, deferredHistorySearch, deferredHistorySearch ? 10 : 64),
+    placeholderData: keepPreviousData,
     staleTime: 0,
   });
   const historyCandidates = historyQuery.data?.history || [];
@@ -408,7 +409,7 @@ export function BrowserToolbar({
           {pendingNavigationAction === "reload" ? <Spinner className={`${navIconClass}`} /> : <RefreshCw className={navIconClass} />}
         </Button>
       </div>
-      <Popover open={historyOpen && historyEntries.length > 0} onOpenChange={setHistoryOpen}>
+      <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
         <PopoverAnchor asChild>
           <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
             <Input
@@ -475,13 +476,16 @@ export function BrowserToolbar({
             />
             <Button
               aria-label={t("browser.openURL")}
-              className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 rounded-[5px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-focus-within:opacity-100"
+              className={cn(
+                navButtonClass,
+                "absolute top-0.5 right-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0 group-focus-within:opacity-100",
+              )}
               disabled={openMutation.isPending || !urlDraft.trim()}
               size="icon-sm"
               type="submit"
               variant="ghost"
             >
-              {openMutation.isPending ? <Spinner className="h-3.5 w-3.5" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
+              {openMutation.isPending ? <Spinner className={navIconClass} /> : <CornerDownLeft className={navIconClass} />}
             </Button>
           </div>
         </PopoverAnchor>
@@ -506,6 +510,9 @@ export function BrowserToolbar({
             onValueChange={(value) => setSelectedHistoryIndex(historyEntries.findIndex((entry) => entry.id === value))}
           >
             <CommandList className="max-h-[22.25rem]">
+              <CommandEmpty className="text-muted-foreground">
+                {historyQuery.isPending ? <Spinner className="mx-auto size-4" /> : t("browser.historyEmpty")}
+              </CommandEmpty>
               {historyEntries.length > 0 ? (
                 <CommandGroup heading={deferredHistorySearch ? t("browser.historyResults") : undefined}>
                   {historyEntries.map((entry, index) => (
@@ -513,7 +520,7 @@ export function BrowserToolbar({
                       key={entry.id}
                       className={cn(
                         "h-10 min-w-0 py-1.5 pr-1 [&>svg:last-child]:hidden",
-                        selectedHistoryIndex === index && "bg-muted text-foreground",
+                        selectedHistoryIndex === index && "!bg-[var(--floating-hover)] text-foreground",
                       )}
                       value={entry.id}
                       onMouseEnter={() => setSelectedHistoryIndex(index)}

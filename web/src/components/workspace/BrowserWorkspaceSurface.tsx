@@ -119,15 +119,6 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
             />
           </div>
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div className="pointer-events-auto">
-              <BrowserFindBar
-                key={`find:${browserKey}`}
-                open={findOpen}
-                sessionID={sessionID}
-                tabID={activeTab?.id}
-                onOpenChange={changeBrowserFindOpen}
-              />
-            </div>
             <BrowserViewportPlaceholder
               active={active && Boolean(activeTab)}
               sessionID={sessionID}
@@ -142,6 +133,15 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
         sessionID={sessionID}
         tabID={activeTab?.id}
       >
+        <div className="pointer-events-auto">
+          <BrowserFindBar
+            key={`find:${browserKey}`}
+            open={findOpen}
+            sessionID={sessionID}
+            tabID={activeTab?.id}
+            onOpenChange={changeBrowserFindOpen}
+          />
+        </div>
         <Button
           aria-label={t(consoleCollapsed ? "agentConsole.showBrowserBar" : "agentConsole.hideBrowserBar")}
           className="pudding-browser-console-toggle pointer-events-auto absolute right-3 shrink-0 rounded-full border border-border/70 bg-card/95 shadow-sm backdrop-blur"
