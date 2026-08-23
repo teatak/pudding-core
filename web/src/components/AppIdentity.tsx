@@ -80,21 +80,21 @@ function builtinAppIcon(appID: string) {
 
 export function builtinAppIconClass(appID: string) {
   if (appID === "canvas") {
-    return "bg-[#F4F0FF] text-[#6C4DE6] shadow-none dark:bg-[#7C5CFC]/16 dark:text-[#B7A6FF]";
+    return "bg-[#6C4DE6] text-white shadow-none";
   }
   if (appID === "skill-authoring") {
-    return "bg-[#F3F0FF] text-[#6D4AFF] shadow-none dark:bg-[#6D4AFF]/16 dark:text-[#B8A7FF]";
+    return "bg-[#8A3D8F] text-white shadow-none";
   }
   if (appID === "app-authoring") {
-    return "bg-[#EAF8F4] text-[#087F6D] shadow-none dark:bg-[#16A085]/16 dark:text-[#63D6C2]";
+    return "bg-[#087F6D] text-white shadow-none";
   }
   if (appID === "capture") {
-    return "bg-[#FFF0F5] text-[#B43A68] shadow-none dark:bg-[#D34C7E]/16 dark:text-[#F08DB1]";
+    return "bg-[#B43A68] text-white shadow-none";
   }
   if (appID === "computer-use") {
-    return "bg-[#FFF4E8] text-[#C76A16] shadow-none dark:bg-[#E47D22]/16 dark:text-[#F3A55F]";
+    return "bg-[#C76A16] text-white shadow-none";
   }
-  return "bg-[#EEF6FF] text-[#2672E8] shadow-none dark:bg-[#2672E8]/16 dark:text-[#7DB5FF]";
+  return "bg-[#2672E8] text-white shadow-none";
 }
 
 export function AppIdentityIcon({

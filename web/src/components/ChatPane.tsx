@@ -366,7 +366,7 @@ export function ChatPane({
           )}
         </div>
         <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
-          {selectedSession ? <SessionAppsControl session={selectedSession} token={token} /> : null}
+          {selectedSession ? <SessionAppsControl key={selectedSession.id} session={selectedSession} token={token} /> : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
