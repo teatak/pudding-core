@@ -13,8 +13,8 @@ import type {
 } from "./types";
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
-const LIST_PADDING_TOP_PX = 22;
-const TURN_GAP_PX = 12;
+const LIST_PADDING_TOP_PX = 24;
+const TURN_GAP_PX = 18;
 const TURN_OVERSCAN = 8;
 const SCROLL_END_THRESHOLD_PX = 8;
 const TURN_ESTIMATED_HEIGHT_PX = 320;

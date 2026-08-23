@@ -1496,7 +1496,7 @@ export function MarkdownBody({
 function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen: () => void }) {
   return (
     <button
-      className="my-2 block h-20 w-24 overflow-hidden rounded-md border border-border/70 bg-muted/40"
+      className="my-2 block aspect-video w-36 overflow-hidden rounded-md border border-border/70 bg-muted/40"
 
       type="button"
       onClick={onOpen}

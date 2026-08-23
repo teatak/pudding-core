@@ -78,7 +78,7 @@ textarea:focus-visible,
 
 :root {
     --pudding-chat-column-inline-gap: 2.5rem;
-    --pudding-chat-column-max-width: 48rem;
+    --pudding-chat-column-max-width: 52rem;
     --pudding-composer-radius: 18px;
     --background: oklch(1 0 0);
     --foreground: oklch(0.18 0 0);
