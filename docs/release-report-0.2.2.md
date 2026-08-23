@@ -4,7 +4,7 @@
 
 对比基线：`v0.2.1`（`cff896fd`）
 
-候选提交：`ff57871f`
+候选提交：`f1dc29ad`
 
 ## 发版结论
 
@@ -20,6 +20,7 @@
 - 调整浏览器查找栏层级、浏览器工具栏和工作区菜单交互。
 - 新增共享 `ShellActionButton`，统一桌面工具栏和菜单按钮状态。
 - 优化会话栏、composer、transcript、附件缩略图和文件变更视图的间距与状态。
+- 统一 transcript activity 图标尺寸，避免身份图标在活动行中偏大。
 - 项目文件树忽略 macOS `.DS_Store` 文件。
 
 ## 影响范围
@@ -63,6 +64,7 @@
 - Keep workspace visibility transitions scoped to the active session.
 - Refine session rail controls, active states, menus, and project approval controls.
 - Improve transcript spacing, assistant metadata transitions, attachments, and file-change presentation.
+- Standardize transcript activity icon sizing for consistent row alignment.
 
 ### Browser and Desktop UI
 
