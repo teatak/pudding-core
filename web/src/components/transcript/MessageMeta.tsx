@@ -61,9 +61,9 @@ export function MessageMeta({
     <div
       className={cn(
         "flex h-6 w-full items-center gap-1 text-xs text-muted-foreground",
-        !persistentStatus &&
-          hoverGroup === "message" &&
-          "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        !persistentStatus && "opacity-0 transition-opacity",
+        !persistentStatus && hoverGroup === "message" && "group-hover:opacity-100 group-focus-within:opacity-100",
+        !persistentStatus && hoverGroup === "assistant-turn" && "group-hover/assistant-turn:opacity-100 group-focus-within/assistant-turn:opacity-100",
         align === "end" && "justify-end",
       )}
     >
@@ -106,13 +106,7 @@ export function MessageMeta({
           )}
         </div>
         {hideStandardDetails ? null : (
-          <div
-            className={cn(
-              "flex items-center gap-2",
-              hoverGroup === "assistant-turn" &&
-                "opacity-0 transition-opacity group-hover/assistant-turn:opacity-100 group-focus-within/assistant-turn:opacity-100",
-            )}
-          >
+          <div className="flex items-center gap-2">
             <span>{formatClock(createdAt)}</span>
             {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
             {model ? (
