@@ -123,21 +123,20 @@ export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boo
   const download = () => void downloadDesktopUpdate();
   const restart = () => void activateDesktopUpdate();
   const label = available
-    ? t("update.update")
+    ? state.version
+      ? t("update.available").replace("{version}", state.version)
+      : t("update.update")
     : downloading
       ? t("update.downloading")
       : t(installing ? "update.restarting" : "update.restart");
   const content = (
     <>
-      <span className="truncate">
-        {label}
-        {available && state.version ? ` ${state.version}` : ""}
-      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {downloading ? (
         <>
           <Progress
             aria-label={label}
-            className="h-1 w-14 shrink-0 bg-foreground/10 dark:bg-foreground/20"
+            className="h-1 w-14 shrink-0 bg-foreground/10 [&_[data-slot=progress-indicator]]:bg-info dark:bg-foreground/20"
             value={state.percent ?? 0}
           />
           <span className="w-8 shrink-0 text-right text-xs tabular-nums">{state.percent ?? 0}%</span>
@@ -157,7 +156,7 @@ export function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boo
     return <div className={cn("flex", className)}>{content}</div>;
   }
   return (
-    <ShellActionButton className={cn(className, "w-auto max-w-full shrink-0")} onClick={downloaded ? restart : download}>
+    <ShellActionButton className={cn(className, "w-auto max-w-full min-w-0 shrink")} onClick={downloaded ? restart : download}>
       {content}
     </ShellActionButton>
   );
