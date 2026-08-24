@@ -706,8 +706,8 @@ export function Mascot({
                     fill="var(--mascot-screen)"
                     fillOpacity="0.82"
                     stroke="var(--mascot-screen-edge)"
-                    strokeOpacity="0.55"
-                    strokeWidth="1.5"
+                    strokeOpacity="0.78"
+                    strokeWidth="2.25"
                     transform={FACE_SCREEN_INSET_TRANSFORM}
                   />
                 </svg>
