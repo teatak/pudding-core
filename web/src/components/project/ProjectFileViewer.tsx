@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minus, Plus, Save } from "@/components/icons";
+import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minimize2, Minus, Plus, Save } from "@/components/icons";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -516,20 +516,9 @@ function ProjectImagePreview({ active, alt, src }: { active: boolean; alt: strin
             >
               <Minus />
             </Button>
-            <Button
-              aria-label={t("project.browserZoomReset")}
-              className="min-w-12 px-1.5 text-xs tabular-nums"
-              size="sm"
-              title={t("project.browserZoomReset")}
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setCustomScale(1);
-                setZoomMode("custom");
-              }}
-            >
+            <span className="min-w-12 px-1.5 text-center text-xs tabular-nums">
               {layoutReady ? `${Math.round(scale * 100)}%` : null}
-            </Button>
+            </span>
             <Button
               aria-label={t("project.browserZoomIn")}
               disabled={scale >= 8}
@@ -542,16 +531,23 @@ function ProjectImagePreview({ active, alt, src }: { active: boolean; alt: strin
               <Plus />
             </Button>
             <Button
-              aria-label={t("project.browserZoomFit")}
+              aria-label={t(zoomMode === "fit" ? "project.browserZoomReset" : "project.browserZoomFit")}
               aria-pressed={zoomMode === "fit"}
               className={viewModeButtonClassName}
               size="icon-sm"
-              title={t("project.browserZoomFit")}
+              title={t(zoomMode === "fit" ? "project.browserZoomReset" : "project.browserZoomFit")}
               type="button"
               variant="ghost"
-              onClick={() => setZoomMode("fit")}
+              onClick={() => {
+                if (zoomMode === "fit") {
+                  setCustomScale(1);
+                  setZoomMode("custom");
+                  return;
+                }
+                setZoomMode("fit");
+              }}
             >
-              <Maximize2 />
+              {zoomMode === "fit" ? <Maximize2 /> : <Minimize2 />}
             </Button>
           </div>
         ) : null}

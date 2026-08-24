@@ -53,6 +53,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --color-control-active: var(--control-active-background);
     --color-control-selected: var(--control-selected-background);
     --color-control-disabled: var(--control-disabled);
+    --color-control-accent-foreground: var(--control-accent-foreground);
+    --color-control-accent: var(--control-accent);
     --color-item-hover: var(--item-hover-background);
     --color-secondary-hover: var(--secondary-hover);
     --color-destructive-foreground: var(--destructive-foreground);
@@ -97,6 +99,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --primary-foreground: oklch(0.985 0 0);
     --info: oklch(0.488 0.243 264.376);
     --info-foreground: oklch(0.97 0.014 254.604);
+    --control-accent: var(--info);
+    --control-accent-foreground: var(--info-foreground);
     --link: var(--info);
     --markdown-link: var(--link);
     --markdown-link-hover: color-mix(in oklch, var(--markdown-link), var(--foreground) 16%);
@@ -110,8 +114,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --destructive: oklch(0.56 0.22 27.5);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --input-focus-border: oklch(0.72 0 0);
-    --ring: oklch(0.708 0 0);
+    --input-focus-border: var(--ring);
+    --ring: var(--info);
     --chart-1: color-mix(in oklch, var(--info), white 56%);
     --chart-2: color-mix(in oklch, var(--info), white 34%);
     --chart-3: var(--info);
@@ -683,8 +687,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --destructive: oklch(0.66 0.17 24);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --input-focus-border: oklch(1 0 0 / 28%);
-    --ring: oklch(0.556 0 0);
+    --input-focus-border: var(--ring);
+    --ring: var(--info);
     --chart-1: color-mix(in oklch, var(--info), white 26%);
     --chart-2: color-mix(in oklch, var(--info), white 12%);
     --chart-3: var(--info);
@@ -791,6 +795,32 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
 
 [data-slot="item"] a:hover {
     color: var(--link);
+}
+
+:where(.pudding-settings-surface, .pudding-settings-control-surface)
+    [data-slot="switch"]:is([data-state="checked"], [data-checked]:not([data-checked="false"])) {
+    background-color: var(--control-accent);
+}
+
+:where(.pudding-settings-surface, .pudding-settings-control-surface)
+    [data-slot="switch"]:is([data-state="checked"], [data-checked]:not([data-checked="false"]))
+    [data-slot="switch-thumb"] {
+    background-color: var(--control-accent-foreground);
+}
+
+:where(.pudding-settings-surface, .pudding-settings-control-surface)
+    :is([data-slot="checkbox"], [data-slot="radio-group-item"]):is(
+        [data-state="checked"],
+        [data-checked]:not([data-checked="false"])
+    ) {
+    border-color: var(--control-accent);
+    background-color: var(--control-accent);
+    color: var(--control-accent-foreground);
+}
+
+:where(.pudding-settings-surface, .pudding-settings-control-surface)
+    :is([data-slot="slider-range"], [data-slot="progress-indicator"]) {
+    background-color: var(--control-accent);
 }
 
 [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {

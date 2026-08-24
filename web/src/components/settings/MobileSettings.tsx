@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { createDesktopMobilePairing, type MobilePairing } from "@/lib/desktopBridge";
 
-import { SETTINGS_NARROW_CONTENT_CLASS, SettingsPanel } from "./shared";
+import { SETTINGS_NARROW_CONTENT_CLASS, SettingsSection } from "./shared";
 
 export function MobileSettings() {
   const { locale, t } = useI18n();
@@ -32,7 +32,7 @@ export function MobileSettings() {
 
   return (
     <div className={SETTINGS_NARROW_CONTENT_CLASS}>
-      <SettingsPanel
+      <SettingsSection
         action={(
           <Button disabled={mutation.isPending} size="sm" type="button" onClick={() => mutation.mutate()}>
             {mutation.isPending ? <Spinner /> : null}
@@ -67,7 +67,7 @@ export function MobileSettings() {
             {t("settings.mobile.empty")}
           </div>
         )}
-      </SettingsPanel>
+      </SettingsSection>
     </div>
   );
 }

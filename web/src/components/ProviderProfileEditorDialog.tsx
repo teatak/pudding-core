@@ -507,7 +507,7 @@ export function ProviderProfileEditorDialog({
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent
-          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-none"
+          className="pudding-settings-control-surface top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-none"
           showCloseButton={false}
           onPointerDownOutside={(event) => {
             if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
@@ -658,7 +658,7 @@ export function ProviderProfileEditorDialog({
                           {editingID ? t("provider.loadCandidates") : t("provider.testAndLoadModels")}
                         </Button>
                       </PopoverAnchor>
-                      <PopoverContent align="end" className="w-80 gap-0 overflow-hidden p-0">
+                      <PopoverContent align="end" className="pudding-settings-control-surface w-80 gap-0 overflow-hidden p-0">
                         <PopoverHeader className="border-b px-3 py-2.5">
                           <PopoverTitle>{t("provider.candidateModels")}</PopoverTitle>
                           <PopoverDescription>{t("provider.candidateModelsHint")}</PopoverDescription>
@@ -1016,7 +1016,7 @@ function ModelDetailsDialog({
       }
     }}>
       <DialogContent
-        className="grid max-h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[min(560px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="pudding-settings-control-surface grid max-h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[min(560px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
         showCloseButton={false}
       >
         <DialogClose asChild>
