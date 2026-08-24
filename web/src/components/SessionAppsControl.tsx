@@ -71,7 +71,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
           <div
             key={appID}
             className={cn(
-              "group/app relative -ml-2 inline-grid size-7 shrink-0 place-items-center rounded-full",
+              "group/app relative -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full",
               "transition-[margin] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
               "hover:z-20 focus-within:z-20",
               pending && "z-20",
@@ -82,7 +82,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
             <button
               aria-label={closeLabel}
               className={cn(
-                "pointer-events-none absolute -top-0.5 -right-0.5 z-10 grid size-3 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm ring-1 ring-[var(--agent-console-chrome-background)]",
+                "pointer-events-none absolute -top-0.5 -right-0.5 z-10 grid size-3 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm ring-1 ring-[var(--agent-console-chrome-background)] transition-colors hover:bg-destructive hover:text-destructive-foreground active:bg-destructive/85",
                 "group-hover/app:pointer-events-auto group-hover/app:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
                 pending && "pointer-events-auto opacity-100",
               )}
@@ -96,7 +96,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
         );
       })}
       {hiddenAppCount > 0 ? (
-        <span className="-ml-2 inline-grid size-7 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5">
+        <span className="-ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5">
           +{hiddenAppCount}
         </span>
       ) : null}
@@ -106,11 +106,11 @@ export function SessionAppsControl({ session, token }: { session: Session; token
 
 function SessionAppIcon({ app, token }: { app: AppDefinition | undefined; token: string }) {
   return (
-    <span className="relative inline-grid size-7 place-items-center overflow-hidden rounded-full bg-[var(--agent-console-chrome-background)] ring-1 ring-[var(--agent-console-chrome-background)] [&_[data-slot=identity-icon]]:!size-7">
+    <span className="relative inline-grid size-6 place-items-center overflow-hidden rounded-full bg-[var(--agent-console-chrome-background)] ring-1 ring-[var(--agent-console-chrome-background)] [&_[data-slot=identity-icon]]:!size-6">
       {app ? (
-        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="md" />
+        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="sm" />
       ) : (
-        <AppIcon size="md" />
+        <AppIcon size="sm" />
       )}
     </span>
   );

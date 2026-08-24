@@ -14,3 +14,6 @@ export const composerSuggestionPanelClassName =
 
 export const composerAttachmentRemoveStateClassName =
   "transition-colors hover:bg-destructive hover:text-destructive-foreground active:bg-destructive/85";
+
+export const composerImageAttachmentRemoveClassName =
+  "absolute top-0.5 right-0.5 z-10 grid size-4 place-items-center rounded-full bg-foreground text-background shadow-md ring-1 ring-background/70 after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none";

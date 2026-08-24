@@ -67,11 +67,11 @@ export function ProjectFileTabs({
   return (
     <div className="flex h-(--workspace-subtoolbar-h) shrink-0 bg-[var(--workspace-file-tabs-background)]">
       {leadingAction ? (
-        <div className="h-full shrink-0 border-r border-[var(--workspace-border)]">
+        <div className="h-full shrink-0 border-r border-b border-[var(--workspace-border)]">
           {leadingAction}
         </div>
       ) : null}
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-w-0 flex-1 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-[var(--workspace-border)]">
         <div
           className="pudding-project-file-tabs flex h-full items-stretch overflow-x-auto overscroll-x-contain"
           onScroll={handleScroll}
@@ -99,8 +99,8 @@ export function ProjectFileTabs({
             >
               <div
                 className={cn(
-                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
-                  selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
+                  "group relative z-10 flex h-full min-w-28 max-w-56 shrink-0 items-center border-b border-[var(--workspace-border)] bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
+                  selected && "border-b-[var(--workspace-file-tab-active-background)] bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
                 )}
               >
                 <button
@@ -148,8 +148,8 @@ export function ProjectFileTabs({
             >
               <div
                 className={cn(
-                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
-                  selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
+                  "group relative z-10 flex h-full min-w-28 max-w-56 shrink-0 items-center border-b border-[var(--workspace-border)] bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
+                  selected && "border-b-[var(--workspace-file-tab-active-background)] bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
                 )}
               >
                 <button

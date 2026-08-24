@@ -29,7 +29,7 @@ export function ProjectSidebar({
     <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-tree-background)]">
       <nav
         aria-label={t("workspace.project")}
-        className="flex h-(--workspace-subtoolbar-h) shrink-0 items-center gap-1 bg-sidebar px-1"
+        className="flex h-(--workspace-subtoolbar-h) shrink-0 items-center gap-1 border-b border-[var(--workspace-border)] bg-[var(--workspace-file-tabs-background)] px-1"
       >
         <ProjectActivityButton
           active={visibleView === "files"}

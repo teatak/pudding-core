@@ -48,6 +48,7 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import {
   composerAttachmentRemoveStateClassName,
+  composerImageAttachmentRemoveClassName,
   composerSendButtonClassName,
   composerShellClassName,
 } from "@/components/composerControlStyles";
@@ -1515,7 +1516,8 @@ function DraftAttachmentChip({
         <button
           aria-label={removeLabel}
           className={cn(
-            "absolute top-1 right-1 z-10 grid size-4 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50",
+            composerImageAttachmentRemoveClassName,
+            "disabled:opacity-50",
             composerAttachmentRemoveStateClassName,
           )}
           disabled={locked}

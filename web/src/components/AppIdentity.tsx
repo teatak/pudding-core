@@ -64,7 +64,7 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
       className={`pudding-app-icon ${builtinAppIconClass(appID)}`}
       size={size}
     >
-      <Icon className="size-[64%]" />
+      <Icon className="size-[64%]" strokeWidth={2.2} />
     </IdentityIcon>
   );
 }
@@ -80,21 +80,21 @@ function builtinAppIcon(appID: string) {
 
 export function builtinAppIconClass(appID: string) {
   if (appID === "canvas") {
-    return "bg-[#6C4DE6] text-white shadow-none";
+    return "bg-[#EEE9FF] text-[#714CF2] shadow-none ring-1 ring-inset ring-[#714CF2]/12 dark:bg-[#6C4DE6]/20 dark:text-[#B9AAFF] dark:ring-[#8A71F2]/18";
   }
   if (appID === "skill-authoring") {
-    return "bg-[#8A3D8F] text-white shadow-none";
+    return "bg-[#F7EAF8] text-[#98409E] shadow-none ring-1 ring-inset ring-[#98409E]/12 dark:bg-[#8A3D8F]/20 dark:text-[#D899DC] dark:ring-[#A75BAC]/18";
   }
   if (appID === "app-authoring") {
-    return "bg-[#087F6D] text-white shadow-none";
+    return "bg-[#E6F8F4] text-[#008C77] shadow-none ring-1 ring-inset ring-[#008C77]/12 dark:bg-[#087F6D]/20 dark:text-[#69D4C1] dark:ring-[#159B86]/18";
   }
   if (appID === "capture") {
-    return "bg-[#B43A68] text-white shadow-none";
+    return "bg-[#FFF0F5] text-[#C43D70] shadow-none ring-1 ring-inset ring-[#C43D70]/12 dark:bg-[#B43A68]/20 dark:text-[#F08DB1] dark:ring-[#D65C88]/18";
   }
   if (appID === "computer-use") {
-    return "bg-[#C76A16] text-white shadow-none";
+    return "bg-[#FFF2E5] text-[#D57312] shadow-none ring-1 ring-inset ring-[#D57312]/12 dark:bg-[#C76A16]/20 dark:text-[#F3A55F] dark:ring-[#E18839]/18";
   }
-  return "bg-[#2672E8] text-white shadow-none";
+  return "bg-[#EAF3FF] text-[#2D7CF0] shadow-none ring-1 ring-inset ring-[#2D7CF0]/12 dark:bg-[#2672E8]/20 dark:text-[#7DB5FF] dark:ring-[#4E8DEE]/18";
 }
 
 export function AppIdentityIcon({

@@ -3,7 +3,10 @@ import { useRef, useState } from "react";
 
 import type { ProjectReference } from "@/api/client";
 import { Spinner } from "@/components/Spinner";
-import { composerAttachmentRemoveStateClassName } from "@/components/composerControlStyles";
+import {
+  composerAttachmentRemoveStateClassName,
+  composerImageAttachmentRemoveClassName,
+} from "@/components/composerControlStyles";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import type { LocalFolderPath } from "@/lib/localFolders";
@@ -187,7 +190,7 @@ function ComposerAttachmentChip({
       <div
         className={cn(
           "group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
-          item.status === "error" ? "border-destructive/40" : "border-border/70 hover:border-foreground/25",
+          item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
       >
         <button
@@ -210,7 +213,7 @@ function ComposerAttachmentChip({
         <button
           aria-label={removeLabel}
           className={cn(
-            "absolute top-1 right-1 z-10 grid size-4 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm after:absolute after:-inset-1 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+            composerImageAttachmentRemoveClassName,
             composerAttachmentRemoveStateClassName,
           )}
           type="button"

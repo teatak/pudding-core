@@ -677,7 +677,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <div
       ref={surfaceRef}
       aria-hidden={!active}
-      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
+      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
     >
       {narrow ? (
         <div className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]">
@@ -694,7 +694,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           <ResizablePanel id="tree" className="min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
             {projectSidebar}
           </ResizablePanel>
-          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize bg-[var(--shell-divider)] after:cursor-ew-resize" />
+          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize" />
           <ResizablePanel id="viewer" className="min-w-0" minSize={compact ? 240 : 280}>
             {projectViewer}
           </ResizablePanel>
