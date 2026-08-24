@@ -47,7 +47,7 @@ export function BackgroundProcessControl({ token, sessionID }: { token: string; 
         <Button
           aria-label={label}
           className={cn(
-            "h-7 gap-1 rounded-full px-2 text-xs font-normal text-muted-foreground hover:text-foreground",
+            "h-8 gap-1 rounded-full px-2 text-xs font-normal text-muted-foreground hover:text-foreground",
             composerControlStateClassName,
           )}
           size="sm"

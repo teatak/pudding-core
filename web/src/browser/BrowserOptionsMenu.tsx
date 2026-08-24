@@ -161,7 +161,7 @@ export function BrowserOptionsMenu({
                 type="button"
               >
                 <EllipsisVertical className="size-4" />
-                {prompt ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" /> : null}
+                {prompt ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-warning" /> : null}
               </ShellActionButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72" sideOffset={7}>

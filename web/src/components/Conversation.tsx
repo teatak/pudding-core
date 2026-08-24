@@ -243,12 +243,12 @@ function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null 
   return (
     <div
       className={
-        "pudding-drop-overlay pointer-events-none absolute inset-0 z-50 bg-primary/[0.055] backdrop-blur-[1px] transition-opacity dark:bg-primary/[0.08] " +
+        "pudding-drop-overlay pointer-events-none absolute inset-0 z-50 bg-info/[0.055] backdrop-blur-[1px] transition-opacity dark:bg-info/[0.08] " +
         (mode ? "opacity-100" : "opacity-0")
       }
     >
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background/90 text-primary shadow-sm ring-1 ring-border/80">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background/90 text-info shadow-sm ring-1 ring-border/80">
           <Icon className="h-5 w-5" />
         </div>
       </div>

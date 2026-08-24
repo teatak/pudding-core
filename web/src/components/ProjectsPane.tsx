@@ -385,7 +385,7 @@ function ProjectEmptyState({
             className={cn(
               "relative overflow-hidden rounded-xl border bg-background transition-colors",
               rootDirs.length === 0 && "border-dashed",
-              dropActive && "border-primary bg-accent/40",
+              dropActive && "border-info bg-accent/40",
             )}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}

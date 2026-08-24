@@ -475,7 +475,7 @@ export function SessionItem({
                 <span className="tabular-nums">{session.backgroundProcessCount}</span>
               </span>
             ) : completed ? (
-              <span aria-label={t("session.completed")} className="size-2 rounded-full bg-blue-500" />
+              <span aria-label={t("session.completed")} className="size-2 rounded-full bg-success" />
             ) : (
               formatRelative(session.lastActivityAt || session.createdAt, locale)
             )}

@@ -98,10 +98,7 @@ function AlertDialogCancel({
 }: ComponentProps<typeof BaseAlertDialogCancel>) {
   return (
     <BaseAlertDialogCancel
-      className={cn(
-        "border-0 hover:!bg-accent dark:hover:!bg-accent",
-        className,
-      )}
+      className={cn("border-0", className)}
       variant={variant}
       {...props}
     />

@@ -115,7 +115,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
           {focusLineIndex >= 0 ? (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 z-0 border-l-2 border-primary/60 bg-primary/[0.06]"
+              className="pointer-events-none absolute inset-x-0 z-0 border-l-2 border-info/60 bg-info/[0.06]"
               style={{
                 height: `${typography.resolvedLineHeight}px`,
                 top: `${12 + focusLineIndex * typography.resolvedLineHeight}px`,
@@ -129,7 +129,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
             {lineNumbers.map((line) => (
               <div
                 key={line}
-                className={cn(line === preview.focusLine && "font-semibold text-primary")}
+                className={cn(line === preview.focusLine && "font-semibold text-info")}
                 style={{ height: `${typography.resolvedLineHeight}px` }}
               >
                 {line}

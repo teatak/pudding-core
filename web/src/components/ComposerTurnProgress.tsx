@@ -57,8 +57,8 @@ function ProgressSegments({ steps }: { steps: TurnPlanStep[] }) {
           key={index}
           className={cn(
             "h-1.5 min-w-1 flex-1 rounded-[2px]",
-            step.status === "completed" && "bg-primary",
-            step.status === "in_progress" && "bg-primary/55",
+            step.status === "completed" && "bg-success",
+            step.status === "in_progress" && "bg-info/55",
             step.status === "pending" && "bg-muted-foreground/20",
           )}
         />

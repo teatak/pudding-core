@@ -72,7 +72,7 @@ export function ProjectComposerControls({
     <>
       {showProjectName ? (
         <span
-          className="pudding-composer-project-name flex h-7 min-w-0 max-w-36 shrink items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-normal text-foreground"
+          className="pudding-composer-project-name flex h-8 min-w-0 max-w-36 shrink items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-normal text-foreground"
 
         >
           {projectQuery.isLoading ? (
@@ -112,7 +112,7 @@ function ProjectApprovalControl({
         <Button
           aria-label={`${t("composer.projectApproval")}: ${currentLabel}`}
           className={cn(
-            "pudding-composer-approval-control h-7 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal text-foreground/70 hover:text-foreground",
+            "pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal text-foreground/70 hover:text-foreground",
             composerControlStateClassName,
             value === "full" && "text-warning hover:text-warning",
           )}

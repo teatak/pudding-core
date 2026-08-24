@@ -220,9 +220,9 @@ export function ModelReasoningPicker({
         <Button
           aria-label={`${t("session.model")}: ${triggerLabel}`}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-7 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-foreground transition-none",
+            "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-foreground transition-none",
             iconOnly
-              ? "w-7 max-w-7 flex-none justify-center p-0"
+              ? "w-8 max-w-8 flex-none justify-center p-0"
               : "min-w-0 max-w-[9.5rem] gap-1 pr-1.5 sm:max-w-[10.5rem]",
             composerControlStateClassName,
             !iconOnly && (visibleModel ? "pl-1" : "pl-2"),

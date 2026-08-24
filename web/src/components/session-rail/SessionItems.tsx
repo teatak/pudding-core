@@ -174,8 +174,8 @@ function SessionDropIndicator({ active }: { active: boolean }) {
     <li aria-hidden="true" className="relative z-20 h-0 -my-px overflow-visible">
       {active ? (
         <>
-          <span className="absolute top-0 right-1 left-2 h-0.5 -translate-y-1/2 rounded-full bg-primary" />
-          <span className="absolute top-0 left-0.5 size-2.5 -translate-y-1/2 rounded-full border-2 border-primary bg-sidebar" />
+          <span className="absolute top-0 right-1 left-2 h-0.5 -translate-y-1/2 rounded-full bg-info" />
+          <span className="absolute top-0 left-0.5 size-2.5 -translate-y-1/2 rounded-full border-2 border-info bg-sidebar" />
         </>
       ) : null}
     </li>

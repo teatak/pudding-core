@@ -510,7 +510,7 @@ export function AudioControlButtons({
               !outputActive && composerControlStateClassName,
               !outputActive && "text-muted-foreground",
             )}
-            size="icon-sm"
+            size="icon"
             type="button"
             variant={outputActive ? "default" : "ghost"}
             onMouseDown={(event) => event.preventDefault()}
@@ -561,7 +561,7 @@ function AudioInputButton({
             !active && composerControlStateClassName,
             !active && "text-muted-foreground",
           )}
-          size="icon-sm"
+          size="icon"
           type="button"
           variant={active ? "default" : grouped ? "outline" : "ghost"}
           onMouseDown={(event) => event.preventDefault()}

@@ -13,7 +13,7 @@ textarea:focus-visible,
 input:not([aria-invalid="true"]):focus-visible,
 textarea:not([aria-invalid="true"]):focus-visible,
 [data-slot="input-group"]:not(:has([aria-invalid="true"])):has([data-slot="input-group-control"]:focus-visible) {
-    border-color: var(--input) !important;
+    border-color: var(--input-focus-border) !important;
 }
 
 :root {
@@ -41,6 +41,9 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --color-overlay: var(--overlay);
     --color-warning: var(--warning);
     --color-success: var(--success);
+    --color-info-foreground: var(--info-foreground);
+    --color-info: var(--info);
+    --color-link: var(--link);
     --color-git-added: var(--git-added);
     --color-git-modified: var(--git-modified);
     --color-git-deleted: var(--git-deleted);
@@ -52,8 +55,6 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --color-control-disabled: var(--control-disabled);
     --color-item-hover: var(--item-hover-background);
     --color-secondary-hover: var(--secondary-hover);
-    --color-primary-hover: var(--primary-hover);
-    --color-primary-active: var(--primary-active);
     --color-destructive-foreground: var(--destructive-foreground);
     --color-destructive-hover: var(--destructive-hover);
     --color-input: var(--input);
@@ -92,11 +93,12 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --card-foreground: oklch(0.18 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.18 0 0);
-    --primary: oklch(0.488 0.243 264.376);
-    --primary-foreground: oklch(0.97 0.014 254.604);
-    --primary-hover: color-mix(in oklch, var(--primary), white 8%);
-    --primary-active: color-mix(in oklch, var(--primary), black 14%);
-    --markdown-link: var(--primary);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --info: oklch(0.488 0.243 264.376);
+    --info-foreground: oklch(0.97 0.014 254.604);
+    --link: var(--info);
+    --markdown-link: var(--link);
     --markdown-link-hover: color-mix(in oklch, var(--markdown-link), var(--foreground) 16%);
     --secondary: oklch(0.967 0 0);
     --secondary-foreground: oklch(0.2 0 0);
@@ -108,12 +110,13 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --destructive: oklch(0.56 0.22 27.5);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: color-mix(in oklch, var(--primary), white 14%);
-    --chart-1: color-mix(in oklch, var(--primary), white 56%);
-    --chart-2: color-mix(in oklch, var(--primary), white 34%);
-    --chart-3: var(--primary);
-    --chart-4: color-mix(in oklch, var(--primary), black 12%);
-    --chart-5: color-mix(in oklch, var(--primary), black 24%);
+    --input-focus-border: oklch(0.72 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: color-mix(in oklch, var(--info), white 56%);
+    --chart-2: color-mix(in oklch, var(--info), white 34%);
+    --chart-3: var(--info);
+    --chart-4: color-mix(in oklch, var(--info), black 12%);
+    --chart-5: color-mix(in oklch, var(--info), black 24%);
     --radius: 0.5rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.18 0 0);
@@ -160,8 +163,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
-    --transcript-reveal-accent: var(--primary);
-    --rail-drop-target-background: color-mix(in srgb, var(--sidebar), var(--primary) 12%);
+    --transcript-reveal-accent: var(--info);
+    --rail-drop-target-background: color-mix(in srgb, var(--sidebar), var(--info) 12%);
     --control-hover-background: oklch(0.945 0 0);
     --control-active-background: oklch(0.905 0 0);
     --control-selected-background: color-mix(in srgb, var(--background), var(--primary) 12%);
@@ -230,7 +233,7 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
     --phase-awaiting-followup: oklch(0.769 0.188 70.08);
-    --phase-thinking: var(--primary);
+    --phase-thinking: var(--info);
     --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
     --phase-executing-tool: oklch(0.789 0.154 211.53);
     --phase-error: var(--destructive);
@@ -310,7 +313,7 @@ html[data-workspace-resizing] .workspace-split-pane {
 }
 
 .pudding-workspace-pane [data-slot="resizable-handle"].pudding-project-sidebar-handle:is(:hover, [data-resize-handle-active]) {
-    background-color: color-mix(in oklch, var(--primary) 50%, transparent);
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
 }
 
 .pudding-project-file-tabs {
@@ -463,7 +466,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 }
 
 .pudding-composer-shell.is-mic-active {
-    --conic-primary: color-mix(in srgb, var(--card) 12%, var(--primary) 88%);
+    --conic-primary: color-mix(in srgb, var(--card) 12%, var(--info) 88%);
     --conic-secondary: color-mix(in srgb, var(--card) 16%, #60a5fa 84%);
     --conic-tertiary: color-mix(in srgb, var(--card) 18%, #34d399 82%);
     animation: composer-mic-rotate 8s linear infinite;
@@ -473,7 +476,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
         0 3px 3px -1.5px rgba(10, 13, 18, 0.04),
         0 8px 8px -4px rgba(10, 13, 18, 0.03),
         0 20px 24px -4px rgba(10, 13, 18, 0.08),
-        0 10px 28px -24px color-mix(in srgb, var(--primary) 42%, transparent),
+        0 10px 28px -24px color-mix(in srgb, var(--info) 42%, transparent),
         0 12px 30px -26px rgba(96, 165, 250, 0.28);
 }
 
@@ -492,7 +495,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
     filter: blur(16px);
     background: conic-gradient(
         from var(--composer-mic-angle) at 50% 50%,
-        color-mix(in srgb, var(--primary) 34%, transparent) 0deg,
+        color-mix(in srgb, var(--info) 34%, transparent) 0deg,
         transparent 35deg,
         transparent 85deg,
         rgba(96, 165, 250, 0.28) 120deg,
@@ -501,7 +504,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
         rgba(52, 211, 153, 0.24) 240deg,
         transparent 275deg,
         transparent 325deg,
-        color-mix(in srgb, var(--primary) 34%, transparent) 1turn
+        color-mix(in srgb, var(--info) 34%, transparent) 1turn
     );
 }
 
@@ -663,11 +666,12 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --card-foreground: oklch(0.95 0 0);
     --popover: oklch(0.28 0 0);
     --popover-foreground: oklch(0.95 0 0);
-    --primary: oklch(0.424 0.199 265.638);
-    --primary-foreground: oklch(0.97 0.014 254.604);
-    --primary-hover: color-mix(in oklch, var(--primary), white 8%);
-    --primary-active: color-mix(in oklch, var(--primary), black 8%);
-    --markdown-link: var(--primary);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --info: oklch(0.623 0.214 259.815);
+    --info-foreground: oklch(0.205 0 0);
+    --link: var(--info);
+    --markdown-link: var(--link);
     --markdown-link-hover: oklch(0.82 0.13 250);
     --secondary: oklch(0.3 0 0);
     --secondary-foreground: oklch(0.95 0 0);
@@ -679,12 +683,13 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --destructive: oklch(0.66 0.17 24);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: color-mix(in oklch, var(--primary), black 12%);
-    --chart-1: color-mix(in oklch, var(--primary), white 26%);
-    --chart-2: color-mix(in oklch, var(--primary), white 12%);
-    --chart-3: var(--primary);
-    --chart-4: color-mix(in oklch, var(--primary), black 12%);
-    --chart-5: color-mix(in oklch, var(--primary), black 24%);
+    --input-focus-border: oklch(1 0 0 / 28%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: color-mix(in oklch, var(--info), white 26%);
+    --chart-2: color-mix(in oklch, var(--info), white 12%);
+    --chart-3: var(--info);
+    --chart-4: color-mix(in oklch, var(--info), black 12%);
+    --chart-5: color-mix(in oklch, var(--info), black 24%);
     --sidebar: oklch(0.26 0 0);
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: var(--primary);
@@ -698,7 +703,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --sidebar-ring: var(--ring);
     --shell-divider: oklch(1 0 0 / 8%);
     --shell-layer-shadow: oklch(0 0 0 / 28%);
-    --transcript-reveal-accent: var(--primary);
+    --transcript-reveal-accent: var(--info);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --control-hover-background: oklch(0.3 0 0);
@@ -766,7 +771,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
     --phase-awaiting-followup: oklch(0.769 0.188 70.08);
-    --phase-thinking: var(--primary);
+    --phase-thinking: var(--info);
     --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
     --phase-executing-tool: oklch(0.789 0.154 211.53);
     --phase-error: var(--destructive);
@@ -779,12 +784,13 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     background-color: var(--overlay);
 }
 
-[data-slot="button"][data-variant="default"]:hover:not(:disabled) {
-    background-color: var(--primary-hover);
+[data-slot="button"][data-variant="link"],
+[data-slot="badge"][data-variant="link"] {
+    color: var(--link);
 }
 
-[data-slot="button"][data-variant="default"]:active:not(:disabled) {
-    background-color: var(--primary-active);
+[data-slot="item"] a:hover {
+    color: var(--link);
 }
 
 [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
@@ -1541,7 +1547,7 @@ html:has(
     position: absolute;
     z-index: 20;
     inset: 0;
-    border: 2px dashed color-mix(in oklch, var(--primary) 62%, transparent);
+    border: 2px dashed color-mix(in oklch, var(--info) 62%, transparent);
     border-radius: inherit;
     pointer-events: none;
     content: "";
@@ -1552,12 +1558,12 @@ html:has(
 }
 
 .pudding-session-drop-row-active::after {
-    border-color: var(--primary);
+    border-color: var(--info);
 }
 
 .pudding-session-drop-project-active {
     background-color: var(--rail-drop-target-background);
-    outline: 2px solid var(--primary);
+    outline: 2px solid var(--info);
     outline-offset: -2px;
 }
 

@@ -665,11 +665,11 @@ function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorSt
       {cursor.effectVisible && cursor.action === "click" ? (
         <span
           key={cursor.id}
-          className="absolute top-0 left-0 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-primary/70"
+          className="absolute top-0 left-0 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-info/70"
         />
       ) : null}
       {cursor.effectVisible && cursor.action === "type" ? (
-        <span key={cursor.id} className="absolute top-0 left-1 h-5 w-0.5 animate-pulse rounded-full bg-primary/80" />
+        <span key={cursor.id} className="absolute top-0 left-1 h-5 w-0.5 animate-pulse rounded-full bg-info/80" />
       ) : null}
       <MousePointer2
         className="relative h-5 w-5 -translate-x-0.5 -translate-y-0.5 text-neutral-950"
@@ -686,8 +686,8 @@ function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorSt
 function BrowserNavigationLoading({ label }: { label: string }) {
   return (
     <div aria-label={label} className="pointer-events-none absolute inset-x-0 top-0 z-10">
-      <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-primary/10">
-        <div className="h-full w-1/2 animate-pulse bg-primary/80" />
+      <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-info/10">
+        <div className="h-full w-1/2 animate-pulse bg-info/80" />
       </div>
     </div>
   );

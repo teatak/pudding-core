@@ -177,7 +177,7 @@ function ProjectDirectoryNode({
           className={cn(
             "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground",
             label.startsWith(".") && "text-muted-foreground",
-            dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
+            dropActive && "bg-info/10 text-foreground ring-1 ring-inset ring-info/40",
           )}
           style={{ paddingLeft: projectTreeNodeInset(depth) }}
 
@@ -322,7 +322,7 @@ function ProjectFileNode({
       className={cn(
         "flex h-6 w-full min-w-0 select-none items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
-        dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
+        dropActive && "bg-info/10 text-foreground ring-1 ring-inset ring-info/40",
       )}
       disabled={disabled}
       draggable={!disabled}

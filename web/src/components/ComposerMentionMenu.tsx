@@ -138,13 +138,13 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
     return <IdentityIcon fallback={reference.kind === "skill" ? "skill" : "app"} fit="contain" size="xs" src={reference.iconURL} />;
   }
   if (reference.kind === "skill") {
-    return <ColoredMentionIcon tone="primary" icon={<WandSparkles className="size-3.5" />} />;
+    return <ColoredMentionIcon tone="info" icon={<WandSparkles className="size-3.5" />} />;
   }
   if (reference.kind === "action" && reference.actionID === "folder") {
     return <ColoredMentionIcon tone="amber" icon={<FolderOpen className="size-3.5" />} />;
   }
   if (reference.kind === "action" && reference.actionID === "screenshot") {
-    return <ColoredMentionIcon tone="primary" icon={<ScanLine className="size-3.5" />} />;
+    return <ColoredMentionIcon tone="info" icon={<ScanLine className="size-3.5" />} />;
   }
   if (reference.kind === "action" && reference.actionID === "photo") {
     return <ColoredMentionIcon tone="emerald" icon={<Camera className="size-3.5" />} />;
@@ -152,11 +152,11 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
   return <ColoredMentionIcon tone="sky" icon={<Paperclip className="size-3.5" />} />;
 }
 
-function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "primary" | "sky" }) {
+function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "info" | "sky" }) {
   const toneClass = {
     amber: "bg-amber-600 text-white",
     emerald: "bg-emerald-600 text-white",
-    primary: "bg-primary text-primary-foreground",
+    info: "bg-info text-info-foreground",
     sky: "bg-sky-600 text-white",
   }[tone];
   return <span className={cn("grid size-5 shrink-0 place-items-center rounded", toneClass)}>{icon}</span>;

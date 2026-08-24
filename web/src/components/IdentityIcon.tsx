@@ -106,7 +106,7 @@ export function IdentityIcon({
         "inline-grid aspect-square shrink-0 place-items-center overflow-hidden bg-muted text-muted-foreground",
         fallbackVisible &&
           fallback === "skill" &&
-          "bg-primary/10 text-primary shadow-none ring-1 ring-inset ring-primary/15 dark:bg-primary/15 dark:text-primary dark:ring-primary/20",
+          "bg-info/10 text-info shadow-none ring-1 ring-inset ring-info/15 dark:bg-info/15 dark:text-info dark:ring-info/20",
         sizeClassByToken[size],
         shape === "circle" ? "rounded-full" : identityIconRadiusClass(size, radius),
         className,

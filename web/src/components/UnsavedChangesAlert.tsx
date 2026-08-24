@@ -32,10 +32,7 @@ export function UnsavedChangesAlert({
           <AlertDialogAction variant="outline" onClick={onDiscard}>
             {t("common.unsavedChanges.discard")}
           </AlertDialogAction>
-          <AlertDialogCancel
-            className="hover:!bg-primary/80 dark:hover:!bg-primary/80"
-            variant="default"
-          >
+          <AlertDialogCancel variant="default">
             {t("common.unsavedChanges.keepEditing")}
           </AlertDialogCancel>
         </AlertDialogFooter>

@@ -298,7 +298,7 @@ export function CollapsibleSessionGroupLabel({
           {activity === "running" ? (
             <Spinner className="size-3" />
           ) : (
-            <span aria-hidden="true" className="size-2 rounded-full bg-blue-500" />
+            <span aria-hidden="true" className="size-2 rounded-full bg-success" />
           )}
         </span>
       ) : null}

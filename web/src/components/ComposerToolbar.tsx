@@ -132,7 +132,7 @@ export function ComposerToolbar({
               aria-label={t("composer.stop")}
               className="rounded-full !bg-foreground !text-background shadow-sm hover:!bg-foreground/90 hover:!text-background dark:hover:!bg-foreground/90"
               disabled={!stopEnabled}
-              size="icon-sm"
+              size="icon"
               type="button"
               variant="ghost"
               onClick={onCancel}
@@ -154,7 +154,7 @@ export function ComposerToolbar({
               aria-label={t(steering ? "composer.queue" : "composer.send")}
               className={composerSendButtonClassName}
               disabled={!sendEnabled}
-              size="icon-sm"
+              size="icon"
               type="submit"
               variant="secondary"
             >

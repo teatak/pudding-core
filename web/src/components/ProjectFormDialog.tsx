@@ -192,7 +192,7 @@ export function ProjectFormDialog({
                 className={cn(
                   "relative overflow-hidden rounded-lg border",
                   directoryPaths.length === 0 && "border-dashed",
-                  dropActive && "border-primary bg-accent/40",
+                  dropActive && "border-info bg-accent/40",
                 )}
                 onDragEnter={handleDragEnter}
                 onDragLeave={handleDragLeave}
