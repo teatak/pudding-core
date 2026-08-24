@@ -22,6 +22,7 @@ export function languageFromPath(path: string) {
     rb: "ruby",
     rs: "rust",
     sh: "shellscript",
+    svg: "xml",
     ts: "typescript",
     yml: "yaml",
     zsh: "shellscript",

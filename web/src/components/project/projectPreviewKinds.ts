@@ -18,6 +18,10 @@ export function isProjectImagePath(path: string) {
   return /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(path);
 }
 
+export function isProjectSVGPath(path: string) {
+  return /\.svg$/i.test(path);
+}
+
 export function projectFileSupportsPreview(path: string) {
   return /\.(?:md|markdown)$/i.test(path)
     || Boolean(projectDocumentPreviewKind(path))
@@ -26,5 +30,5 @@ export function projectFileSupportsPreview(path: string) {
 }
 
 export function projectFileSupportsSource(path: string) {
-  return !isProjectImagePath(path) && !isProjectPDFPath(path);
+  return isProjectSVGPath(path) || (!isProjectImagePath(path) && !isProjectPDFPath(path));
 }
