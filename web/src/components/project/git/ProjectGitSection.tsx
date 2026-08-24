@@ -190,7 +190,7 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
             return (
               <div key={repository.root.id} className="pb-2">
                 <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
-                <div className="space-y-2 border-y border-[var(--workspace-border)] px-3 py-3">
+                <div className="space-y-2 px-3 py-3">
                   <p className="text-[11px] text-muted-foreground">{t("project.gitUnavailable")}</p>
                   <Button
                     className="h-7 w-full bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] text-xs hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_9%)]"
@@ -222,7 +222,7 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
             <div key={repository.root.id} className="pb-1">
               <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
               <form
-                className="space-y-1.5 border-y border-[var(--workspace-border)] px-2 py-2"
+                className="space-y-1.5 px-2 py-2"
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!status.clean) {
