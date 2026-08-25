@@ -48,7 +48,8 @@ const FACE_YAW_SQUEEZE_X = 0.04;
 const FACE_YAW_ORIGIN_SHIFT_PERCENT = 6;
 const FACE_CENTER_X = 64;
 const FACE_CENTER_Y = 77;
-const FACE_Z_OFFSET_PX = 1;
+const FACE_FRAME_Z_OFFSET_PX = 3;
+const FACE_GLASS_INSET_PX = 2;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -133,7 +134,7 @@ const headStyle: CSSProperties = {
 
 const faceLayerStyle: CSSProperties = {
   ...absoluteLayerStyle,
-  transform: `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(0deg) rotateX(0deg)`,
+  transform: `translate3d(0px, 0px, ${FACE_FRAME_Z_OFFSET_PX}px) rotateY(0deg) rotateX(0deg)`,
   transformOrigin: `${(FACE_CENTER_X / 128) * 100}% ${(FACE_CENTER_Y / 128) * 100}%`,
   transformStyle: "preserve-3d",
   zIndex: 1,
@@ -157,6 +158,13 @@ const antennaMotionStyle: CSSProperties = {
 const faceMotionStyle: CSSProperties = {
   ...compositeLayerStyle,
   transformOrigin: `${(FACE_CENTER_X / 128) * 100}% ${(FACE_CENTER_Y / 128) * 100}%`,
+  transformStyle: "preserve-3d",
+};
+
+const faceGlassStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transform: `translateZ(-${FACE_GLASS_INSET_PX}px)`,
+  transformStyle: "preserve-3d",
 };
 
 const eyeMotionStyle: CSSProperties = {
@@ -715,119 +723,121 @@ export function Mascot({
                   />
                 </svg>
               </span>
-              <span data-slot="face-screen" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <path
-                    d={FACE_SCREEN_PATH}
-                    fill="var(--mascot-screen)"
-                    fillOpacity="0.82"
-                    stroke="var(--mascot-screen-edge)"
-                    strokeOpacity="0.92"
-                    strokeWidth="2.75"
-                    transform={FACE_SCREEN_INSET_TRANSFORM}
-                  />
-                </svg>
-              </span>
-              {showFaceDebugFrame ? (
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <rect
-                    data-slot="face-debug-frame"
-                    fill="none"
-                    height="38"
-                    rx="6"
-                    stroke="#ff7a00"
-                    strokeDasharray="3 3"
-                    strokeWidth="2"
-                    vectorEffect="non-scaling-stroke"
-                    width="52"
-                    x="38"
-                    y="58"
-                  />
-                </svg>
-              ) : null}
+              <span data-slot="face-glass-plane" style={faceGlassStyle}>
+                <span data-slot="face-screen" style={compositeLayerStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <path
+                      d={FACE_SCREEN_PATH}
+                      fill="var(--mascot-screen)"
+                      fillOpacity="0.82"
+                      stroke="var(--mascot-screen-edge)"
+                      strokeOpacity="0.92"
+                      strokeWidth="3.5"
+                      transform={FACE_SCREEN_INSET_TRANSFORM}
+                    />
+                  </svg>
+                </span>
+                {showFaceDebugFrame ? (
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <rect
+                      data-slot="face-debug-frame"
+                      fill="none"
+                      height="38"
+                      rx="6"
+                      stroke="#ff7a00"
+                      strokeDasharray="3 3"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                      width="52"
+                      x="38"
+                      y="58"
+                    />
+                  </svg>
+                ) : null}
 
-              <span data-slot="status-lights" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g fill="var(--mascot-status-light)">
-                    <circle cx="41" cy="82" r="3.5" />
-                    <circle cx="87" cy="82" r="3.5" />
-                  </g>
-                  <g fill="#ffffff" fillOpacity="0.42">
-                    <circle cx="40" cy="81" r="0.9" />
-                    <circle cx="86" cy="81" r="0.9" />
-                  </g>
-                </svg>
-              </span>
-
-              <span data-slot="eyes" style={eyeMotionStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g ref={pupilMotionRef} fill="var(--mascot-feature-outline)">
-                    <ellipse cx="52" cy="70" rx="5.6" ry="7" />
-                    <ellipse cx="76" cy="70" rx="5.6" ry="7" />
-                    <g fill="#ffffff">
-                      <circle cx="50.2" cy="67.2" r="1.7" />
-                      <circle cx="74.2" cy="67.2" r="1.7" />
+                <span data-slot="status-lights" style={compositeLayerStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <g fill="var(--mascot-status-light)">
+                      <circle cx="41" cy="82" r="3.5" />
+                      <circle cx="87" cy="82" r="3.5" />
                     </g>
-                  </g>
-                </svg>
-              </span>
+                    <g fill="#ffffff" fillOpacity="0.42">
+                      <circle cx="40" cy="81" r="0.9" />
+                      <circle cx="86" cy="81" r="0.9" />
+                    </g>
+                  </svg>
+                </span>
 
-              <span data-slot="eyes-error" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g fill="none" stroke="var(--mascot-feature-outline)" strokeLinecap="round" strokeWidth="3.8">
-                    <path d="M48 70 Q52 73.5 56 70" />
-                    <path d="M72 70 Q76 73.5 80 70" />
-                  </g>
-                </svg>
-              </span>
+                <span data-slot="eyes" style={eyeMotionStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <g ref={pupilMotionRef} fill="var(--mascot-feature-outline)">
+                      <ellipse cx="52" cy="70" rx="5.6" ry="7" />
+                      <ellipse cx="76" cy="70" rx="5.6" ry="7" />
+                      <g fill="#ffffff">
+                        <circle cx="50.2" cy="67.2" r="1.7" />
+                        <circle cx="74.2" cy="67.2" r="1.7" />
+                      </g>
+                    </g>
+                  </svg>
+                </span>
 
-              <span data-slot="mouth" style={mouthMotionStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <path
-                    d={MOUTH_PATH}
-                    fill="none"
-                    stroke="var(--mascot-feature-outline)"
-                    strokeLinecap="round"
-                    strokeWidth="5.4"
-                  />
-                  <path
-                    d={MOUTH_PATH}
-                    fill="none"
-                    stroke="#ffffff"
-                    strokeLinecap="round"
-                    strokeWidth="3"
-                  />
-                </svg>
-              </span>
+                <span data-slot="eyes-error" style={compositeLayerStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <g fill="none" stroke="var(--mascot-feature-outline)" strokeLinecap="round" strokeWidth="3.8">
+                      <path d="M48 70 Q52 73.5 56 70" />
+                      <path d="M72 70 Q76 73.5 80 70" />
+                    </g>
+                  </svg>
+                </span>
 
-              <span data-slot="mouth-error" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <path
-                    d="M59 89.4 Q64 87.6 69 89.4"
-                    fill="none"
-                    stroke="var(--mascot-feature-outline)"
-                    strokeLinecap="round"
-                    strokeWidth="3.6"
-                  />
-                </svg>
-              </span>
+                <span data-slot="mouth" style={mouthMotionStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <path
+                      d={MOUTH_PATH}
+                      fill="none"
+                      stroke="var(--mascot-feature-outline)"
+                      strokeLinecap="round"
+                      strokeWidth="5.4"
+                    />
+                    <path
+                      d={MOUTH_PATH}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeLinecap="round"
+                      strokeWidth="3"
+                    />
+                  </svg>
+                </span>
 
-              <span data-slot="face-screen-reflection" style={compositeLayerStyle}>
-                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <path
-                    d="M39 66 C40 61.5 43.5 59 48.5 59 H76 C69 61 63.5 64.5 59 68 H42 C40.5 68 39.5 67.25 39 66 Z"
-                    fill="color-mix(in oklch, var(--mascot-screen), white 74%)"
-                    fillOpacity="0.28"
-                  />
-                  <path
-                    d="M39 65 C40 61.5 43 59.5 47 59.5 H72"
-                    fill="none"
-                    stroke="color-mix(in oklch, var(--mascot-screen), white 76%)"
-                    strokeLinecap="round"
-                    strokeOpacity="0.78"
-                    strokeWidth="1.8"
-                  />
-                </svg>
+                <span data-slot="mouth-error" style={compositeLayerStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <path
+                      d="M59 89.4 Q64 87.6 69 89.4"
+                      fill="none"
+                      stroke="var(--mascot-feature-outline)"
+                      strokeLinecap="round"
+                      strokeWidth="3.6"
+                    />
+                  </svg>
+                </span>
+
+                <span data-slot="face-screen-reflection" style={compositeLayerStyle}>
+                  <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                    <path
+                      d="M39 66 C40 61.5 43.5 59 48.5 59 H76 C69 61 63.5 64.5 59 68 H42 C40.5 68 39.5 67.25 39 66 Z"
+                      fill="color-mix(in oklch, var(--mascot-screen), white 74%)"
+                      fillOpacity="0.28"
+                    />
+                    <path
+                      d="M39 65 C40 61.5 43 59.5 47 59.5 H72"
+                      fill="none"
+                      stroke="color-mix(in oklch, var(--mascot-screen), white 76%)"
+                      strokeLinecap="round"
+                      strokeOpacity="0.78"
+                      strokeWidth="1.8"
+                    />
+                  </svg>
+                </span>
               </span>
             </span>
               </span>
