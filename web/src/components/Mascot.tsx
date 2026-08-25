@@ -48,8 +48,9 @@ const FACE_YAW_SQUEEZE_X = 0.04;
 const FACE_YAW_ORIGIN_SHIFT_PERCENT = 6;
 const FACE_CENTER_X = 64;
 const FACE_CENTER_Y = 77;
-const FACE_FRAME_Z_OFFSET_PX = 3;
-const FACE_GLASS_INSET_PX = 2;
+const FACE_FRAME_Z_OFFSET_PX = 4;
+const FACE_GLASS_INSET_PX = 3;
+const BODY_DEPTH_PX = 5;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -143,6 +144,12 @@ const faceLayerStyle: CSSProperties = {
 const compositeLayerStyle: CSSProperties = {
   ...absoluteLayerStyle,
   pointerEvents: "none",
+};
+
+const bodyBackShellStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transform: `translateZ(-${BODY_DEPTH_PX}px)`,
+  transformStyle: "preserve-3d",
 };
 
 const shadowMotionStyle: CSSProperties = {
@@ -536,6 +543,17 @@ export function Mascot({
 
           <span data-slot="head-gesture" ref={headGestureRef} style={headGestureStyle}>
             <span data-slot="head" ref={headRef} style={headStyle}>
+          <span data-slot="body-back-shell" style={bodyBackShellStyle}>
+            <svg data-slot="body-back-shell-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <path
+                d={BODY_PATH}
+                fill="color-mix(in oklch, var(--mascot-body), white 8%)"
+                stroke="color-mix(in oklch, var(--mascot-outline), var(--mascot-body) 62%)"
+                strokeWidth="4"
+              />
+            </svg>
+          </span>
+
           <svg data-slot="body-outline-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
             <path
               d={BODY_PATH}
