@@ -62,10 +62,22 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
     if (diffChanges.length > 0) openTurnFileChanges(sessionID, turnID, changes, diffChanges[0].id);
   };
 
+  const openPrimary = () => {
+    if (reviewable) {
+      openReview();
+      return;
+    }
+    if (singleChange && previewable) {
+      revealResource(sessionID, previewable, displayState);
+    }
+  };
+
+  const primaryActionAvailable = reviewable || Boolean(singleChange && previewable);
+
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card text-sm text-muted-foreground shadow-none dark:bg-background">
       <div className="flex min-h-12 items-center gap-2 bg-background px-2 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
-        <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!reviewable} type="button" onClick={openReview}>
+        <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!primaryActionAvailable} type="button" onClick={openPrimary}>
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-foreground/65">
             <Files className="size-4" />
           </span>

@@ -2,7 +2,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  CircleAlert,
   Copy,
   Lightbulb,
   ListChecks,
@@ -922,8 +921,8 @@ function ProcessCompactPart({
   const activeTool = activePart?.type === "tool_use" ? activePart : undefined;
   const elapsed = useElapsedDuration(activeTool?.phase === "running" ? activeTool.phaseUpdatedAt : undefined, locale);
   const title = processCompactTitle(hiddenParts, activePart, elapsed, t);
-  const Icon = title.failed ? CircleAlert : processCompactIcon(hiddenParts, t);
-  const app = title.failed ? undefined : sharedProcessAppIdentity(hiddenParts, appsQuery.data?.apps || []);
+  const Icon = processCompactIcon(hiddenParts, t);
+  const app = sharedProcessAppIdentity(hiddenParts, appsQuery.data?.apps || []);
   return (
     <TranscriptDisclosure
       className="text-muted-foreground/70"

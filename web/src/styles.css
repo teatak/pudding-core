@@ -233,7 +233,7 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --mascot-screen: oklch(0.91 0.018 95);
     --mascot-error-screen: oklch(0.89 0.045 25);
     --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 38%);
-    --mascot-screen-edge: oklch(0.73 0.09 82);
+    --mascot-screen-edge: oklch(0.76 0.13 80);
     --mascot-shadow: oklch(0.52 0.012 250 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -676,6 +676,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --primary-foreground: oklch(0.205 0 0);
     --info: oklch(0.623 0.214 259.815);
     --info-foreground: oklch(0.205 0 0);
+    --control-accent: oklch(0.424 0.199 265.638);
+    --control-accent-foreground: oklch(0.97 0.014 254.604);
     --link: var(--info);
     --markdown-link: var(--link);
     --markdown-link-hover: oklch(0.82 0.13 250);
@@ -773,7 +775,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --mascot-screen: oklch(0.8 0.016 95);
     --mascot-error-screen: oklch(0.67 0.06 25);
     --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 44%);
-    --mascot-screen-edge: oklch(0.78 0.08 82);
+    --mascot-screen-edge: oklch(0.82 0.11 80);
     --mascot-shadow: oklch(0.38 0.012 250 / 12%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
