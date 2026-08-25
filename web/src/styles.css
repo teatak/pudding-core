@@ -232,8 +232,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 34%);
     --mascot-screen: oklch(0.91 0.018 95);
     --mascot-error-screen: oklch(0.89 0.045 25);
-    --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 38%);
-    --mascot-screen-edge: oklch(0.76 0.13 80);
+    --mascot-screen-groove: oklch(0.46 0.055 220);
+    --mascot-screen-edge: oklch(0.64 0.18 250);
     --mascot-shadow: oklch(0.52 0.012 250 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -774,8 +774,8 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 38%);
     --mascot-screen: oklch(0.8 0.016 95);
     --mascot-error-screen: oklch(0.67 0.06 25);
-    --mascot-screen-groove: color-mix(in oklch, var(--mascot-body), black 44%);
-    --mascot-screen-edge: oklch(0.82 0.11 80);
+    --mascot-screen-groove: oklch(0.42 0.05 220);
+    --mascot-screen-edge: oklch(0.76 0.16 250);
     --mascot-shadow: oklch(0.38 0.012 250 / 12%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
