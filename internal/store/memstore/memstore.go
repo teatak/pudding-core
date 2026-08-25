@@ -26,8 +26,7 @@ type Memstore struct {
 	fileChangeStates map[string]store.TurnFileChangeState
 	messages         map[string][]*store.Message // sessionID → 时间升序
 	queued           map[string][]*store.QueuedInput
-	usage            map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	ucalibration     map[usageCalibrationKey]*store.UsageCalibrationStat
+	usage            map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
 	susage           map[string]*store.SessionUsageStat        // sessionID → session stats
 	canvas           map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
 	closed           map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
@@ -51,7 +50,6 @@ func New() *Memstore {
 		messages:         make(map[string][]*store.Message),
 		queued:           make(map[string][]*store.QueuedInput),
 		usage:            make(map[usageKey]*store.UsageHourlyStat),
-		ucalibration:     make(map[usageCalibrationKey]*store.UsageCalibrationStat),
 		susage:           make(map[string]*store.SessionUsageStat),
 		canvas:           make(map[string]*store.CanvasItem),
 		closed:           make(map[string]*store.ClosedCanvasItem),
@@ -1334,45 +1332,6 @@ func (m *Memstore) UsageHourlyStats(_ context.Context, from, to time.Time) ([]*s
 	return out, nil
 }
 
-func (m *Memstore) RecordUsageCalibration(_ context.Context, providerName, model string, estimatedInputTokens, actualInputTokens int) (*store.UsageCalibrationStat, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	key := usageCalibrationKey{provider: providerName, model: model}
-	stat := m.ucalibration[key]
-	if stat == nil {
-		stat = &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}
-		m.ucalibration[key] = stat
-	}
-	if estimatedInputTokens <= 0 || actualInputTokens <= 0 || providerName == "" || model == "" {
-		return cloneUsageCalibrationStat(stat), nil
-	}
-	stat.InputRatioEWMA = store.NextUsageCalibrationRatio(
-		stat.InputRatioEWMA,
-		stat.SampleCount,
-		estimatedInputTokens,
-		actualInputTokens,
-	)
-	stat.SampleCount++
-	stat.LastEstimatedInputTokens = estimatedInputTokens
-	stat.LastActualInputTokens = actualInputTokens
-	stat.UpdatedAt = time.Now()
-	return cloneUsageCalibrationStat(stat), nil
-}
-
-func (m *Memstore) UsageCalibration(_ context.Context, providerName, model string) (*store.UsageCalibrationStat, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	stat := m.ucalibration[usageCalibrationKey{provider: providerName, model: model}]
-	if stat == nil {
-		return &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}, nil
-	}
-	return cloneUsageCalibrationStat(stat), nil
-}
-
 func (m *Memstore) RecordSessionUsage(_ context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1395,6 +1354,9 @@ func (m *Memstore) RecordSessionUsage(_ context.Context, sessionID string, in st
 		m.susage[sessionID] = stat
 	}
 	stat.RequestCount += requestCount
+	stat.LastProvider = strings.TrimSpace(in.Provider)
+	stat.LastModel = strings.TrimSpace(in.Model)
+	stat.LastEstimatedInputTokens = clampNonNegative(in.EstimatedInputTokens)
 	stat.LastInputUncachedTokens = inputUncached
 	stat.LastInputCachedTokens = inputCached
 	stat.LastCacheCreationTokens = cacheCreation
@@ -2552,19 +2514,6 @@ func cloneUsageHourlyStat(stat *store.UsageHourlyStat) *store.UsageHourlyStat {
 type usageKey struct {
 	hourMS int64
 	model  string
-}
-
-type usageCalibrationKey struct {
-	provider string
-	model    string
-}
-
-func cloneUsageCalibrationStat(stat *store.UsageCalibrationStat) *store.UsageCalibrationStat {
-	if stat == nil {
-		return nil
-	}
-	cp := *stat
-	return &cp
 }
 
 func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat {

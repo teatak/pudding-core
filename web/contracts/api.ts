@@ -962,7 +962,7 @@ export const backgroundProcess = z.object({
   finishedAt: z.string().optional(),
   reason: z.string().optional(),
   error: z.string().optional(),
-  sandboxed: z.boolean(),
+  execution: z.enum(["sandbox", "host"]),
   sandboxKind: z.string().optional(),
   sandboxDenied: z.boolean().optional(),
   tty: z.boolean().optional(),

@@ -3,7 +3,6 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 )
@@ -415,20 +414,6 @@ func TestSessionLoadedAppsAreNormalizedAndReadable(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"loadedAppIDs":["browser","terminal"]`) {
 		t.Fatalf("loaded app ids must be readable: %s", data)
-	}
-}
-
-func TestNextUsageCalibrationRatioUsesBoundedEWMA(t *testing.T) {
-	first := NextUsageCalibrationRatio(0, 0, 100, 130)
-	if math.Abs(first-1.3) > 0.0001 {
-		t.Fatalf("first ratio = %f want 1.3", first)
-	}
-	second := NextUsageCalibrationRatio(first, 1, 100, 110)
-	if math.Abs(second-1.25) > 0.0001 {
-		t.Fatalf("second ratio = %f want 1.25", second)
-	}
-	if got := NextUsageCalibrationRatio(second, 2, 100, 1000); got > 1.44 {
-		t.Fatalf("outlier was not bounded: %f", got)
 	}
 }
 

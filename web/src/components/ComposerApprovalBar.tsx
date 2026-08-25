@@ -53,7 +53,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   const gitCommitApproval = gitCommitFromPayload(current.payload);
   const isComputerAppApproval = isToolCallApproval && toolCallApproval.scope === "computer" && Boolean(toolCallApproval.appID);
   const approvalReason = isToolCallApproval
-    ? toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
+    ? toolCallReason(toolCallApproval.operation, toolCallApproval.execution, toolCallApproval.hostAccessReason, t) || current.reason
     : current.reason;
 
   async function approve(scope: "turn" | "session") {
@@ -547,18 +547,20 @@ function suggestedProjectDirName(payload: unknown) {
 
 function toolCallFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
-    return { appID: "", command: "", operation: "", paths: [] as string[], sandboxBypass: false, scope: "", valuePreview: undefined as string | undefined };
+    return { appID: "", command: "", execution: "", hostAccessReason: "", operation: "", paths: [] as string[], scope: "", valuePreview: undefined as string | undefined };
   }
   const data = payload as Record<string, unknown>;
   const appID = typeof data.appID === "string" ? data.appID.trim() : "";
   const operation = typeof data.operation === "string" ? data.operation.trim() : "";
   const scope = typeof data.scope === "string" ? data.scope.trim() : "";
   const command = typeof data.command === "string" ? data.command : "";
+  const execution = data.execution === "host" || data.execution === "sandbox" ? data.execution : "";
+  const hostAccessReason = typeof data.hostAccessReason === "string" ? data.hostAccessReason.trim() : "";
   const paths = Array.isArray(data.paths)
     ? data.paths.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
     : [];
   const valuePreview = typeof data.valuePreview === "string" ? data.valuePreview : undefined;
-  return { appID, command, operation, paths: dedupeStrings(paths), sandboxBypass: data.sandboxBypass === true, scope, valuePreview };
+  return { appID, command, execution, hostAccessReason, operation, paths: dedupeStrings(paths), scope, valuePreview };
 }
 
 function patchApprovalFromPayload(payload: unknown): PatchApproval | null {
@@ -641,11 +643,12 @@ function gitCommitFromPayload(payload: unknown): GitCommitApproval | null {
   };
 }
 
-function toolCallReason(operation: string, sandboxBypass: boolean, t: (key: string) => string) {
-  if (sandboxBypass) {
-    return operation === "process_start"
+function toolCallReason(operation: string, execution: string, hostAccessReason: string, t: (key: string) => string) {
+  if (execution === "host") {
+    const summary = operation === "process_start"
       ? t("transcript.approvalToolCall.process_startFullAccess")
       : t("transcript.approvalToolCall.commandFullAccess");
+    return hostAccessReason ? `${summary} ${hostAccessReason}` : summary;
   }
   switch (operation) {
     case "write":

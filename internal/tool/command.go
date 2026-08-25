@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -23,14 +24,23 @@ const (
 	commandMaxBytes         = 64 << 10
 )
 
+type CommandExecutionMode string
+
+const (
+	CommandExecutionSandbox CommandExecutionMode = "sandbox"
+	CommandExecutionHost    CommandExecutionMode = "host"
+)
+
 type commandRunArgs struct {
-	Scope      string            `json:"scope"`
-	Command    string            `json:"command"`
-	CWD        string            `json:"cwd,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
-	TimeoutMS  int               `json:"timeout_ms,omitempty"`
-	Background bool              `json:"background,omitempty"`
-	TTY        bool              `json:"tty,omitempty"`
+	Scope            string               `json:"scope"`
+	Command          string               `json:"command"`
+	Execution        CommandExecutionMode `json:"execution,omitempty"`
+	HostAccessReason string               `json:"host_access_reason,omitempty"`
+	CWD              string               `json:"cwd,omitempty"`
+	Env              map[string]string    `json:"env,omitempty"`
+	TimeoutMS        int                  `json:"timeout_ms,omitempty"`
+	Background       bool                 `json:"background,omitempty"`
+	TTY              bool                 `json:"tty,omitempty"`
 }
 
 func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
@@ -78,6 +88,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 		Env:         env,
 		ProjectDirs: call.ProjectDirs,
 		SandboxMode: call.CommandSandbox,
+		StateKey:    call.CommandStateKey,
 	})
 	if err != nil {
 		return toolJSONError(out, "command_prepare_failed", err.Error())
@@ -143,6 +154,11 @@ func decodeCommandRunArgs(raw json.RawMessage) (commandRunArgs, error) {
 	if args.Scope != managedScopeProject {
 		return args, errors.New("command scope must be project")
 	}
+	args.Execution = CommandExecutionMode(strings.ToLower(strings.TrimSpace(string(args.Execution))))
+	if args.Execution == "" {
+		args.Execution = CommandExecutionSandbox
+	}
+	args.HostAccessReason = strings.TrimSpace(args.HostAccessReason)
 	if err := validateCommandInput(args); err != nil {
 		return args, err
 	}
@@ -161,7 +177,13 @@ func commandApprovalDetails(call Call) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	details := map[string]any{"command": args.Command}
+	details := map[string]any{
+		"command":   args.Command,
+		"execution": string(args.Execution),
+	}
+	if args.HostAccessReason != "" {
+		details["hostAccessReason"] = args.HostAccessReason
+	}
 	if args.Background {
 		details["background"] = true
 	}
@@ -217,6 +239,15 @@ func validateCommandInput(args commandRunArgs) error {
 	if len(args.Command) > commandMaxBytes {
 		return errors.New("command is too large")
 	}
+	if args.Execution != CommandExecutionSandbox && args.Execution != CommandExecutionHost {
+		return errors.New("command execution must be sandbox or host")
+	}
+	if args.Execution == CommandExecutionHost && args.HostAccessReason == "" {
+		return errors.New("host_access_reason is required when execution is host")
+	}
+	if args.Execution == CommandExecutionSandbox && args.HostAccessReason != "" {
+		return errors.New("host_access_reason is available only when execution is host")
+	}
 	analysis, err := analyzeShellCommand(args.Command)
 	if err != nil {
 		return err
@@ -245,10 +276,14 @@ func commandTimeout(timeoutMS int) (time.Duration, error) {
 }
 
 func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDirs []string, execution *commandExecution, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
-	// A non-zero process exit is a completed command, not a tool transport failure.
-	ok := reason == "" || reason == "non_zero_exit"
 	stdoutText := stdout.String()
 	stderrText := stderr.String()
+	sandboxDenied := execution != nil && execution.Sandboxed && commandSandboxDenied(stdoutText+"\n"+stderrText, runErr)
+	if sandboxDenied {
+		reason = "sandbox_denied"
+	}
+	// A normal non-zero process exit is a completed command, not a tool transport failure.
+	ok := reason == "" || reason == "non_zero_exit"
 	payload := map[string]any{
 		"ok":              ok,
 		"cwd":             cwd,
@@ -260,13 +295,13 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 		"timedOut":        timedOut,
 		"cancelled":       cancelled,
 		"durationMs":      duration.Milliseconds(),
-		"sandboxed":       execution != nil && execution.Sandboxed,
+		"execution":       commandActualExecution(execution),
 	}
 	if execution != nil && execution.SandboxKind != "" {
 		payload["sandboxKind"] = execution.SandboxKind
 	}
 	if execution != nil && execution.Sandboxed {
-		payload["sandboxDenied"] = commandSandboxDenied(stdoutText+"\n"+stderrText, runErr)
+		payload["sandboxDenied"] = sandboxDenied
 	}
 	payload["command"] = args.Command
 	payload["shell"] = shell
@@ -291,6 +326,77 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 		out.SummaryCount = len(payload)
 	}
 	return out
+}
+
+func commandActualExecution(execution *commandExecution) string {
+	if execution != nil && execution.Sandboxed {
+		return commandExecutionLabel(true)
+	}
+	return commandExecutionLabel(false)
+}
+
+func commandExecutionLabel(sandboxed bool) string {
+	if sandboxed {
+		return string(CommandExecutionSandbox)
+	}
+	return string(CommandExecutionHost)
+}
+
+func RequestedCommandExecution(raw json.RawMessage) (CommandExecutionMode, error) {
+	args, err := decodeCommandRunArgs(raw)
+	if err != nil {
+		return "", err
+	}
+	return args.Execution, nil
+}
+
+func CommandBoundaryFailure(call Call, risk ToolRisk) (Result, bool) {
+	requested, err := RequestedCommandExecution(call.Args)
+	if err != nil || requested == CommandExecutionHost {
+		return Result{}, false
+	}
+	out := Result{CallID: call.CallID, Name: call.Name}
+	if len(risk.requiredProjectPaths) > 0 {
+		payload := map[string]any{
+			"ok":          false,
+			"reason":      "additional_project_access_required",
+			"detail":      "command references paths outside the authorized project directories; request those directories with request_capability and retry inside the sandbox",
+			"execution":   string(CommandExecutionSandbox),
+			"paths":       risk.requiredProjectPaths,
+			"projectDirs": commandProjectDirSuggestions(risk.requiredProjectPaths),
+		}
+		return toolJSON(out, false, payload), true
+	}
+	if risk.hostAccessRequired {
+		payload := map[string]any{
+			"ok":        false,
+			"reason":    "host_access_required",
+			"detail":    "command requires host access; retry with execution=host and an explicit host_access_reason",
+			"execution": string(CommandExecutionSandbox),
+		}
+		return toolJSON(out, false, payload), true
+	}
+	return Result{}, false
+}
+
+func commandProjectDirSuggestions(paths []string) []string {
+	var dirs []string
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" || !filepath.IsAbs(path) {
+			continue
+		}
+		dir := path
+		if info, err := os.Stat(path); err == nil {
+			if !info.IsDir() {
+				dir = filepath.Dir(path)
+			}
+		} else {
+			dir = filepath.Dir(path)
+		}
+		dirs = append(dirs, dir)
+	}
+	return compactRiskPaths(dirs...)
 }
 
 type commandProgressWriter struct {

@@ -46,6 +46,13 @@ func estimateMessageTokens(msg provider.Message) int {
 			contentTokens += estimatePartTokens(part)
 		}
 	}
+	continuationTokens := 0
+	for _, continuation := range msg.Continuations {
+		continuationTokens += EstimateTextTokens(string(continuation.Data))
+	}
+	if continuationTokens > contentTokens {
+		return continuationTokens
+	}
 	return contentTokens
 }
 

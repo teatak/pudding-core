@@ -965,11 +965,11 @@ function processCompactTitle(
     const result = formatToolResult(activePart.resultContent);
     const baseTitle = toolDisplayName(activePart.name || activePart.resultName || "", t("transcript.tool"), t);
     if (activePart.dotPhase === "awaiting_followup") {
+      const completed = toolTitle(activePart, result, baseTitle, elapsed, t);
       return {
         active: true,
         failed: false,
-        label: baseTitle,
-        summary: t("transcript.phaseAwaitingFollowup"),
+        ...completed,
       };
     }
     if (activePart.dotPhase === "streaming_tool_args" && activePart.phase !== "streaming_args") {
@@ -1212,12 +1212,13 @@ function ToolUsePart({
   const Icon = toolPartIcon(part);
   const appID = computerToolAppID(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
+  const activityActive = showActivitySpinner || Boolean(part.active);
   const toneClass = "text-muted-foreground";
   const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
   const disclosure = !showDetails ? (
     <TranscriptDisclosure
       className={toneClass}
-      icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
+      icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       summary={title.summary || undefined}
       summaryClassName={summaryClass}
       title={title.label}
@@ -1225,7 +1226,7 @@ function ToolUsePart({
   ) : (
     <TranscriptDisclosure
       className={toneClass}
-      icon={<ToolActivityGlyph active={showActivitySpinner} appID={appID} icon={Icon} />}
+      icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       open={open}
       summary={title.summary || undefined}
       summaryClassName={summaryClass}

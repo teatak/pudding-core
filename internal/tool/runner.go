@@ -10,14 +10,15 @@ import (
 )
 
 type Call struct {
-	SessionID      string
-	TurnID         string
-	CallID         string
-	Name           string
-	Args           json.RawMessage
-	Mode           store.AgentMode
-	ProjectDirs    []string
-	CommandSandbox CommandSandboxMode
+	SessionID       string
+	TurnID          string
+	CallID          string
+	Name            string
+	Args            json.RawMessage
+	Mode            store.AgentMode
+	ProjectDirs     []string
+	CommandSandbox  CommandSandboxMode
+	CommandStateKey string
 }
 
 type CommandSandboxMode string

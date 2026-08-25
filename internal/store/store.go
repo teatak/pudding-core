@@ -2011,7 +2011,9 @@ type FinishTurnResult struct {
 
 type UsageRecordInput struct {
 	OccurredAt            time.Time
+	Provider              string
 	Model                 string
+	EstimatedInputTokens  int
 	RequestCount          int
 	InputUncachedTokens   int
 	InputCachedTokens     int
@@ -2036,41 +2038,12 @@ func (s UsageHourlyStat) TotalTokens() int {
 	return s.InputUncachedTokens + s.InputCachedTokens + s.CacheCreationTokens + s.OutputContentTokens + s.OutputReasoningTokens
 }
 
-type UsageCalibrationStat struct {
-	Provider                 string    `json:"provider"`
-	Model                    string    `json:"model"`
-	SampleCount              int       `json:"sampleCount"`
-	InputRatioEWMA           float64   `json:"inputRatioEWMA"`
-	LastEstimatedInputTokens int       `json:"lastEstimatedInputTokens"`
-	LastActualInputTokens    int       `json:"lastActualInputTokens"`
-	UpdatedAt                time.Time `json:"updatedAt"`
-}
-
-// NextUsageCalibrationRatio updates the provider/model input-token correction
-// factor from one request whose raw estimate and provider-reported usage refer
-// to the exact same payload. Outliers are bounded so one malformed usage report
-// cannot permanently poison future estimates.
-func NextUsageCalibrationRatio(current float64, sampleCount, estimatedInputTokens, actualInputTokens int) float64 {
-	if estimatedInputTokens <= 0 || actualInputTokens <= 0 {
-		return current
-	}
-	sample := float64(actualInputTokens) / float64(estimatedInputTokens)
-	if sample < 0.5 {
-		sample = 0.5
-	}
-	if sample > 2 {
-		sample = 2
-	}
-	if sampleCount <= 0 || current <= 0 {
-		return sample
-	}
-	const alpha = 0.25
-	return current*(1-alpha) + sample*alpha
-}
-
 type SessionUsageStat struct {
 	SessionID                       string    `json:"sessionID"`
 	RequestCount                    int       `json:"requestCount"`
+	LastProvider                    string    `json:"lastProvider"`
+	LastModel                       string    `json:"lastModel"`
+	LastEstimatedInputTokens        int       `json:"lastEstimatedInputTokens"`
 	LastInputUncachedTokens         int       `json:"lastInputUncachedTokens"`
 	LastInputCachedTokens           int       `json:"lastInputCachedTokens"`
 	LastCacheCreationTokens         int       `json:"lastCacheCreationTokens"`
@@ -2403,11 +2376,8 @@ type Store interface {
 	RecordUsage(ctx context.Context, in UsageRecordInput) (*UsageHourlyStat, error)
 	// UsageHourlyStats 返回 [from, to) 的全局小时统计;to 为零值表示无上界。
 	UsageHourlyStats(ctx context.Context, from, to time.Time) ([]*UsageHourlyStat, error)
-	// RecordUsageCalibration 用同一 provider request 的原始预估与实测输入
-	// 更新 provider profile + model 级别的 EWMA 校准系数。
-	RecordUsageCalibration(ctx context.Context, provider, model string, estimatedInputTokens, actualInputTokens int) (*UsageCalibrationStat, error)
-	UsageCalibration(ctx context.Context, provider, model string) (*UsageCalibrationStat, error)
-	// RecordSessionUsage 把一次 provider request 用量写入 session 统计。
+	// RecordSessionUsage 把一次 provider request 的原始预估与实测用量写入
+	// session 统计；二者必须来自同一个 provider payload。
 	RecordSessionUsage(ctx context.Context, sessionID string, in UsageRecordInput) (*SessionUsageStat, error)
 	// SessionUsage 返回 session 最近一次与累计 token 用量;无用量时返回零统计。
 	SessionUsage(ctx context.Context, sessionID string) (*SessionUsageStat, error)

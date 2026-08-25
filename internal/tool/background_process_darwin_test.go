@@ -17,7 +17,7 @@ func TestBackgroundProcessSandboxedPTYAcceptsInput(t *testing.T) {
 		"tty":     true,
 	})
 	started := decodeBackgroundProcessPayload(t, start)
-	if !start.Ok || !started.Running || !started.Sandboxed || !started.TTY {
+	if !start.Ok || !started.Running || started.Execution != "sandbox" || !started.TTY {
 		t.Fatalf("sandboxed interactive process did not start: result=%+v payload=%+v", start, started)
 	}
 	write := backgroundToolCall(runner, "sess_sandbox_tty", root, CommandSession, map[string]any{

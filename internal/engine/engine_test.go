@@ -489,19 +489,19 @@ func TestUsageChunkRecordsHourlyStats(t *testing.T) {
 	}
 }
 
-func TestRecordUsageCalibratesMatchingProviderRequest(t *testing.T) {
+func TestRecordUsageCalibratesFromMatchingSessionRequest(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t)
 	eng.recordUsage(context.Background(), sid, "mock", "mock-model", 100, provider.UsageInfo{
 		InputUncachedTokens: 130,
 	}, 1)
 
-	calibration, err := ms.UsageCalibration(context.Background(), "mock", "mock-model")
+	stat, err := ms.SessionUsage(context.Background(), sid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calibration.SampleCount != 1 || calibration.InputRatioEWMA != 1.3 ||
-		calibration.LastEstimatedInputTokens != 100 || calibration.LastActualInputTokens != 130 {
-		t.Fatalf("calibration wrong: %+v", calibration)
+	if stat.LastProvider != "mock" || stat.LastModel != "mock-model" ||
+		stat.LastEstimatedInputTokens != 100 || stat.LastInputTokens() != 130 {
+		t.Fatalf("session calibration pair wrong: %+v", stat)
 	}
 
 	usage, err := eng.SessionUsage(context.Background(), sid)
@@ -516,6 +516,36 @@ func TestRecordUsageCalibratesMatchingProviderRequest(t *testing.T) {
 	}
 	if usage.ContextEstimatedTokens != usage.MessageEstimatedTokens+usage.SystemPromptEstimatedTokens+usage.ToolsSchemaEstimatedTokens {
 		t.Fatalf("calibrated estimate components do not add up: %+v", usage)
+	}
+
+	otherSessionID := "session_without_calibration"
+	if err := ms.CreateSession(context.Background(), &store.Session{
+		ID: otherSessionID, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	otherUsage, err := eng.SessionUsage(context.Background(), otherSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherUsage.InputCalibrationSamples != 0 || otherUsage.InputCalibrationFactor != 1 {
+		t.Fatalf("calibration leaked into another session: %+v", otherUsage)
+	}
+}
+
+func TestSessionInputCalibrationFactorUsesExactLastRequestWithoutBounds(t *testing.T) {
+	stat := &store.SessionUsageStat{
+		LastProvider:             "mock",
+		LastModel:                "model-a",
+		LastEstimatedInputTokens: 100,
+		LastInputUncachedTokens:  20,
+	}
+	factor, applied := sessionInputCalibrationFactor(stat, "mock", "model-a")
+	if !applied || factor != 0.2 {
+		t.Fatalf("factor=%f applied=%v, want 0.2 true", factor, applied)
+	}
+	if factor, applied := sessionInputCalibrationFactor(stat, "mock", "model-b"); applied || factor != 1 {
+		t.Fatalf("mismatched model factor=%f applied=%v, want 1 false", factor, applied)
 	}
 }
 
@@ -3366,7 +3396,7 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 
 	done := make(chan tool.Result, 1)
 	go func() {
-		raw := json.RawMessage(`{"scope":"project","command":"brew install mysql-client"}`)
+		raw := json.RawMessage(`{"scope":"project","command":"brew install mysql-client","execution":"host","host_access_reason":"install a host package"}`)
 		done <- eng.executeAllowedTool(ctx, sessionID, "turn_brew", store.ModeCode, tool.Call{CallID: "call_brew", Name: tool.CommandRun, Args: raw})
 	}()
 
@@ -3378,6 +3408,9 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 	}
 	if approval.Kind != event.ApprovalRequested || approval.ApprovalKind != ApprovalKindToolCall {
 		t.Fatalf("unexpected approval event: %+v", approval)
+	}
+	if !strings.Contains(string(approval.Payload), `"execution":"host"`) || !strings.Contains(string(approval.Payload), `"hostAccessReason":"install a host package"`) || strings.Contains(string(approval.Payload), "sandboxBypass") {
+		t.Fatalf("host approval payload is incomplete: %s", approval.Payload)
 	}
 	if err := eng.ApproveApproval(ctx, sessionID, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
 		t.Fatal(err)
@@ -3397,8 +3430,50 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 	if call.CommandSandbox != tool.CommandSandboxBypass {
 		t.Fatalf("approved command sandbox = %q, want bypass", call.CommandSandbox)
 	}
-	if string(call.Args) != `{"scope":"project","command":"brew install mysql-client"}` {
+	if string(call.Args) != `{"scope":"project","command":"brew install mysql-client","execution":"host","host_access_reason":"install a host package"}` {
 		t.Fatalf("approved command invocation changed: %s", call.Args)
+	}
+}
+
+func TestSandboxCommandReportsBoundaryRequirementWithoutApproval(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	root := t.TempDir()
+	project := &store.Project{ID: "proj_boundary", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "sess_boundary"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	calls := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
+	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner))
+	outsideRaw, err := json.Marshal(map[string]any{"scope": "project", "command": "cat " + filepath.Join(t.TempDir(), "report.txt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		raw    json.RawMessage
+		reason string
+	}{
+		{name: "host service", raw: json.RawMessage(`{"scope":"project","command":"brew install mysql-client"}`), reason: "host_access_required"},
+		{name: "outside path", raw: outsideRaw, reason: "additional_project_access_required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := eng.executeAllowedTool(ctx, sessionID, "turn_boundary", store.ModeCode, tool.Call{CallID: "call_boundary", Name: tool.CommandRun, Args: test.raw})
+			if result.Ok || !strings.Contains(result.Content, test.reason) {
+				t.Fatalf("boundary result = %+v, want %q", result, test.reason)
+			}
+		})
+	}
+	if len(calls.calls) != 0 {
+		t.Fatalf("boundary failures must not execute: %+v", calls.calls)
 	}
 }
 
@@ -3436,7 +3511,7 @@ func TestApprovedDestructiveCommandRemainsSandboxed(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("destructive command approval request not emitted")
 	}
-	if !strings.Contains(string(approval.Payload), `"sandboxBypass":false`) {
+	if !strings.Contains(string(approval.Payload), `"execution":"sandbox"`) || strings.Contains(string(approval.Payload), "sandboxBypass") {
 		t.Fatalf("approval payload must describe sandboxed execution: %s", approval.Payload)
 	}
 	if err := eng.ApproveApproval(ctx, sessionID, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
@@ -4853,8 +4928,30 @@ type approvalDetailsRecordingToolRunner struct {
 	*recordingToolRunner
 }
 
-func (r *approvalDetailsRecordingToolRunner) ApprovalDetails(context.Context, tool.Call) (map[string]any, error) {
-	return map[string]any{}, nil
+func (r *approvalDetailsRecordingToolRunner) ApprovalDetails(_ context.Context, call tool.Call) (map[string]any, error) {
+	if call.Name != tool.CommandRun {
+		return map[string]any{}, nil
+	}
+	var args struct {
+		Command          string `json:"command"`
+		Execution        string `json:"execution"`
+		HostAccessReason string `json:"host_access_reason"`
+		Background       bool   `json:"background"`
+	}
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		return nil, err
+	}
+	if args.Execution == "" {
+		args.Execution = "sandbox"
+	}
+	result := map[string]any{"command": args.Command, "execution": args.Execution}
+	if args.HostAccessReason != "" {
+		result["hostAccessReason"] = args.HostAccessReason
+	}
+	if args.Background {
+		result["background"] = true
+	}
+	return result, nil
 }
 
 func (r *recordingToolRunner) CloseSession(sessionID string) {

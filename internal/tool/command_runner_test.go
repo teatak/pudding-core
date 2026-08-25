@@ -105,6 +105,7 @@ func (r *recordingCommandRunner) Prepare(spec commandSpec) (*commandExecution, e
 		Env:         append([]string(nil), spec.Env...),
 		ProjectDirs: append([]string(nil), spec.ProjectDirs...),
 		SandboxMode: spec.SandboxMode,
+		StateKey:    spec.StateKey,
 	})
 	r.mu.Unlock()
 	execution, err := newDirectCommandRunner().Prepare(spec)
@@ -132,7 +133,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		ProjectDirs: []string{root},
 	})
 	payload := decodeCommandPayload(t, foreground)
-	if !payload.Sandboxed || payload.SandboxKind != "test-sandbox" || !payload.SandboxDenied {
+	if payload.Execution != "sandbox" || payload.SandboxKind != "test-sandbox" || !payload.SandboxDenied {
 		t.Fatalf("foreground sandbox metadata missing: %+v", payload)
 	}
 
@@ -142,7 +143,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		"background": true,
 	})
 	started := decodeBackgroundProcessPayload(t, background)
-	if !started.Sandboxed || started.SandboxKind != "test-sandbox" {
+	if started.Execution != "sandbox" || started.SandboxKind != "test-sandbox" {
 		t.Fatalf("background sandbox metadata missing: %+v", started)
 	}
 

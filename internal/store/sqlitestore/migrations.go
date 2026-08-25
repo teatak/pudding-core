@@ -17,7 +17,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 12
+	currentSchemaVersion       = 13
 )
 
 var (
@@ -279,6 +279,20 @@ var schemaMigrations = map[int]schemaMigration{
 			SELECT session_id,turn_id,'applied',MAX(created_at)
 			FROM turn_file_changes GROUP BY session_id,turn_id;
 		`)
+		return err
+	},
+	13: func(tx *sql.Tx) error {
+		columns := []struct{ name, definition string }{
+			{"last_provider", "TEXT NOT NULL DEFAULT ''"},
+			{"last_model", "TEXT NOT NULL DEFAULT ''"},
+			{"last_estimated_input_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		}
+		for _, column := range columns {
+			if err := addTableColumnIfMissing(tx, "session_usage", column.name, column.definition); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(`DROP TABLE IF EXISTS usage_calibrations`)
 		return err
 	},
 }
@@ -669,10 +683,12 @@ var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"computer_app_grants": {"session_id", "app_id", "created_at"},
 	})
+	delete(out.tables, "usage_calibrations")
+	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
 	out.indexes = append(out.indexes, "sessions_archived_at")
-	out.forbiddenTables = []string{"project_app_bindings"}
+	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations"}
 	return out
 }()
 

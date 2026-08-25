@@ -1,7 +1,6 @@
 package contextbuilder
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/provider"
@@ -32,31 +31,30 @@ func TestEstimateImageTokensUsesModelImageDimensions(t *testing.T) {
 	}
 }
 
-func TestEstimateMessagesTokensUsesCanonicalPartsNotNativeContinuationEnvelope(t *testing.T) {
-	smallContinuation := provider.Continuation{
+func TestEstimateMessagesTokensCountsNativeContinuationAndToolResult(t *testing.T) {
+	continuation := provider.Continuation{
 		Kind: provider.ContinuationOpenAIResponses,
-		Data: []byte(`{"reasoning_details":[]}`),
+		Data: []byte(`{"type":"reasoning","encrypted_content":"abcdefghijklmnopqrstuvwxyz"}`),
 	}
-	largeContinuation := provider.Continuation{
-		Kind: provider.ContinuationOpenAIResponses,
-		Data: []byte(`{"reasoning_details":[{"text":"` + strings.Repeat(`\n`, 100_000) + `"}]}`),
-	}
-	message := provider.Message{
+	messages := []provider.Message{{
 		Role: provider.RoleAssistant,
 		Parts: []provider.Part{
 			{Type: provider.PartToolUse, CallID: "call_1", Name: "inspect"},
 			{Type: provider.PartToolResult, CallID: "call_1", Content: "result"},
 		},
-	}
-	message.Continuations = []provider.Continuation{smallContinuation}
-	want := EstimateMessagesTokens([]provider.Message{message})
-	message.Continuations = []provider.Continuation{largeContinuation}
-	if got := EstimateMessagesTokens([]provider.Message{message}); got != want {
-		t.Fatalf("large native continuation changed estimate: got %d, want %d", got, want)
+		Continuations: []provider.Continuation{continuation},
+	}}
+
+	got := EstimateMessagesTokens(messages)
+	continuationTokens := EstimateTextTokens(string(continuation.Data))
+	toolResultTokens := estimatePartTokens(messages[0].Parts[1])
+	wantFloor := 2*messageTokenOverhead + continuationTokens + toolResultTokens
+	if got < wantFloor {
+		t.Fatalf("EstimateMessagesTokens() = %d, want at least %d", got, wantFloor)
 	}
 }
 
-func TestEstimateMessagesTokensIgnoresTrailingStateOnlyContinuationData(t *testing.T) {
+func TestEstimateMessagesTokensCountsTrailingStateOnlyContinuation(t *testing.T) {
 	first := provider.Continuation{
 		Kind: provider.ContinuationOpenAIResponses,
 		Data: []byte(`{"type":"function_call","call_id":"call_1"}`),
@@ -74,8 +72,12 @@ func TestEstimateMessagesTokensIgnoresTrailingStateOnlyContinuationData(t *testi
 		Continuations: []provider.Continuation{first, trailing},
 	}}
 
-	want := 3*messageTokenOverhead + estimatePartTokens(messages[0].Parts[0]) + estimatePartTokens(messages[0].Parts[1])
-	if got := EstimateMessagesTokens(messages); got != want {
-		t.Fatalf("EstimateMessagesTokens() = %d, want %d", got, want)
+	got := EstimateMessagesTokens(messages)
+	wantFloor := 3*messageTokenOverhead +
+		EstimateTextTokens(string(first.Data)) +
+		estimatePartTokens(messages[0].Parts[1]) +
+		EstimateTextTokens(string(trailing.Data))
+	if got < wantFloor {
+		t.Fatalf("EstimateMessagesTokens() = %d, want at least %d", got, wantFloor)
 	}
 }

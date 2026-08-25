@@ -22,7 +22,7 @@ type backgroundProcessPayload struct {
 	TailOffset    int64                          `json:"tailOffset"`
 	Truncated     bool                           `json:"truncated"`
 	HasMore       bool                           `json:"hasMore"`
-	Sandboxed     bool                           `json:"sandboxed"`
+	Execution     string                         `json:"execution"`
 	SandboxKind   string                         `json:"sandboxKind"`
 	SandboxDenied bool                           `json:"sandboxDenied"`
 	TTY           bool                           `json:"tty"`

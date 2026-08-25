@@ -3654,6 +3654,9 @@ func TestGetSessionUsage(t *testing.T) {
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",
 		map[string]string{"title": "x", "provider": "mock", "model": "m1"}))
 	if _, err := st.RecordSessionUsage(context.Background(), sess.ID, store.UsageRecordInput{
+		Provider:              "mock",
+		Model:                 "m1",
+		EstimatedInputTokens:  100,
 		InputUncachedTokens:   10,
 		InputCachedTokens:     20,
 		CacheCreationTokens:   30,
@@ -3662,15 +3665,11 @@ func TestGetSessionUsage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RecordUsageCalibration(context.Background(), "mock", "m1", 100, 130); err != nil {
-		t.Fatal(err)
-	}
-
 	got := decodeJSON[engine.SessionUsageInfo](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sess.ID+"/usage", nil))
 	if got.SessionID != sess.ID || got.RequestCount != 1 || got.LastPromptTokens != 60 || got.LastOutputTokens != 90 || got.CumulativeTotalTokens != 150 {
 		t.Fatalf("unexpected session usage: %+v", got)
 	}
-	if got.InputCalibrationSamples != 1 || got.InputCalibrationFactor != 1.3 || got.ContextEstimatedTokens <= got.ContextRawEstimatedTokens {
+	if got.InputCalibrationSamples != 1 || got.InputCalibrationFactor != 0.6 || got.ContextEstimatedTokens >= got.ContextRawEstimatedTokens {
 		t.Fatalf("unexpected calibrated estimate: %+v", got)
 	}
 }

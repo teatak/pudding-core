@@ -1578,63 +1578,6 @@ func (s *Store) usageHourlyStat(ctx context.Context, hour time.Time, model strin
 	))
 }
 
-func (s *Store) RecordUsageCalibration(ctx context.Context, providerName, model string, estimatedInputTokens, actualInputTokens int) (*store.UsageCalibrationStat, error) {
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	if providerName == "" || model == "" || estimatedInputTokens <= 0 || actualInputTokens <= 0 {
-		return s.UsageCalibration(ctx, providerName, model)
-	}
-	now := time.Now()
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		var sampleCount int
-		var currentRatio float64
-		err := tx.QueryRowContext(ctx,
-			`SELECT sample_count,input_ratio_ewma FROM usage_calibrations WHERE provider=? AND model=?`,
-			providerName, model,
-		).Scan(&sampleCount, &currentRatio)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		nextRatio := store.NextUsageCalibrationRatio(currentRatio, sampleCount, estimatedInputTokens, actualInputTokens)
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO usage_calibrations(
-				provider,model,sample_count,input_ratio_ewma,
-				last_estimated_input_tokens,last_actual_input_tokens,updated_at
-			) VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(provider,model) DO UPDATE SET
-				sample_count=usage_calibrations.sample_count+1,
-				input_ratio_ewma=excluded.input_ratio_ewma,
-				last_estimated_input_tokens=excluded.last_estimated_input_tokens,
-				last_actual_input_tokens=excluded.last_actual_input_tokens,
-				updated_at=excluded.updated_at`,
-			providerName, model, sampleCount+1, nextRatio,
-			estimatedInputTokens, actualInputTokens, unixMS(now),
-		)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.UsageCalibration(ctx, providerName, model)
-}
-
-func (s *Store) UsageCalibration(ctx context.Context, providerName, model string) (*store.UsageCalibrationStat, error) {
-	providerName = strings.TrimSpace(providerName)
-	model = strings.TrimSpace(model)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stat, err := scanUsageCalibrationStat(s.db.QueryRowContext(ctx,
-		`SELECT provider,model,sample_count,input_ratio_ewma,
-			last_estimated_input_tokens,last_actual_input_tokens,updated_at
-		FROM usage_calibrations WHERE provider=? AND model=?`,
-		providerName, model,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}, nil
-	}
-	return stat, err
-}
-
 func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
 	now := time.Now()
 	requestCount := in.RequestCount
@@ -1654,13 +1597,17 @@ func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in sto
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO session_usage(
 				session_id,request_count,
+				last_provider,last_model,last_estimated_input_tokens,
 				last_input_uncached_tokens,last_input_cached_tokens,last_cache_creation_tokens,
 				last_output_content_tokens,last_output_reasoning_tokens,
 				cumulative_input_uncached_tokens,cumulative_input_cached_tokens,cumulative_cache_creation_tokens,
 				cumulative_output_content_tokens,cumulative_output_reasoning_tokens,updated_at
-			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(session_id) DO UPDATE SET
 				request_count=request_count+excluded.request_count,
+				last_provider=excluded.last_provider,
+				last_model=excluded.last_model,
+				last_estimated_input_tokens=excluded.last_estimated_input_tokens,
 				last_input_uncached_tokens=excluded.last_input_uncached_tokens,
 				last_input_cached_tokens=excluded.last_input_cached_tokens,
 				last_cache_creation_tokens=excluded.last_cache_creation_tokens,
@@ -1673,6 +1620,7 @@ func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in sto
 				cumulative_output_reasoning_tokens=cumulative_output_reasoning_tokens+excluded.cumulative_output_reasoning_tokens,
 				updated_at=excluded.updated_at`,
 			sessionID, requestCount,
+			strings.TrimSpace(in.Provider), strings.TrimSpace(in.Model), clampNonNegative(in.EstimatedInputTokens),
 			inputUncached, inputCached, cacheCreation,
 			outputContent, outputReasoning,
 			inputUncached, inputCached, cacheCreation,
@@ -2776,28 +2724,10 @@ func scanUsageHourlyStat(row messageScanner) (*store.UsageHourlyStat, error) {
 	return &stat, nil
 }
 
-func scanUsageCalibrationStat(row messageScanner) (*store.UsageCalibrationStat, error) {
-	var stat store.UsageCalibrationStat
-	var updated int64
-	err := row.Scan(
-		&stat.Provider,
-		&stat.Model,
-		&stat.SampleCount,
-		&stat.InputRatioEWMA,
-		&stat.LastEstimatedInputTokens,
-		&stat.LastActualInputTokens,
-		&updated,
-	)
-	if err != nil {
-		return nil, err
-	}
-	stat.UpdatedAt = timeFromMS(updated)
-	return &stat, nil
-}
-
 func sessionUsageTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.SessionUsageStat, error) {
 	return scanSessionUsageStat(tx.QueryRowContext(ctx,
 		`SELECT session_id,request_count,
+			last_provider,last_model,last_estimated_input_tokens,
 			last_input_uncached_tokens,last_input_cached_tokens,last_cache_creation_tokens,
 			last_output_content_tokens,last_output_reasoning_tokens,
 			cumulative_input_uncached_tokens,cumulative_input_cached_tokens,cumulative_cache_creation_tokens,
@@ -2813,6 +2743,9 @@ func scanSessionUsageStat(row messageScanner) (*store.SessionUsageStat, error) {
 	err := row.Scan(
 		&stat.SessionID,
 		&stat.RequestCount,
+		&stat.LastProvider,
+		&stat.LastModel,
+		&stat.LastEstimatedInputTokens,
 		&stat.LastInputUncachedTokens,
 		&stat.LastInputCachedTokens,
 		&stat.LastCacheCreationTokens,

@@ -262,35 +262,52 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 	}
 
 	tempRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat > \"$TMPDIR/report.py\""}`), []string{root})
-	if !ok || !tempRisk.LowRisk || tempRisk.SandboxBypass {
+	if !ok || !tempRisk.LowRisk || tempRisk.hostAccessRequired || len(tempRisk.requiredProjectPaths) != 0 {
 		t.Fatalf("sandbox-managed temporary output should remain low risk: %+v ok=%v", tempRisk, ok)
 	}
 
 	tempScriptRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"python3 \"$TMPDIR/report.py\""}`), []string{root})
-	if !ok || !tempScriptRisk.LowRisk || tempScriptRisk.SandboxBypass {
+	if !ok || !tempScriptRisk.LowRisk || tempScriptRisk.hostAccessRequired || len(tempScriptRisk.requiredProjectPaths) != 0 {
 		t.Fatalf("sandbox-managed temporary script should remain low risk: %+v ok=%v", tempScriptRisk, ok)
+	}
+
+	systemInputRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat < /etc/ssl/cert.pem"}`), []string{root})
+	if !ok || !systemInputRisk.LowRisk || len(systemInputRisk.requiredProjectPaths) != 0 {
+		t.Fatalf("sandbox-readable input redirection should remain low risk: %+v ok=%v", systemInputRisk, ok)
+	}
+
+	outsideInput := filepath.Join(t.TempDir(), "input.txt")
+	outsideInputRaw, _ := json.Marshal(map[string]any{
+		"scope":   "project",
+		"command": "cat < " + quoteShellArg(outsideInput),
+	})
+	outsideInputRisk, ok := ClassifyToolCallForProject(CommandRun, outsideInputRaw, []string{root})
+	if !ok || outsideInputRisk.LowRisk || len(outsideInputRisk.requiredProjectPaths) == 0 {
+		t.Fatalf("outside input redirection must require project access: %+v ok=%v", outsideInputRisk, ok)
 	}
 }
 
-func TestClassifyToolCallCommandSeparatesApprovalFromSandboxBypass(t *testing.T) {
+func TestClassifyToolCallCommandSeparatesApprovalFromExecutionBoundary(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "report.txt")
 	outsideScript := filepath.Join(t.TempDir(), "report.py")
 	tests := []struct {
 		name    string
 		command string
-		bypass  bool
+		host    bool
+		outside bool
 	}{
 		{name: "destructive project command", command: "rm -rf build"},
 		{name: "inline Python", command: `python3 -c "print('ok')"`},
 		{name: "external curl", command: "curl https://example.com"},
-		{name: "host package manager", command: "brew install mysql-client", bypass: true},
-		{name: "Git push credentials", command: "git push origin main", bypass: true},
-		{name: "outside output", command: "printf ok > " + quoteShellArg(outside), bypass: true},
-		{name: "outside read", command: "cat " + quoteShellArg(outside), bypass: true},
-		{name: "outside script", command: "python3 " + quoteShellArg(outsideScript), bypass: true},
-		{name: "outside destructive path", command: "rm -rf " + quoteShellArg(outside), bypass: true},
-		{name: "outside PATH", command: "my-tool --check", bypass: true},
+		{name: "host package manager", command: "brew install mysql-client", host: true},
+		{name: "Git push credentials", command: "git push origin main", host: true},
+		{name: "outside output", command: "printf ok > " + quoteShellArg(outside), outside: true},
+		{name: "outside read", command: "cat " + quoteShellArg(outside), outside: true},
+		{name: "outside script", command: "python3 " + quoteShellArg(outsideScript), outside: true},
+		{name: "outside destructive path", command: "rm -rf " + quoteShellArg(outside), outside: true},
+		{name: "outside PATH", command: "my-tool --check", outside: true},
+		{name: "sandbox runtime read", command: "cat /etc/ssl/cert.pem"},
 		{name: "absolute regex is not a path", command: `sed -n '/Users/p' README.md`},
 		{name: "absolute search pattern is not a path", command: `rg '/Users' .`},
 	}
@@ -302,16 +319,21 @@ func TestClassifyToolCallCommandSeparatesApprovalFromSandboxBypass(t *testing.T)
 			}
 			raw, _ := json.Marshal(args)
 			risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
-			if !ok || risk.SandboxBypass != test.bypass {
-				t.Fatalf("sandbox bypass = %v, want %v: %+v", risk.SandboxBypass, test.bypass, risk)
+			if !ok || risk.hostAccessRequired != test.host || (len(risk.requiredProjectPaths) > 0) != test.outside {
+				t.Fatalf("boundary classification = %+v, want host=%v outside=%v", risk, test.host, test.outside)
 			}
 		})
 	}
 
 	wildcardRaw := json.RawMessage(`{"scope":"project","command":"npm run dev","env":{"HOST":"0.0.0.0"}}`)
 	wildcardRisk, ok := ClassifyToolCallForProject(CommandRun, wildcardRaw, []string{root})
-	if !ok || wildcardRisk.LowRisk || wildcardRisk.SandboxBypass {
+	if !ok || wildcardRisk.LowRisk || wildcardRisk.hostAccessRequired || len(wildcardRisk.requiredProjectPaths) != 0 {
 		t.Fatalf("wildcard bind must require approval without full filesystem access: %+v ok=%v", wildcardRisk, ok)
+	}
+
+	hostRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"brew install mysql-client","execution":"host","host_access_reason":"install a host package"}`), []string{root})
+	if !ok || hostRisk.LowRisk || !hostRisk.hostAccessRequired {
+		t.Fatalf("explicit host execution must require approval: %+v ok=%v", hostRisk, ok)
 	}
 }
 

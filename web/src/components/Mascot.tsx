@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties } from "react";
 
 type MascotProps = {
   className?: string;
@@ -188,6 +188,8 @@ export function Mascot({
   showHeadDebugFrame = false,
 }: MascotProps) {
   const motionEnabled = ambientMotion || pointerTracking;
+  const bodyMetalGradientID = `mascot-body-metal-${useId().replaceAll(":", "")}`;
+  const bodyMetalPaint = `url(#${bodyMetalGradientID})`;
   const rootRef = useRef<HTMLSpanElement>(null);
   const headGestureRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
@@ -556,7 +558,7 @@ export function Mascot({
                 data-slot="arm-left-limb"
                 d={LEFT_ARM_PATH}
                 fill="none"
-                stroke="var(--mascot-body)"
+                stroke={bodyMetalPaint}
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -564,7 +566,7 @@ export function Mascot({
                 data-slot="arm-left-palm"
                 cx={LEFT_PALM_X}
                 cy={PALM_Y}
-                fill="var(--mascot-body)"
+                fill={bodyMetalPaint}
                 rx="6"
                 ry="5"
                 transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
@@ -593,7 +595,7 @@ export function Mascot({
                 data-slot="arm-right-limb"
                 d={RIGHT_ARM_PATH}
                 fill="none"
-                stroke="var(--mascot-body)"
+                stroke={bodyMetalPaint}
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -601,7 +603,7 @@ export function Mascot({
                 data-slot="arm-right-palm"
                 cx={RIGHT_PALM_X}
                 cy={PALM_Y}
-                fill="var(--mascot-body)"
+                fill={bodyMetalPaint}
                 rx="6"
                 ry="5"
                 transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
@@ -623,14 +625,14 @@ export function Mascot({
                 <path
                   d="M64 34 C65 28 63 23 60 18"
                   fill="none"
-                  stroke="var(--mascot-body)"
+                  stroke={bodyMetalPaint}
                   strokeLinecap="round"
                   strokeWidth="4"
                 />
                 <circle
                   cx="59"
                   cy="16"
-                  fill="var(--mascot-body)"
+                  fill={bodyMetalPaint}
                   r="5"
                 />
               </svg>
@@ -638,9 +640,25 @@ export function Mascot({
           </span>
 
           <svg data-slot="body-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+            <defs>
+              <linearGradient
+                id={bodyMetalGradientID}
+                gradientUnits="userSpaceOnUse"
+                x1="64"
+                x2="64"
+                y1="34"
+                y2="110"
+              >
+                <stop offset="0" stopColor="var(--mascot-body-metal-top)" />
+                <stop offset="0.34" stopColor="var(--mascot-body)" />
+                <stop offset="0.6" stopColor="var(--mascot-body-metal-low)" />
+                <stop offset="0.78" stopColor="var(--mascot-body-metal-rebound)" />
+                <stop offset="1" stopColor="var(--mascot-body-metal-bottom)" />
+              </linearGradient>
+            </defs>
             <path
               d={BODY_PATH}
-              fill="var(--mascot-body)"
+              fill={bodyMetalPaint}
             />
             <path
               data-slot="body-metal-highlight"
@@ -678,7 +696,7 @@ export function Mascot({
           <svg data-slot="antenna-base-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
             <path
               d="M59 35 L60.5 30 H67.5 L69 35 Z"
-              fill="var(--mascot-body)"
+              fill={bodyMetalPaint}
               stroke="var(--mascot-outline)"
               strokeLinejoin="round"
               strokeWidth="2.25"

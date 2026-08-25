@@ -296,7 +296,7 @@ function LiveAssistantOutput({
   ]);
 
   return (
-    <div className="selectable-text animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
+    <div className="selectable-text min-w-0 text-sm leading-6">
       <div className="min-w-0">
         {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
       </div>

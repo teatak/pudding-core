@@ -9,18 +9,6 @@
 (allow signal (target same-sandbox))
 (allow process-info* (target same-sandbox))
 
-; Basic runtime and loader access.
-(allow file-read* file-test-existence file-map-executable
-  (subpath "/System")
-  (subpath "/Library")
-  (subpath "/usr")
-  (subpath "/bin")
-  (subpath "/sbin")
-  (subpath "/Applications")
-  (subpath "/opt/homebrew")
-  (subpath "/private/etc")
-  (subpath "/private/var/db"))
-
 (allow file-read* file-test-existence file-write-data
   (literal "/dev/null")
   (literal "/dev/zero"))

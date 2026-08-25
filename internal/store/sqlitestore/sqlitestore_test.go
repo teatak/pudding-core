@@ -2102,35 +2102,6 @@ func TestUsageHourlyStatsRecordAndQuery(t *testing.T) {
 	}
 }
 
-func TestUsageCalibrationRecordAndQuery(t *testing.T) {
-	st, _ := openTestStore(t)
-	ctx := context.Background()
-
-	first, err := st.RecordUsageCalibration(ctx, "profile-a", "model-a", 100, 130)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.SampleCount != 1 || first.InputRatioEWMA != 1.3 || first.LastEstimatedInputTokens != 100 || first.LastActualInputTokens != 130 {
-		t.Fatalf("first calibration = %+v", first)
-	}
-
-	second, err := st.RecordUsageCalibration(ctx, "profile-a", "model-a", 100, 110)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.SampleCount != 2 || second.InputRatioEWMA != 1.25 || second.LastEstimatedInputTokens != 100 || second.LastActualInputTokens != 110 {
-		t.Fatalf("second calibration = %+v", second)
-	}
-
-	other, err := st.UsageCalibration(ctx, "profile-a", "model-b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if other.SampleCount != 0 || other.InputRatioEWMA != 1 {
-		t.Fatalf("missing calibration = %+v", other)
-	}
-}
-
 func TestSessionUsageRecordAndQuery(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
@@ -2145,6 +2116,9 @@ func TestSessionUsageRecordAndQuery(t *testing.T) {
 	}
 
 	first, err := st.RecordSessionUsage(ctx, "sess_usage", store.UsageRecordInput{
+		Provider:              "profile-a",
+		Model:                 "model-a",
+		EstimatedInputTokens:  100,
 		InputUncachedTokens:   10,
 		InputCachedTokens:     20,
 		CacheCreationTokens:   30,
@@ -2154,11 +2128,15 @@ func TestSessionUsageRecordAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.RequestCount != 1 || first.LastInputTokens() != 60 || first.LastOutputTokens() != 90 || first.CumulativeTotalTokens() != 150 {
+	if first.RequestCount != 1 || first.LastProvider != "profile-a" || first.LastModel != "model-a" ||
+		first.LastEstimatedInputTokens != 100 || first.LastInputTokens() != 60 || first.LastOutputTokens() != 90 || first.CumulativeTotalTokens() != 150 {
 		t.Fatalf("first session usage wrong: %+v", first)
 	}
 
 	second, err := st.RecordSessionUsage(ctx, "sess_usage", store.UsageRecordInput{
+		Provider:              "profile-b",
+		Model:                 "model-b",
+		EstimatedInputTokens:  40,
 		RequestCount:          2,
 		InputUncachedTokens:   -1,
 		InputCachedTokens:     1,
@@ -2168,7 +2146,9 @@ func TestSessionUsageRecordAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.RequestCount != 3 || second.LastInputUncachedTokens != 0 || second.LastInputTokens() != 1 || second.LastOutputTokens() != 5 || second.CumulativeTotalTokens() != 156 {
+	if second.RequestCount != 3 || second.LastProvider != "profile-b" || second.LastModel != "model-b" ||
+		second.LastEstimatedInputTokens != 40 || second.LastInputUncachedTokens != 0 || second.LastInputTokens() != 1 ||
+		second.LastOutputTokens() != 5 || second.CumulativeTotalTokens() != 156 {
 		t.Fatalf("merged session usage wrong: %+v", second)
 	}
 

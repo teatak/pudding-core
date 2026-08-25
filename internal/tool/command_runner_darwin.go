@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -50,7 +49,7 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 	if err != nil {
 		return nil, err
 	}
-	stateRoot, err := r.prepareStateRoot(projectRoots)
+	stateRoot, err := r.prepareStateRoot(spec.StateKey, projectRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +64,7 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 
 	readRoots := append([]string(nil), projectRoots...)
 	readRoots = append(readRoots, stateRoot)
+	readRoots = append(readRoots, sandboxStaticReadRoots()...)
 	readRoots = append(readRoots, sandboxKnownReadRoots()...)
 	readRoots = append(readRoots, toolchainRoot)
 	readRoots = sandboxUniquePaths(readRoots)
@@ -89,7 +89,7 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 	}, nil
 }
 
-func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, error) {
+func (r *macOSCommandRunner) prepareStateRoot(stateKey string, projectRoots []string) (string, error) {
 	homeRoot, err := filepath.EvalSymlinks(r.homeDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve command sandbox home: %w", err)
@@ -98,13 +98,28 @@ func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, er
 	if err != nil || !homeInfo.IsDir() {
 		return "", errors.New("command sandbox home must be a directory")
 	}
-	hash := sha256.Sum256([]byte(strings.Join(projectRoots, "\x00")))
+	stateKey = strings.TrimSpace(stateKey)
+	if stateKey == "" && len(projectRoots) > 0 {
+		stateKey = projectRoots[0]
+	}
+	if stateKey == "" {
+		return "", errors.New("command sandbox state key is required")
+	}
 	runtimeRoot := filepath.Join(homeRoot, "runtime")
 	sandboxRoot := filepath.Join(runtimeRoot, "command-sandbox")
-	stateRoot := filepath.Join(sandboxRoot, hex.EncodeToString(hash[:]))
+	stateRoot := sandboxStateRoot(sandboxRoot, stateKey)
 	for _, dir := range []string{
 		runtimeRoot,
 		sandboxRoot,
+	} {
+		if err := ensureSandboxStateDir(dir); err != nil {
+			return "", fmt.Errorf("prepare command sandbox state: %w", err)
+		}
+	}
+	if err := migrateLegacySandboxState(sandboxRoot, stateRoot, projectRoots); err != nil {
+		return "", fmt.Errorf("migrate command sandbox state: %w", err)
+	}
+	for _, dir := range []string{
 		stateRoot,
 		filepath.Join(stateRoot, "cache"),
 		filepath.Join(stateRoot, "cache", "corepack"),
@@ -138,6 +153,41 @@ func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, er
 		return "", errors.New("command sandbox state escapes Pudding home")
 	}
 	return resolved, nil
+}
+
+func sandboxStateRoot(sandboxRoot, stateKey string) string {
+	hash := sha256.Sum256([]byte(stateKey))
+	return filepath.Join(sandboxRoot, hex.EncodeToString(hash[:]))
+}
+
+func migrateLegacySandboxState(sandboxRoot, stateRoot string, projectRoots []string) error {
+	legacyRoot := sandboxStateRoot(sandboxRoot, strings.Join(projectRoots, "\x00"))
+	if legacyRoot == stateRoot {
+		return nil
+	}
+	if _, err := os.Lstat(stateRoot); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	legacyInfo, err := os.Lstat(legacyRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if legacyInfo.Mode()&os.ModeSymlink != 0 || !legacyInfo.IsDir() {
+		return errors.New("legacy sandbox state path must be a directory, not a symlink")
+	}
+	if err := os.Rename(legacyRoot, stateRoot); err != nil {
+		// Another command may have completed the same atomic migration.
+		if _, targetErr := os.Lstat(stateRoot); targetErr == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func ensureSandboxStateDir(path string) error {
@@ -246,93 +296,6 @@ func sandboxExecutableRoot(executable string, projectRoots []string) (string, er
 	return "", fmt.Errorf("command executable %q is outside the project and trusted toolchains", executable)
 }
 
-func sandboxStaticReadRoots() []string {
-	return []string{
-		"/System",
-		"/Library",
-		"/usr",
-		"/bin",
-		"/sbin",
-		"/Applications",
-		"/opt/homebrew",
-	}
-}
-
-func sandboxKnownReadRoots() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	candidates := []string{
-		filepath.Join(home, "go", "pkg", "mod"),
-		filepath.Join(home, ".cargo", "registry"),
-		filepath.Join(home, ".cargo", "git"),
-		filepath.Join(home, ".cache", "pip"),
-		filepath.Join(home, "Library", "Caches", "pip"),
-		filepath.Join(home, ".npm", "_cacache"),
-		filepath.Join(home, "Library", "pnpm", "store"),
-		filepath.Join(home, ".local", "share", "pnpm", "store"),
-	}
-	candidates = append(candidates, sandboxToolchainCandidates(home)...)
-	return sandboxExistingPaths(candidates, true)
-}
-
-func sandboxToolchainCandidates(home string) []string {
-	return []string{
-		filepath.Join(home, ".asdf", "installs"),
-		filepath.Join(home, ".asdf", "shims"),
-		filepath.Join(home, ".cargo", "bin"),
-		filepath.Join(home, ".nvm", "versions"),
-		filepath.Join(home, ".npm-global"),
-		filepath.Join(home, ".local", "bin"),
-		filepath.Join(home, ".local", "share", "pipx", "venvs"),
-		filepath.Join(home, ".volta", "tools", "image"),
-		filepath.Join(home, ".volta", "bin"),
-		filepath.Join(home, ".pyenv", "versions"),
-		filepath.Join(home, ".rustup", "toolchains"),
-		filepath.Join(home, ".sdkman", "candidates"),
-		filepath.Join(home, ".local", "share", "mise", "installs"),
-		filepath.Join(home, ".local", "share", "mise", "shims"),
-		filepath.Join(home, "go", "bin"),
-		filepath.Join(home, "Library", "Android", "sdk"),
-		filepath.Join(home, "Library", "pnpm"),
-	}
-}
-
-func sandboxExistingPaths(paths []string, directories bool) []string {
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() != directories {
-			continue
-		}
-		resolved, err := filepath.EvalSymlinks(path)
-		if err == nil {
-			out = append(out, resolved)
-		}
-	}
-	return sandboxUniquePaths(out)
-}
-
-func sandboxUniquePaths(paths []string) []string {
-	seen := make(map[string]struct{}, len(paths))
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		path = filepath.Clean(path)
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		out = append(out, path)
-	}
-	sort.Strings(out)
-	return out
-}
-
 type sandboxDefinition struct {
 	key  string
 	path string
@@ -342,7 +305,7 @@ func sandboxProfile(readRoots, writeRoots []string) (string, []sandboxDefinition
 	var policy strings.Builder
 	policy.WriteString(macOSCommandSandboxBasePolicy)
 	policy.WriteString("\n; Per-command filesystem grants.\n")
-	ancestorRoots := append(append([]string(nil), sandboxStaticReadRoots()...), readRoots...)
+	ancestorRoots := append([]string(nil), readRoots...)
 	ancestorRoots = append(ancestorRoots, writeRoots...)
 	ancestors := sandboxAncestorPaths(ancestorRoots)
 	definitions := make([]sandboxDefinition, 0, len(ancestors)+len(readRoots)+len(writeRoots))
@@ -407,8 +370,10 @@ func sandboxEnvironment(env []string, stateRoot string) []string {
 	out = sandboxPrependPath(out, filepath.Join(npmPrefix, "bin"), pnpmHome)
 	out = sandboxSetEnv(out, "PIP_CACHE_DIR", filepath.Join(cacheDir, "pip"))
 	out = sandboxSetEnv(out, "UV_CACHE_DIR", filepath.Join(cacheDir, "uv"))
-	out = sandboxSetEnv(out, "PYTHONUSERBASE", filepath.Join(stateRoot, "python"))
+	pythonUserBase := filepath.Join(stateRoot, "python")
+	out = sandboxSetEnv(out, "PYTHONUSERBASE", pythonUserBase)
 	out = sandboxSetEnv(out, "PYTHONPYCACHEPREFIX", filepath.Join(cacheDir, "python-bytecode"))
+	out = sandboxPrependPath(out, filepath.Join(pythonUserBase, "bin"))
 	if certificateBundle := sandboxCertificateBundle(); certificateBundle != "" {
 		out = sandboxSetEnvDefault(out, "SSL_CERT_FILE", certificateBundle)
 		out = sandboxSetEnvDefault(out, "REQUESTS_CA_BUNDLE", certificateBundle)

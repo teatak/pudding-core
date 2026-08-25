@@ -576,8 +576,6 @@ export const useOverlayStore = create<OverlayState>((set) => ({
           phase = "streaming_tool_args";
         } else if (event.phase === "running" || event.phase === "output") {
           phase = "executing_tool";
-        } else if (event.phase === "error") {
-          phase = "error";
         }
         const nextRunningTurns =
           state.runningTurns[event.sessionID] === event.turnID

@@ -370,6 +370,7 @@ func TestMacOSCommandSandboxEnvironmentIsolatesGitConfig(t *testing.T) {
 	}
 	pathDirs := filepath.SplitList(sandboxEnvValue(env, "PATH"))
 	for index, want := range []string{
+		filepath.Join(stateRoot, "python", "bin"),
 		filepath.Join(stateRoot, "node", "npm-prefix", "bin"),
 		filepath.Join(stateRoot, "node", "pnpm-home"),
 	} {
@@ -394,12 +395,12 @@ func TestMacOSCommandSandboxUsesPrivateTemporaryAndPythonState(t *testing.T) {
 	runner := newPlatformCommandRunner(home)
 	result := runMacOSSandboxTestCommand(t, runner, commandSpec{
 		Executable:  "/bin/sh",
-		Args:        []string{"-lc", `printf script > "$TMPDIR/example.py" && test -f "$TMPDIR/example.py" && mkdir -p "$PYTHONUSERBASE/demo" && printf package > "$PYTHONUSERBASE/demo/data.txt"`},
+		Args:        []string{"-lc", `printf script > "$TMPDIR/example.py" && test -f "$TMPDIR/example.py" && mkdir -p "$PYTHONUSERBASE/demo" "$PYTHONUSERBASE/bin" && printf package > "$PYTHONUSERBASE/demo/data.txt" && printf '#!/bin/sh\nprintf python-cli' > "$PYTHONUSERBASE/bin/pudding-python-cli" && chmod +x "$PYTHONUSERBASE/bin/pudding-python-cli" && pudding-python-cli`},
 		CWD:         project,
 		Env:         mustCommandEnvironment(t),
 		ProjectDirs: []string{project},
 	})
-	if result.exitCode != 0 {
+	if result.exitCode != 0 || strings.TrimSpace(result.stdout) != "python-cli" {
 		t.Fatalf("private command state failed: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 	}
 	if _, err := exec.LookPath("python3"); err != nil {
@@ -481,7 +482,7 @@ func TestMacOSCommandSandboxRejectsSymlinkedStateRoot(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	runner := &macOSCommandRunner{homeDir: home}
-	stateRoot, err := runner.prepareStateRoot([]string{project})
+	stateRoot, err := runner.prepareStateRoot("project:test", []string{project})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,11 +493,57 @@ func TestMacOSCommandSandboxRejectsSymlinkedStateRoot(t *testing.T) {
 	if err := os.Symlink(outside, stateRoot); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if _, err := runner.prepareStateRoot([]string{project}); err == nil {
+	if _, err := runner.prepareStateRoot("project:test", []string{project}); err == nil {
 		t.Fatal("expected symlinked sandbox state root to be rejected")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "cache")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("sandbox state escaped into symlink target, err=%v", err)
+	}
+}
+
+func TestMacOSCommandSandboxStateSurvivesProjectRootChanges(t *testing.T) {
+	runner := &macOSCommandRunner{homeDir: t.TempDir()}
+	first, err := runner.prepareStateRoot("project:stable", []string{t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runner.prepareStateRoot("project:stable", []string{t.TempDir(), t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("state root changed after project authorization update: %q != %q", first, second)
+	}
+}
+
+func TestMacOSCommandSandboxMigratesLegacyProjectState(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	resolvedProject, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxRoot := filepath.Join(home, "runtime", "command-sandbox")
+	legacyRoot := sandboxStateRoot(sandboxRoot, resolvedProject)
+	if err := os.MkdirAll(filepath.Join(legacyRoot, "python"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(legacyRoot, "python", "installed-package")
+	if err := os.WriteFile(marker, []byte("preserved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &macOSCommandRunner{homeDir: home}
+	stateRoot, err := runner.prepareStateRoot("project:stable", []string{resolvedProject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(stateRoot, "python", "installed-package"))
+	if err != nil || string(content) != "preserved" {
+		t.Fatalf("legacy sandbox state was not preserved: content=%q err=%v", content, err)
+	}
+	if _, err := os.Lstat(legacyRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy sandbox state still exists after migration: %v", err)
 	}
 }
 

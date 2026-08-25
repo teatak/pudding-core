@@ -21,13 +21,14 @@ const (
 )
 
 type ToolRisk struct {
-	Class         RiskClass `json:"class"`
-	Operation     string    `json:"operation"`
-	Scope         string    `json:"scope"`
-	Paths         []string  `json:"paths,omitempty"`
-	Summary       string    `json:"summary"`
-	LowRisk       bool      `json:"lowRisk,omitempty"`
-	SandboxBypass bool      `json:"sandboxBypass,omitempty"`
+	Class                RiskClass `json:"class"`
+	Operation            string    `json:"operation"`
+	Scope                string    `json:"scope"`
+	Paths                []string  `json:"paths,omitempty"`
+	Summary              string    `json:"summary"`
+	LowRisk              bool      `json:"lowRisk,omitempty"`
+	hostAccessRequired   bool
+	requiredProjectPaths []string
 }
 
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
@@ -292,8 +293,8 @@ func classifyGitReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 }
 
 func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
-	var args commandRunArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject || validateCommandInput(args) != nil {
+	args, err := decodeCommandRunArgs(raw)
+	if err != nil {
 		return ToolRisk{}, false
 	}
 	analysis, err := analyzeShellCommand(args.Command)
@@ -316,31 +317,33 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	for _, argv := range analysis.Commands {
 		commandOperation := commandOperation(argv[0])
 		executableAllowed := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs)
-		argsEscapeProject := commandPathArgsEscapeProject(argv, args.CWD, projectDirs)
+		outsidePaths := commandPathArgsOutsideProject(argv, args.CWD, projectDirs)
+		if !executableAllowed && !isBareCommand(argv[0]) {
+			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, args.CWD, projectDirs)...)
+		}
 		commandLowRisk := executableAllowed &&
 			!commandRequiresApproval(argv) &&
-			!argsEscapeProject
+			len(outsidePaths) == 0 &&
+			!commandNeedsHostAccess(argv)
 		risk.LowRisk = risk.LowRisk && commandLowRisk
-		risk.SandboxBypass = risk.SandboxBypass ||
-			!executableAllowed ||
-			argsEscapeProject ||
-			commandNeedsHostAccess(argv)
+		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
+		risk.hostAccessRequired = risk.hostAccessRequired || commandNeedsHostAccess(argv)
 		if isDestructiveCommand(commandOperation) {
 			risk.Class = RiskClassDestructive
 			risk.LowRisk = false
 		}
 	}
-	if !commandRedirectionsInsideProject(analysis.Redirections, args.CWD, projectDirs) {
+	if outsidePaths := commandRedirectionsOutsideProject(analysis.Redirections, args.CWD, projectDirs); len(outsidePaths) > 0 {
 		risk.LowRisk = false
-		risk.SandboxBypass = true
+		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 	}
 	if len(args.Env) > 0 {
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
 		if commandEnvironmentRequiresApproval(args.Env) {
 			risk.LowRisk = false
 		}
-		if commandEnvironmentNeedsHostAccess(args.Env, args.CWD, projectDirs) {
-			risk.SandboxBypass = true
+		if outsidePaths := commandEnvironmentOutsideProjectPaths(args.Env, args.CWD, projectDirs); len(outsidePaths) > 0 {
+			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		}
 	}
 	if args.Background {
@@ -353,6 +356,12 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	if risk.Class == RiskClassDestructive {
 		risk.Summary = "Run destructive project command: " + compactShellCommand(args.Command)
 	}
+	if args.Execution == CommandExecutionHost {
+		risk.LowRisk = false
+		risk.Paths = compactRiskPaths(append(risk.Paths, risk.requiredProjectPaths...)...)
+		risk.Summary = "Run one command outside the project sandbox: " + compactShellCommand(args.Command)
+	}
+	risk.requiredProjectPaths = compactRiskPaths(risk.requiredProjectPaths...)
 	return risk, true
 }
 
@@ -360,36 +369,40 @@ func compactShellCommand(command string) string {
 	return compactCommand([]string{strings.Join(strings.Fields(command), " ")})
 }
 
-func commandRedirectionsInsideProject(redirections []shellRedirection, cwd string, projectDirs []string) bool {
+func commandRedirectionsOutsideProject(redirections []shellRedirection, cwd string, projectDirs []string) []string {
 	roots := normalizeProjectDirs(projectDirs)
 	resolvedCWD := ""
 	if len(roots) > 0 {
 		_, resolved, _, err := resolveProjectPath(roots, cwd, true, false)
 		if err != nil {
-			return false
+			return compactRiskPaths(cwd)
 		}
 		resolvedCWD = resolved
 	}
+	var outside []string
 	for _, redirection := range redirections {
 		path := strings.TrimSpace(redirection.Path)
 		if isSafeDeviceRedirection(path) {
 			continue
 		}
 		if path == "" {
-			return false
+			outside = append(outside, "<empty redirection>")
+			continue
 		}
 		if len(roots) == 0 {
 			cleaned := filepath.Clean(path)
-			if filepath.IsAbs(path) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-				return false
+			if (filepath.IsAbs(path) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator))) &&
+				(redirection.Writes || !commandPathReadableInSandbox(path)) {
+				outside = append(outside, path)
 			}
 			continue
 		}
-		if !commandPathInsideProject(path, resolvedCWD, roots) {
-			return false
+		if !commandPathInsideProject(path, resolvedCWD, roots) &&
+			(redirection.Writes || !commandPathReadableInSandbox(path)) {
+			outside = append(outside, path)
 		}
 	}
-	return true
+	return compactRiskPaths(outside...)
 }
 
 func isSafeDeviceRedirection(path string) bool {
@@ -401,19 +414,30 @@ func isSafeDeviceRedirection(path string) bool {
 	}
 }
 
-func commandPathArgsEscapeProject(argv []string, cwd string, projectDirs []string) bool {
+func commandPathArgsOutsideProject(argv []string, cwd string, projectDirs []string) []string {
 	if len(argv) == 0 {
-		return false
+		return nil
 	}
-	return commandPathsEscapeProject(commandPathArgs(argv), cwd, projectDirs)
+	outside := commandPathsOutsideProject(commandPathArgs(argv), cwd, projectDirs)
+	if !commandReadsSandboxSystemPaths(commandOperation(argv[0])) {
+		return outside
+	}
+	filtered := outside[:0]
+	for _, path := range outside {
+		if !commandPathReadableInSandbox(path) {
+			filtered = append(filtered, path)
+		}
+	}
+	return filtered
 }
 
-func commandPathsEscapeProject(paths []string, cwd string, projectDirs []string) bool {
+func commandPathsOutsideProject(paths []string, cwd string, projectDirs []string) []string {
 	roots := normalizeProjectDirs(projectDirs)
 	resolvedCWD := ""
 	if len(roots) > 0 {
 		_, resolvedCWD, _, _ = resolveProjectPath(roots, cwd, true, false)
 	}
+	var outside []string
 	for _, path := range paths {
 		candidate := strings.TrimSpace(path)
 		if index := strings.IndexByte(candidate, '='); index >= 0 {
@@ -429,11 +453,20 @@ func commandPathsEscapeProject(paths []string, cwd string, projectDirs []string)
 		cleaned := filepath.Clean(candidate)
 		if filepath.IsAbs(candidate) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 			if resolvedCWD == "" || !commandPathInsideProject(candidate, resolvedCWD, roots) {
-				return true
+				outside = append(outside, candidate)
 			}
 		}
 	}
-	return false
+	return compactRiskPaths(outside...)
+}
+
+func commandReadsSandboxSystemPaths(operation string) bool {
+	switch operation {
+	case "cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandPathArgs(argv []string) []string {
@@ -742,7 +775,8 @@ func commandEnvironmentRequiresApproval(env map[string]string) bool {
 	return false
 }
 
-func commandEnvironmentNeedsHostAccess(env map[string]string, cwd string, projectDirs []string) bool {
+func commandEnvironmentOutsideProjectPaths(env map[string]string, cwd string, projectDirs []string) []string {
+	var outside []string
 	for key, value := range env {
 		key = strings.ToUpper(strings.TrimSpace(key))
 		var candidates []string
@@ -766,11 +800,13 @@ func commandEnvironmentNeedsHostAccess(env map[string]string, cwd string, projec
 				candidates = filepath.SplitList(value)
 			}
 		}
-		if commandPathsEscapeProject(candidates, cwd, projectDirs) {
-			return true
+		for _, path := range commandPathsOutsideProject(candidates, cwd, projectDirs) {
+			if !commandPathReadableInSandbox(path) {
+				outside = append(outside, path)
+			}
 		}
 	}
-	return false
+	return compactRiskPaths(outside...)
 }
 
 func commandRequestsWildcardBind(args []string) bool {

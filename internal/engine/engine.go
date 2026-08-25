@@ -537,14 +537,7 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if err != nil {
 		return nil, err
 	}
-	calibration, err := e.store.UsageCalibration(ctx, resolved.providerName, resolved.model)
-	if err != nil {
-		return nil, err
-	}
-	calibrationFactor := calibration.InputRatioEWMA
-	if calibrationFactor <= 0 {
-		calibrationFactor = 1
-	}
+	calibrationFactor, calibrationApplied := sessionInputCalibrationFactor(stat, resolved.providerName, resolved.model)
 	messageEstimatedTokens := calibratedTokenEstimate(estimate.MessageTokens, calibrationFactor)
 	systemPromptEstimatedTokens := calibratedTokenEstimate(estimate.SystemTokens, calibrationFactor)
 	toolsSchemaEstimatedTokens := calibratedTokenEstimate(estimate.ToolsTokens, calibrationFactor)
@@ -563,7 +556,7 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 		ContextEstimatedTokens:          contextEstimatedTokens,
 		ContextRawEstimatedTokens:       estimate.Total(),
 		InputCalibrationFactor:          calibrationFactor,
-		InputCalibrationSamples:         calibration.SampleCount,
+		InputCalibrationSamples:         boolInt(calibrationApplied),
 		MessageEstimatedTokens:          messageEstimatedTokens,
 		PromptOverheadEstimatedTokens:   systemPromptEstimatedTokens + toolsSchemaEstimatedTokens,
 		SystemPromptEstimatedTokens:     systemPromptEstimatedTokens,
@@ -597,6 +590,21 @@ func calibratedTokenEstimate(raw int, factor float64) int {
 		factor = 1
 	}
 	return int(math.Ceil(float64(raw) * factor))
+}
+
+func sessionInputCalibrationFactor(stat *store.SessionUsageStat, providerName, model string) (float64, bool) {
+	if stat == nil || stat.LastEstimatedInputTokens <= 0 || stat.LastInputTokens() <= 0 ||
+		stat.LastProvider != strings.TrimSpace(providerName) || stat.LastModel != strings.TrimSpace(model) {
+		return 1, false
+	}
+	return float64(stat.LastInputTokens()) / float64(stat.LastEstimatedInputTokens), true
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *resolvedModel) (*SubmitResult, error) {
@@ -1734,7 +1742,9 @@ func (e *Engine) recordUsage(
 	}
 	in := store.UsageRecordInput{
 		OccurredAt:            time.Now(),
+		Provider:              providerName,
 		Model:                 model,
+		EstimatedInputTokens:  estimatedInputTokens,
 		RequestCount:          requestCount,
 		InputUncachedTokens:   usage.InputUncachedTokens,
 		InputCachedTokens:     usage.InputCachedTokens,
@@ -1747,12 +1757,6 @@ func (e *Engine) recordUsage(
 	}
 	if _, err := e.store.RecordSessionUsage(ctx, sessionID, in); err != nil {
 		slog.Warn("engine: record session usage failed", "sessionID", sessionID, "err", err)
-	}
-	actualInputTokens := usage.InputUncachedTokens + usage.InputCachedTokens + usage.CacheCreationTokens
-	if estimatedInputTokens > 0 && actualInputTokens > 0 {
-		if _, err := e.store.RecordUsageCalibration(ctx, providerName, model, estimatedInputTokens, actualInputTokens); err != nil {
-			slog.Warn("engine: record usage calibration failed", "provider", providerName, "model", model, "err", err)
-		}
 	}
 }
 
@@ -1989,16 +1993,25 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		risk = refineToolRisk(call.Name, risk, approvalDetails)
 		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk, approvalDetails)
 		call.CommandSandbox = commandSandboxModeForProject(project)
+		call.CommandStateKey = commandSandboxStateKey(project, sessionID)
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)
 		} else if err != nil {
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("approval policy: %v", err)}
-		} else if required {
+		} else if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce {
+			if boundaryFailure, failed := tool.CommandBoundaryFailure(call, risk); failed {
+				result = boundaryFailure
+			}
+		}
+		if result.CallID == "" && result.Name == "" && required {
 			var approved bool
 			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails)
 			if approved {
-				if call.Name == tool.CommandRun && risk.SandboxBypass {
-					call.CommandSandbox = tool.CommandSandboxBypass
+				if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce {
+					execution, _ := tool.RequestedCommandExecution(call.Args)
+					if execution == tool.CommandExecutionHost {
+						call.CommandSandbox = tool.CommandSandboxBypass
+					}
 				}
 				result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 			}
@@ -2008,6 +2021,13 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 	}
 	return result
+}
+
+func commandSandboxStateKey(project *store.Project, sessionID string) string {
+	if project != nil {
+		return "project:" + project.ID
+	}
+	return "session:" + sessionID
 }
 
 func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool) {

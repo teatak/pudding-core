@@ -11,6 +11,7 @@ type commandSpec struct {
 	Env         []string
 	ProjectDirs []string
 	SandboxMode CommandSandboxMode
+	StateKey    string
 }
 
 type commandExecution struct {

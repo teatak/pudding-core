@@ -34,7 +34,7 @@ type commandPayload struct {
 	VerificationStatus string              `json:"verificationStatus"`
 	DiagnosticCount    int                 `json:"diagnosticCount"`
 	Diagnostics        []commandDiagnostic `json:"diagnostics"`
-	Sandboxed          bool                `json:"sandboxed"`
+	Execution          string              `json:"execution"`
 	SandboxKind        string              `json:"sandboxKind"`
 	SandboxDenied      bool                `json:"sandboxDenied"`
 }
@@ -51,7 +51,7 @@ func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
 		"cwd":     "nested",
 	})
 	payload := decodeCommandPayload(t, res)
-	if !res.Ok || !payload.OK || payload.ExitCode != 0 {
+	if !res.Ok || !payload.OK || payload.ExitCode != 0 || payload.Execution != "host" {
 		t.Fatalf("command should succeed: result=%+v payload=%+v", res, payload)
 	}
 	if payload.VerificationKind != "" || payload.VerificationStatus != "" {
@@ -151,6 +151,26 @@ func TestCommandRunRejectsCWDOutsideProject(t *testing.T) {
 	})
 	if res.Ok || !strings.Contains(res.Content, `"reason":"path_not_authorized"`) {
 		t.Fatalf("outside cwd must be rejected: %+v", res)
+	}
+}
+
+func TestDecodeCommandExecutionBoundary(t *testing.T) {
+	defaultArgs, err := decodeCommandRunArgs(json.RawMessage(`{"scope":"project","command":"go test ./..."}`))
+	if err != nil || defaultArgs.Execution != CommandExecutionSandbox {
+		t.Fatalf("default execution = %+v, err=%v", defaultArgs, err)
+	}
+	hostArgs, err := decodeCommandRunArgs(json.RawMessage(`{"scope":"project","command":"brew install jq","execution":"host","host_access_reason":"install a host package"}`))
+	if err != nil || hostArgs.Execution != CommandExecutionHost || hostArgs.HostAccessReason == "" {
+		t.Fatalf("host execution = %+v, err=%v", hostArgs, err)
+	}
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"scope":"project","command":"brew install jq","execution":"host"}`),
+		json.RawMessage(`{"scope":"project","command":"go test ./...","host_access_reason":"not needed"}`),
+		json.RawMessage(`{"scope":"project","command":"go test ./...","execution":"unknown"}`),
+	} {
+		if _, err := decodeCommandRunArgs(raw); err == nil {
+			t.Fatalf("invalid boundary arguments accepted: %s", raw)
+		}
 	}
 }
 

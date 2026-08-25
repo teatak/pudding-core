@@ -50,7 +50,7 @@ type BackgroundProcessSnapshot struct {
 	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
 	Reason        string     `json:"reason,omitempty"`
 	Error         string     `json:"error,omitempty"`
-	Sandboxed     bool       `json:"sandboxed"`
+	Execution     string     `json:"execution"`
 	SandboxKind   string     `json:"sandboxKind,omitempty"`
 	SandboxDenied bool       `json:"sandboxDenied,omitempty"`
 	TTY           bool       `json:"tty,omitempty"`
@@ -197,7 +197,7 @@ func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
 	}
 	commandArgs := commandRunArgs{Scope: args.Scope, Command: args.Command, CWD: args.CWD, Env: args.Env}
 	executable, invocationArgs, shell := commandInvocation(commandArgs)
-	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, env, executable, invocationArgs, args.Command, shell, args.TTY)
+	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, call.CommandStateKey, env, executable, invocationArgs, args.Command, shell, args.TTY)
 	if err != nil {
 		return backgroundProcessError(out, err)
 	}
@@ -294,7 +294,7 @@ func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	return args, nil
 }
 
-func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, projectDirs []string, sandboxMode CommandSandboxMode, env []string, executable string, invocationArgs []string, command, shell string, tty bool) (*backgroundProcess, error) {
+func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, projectDirs []string, sandboxMode CommandSandboxMode, stateKey string, env []string, executable string, invocationArgs []string, command, shell string, tty bool) (*backgroundProcess, error) {
 	if tty && runtime.GOOS == "windows" {
 		return nil, errors.New("interactive command sessions are unavailable on Windows")
 	}
@@ -305,6 +305,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		Env:         env,
 		ProjectDirs: projectDirs,
 		SandboxMode: sandboxMode,
+		StateKey:    stateKey,
 	})
 	if err != nil {
 		return nil, err
@@ -605,6 +606,7 @@ func (p *backgroundProcess) wait() {
 	}
 	if p.sandboxed && (commandSandboxDenied(p.sandboxDetectionTail+"\n"+p.errorText, waitErr) || (waitErr != nil && p.sandboxDenialOutput)) {
 		p.sandboxDenied = true
+		p.reason = "sandbox_denied"
 	}
 	p.scheduleRetentionLocked()
 	stopped := p.requestedStopReason != ""
@@ -774,7 +776,7 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 		"running":   p.running,
 		"cwd":       p.cwd,
 		"startedAt": p.startedAt.UTC().Format(time.RFC3339Nano),
-		"sandboxed": p.sandboxed,
+		"execution": commandExecutionLabel(p.sandboxed),
 	}
 	if p.sandboxKind != "" {
 		payload["sandboxKind"] = p.sandboxKind
@@ -825,7 +827,7 @@ func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 		StartedAt:     p.startedAt,
 		Reason:        p.reason,
 		Error:         p.errorText,
-		Sandboxed:     p.sandboxed,
+		Execution:     commandExecutionLabel(p.sandboxed),
 		SandboxKind:   p.sandboxKind,
 		SandboxDenied: p.sandboxDenied,
 		TTY:           p.tty,

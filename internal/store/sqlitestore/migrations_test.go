@@ -30,6 +30,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		10: "6af6b54cb36da3f00c3d37a334040cd2611688218439afbedd6e567362540e7a",
 		11: "393fa5bed1711a7383d4a9d538a18a0a0322d54bdd52cae94e9a664252fe7d95",
 		12: "8f28c4af75aeafedf3fe75f9d0dd4b064acbc6040330260e74836d57469c5b80",
+		13: "19ae784ea197314f139a5836cd172a6d3c2ca2e3c0f717d69eccf595d25fb99f",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -142,6 +143,64 @@ func TestOpenMigratesVersionElevenTurnFileReplaySnapshots(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesVersionTwelveSessionCalibration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, st, "sess_v12")
+	if _, err := st.RecordSessionUsage(context.Background(), "sess_v12", store.UsageRecordInput{InputUncachedTokens: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		ALTER TABLE session_usage DROP COLUMN last_provider;
+		ALTER TABLE session_usage DROP COLUMN last_model;
+		ALTER TABLE session_usage DROP COLUMN last_estimated_input_tokens;
+		CREATE TABLE usage_calibrations (
+			provider TEXT NOT NULL,
+			model TEXT NOT NULL,
+			sample_count INTEGER NOT NULL DEFAULT 0,
+			input_ratio_ewma REAL NOT NULL DEFAULT 1,
+			last_estimated_input_tokens INTEGER NOT NULL DEFAULT 0,
+			last_actual_input_tokens INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(provider,model)
+		);
+		PRAGMA user_version = 12;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	usage, err := reopened.SessionUsage(context.Background(), "sess_v12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.LastInputTokens() != 42 || usage.LastProvider != "" || usage.LastModel != "" || usage.LastEstimatedInputTokens != 0 {
+		t.Fatalf("migrated session usage = %+v", usage)
+	}
+	var calibrationTables int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='usage_calibrations'`).Scan(&calibrationTables); err != nil {
+		t.Fatal(err)
+	}
+	if calibrationTables != 0 {
+		t.Fatalf("obsolete usage_calibrations table count = %d", calibrationTables)
+	}
+}
+
 func TestOpenMigratesVersionThreeBrowserHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
@@ -177,7 +236,7 @@ func TestOpenMigratesVersionThreeBrowserHistory(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesVersionFourUsageCalibration(t *testing.T) {
+func TestOpenMigratesVersionFourToSessionCalibration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	st, err := Open(path)
 	if err != nil {
@@ -188,7 +247,7 @@ func TestOpenMigratesVersionFourUsageCalibration(t *testing.T) {
 	}
 	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`
-		DROP TABLE usage_calibrations;
+		DROP TABLE IF EXISTS usage_calibrations;
 		PRAGMA user_version = 4;
 	`); err != nil {
 		t.Fatal(err)
@@ -205,12 +264,21 @@ func TestOpenMigratesVersionFourUsageCalibration(t *testing.T) {
 	if err != nil || version != currentSchemaVersion {
 		t.Fatalf("schema version = %d err=%v, want %d", version, err, currentSchemaVersion)
 	}
-	calibration, err := reopened.UsageCalibration(context.Background(), "profile-a", "model-a")
-	if err != nil {
+	var calibrationTables int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='usage_calibrations'`).Scan(&calibrationTables); err != nil {
 		t.Fatal(err)
 	}
-	if calibration.SampleCount != 0 || calibration.InputRatioEWMA != 1 {
-		t.Fatalf("new calibration table returned %+v", calibration)
+	if calibrationTables != 0 {
+		t.Fatalf("obsolete usage_calibrations table count = %d", calibrationTables)
+	}
+	for _, column := range []string{"last_provider", "last_model", "last_estimated_input_tokens"} {
+		columns, err := tableColumns(reopened.db, "session_usage")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := columns[column]; !ok {
+			t.Fatalf("session_usage missing %s", column)
+		}
 	}
 }
 
@@ -427,7 +495,7 @@ func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
 	}
 	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`
-		DROP TABLE usage_calibrations;
+		DROP TABLE IF EXISTS usage_calibrations;
 		DROP TABLE turn_file_changes;
 		DROP TABLE canvas_items;
 		DROP TABLE canvas_closed_items;
@@ -485,7 +553,7 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 
 	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`
-		DROP TABLE usage_calibrations;
+		DROP TABLE IF EXISTS usage_calibrations;
 		DROP TABLE canvas_items;
 		DROP TABLE canvas_closed_items;
 		DROP TABLE canvas_saved_items;

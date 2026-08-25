@@ -135,20 +135,12 @@ CREATE TABLE IF NOT EXISTS usage (
     PRIMARY KEY (hour_start_at, model)
 );
 
-CREATE TABLE IF NOT EXISTS usage_calibrations (
-    provider                    TEXT    NOT NULL,
-    model                       TEXT    NOT NULL,
-    sample_count                INTEGER NOT NULL DEFAULT 0,
-    input_ratio_ewma            REAL    NOT NULL DEFAULT 1,
-    last_estimated_input_tokens INTEGER NOT NULL DEFAULT 0,
-    last_actual_input_tokens    INTEGER NOT NULL DEFAULT 0,
-    updated_at                  INTEGER NOT NULL,
-    PRIMARY KEY (provider, model)
-);
-
 CREATE TABLE IF NOT EXISTS session_usage (
     session_id                         TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     request_count                      INTEGER NOT NULL DEFAULT 0,
+    last_provider                      TEXT    NOT NULL DEFAULT '',
+    last_model                         TEXT    NOT NULL DEFAULT '',
+    last_estimated_input_tokens        INTEGER NOT NULL DEFAULT 0,
     last_input_uncached_tokens         INTEGER NOT NULL DEFAULT 0,
     last_input_cached_tokens           INTEGER NOT NULL DEFAULT 0,
     last_cache_creation_tokens         INTEGER NOT NULL DEFAULT 0,
