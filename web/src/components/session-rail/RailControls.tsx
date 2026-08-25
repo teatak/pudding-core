@@ -239,12 +239,11 @@ export function CollapsibleSessionGroupLabel({
       className={cn(
         "group/project-label relative gap-1 px-0",
         icon === "project" ? "h-8 min-h-8 text-sm" : "h-7 min-h-7 text-[13px]",
-        !interactionDisabled && "has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
-        !interactionDisabled && icon === "project" && "hover:bg-sidebar-accent",
+        !interactionDisabled && !active && "has-[:focus-visible]:bg-[var(--sidebar-hover-background)] has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-[var(--sidebar-hover-background)] has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        !interactionDisabled && !active && icon === "project" && "hover:bg-[var(--sidebar-hover-background)]",
         icon === "project" && "font-normal text-sidebar-foreground!",
         icon !== "project" && "font-normal text-sidebar-foreground/45!",
         dragging && "opacity-45",
-        active && "bg-[var(--sidebar-selected-background)] text-sidebar-accent-foreground",
         dropTargetActive && "pudding-session-drop-project-active",
       )}
     >
@@ -286,7 +285,9 @@ export function CollapsibleSessionGroupLabel({
               <MessageCirclePlus className="size-3.5" />
             </RailIconAction>
           </TooltipTrigger>
-          <TooltipContent side="right">{actionLabel || label}</TooltipContent>
+          <TooltipContent className="pointer-events-none" side="right" sideOffset={4}>
+            {actionLabel || label}
+          </TooltipContent>
         </Tooltip>
       ) : null}
       {activity && !dropTargetActive && !interactionDisabled ? (
@@ -398,7 +399,9 @@ export function ProjectSortHeader({
                   <FolderPlus className="size-3.5" />
                 </RailIconAction>
               </TooltipTrigger>
-              <TooltipContent side="right">{t("project.add")}</TooltipContent>
+              <TooltipContent className="pointer-events-none" side="right" sideOffset={4}>
+                {t("project.add")}
+              </TooltipContent>
             </Tooltip>
           </>
         ) : null}

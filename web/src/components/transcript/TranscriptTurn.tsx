@@ -47,6 +47,8 @@ function TranscriptTurnView({
       {turn.user ? (
         <div className="min-w-0">
           <UserInput
+            disclosure={disclosure}
+            disclosureKey={`${turn.key}:user`}
             token={token}
             user={turn.user}
             onQueuedCancel={onQueuedCancel}

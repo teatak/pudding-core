@@ -41,7 +41,10 @@ import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
 } from "@/components/AppMenu";
-import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import {
+  AppPopoverContent as PopoverContent,
+  appPopoverControlItemStateClassName,
+} from "@/components/AppPopover";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -693,7 +696,10 @@ export function ProviderProfileEditorDialog({
                               filteredCandidateIDs.map((id) => (
                                 <label
                                   key={id}
-                                  className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                                  className={cn(
+                                    "flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+                                    appPopoverControlItemStateClassName,
+                                  )}
                                 >
                                   <Checkbox
                                     checked={selectedCandidateIDs.includes(id)}

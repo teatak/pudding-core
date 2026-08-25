@@ -507,12 +507,14 @@ export function AudioControlButtons({
             aria-pressed={outputActive}
             className={cn(
               "rounded-full",
+              outputActive &&
+                "!bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80",
               !outputActive && composerControlStateClassName,
               !outputActive && "text-muted-foreground",
             )}
             size="icon"
             type="button"
-            variant={outputActive ? "default" : "ghost"}
+            variant="ghost"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               if (!outputDisabled) {
@@ -558,12 +560,14 @@ function AudioInputButton({
           className={cn(
             "relative overflow-hidden",
             !grouped && "rounded-full",
+            active &&
+              "!border-transparent !bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80",
             !active && composerControlStateClassName,
             !active && "text-muted-foreground",
           )}
           size="icon"
           type="button"
-          variant={active ? "default" : grouped ? "outline" : "ghost"}
+          variant={grouped ? "outline" : "ghost"}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             if (!disabled) {
@@ -590,7 +594,7 @@ function MicButtonContent({ active, icon, level }: { active: boolean; icon: Reac
       {profiles.map((profile, index) => (
         <span
           key={index}
-          className="w-0.5 rounded-full bg-primary-foreground"
+          className="w-0.5 rounded-full bg-control-accent-foreground"
           style={{ height: `${5 + normalized * profile * 14}px` }}
         />
       ))}

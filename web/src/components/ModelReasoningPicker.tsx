@@ -14,7 +14,11 @@ import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuRadioItem as DropdownMenuRadioItem,
 } from "@/components/AppMenu";
-import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import {
+  AppPopoverContent as PopoverContent,
+  appPopoverItemStateClassName,
+  appPopoverSelectedItemStateClassName,
+} from "@/components/AppPopover";
 import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
@@ -145,6 +149,7 @@ export function ModelReasoningPicker({
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       if (context?.sessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(context.sessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(context.sessionID) });
       }
     },
   });
@@ -273,7 +278,11 @@ export function ModelReasoningPicker({
             >
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs hover:bg-control-hover active:bg-control-active data-[state=open]:bg-control-hover"
+                  className={cn(
+                    "flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs data-[state=open]:bg-[var(--floating-active)]",
+                    appPopoverItemStateClassName,
+                    "data-[state=open]:hover:bg-[var(--floating-active)] data-[state=open]:focus-within:bg-[var(--floating-active)]",
+                  )}
                   type="button"
                   onPointerEnter={reasoningMenu.openFromHover}
                   onPointerLeave={reasoningMenu.closeFromHover}
@@ -356,8 +365,9 @@ export function ModelReasoningPicker({
                       key={profile.id}
                       aria-current={viewed ? "true" : undefined}
                       className={cn(
-                        "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-control-hover hover:text-foreground active:bg-control-active",
-                        viewed && "bg-control-hover text-foreground",
+                        "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:text-foreground",
+                        appPopoverItemStateClassName,
+                        viewed && cn(appPopoverSelectedItemStateClassName, "text-foreground"),
                       )}
                       type="button"
                       onClick={() => {
@@ -485,8 +495,10 @@ function ProfileModels({
         return (
           <button
             key={model}
-            className="flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] hover:bg-control-hover active:bg-control-active"
-
+            className={cn(
+              "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px]",
+              appPopoverItemStateClassName,
+            )}
             type="button"
             onClick={() => onPick(model)}
           >

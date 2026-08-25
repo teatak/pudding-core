@@ -5,7 +5,11 @@ import { toast } from "sonner";
 
 import { getProject, updateProject, type Project } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import {
+  AppPopoverContent as PopoverContent,
+  appPopoverItemStateClassName,
+  appPopoverSelectedItemStateClassName,
+} from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
 import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
@@ -147,8 +151,9 @@ function ProjectApprovalControl({
               aria-checked={selected}
               aria-label={t(`composer.projectApproval.${mode}`)}
               className={cn(
-                "relative flex min-h-11 w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-control-hover active:bg-control-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
-                selected && "bg-control-hover",
+                "relative flex min-h-11 w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
+                appPopoverItemStateClassName,
+                selected && appPopoverSelectedItemStateClassName,
               )}
               role="radio"
               type="button"

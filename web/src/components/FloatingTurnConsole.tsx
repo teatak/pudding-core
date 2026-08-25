@@ -274,6 +274,7 @@ export function FloatingTurnConsole({
                   turn.user ? (
                     <UserInput
                       key={turn.key}
+                      disclosureKey={`${turn.key}:floating-user`}
                       token={token}
                       user={turn.user}
                       onQueuedCancel={cancelQueued}

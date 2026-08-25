@@ -1,5 +1,5 @@
-import { Captions, Check, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "@/components/icons";
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { Captions, Check, ChevronDown, ChevronUp, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "@/components/icons";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Spinner } from "@/components/Spinner";
@@ -14,9 +14,13 @@ import { cn } from "@/lib/utils";
 
 import { InterruptedBadge, MessageMeta } from "./MessageMeta";
 import { FormResultCard, formResultFromContentParts } from "./FormResultCard";
-import { uiContextFromContentParts, type UserInputVM } from "./types";
+import { uiContextFromContentParts, type TurnDisclosureState, type UserInputVM } from "./types";
+
+const COLLAPSED_USER_TEXT_HEIGHT = 240;
 
 export const UserInput = memo(function UserInput({
+  disclosure,
+  disclosureKey,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSteer,
@@ -24,6 +28,8 @@ export const UserInput = memo(function UserInput({
   token,
   user,
 }: {
+  disclosure?: TurnDisclosureState;
+  disclosureKey: string;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
@@ -297,13 +303,15 @@ export const UserInput = memo(function UserInput({
                 <div className="grid min-w-0 max-w-full gap-2">
                   {formResult ? <FormResultCard part={formResult} /> : null}
                   {(!formResult && user.text) || showASRIndicator ? (
-                    <div
-                      className="min-w-0 max-w-full [overflow-wrap:anywhere]"
-                      data-transcript-message-id={user.messageID}
+                    <CollapsibleUserText
+                      key={disclosureKey}
+                      disclosure={disclosure}
+                      disclosureKey={disclosureKey}
+                      messageID={user.messageID}
                     >
                       {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
                       {!formResult ? user.text : null}
-                    </div>
+                    </CollapsibleUserText>
                   ) : null}
                   {user.interrupted ? <InterruptedBadge /> : null}
                 </div>
@@ -329,6 +337,110 @@ export const UserInput = memo(function UserInput({
     </>
   );
 });
+
+function CollapsibleUserText({
+  children,
+  disclosure,
+  disclosureKey,
+  messageID,
+}: {
+  children: ReactNode;
+  disclosure?: TurnDisclosureState;
+  disclosureKey: string;
+  messageID?: string;
+}) {
+  const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const collapseAnchorRef = useRef<{
+    bottom: number;
+    scrollElement: HTMLElement;
+  } | null>(null);
+  const [collapsible, setCollapsible] = useState(false);
+  const [expanded, setExpanded] = useState(() => disclosure?.isOpen(disclosureKey) || false);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+    const update = () => setCollapsible(content.getBoundingClientRect().height > COLLAPSED_USER_TEXT_HEIGHT + 1);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const anchor = collapseAnchorRef.current;
+    const root = rootRef.current;
+    if (!anchor || !root || expanded) {
+      return;
+    }
+
+    anchor.scrollElement.scrollTop += root.getBoundingClientRect().bottom - anchor.bottom;
+    collapseAnchorRef.current = null;
+  }, [expanded]);
+
+  function setOpen(open: boolean) {
+    if (!open) {
+      const root = rootRef.current;
+      const scrollElement = root?.closest<HTMLElement>("[data-transcript-viewport]");
+      if (root && scrollElement) {
+        collapseAnchorRef.current = {
+          bottom: root.getBoundingClientRect().bottom,
+          scrollElement,
+        };
+      }
+    }
+    setExpanded(open);
+    disclosure?.setOpen(disclosureKey, open);
+  }
+
+  const collapsed = collapsible && !expanded;
+  return (
+    <div
+      ref={rootRef}
+      className="relative min-w-0 max-w-full [overflow-wrap:anywhere]"
+      data-transcript-message-id={messageID}
+    >
+      <div
+        className={cn(
+          "min-w-0 max-w-full",
+          collapsed &&
+            "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_0,#000_calc(100%-2rem),transparent_100%)]",
+        )}
+        style={collapsed ? { maxHeight: COLLAPSED_USER_TEXT_HEIGHT } : undefined}
+      >
+        <div ref={contentRef}>{children}</div>
+      </div>
+      {collapsed ? (
+        <button
+          aria-expanded="false"
+          aria-label={t("transcript.userMessageExpand")}
+          className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+          type="button"
+          onClick={() => setOpen(true)}
+        >
+          <ChevronDown
+            className="absolute bottom-0 right-0 size-4 text-muted-foreground/70"
+            aria-hidden="true"
+          />
+        </button>
+      ) : collapsible ? (
+        <button
+          aria-expanded="true"
+          aria-label={t("transcript.userMessageCollapse")}
+          className="ml-auto flex size-5 items-center justify-center rounded text-muted-foreground/70 outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70"
+          type="button"
+          onClick={() => setOpen(false)}
+        >
+          <ChevronUp className="size-4" aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function isASRClientMessageID(clientMessageID: string | undefined) {
   return Boolean(clientMessageID?.startsWith("audmsg"));

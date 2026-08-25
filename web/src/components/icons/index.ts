@@ -62,6 +62,7 @@ export {
   FileJson2,
   FileOutput,
   FilePenLine,
+  FilePlus,
   FilePlus2,
   FileSearch,
   FileText,

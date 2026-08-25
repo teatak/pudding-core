@@ -25,11 +25,9 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
     staleTime: 5_000,
   });
   const usage = usageQuery.data;
-  const currentTokens = usage?.lastPromptTokens || 0;
-  const estimatedTokens = usage?.contextEstimatedTokens || 0;
-  const currentPercent = usage && usage.contextWindow > 0 ? Math.min(100, (currentTokens / usage.contextWindow) * 100) : 0;
-  const estimatedPercent = usage && usage.contextWindow > 0 ? Math.min(100, (estimatedTokens / usage.contextWindow) * 100) : 0;
-  const tone = Math.max(currentPercent, estimatedPercent) >= 95 ? "danger" : Math.max(currentPercent, estimatedPercent) >= 80 ? "warning" : "ok";
+  const contextTokens = usage?.contextEstimatedTokens || 0;
+  const contextPercent = usage && usage.contextWindow > 0 ? Math.min(100, (contextTokens / usage.contextWindow) * 100) : 0;
+  const tone = contextPercent >= 95 ? "danger" : contextPercent >= 80 ? "warning" : "ok";
 
   return (
     <Popover>
@@ -44,7 +42,7 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
           type="button"
           variant="ghost"
         >
-          <Ring current={usageQuery.isLoading ? 0 : currentPercent} estimate={usageQuery.isLoading ? 0 : estimatedPercent} tone={tone} />
+          <Ring percent={usageQuery.isLoading ? 0 : contextPercent} tone={tone} />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -56,10 +54,8 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
       >
         {usage ? (
           <UsagePanel
-            currentPercent={currentPercent}
-            currentTokens={currentTokens}
-            estimatedPercent={estimatedPercent}
-            estimatedTokens={estimatedTokens}
+            contextPercent={contextPercent}
+            contextTokens={contextTokens}
             tone={tone}
             usage={usage}
           />
@@ -72,17 +68,13 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
 }
 
 function UsagePanel({
-  currentPercent,
-  currentTokens,
-  estimatedPercent,
-  estimatedTokens,
+  contextPercent,
+  contextTokens,
   tone,
   usage,
 }: {
-  currentPercent: number;
-  currentTokens: number;
-  estimatedPercent: number;
-  estimatedTokens: number;
+  contextPercent: number;
+  contextTokens: number;
   tone: "ok" | "warning" | "danger";
   usage: SessionUsage;
 }) {
@@ -99,19 +91,15 @@ function UsagePanel({
           <div className="flex min-w-0 items-baseline gap-1.5">
             <span className="shrink-0 text-xs font-medium text-muted-foreground">{t("usage.currentInput")}</span>
             <span className="truncate text-base font-semibold text-foreground">
-              {formatTokens(currentTokens, locale)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow, locale) : "--"}
+              {formatTokens(contextTokens, locale)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow, locale) : "--"}
             </span>
           </div>
-          <div className="text-right text-xs font-medium tabular-nums text-muted-foreground">{Math.round(currentPercent)}%</div>
+          <div className="text-right text-xs font-medium tabular-nums text-muted-foreground">{Math.round(contextPercent)}%</div>
         </div>
-        <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn("absolute inset-y-0 left-0 rounded-full opacity-45", progressClass(tone))}
-            style={{ width: `${Math.min(100, estimatedPercent)}%` }}
-          />
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-foreground/10">
           <div
             className={cn("absolute inset-y-0 left-0 rounded-full", progressClass(tone))}
-            style={{ width: `${Math.min(100, currentPercent)}%` }}
+            style={{ width: `${Math.min(100, contextPercent)}%` }}
           />
           {compactPercent > 0 ? (
             <div
@@ -123,7 +111,7 @@ function UsagePanel({
           ) : null}
         </div>
         <div className="space-y-0.5">
-          <CollapsibleUsageGroup label={t("usage.nextEstimate")} value={estimatedTokens}>
+          <CollapsibleUsageGroup label={t("usage.nextEstimate")} value={contextTokens}>
             {usage.inputCalibrationSamples > 0 ? (
               <>
                 <UsageRow label={t("usage.rawEstimate")} value={usage.contextRawEstimatedTokens} muted indent />
@@ -280,28 +268,13 @@ function UsageRow({
   );
 }
 
-function Ring({ current, estimate, tone }: { current: number; estimate: number; tone: "ok" | "warning" | "danger" }) {
+function Ring({ percent, tone }: { percent: number; tone: "ok" | "warning" | "danger" }) {
   const radius = 8;
   const circumference = 2 * Math.PI * radius;
-  const currentOffset = circumference - (Math.min(100, current) / 100) * circumference;
-  const estimateOffset = circumference - (Math.min(100, estimate) / 100) * circumference;
-  const showEstimate = estimate > current + 0.3;
+  const offset = circumference - (Math.min(100, percent) / 100) * circumference;
   return (
     <svg aria-hidden="true" className="size-4 -rotate-90" viewBox="0 0 24 24">
       <circle className="stroke-muted-foreground/30" cx="12" cy="12" fill="none" r={radius} strokeWidth="2.4" />
-      {showEstimate ? (
-        <circle
-          className={cn("opacity-45 transition-[stroke-dashoffset]", strokeClass(tone))}
-          cx="12"
-          cy="12"
-          fill="none"
-          r={radius}
-          strokeDasharray={circumference}
-          strokeDashoffset={estimateOffset}
-          strokeLinecap="round"
-          strokeWidth="2.4"
-        />
-      ) : null}
       <circle
         className={cn("transition-[stroke-dashoffset]", strokeClass(tone))}
         cx="12"
@@ -309,7 +282,7 @@ function Ring({ current, estimate, tone }: { current: number; estimate: number; 
         fill="none"
         r={radius}
         strokeDasharray={circumference}
-        strokeDashoffset={currentOffset}
+        strokeDashoffset={offset}
         strokeLinecap="round"
         strokeWidth="2.4"
       />

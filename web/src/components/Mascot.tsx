@@ -51,6 +51,7 @@ const FACE_CENTER_Y = 77;
 const FACE_FRAME_Z_OFFSET_PX = 4;
 const FACE_GLASS_INSET_PX = 3;
 const BODY_DEPTH_PX = 5;
+const BODY_BACK_SHELL_SCALE = (HEAD_PERSPECTIVE_PX + BODY_DEPTH_PX) / HEAD_PERSPECTIVE_PX;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -148,7 +149,8 @@ const compositeLayerStyle: CSSProperties = {
 
 const bodyBackShellStyle: CSSProperties = {
   ...compositeLayerStyle,
-  transform: `translateZ(-${BODY_DEPTH_PX}px)`,
+  transform: `translateZ(-${BODY_DEPTH_PX}px) scale(${BODY_BACK_SHELL_SCALE})`,
+  transformOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
   transformStyle: "preserve-3d",
 };
 
@@ -547,35 +549,26 @@ export function Mascot({
             <svg data-slot="body-back-shell-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
               <path
                 d={BODY_PATH}
-                fill="color-mix(in oklch, var(--mascot-body), white 8%)"
-                stroke="color-mix(in oklch, var(--mascot-outline), var(--mascot-body) 62%)"
-                strokeWidth="4"
+                fill="color-mix(in oklch, var(--mascot-body), black 5%)"
+                stroke="var(--mascot-shell-outline)"
+                strokeWidth="3"
               />
             </svg>
           </span>
-
-          <svg data-slot="body-outline-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-            <path
-              d={BODY_PATH}
-              fill="none"
-              stroke="var(--mascot-outline)"
-              strokeWidth="4"
-            />
-          </svg>
 
           <span data-slot="arm-left-motion" style={compositeLayerStyle}>
             <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
               <path
                 d={LEFT_ARM_PATH}
                 fill="none"
-                stroke="var(--mascot-outline)"
+                stroke="var(--mascot-shell-outline)"
                 strokeLinecap="round"
                 strokeWidth="9.5"
               />
               <ellipse
                 cx={LEFT_PALM_X}
                 cy={PALM_Y}
-                fill="var(--mascot-outline)"
+                fill="var(--mascot-shell-outline)"
                 rx="8"
                 ry="7"
                 transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
@@ -605,14 +598,14 @@ export function Mascot({
               <path
                 d={RIGHT_ARM_PATH}
                 fill="none"
-                stroke="var(--mascot-outline)"
+                stroke="var(--mascot-shell-outline)"
                 strokeLinecap="round"
                 strokeWidth="9.5"
               />
               <ellipse
                 cx={RIGHT_PALM_X}
                 cy={PALM_Y}
-                fill="var(--mascot-outline)"
+                fill="var(--mascot-shell-outline)"
                 rx="8"
                 ry="7"
                 transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
@@ -643,11 +636,11 @@ export function Mascot({
                 <path
                   d="M64 34 C65 28 63 23 60 18"
                   fill="none"
-                  stroke="var(--mascot-outline)"
+                  stroke="var(--mascot-shell-outline)"
                   strokeLinecap="round"
                   strokeWidth="8"
                 />
-                <circle cx="59" cy="16" fill="var(--mascot-outline)" r="7" />
+                <circle cx="59" cy="16" fill="var(--mascot-shell-outline)" r="7" />
                 <path
                   d="M64 34 C65 28 63 23 60 18"
                   fill="none"
@@ -721,7 +714,7 @@ export function Mascot({
             <path
               d="M59 35 L60.5 30 H67.5 L69 35 Z"
               fill={bodyMetalPaint}
-              stroke="var(--mascot-outline)"
+              stroke="var(--mascot-shell-outline)"
               strokeLinejoin="round"
               strokeWidth="2.25"
             />

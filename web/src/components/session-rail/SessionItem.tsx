@@ -231,7 +231,7 @@ export function SessionItem({
         aria-haspopup="menu"
         aria-label={t("session.actions")}
         className={cn(
-          "absolute top-1/2 right-8 -translate-y-1/2 text-muted-foreground",
+          "absolute inset-y-0 right-8 my-auto text-muted-foreground",
           actionsAlwaysVisible && "opacity-100",
           !actionsAlwaysVisible &&
             !suppressInteractiveState &&
@@ -522,7 +522,7 @@ export function SessionItem({
               <RailIconAction
                 aria-label={t("session.archive")}
                 className={cn(
-                  "absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground",
+                  "absolute inset-y-0 right-1 my-auto text-muted-foreground",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
                     !suppressInteractiveState &&

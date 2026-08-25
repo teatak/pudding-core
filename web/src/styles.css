@@ -218,19 +218,19 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
-    --floating-hover: color-mix(in oklch, var(--control-hover-background), var(--control-active-background) 65%);
-    --floating-active: var(--control-active-background);
+    --floating-hover: oklch(0.91 0 0);
+    --floating-active: oklch(0.875 0 0);
     --floating-selected: var(--floating-hover);
     --menu-item-gap: 0.25rem;
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
-    --mascot-body: oklch(0.79 0.016 250);
+    --mascot-body: oklch(0.74 0.055 245);
     --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 33%);
     --mascot-metal-highlight: oklch(0.99 0.006 250 / 78%);
     --mascot-metal-shade: oklch(0.58 0.012 250 / 32%);
     --mascot-status-light: oklch(0.72 0.14 16 / 88%);
     --mascot-feature-outline: oklch(0.38 0.02 255);
-    --mascot-outline: color-mix(in oklch, var(--mascot-body), black 34%);
+    --mascot-shell-outline: color-mix(in oklch, var(--mascot-body), black 12%);
     --mascot-screen: oklch(0.91 0.018 95);
     --mascot-error-screen: oklch(0.89 0.045 25);
     --mascot-screen-groove: oklch(0.46 0.025 250);
@@ -780,18 +780,18 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: var(--popover);
-    --floating-hover: color-mix(in oklch, var(--control-hover-background), var(--control-active-background) 65%);
-    --floating-active: var(--control-active-background);
+    --floating-hover: oklch(0.35 0 0);
+    --floating-active: oklch(0.39 0 0);
     --floating-selected: var(--floating-hover);
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
-    --mascot-body: oklch(0.67 0.014 250);
+    --mascot-body: oklch(0.61 0.05 245);
     --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 21%);
     --mascot-metal-highlight: oklch(0.95 0.008 250 / 62%);
     --mascot-metal-shade: oklch(0.45 0.01 250 / 34%);
     --mascot-status-light: oklch(0.62 0.12 16 / 82%);
     --mascot-feature-outline: oklch(0.32 0.02 255);
-    --mascot-outline: color-mix(in oklch, var(--mascot-body), black 38%);
+    --mascot-shell-outline: color-mix(in oklch, var(--mascot-body), black 12%);
     --mascot-screen: oklch(0.8 0.016 95);
     --mascot-error-screen: oklch(0.67 0.06 25);
     --mascot-screen-groove: oklch(0.46 0.022 250);
@@ -1301,6 +1301,9 @@ html:has(
 }
 
 .pudding-session-rail {
+    --sidebar-hover-background: var(--floating-hover);
+    --sidebar-selected-background: var(--floating-active);
+    --sidebar-accent: var(--floating-hover);
     font-size: 0.875rem;
     letter-spacing: -0.006em;
 }
@@ -1320,6 +1323,12 @@ html:has(
     background-color: var(--sidebar-selected-background);
     color: var(--foreground);
     font-weight: 500;
+    box-shadow: none;
+}
+
+.pudding-session-rail [data-slot="sidebar-group-label"][data-active="true"] {
+    background-color: var(--sidebar-selected-background);
+    color: var(--foreground);
     box-shadow: none;
 }
 

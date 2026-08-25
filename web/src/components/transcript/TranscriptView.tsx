@@ -149,14 +149,12 @@ export function TranscriptView({
           aria-label={jumpLatestLabel}
           className={
             newMessageCount > 0
-              ? "absolute z-40 h-9 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
-              : "absolute z-40 rounded-full border border-border bg-card shadow-md hover:bg-muted"
+              ? "absolute inset-x-0 z-40 mx-auto h-9 w-fit gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
+              : "absolute inset-x-0 z-40 mx-auto rounded-full border border-border bg-card shadow-md hover:bg-muted"
           }
           size={newMessageCount > 0 ? "default" : "icon"}
           style={{
             bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)",
-            right:
-              "calc(var(--pudding-chat-column-edge) + var(--pudding-composer-mascot-right, 0rem) + var(--pudding-composer-mascot-size, 0rem) + var(--pudding-composer-mascot-gap, 0rem))",
           }}
           type="button"
           variant={newMessageCount > 0 ? "default" : "ghost"}

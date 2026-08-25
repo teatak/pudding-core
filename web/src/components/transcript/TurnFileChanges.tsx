@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Eye, FileImage, FileText, Files, Redo2, Undo2 } from "@/components/icons";
+import { ChevronDown, Eye, FileDiff, FileImage, FilePlus, FileText, Redo2, Undo2 } from "@/components/icons";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -79,7 +79,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
       <div className="flex min-h-12 items-center gap-2 bg-background px-2 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
         <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!primaryActionAvailable} type="button" onClick={openPrimary}>
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-foreground/65">
-            <Files className="size-4" />
+            {singleChange?.kind === "added" ? <FilePlus className="size-4" /> : <FileDiff className="size-4" />}
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-foreground">

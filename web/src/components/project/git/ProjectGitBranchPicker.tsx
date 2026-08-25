@@ -13,7 +13,11 @@ import {
   type ProjectGitStatus,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { AppPopoverContent } from "@/components/AppPopover";
+import {
+  AppPopoverContent,
+  appPopoverControlItemStateClassName,
+  appPopoverItemStateClassName,
+} from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
@@ -37,6 +41,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 import { projectGitOperationError, projectGitReadError } from "../projectErrors";
 
@@ -145,10 +150,10 @@ export function ProjectGitBranchPicker({
             )}
           </div>
           <div className="mt-1 border-t pt-1">
-            <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent" type="button" onClick={() => setDialog({ mode: "create", name: "" })}>
+            <button className={cn("flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs", appPopoverItemStateClassName)} type="button" onClick={() => setDialog({ mode: "create", name: "" })}>
               <Plus className="size-3.5" />{t("project.gitCreateBranch")}
             </button>
-            <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent" type="button" onClick={() => setDialog({ mode: "rename", name: branch })}>
+            <button className={cn("flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs", appPopoverItemStateClassName)} type="button" onClick={() => setDialog({ mode: "rename", name: branch })}>
               {t("project.gitRenameBranch")}
             </button>
           </div>
@@ -199,7 +204,7 @@ function BranchGroup({ label, branches, pending, onDelete, onSwitch }: {
     <div className="pb-1">
       <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       {branches.map((branch) => (
-        <div key={`${branch.remote}:${branch.name}`} className="group/branch flex h-7 items-center rounded-md hover:bg-accent">
+        <div key={`${branch.remote}:${branch.name}`} className={cn("group/branch flex h-7 items-center rounded-md", appPopoverControlItemStateClassName)}>
           <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs" disabled={pending || branch.current} type="button" onClick={() => onSwitch(branch.name)}>
             {branch.current ? <Check className="size-3.5 shrink-0" /> : null}
             <span className="min-w-0 flex-1 truncate">{branch.name}</span>
