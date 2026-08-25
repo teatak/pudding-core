@@ -1,8 +1,8 @@
 # 吉祥物金属化改造计划
 
 > 状态:已实施
-> 日期:2026-08-24  
-> 范围:`web/src/components/Mascot.tsx`、`web/src/styles.css`  
+> 日期:2026-08-24
+> 范围:`web/src/components/Mascot.tsx`、`web/src/styles.css`
 > 方向:银灰钛金属机身、浅色磨砂面屏、统一中性色调。
 
 ## 0. 结论
