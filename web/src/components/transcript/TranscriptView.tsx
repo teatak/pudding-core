@@ -155,7 +155,8 @@ export function TranscriptView({
           size={newMessageCount > 0 ? "default" : "icon"}
           style={{
             bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)",
-            right: "var(--pudding-chat-column-edge)",
+            right:
+              "calc(var(--pudding-chat-column-edge) + var(--pudding-composer-mascot-right, 0rem) + var(--pudding-composer-mascot-size, 0rem) + var(--pudding-composer-mascot-gap, 0rem))",
           }}
           type="button"
           variant={newMessageCount > 0 ? "default" : "ghost"}

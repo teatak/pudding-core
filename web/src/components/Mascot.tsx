@@ -650,10 +650,7 @@ export function Mascot({
                 y2="110"
               >
                 <stop offset="0" stopColor="var(--mascot-body-metal-top)" />
-                <stop offset="0.34" stopColor="var(--mascot-body)" />
-                <stop offset="0.6" stopColor="var(--mascot-body-metal-low)" />
-                <stop offset="0.78" stopColor="var(--mascot-body-metal-rebound)" />
-                <stop offset="1" stopColor="var(--mascot-body-metal-bottom)" />
+                <stop offset="1" stopColor="var(--mascot-body)" />
               </linearGradient>
             </defs>
             <path
@@ -670,10 +667,11 @@ export function Mascot({
             />
             <path
               data-slot="body-metal-shade"
-              d="M105 82 C106 93 100 102 89 105.5"
+              d="M104.5 73 C107 86.5 105 96 98 101.5 C94 104.5 89.5 106 85 106.5"
               fill="none"
               stroke="var(--mascot-metal-shade)"
               strokeLinecap="round"
+              strokeOpacity="0.72"
               strokeWidth="2.75"
             />
             {showHeadDebugFrame ? (

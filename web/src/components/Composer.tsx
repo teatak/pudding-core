@@ -60,6 +60,7 @@ import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
+import { Mascot } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -1135,6 +1136,15 @@ export function Composer({
           </div>
           {floating ? null : (
             <>
+              <span className="pudding-composer-mascot-anchor">
+                <Mascot
+                  className="size-full overflow-visible"
+                  gaze={submitError ? { type: "center" } : { type: "pointer" }}
+                  headShakeSignal={submitError ? 1 : 0}
+                  mood={submitError ? "error" : running ? "thinking" : "idle"}
+                  pointerTracking
+                />
+              </span>
               {submitError ? (
                 <span
                   aria-live="polite"

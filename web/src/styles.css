@@ -226,18 +226,15 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --mascot-body: oklch(0.79 0.016 250);
     --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 33%);
-    --mascot-body-metal-low: color-mix(in oklch, var(--mascot-body), black 10%);
-    --mascot-body-metal-rebound: color-mix(in oklch, var(--mascot-body), white 14%);
-    --mascot-body-metal-bottom: color-mix(in oklch, var(--mascot-body), black 5%);
     --mascot-metal-highlight: oklch(0.99 0.006 250 / 78%);
-    --mascot-metal-shade: oklch(0.3 0.012 250 / 42%);
+    --mascot-metal-shade: oklch(0.58 0.012 250 / 32%);
     --mascot-status-light: oklch(0.72 0.14 16 / 88%);
     --mascot-feature-outline: oklch(0.38 0.02 255);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 34%);
     --mascot-screen: oklch(0.91 0.018 95);
     --mascot-error-screen: oklch(0.89 0.045 25);
-    --mascot-screen-groove: oklch(0.46 0.055 220);
-    --mascot-screen-edge: oklch(0.64 0.18 250);
+    --mascot-screen-groove: oklch(0.46 0.025 250);
+    --mascot-screen-edge: oklch(0.76 0.16 165);
     --mascot-shadow: oklch(0.52 0.012 250 / 9%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
@@ -421,6 +418,24 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 .pudding-composer-shell {
     container-type: inline-size;
     box-shadow: 0 10px 28px -18px rgb(0 0 0 / 0.2);
+}
+
+.pudding-conversation {
+    --pudding-composer-mascot-size: 3rem;
+    --pudding-composer-mascot-right: 0.5rem;
+    --pudding-composer-mascot-gap: 0.5rem;
+}
+
+.pudding-composer-mascot-anchor {
+    position: absolute;
+    z-index: 30;
+    top: 0;
+    right: var(--pudding-composer-mascot-right);
+    width: var(--pudding-composer-mascot-size);
+    height: var(--pudding-composer-mascot-size);
+    overflow: visible;
+    pointer-events: auto;
+    transform: translateY(-82%);
 }
 
 .dark .pudding-composer-shell {
@@ -772,18 +787,15 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --mascot-body: oklch(0.67 0.014 250);
     --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 21%);
-    --mascot-body-metal-low: color-mix(in oklch, var(--mascot-body), black 12%);
-    --mascot-body-metal-rebound: color-mix(in oklch, var(--mascot-body), white 12%);
-    --mascot-body-metal-bottom: color-mix(in oklch, var(--mascot-body), black 6%);
     --mascot-metal-highlight: oklch(0.95 0.008 250 / 62%);
-    --mascot-metal-shade: oklch(0.2 0.01 250 / 46%);
+    --mascot-metal-shade: oklch(0.45 0.01 250 / 34%);
     --mascot-status-light: oklch(0.62 0.12 16 / 82%);
     --mascot-feature-outline: oklch(0.32 0.02 255);
     --mascot-outline: color-mix(in oklch, var(--mascot-body), black 38%);
     --mascot-screen: oklch(0.8 0.016 95);
     --mascot-error-screen: oklch(0.67 0.06 25);
-    --mascot-screen-groove: oklch(0.42 0.05 220);
-    --mascot-screen-edge: oklch(0.76 0.16 250);
+    --mascot-screen-groove: oklch(0.46 0.022 250);
+    --mascot-screen-edge: oklch(0.82 0.14 165);
     --mascot-shadow: oklch(0.38 0.012 250 / 12%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
