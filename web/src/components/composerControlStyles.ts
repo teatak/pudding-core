@@ -10,7 +10,7 @@ export const composerSendButtonClassName =
 export const composerMenuShadowClassName = "shadow-none";
 
 export const composerSuggestionPanelClassName =
-  `pudding-composer-suggestion mb-1 rounded-lg border bg-card text-card-foreground ${composerMenuShadowClassName}`;
+  `pudding-composer-suggestion left-4 mb-1 rounded-lg border bg-card text-card-foreground ${composerMenuShadowClassName}`;
 
 export const composerAttachmentRemoveStateClassName =
   "transition-colors hover:bg-destructive hover:text-destructive-foreground active:bg-destructive/85";

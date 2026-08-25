@@ -1258,7 +1258,6 @@ function DraftComposer({
           <div ref={selectionGuardRef} className="relative">
             {mentionMenuOpen ? (
               <ComposerMentionMenu
-                align="start"
                 references={mentions.filtered}
                 query={mentions.query}
                 selectedIndex={mentions.activeIndex}

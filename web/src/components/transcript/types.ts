@@ -192,12 +192,20 @@ export function uiContextFromContentParts(parts: ContentPart[] | undefined): UIC
   return parts?.find((part): part is UIContextPart => part.type === "ui_context");
 }
 
-export function transcriptPhaseKey(phase: TurnPhaseState) {
-  if (phase.turnID) {
-    return `assistant:${phase.turnID}`;
+export function transcriptTurnKey({
+  clientMessageID,
+  sessionID,
+  turnID,
+}: {
+  clientMessageID?: string;
+  sessionID: string;
+  turnID?: string;
+}) {
+  if (clientMessageID) {
+    return `turn:client:${clientMessageID}`;
   }
-  if (phase.clientMessageID) {
-    return `assistant:pending:${phase.clientMessageID}`;
+  if (turnID) {
+    return `turn:${turnID}`;
   }
-  return `assistant:phase:${phase.sessionID}`;
+  return `turn:session:${sessionID}`;
 }

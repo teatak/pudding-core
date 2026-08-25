@@ -24,14 +24,12 @@ type MentionSection = {
 export function ComposerMentionMenu({
   references,
   query,
-  align = "default",
   selectedIndex,
   onHover,
   onSelect,
 }: {
   references: ComposerMentionReference[];
   query: string;
-  align?: "default" | "start";
   selectedIndex: number;
   onHover: (index: number) => void;
   onSelect: (reference: ComposerMentionReference) => void;
@@ -55,7 +53,6 @@ export function ComposerMentionMenu({
       className={cn(
         "absolute bottom-full z-40 w-[min(16rem,calc(100%-2rem))] text-sm",
         composerSuggestionPanelClassName,
-        align === "start" ? "left-4" : "left-16",
       )}
       role="listbox"
       onContextMenu={(event) => event.preventDefault()}

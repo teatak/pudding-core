@@ -428,7 +428,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 
 .pudding-composer-mascot-anchor {
     position: absolute;
-    z-index: 30;
+    z-index: 10;
     top: 0;
     right: var(--pudding-composer-mascot-right);
     width: var(--pudding-composer-mascot-size);

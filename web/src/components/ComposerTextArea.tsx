@@ -124,7 +124,7 @@ function SlashCommandMenu({
     <div
       ref={listRef}
       className={cn(
-        "absolute bottom-full left-16 z-40 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto p-1 text-sm",
+        "absolute bottom-full z-40 max-h-64 w-[min(30rem,calc(100%-2rem))] overflow-y-auto p-1 text-sm",
         composerSuggestionPanelClassName,
       )}
       role="listbox"

@@ -14,7 +14,7 @@ import {
   localFoldersFromContentParts,
   projectReferencesFromContentParts,
   textFromContentParts,
-  transcriptPhaseKey,
+  transcriptTurnKey,
   type TranscriptTurnVM,
   type TurnModelVM,
   type UserInputVM,
@@ -197,7 +197,11 @@ export function useTranscriptViewModel({
           anchorID: turn.id,
           fileChanges: turn.fileChanges,
           fileChangeState: turn.fileChangeState,
-          key: `turn:${turn.id}`,
+          key: transcriptTurnKey({
+            clientMessageID: turn.clientMessageID,
+            sessionID,
+            turnID: turn.id,
+          }),
           kind: overlay ? "live" : phaseForTurn ? "phase" : "canonical",
           sequence,
           turnID: turn.id,
@@ -219,7 +223,11 @@ export function useTranscriptViewModel({
             overlay,
             phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
           },
-          key: `turn:${turn.id}`,
+          key: transcriptTurnKey({
+            clientMessageID: turn.clientMessageID,
+            sessionID,
+            turnID: turn.id,
+          }),
           kind: "live",
           turnID: turn.id,
           user,
@@ -254,7 +262,11 @@ export function useTranscriptViewModel({
                   phase: phaseForTurn,
                 }
             : undefined,
-        key: `turn:${turn.id}`,
+        key: transcriptTurnKey({
+          clientMessageID: turn.clientMessageID,
+          sessionID,
+          turnID: turn.id,
+        }),
         kind: phaseForTurn && outputMessages.length === 0 ? "phase" : "canonical",
         turnID: turn.id,
         user,
@@ -315,7 +327,11 @@ export function useTranscriptViewModel({
       items.push({
         assistant: sequence.length > 0 ? undefined : assistant,
         clientMessageID: pendingClientID,
-        key: `turn:${overlay.turnID}`,
+        key: transcriptTurnKey({
+          clientMessageID: pendingClientID,
+          sessionID,
+          turnID: overlay.turnID,
+        }),
         kind: "live",
         sequence: sequence.length > 0 ? sequence : undefined,
         turnID: overlay.turnID,
@@ -343,7 +359,7 @@ export function useTranscriptViewModel({
           phase: displayPhase,
         },
         clientMessageID: displayPhase.clientMessageID,
-        key: transcriptPhaseKey(displayPhase),
+        key: transcriptTurnKey(displayPhase),
         kind: "phase",
         turnID: displayPhase.turnID,
         user: pending ? userFromPending(pending, { pending: displayPhase.phase === "submitting" && !displayPhase.turnID }) : undefined,
@@ -356,7 +372,10 @@ export function useTranscriptViewModel({
       }
       items.push({
         clientMessageID: pending.clientMessageID,
-        key: `pending:${pending.clientMessageID}`,
+        key: transcriptTurnKey({
+          clientMessageID: pending.clientMessageID,
+          sessionID,
+        }),
         kind: "pending",
         user: userFromPending(pending),
       });

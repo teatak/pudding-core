@@ -820,18 +820,26 @@ function pointerHitsVerticalScrollbar(event: PointerEvent, element: HTMLElement)
 function useTranscriptStructure(sessionID: string, turns: TranscriptTurnVM[]) {
   const tailItemKey = `${TAIL_ITEM_KEY}:${sessionID}`;
   const structureRef = useRef<{
+    indexKeys: string[];
     itemKeys: string[];
     turnIndexByID: Map<string, number>;
   }>({
+    indexKeys: [],
     itemKeys: [tailItemKey],
     turnIndexByID: new Map(),
   });
   const current = structureRef.current;
-  const structureChanged =
+  const indexKeys = turns.map(
+    (turn) => `${turn.key}\u0000${turn.anchorID || ""}\u0000${turn.turnID || ""}`,
+  );
+  const itemKeysChanged =
     current.itemKeys.length !== turns.length + 1 ||
     current.itemKeys[current.itemKeys.length - 1] !== tailItemKey ||
     turns.some((turn, index) => current.itemKeys[index] !== turn.key);
-  if (!structureChanged) {
+  const indexesChanged =
+    current.indexKeys.length !== indexKeys.length ||
+    indexKeys.some((key, index) => current.indexKeys[index] !== key);
+  if (!itemKeysChanged && !indexesChanged) {
     return current;
   }
   const indexes = new Map<string, number>();
@@ -846,7 +854,8 @@ function useTranscriptStructure(sessionID: string, turns: TranscriptTurnVM[]) {
     return turn.key;
   });
   const next = {
-    itemKeys: [...itemKeys, tailItemKey],
+    indexKeys,
+    itemKeys: itemKeysChanged ? [...itemKeys, tailItemKey] : current.itemKeys,
     turnIndexByID: indexes,
   };
   structureRef.current = next;
