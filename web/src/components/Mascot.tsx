@@ -545,13 +545,23 @@ export function Mascot({
 
           <span data-slot="head-gesture" ref={headGestureRef} style={headGestureStyle}>
             <span data-slot="head" ref={headRef} style={headStyle}>
+          <span data-slot="body-shell-outline" style={bodyBackShellStyle}>
+            <svg data-slot="body-shell-outline-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <path
+                d={BODY_PATH}
+                fill="none"
+                stroke="var(--mascot-shell-outline)"
+                strokeLinejoin="round"
+                strokeWidth="3.5"
+              />
+            </svg>
+          </span>
+
           <span data-slot="body-back-shell" style={bodyBackShellStyle}>
             <svg data-slot="body-back-shell-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
               <path
                 d={BODY_PATH}
-                fill="color-mix(in oklch, var(--mascot-body), black 5%)"
-                stroke="var(--mascot-shell-outline)"
-                strokeWidth="3"
+                fill="var(--mascot-shell-rear)"
               />
             </svg>
           </span>
@@ -729,7 +739,7 @@ export function Mascot({
                     fill="none"
                     stroke="var(--mascot-screen-groove)"
                     strokeLinejoin="round"
-                    strokeWidth="5.5"
+                    strokeWidth="4.5"
                     transform={FACE_SCREEN_GROOVE_TRANSFORM}
                   />
                 </svg>
@@ -743,7 +753,7 @@ export function Mascot({
                       fillOpacity="0.82"
                       stroke="var(--mascot-screen-edge)"
                       strokeOpacity="0.92"
-                      strokeWidth="3.5"
+                      strokeWidth="4.5"
                       transform={FACE_SCREEN_INSET_TRANSFORM}
                     />
                   </svg>
