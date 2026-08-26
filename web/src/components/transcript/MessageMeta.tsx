@@ -74,7 +74,7 @@ export function MessageMeta({
             <>
               <Button
                 aria-label={t("common.copy")}
-                className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+                className="size-6 bg-transparent active:translate-y-0"
                 size="icon-xs"
                 tabIndex={-1}
                 type="button"

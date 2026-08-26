@@ -186,6 +186,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			continuation.Content = responseText.String()
 			continuation.Reasoning = responseReasoning.String()
 			continuation.ReasoningContent = responseReasoningContent.String()
+			continuation.ReasoningDetails = compactReasoningDetails(continuation.ReasoningDetails)
 			done := provider.Chunk{Done: true, Finish: finish}
 			if encoded, err := json.Marshal(continuation); err == nil &&
 				(responseText.Len() > 0 ||
@@ -554,6 +555,7 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 	if continuation := provider.ContinuationFor(msg, provider.ContinuationOpenAIChat); msg.Role == provider.RoleAssistant && continuation != nil {
 		var replay chatMessage
 		if json.Unmarshal(continuation.Data, &replay) == nil && replay.Role == "assistant" {
+			replay.ReasoningDetails = compactReasoningDetails(replay.ReasoningDetails)
 			return []chatMessage{replay}
 		}
 	}
@@ -620,6 +622,95 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 		out = append(out, chatMessage{Role: role, Content: msg.Text})
 	}
 	return out
+}
+
+func compactReasoningDetails(details []json.RawMessage) []json.RawMessage {
+	if len(details) < 2 {
+		return details
+	}
+	type detailGroup struct {
+		fieldName string
+		fields    map[string]json.RawMessage
+		firstRaw  json.RawMessage
+		fragments strings.Builder
+		count     int
+	}
+	type detailItem struct {
+		raw   json.RawMessage
+		group *detailGroup
+	}
+	items := make([]detailItem, 0, len(details))
+	groups := make(map[string]*detailGroup, len(details))
+	for _, raw := range details {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			items = append(items, detailItem{raw: append(json.RawMessage(nil), raw...)})
+			continue
+		}
+		fieldName, fragment := reasoningDetailFragment(fields)
+		if fieldName == "" || fragment == "" {
+			items = append(items, detailItem{raw: append(json.RawMessage(nil), raw...)})
+			continue
+		}
+		delete(fields, fieldName)
+		identity, err := json.Marshal(fields)
+		if err != nil {
+			items = append(items, detailItem{raw: append(json.RawMessage(nil), raw...)})
+			continue
+		}
+		key := fieldName + "\x00" + string(identity)
+		group := groups[key]
+		if group == nil {
+			group = &detailGroup{
+				fieldName: fieldName,
+				fields:    fields,
+				firstRaw:  append(json.RawMessage(nil), raw...),
+			}
+			groups[key] = group
+			items = append(items, detailItem{group: group})
+		}
+		group.fragments.WriteString(fragment)
+		group.count++
+	}
+	out := make([]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		if item.group == nil {
+			out = append(out, item.raw)
+			continue
+		}
+		group := item.group
+		if group.count == 1 {
+			out = append(out, group.firstRaw)
+			continue
+		}
+		encoded, err := json.Marshal(group.fragments.String())
+		if err != nil {
+			out = append(out, group.firstRaw)
+			continue
+		}
+		group.fields[group.fieldName] = encoded
+		compacted, err := json.Marshal(group.fields)
+		if err != nil {
+			out = append(out, group.firstRaw)
+			continue
+		}
+		out = append(out, compacted)
+	}
+	return out
+}
+
+func reasoningDetailFragment(fields map[string]json.RawMessage) (string, string) {
+	for _, fieldName := range []string{"text", "summary"} {
+		raw, ok := fields[fieldName]
+		if !ok {
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			return fieldName, value
+		}
+	}
+	return "", ""
 }
 
 func sanitizeChatToolMessages(messages []chatMessage) []chatMessage {

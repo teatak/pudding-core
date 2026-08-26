@@ -16,7 +16,6 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
-import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -502,16 +501,15 @@ export function AudioControlButtons({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            aria-disabled={outputDisabled}
             aria-label={outputLabel}
             aria-pressed={outputActive}
             className={cn(
               "rounded-full",
               outputActive &&
-                "!bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80",
-              !outputActive && composerControlStateClassName,
+                "!bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80 disabled:opacity-100",
               !outputActive && "text-muted-foreground",
             )}
+            disabled={outputDisabled}
             size="icon"
             type="button"
             variant="ghost"
@@ -554,17 +552,16 @@ function AudioInputButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          aria-disabled={disabled}
           aria-label={label}
           aria-pressed={active}
           className={cn(
             "relative overflow-hidden",
             !grouped && "rounded-full",
             active &&
-              "!border-transparent !bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80",
-            !active && composerControlStateClassName,
+              "!border-transparent !bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80 disabled:opacity-100",
             !active && "text-muted-foreground",
           )}
+          disabled={disabled}
           size="icon"
           type="button"
           variant={grouped ? "outline" : "ghost"}

@@ -17,7 +17,6 @@ import {
   appPopoverSelectedItemStateClassName,
 } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
-import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
@@ -51,10 +50,7 @@ export function BackgroundProcessControl({ token, sessionID }: { token: string; 
       <PopoverTrigger asChild>
         <Button
           aria-label={label}
-          className={cn(
-            "h-8 gap-1 rounded-full px-2 text-xs font-normal text-muted-foreground hover:text-foreground",
-            composerControlStateClassName,
-          )}
+          className="h-8 gap-1 rounded-full px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
           size="sm"
           type="button"
           variant="ghost"

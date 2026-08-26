@@ -28,7 +28,8 @@ const ProjectMarkdownEditor = lazy(() => import("./ProjectMarkdownEditor").then(
 
 type FileViewMode = "preview" | "source";
 
-const viewModeButtonClassName = "text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted! aria-pressed:text-foreground aria-pressed:shadow-none!";
+const viewModeButtonClassName =
+  "text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground aria-pressed:shadow-none dark:hover:bg-muted/60 dark:aria-pressed:bg-input/50";
 
 type FileDraft = {
   baseContent: string;

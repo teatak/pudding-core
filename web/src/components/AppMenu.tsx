@@ -20,8 +20,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const contentClassName = "min-w-40 w-max rounded-xl border-0 bg-popover/95 p-1.5 font-sans shadow-[0_10px_28px_rgb(0_0_0/0.18)] ring-1 ring-foreground/10 backdrop-blur-xl data-open:animate-none data-closed:animate-none dark:shadow-[0_10px_28px_rgb(0_0_0/0.45)]";
-const itemClassName = "min-h-[26px] gap-2 rounded-md px-2 py-0.5 text-[13px] leading-5 font-normal whitespace-nowrap focus:bg-[var(--floating-hover)] focus:text-foreground [&_svg:not([class*='size-'])]:size-3.5";
-const radioItemClassName = "min-h-[26px] gap-2 rounded-md py-0.5 pr-8 pl-2 text-[13px] leading-5 font-normal whitespace-nowrap focus:bg-[var(--floating-hover)] focus:text-foreground [&_svg:not([class*='size-'])]:size-3.5";
+const itemClassName = "min-h-[26px] gap-2 rounded-md px-2 py-0.5 text-[13px] leading-5 font-normal whitespace-nowrap focus:bg-interactive-hover focus:text-foreground active:bg-interactive-pressed [&_svg:not([class*='size-'])]:size-3.5";
+const radioItemClassName = "min-h-[26px] gap-2 rounded-md py-0.5 pr-8 pl-2 text-[13px] leading-5 font-normal whitespace-nowrap focus:bg-interactive-hover focus:text-foreground active:bg-interactive-pressed [&_svg:not([class*='size-'])]:size-3.5";
 const labelClassName = "min-h-[26px] gap-2 px-2 py-0.5 text-[13px] leading-5 font-normal text-muted-foreground";
 const separatorClassName = "mx-1 my-1 bg-foreground/10";
 

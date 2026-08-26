@@ -119,6 +119,93 @@ func TestChatContinuationReplaysStructuredReasoningAndToolCall(t *testing.T) {
 	}
 }
 
+func TestChatContinuationCompactsReasoningDetailDeltas(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"hello ","format":"unknown","index":0}]}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"world","format":"unknown","index":0}]}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"cipher","format":"unknown","index":1}]}}]}`+"\n\n"+
+			"data: [DONE]\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var continuation *provider.Continuation
+	for chunk := range out {
+		if chunk.Done {
+			continuation = chunk.Continuation
+		}
+	}
+	if continuation == nil {
+		t.Fatal("missing continuation")
+	}
+	var replay chatMessage
+	if err := json.Unmarshal(continuation.Data, &replay); err != nil {
+		t.Fatal(err)
+	}
+	if len(replay.ReasoningDetails) != 2 {
+		t.Fatalf("reasoning details len = %d, want 2: %s", len(replay.ReasoningDetails), continuation.Data)
+	}
+	var textDetail chatReasoningDetailText
+	if err := json.Unmarshal(replay.ReasoningDetails[0], &textDetail); err != nil {
+		t.Fatal(err)
+	}
+	if textDetail.Text != "hello world" {
+		t.Fatalf("compacted text = %q, want %q", textDetail.Text, "hello world")
+	}
+}
+
+func TestChatContinuationCompactsStoredReasoningDetailDeltasOnReplay(t *testing.T) {
+	continuation := chatMessage{
+		Role: "assistant",
+		ReasoningDetails: []json.RawMessage{
+			json.RawMessage(`{"type":"reasoning.text","text":"hello ","format":"unknown","index":0}`),
+			json.RawMessage(`{"type":"reasoning.text","text":"world","format":"unknown","index":0}`),
+		},
+	}
+	data, err := json.Marshal(continuation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := chatMessagesFor(provider.Message{
+		Role: provider.RoleAssistant,
+		Continuations: []provider.Continuation{{
+			Kind: provider.ContinuationOpenAIChat,
+			Data: data,
+		}},
+	})
+	if len(messages) != 1 || len(messages[0].ReasoningDetails) != 1 {
+		t.Fatalf("stored reasoning details were not compacted: %+v", messages)
+	}
+	var textDetail chatReasoningDetailText
+	if err := json.Unmarshal(messages[0].ReasoningDetails[0], &textDetail); err != nil {
+		t.Fatal(err)
+	}
+	if textDetail.Text != "hello world" {
+		t.Fatalf("compacted stored text = %q, want %q", textDetail.Text, "hello world")
+	}
+}
+
+func TestCompactReasoningDetailsHandlesManyStreamFragments(t *testing.T) {
+	const fragmentCount = 64_615
+	details := make([]json.RawMessage, fragmentCount)
+	for index := range details {
+		details[index] = json.RawMessage(`{"type":"reasoning.text","text":"x","format":"unknown","index":0}`)
+	}
+	compacted := compactReasoningDetails(details)
+	if len(compacted) != 1 {
+		t.Fatalf("compacted details len = %d, want 1", len(compacted))
+	}
+	var textDetail chatReasoningDetailText
+	if err := json.Unmarshal(compacted[0], &textDetail); err != nil {
+		t.Fatal(err)
+	}
+	if len(textDetail.Text) != fragmentCount {
+		t.Fatalf("compacted text len = %d, want %d", len(textDetail.Text), fragmentCount)
+	}
+}
+
 func TestReadSSEUsageChunk(t *testing.T) {
 	out := make(chan provider.Chunk, 4)
 	err := readSSE(context.Background(), strings.NewReader(

@@ -201,7 +201,7 @@ export function ProjectFormDialog({
               >
                 {directoryPaths.length === 0 ? (
                   <button
-                    className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 bg-transparent px-4 py-3 text-center text-sm transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                    className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 bg-transparent px-4 py-3 text-center text-sm transition-colors outline-none hover:bg-interactive-hover active:bg-interactive-pressed focus-visible:bg-interactive-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
                     disabled={isPending}
                     type="button"
                     onClick={onChooseDirectories}
@@ -269,7 +269,7 @@ export function ProjectFormDialog({
                       </div>
                     ))}
                     <button
-                      className="flex h-11 w-full items-center justify-start gap-1.5 bg-transparent px-3 text-sm font-normal transition-colors outline-none hover:bg-control-hover active:bg-control-active focus-visible:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                      className="flex h-11 w-full items-center justify-start gap-1.5 bg-transparent px-3 text-sm font-normal transition-colors outline-none hover:bg-interactive-hover active:bg-interactive-pressed focus-visible:bg-interactive-hover focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
                       disabled={isPending}
                       type="button"
                       onClick={onChooseDirectories}

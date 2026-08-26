@@ -12,11 +12,7 @@ export const ShellActionButton = forwardRef<HTMLButtonElement, ShellActionButton
   return (
     <Button
       ref={ref}
-      className={cn(
-        "bg-transparent hover:bg-control-hover focus-visible:bg-control-hover aria-expanded:bg-control-hover aria-pressed:bg-control-hover data-[state=open]:bg-control-hover active:bg-control-active dark:hover:bg-control-hover",
-        className,
-      )}
-      data-shell-action=""
+      className={cn("pudding-shell-action bg-transparent", className)}
       type={type}
       variant="ghost"
       {...props}

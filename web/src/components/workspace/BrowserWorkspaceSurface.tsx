@@ -144,11 +144,11 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
         </div>
         <Button
           aria-label={t(consoleCollapsed ? "agentConsole.showBrowserBar" : "agentConsole.hideBrowserBar")}
-          className="pudding-browser-console-toggle pointer-events-auto absolute right-3 shrink-0 rounded-full border border-border/70 bg-card/95 shadow-sm backdrop-blur"
+          className="pudding-browser-console-toggle pointer-events-auto absolute right-3 shrink-0 rounded-full border border-border/70 shadow-sm"
           data-console-collapsed={consoleCollapsed}
           size="icon-sm"
           type="button"
-          variant="ghost"
+          variant="secondary"
           onClick={() => setConsoleCollapsed((collapsed) => !collapsed)}
         >
           {consoleCollapsed ? <ChevronUp /> : <ChevronDown />}

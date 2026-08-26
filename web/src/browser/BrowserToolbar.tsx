@@ -520,7 +520,7 @@ export function BrowserToolbar({
                       key={entry.id}
                       className={cn(
                         "h-10 min-w-0 py-1.5 pr-1 [&>svg:last-child]:hidden",
-                        selectedHistoryIndex === index && "!bg-[var(--floating-hover)] text-foreground",
+                        selectedHistoryIndex === index && "!bg-interactive-selected text-foreground",
                       )}
                       value={entry.id}
                       onMouseEnter={() => setSelectedHistoryIndex(index)}

@@ -123,7 +123,7 @@ export function AssistantOutputMeta({
             <TooltipTrigger asChild>
               <Button
                 aria-label={t("transcript.cloneToNewChat")}
-                className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+                className="size-6 bg-transparent active:translate-y-0"
                 data-slot="button"
                 disabled={Boolean(cloningMessageID)}
                 size="icon-xs"

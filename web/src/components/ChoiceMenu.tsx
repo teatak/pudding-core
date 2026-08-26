@@ -107,8 +107,11 @@ export function ChoiceMenu<T>({
         const disabled = busy || item.disabled;
         const itemClassName = cn(
           "min-w-0 rounded-md px-2.5 py-1.5 text-left transition-opacity disabled:opacity-50",
-          !item.noActiveStyle && "hover:bg-control-hover active:bg-control-active",
-          index === selectedIndex && !item.noActiveStyle && "bg-control-hover text-foreground",
+          !item.noActiveStyle &&
+            "hover:bg-interactive-hover active:bg-interactive-pressed",
+          index === selectedIndex &&
+            !item.noActiveStyle &&
+            "bg-interactive-selected text-foreground hover:bg-interactive-selected",
           item.noActiveStyle && "px-0 py-0.5",
         );
         const commonProps = {

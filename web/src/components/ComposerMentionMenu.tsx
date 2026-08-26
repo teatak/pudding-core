@@ -77,8 +77,9 @@ export function ComposerMentionMenu({
                   ref={index === selectedIndex ? selectedRef : undefined}
                   aria-selected={index === selectedIndex}
                   className={cn(
-                    "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-control-hover active:bg-control-active",
-                    index === selectedIndex && "bg-control-hover text-foreground",
+                    "flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-interactive-hover active:bg-interactive-pressed",
+                    index === selectedIndex &&
+                      "bg-interactive-selected text-foreground hover:bg-interactive-selected",
                   )}
                   role="option"
                   type="button"

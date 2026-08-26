@@ -11,7 +11,6 @@ import {
   appPopoverSelectedItemStateClassName,
 } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
-import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -116,8 +115,7 @@ function ProjectApprovalControl({
         <Button
           aria-label={`${t("composer.projectApproval")}: ${currentLabel}`}
           className={cn(
-            "pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal text-foreground/70 hover:text-foreground",
-            composerControlStateClassName,
+            "pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal text-[var(--composer-control-foreground)]",
             value === "full" && "text-warning hover:text-warning",
           )}
           disabled={!project || busy}
@@ -126,9 +124,7 @@ function ProjectApprovalControl({
           variant="ghost"
         >
           {busy ? <Spinner className="size-4" /> : CurrentApprovalIcon ? (
-            <CurrentApprovalIcon
-              className={cn("size-4 shrink-0 text-muted-foreground", value === "full" && "text-warning")}
-            />
+            <CurrentApprovalIcon className="size-4 shrink-0" />
           ) : null}
           <span className="pudding-composer-approval-label min-w-0 truncate">{currentLabel}</span>
         </Button>

@@ -19,7 +19,6 @@ import { RailPanel } from "@/components/session-rail/RailPanel";
 import { SessionSearchDialog, type SessionSearchSelection } from "@/components/SessionSearchDialog";
 import { ShellActionButton } from "@/components/ShellActionButton";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
@@ -471,42 +470,37 @@ export function SessionRail({
       }}
     >
       <Popover open={collapsed && hover.open} onOpenChange={hover.handleOpenChange}>
-        <Tooltip>
-          <PopoverAnchor asChild>
-            <TooltipTrigger asChild>
-              <ShellActionButton
-                aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                className="size-7 opacity-100"
-                size="icon-sm"
-                tabIndex={-1}
-                onClick={() => {
-                  if (responsiveCollapsed) {
-                    hover.toggle();
-                    return;
-                  }
-                  if (!collapsed) {
-                    collapse(true);
-                    return;
-                  }
-                  collapse(false);
-                }}
-                onMouseEnter={() => {
-                  if (collapsed && hasHoverInput) {
-                    hover.openNow();
-                  }
-                }}
-                onMouseLeave={() => {
-                  if (collapsed && hasHoverInput) {
-                    hover.scheduleClose();
-                  }
-                }}
-              >
-                <PanelLeft />
-              </ShellActionButton>
-            </TooltipTrigger>
-          </PopoverAnchor>
-          {!collapsed ? <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent> : null}
-        </Tooltip>
+        <PopoverAnchor asChild>
+          <ShellActionButton
+            aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
+            className="size-7 opacity-100"
+            size="icon-sm"
+            tabIndex={-1}
+            onClick={() => {
+              if (responsiveCollapsed) {
+                hover.toggle();
+                return;
+              }
+              if (!collapsed) {
+                collapse(true);
+                return;
+              }
+              collapse(false);
+            }}
+            onMouseEnter={() => {
+              if (collapsed && hasHoverInput) {
+                hover.openNow();
+              }
+            }}
+            onMouseLeave={() => {
+              if (collapsed && hasHoverInput) {
+                hover.scheduleClose();
+              }
+            }}
+          >
+            <PanelLeft />
+          </ShellActionButton>
+        </PopoverAnchor>
         {collapsed ? (
           <PopoverContent
             align="start"

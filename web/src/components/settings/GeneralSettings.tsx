@@ -330,7 +330,7 @@ export function GeneralSettings({
           >
             <ToggleGroup
               aria-label={t("settings.general.theme")}
-              className="rounded-lg bg-muted p-0.5"
+              className="rounded-lg bg-interactive-hover p-0.5"
               id="pudding-interface-theme"
               spacing={1}
               type="single"

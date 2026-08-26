@@ -343,8 +343,8 @@ function SettingsTopNav({
                 className={cn(
                   "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm",
                   isActive
-                    ? "bg-control-hover text-foreground"
-                    : "text-muted-foreground hover:bg-control-hover hover:text-foreground active:bg-control-active",
+                    ? "bg-interactive-selected text-foreground"
+                    : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground active:bg-interactive-pressed",
                 )}
                 type="button"
                 onClick={() => onActiveChange(section.id)}

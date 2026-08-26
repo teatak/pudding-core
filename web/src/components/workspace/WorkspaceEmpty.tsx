@@ -7,6 +7,9 @@ import { useI18n } from "@/i18n";
 
 import { CanvasLibraryMenuSections } from "./WorkspaceSurfaceControls";
 
+const workspaceEmptyActionClassName =
+  "h-10 justify-center gap-2 rounded-lg border border-[var(--workspace-border)] bg-[var(--workspace-segment-background)] px-4 text-sm font-medium text-foreground shadow-none hover:bg-[var(--workspace-tab-hover-background)] active:bg-[var(--workspace-tab-active-background)] dark:hover:bg-[var(--workspace-tab-hover-background)] dark:active:bg-[var(--workspace-tab-active-background)] [&_svg]:size-4";
+
 export function WorkspaceEmpty({
   disabled,
   creatingBrowser,
@@ -48,7 +51,7 @@ export function WorkspaceEmpty({
           >
             {hasProject ? (
               <Button
-                className="h-10 justify-center gap-2 rounded-lg border border-[var(--workspace-border)] bg-[var(--workspace-segment-background)] px-4 text-sm font-medium text-foreground shadow-none hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground active:bg-[var(--workspace-tab-active-background)] [&_svg]:size-4"
+                className={workspaceEmptyActionClassName}
                 disabled={disabled || creatingBrowser}
                 type="button"
                 variant="ghost"
@@ -59,7 +62,7 @@ export function WorkspaceEmpty({
               </Button>
             ) : null}
             <Button
-              className="h-10 justify-center gap-2 rounded-lg border border-[var(--workspace-border)] bg-[var(--workspace-segment-background)] px-4 text-sm font-medium text-foreground shadow-none hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground active:bg-[var(--workspace-tab-active-background)] [&_svg]:size-4"
+              className={workspaceEmptyActionClassName}
               disabled={disabled || creatingBrowser}
               type="button"
               variant="ghost"

@@ -27,7 +27,7 @@ import { SettingsDialog } from "@/components/SettingsDialog";
 import { ComputerUsePermissionGuide } from "@/components/ComputerUsePermissionGuide";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
@@ -694,23 +694,16 @@ export function App() {
         ? <AgentConsoleLayoutControl />
         : null}
       <div className="pudding-workspace-toggle flex items-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ShellActionButton
-              aria-label={workspaceToggleLabel}
-              aria-pressed={workspaceRequestedOpen}
-              className="no-drag-region pointer-events-auto"
-              size="icon-sm"
-              tabIndex={-1}
-              onClick={() => setWorkspaceOpen(workspaceSessionID, !workspaceRequestedOpen)}
-            >
-              {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
-            </ShellActionButton>
-          </TooltipTrigger>
-          <TooltipContent align="end" side="bottom">
-            {workspaceToggleLabel}
-          </TooltipContent>
-        </Tooltip>
+        <ShellActionButton
+          aria-label={workspaceToggleLabel}
+          aria-pressed={workspaceRequestedOpen}
+          className="no-drag-region pointer-events-auto"
+          size="icon-sm"
+          tabIndex={-1}
+          onClick={() => setWorkspaceOpen(workspaceSessionID, !workspaceRequestedOpen)}
+        >
+          {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
+        </ShellActionButton>
       </div>
     </div>
   ) : null;

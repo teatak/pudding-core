@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type Re
 
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
 
+import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 import { TranscriptTurn } from "./TranscriptTurn";
 import type {
   TranscriptDisplaySettings,
@@ -133,6 +134,7 @@ export const TranscriptList = memo(function TranscriptList({
     gap: TURN_GAP_PX,
     getItemKey,
     getScrollElement: () => scrollElement,
+    measureElement: measureTranscriptItem,
     onChange: handleVirtualizerChange,
     overscan: TURN_OVERSCAN,
     paddingStart: LIST_PADDING_TOP_PX,
@@ -142,16 +144,17 @@ export const TranscriptList = memo(function TranscriptList({
   });
   const virtualItems = virtualizer.getVirtualItems();
   const virtualRenderVersion = virtualItems.map((item) => item.key).join("\u0000");
+  const resizeMountedElement = useCallback((index: number, node: HTMLDivElement) => {
+    if (node.isConnected) {
+      virtualizer.resizeItem(index, measureTranscriptItem(node));
+    }
+  }, [virtualizer]);
   const measureElement = useCallback((node: HTMLDivElement | null) => {
     if (!node) {
       virtualizer.measureElement(null);
       return;
     }
-    queueMicrotask(() => {
-      if (node.isConnected) {
-        virtualizer.measureElement(node);
-      }
-    });
+    queueMicrotask(() => virtualizer.measureElement(node));
   }, [virtualizer]);
   const setListElement = useCallback((node: HTMLDivElement | null) => {
     listElementRef.current = node;
@@ -534,14 +537,13 @@ export const TranscriptList = memo(function TranscriptList({
               return null;
             }
             return (
-              <div
+              <MeasuredTurnItem
                 key={virtualItem.key}
-                ref={measureElement}
                 aria-posinset={virtualItem.index + 1}
                 aria-setsize={turns.length}
-                className="min-w-0"
-                data-index={virtualItem.index}
-                role="listitem"
+                index={virtualItem.index}
+                registerElement={measureElement}
+                resizeElement={resizeMountedElement}
               >
                 <TranscriptTurn
                   cloningMessageID={cloningMessageID}
@@ -557,7 +559,7 @@ export const TranscriptList = memo(function TranscriptList({
                   token={token}
                   turn={turn}
                 />
-              </div>
+              </MeasuredTurnItem>
             );
           })}
         </div>
@@ -565,6 +567,52 @@ export const TranscriptList = memo(function TranscriptList({
     </div>
   );
 });
+
+function MeasuredTurnItem({
+  children,
+  index,
+  registerElement,
+  resizeElement,
+  ...aria
+}: {
+  children: ReactNode;
+  index: number;
+  registerElement: (node: HTMLDivElement | null) => void;
+  resizeElement: (index: number, node: HTMLDivElement) => void;
+  "aria-posinset": number;
+  "aria-setsize": number;
+}) {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const setElement = useCallback((node: HTMLDivElement | null) => {
+    elementRef.current = node;
+    registerElement(node);
+  }, [registerElement]);
+  const measureItem = useCallback(() => {
+    const node = elementRef.current;
+    if (node) {
+      resizeElement(index, node);
+    }
+  }, [index, resizeElement]);
+
+  return (
+    <div
+      ref={setElement}
+      {...aria}
+      className="min-w-0"
+      data-index={index}
+      role="listitem"
+    >
+      <TranscriptItemMeasureContext.Provider value={measureItem}>
+        {children}
+      </TranscriptItemMeasureContext.Provider>
+    </div>
+  );
+}
+
+function measureTranscriptItem(element: Element, entry?: ResizeObserverEntry) {
+  const borderBox = entry?.borderBoxSize[0];
+  return Math.round(borderBox?.blockSize ?? element.getBoundingClientRect().height);
+}
 
 function findTurnElement(root: HTMLElement, turnID: string) {
   return root.querySelector<HTMLElement>(

@@ -731,7 +731,7 @@ function MetaIconButton({
       <TooltipTrigger asChild>
         <Button
           aria-label={label}
-          className="size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0 [&>[data-slot=spinner]]:size-3"
+          className="size-6 bg-transparent active:translate-y-0 [&>[data-slot=spinner]]:size-3"
           disabled={disabled}
           size="icon-xs"
           type="button"

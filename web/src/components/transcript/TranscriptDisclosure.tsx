@@ -1,7 +1,18 @@
 import { ChevronDown, ChevronRight } from "@/components/icons";
-import { useState, type KeyboardEventHandler, type MouseEventHandler, type ReactNode, type ToggleEvent } from "react";
+import {
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEventHandler,
+  type MouseEventHandler,
+  type ReactNode,
+  type ToggleEvent,
+} from "react";
 
 import { cn } from "@/lib/utils";
+
+import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 
 type TranscriptDisclosureProps = {
   children?: ReactNode;
@@ -43,6 +54,21 @@ export function TranscriptDisclosure({
   const [localOpen, setLocalOpen] = useState(false);
   const expandable = children != null;
   const resolvedOpen = open ?? localOpen;
+  const measureItem = useContext(TranscriptItemMeasureContext);
+  const previousLayoutRef = useRef({ expandable, open: resolvedOpen });
+
+  useLayoutEffect(() => {
+    const previous = previousLayoutRef.current;
+    previousLayoutRef.current = { expandable, open: resolvedOpen };
+    if (
+      !measureItem ||
+      (previous.expandable === expandable && previous.open === resolvedOpen)
+    ) {
+      return;
+    }
+    queueMicrotask(measureItem);
+  }, [expandable, measureItem, resolvedOpen]);
+
   const row = (
     <>
       <TranscriptActivityIcon className={iconClassName}>{icon}</TranscriptActivityIcon>

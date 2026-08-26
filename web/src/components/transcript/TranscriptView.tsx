@@ -150,14 +150,14 @@ export function TranscriptView({
           className={
             newMessageCount > 0
               ? "absolute inset-x-0 z-40 mx-auto h-9 w-fit gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
-              : "absolute inset-x-0 z-40 mx-auto rounded-full border border-border bg-card shadow-md hover:bg-muted"
+              : "absolute inset-x-0 z-40 mx-auto rounded-full border border-border shadow-md"
           }
           size={newMessageCount > 0 ? "default" : "icon"}
           style={{
             bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)",
           }}
           type="button"
-          variant={newMessageCount > 0 ? "default" : "ghost"}
+          variant={newMessageCount > 0 ? "default" : "secondary"}
           onClick={onJumpLatest}
         >
           <ArrowDown />

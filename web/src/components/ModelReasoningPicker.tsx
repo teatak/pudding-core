@@ -19,7 +19,6 @@ import {
   appPopoverItemStateClassName,
   appPopoverSelectedItemStateClassName,
 } from "@/components/AppPopover";
-import { composerControlStateClassName } from "@/components/composerControlStyles";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
@@ -225,16 +224,14 @@ export function ModelReasoningPicker({
         <Button
           aria-label={`${t("session.model")}: ${triggerLabel}`}
           className={cn(
-            "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-foreground transition-none",
+            "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-[var(--composer-control-foreground)] transition-none",
             iconOnly
               ? "w-8 max-w-8 flex-none justify-center p-0"
               : "min-w-0 max-w-[9.5rem] gap-1 pr-1.5 sm:max-w-[10.5rem]",
-            composerControlStateClassName,
             !iconOnly && (visibleModel ? "pl-1" : "pl-2"),
             className,
           )}
           size="sm"
-          title={triggerLabel}
           variant="ghost"
         >
           {visibleModel ? (
@@ -243,7 +240,7 @@ export function ModelReasoningPicker({
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
           {iconOnly ? null : (
-            <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
+            <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
               {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
               {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
@@ -279,9 +276,9 @@ export function ModelReasoningPicker({
               <DropdownMenuTrigger asChild>
                 <button
                   className={cn(
-                    "flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs data-[state=open]:bg-[var(--floating-active)]",
+                    "flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs data-[state=open]:bg-interactive-selected",
                     appPopoverItemStateClassName,
-                    "data-[state=open]:hover:bg-[var(--floating-active)] data-[state=open]:focus-within:bg-[var(--floating-active)]",
+                    "data-[state=open]:hover:bg-interactive-selected data-[state=open]:focus-within:bg-interactive-selected",
                   )}
                   type="button"
                   onPointerEnter={reasoningMenu.openFromHover}

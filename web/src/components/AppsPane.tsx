@@ -1306,7 +1306,7 @@ function ManagedAppTile({
   const iconSrc = app.source === "installed" ? appIconURL(token, app) : undefined;
   return (
     <button
-      className="group grid min-h-20 w-20 min-w-0 shrink-0 content-center justify-items-center gap-1.5 rounded-lg px-1 py-2 text-center transition-colors hover:bg-control-hover active:bg-control-active"
+      className="group grid min-h-20 w-20 min-w-0 shrink-0 content-center justify-items-center gap-1.5 rounded-lg px-1 py-2 text-center transition-colors hover:bg-interactive-hover active:bg-interactive-pressed"
       type="button"
       onClick={onSelect}
     >
@@ -2496,7 +2496,7 @@ function SkillRows({
         <Item
           key={skill.path}
           asChild
-          className="relative items-start gap-3 rounded-none border-0 px-3 py-2.5 hover:bg-control-hover active:bg-control-active"
+          className="relative items-start gap-3 rounded-none border-0 px-3 py-2.5 hover:bg-interactive-hover active:bg-interactive-pressed"
         >
           <button type="button" onClick={() => onSkillSelect?.(skill)}>
             {index > 0 ? <span aria-hidden="true" className="absolute inset-x-3 top-0 border-t border-border/70" /> : null}

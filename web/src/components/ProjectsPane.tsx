@@ -413,7 +413,7 @@ function ProjectEmptyState({
                   </div>
                 ))}
                 <button
-                  className="flex h-12 w-full items-center justify-center gap-2 bg-transparent px-3 text-sm font-normal text-foreground transition-colors hover:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  className="flex h-12 w-full items-center justify-center gap-2 bg-transparent px-3 text-sm font-normal text-foreground transition-colors hover:bg-interactive-hover active:bg-interactive-pressed focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                   disabled={isPending}
                   type="button"
                   onClick={onChooseDirectories}
@@ -424,7 +424,7 @@ function ProjectEmptyState({
               </>
             ) : (
               <button
-                className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 bg-transparent px-4 py-3 text-center text-sm transition-colors hover:bg-control-hover focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 bg-transparent px-4 py-3 text-center text-sm transition-colors hover:bg-interactive-hover active:bg-interactive-pressed focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 disabled={isPending}
                 type="button"
                 onClick={onChooseDirectories}

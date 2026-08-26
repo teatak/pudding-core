@@ -18,6 +18,9 @@ export type ImageLightboxItem = {
   url: string;
 };
 
+const lightboxActionClassName =
+  "rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white active:bg-white/25 dark:hover:bg-white/20 dark:active:bg-white/25";
+
 export function ImageLightbox({
   images,
   openIndex,
@@ -120,7 +123,7 @@ export function ImageLightbox({
             <DialogClose asChild>
               <Button
                 aria-label="关闭预览"
-                className="ml-auto rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                className={cn("ml-auto", lightboxActionClassName)}
                 size="icon-sm"
                 type="button"
                 variant="ghost"
@@ -152,7 +155,7 @@ export function ImageLightbox({
             <>
               <Button
                 aria-label="上一张"
-                className="absolute top-1/2 left-3 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                className={cn("absolute top-1/2 left-3", lightboxActionClassName)}
                 size="icon-lg"
                 type="button"
                 variant="ghost"
@@ -162,7 +165,7 @@ export function ImageLightbox({
               </Button>
               <Button
                 aria-label="下一张"
-                className="absolute top-1/2 right-3 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                className={cn("absolute top-1/2 right-3", lightboxActionClassName)}
                 size="icon-lg"
                 type="button"
                 variant="ghost"
