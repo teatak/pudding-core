@@ -173,7 +173,6 @@ export function ProviderProfileEditorDialog({
   const [apiKeyVisible, setAPIKeyVisible] = useState(false);
   const [modelDialogState, setModelDialogState] = useState<ModelDialogState | null>(null);
   const [pendingRevealModelIndex, setPendingRevealModelIndex] = useState<number | null>(null);
-  const [highlightedModelID, setHighlightedModelID] = useState<string | null>(null);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
   const [basicInfoSaving, setBasicInfoSaving] = useState(false);
   const [modelDialogSaving, setModelDialogSaving] = useState(false);
@@ -235,7 +234,6 @@ export function ProviderProfileEditorDialog({
     setAPIKeyVisible(false);
     setModelDialogState(null);
     setPendingRevealModelIndex(null);
-    setHighlightedModelID(null);
     setModelSaveError(null);
     setBasicInfoSaving(false);
     setModelDialogSaving(false);
@@ -254,7 +252,6 @@ export function ProviderProfileEditorDialog({
     if (!field) {
       return;
     }
-    setHighlightedModelID(field.id);
     setPendingRevealModelIndex(null);
     window.requestAnimationFrame(() => {
       document.getElementById(`provider-model-${field.id}`)?.scrollIntoView({
@@ -263,14 +260,6 @@ export function ProviderProfileEditorDialog({
       });
     });
   }, [fields.fields, pendingRevealModelIndex]);
-
-  useEffect(() => {
-    if (!highlightedModelID) {
-      return;
-    }
-    const timeout = window.setTimeout(() => setHighlightedModelID(null), 1600);
-    return () => window.clearTimeout(timeout);
-  }, [highlightedModelID]);
 
   const createMutation = useMutation({
     mutationFn: (value: ProviderProfileEditorValue) => createProvider(token, cleanCreateProvider(value)),
@@ -786,7 +775,6 @@ export function ProviderProfileEditorDialog({
                           <SortableModelRow
                             key={field.id}
                             disabled={modelSaving}
-                            highlighted={highlightedModelID === field.id}
                             model={configuredModels[index] || emptyModel()}
                             sortableDisabled={fields.fields.length < 2 || modelSaving}
                             sortableID={field.id}
@@ -877,7 +865,6 @@ export function ProviderProfileEditorDialog({
 
 function SortableModelRow({
   disabled,
-  highlighted,
   model,
   sortableDisabled,
   sortableID,
@@ -886,7 +873,6 @@ function SortableModelRow({
   onRemove,
 }: {
   disabled: boolean;
-  highlighted: boolean;
   model: ModelFormValue;
   sortableDisabled: boolean;
   sortableID: string;
@@ -906,7 +892,6 @@ function SortableModelRow({
       ref={setNodeRef}
       className={cn(
         "relative grid h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 px-2 not-last:border-b",
-        highlighted && "bg-primary/5 ring-1 ring-inset ring-primary/40",
         isDragging && "z-10 bg-card opacity-80 shadow-md",
       )}
       id={`provider-model-${sortableID}`}

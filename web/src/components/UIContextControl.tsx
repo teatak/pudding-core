@@ -27,6 +27,7 @@ export function UIContextControl({
         <Button
           aria-label={enabled ? t("uiContext.disable") : t("uiContext.enable")}
           aria-pressed={enabled}
+          data-selected-background="none"
           className={cn(
             "relative rounded-full",
             enabled ? "text-muted-foreground" : "text-muted-foreground/45",

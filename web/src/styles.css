@@ -222,19 +222,19 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --menu-item-gap: 0.25rem;
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
-    --mascot-body: oklch(0.76 0.012 255);
-    --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 33%);
-    --mascot-metal-highlight: oklch(0.99 0.006 250 / 78%);
-    --mascot-metal-shade: oklch(0.5 0.01 255 / 30%);
+    --mascot-body: oklch(0.82 0.012 250);
+    --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 46%);
+    --mascot-metal-highlight: oklch(0.995 0.004 250 / 92%);
+    --mascot-metal-shade: oklch(0.5 0.018 250 / 38%);
     --mascot-status-light: oklch(0.72 0.14 16 / 88%);
-    --mascot-feature-outline: oklch(0.38 0.02 255);
-    --mascot-shell-rear: color-mix(in oklch, var(--mascot-body), white 4%);
-    --mascot-shell-outline: color-mix(in oklch, var(--mascot-body), oklch(0.3 0.01 255) 30%);
-    --mascot-screen: oklch(0.91 0.018 95);
+    --mascot-feature-outline: oklch(0.34 0.025 265);
+    --mascot-shell-rear: color-mix(in oklch, var(--mascot-body), white 10%);
+    --mascot-shell-outline: color-mix(in oklch, var(--mascot-body), oklch(0.36 0.025 250) 36%);
+    --mascot-screen: oklch(0.94 0.032 95);
     --mascot-error-screen: oklch(0.89 0.045 25);
-    --mascot-screen-groove: oklch(0.48 0.085 285);
+    --mascot-screen-groove: oklch(0.4 0.095 165);
     --mascot-screen-edge: oklch(0.76 0.16 165);
-    --mascot-shadow: oklch(0.52 0.012 250 / 9%);
+    --mascot-shadow: oklch(0.44 0.018 250 / 12%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
@@ -741,9 +741,9 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --transcript-reveal-accent: var(--info);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
-    --interactive-hover: oklch(1 0 0 / 10%);
-    --interactive-selected: oklch(1 0 0 / 13%);
-    --interactive-pressed: oklch(1 0 0 / 16%);
+    --interactive-hover: oklch(1 0 0 / 8%);
+    --interactive-selected: oklch(1 0 0 / 10%);
+    --interactive-pressed: oklch(1 0 0 / 12%);
     --item-hover-background: color-mix(in oklch, var(--card) 90%, var(--foreground));
     --workspace-background: var(--background);
     --workspace-chrome-background: var(--workspace-background);
@@ -790,17 +790,19 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     --floating-surface: var(--popover);
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
-    --mascot-body: oklch(0.61 0.012 255);
-    --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 21%);
-    --mascot-metal-highlight: oklch(0.95 0.008 250 / 62%);
-    --mascot-metal-shade: oklch(0.4 0.01 255 / 32%);
+    --mascot-body: oklch(0.72 0.014 250);
+    --mascot-body-metal-top: color-mix(in oklch, var(--mascot-body), white 34%);
+    --mascot-metal-highlight: oklch(0.97 0.006 250 / 78%);
+    --mascot-metal-shade: oklch(0.38 0.018 250 / 44%);
     --mascot-status-light: oklch(0.62 0.12 16 / 82%);
-    --mascot-feature-outline: oklch(0.32 0.02 255);
-    --mascot-screen: oklch(0.8 0.016 95);
+    --mascot-feature-outline: oklch(0.3 0.025 265);
+    --mascot-shell-rear: color-mix(in oklch, var(--mascot-body), black 4%);
+    --mascot-shell-outline: color-mix(in oklch, var(--mascot-body), oklch(0.28 0.025 250) 42%);
+    --mascot-screen: oklch(0.82 0.028 95);
     --mascot-error-screen: oklch(0.67 0.06 25);
-    --mascot-screen-groove: oklch(0.44 0.07 285);
+    --mascot-screen-groove: oklch(0.36 0.085 165);
     --mascot-screen-edge: oklch(0.82 0.14 165);
-    --mascot-shadow: oklch(0.38 0.012 250 / 12%);
+    --mascot-shadow: oklch(0.26 0.016 250 / 17%);
     --phase-submitting: oklch(0.879 0.169 91.605);
     --phase-awaiting-model: oklch(0.828 0.189 84.429);
     --phase-streaming-text: oklch(0.685 0.169 237.323);
@@ -868,7 +870,7 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     [aria-pressed="true"],
     [aria-expanded="true"],
     [data-state="open"]
-):not(:disabled) {
+):not(:disabled):not([data-selected-background="none"]) {
     background-color: var(--interactive-selected);
     box-shadow: none;
 }
