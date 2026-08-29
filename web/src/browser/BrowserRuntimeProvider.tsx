@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -17,15 +18,20 @@ import {
   ElectronWebviewBrowser,
   type ElectronWebviewRuntimeHandle,
 } from "@/browser/ElectronWebviewBrowser";
-import { electronBrowserBridge } from "@/browser/electronBridge";
+import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import {
+  electronBrowserBridge,
+  type ElectronBrowserAutomationEvent,
+} from "@/browser/electronBridge";
 import { activateBrowserPageFindRegion } from "@/browser/pageFindTarget";
 import {
   useElectronRequiredBrowserTabs,
   type ElectronBrowserSurfaceTab,
 } from "@/browser/useElectronRequiredBrowserTabs";
-import { Camera, Check } from "@/components/icons";
+import { Check, Globe, X } from "@/components/icons";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
+import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 type RuntimeEntry = {
   handle: ElectronWebviewRuntimeHandle;
@@ -34,32 +40,49 @@ type RuntimeEntry = {
 };
 
 type ActiveViewport = {
+  interactive: boolean;
   key: string;
+  pipPhase?: BrowserAutomationActivity["phase"];
+  priority: number;
 };
 
 type AutomationLease = {
   action: "click" | "screenshot";
-  captureStatus: "running" | "success";
   complete: (ok: boolean) => void;
   completed: boolean;
+  frameID?: number;
   key: string;
-  previewDataURL: string;
   presentationFrameReady: boolean;
 };
 
+type BrowserAutomationActivity = {
+  action: ElectronBrowserAutomationEvent["action"];
+  ok?: boolean;
+  phase: "running" | "complete";
+  sessionID: string;
+  tabID: string;
+};
+
 type BrowserRuntimeContextValue = {
+  automationActivitiesBySession: Record<string, BrowserAutomationActivity>;
   requiredTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;
+  runtimeTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;
   registerRuntime: (
     key: string,
     host: HTMLDivElement,
     handle: ElectronWebviewRuntimeHandle,
   ) => () => void;
+  registerViewport: (
+    viewportID: string,
+    viewport: ActiveViewport,
+  ) => () => void;
   retainTabs: (sessionID: string, tabs: ElectronBrowserSurfaceTab[]) => void;
-  setViewport: (viewport: ActiveViewport | null) => void;
 };
 
 const emptyRuntimeTabs: ElectronBrowserSurfaceTab[] = [];
-const screenshotPreviewExitDelayMs = 2_000;
+const automationPipCloseDelayMs = 30_000;
+const pipViewportPriority = 10;
+const workspaceViewportPriority = 20;
 
 const BrowserRuntimeContext = createContext<BrowserRuntimeContextValue | null>(null);
 
@@ -74,14 +97,21 @@ export function BrowserRuntimeProvider({
   const [retainedTabsBySession, setRetainedTabsBySession] = useState<
     Record<string, ElectronBrowserSurfaceTab[]>
   >({});
+  const [automationActivitiesBySession, setAutomationActivitiesBySession] = useState<
+    Record<string, BrowserAutomationActivity>
+  >({});
+  const automationActivitiesRef = useRef<Record<string, BrowserAutomationActivity>>({});
   const runtimesRef = useRef(new Map<string, RuntimeEntry>());
-  const viewportRef = useRef<ActiveViewport | null>(null);
-  const automationFrameRef = useRef<number | undefined>(undefined);
-  const automationHideTimerRef = useRef<number | undefined>(undefined);
-  const automationLeaseRef = useRef<AutomationLease | null>(null);
+  const viewportsRef = useRef(new Map<string, ActiveViewport>());
+  const automationHideTimersRef = useRef(new Map<string, number>());
+  const automationLeasesRef = useRef(new Map<string, AutomationLease>());
 
   useEffect(() => {
     setRetainedTabsBySession({});
+    automationHideTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    automationHideTimersRef.current.clear();
+    automationActivitiesRef.current = {};
+    setAutomationActivitiesBySession({});
   }, [token]);
 
   useEffect(() => {
@@ -106,29 +136,32 @@ export function BrowserRuntimeProvider({
   }, [requiredTabsBySession, retainedTabsBySession]);
 
   const applyPresentations = useCallback(() => {
-    const automation = automationLeaseRef.current;
-    const viewport = viewportRef.current;
+    const viewport = selectActiveViewport(viewportsRef.current);
 
     runtimesRef.current.forEach((runtime, key) => {
-      if (automation?.key === key) {
-        if (automation.action === "screenshot") {
-          runtime.host.dataset.captureStatus = automation.captureStatus;
-          applyRuntimeCapturePreview(runtime, automation.previewDataURL);
-          applyRuntimePresentation(runtime, "preview", false);
-        } else {
-          delete runtime.host.dataset.captureStatus;
-          applyRuntimeCapturePreview(runtime, "");
-          applyRuntimePresentation(runtime, "automation", viewport?.key === key);
-        }
+      const automation = automationLeasesRef.current.get(key);
+      if (automation) {
+        const automationViewport = selectActiveViewport(viewportsRef.current, key);
+        applyRuntimePresentation(
+          runtime,
+          "automation",
+          Boolean(automationViewport),
+          false,
+          automationViewport?.pipPhase,
+        );
         return;
       }
-      delete runtime.host.dataset.captureStatus;
-      applyRuntimeCapturePreview(runtime, "");
-      if (!automation && viewport?.key === key) {
-        applyRuntimePresentation(runtime, "visible", true);
+      if (viewport?.key === key) {
+        applyRuntimePresentation(
+          runtime,
+          "visible",
+          true,
+          viewport.interactive,
+          viewport.pipPhase,
+        );
         return;
       }
-      applyRuntimePresentation(runtime, "standby", false);
+      applyRuntimePresentation(runtime, "standby", false, false);
     });
   }, []);
 
@@ -150,10 +183,11 @@ export function BrowserRuntimeProvider({
       }
       entry.handle.releaseAutomationFocus();
       runtimesRef.current.delete(key);
-      const lease = automationLeaseRef.current;
-      if (lease?.key === key) {
+      const lease = automationLeasesRef.current.get(key);
+      if (lease) {
+        window.cancelAnimationFrame(lease.frameID || 0);
         completeAutomationLease(lease, false);
-        automationLeaseRef.current = null;
+        automationLeasesRef.current.delete(key);
         applyPresentations();
       }
     };
@@ -177,9 +211,16 @@ export function BrowserRuntimeProvider({
     });
   }, []);
 
-  const setViewport = useCallback((viewport: ActiveViewport | null) => {
-    viewportRef.current = viewport;
+  const registerViewport = useCallback((viewportID: string, viewport: ActiveViewport) => {
+    viewportsRef.current.set(viewportID, viewport);
     applyPresentations();
+    return () => {
+      if (viewportsRef.current.get(viewportID) !== viewport) {
+        return;
+      }
+      viewportsRef.current.delete(viewportID);
+      applyPresentations();
+    };
   }, [applyPresentations]);
 
   useEffect(() => {
@@ -195,106 +236,143 @@ export function BrowserRuntimeProvider({
       void bridge.completeAutomationLifecycle?.({ requestID, ok }).catch(() => undefined);
     };
     const stopStart = bridge.onAutomationStart((event) => {
-      if ((event.action !== "click" && event.action !== "screenshot") || !event.requestID) {
+      window.clearTimeout(automationHideTimersRef.current.get(event.sessionID));
+      automationHideTimersRef.current.delete(event.sessionID);
+      const activity: BrowserAutomationActivity = {
+        action: event.action,
+        phase: "running",
+        sessionID: event.sessionID,
+        tabID: event.tabID,
+      };
+      const nextActivities = {
+        ...automationActivitiesRef.current,
+        [event.sessionID]: activity,
+      };
+      automationActivitiesRef.current = nextActivities;
+      setAutomationActivitiesBySession(nextActivities);
+
+      if (
+        !event.requestID
+        || (event.action !== "click" && event.action !== "screenshot")
+      ) {
         return;
       }
-      window.clearTimeout(automationHideTimerRef.current);
-      window.cancelAnimationFrame(automationFrameRef.current || 0);
-      const previousLease = automationLeaseRef.current;
+      const key = runtimeKey(event.sessionID, event.tabID);
+      const previousLease = automationLeasesRef.current.get(key);
       if (previousLease) {
+        window.cancelAnimationFrame(previousLease.frameID || 0);
         runtimesRef.current.get(previousLease.key)?.handle.releaseAutomationFocus();
         completeAutomationLease(previousLease, false);
       }
       const lease: AutomationLease = {
         action: event.action,
-        captureStatus: "running",
         complete: (ok: boolean) => complete(event.requestID || "", ok),
         completed: false,
-        key: runtimeKey(event.sessionID, event.tabID),
-        previewDataURL: "",
+        key,
         presentationFrameReady: false,
       };
-      automationLeaseRef.current = lease;
+      automationLeasesRef.current.set(key, lease);
       applyPresentations();
       const deadline = performance.now() + 1_200;
       const focusWhenReady = () => {
-        if (automationLeaseRef.current !== lease) {
+        if (automationLeasesRef.current.get(key) !== lease) {
           return;
         }
         const runtime = runtimesRef.current.get(lease.key);
         const rect = runtime?.host.getBoundingClientRect();
         if (runtime && rect && rect.width > 0 && rect.height > 0) {
-          if (
-            lease.action === "screenshot"
-            && runtime.handle.readyForCapture()
-          ) {
-            if (lease.presentationFrameReady) {
-              completeAutomationLease(lease, true);
-              return;
-            }
+          if (!lease.presentationFrameReady) {
             lease.presentationFrameReady = true;
+          } else if (lease.action === "screenshot" && runtime.handle.readyForCapture()) {
+            completeAutomationLease(lease, true);
+            return;
           } else if (lease.action === "click" && runtime.handle.focusForAutomation()) {
             completeAutomationLease(lease, true);
             return;
           }
         }
         if (performance.now() >= deadline) {
-          automationLeaseRef.current = null;
+          automationLeasesRef.current.delete(key);
           runtime?.handle.releaseAutomationFocus();
           applyPresentations();
           completeAutomationLease(lease, false);
           return;
         }
-        automationFrameRef.current = window.requestAnimationFrame(focusWhenReady);
+        lease.frameID = window.requestAnimationFrame(focusWhenReady);
       };
-      automationFrameRef.current = window.requestAnimationFrame(focusWhenReady);
+      lease.frameID = window.requestAnimationFrame(focusWhenReady);
     });
     const stopEnd = bridge.onAutomationEnd((event) => {
-      if ((event.action !== "click" && event.action !== "screenshot") || !event.requestID) {
-        return;
+      const currentActivity = automationActivitiesRef.current[event.sessionID];
+      if (
+        currentActivity?.tabID === event.tabID
+        && currentActivity.action === event.action
+      ) {
+        const completedActivity: BrowserAutomationActivity = {
+          ...currentActivity,
+          ok: event.ok,
+          phase: "complete",
+        };
+        const nextActivities = {
+          ...automationActivitiesRef.current,
+          [event.sessionID]: completedActivity,
+        };
+        automationActivitiesRef.current = nextActivities;
+        setAutomationActivitiesBySession(nextActivities);
+        window.clearTimeout(automationHideTimersRef.current.get(event.sessionID));
+        const timer = window.setTimeout(() => {
+          if (automationActivitiesRef.current[event.sessionID] !== completedActivity) {
+            return;
+          }
+          const remainingActivities = { ...automationActivitiesRef.current };
+          delete remainingActivities[event.sessionID];
+          automationActivitiesRef.current = remainingActivities;
+          automationHideTimersRef.current.delete(event.sessionID);
+          setAutomationActivitiesBySession(remainingActivities);
+        }, automationPipCloseDelayMs);
+        automationHideTimersRef.current.set(event.sessionID, timer);
       }
-      const lease = automationLeaseRef.current;
-      if (lease?.key === runtimeKey(event.sessionID, event.tabID)) {
-        window.cancelAnimationFrame(automationFrameRef.current || 0);
+      const key = runtimeKey(event.sessionID, event.tabID);
+      const lease = automationLeasesRef.current.get(key);
+      if (
+        lease?.action === event.action
+      ) {
+        window.cancelAnimationFrame(lease.frameID || 0);
         runtimesRef.current.get(lease.key)?.handle.releaseAutomationFocus();
-        if (lease.action === "screenshot" && event.ok === true) {
-          lease.captureStatus = "success";
-          lease.previewDataURL = event.previewDataURL || "";
-          applyPresentations();
-          automationHideTimerRef.current = window.setTimeout(() => {
-            if (automationLeaseRef.current !== lease) {
-              return;
-            }
-            automationLeaseRef.current = null;
-            applyPresentations();
-          }, screenshotPreviewExitDelayMs);
-        } else {
-          automationLeaseRef.current = null;
-          applyPresentations();
-        }
+        automationLeasesRef.current.delete(key);
+        applyPresentations();
       }
-      complete(event.requestID, true);
+      complete(event.requestID || "", true);
     });
     return () => {
       stopStart();
       stopEnd();
-      window.clearTimeout(automationHideTimerRef.current);
-      window.cancelAnimationFrame(automationFrameRef.current || 0);
-      const lease = automationLeaseRef.current;
-      if (lease) {
+      automationHideTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      automationHideTimersRef.current.clear();
+      automationLeasesRef.current.forEach((lease) => {
+        window.cancelAnimationFrame(lease.frameID || 0);
         runtimesRef.current.get(lease.key)?.handle.releaseAutomationFocus();
         completeAutomationLease(lease, false);
-        automationLeaseRef.current = null;
-      }
+      });
+      automationLeasesRef.current.clear();
     };
   }, [applyPresentations]);
 
   const context = useMemo<BrowserRuntimeContextValue>(() => ({
+    automationActivitiesBySession,
     registerRuntime,
+    registerViewport,
     requiredTabsBySession,
     retainTabs,
-    setViewport,
-  }), [registerRuntime, requiredTabsBySession, retainTabs, setViewport]);
+    runtimeTabsBySession,
+  }), [
+    automationActivitiesBySession,
+    registerRuntime,
+    registerViewport,
+    requiredTabsBySession,
+    retainTabs,
+    runtimeTabsBySession,
+  ]);
 
   return (
     <BrowserRuntimeContext.Provider value={context}>
@@ -320,14 +398,21 @@ export function BrowserRuntimeProvider({
 
 export const BrowserViewportPlaceholder = memo(function BrowserViewportPlaceholder({
   active,
+  interactive = true,
+  pipPhase,
+  priority = workspaceViewportPriority,
   sessionID,
   tabID,
 }: {
   active: boolean;
+  interactive?: boolean;
+  pipPhase?: BrowserAutomationActivity["phase"];
+  priority?: number;
   sessionID: string;
   tabID?: string;
 }) {
-  const { setViewport } = useBrowserRuntimeContext();
+  const { registerViewport } = useBrowserRuntimeContext();
+  const viewportID = useId();
   const key = tabID ? runtimeKey(sessionID, tabID) : "";
   const anchorName = tabID ? runtimeAnchorName(sessionID, tabID) : "--pudding-browser-none";
 
@@ -335,9 +420,8 @@ export const BrowserViewportPlaceholder = memo(function BrowserViewportPlacehold
     if (!active || !key) {
       return;
     }
-    setViewport({ key });
-    return () => setViewport(null);
-  }, [active, key, setViewport]);
+    return registerViewport(viewportID, { interactive, key, pipPhase, priority });
+  }, [active, interactive, key, pipPhase, priority, registerViewport, viewportID]);
 
   return (
     <div
@@ -374,6 +458,76 @@ export const BrowserViewportOverlay = memo(function BrowserViewportOverlay({
   );
 });
 
+export const BrowserAutomationPip = memo(function BrowserAutomationPip({
+  sessionID,
+}: {
+  sessionID: string;
+}) {
+  const { t } = useI18n();
+  const workspaceOpen = useWorkspaceOpen(sessionID);
+  const { automationActivitiesBySession, runtimeTabsBySession } = useBrowserRuntimeContext();
+  const automationActivity = automationActivitiesBySession[sessionID];
+  if (!automationActivity || automationActivity.sessionID !== sessionID || workspaceOpen) {
+    return null;
+  }
+
+  const tab = runtimeTabsBySession[sessionID]?.find((entry) => entry.id === automationActivity.tabID);
+  const pageTitle = tab?.title?.trim()
+    || browserHost(tab?.url)
+    || t("browser.noTitle");
+  const actionLabel = browserAutomationActionLabel(t, automationActivity.action);
+  const completed = automationActivity.phase === "complete";
+  const failed = completed && automationActivity.ok === false;
+
+  return (
+    <aside
+      aria-label={`${actionLabel}: ${pageTitle}`}
+      aria-live="polite"
+      className="pudding-browser-pip pointer-events-none absolute right-4 z-10 w-[min(20rem,calc(100%-2rem))] overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl"
+      data-phase={automationActivity.phase}
+      role="status"
+      style={{ bottom: "calc(var(--pudding-composer-overlay-height) + 0.75rem)" }}
+    >
+      <div className="flex h-10 items-center gap-2 border-b border-border/70 bg-popover/95 px-2.5 backdrop-blur-md">
+        <span className="grid size-6 shrink-0 place-items-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+          <BrowserFavicon
+            className="size-full rounded-sm object-cover"
+            fallback={<Globe className="size-3.5" />}
+            faviconURL={tab?.faviconURL}
+            pageURL={tab?.url || ""}
+          />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium">{actionLabel}</span>
+          <span className="block truncate text-[11px] text-muted-foreground">{pageTitle}</span>
+        </span>
+        {completed ? (
+          <span className={failed
+            ? "grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-white"
+            : "grid size-5 shrink-0 place-items-center rounded-full bg-emerald-500 text-white"}
+          >
+            {failed
+              ? <X aria-hidden="true" className="size-3" strokeWidth={3} />
+              : <Check aria-hidden="true" className="size-3" strokeWidth={3} />}
+          </span>
+        ) : (
+          <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+      </div>
+      <div className="relative aspect-video overflow-hidden bg-muted/50">
+        <BrowserViewportPlaceholder
+          active
+          interactive={false}
+          pipPhase={automationActivity.phase}
+          priority={pipViewportPriority}
+          sessionID={sessionID}
+          tabID={automationActivity.tabID}
+        />
+      </div>
+    </aside>
+  );
+});
+
 export function useBrowserRuntimeTabs(sessionID: string, tabs: ElectronBrowserSurfaceTab[]) {
   const { requiredTabsBySession, retainTabs } = useBrowserRuntimeContext();
   useEffect(() => {
@@ -393,7 +547,6 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
   tab: ElectronBrowserSurfaceTab;
   token: string;
 }) {
-  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ElectronWebviewRuntimeHandle | null>(null);
   const key = runtimeKey(sessionID, tab.id);
@@ -408,6 +561,31 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
     return registerRuntime(key, host, handle);
   }, [key, registerRuntime]);
 
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) {
+      return;
+    }
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+      const styles = getComputedStyle(host);
+      const runtimeWidth = Number.parseFloat(styles.getPropertyValue("--browser-runtime-width"));
+      const runtimeHeight = Number.parseFloat(styles.getPropertyValue("--browser-runtime-height"));
+      if (runtimeWidth <= 0 || runtimeHeight <= 0) {
+        return;
+      }
+      const scale = Math.min(
+        entry.contentRect.width / runtimeWidth,
+        entry.contentRect.height / runtimeHeight,
+      );
+      host.style.setProperty("--pudding-browser-runtime-scale", String(scale));
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
       ref={hostRef}
@@ -416,33 +594,9 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
       onPointerDownCapture={activateBrowserPageFindRegion}
       style={{ "--pudding-browser-anchor": anchorName } as CSSProperties}
     >
-      <div className="pudding-browser-capture-chrome" role="status">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Camera className="size-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-medium text-foreground">{t("transcript.toolBrowserScreenshot")}</span>
-          <span className="block truncate text-[11px] text-muted-foreground">{tab.title || tab.url}</span>
-        </span>
-        <Spinner className="pudding-browser-capture-progress size-3.5 shrink-0 text-muted-foreground" />
-      </div>
       <div className="pudding-browser-runtime-surface">
         <ElectronWebviewBrowser ref={runtimeRef} activeTab={tab} sessionID={sessionID} token={token} />
       </div>
-      <div className="pudding-browser-capture-preview" aria-hidden="true">
-        <img
-          alt=""
-          className="pudding-browser-capture-preview-image h-full w-full object-contain"
-          data-browser-capture-preview="true"
-          hidden
-        />
-        <span className="pudding-browser-capture-placeholder flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-          <Camera className="size-5" />
-        </span>
-      </div>
-      <span className="pudding-browser-capture-success hidden items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-2 ring-white/80">
-        <Check aria-hidden="true" className="size-5" strokeWidth={3} />
-      </span>
     </div>
   );
 });
@@ -466,6 +620,52 @@ function runtimeAnchorName(sessionID: string, tabID: string) {
   ).join("-")}`;
 }
 
+function selectActiveViewport(
+  viewports: Map<string, ActiveViewport>,
+  key?: string,
+) {
+  return [...viewports.values()]
+    .filter((viewport) => !key || viewport.key === key)
+    .sort((left, right) => right.priority - left.priority)[0] || null;
+}
+
+function browserAutomationActionLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  action: ElectronBrowserAutomationEvent["action"],
+) {
+  switch (action) {
+    case "back":
+      return t("transcript.toolBrowserBack");
+    case "click":
+      return t("transcript.toolBrowserClick");
+    case "forward":
+      return t("transcript.toolBrowserForward");
+    case "observe":
+      return t("transcript.toolBrowserObserve");
+    case "open":
+      return t("transcript.toolBrowserOpen");
+    case "reload":
+      return t("transcript.toolBrowserReload");
+    case "screenshot":
+      return t("transcript.toolBrowserScreenshot");
+    case "scroll":
+      return t("transcript.toolBrowserScroll");
+    case "type":
+      return t("transcript.toolBrowserType");
+  }
+}
+
+function browserHost(url: string | undefined) {
+  if (!url || url === "about:blank") {
+    return "";
+  }
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 function completeAutomationLease(lease: AutomationLease, ok: boolean) {
   if (lease.completed) {
     return;
@@ -476,31 +676,25 @@ function completeAutomationLease(lease: AutomationLease, ok: boolean) {
 
 function applyRuntimePresentation(
   runtime: RuntimeEntry,
-  mode: "standby" | "visible" | "automation" | "preview",
+  mode: "standby" | "visible" | "automation",
   anchored: boolean,
+  interactive: boolean,
+  pipPhase?: BrowserAutomationActivity["phase"],
 ) {
-  const presentation = `${mode}:${anchored ? "anchored" : "standby"}`;
+  const presentation = `${mode}:${anchored ? "anchored" : "standby"}:${interactive ? "interactive" : "passive"}:${pipPhase || "workspace"}`;
   if (runtime.presentation === presentation) {
     return;
   }
   runtime.presentation = presentation;
   runtime.host.dataset.anchored = anchored ? "true" : "false";
+  runtime.host.dataset.interactive = interactive ? "true" : "false";
   runtime.host.dataset.presentation = mode;
-  runtime.host.setAttribute("aria-hidden", mode === "visible" || mode === "preview" ? "false" : "true");
-}
-
-function applyRuntimeCapturePreview(runtime: RuntimeEntry, source: string) {
-  const image = runtime.host.querySelector<HTMLImageElement>("[data-browser-capture-preview]");
-  if (!image) {
-    return;
+  if (pipPhase) {
+    runtime.host.dataset.pipPhase = pipPhase;
+  } else {
+    delete runtime.host.dataset.pipPhase;
   }
-  if (!source) {
-    image.removeAttribute("src");
-    image.hidden = true;
-    return;
-  }
-  image.src = source;
-  image.hidden = false;
+  runtime.host.setAttribute("aria-hidden", mode === "visible" && interactive ? "false" : "true");
 }
 
 function mergeRuntimeTabs(

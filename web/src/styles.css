@@ -143,7 +143,6 @@ textarea:not([aria-invalid="true"]):focus-visible,
     --toolbar-h: 54px;
     --browser-runtime-width: 1280px;
     --browser-runtime-height: 720px;
-    --browser-capture-preview-height: 135px;
     --toolbar-edge-inset: 0.75rem;
     --rail-toggle-left: var(--toolbar-edge-inset);
     --rail-title-gap: 6px;
@@ -990,6 +989,9 @@ html[data-agent-console-resizing="true"] webview {
 .pudding-browser-runtime-host[data-presentation="visible"] {
     visibility: visible;
     opacity: 1;
+}
+
+.pudding-browser-runtime-host[data-presentation="visible"][data-interactive="true"] {
     pointer-events: auto;
 }
 
@@ -997,97 +999,41 @@ html[data-agent-console-resizing="true"] webview {
     visibility: visible;
 }
 
+.pudding-browser-runtime-host[data-presentation="automation"][data-anchored="true"] {
+    opacity: 1;
+}
+
 .pudding-browser-runtime-surface {
     position: absolute;
     inset: 0;
 }
 
-.pudding-browser-capture-chrome {
-    display: none;
-}
-
-.pudding-browser-keepalive-layer:has(.pudding-browser-runtime-host[data-presentation="preview"]) {
-    z-index: 45;
-}
-
-.pudding-browser-runtime-host[data-presentation="preview"] {
-    top: calc(var(--toolbar-h) + 0.75rem);
-    right: 1rem;
-    left: auto;
-    width: 16rem;
-    height: calc(2.5rem + var(--browser-capture-preview-height) + 0.5rem);
-    visibility: visible;
-    border: 1px solid color-mix(in oklch, var(--border), var(--foreground) 8%);
-    border-radius: 0.875rem;
-    background: color-mix(in oklch, var(--popover), transparent 4%);
-    box-shadow:
-        0 18px 48px rgb(0 0 0 / 18%),
-        0 2px 8px rgb(0 0 0 / 10%);
-    opacity: 1;
-    pointer-events: none;
-    backdrop-filter: blur(18px);
-}
-
-.pudding-browser-runtime-host[data-presentation="preview"] .pudding-browser-capture-chrome {
-    position: absolute;
-    z-index: 3;
-    inset: 0 0 auto;
-    display: flex;
-    height: 2.5rem;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0 0.625rem;
-    border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 18%);
-    background: color-mix(in oklch, var(--popover), transparent 2%);
-}
-
-.pudding-browser-runtime-host[data-presentation="preview"] .pudding-browser-runtime-surface {
-    top: 2.5rem;
+.pudding-browser-runtime-host[data-anchored="true"][data-interactive="false"] .pudding-browser-runtime-surface {
     right: auto;
     bottom: auto;
-    left: 0.5rem;
     width: var(--browser-runtime-width);
     height: var(--browser-runtime-height);
-    overflow: hidden;
-    border-radius: 0.5rem;
+    transform: scale(var(--pudding-browser-runtime-scale));
+    transform-origin: top left;
 }
 
-.pudding-browser-capture-preview {
-    display: none;
+@keyframes pudding-browser-pip-enter {
+    from {
+        transform: translateY(0.5rem) scale(0.98);
+        opacity: 0;
+    }
 }
 
-.pudding-browser-runtime-host[data-presentation="preview"] .pudding-browser-capture-preview {
-    position: absolute;
-    z-index: 2;
-    top: 2.5rem;
-    right: 0.5rem;
-    bottom: 0.5rem;
-    left: 0.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border-radius: 0.5rem;
-    background: var(--popover);
+.pudding-browser-pip[data-phase="running"],
+.pudding-browser-runtime-host[data-pip-phase="running"] {
+    animation: pudding-browser-pip-enter 160ms ease-out both;
 }
 
-.pudding-browser-capture-preview-image:not([hidden]) + .pudding-browser-capture-placeholder {
-    display: none;
-}
-
-.pudding-browser-runtime-host[data-capture-status="success"] .pudding-browser-capture-progress {
-    display: none;
-}
-
-.pudding-browser-runtime-host[data-capture-status="success"] .pudding-browser-capture-success {
-    position: absolute;
-    z-index: 4;
-    top: 50%;
-    left: 50%;
-    display: flex;
-    width: 2.25rem;
-    height: 2.25rem;
-    transform: translate(-50%, -50%);
+@media (prefers-reduced-motion: reduce) {
+    .pudding-browser-pip[data-phase],
+    .pudding-browser-runtime-host[data-pip-phase] {
+        animation: none;
+    }
 }
 
 .pudding-agent-console[data-mode="dock-left"],

@@ -2,6 +2,7 @@ import { Paperclip, Upload } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
+import { BrowserAutomationPip } from "@/browser/BrowserRuntimeProvider";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { ConversationSearchBar } from "@/components/ConversationSearchBar";
@@ -205,6 +206,7 @@ export function Conversation({
           token={token}
         />
       )}
+      <BrowserAutomationPip sessionID={session.id} />
       <div
         ref={composerOverlayRef}
         className={

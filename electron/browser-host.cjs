@@ -57,13 +57,25 @@ class BrowserHost {
     if (!url) {
       throw navigationNotAllowedError(request.url);
     }
-    await this.requireWebContents(slot);
-    if (sameNormalizedURL(slot.committedURL, url, slot.fileRoots)) {
+    if (
+      slot.webContents
+      && !slot.webContents.isDestroyed()
+      && sameNormalizedURL(slot.committedURL, url, slot.fileRoots)
+    ) {
       return snapshot(slot);
     }
-    this.noteAutomationStart(slot, "open");
-    await this.runCommand(slot, () => this.navigate(slot, url));
-    return snapshot(slot);
+    let succeeded = false;
+    await this.noteAutomationStart(slot, "open");
+    try {
+      await this.requireWebContents(slot);
+      if (!sameNormalizedURL(slot.committedURL, url, slot.fileRoots)) {
+        await this.runCommand(slot, () => this.navigate(slot, url));
+      }
+      succeeded = true;
+      return snapshot(slot);
+    } finally {
+      await this.noteAutomationEnd(slot, "open", succeeded);
+    }
   }
 
   async back(request) {
@@ -72,15 +84,21 @@ class BrowserHost {
       throw new Error("browser tab not found");
     }
     await this.requireWebContents(slot);
-    this.noteAutomationStart(slot, "back");
-    await this.runCommand(slot, async () => {
-      const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
-      if (history.currentIndex > 0) {
-        const entry = history.entries[history.currentIndex - 1];
-        await this.navigateHistory(slot, entry.id, entry.url);
-      }
-    });
-    return snapshot(slot);
+    let succeeded = false;
+    await this.noteAutomationStart(slot, "back");
+    try {
+      await this.runCommand(slot, async () => {
+        const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
+        if (history.currentIndex > 0) {
+          const entry = history.entries[history.currentIndex - 1];
+          await this.navigateHistory(slot, entry.id, entry.url);
+        }
+      });
+      succeeded = true;
+      return snapshot(slot);
+    } finally {
+      await this.noteAutomationEnd(slot, "back", succeeded);
+    }
   }
 
   async forward(request) {
@@ -89,15 +107,21 @@ class BrowserHost {
       throw new Error("browser tab not found");
     }
     await this.requireWebContents(slot);
-    this.noteAutomationStart(slot, "forward");
-    await this.runCommand(slot, async () => {
-      const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
-      if (history.currentIndex + 1 < history.entries.length) {
-        const entry = history.entries[history.currentIndex + 1];
-        await this.navigateHistory(slot, entry.id, entry.url);
-      }
-    });
-    return snapshot(slot);
+    let succeeded = false;
+    await this.noteAutomationStart(slot, "forward");
+    try {
+      await this.runCommand(slot, async () => {
+        const history = await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
+        if (history.currentIndex + 1 < history.entries.length) {
+          const entry = history.entries[history.currentIndex + 1];
+          await this.navigateHistory(slot, entry.id, entry.url);
+        }
+      });
+      succeeded = true;
+      return snapshot(slot);
+    } finally {
+      await this.noteAutomationEnd(slot, "forward", succeeded);
+    }
   }
 
   async reload(request) {
@@ -106,39 +130,52 @@ class BrowserHost {
       throw new Error("browser tab not found");
     }
     const webContents = await this.requireWebContents(slot);
-    this.noteAutomationStart(slot, "reload");
-    const reloadURL = normalizeURL(request.url, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
-    const actualURL = normalizeURL(slot.committedURL, slot.fileRoots);
-    if (reloadURL && !sameNormalizedURL(reloadURL, actualURL, slot.fileRoots)) {
-      await this.runCommand(slot, () => this.navigate(slot, reloadURL));
-    } else {
-      await this.runCommand(slot, () =>
-        this.runNavigation(slot, () => {
-          if (webContents.isDestroyed() || slot.webContents !== webContents) {
-            throw new Error("browser webview target not found");
-          }
-          webContents.reload();
-        }),
-      );
+    let succeeded = false;
+    await this.noteAutomationStart(slot, "reload");
+    try {
+      const reloadURL = normalizeURL(request.url, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
+      const actualURL = normalizeURL(slot.committedURL, slot.fileRoots);
+      if (reloadURL && !sameNormalizedURL(reloadURL, actualURL, slot.fileRoots)) {
+        await this.runCommand(slot, () => this.navigate(slot, reloadURL));
+      } else {
+        await this.runCommand(slot, () =>
+          this.runNavigation(slot, () => {
+            if (webContents.isDestroyed() || slot.webContents !== webContents) {
+              throw new Error("browser webview target not found");
+            }
+            webContents.reload();
+          }),
+        );
+      }
+      succeeded = true;
+      return snapshot(slot);
+    } finally {
+      await this.noteAutomationEnd(slot, "reload", succeeded);
     }
-    return snapshot(slot);
   }
 
   async observe(request) {
     const slot = this.requireLiveSlot(request);
     const maxText = clampInt(request.maxTextChars, 6000, 20000);
     const maxElements = clampInt(request.maxElements, 30, 100);
-    const result = await this.runCommand(slot, () => evaluateJSON(slot, observeScript(maxText, maxElements)));
-    return {
-      tab: snapshot(slot),
-      title: String(result.title || ""),
-      url: String(result.url || ""),
-      readyState: String(result.readyState || ""),
-      text: String(result.text || ""),
-      textChars: Math.max(0, Math.round(Number(result.textChars) || 0)),
-      truncated: Boolean(result.truncated),
-      elements: Array.isArray(result.elements) ? result.elements : [],
-    };
+    let succeeded = false;
+    await this.noteAutomationStart(slot, "observe");
+    try {
+      const result = await this.runCommand(slot, () => evaluateJSON(slot, observeScript(maxText, maxElements)));
+      succeeded = true;
+      return {
+        tab: snapshot(slot),
+        title: String(result.title || ""),
+        url: String(result.url || ""),
+        readyState: String(result.readyState || ""),
+        text: String(result.text || ""),
+        textChars: Math.max(0, Math.round(Number(result.textChars) || 0)),
+        truncated: Boolean(result.truncated),
+        elements: Array.isArray(result.elements) ? result.elements : [],
+      };
+    } finally {
+      await this.noteAutomationEnd(slot, "observe", succeeded);
+    }
   }
 
   async readSelection(request) {
@@ -278,7 +315,6 @@ class BrowserHost {
     const fullPage = Boolean(request.fullPage);
     const { viewport, dataBase64 } = await this.runCommand(slot, async () => {
       let succeeded = false;
-      let previewDataBase64 = "";
       try {
         const prepared = await this.noteAutomationStart(slot, "screenshot");
         if (prepared === false) {
@@ -288,13 +324,10 @@ class BrowserHost {
           viewport: await viewportMetrics(slot),
           dataBase64: await captureScreenshot(slot, fullPage),
         };
-        previewDataBase64 = result.dataBase64;
         succeeded = true;
         return result;
       } finally {
-        await this.noteAutomationEnd(slot, "screenshot", succeeded, previewDataBase64
-          ? { previewDataBase64 }
-          : undefined);
+        await this.noteAutomationEnd(slot, "screenshot", succeeded);
       }
     });
     const buffer = Buffer.from(dataBase64, "base64");
@@ -319,6 +352,7 @@ class BrowserHost {
     return this.runInputCommand(() =>
       this.runCommand(slot, async () => {
         let lifecycleStarted = false;
+        let succeeded = false;
         try {
           lifecycleStarted = true;
           const prepared = await this.noteAutomationStart(slot, "click");
@@ -329,10 +363,11 @@ class BrowserHost {
           await dispatchMouseClick(slot, target.x, target.y);
           this.noteUpdated(slot);
           this.noteCursor(slot, "click", target);
+          succeeded = true;
           return { tab: snapshot(slot), action: "click", result: target };
         } finally {
           if (lifecycleStarted) {
-            await this.noteAutomationEnd(slot, "click");
+            await this.noteAutomationEnd(slot, "click", succeeded);
           }
         }
       }),
@@ -346,7 +381,8 @@ class BrowserHost {
     }
     return this.runInputCommand(() =>
       this.runCommand(slot, async () => {
-        this.noteAutomationStart(slot, "type");
+        let succeeded = false;
+        await this.noteAutomationStart(slot, "type");
         try {
           const expectation = await evaluateJSON(slot, typePrepareScript(request));
           await evaluateJSON(slot, typeTargetInputScript(request));
@@ -357,9 +393,10 @@ class BrowserHost {
           delete typed.matchesExpected;
           this.noteUpdated(slot);
           this.noteCursor(slot, "type", typed);
+          succeeded = true;
           return { tab: snapshot(slot), action: "type", result: typed };
         } finally {
-          this.noteAutomationEnd(slot, "type");
+          await this.noteAutomationEnd(slot, "type", succeeded);
         }
       }),
     );
@@ -372,15 +409,17 @@ class BrowserHost {
     }
     return this.runInputCommand(() =>
       this.runCommand(slot, async () => {
-        this.noteAutomationStart(slot, "scroll");
+        let succeeded = false;
+        await this.noteAutomationStart(slot, "scroll");
         try {
           const target = await evaluateJSON(slot, scrollTargetScript(request));
           const result = await waitForScrollResult(slot, request, target);
           this.noteUpdated(slot);
           this.noteCursor(slot, "scroll", result);
+          succeeded = true;
           return { tab: snapshot(slot), action: "scroll", result };
         } finally {
-          this.noteAutomationEnd(slot, "scroll");
+          await this.noteAutomationEnd(slot, "scroll", succeeded);
         }
       }),
     );

@@ -214,6 +214,37 @@ test("waits for a renderer webview and navigates it through persistent CDP", asy
   host.closeAll();
 });
 
+test("publishes one balanced open lifecycle while creating a new browser tab", async () => {
+  let required;
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
+    (request) => {
+      required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
+    },
+  );
+  const request = { sessionID: "session-new-open", tabID: "tab-new-open", url: "https://example.com/" };
+  const opening = host.loadURL(request);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(required.url, request.url);
+  assert.deepEqual(lifecycle, ["start:open"]);
+
+  await host.registerWebContents(required, new FakeWebContents(71));
+  const opened = await opening;
+  assert.equal(opened.url, request.url);
+  assert.deepEqual(lifecycle, ["start:open", "end:open:true"]);
+  host.closeAll();
+});
+
 test("managed browser cancels Web Bluetooth device selection", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
@@ -311,7 +342,17 @@ test("reads the current non-editable browser text selection", async () => {
 
 test("browser observations and click results redact password input values", async () => {
   const required = [];
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
+    (request) => required.push(request),
+    (event) => lifecycle.push(`end:${event.action}:${event.ok}`),
+  );
   const request = { sessionID: "session-password", tabID: "tab-password" };
   const opening = host.ensure(request);
   await new Promise((resolve) => setImmediate(resolve));
@@ -332,6 +373,7 @@ test("browser observations and click results redact password input values", asyn
   const observeEvaluation = webContents.debugger.commands.filter(({ method }) => method === "Runtime.evaluate").at(-1);
   assert.match(observeEvaluation.params.expression, /isPasswordInput/);
   assert.match(observeEvaluation.params.expression, /isPasswordInput\(el\) \? "" : el\.value/);
+  assert.deepEqual(lifecycle, ["start:observe", "end:observe:true"]);
 
   webContents.debugger.evaluateValues = [JSON.stringify({
     ok: true,
@@ -815,7 +857,6 @@ test("prepares and releases the webview surface around screenshots", async () =>
   let required;
   let prepared = true;
   const lifecycle = [];
-  const screenshotPreviews = [];
   const host = new BrowserHost(
     undefined,
     undefined,
@@ -828,7 +869,6 @@ test("prepares and releases the webview surface around screenshots", async () =>
     },
     (event) => {
       lifecycle.push(`end:${event.action}:${event.ok}`);
-      screenshotPreviews.push(event.previewDataBase64 || "");
     },
   );
   const request = { sessionID: "session-screenshot", tabID: "tab-screenshot", url: "about:blank" };
@@ -847,7 +887,6 @@ test("prepares and releases the webview surface around screenshots", async () =>
   assert.equal(screenshot.width, 2);
   assert.equal(screenshot.height, 3);
   assert.deepEqual(lifecycle, ["start:screenshot", "end:screenshot:true"]);
-  assert.deepEqual(screenshotPreviews, [png.toString("base64")]);
 
   prepared = false;
   await assert.rejects(host.screenshot(request), /screenshot surface preparation failed/);
@@ -857,7 +896,6 @@ test("prepares and releases the webview surface around screenshots", async () =>
     "start:screenshot",
     "end:screenshot:false",
   ]);
-  assert.deepEqual(screenshotPreviews, [png.toString("base64"), ""]);
   host.closeAll();
 });
 
@@ -903,12 +941,19 @@ test("rejects a second live webview for the same session tab", async () => {
 
 test("click type and scroll use only the expected CDP command sequences", async () => {
   let required;
+  const lifecycle = [];
   const host = new BrowserHost(
     undefined,
     undefined,
-    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
     (request) => {
       required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
     },
   );
   const opening = host.ensure({ sessionID: "session-actions", tabID: "tab-actions", url: "about:blank" });
@@ -929,6 +974,15 @@ test("click type and scroll use only the expected CDP command sequences", async 
   await host.click({ sessionID: "session-actions", tabID: "tab-actions", selector: "#save" });
   await host.type({ sessionID: "session-actions", tabID: "tab-actions", selector: "#name", text: "Pudding", clear: true });
   await host.scroll({ sessionID: "session-actions", tabID: "tab-actions", deltaY: 600 });
+
+  assert.deepEqual(lifecycle, [
+    "start:click",
+    "end:click:true",
+    "start:type",
+    "end:type:true",
+    "start:scroll",
+    "end:scroll:true",
+  ]);
 
   const methods = webContents.debugger.commands.map(({ method }) => method);
   assert.deepEqual(methods, [
@@ -994,6 +1048,7 @@ test("rejects controlled input when the resulting value does not match", async (
   );
   assert.equal(completed.length, 1);
   assert.equal(completed[0].action, "type");
+  assert.equal(completed[0].ok, false);
   host.closeAll();
 });
 
@@ -1067,14 +1122,27 @@ test("does not dispatch a click when renderer focus preparation fails", async ()
   assert.deepEqual(webContents.debugger.commands, []);
   assert.equal(completed.length, 1);
   assert.equal(completed[0].action, "click");
+  assert.equal(completed[0].ok, false);
   host.closeAll();
 });
 
 test("reload ignores stale main-frame events until a new loader commits", async () => {
   let required;
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
-    required = request;
-  });
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
+    (request) => {
+      required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
+    },
+  );
   const opening = host.ensure({ sessionID: "session-reload", tabID: "tab-reload", url: "about:blank" });
   await new Promise((resolve) => setImmediate(resolve));
   const webContents = new FakeWebContents(52);
@@ -1100,14 +1168,27 @@ test("reload ignores stale main-frame events until a new loader commits", async 
   });
   await reload;
   assert.equal(settled, true);
+  assert.deepEqual(lifecycle, ["start:reload", "end:reload:true"]);
   host.closeAll();
 });
 
 test("waits for readable history after a document swap", async () => {
   let required;
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
-    required = request;
-  });
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
+    (request) => {
+      required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
+    },
+  );
   const request = { sessionID: "session-history-swap", tabID: "tab-history-swap", url: "about:blank" };
   const opening = host.ensure(request);
   await new Promise((resolve) => setImmediate(resolve));
@@ -1123,6 +1204,7 @@ test("waits for readable history after a document swap", async () => {
     webContents.debugger.commands.filter(({ method }) => method === "Page.getNavigationHistory").length,
     2,
   );
+  assert.deepEqual(lifecycle, ["start:open", "end:open:true"]);
   host.closeAll();
 });
 
@@ -1177,12 +1259,19 @@ test("refreshes back and forward availability after page-driven navigation", asy
 test("history navigation uses the target entry instead of frame URL events", async () => {
   let required;
   const updates = [];
+  const lifecycle = [];
   const host = new BrowserHost(
     (snapshot) => updates.push(snapshot),
     undefined,
-    undefined,
+    (event) => {
+      lifecycle.push(`start:${event.action}`);
+      return true;
+    },
     (request) => {
       required = request;
+    },
+    (event) => {
+      lifecycle.push(`end:${event.action}:${event.ok}`);
     },
   );
   const request = { sessionID: "session-hash-history", tabID: "tab-hash-history", url: "about:blank" };
@@ -1220,6 +1309,12 @@ test("history navigation uses the target entry instead of frame URL events", asy
   assert.equal(backed.url, "about:blank");
   assert.equal(backed.canGoBack, false);
   assert.equal(backed.canGoForward, true);
+  assert.deepEqual(lifecycle, [
+    "start:forward",
+    "end:forward:true",
+    "start:back",
+    "end:back:true",
+  ]);
   host.closeAll();
 });
 

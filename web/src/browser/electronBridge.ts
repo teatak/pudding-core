@@ -99,9 +99,8 @@ export type ElectronBrowserCursorEvent = {
 export type ElectronBrowserAutomationEvent = {
   sessionID: string;
   tabID: string;
-  action: "back" | "click" | "forward" | "open" | "reload" | "screenshot" | "scroll" | "type";
+  action: "back" | "click" | "forward" | "observe" | "open" | "reload" | "screenshot" | "scroll" | "type";
   ok?: boolean;
-  previewDataURL?: string;
   requestID?: string;
   version?: number;
   createdAt?: string;
