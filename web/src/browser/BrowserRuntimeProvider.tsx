@@ -483,12 +483,11 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
     <aside
       aria-label={`${actionLabel}: ${pageTitle}`}
       aria-live="polite"
-      className="pudding-browser-pip pointer-events-none absolute right-4 z-10 w-[min(20rem,calc(100%-2rem))] overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl"
+      className="pudding-browser-pip pointer-events-none relative w-full overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl"
       data-phase={automationActivity.phase}
       role="status"
-      style={{ bottom: "calc(var(--pudding-composer-overlay-height) + 0.75rem)" }}
     >
-      <div className="flex h-10 items-center gap-2 border-b border-border/70 bg-popover/95 px-2.5 backdrop-blur-md">
+      <div className="flex min-h-11 items-center gap-2 border-b border-border/70 bg-popover/95 px-2.5 py-2 backdrop-blur-md">
         <span className="grid size-6 shrink-0 place-items-center overflow-hidden rounded-md bg-muted text-muted-foreground">
           <BrowserFavicon
             className="size-full rounded-sm object-cover"
@@ -527,6 +526,12 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
     </aside>
   );
 });
+
+export function useBrowserAutomationActivity(sessionID: string) {
+  const { automationActivitiesBySession } = useBrowserRuntimeContext();
+  const activity = automationActivitiesBySession[sessionID];
+  return activity?.sessionID === sessionID ? activity : undefined;
+}
 
 export function useBrowserRuntimeTabs(sessionID: string, tabs: ElectronBrowserSurfaceTab[]) {
   const { requiredTabsBySession, retainTabs } = useBrowserRuntimeContext();

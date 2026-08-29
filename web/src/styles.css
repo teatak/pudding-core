@@ -88,6 +88,8 @@ textarea:not([aria-invalid="true"]):focus-visible,
 :root {
     --pudding-chat-column-inline-gap: 2.5rem;
     --pudding-chat-column-max-width: 52rem;
+    --pudding-activity-rail-min-width: 1160px;
+    --pudding-activity-rail-reserve: 18rem;
     --pudding-composer-radius: 18px;
     --background: oklch(1 0 0);
     --foreground: oklch(0.18 0 0);
@@ -1003,6 +1005,10 @@ html[data-agent-console-resizing="true"] webview {
     opacity: 1;
 }
 
+.pudding-browser-runtime-host[data-pip-phase] {
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+}
+
 .pudding-browser-runtime-surface {
     position: absolute;
     inset: 0;
@@ -1350,8 +1356,34 @@ html:has([data-workspace-presentation="canvas"] .pudding-browser-workspace-surfa
     background-color: var(--message-user-background);
 }
 
+.pudding-conversation[data-activity-rail="true"] .pudding-chat-column {
+    width: min(
+        calc(100% - var(--pudding-activity-rail-reserve) - var(--pudding-chat-column-inline-gap)),
+        var(--pudding-chat-column-max-width)
+    );
+    margin-left: max(
+        calc(var(--pudding-chat-column-inline-gap) / 2),
+        calc((100% - var(--pudding-activity-rail-reserve) - var(--pudding-chat-column-max-width)) / 2)
+    );
+    margin-right: auto;
+}
+
 .pudding-transcript-shell {
-  --pudding-chat-column-edge: max(calc(var(--pudding-chat-column-inline-gap) / 2), calc((100% - var(--pudding-chat-column-max-width)) / 2));
+    --pudding-chat-column-edge-start: max(
+        calc(var(--pudding-chat-column-inline-gap) / 2),
+        calc((100% - var(--pudding-chat-column-max-width)) / 2)
+    );
+    --pudding-chat-column-edge-end: var(--pudding-chat-column-edge-start);
+}
+
+.pudding-conversation[data-activity-rail="true"] .pudding-transcript-shell {
+    --pudding-chat-column-edge-start: max(
+        calc(var(--pudding-chat-column-inline-gap) / 2),
+        calc((100% - var(--pudding-activity-rail-reserve) - var(--pudding-chat-column-max-width)) / 2)
+    );
+    --pudding-chat-column-edge-end: calc(
+        var(--pudding-activity-rail-reserve) + var(--pudding-chat-column-edge-start)
+    );
 }
 
 .pudding-transcript-viewport {
@@ -1370,10 +1402,10 @@ html:has([data-workspace-presentation="canvas"] .pudding-browser-workspace-surfa
         linear-gradient(
             to right,
             #000 0,
-            #000 var(--pudding-chat-column-edge),
-            transparent var(--pudding-chat-column-edge),
-            transparent calc(100% - var(--pudding-chat-column-edge)),
-            #000 calc(100% - var(--pudding-chat-column-edge)),
+            #000 var(--pudding-chat-column-edge-start),
+            transparent var(--pudding-chat-column-edge-start),
+            transparent calc(100% - var(--pudding-chat-column-edge-end)),
+            #000 calc(100% - var(--pudding-chat-column-edge-end)),
             #000 100%
         );
 }

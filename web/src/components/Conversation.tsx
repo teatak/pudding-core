@@ -2,16 +2,22 @@ import { Paperclip, Upload } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
-import { BrowserAutomationPip } from "@/browser/BrowserRuntimeProvider";
+import {
+  BrowserAutomationPip,
+  useBrowserAutomationActivity,
+} from "@/browser/BrowserRuntimeProvider";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { ConversationSearchBar } from "@/components/ConversationSearchBar";
 import { FloatingTurnConsole } from "@/components/FloatingTurnConsole";
 import { Transcript } from "@/components/Transcript";
 import type { TranscriptSearchState } from "@/components/transcript/types";
+import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
+import { useWorkspaceActivities } from "@/state/workspaceActivityStore";
+import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 const SUBMIT_ERROR_DURATION_MS = 5000;
 
@@ -39,12 +45,28 @@ export function Conversation({
   const [submitSignal, setSubmitSignal] = useState(0);
   const [dragMode, setDragMode] = useState<"files" | "project_reference" | null>(null);
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
+  const [activityRailFits, setActivityRailFits] = useState(true);
   const [searchState, setSearchState] = useState<TranscriptSearchState>({ terms: [] });
   const droppedFilesNonceRef = useRef(0);
   const submitErrorTimerRef = useRef<number | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
   const floating = presentation === "floating";
+  const workspaceOpen = useWorkspaceOpen(session.id);
+  const workspaceActivities = useWorkspaceActivities(session.id);
+  const browserAutomationActivity = useBrowserAutomationActivity(session.id);
+  const visibleWorkspaceActivities = browserAutomationActivity
+    ? workspaceActivities.filter(
+        (activity) => activity.kind !== "browser" || activity.resourceID !== browserAutomationActivity.tabID,
+      )
+    : workspaceActivities;
+  const hasVisibleActivities = visibleWorkspaceActivities.length > 0
+    || Boolean(browserAutomationActivity);
+  const showActivitySurface = !floating
+    && !workspaceOpen
+    && hasVisibleActivities;
+  const showActivityRail = showActivitySurface && activityRailFits;
+  const showComposerActivities = showActivitySurface && !activityRailFits;
   const handleSubmitStart = useCallback(() => {
     setSubmitSignal((signal) => signal + 1);
   }, []);
@@ -92,6 +114,24 @@ export function Conversation({
     observer.observe(composerOverlay, { box: "border-box" });
     return () => observer.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    const conversation = conversationRef.current;
+    if (!conversation || floating) {
+      return;
+    }
+    const minimumWidth = Number.parseFloat(
+      getComputedStyle(conversation).getPropertyValue("--pudding-activity-rail-min-width"),
+    );
+    const updateActivityRailFit = (entry?: ResizeObserverEntry) => {
+      const width = entry?.borderBoxSize[0]?.inlineSize ?? conversation.clientWidth;
+      setActivityRailFits(width >= minimumWidth);
+    };
+    updateActivityRailFit();
+    const observer = new ResizeObserver(([entry]) => updateActivityRailFit(entry));
+    observer.observe(conversation, { box: "border-box" });
+    return () => observer.disconnect();
+  }, [floating]);
 
   const resetDragState = useCallback(() => {
     setDragMode(null);
@@ -175,6 +215,7 @@ export function Conversation({
         (floating ? "bg-transparent" : "bg-background")
       }
       data-file-drop-target=""
+      data-activity-rail={showActivityRail ? "true" : undefined}
       data-pudding-drop-target="conversation"
       data-session-id={session.id}
       onDragEnter={handleDragEnter}
@@ -206,24 +247,46 @@ export function Conversation({
           token={token}
         />
       )}
-      <BrowserAutomationPip sessionID={session.id} />
+      {showActivityRail ? (
+        <aside
+          className="pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
+        >
+          <WorkspaceActivityCard activities={visibleWorkspaceActivities} />
+          <BrowserAutomationPip sessionID={session.id} />
+        </aside>
+      ) : null}
       <div
         ref={composerOverlayRef}
         className={
           floating
             ? "pointer-events-none relative z-30 mt-auto shrink-0"
-            : "pointer-events-none absolute inset-x-0 bottom-0 z-30"
+            : "pointer-events-none absolute inset-x-0 bottom-0"
         }
       >
-        <Composer
-          droppedFiles={droppedFiles}
-          presentation={floating ? "floating" : "default"}
-          submitError={submitError}
-          token={token}
-          session={session}
-          onSubmitStart={handleSubmitStart}
-          onSubmitError={handleSubmitError}
-        />
+        {showComposerActivities ? (
+          <ChatColumn className="relative z-10 mb-3 flex flex-col items-center gap-3">
+            <WorkspaceActivityCard
+              activities={visibleWorkspaceActivities}
+              presentation="composer"
+            />
+            {browserAutomationActivity ? (
+              <div className="w-60 max-w-full">
+                <BrowserAutomationPip sessionID={session.id} />
+              </div>
+            ) : null}
+          </ChatColumn>
+        ) : null}
+        <div className={floating ? undefined : "relative z-30"}>
+          <Composer
+            droppedFiles={droppedFiles}
+            presentation={floating ? "floating" : "default"}
+            submitError={submitError}
+            token={token}
+            session={session}
+            onSubmitStart={handleSubmitStart}
+            onSubmitError={handleSubmitError}
+          />
+        </div>
       </div>
       {floating ? null : (
         <ConversationSearchBar

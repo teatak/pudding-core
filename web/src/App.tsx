@@ -207,40 +207,17 @@ export function App() {
   const [workspaceTransition, setWorkspaceTransition] = useState<WorkspaceTransitionPhase>("idle");
   const workspaceRequestRef = useRef(workspaceRequestedOpen);
   const workspaceSessionRef = useRef(workspaceSessionID);
-  useLayoutEffect(() => {
-    const sessionChanged = workspaceSessionRef.current !== workspaceSessionID;
-    workspaceSessionRef.current = workspaceSessionID;
-    if (!workspaceTransitionEnabled || (sessionChanged && !workspaceRequestedOpen)) {
-      workspaceRequestRef.current = workspaceRequestedOpen;
-      setWorkspaceTransition("idle");
-      setWorkspacePresent(workspaceRequestedOpen);
-      return;
-    }
-    if (workspaceRequestRef.current === workspaceRequestedOpen) {
-      return;
-    }
-    workspaceRequestRef.current = workspaceRequestedOpen;
-    if (workspaceRequestedOpen) {
-      setWorkspacePresent(true);
-      setWorkspaceTransition("opening");
-    } else {
-      setWorkspaceTransition("closing");
-    }
-    const timer = window.setTimeout(() => {
-      setWorkspaceTransition("idle");
-      if (!workspaceRequestedOpen) {
-        setWorkspacePresent(false);
-      }
-    }, workspaceTransitionDelay());
-    return () => window.clearTimeout(timer);
-  }, [workspaceRequestedOpen, workspaceSessionID, workspaceTransitionEnabled]);
   const effectiveWorkspaceOpen = canUseWorkspace && workspacePresent;
   const workspaceVisible = effectiveWorkspaceOpen && workspaceTransition !== "closing";
   const workspaceDockRequested =
     effectiveWorkspaceOpen && agentConsoleMode !== "floating";
   const chatDockSide = agentConsoleMode === "dock-right" ? "right" : "left";
   const updateCenteredLayout = useCallback(
-    (layoutWidth: number, nextSplitRatio = dockSplitRatioRef.current) => {
+    (
+      layoutWidth: number,
+      nextWorkspaceDockRequested: boolean,
+      nextSplitRatio = dockSplitRatioRef.current,
+    ) => {
       const expandedBounds = dockSplitRatioBounds({
         chatDockSide,
         layoutWidth,
@@ -256,7 +233,7 @@ export function App() {
         constraints: centeredLayoutConstraints,
         layoutWidth,
         leftGroupRatio: feasibleExpandedRatio,
-        workspaceDockRequested,
+        workspaceDockRequested: nextWorkspaceDockRequested,
       });
       const current = centeredLayoutRef.current;
       if (
@@ -270,8 +247,50 @@ export function App() {
       setCenteredLayout(next);
       return next;
     },
-    [chatDockSide, workspaceDockRequested],
+    [chatDockSide],
   );
+  useLayoutEffect(() => {
+    const sessionChanged = workspaceSessionRef.current !== workspaceSessionID;
+    workspaceSessionRef.current = workspaceSessionID;
+    if (!workspaceTransitionEnabled || (sessionChanged && !workspaceRequestedOpen)) {
+      workspaceRequestRef.current = workspaceRequestedOpen;
+      updateCenteredLayout(
+        layoutNode?.clientWidth || 0,
+        workspaceRequestedOpen && agentConsoleMode !== "floating",
+      );
+      setWorkspaceTransition("idle");
+      setWorkspacePresent(workspaceRequestedOpen);
+      return;
+    }
+    if (workspaceRequestRef.current === workspaceRequestedOpen) {
+      return;
+    }
+    workspaceRequestRef.current = workspaceRequestedOpen;
+    if (workspaceRequestedOpen) {
+      // 先提交最终响应式形态，再让工作区入场，避免 rail 收起与分栏宽度
+      // 在相邻两帧分别生效，造成工作区横向越界后回弹。
+      updateCenteredLayout(layoutNode?.clientWidth || 0, true);
+      setWorkspacePresent(true);
+      setWorkspaceTransition("opening");
+    } else {
+      setWorkspaceTransition("closing");
+    }
+    const timer = window.setTimeout(() => {
+      setWorkspaceTransition("idle");
+      if (!workspaceRequestedOpen) {
+        updateCenteredLayout(layoutNode?.clientWidth || 0, false);
+        setWorkspacePresent(false);
+      }
+    }, workspaceTransitionDelay());
+    return () => window.clearTimeout(timer);
+  }, [
+    agentConsoleMode,
+    layoutNode,
+    updateCenteredLayout,
+    workspaceRequestedOpen,
+    workspaceSessionID,
+    workspaceTransitionEnabled,
+  ]);
   // workspaceOpen 只表达用户意图。停靠/抽屉以及 rail 的响应式展示由
   // 两个共享 Chat 的组合区域统一求解，不写回用户偏好。
   const workspaceOverlay =
@@ -348,7 +367,7 @@ export function App() {
         }, 80);
         previousWidth = nextWidth;
       }
-      updateCenteredLayout(nextWidth);
+      updateCenteredLayout(nextWidth, workspaceDockRequested);
     };
     updatePresentation();
     const observer = new ResizeObserver(updatePresentation);
@@ -360,7 +379,7 @@ export function App() {
       window.clearTimeout(resizeSettledTimer);
       delete document.documentElement.dataset.shellResizing;
     };
-  }, [layoutNode, updateCenteredLayout]);
+  }, [layoutNode, updateCenteredLayout, workspaceDockRequested]);
 
   useEffect(() => {
     dockSplitRatioRef.current = dockSplitRatio;
@@ -420,7 +439,11 @@ export function App() {
     const layoutWidth = layoutNode?.clientWidth || 0;
     let normalized = clamp(next, 0, 1);
     if (layoutWidth > 0 && workspaceDocked) {
-      const presentation = updateCenteredLayout(layoutWidth, normalized);
+      const presentation = updateCenteredLayout(
+        layoutWidth,
+        workspaceDockRequested,
+        normalized,
+      );
       const bounds = dockSplitRatioBounds({
         chatDockSide,
         layoutWidth,
@@ -429,7 +452,7 @@ export function App() {
           presentation.railResponsiveCollapsed,
       });
       normalized = clamp(normalized, bounds.minimum, bounds.maximum);
-      updateCenteredLayout(layoutWidth, normalized);
+      updateCenteredLayout(layoutWidth, workspaceDockRequested, normalized);
     }
     dockSplitRatioRef.current = normalized;
     setDockSplitRatio(normalized);
@@ -487,7 +510,11 @@ export function App() {
       const layoutRect = layoutNode.getBoundingClientRect();
       const layoutWidth = layoutRect.width;
       const rawRatio = (clientX - layoutRect.left) / layoutWidth;
-      const presentation = updateCenteredLayout(layoutWidth, rawRatio);
+      const presentation = updateCenteredLayout(
+        layoutWidth,
+        workspaceDockRequested,
+        rawRatio,
+      );
       const liveRailCollapsed =
         getRailCollapsedPreference() ||
         presentation.railResponsiveCollapsed;

@@ -62,7 +62,6 @@ import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbo
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { Mascot } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
-import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
@@ -91,7 +90,6 @@ import {
   useUIContextEnabled,
   useVisibleUIContext,
 } from "@/state/uiContextStore";
-import { useWorkspaceActivities } from "@/state/workspaceActivityStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 const composerSchema = z.object({
@@ -203,7 +201,6 @@ export function Composer({
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const workspaceOpen = useWorkspaceOpen(sessionID);
-  const workspaceActivities = useWorkspaceActivities(sessionID);
   const uiContextEnabled = useUIContextEnabled();
   const visibleUIContext = useVisibleUIContext(sessionID);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
@@ -248,13 +245,7 @@ export function Composer({
       && running
       && activeTurnPlan,
   );
-  const showWorkspaceActivities = Boolean(
-    !showInputFlowPanel
-      && !showTurnProgress
-      && !workspaceOpen
-      && workspaceActivities.length > 0,
-  );
-  const showComposerTopStatus = showTurnProgress || showWorkspaceActivities;
+  const showComposerTopStatus = showTurnProgress;
   const [draftSlashCommand, setDraftSlashCommand] = useState<SlashSubmitCommand | null>(null);
   const textAreaHandleRef = useRef<ComposerTextAreaHandle | null>(null);
   const uploadedAttachments = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
@@ -1034,11 +1025,6 @@ export function Composer({
           <ChatColumn className="relative flex h-full items-center justify-center">
             {showTurnProgress && activeTurnPlan ? (
               <ComposerTurnProgress progress={activeTurnPlan} />
-            ) : null}
-            {showWorkspaceActivities ? (
-              <div className="min-w-0">
-                <WorkspaceActivityCard activities={workspaceActivities} />
-              </div>
             ) : null}
           </ChatColumn>
         </aside>

@@ -19,7 +19,7 @@ export function ChatColumn({
     <div
       ref={innerRef}
       className={cn(
-        "mx-auto w-[calc(100%-var(--pudding-chat-column-inline-gap))] min-w-0 max-w-[var(--pudding-chat-column-max-width)]",
+        "pudding-chat-column mx-auto w-[calc(100%-var(--pudding-chat-column-inline-gap))] min-w-0 max-w-[var(--pudding-chat-column-max-width)]",
         className,
       )}
     >
