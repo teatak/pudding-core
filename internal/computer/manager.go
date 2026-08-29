@@ -193,54 +193,29 @@ func validCapture(captured Capture, windowID uint32, output string) bool {
 	return captured.WindowID == windowID && filepath.Clean(captured.Output) == filepath.Clean(output) && captured.Width > 0 && captured.Height > 0 && captured.ScaleFactor > 0
 }
 
-func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (ActionResult, error) {
+func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uint32, actions []ActionInput) (ActionsResult, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
-		return ActionResult{}, err
+		return ActionsResult{}, err
 	}
-	semantic, err := validateSemanticAction(SemanticAction{ElementID: elementID, Action: action, Value: value})
+	validated, err := NormalizeActions(actions)
 	if err != nil {
-		return ActionResult{}, err
+		return ActionsResult{}, err
 	}
 
-	if err := m.acquireWrite(ctx, "action"); err != nil {
-		return ActionResult{}, err
+	if err := m.acquireWrite(ctx, "actions"); err != nil {
+		return ActionsResult{}, err
 	}
 	defer m.releaseWrite()
 
-	native, err := m.service.Act(ctx, sessionID, appID, windowID, semantic.ElementID, semantic.Action, semantic.Value)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	if !matchesSemanticResult(native, appID, semantic) {
-		return ActionResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use action returned an invalid result", Outcome: "unknown"}
-	}
-	return ActionResult{Action: native}, nil
-}
-
-func (m *Manager) ActSequence(ctx context.Context, sessionID, appID string, windowID uint32, actions []SemanticAction) (ActionSequenceResult, error) {
-	if err := validateTarget(sessionID, appID, windowID); err != nil {
-		return ActionSequenceResult{}, err
-	}
-	if len(actions) < 2 || len(actions) > MaxActionSequenceSteps {
-		return ActionSequenceResult{}, invalid("action_sequence requires between 2 and 32 actions")
-	}
-	validated := make([]SemanticAction, len(actions))
-	for index, action := range actions {
-		resolved, err := validateSemanticAction(action)
-		if err != nil {
-			return ActionSequenceResult{}, invalid(fmt.Sprintf("actions[%d]: %s", index, err.Error()))
-		}
-		validated[index] = resolved
-	}
-
-	if err := m.acquireWrite(ctx, "action sequence"); err != nil {
-		return ActionSequenceResult{}, err
-	}
-	defer m.releaseWrite()
-
-	result := ActionSequenceResult{Actions: make([]NativeAction, 0, len(validated))}
+	result := ActionsResult{Actions: make([]NativeAction, 0, len(validated))}
 	for index, action := range validated {
-		native, actionErr := m.service.Act(ctx, sessionID, appID, windowID, action.ElementID, action.Action, action.Value)
+		var native NativeAction
+		var actionErr error
+		if isSemanticAction(action.Type) {
+			native, actionErr = m.service.Act(ctx, sessionID, appID, windowID, action.ElementID, action.Type, action.Value)
+		} else {
+			native, actionErr = m.service.Pointer(ctx, sessionID, appID, windowID, pointerInput(action))
+		}
 		if actionErr != nil {
 			failure := ErrorFailure(actionErr)
 			if result.CompletedCount > 0 && failure.Outcome == "not_started" {
@@ -251,8 +226,8 @@ func (m *Manager) ActSequence(ctx context.Context, sessionID, appID string, wind
 			result.Failure = &failure
 			return result, nil
 		}
-		if !matchesSemanticResult(native, appID, action) {
-			failure := ErrorFailure(&OperationError{Code: "computer_invalid_response", Message: "Computer Use action sequence returned an invalid result", Outcome: "unknown"})
+		if !matchesActionResult(native, appID, action) {
+			failure := ErrorFailure(&OperationError{Code: "computer_invalid_response", Message: "Computer Use actions returned an invalid result", Outcome: "unknown"})
 			result.FailedIndex = &index
 			result.Failure = &failure
 			return result, nil
@@ -263,86 +238,120 @@ func (m *Manager) ActSequence(ctx context.Context, sessionID, appID string, wind
 	return result, nil
 }
 
-func validateSemanticAction(action SemanticAction) (SemanticAction, error) {
+func NormalizeActions(actions []ActionInput) ([]ActionInput, error) {
+	if len(actions) < 1 || len(actions) > MaxActionsPerCall {
+		return nil, invalid("actions must contain between 1 and 32 items")
+	}
+	validated := make([]ActionInput, len(actions))
+	for index, action := range actions {
+		resolved, err := normalizeAction(action)
+		if err != nil {
+			return nil, invalid(fmt.Sprintf("actions[%d]: %s", index, err.Error()))
+		}
+		validated[index] = resolved
+	}
+	return validated, nil
+}
+
+func normalizeAction(action ActionInput) (ActionInput, error) {
+	action.Type = strings.TrimSpace(action.Type)
 	action.ElementID = strings.TrimSpace(action.ElementID)
-	action.Action = strings.TrimSpace(action.Action)
-	if action.ElementID == "" {
-		return action, invalid("elementID is required")
+	action.Button = strings.TrimSpace(action.Button)
+	if isSemanticAction(action.Type) {
+		if action.ElementID == "" {
+			return action, invalid("elementID is required for semantic actions")
+		}
+		if hasPointerFields(action) {
+			return action, invalid("pointer fields are allowed only for click, drag, and scroll")
+		}
+		if action.Type == ActionSetValue && action.Value == nil {
+			return action, invalid("value is required for set_value")
+		}
+		if action.Type != ActionSetValue && action.Value != nil {
+			return action, invalid("value is allowed only for set_value")
+		}
+		if action.Value != nil && utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters {
+			return action, invalid("value is too long")
+		}
+		return action, nil
 	}
-	if !validAction(action.Action) {
-		return action, invalid("action must be press, set_value, select, or submit")
+	if action.Type != ActionClick && action.Type != ActionDrag && action.Type != ActionScroll {
+		return action, invalid("type must be press, set_value, select, submit, click, drag, or scroll")
 	}
-	if action.Action == ActionSetValue && action.Value == nil {
-		return action, invalid("value is required for set_value")
+	if action.ElementID != "" || action.Value != nil {
+		return action, invalid("elementID and value must be omitted for pointer actions")
 	}
-	if action.Action != ActionSetValue && action.Value != nil {
-		return action, invalid("value is allowed only for set_value")
+	if action.X == nil || action.Y == nil || !normalizedCoordinate(*action.X) || !normalizedCoordinate(*action.Y) {
+		return action, invalid("x and y must be normalized window coordinates between 0 inclusive and 1 exclusive")
 	}
-	if action.Value != nil && utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters {
-		return action, invalid("value is too long")
+	switch action.Type {
+	case ActionClick:
+		if action.ToX != nil || action.ToY != nil || action.DeltaX != nil || action.DeltaY != nil {
+			return action, invalid("click accepts only x, y, button, and clickCount")
+		}
+		if action.Button == "" {
+			action.Button = PointerButtonLeft
+		}
+		if action.Button != PointerButtonLeft && action.Button != PointerButtonRight {
+			return action, invalid("click button must be left or right")
+		}
+		if action.ClickCount == nil {
+			count := 1
+			action.ClickCount = &count
+		}
+		if *action.ClickCount != 1 && !(action.Button == PointerButtonLeft && *action.ClickCount == 2) {
+			return action, invalid("clickCount must be 1, or 2 for the left button")
+		}
+	case ActionDrag:
+		if action.ToX == nil || action.ToY == nil || !normalizedCoordinate(*action.ToX) || !normalizedCoordinate(*action.ToY) {
+			return action, invalid("drag requires normalized toX and toY between 0 inclusive and 1 exclusive")
+		}
+		if action.Button != "" || action.ClickCount != nil || action.DeltaX != nil || action.DeltaY != nil {
+			return action, invalid("drag accepts only start and end coordinates")
+		}
+	case ActionScroll:
+		if action.ToX != nil || action.ToY != nil || action.Button != "" || action.ClickCount != nil {
+			return action, invalid("scroll accepts only x, y, deltaX, and deltaY")
+		}
+		if action.DeltaX == nil {
+			zero := 0
+			action.DeltaX = &zero
+		}
+		if action.DeltaY == nil {
+			zero := 0
+			action.DeltaY = &zero
+		}
+		if (*action.DeltaX == 0 && *action.DeltaY == 0) || *action.DeltaX < -5_000 || *action.DeltaX > 5_000 || *action.DeltaY < -5_000 || *action.DeltaY > 5_000 {
+			return action, invalid("scroll deltas must be non-zero in total and between -5000 and 5000")
+		}
 	}
 	return action, nil
 }
 
-func matchesSemanticResult(native NativeAction, appID string, action SemanticAction) bool {
-	return native.Completed && native.AppID == appID && native.ElementID == action.ElementID && native.Action == action.Action
+func isSemanticAction(actionType string) bool {
+	return actionType == ActionPress || actionType == ActionSetValue || actionType == ActionSelect || actionType == ActionSubmit
 }
 
-func (m *Manager) Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (ActionResult, error) {
-	if err := validateTarget(sessionID, appID, windowID); err != nil {
-		return ActionResult{}, err
-	}
-	if err := validatePointerInput(pointer); err != nil {
-		return ActionResult{}, err
-	}
-	if err := m.acquireWrite(ctx, "action"); err != nil {
-		return ActionResult{}, err
-	}
-	defer m.releaseWrite()
-
-	native, err := m.service.Pointer(ctx, sessionID, appID, windowID, pointer)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	if !matchesPointerResult(native, appID, pointer) {
-		return ActionResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use pointer action returned an invalid result", Outcome: "unknown"}
-	}
-	return ActionResult{Action: native}, nil
+func hasPointerFields(action ActionInput) bool {
+	return action.X != nil || action.Y != nil || action.ToX != nil || action.ToY != nil || action.Button != "" || action.ClickCount != nil || action.DeltaX != nil || action.DeltaY != nil
 }
 
-func validatePointerInput(pointer PointerInput) error {
-	if !normalizedCoordinate(pointer.X) || !normalizedCoordinate(pointer.Y) {
-		return invalid("x and y must be normalized window coordinates between 0 inclusive and 1 exclusive")
+func pointerInput(action ActionInput) PointerInput {
+	pointer := PointerInput{
+		Action: action.Type, X: *action.X, Y: *action.Y, ToX: action.ToX, ToY: action.ToY,
+		Button: action.Button, DeltaX: action.DeltaX, DeltaY: action.DeltaY,
 	}
-	switch pointer.Action {
-	case ActionClick:
-		if pointer.ToX != nil || pointer.ToY != nil || pointer.DeltaX != nil || pointer.DeltaY != nil {
-			return invalid("click accepts only x, y, button, and clickCount")
-		}
-		if pointer.Button != PointerButtonLeft && pointer.Button != PointerButtonRight {
-			return invalid("click button must be left or right")
-		}
-		if pointer.ClickCount != 1 && !(pointer.Button == PointerButtonLeft && pointer.ClickCount == 2) {
-			return invalid("clickCount must be 1, or 2 for the left button")
-		}
-	case ActionDrag:
-		if pointer.ToX == nil || pointer.ToY == nil || !normalizedCoordinate(*pointer.ToX) || !normalizedCoordinate(*pointer.ToY) {
-			return invalid("drag requires normalized toX and toY between 0 inclusive and 1 exclusive")
-		}
-		if pointer.Button != "" || pointer.ClickCount != 0 || pointer.DeltaX != nil || pointer.DeltaY != nil {
-			return invalid("drag accepts only start and end coordinates")
-		}
-	case ActionScroll:
-		if pointer.ToX != nil || pointer.ToY != nil || pointer.Button != "" || pointer.ClickCount != 0 || pointer.DeltaX == nil || pointer.DeltaY == nil {
-			return invalid("scroll requires deltaX and deltaY and accepts no click or drag fields")
-		}
-		if (*pointer.DeltaX == 0 && *pointer.DeltaY == 0) || *pointer.DeltaX < -5_000 || *pointer.DeltaX > 5_000 || *pointer.DeltaY < -5_000 || *pointer.DeltaY > 5_000 {
-			return invalid("scroll deltas must be non-zero in total and between -5000 and 5000")
-		}
-	default:
-		return invalid("pointer action must be click, drag, or scroll")
+	if action.ClickCount != nil {
+		pointer.ClickCount = *action.ClickCount
 	}
-	return nil
+	return pointer
+}
+
+func matchesActionResult(native NativeAction, appID string, action ActionInput) bool {
+	if isSemanticAction(action.Type) {
+		return native.Completed && native.AppID == appID && native.ElementID == action.ElementID && native.Action == action.Type
+	}
+	return matchesPointerResult(native, appID, pointerInput(action))
 }
 
 func normalizedCoordinate(value float64) bool {

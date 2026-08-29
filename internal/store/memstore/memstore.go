@@ -128,6 +128,43 @@ func (m *Memstore) UpdateProject(_ context.Context, id string, upd store.Project
 	return m.projectWithActivityLocked(p), nil
 }
 
+func (m *Memstore) MergeProjects(_ context.Context, targetID, sourceID string, upd store.ProjectUpdate) (*store.Project, error) {
+	if err := store.NormalizeProjectUpdate(&upd); err != nil {
+		return nil, err
+	}
+	targetID = strings.TrimSpace(targetID)
+	sourceID = strings.TrimSpace(sourceID)
+	if targetID == "" || sourceID == "" || targetID == sourceID || upd.Name == nil || *upd.Name == "" || upd.RootDirs == nil {
+		return nil, store.ErrInvalidProject
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	target, targetOK := m.projects[targetID]
+	source, sourceOK := m.projects[sourceID]
+	if !targetOK || !sourceOK {
+		return nil, store.ErrNotFound
+	}
+	if !store.SameProjectDirs(source.RootDirs, *upd.RootDirs) {
+		return nil, store.ErrProjectMergeConflict
+	}
+	if upd.Name != nil {
+		target.Name = *upd.Name
+	}
+	target.RootDirs = append([]string(nil), (*upd.RootDirs)...)
+	if upd.ApprovalMode != nil {
+		target.ApprovalMode = *upd.ApprovalMode
+	}
+	target.UpdatedAt = time.Now()
+	for _, session := range m.sessions {
+		if session.ProjectID == sourceID {
+			session.ProjectID = targetID
+			session.UpdatedAt = target.UpdatedAt
+		}
+	}
+	delete(m.projects, sourceID)
+	return m.projectWithActivityLocked(target), nil
+}
+
 func (m *Memstore) DeleteProject(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

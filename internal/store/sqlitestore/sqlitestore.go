@@ -181,6 +181,57 @@ func (s *Store) UpdateProject(ctx context.Context, id string, upd store.ProjectU
 	return out, err
 }
 
+func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, upd store.ProjectUpdate) (*store.Project, error) {
+	if err := store.NormalizeProjectUpdate(&upd); err != nil {
+		return nil, err
+	}
+	targetID = strings.TrimSpace(targetID)
+	sourceID = strings.TrimSpace(sourceID)
+	if targetID == "" || sourceID == "" || targetID == sourceID || upd.Name == nil || *upd.Name == "" || upd.RootDirs == nil {
+		return nil, store.ErrInvalidProject
+	}
+	var out *store.Project
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		target, err := getProjectTx(ctx, tx, targetID)
+		if err != nil {
+			return err
+		}
+		source, err := getProjectTx(ctx, tx, sourceID)
+		if err != nil {
+			return err
+		}
+		if !store.SameProjectDirs(source.RootDirs, *upd.RootDirs) {
+			return store.ErrProjectMergeConflict
+		}
+		if upd.Name != nil {
+			target.Name = *upd.Name
+		}
+		target.RootDirs = append([]string(nil), (*upd.RootDirs)...)
+		if target.Name == "" {
+			target.Name = projectNameFromDirs(target.RootDirs)
+		}
+		if upd.ApprovalMode != nil {
+			target.ApprovalMode = *upd.ApprovalMode
+		}
+		target.UpdatedAt = time.Now()
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=? WHERE id=?`,
+			target.Name, encodeStringSlice(target.RootDirs), target.ApprovalMode, unixMS(target.UpdatedAt), targetID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET project_id=?, updated_at=? WHERE project_id=?`, targetID, unixMS(target.UpdatedAt), sourceID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id=?`, sourceID); err != nil {
+			return err
+		}
+		out = target
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET project_id='' WHERE project_id=?`, id); err != nil {

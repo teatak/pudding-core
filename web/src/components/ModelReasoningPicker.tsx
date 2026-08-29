@@ -240,11 +240,11 @@ export function ModelReasoningPicker({
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
           {iconOnly ? null : (
-            <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden">
+            <span className={cn("flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden", !visibleModel && "text-warning")}>
               <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
               {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
               {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+              <ChevronDown className={cn("size-3 shrink-0", visibleModel ? "text-muted-foreground" : "text-current")} />
             </span>
           )}
         </Button>

@@ -244,7 +244,6 @@ export function CollapsibleSessionGroupLabel({
         icon === "project" && "font-normal text-sidebar-foreground!",
         icon !== "project" && "font-normal text-sidebar-foreground/45!",
         dragging && "opacity-45",
-        dropTargetActive && "pudding-session-drop-project-active",
       )}
     >
       <button

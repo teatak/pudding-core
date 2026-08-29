@@ -21,6 +21,7 @@ var (
 	ErrTurnRunning              = errors.New("store: session has a running turn")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
 	ErrInvalidProject           = errors.New("store: invalid project")
+	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
@@ -399,6 +400,22 @@ func NormalizeProjectDirs(dirs []string) []string {
 		out = append(out, cleaned)
 	}
 	return out
+}
+
+func SameProjectDirs(left, right []string) bool {
+	left = append([]string(nil), NormalizeProjectDirs(left)...)
+	right = append([]string(nil), NormalizeProjectDirs(right)...)
+	if len(left) != len(right) {
+		return false
+	}
+	sort.Strings(left)
+	sort.Strings(right)
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func ValidAgentMode(mode AgentMode) bool {
@@ -2325,6 +2342,7 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (*Project, error)
 	ListProjects(ctx context.Context) ([]*Project, error)
 	UpdateProject(ctx context.Context, id string, upd ProjectUpdate) (*Project, error)
+	MergeProjects(ctx context.Context, targetID, sourceID string, upd ProjectUpdate) (*Project, error)
 	DeleteProject(ctx context.Context, id string) error
 
 	CreateSession(ctx context.Context, s *Session) error

@@ -273,6 +273,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/project/git/branches/delete").POST(s.deleteProjectGitBranch)
 	app.Route("/sessions/:id/project/resources/:rootID/*path").GET(s.getProjectResource)
 	app.Route("/projects").GET(s.listProjects).POST(s.createProject)
+	app.Route("/projects/:id/merge").POST(s.mergeProject)
 	app.Route("/projects/:id").GET(s.getProject).PATCH(s.patchProject).DELETE(s.deleteProject)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings).DELETE(s.resetSettings)
 	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig).DELETE(s.resetAudioConfig)
@@ -514,6 +515,53 @@ func (s *Server) patchProject(c *cart.Context) error {
 	}
 	if upd.RootDirs != nil {
 		if err := s.revokeProjectBrowserFileAccess(c.Request.Context(), project.ID); err != nil {
+			return s.browserError(c, err)
+		}
+	}
+	c.JSON(http.StatusOK, project)
+	return nil
+}
+
+type mergeProjectReq struct {
+	SourceProjectID string   `json:"sourceProjectID"`
+	Name            string   `json:"name"`
+	RootDirs        []string `json:"rootDirs"`
+}
+
+func (s *Server) mergeProject(c *cart.Context) error {
+	targetID, _ := c.Param("id")
+	var req mergeProjectReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	req.SourceProjectID = strings.TrimSpace(req.SourceProjectID)
+	if req.SourceProjectID == "" {
+		return badRequest(c, "source project id is required")
+	}
+	targetSessionIDs, err := s.projectSessionIDs(c.Request.Context(), targetID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	sourceSessionIDs, err := s.projectSessionIDs(c.Request.Context(), req.SourceProjectID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	name := req.Name
+	rootDirs := req.RootDirs
+	project, err := s.store.MergeProjects(c.Request.Context(), targetID, req.SourceProjectID, store.ProjectUpdate{
+		Name:     &name,
+		RootDirs: &rootDirs,
+	})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	seenSessionIDs := make(map[string]bool, len(targetSessionIDs)+len(sourceSessionIDs))
+	for _, sessionID := range append(targetSessionIDs, sourceSessionIDs...) {
+		if seenSessionIDs[sessionID] {
+			continue
+		}
+		seenSessionIDs[sessionID] = true
+		if err := s.revokeBrowserFileAccess(c.Request.Context(), sessionID); err != nil {
 			return s.browserError(c, err)
 		}
 	}
@@ -1507,6 +1555,10 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, store.ErrInvalidProject) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_project"})
+		return nil
+	}
+	if errors.Is(err, store.ErrProjectMergeConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "project_merge_conflict"})
 		return nil
 	}
 	c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})

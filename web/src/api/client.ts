@@ -24,6 +24,7 @@ import {
   searchSessionMessagesResponse,
   listTurnsResponse,
   message,
+  mergeProjectRequest,
   patchQueuedInputRequest,
   patchProviderRequest,
   patchProjectRequest,
@@ -660,6 +661,17 @@ export function updateProject(
   return request(token, `/projects/${encodeURIComponent(projectID)}`, project, {
     method: "PATCH",
     body: JSON.stringify(patchProjectRequest.parse(body)),
+  });
+}
+
+export function mergeProjects(
+  token: string,
+  targetProjectID: string,
+  body: z.infer<typeof mergeProjectRequest>,
+): Promise<Project> {
+  return request(token, `/projects/${encodeURIComponent(targetProjectID)}/merge`, project, {
+    method: "POST",
+    body: JSON.stringify(mergeProjectRequest.parse(body)),
   });
 }
 
@@ -1578,4 +1590,4 @@ export async function deleteProvider(token: string, name: string): Promise<void>
 }
 
 export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
-export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };
+export { createProjectRequest, createProviderRequest, mergeProjectRequest, patchProjectRequest, patchProviderRequest };

@@ -391,8 +391,8 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 				return c.fail(err)
 			}
 			completed := c.scenario.actions[actionIndex]
-			if result.Action.Action != completed.action {
-				return c.fail(fmt.Errorf("Computer Use returned action %q, want %q", result.Action.Action, completed.action))
+			if result.Actions[0].Action != completed.action {
+				return c.fail(fmt.Errorf("Computer Use returned action %q, want %q", result.Actions[0].Action, completed.action))
 			}
 			name, callID = tool.ComputerObserve, completed.callID+"_verify"
 			args = map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "maxElements": 300}
@@ -457,25 +457,22 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 
 func (c *computerUseSmokeClient) smokeActionCall(action computerUseSmokeAction) (string, string, any, error) {
 	if action.pointer {
-		args, err := smokePointerClickArgs(c.observation, c.windowID)
+		pointer, err := smokePointerClickArgs(c.observation, c.windowID)
 		if err != nil {
 			return "", "", nil, err
 		}
-		args["appID"] = c.scenario.appID
-		args["windowID"] = c.windowID
+		args := map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "actions": []any{pointer}}
 		return tool.ComputerAct, action.callID, args, nil
 	}
 	element := smokeElement(c.observation.Elements, action.action, action.matches)
 	if element == nil {
 		return "", "", nil, fmt.Errorf("%s action target %s was not observed", c.scenario.name, action.callID)
 	}
-	args := map[string]any{
-		"appID": c.scenario.appID, "windowID": c.windowID,
-		"elementID": element.ElementID, "action": action.action,
-	}
+	item := map[string]any{"elementID": element.ElementID, "type": action.action}
 	if action.value != nil {
-		args["value"] = *action.value
+		item["value"] = *action.value
 	}
+	args := map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "actions": []any{item}}
 	return tool.ComputerAct, action.callID, args, nil
 }
 
@@ -508,7 +505,7 @@ func smokePointerClickArgs(observation computer.Observation, windowID uint32) (m
 		return nil, errors.New("fixture pointer coordinate is outside the window")
 	}
 	return map[string]any{
-		"action": computer.ActionClick, "x": x, "y": y,
+		"type": computer.ActionClick, "x": x, "y": y,
 		"button": computer.PointerButtonLeft, "clickCount": 1,
 	}, nil
 }
@@ -581,16 +578,16 @@ func decodeSmokeToolResult(req provider.Request, name string, out any) error {
 	return fmt.Errorf("tool result %s not found", name)
 }
 
-func decodeSmokeActionResult(req provider.Request) (computer.ActionResult, error) {
+func decodeSmokeActionResult(req provider.Request) (computer.ActionsResult, error) {
 	var result struct {
-		OK     bool                  `json:"ok"`
-		Result computer.ActionResult `json:"result"`
+		OK     bool                   `json:"ok"`
+		Result computer.ActionsResult `json:"result"`
 	}
 	if err := decodeSmokeToolResult(req, tool.ComputerAct, &result); err != nil {
-		return computer.ActionResult{}, err
+		return computer.ActionsResult{}, err
 	}
-	if !result.OK || !result.Result.Action.Completed {
-		return computer.ActionResult{}, fmt.Errorf("Computer Use action was not completed: %+v", result)
+	if !result.OK || result.Result.CompletedCount != 1 || len(result.Result.Actions) != 1 || !result.Result.Actions[0].Completed {
+		return computer.ActionsResult{}, fmt.Errorf("Computer Use action was not completed: %+v", result)
 	}
 	return result.Result, nil
 }

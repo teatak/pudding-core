@@ -125,6 +125,47 @@ func TestSessionProjectPersists(t *testing.T) {
 	}
 }
 
+func TestMergeProjectsMovesSessionsAndDeletesSource(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	target := &store.Project{ID: "merge_target", Name: "Target", RootDirs: []string{"/target"}}
+	source := &store.Project{ID: "merge_source", Name: "Source", RootDirs: []string{"/shared"}}
+	for _, project := range []*store.Project{target, source} {
+		if err := st.CreateProject(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []*store.Session{
+		{ID: "merge_target_session", Provider: "mock", Model: "mock", ProjectID: target.ID},
+		{ID: "merge_source_session", Provider: "mock", Model: "mock", ProjectID: source.ID},
+	} {
+		if err := st.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := "Merged"
+	dirs := []string{"/shared"}
+	merged, err := st.MergeProjects(ctx, target.ID, source.ID, store.ProjectUpdate{Name: &name, RootDirs: &dirs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.ID != target.ID || merged.Name != name || !store.SameProjectDirs(merged.RootDirs, dirs) {
+		t.Fatalf("merged project = %+v", merged)
+	}
+	if _, err := st.GetProject(ctx, source.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("source project still exists: %v", err)
+	}
+	for _, sessionID := range []string{"merge_target_session", "merge_source_session"} {
+		session, err := st.GetSession(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if session.ProjectID != target.ID {
+			t.Fatalf("session %s project = %q", sessionID, session.ProjectID)
+		}
+	}
+}
+
 func TestProjectWithoutDirectoriesPersists(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()

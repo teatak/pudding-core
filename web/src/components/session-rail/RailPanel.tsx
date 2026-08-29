@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   type DragEvent as ReactDragEvent,
@@ -7,8 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 
-import type { Project, Session } from "@/api/client";
+import { createProject, type Project, type Session } from "@/api/client";
+import { queryKeys } from "@/api/queryKeys";
 import {
   Folders,
   MessageCirclePlus,
@@ -63,6 +66,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
 import { getDesktopHomeDirectory } from "@/lib/desktopBridge";
+import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { cn } from "@/lib/utils";
@@ -129,7 +133,7 @@ type RailPanelProps = {
 };
 
 type SessionDropTarget =
-  | { kind: "pinned"; index: number }
+  | { kind: "pinned"; index: number; indicatorIndex: number | null }
   | { kind: "recent" }
   | { kind: "project"; projectID: string };
 
@@ -169,6 +173,19 @@ export function RailPanel({
 }: RailPanelProps) {
   const { t } = useI18n();
   const navigate = useNavigate({ from: "/" });
+  const queryClient = useQueryClient();
+  const createProjectMutation = useMutation({
+    mutationFn: (rootDirs: string[]) => createProject(token, { rootDirs }),
+    onSuccess: (created) => {
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
+        projects: [...(previous?.projects.filter((project) => project.id !== created.id) || []), created],
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+      toast.success(t("project.added"));
+      onCreateProjectSession(created.id);
+    },
+    onError: () => toast.error(t("project.createFailed")),
+  });
   const completedSessions = useOverlayStore((state) => state.completedSessions);
   const runningTurns = useOverlayStore((state) => state.runningTurns);
   const turnPhases = useOverlayStore((state) => state.turnPhases);
@@ -186,9 +203,11 @@ export function RailPanel({
   const [customProjectOrder, setCustomProjectOrder] = useState<string[]>(() => readCustomProjectOrder());
   const [draggingProjectKey, setDraggingProjectKey] = useState<string | null>(null);
   const [projectDropTarget, setProjectDropTarget] = useState<ProjectDropTarget | null>(null);
+  const [projectFolderDropActive, setProjectFolderDropActive] = useState(false);
   const [optimisticPinnedOrder, setOptimisticPinnedOrder] = useState<string[] | null>(null);
   const [contentFade, setContentFade] = useState({ top: false, bottom: false });
   const [homeDirectory, setHomeDirectory] = useState("");
+  const draggingSessionIDRef = useRef<string | null>(null);
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
@@ -245,6 +264,18 @@ export function RailPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const clearFolderDropState = () => setProjectFolderDropActive(false);
+    window.addEventListener("dragend", clearFolderDropState);
+    window.addEventListener("drop", clearFolderDropState);
+    window.addEventListener("blur", clearFolderDropState);
+    return () => {
+      window.removeEventListener("dragend", clearFolderDropState);
+      window.removeEventListener("drop", clearFolderDropState);
+      window.removeEventListener("blur", clearFolderDropState);
+    };
+  }, []);
+
   function toggleGroupCollapsed(groupID: string) {
     setCollapsedGroups((previous) => {
       const next = new Set(previous);
@@ -290,16 +321,21 @@ export function RailPanel({
     container: HTMLElement,
     clientY: number,
     sourceKey: string,
-  ): ProjectDropTarget {
+  ): ProjectDropTarget | null {
     const containerRect = container.getBoundingClientRect();
-    const projectRows = Array.from(
+    const allProjectRows = Array.from(
       container.querySelectorAll<HTMLElement>("[data-project-group-key]"),
-    ).filter((row) => row.dataset.projectGroupKey !== sourceKey);
+    );
+    const sourceIndex = allProjectRows.findIndex((row) => row.dataset.projectGroupKey === sourceKey);
+    const projectRows = allProjectRows.filter((row) => row.dataset.projectGroupKey !== sourceKey);
     const nextRowIndex = projectRows.findIndex((row) => {
       const rect = row.getBoundingClientRect();
       return clientY < rect.top + rect.height / 2;
     });
     const index = nextRowIndex < 0 ? projectRows.length : nextRowIndex;
+    if (sourceIndex < 0 || index === sourceIndex) {
+      return null;
+    }
     const anchorRect = projectRows[index]?.getBoundingClientRect();
     const lastRect = projectRows.at(-1)?.getBoundingClientRect();
 
@@ -324,6 +360,10 @@ export function RailPanel({
       event.clientY,
       draggingProjectKey,
     );
+    if (!nextTarget) {
+      setProjectDropTarget(null);
+      return;
+    }
     setProjectDropTarget((previous) =>
       previous?.index === nextTarget.index && Math.abs(previous.top - nextTarget.top) < 0.5
         ? previous
@@ -343,18 +383,79 @@ export function RailPanel({
   }
 
   function handleProjectDrop(event: ReactDragEvent<HTMLDivElement>) {
+    if (!draggingProjectKey) {
+      return;
+    }
     event.preventDefault();
-    const sourceKey = draggingProjectKey || event.dataTransfer.getData("text/plain");
-    if (!sourceKey) {
+    event.stopPropagation();
+    const target = resolveProjectDropTarget(event.currentTarget, event.clientY, draggingProjectKey);
+    if (!target) {
       clearProjectDragState();
       return;
     }
-    const target = resolveProjectDropTarget(event.currentTarget, event.clientY, sourceKey);
-    const order = projectGroups.map((group) => group.key).filter((groupKey) => groupKey !== sourceKey);
-    order.splice(Math.min(target.index, order.length), 0, sourceKey);
+    const order = projectGroups.map((group) => group.key).filter((groupKey) => groupKey !== draggingProjectKey);
+    order.splice(Math.min(target.index, order.length), 0, draggingProjectKey);
     setCustomProjectOrder(order);
     writeCustomProjectOrder(order);
     clearProjectDragState();
+  }
+
+  function handleProjectFolderDragEnter(event: ReactDragEvent<HTMLElement>) {
+    if (createProjectMutation.isPending || !dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setProjectFolderDropActive(true);
+  }
+
+  function handleProjectFolderDragOver(event: ReactDragEvent<HTMLElement>) {
+    if (createProjectMutation.isPending || !dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setProjectFolderDropActive(true);
+  }
+
+  function handleProjectFolderDragLeave(event: ReactDragEvent<HTMLElement>) {
+    if (!dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+    setProjectFolderDropActive(false);
+  }
+
+  function handleProjectFolderDrop(event: ReactDragEvent<HTMLElement>) {
+    if (!dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setProjectFolderDropActive(false);
+    if (createProjectMutation.isPending) {
+      return;
+    }
+    const dropped = droppedLocalItemsFromDataTransfer(event.dataTransfer);
+    if (dropped.folderPathUnavailable) {
+      toast.error(t("project.folderDropPathUnavailable"));
+    }
+    if (dropped.folderPaths.length === 0) {
+      return;
+    }
+    const directoryKey = normalizedDirectorySet(dropped.folderPaths);
+    const existingProject = projects.find(
+      (project) => normalizedDirectorySet(project.rootDirs) === directoryKey,
+    );
+    if (existingProject) {
+      onCreateProjectSession(existingProject.id);
+      return;
+    }
+    createProjectMutation.mutate(dropped.folderPaths);
   }
 
   useEffect(() => {
@@ -430,6 +531,7 @@ export function RailPanel({
       autoScrollFrameRef.current = null;
     }
     autoScrollPointerRef.current = null;
+    draggingSessionIDRef.current = null;
     setDraggingSessionID(null);
     setDragTarget(null);
     setDragPreview(null);
@@ -503,21 +605,28 @@ export function RailPanel({
     if (kind !== "pinned") {
       return null;
     }
-    const itemElements = Array.from(zone.querySelectorAll<HTMLElement>("[data-session-item-id]")).filter(
-      (item) => item.dataset.sessionItemId !== draggingSessionID,
-    );
-    const index = itemElements.findIndex((item) => {
+    const itemElements = Array.from(zone.querySelectorAll<HTMLElement>("[data-session-item-id]"));
+    const nextItemIndex = itemElements.findIndex((item) => {
       const rect = item.getBoundingClientRect();
       return clientY < rect.top + rect.height / 2;
     });
+    const indicatorIndex = nextItemIndex === -1 ? itemElements.length : nextItemIndex;
+    const draggedItemIndex = pinnedSessions.findIndex(
+      (session) => session.id === draggingSessionIDRef.current,
+    );
+    const index = draggedItemIndex >= 0 && indicatorIndex > draggedItemIndex
+      ? indicatorIndex - 1
+      : indicatorIndex;
     return {
       kind,
-      index: index === -1 ? itemElements.length : index,
+      index,
+      indicatorIndex: draggedItemIndex >= 0 && index === draggedItemIndex ? null : indicatorIndex,
     };
   }
 
   function handlePointerDragStart(sessionID: string, clientX: number, clientY: number) {
     const session = displayedSessions.find((item) => item.id === sessionID);
+    draggingSessionIDRef.current = sessionID;
     dragPreviewPointRef.current = { x: clientX, y: clientY };
     setDraggingSessionID(sessionID);
     setDragPreview({
@@ -582,6 +691,14 @@ export function RailPanel({
       ...pinnedWithoutDragged.slice(insertIndex),
     ];
     const nextOrder = nextPinned.map((item) => item.id);
+    const currentOrder = pinnedSessions.map((item) => item.id);
+    if (
+      nextOrder.length === currentOrder.length &&
+      nextOrder.every((itemID, index) => itemID === currentOrder[index])
+    ) {
+      clearDragState();
+      return;
+    }
     setOptimisticPinnedOrder(nextOrder);
     const updates = nextPinned.flatMap((item, index) => {
       const pinnedOrder = index + 1;
@@ -599,7 +716,14 @@ export function RailPanel({
   return (
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
-        <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
+        <Sidebar
+          className="min-h-0 w-full flex-1 bg-transparent"
+          collapsible="none"
+          onDragEnter={handleProjectFolderDragEnter}
+          onDragLeave={handleProjectFolderDragLeave}
+          onDragOver={handleProjectFolderDragOver}
+          onDrop={handleProjectFolderDrop}
+        >
           <SidebarHeader className="px-2 pt-0 pb-2">
             <SidebarMenu
               className="gap-0.5"
@@ -723,7 +847,7 @@ export function RailPanel({
                             sessions={pinnedSessions}
                             showEmptyState={false}
                             draggingSessionID={draggingSessionID}
-                            dropIndex={dragTarget?.kind === "pinned" ? dragTarget.index : null}
+                            dropIndex={dragTarget?.kind === "pinned" ? dragTarget.indicatorIndex : null}
                             showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
                             onArchive={onArchive}
                             onOpenSplit={onOpenSplit}
@@ -841,24 +965,29 @@ export function RailPanel({
                               group.project &&
                               (draggedSession.pinned || draggedSession.projectID !== group.project.id),
                             );
+                            const projectDropActive = Boolean(
+                              dragTarget?.kind === "project" &&
+                              dragTarget.projectID === group.project?.id,
+                            );
                             return (
                               <Collapsible
                                 key={group.key}
                                 asChild
-                                open={draggingProjectKey || draggingSessionID ? false : !projectCollapsed}
+                                open={draggingProjectKey ? false : !projectCollapsed}
                               >
                                 <SidebarGroup
-                                  className="rounded-md px-2 py-0"
+                                  className={cn(
+                                    "rounded-md px-2 py-0",
+                                    projectDropActive && "pudding-session-drop-project-active",
+                                  )}
                                   data-project-group-key={group.key}
+                                  data-session-drop-target={projectDropEnabled ? "project" : undefined}
+                                  data-session-project-id={projectDropEnabled ? group.project?.id : undefined}
                                 >
-                                  <div
-                                    className="rounded-md"
-                                    data-session-drop-target={projectDropEnabled ? "project" : undefined}
-                                    data-session-project-id={projectDropEnabled ? group.project?.id : undefined}
-                                  >
+                                  <div className="rounded-md">
                                     <CollapsibleSessionGroupLabel
                                       active={draftActive && draftProjectID === group.projectID}
-                                      activity={projectCollapsed || draggingSessionID
+                                      activity={projectCollapsed
                                         ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
                                         : undefined}
                                       actions={group.project ? (
@@ -868,11 +997,8 @@ export function RailPanel({
                                           token={token}
                                         />
                                       ) : undefined}
-                                      collapsed={draggingSessionID ? true : projectCollapsed}
-                                      dropTargetActive={
-                                        dragTarget?.kind === "project" &&
-                                        dragTarget.projectID === group.project?.id
-                                      }
+                                      collapsed={projectCollapsed}
+                                      dropTargetActive={projectDropActive}
                                       interactionDisabled={isDraggedSessionSourceProject}
                                       icon="project"
                                       label={group.label}
@@ -945,6 +1071,13 @@ export function RailPanel({
             </ShellActionButton>
             <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
           </SidebarFooter>
+          {projectFolderDropActive ? (
+            <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-info/[0.055] px-4 text-center text-sm font-medium text-info backdrop-blur-[1px] dark:bg-info/[0.08]">
+              <span className="rounded-full bg-background/90 px-3 py-2 shadow-sm ring-1 ring-border/80">
+                {t("project.folderDropCreateHint")}
+              </span>
+            </div>
+          ) : null}
         </Sidebar>
         <SessionProjectPickerDialog
           open={Boolean(projectPickerSessionID)}
@@ -966,4 +1099,12 @@ export function RailPanel({
       </SidebarProvider>
     </RailOverlayHoldContext.Provider>
   );
+}
+
+function normalizedDirectorySet(paths: string[]) {
+  return [...paths].map((path) => path.replace(/[\\/]+$/, "")).sort().join("\n");
+}
+
+function dataTransferHasFiles(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types || []).includes("Files");
 }

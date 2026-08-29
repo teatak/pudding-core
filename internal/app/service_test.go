@@ -152,7 +152,8 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Reuse known element IDs") ||
 		!strings.Contains(computerSkill.Content, "normalized current-window coordinates") ||
 		strings.Contains(computerSkill.Content, "observationID") ||
-		!strings.Contains(computerSkill.Content, "use action_sequence instead of separate calls") ||
+		!strings.Contains(computerSkill.Content, "Every builtin_computer_act call uses an actions array") ||
+		!strings.Contains(computerSkill.Content, "one item in it for a single action") ||
 		!strings.Contains(computerSkill.Content, "Do not narrate routine Computer Use progress") ||
 		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
 		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)

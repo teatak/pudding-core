@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import {
   deleteProject,
+  mergeProjects,
   revealDesktopPath,
   updateProject,
   type Project,
@@ -38,8 +39,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuSub, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenu, DropdownMenuSub, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuPortal,
+  ContextMenuSub,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
@@ -57,6 +69,34 @@ type ProjectMenuEntry =
       icon?: ReactNode;
     }
   | { type: "submenu"; label: string; items: ProjectMenuEntry[] };
+
+type ProjectMergeRequest = {
+  conflictingProject: Project;
+  nextName: string;
+  paths: string[];
+};
+
+type ProjectMergeCommand = {
+  targetProjectID: string;
+  sourceProjectID: string;
+  name: string;
+  rootDirs: string[];
+};
+
+type ProjectMergeNameChoice = "current" | "existing";
+
+function projectMergeCommand(
+  currentProject: Project,
+  request: ProjectMergeRequest,
+  choice: ProjectMergeNameChoice,
+): ProjectMergeCommand {
+  return {
+    targetProjectID: currentProject.id,
+    sourceProjectID: request.conflictingProject.id,
+    name: choice === "current" ? request.nextName : request.conflictingProject.name,
+    rootDirs: request.paths,
+  };
+}
 
 export function ProjectActionsMenu({
   alwaysVisible = false,
@@ -80,10 +120,12 @@ export function ProjectActionsMenu({
   const menuOpen = openMenu !== null;
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [mergeRequest, setMergeRequest] = useState<ProjectMergeRequest | null>(null);
+  const [mergeNameChoice, setMergeNameChoice] = useState<ProjectMergeNameChoice | "">("");
   const [name, setName] = useState(project.name);
   const [directoryPaths, setDirectoryPaths] = useState(project.rootDirs);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const overlayOpen = menuOpen || editOpen || deleteOpen;
+  const overlayOpen = menuOpen || editOpen || deleteOpen || Boolean(mergeRequest);
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
     (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
@@ -159,6 +201,68 @@ export function ProjectActionsMenu({
     },
     onError: () => toast.error(t("project.updateFailed")),
   });
+  const mergeMutation = useMutation({
+    mutationFn: (command: ProjectMergeCommand) =>
+      mergeProjects(token, command.targetProjectID, {
+        sourceProjectID: command.sourceProjectID,
+        name: command.name,
+        rootDirs: command.rootDirs,
+      }),
+    onSuccess: async (updated, command) => {
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      const affectedSessions = previousSessions?.sessions.filter(
+        (session) =>
+          session.projectID === command.targetProjectID || session.projectID === command.sourceProjectID,
+      ) || [];
+      cacheProject(updated);
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
+        projects: previous?.projects.filter((entry) => entry.id !== command.sourceProjectID) || [updated],
+      }));
+      queryClient.removeQueries({ queryKey: queryKeys.project(command.sourceProjectID), exact: true });
+      if (previousSessions) {
+        queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), {
+          sessions: previousSessions.sessions.map((session) =>
+            session.projectID === command.sourceProjectID
+              ? { ...session, projectID: command.targetProjectID }
+              : session,
+          ),
+        });
+      }
+      for (const session of affectedSessions) {
+        if (session.projectID === command.sourceProjectID) {
+          queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
+            previous ? { ...previous, projectID: command.targetProjectID } : previous,
+          );
+        }
+      }
+      setName(updated.name);
+      setDirectoryPaths(updated.rootDirs);
+      setMergeRequest(null);
+      setMergeNameChoice("");
+      setEditOpen(false);
+      toast.success(t("project.mergeSuccess"));
+      await navigate({
+        to: "/",
+        search: (previous) => {
+          const next = { ...(previous as AppSearch) };
+          if (next.project === command.sourceProjectID) {
+            next.project = command.targetProjectID;
+          }
+          return next;
+        },
+        replace: true,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.archivedSessions() }),
+        ...affectedSessions.map((session) =>
+          queryClient.invalidateQueries({ queryKey: ["session", session.id, "project"] }),
+        ),
+      ]);
+    },
+    onError: () => toast.error(t("project.mergeFailed")),
+  });
   const deleteMutation = useMutation({
     mutationFn: () => deleteProject(token, project.id),
     onSuccess: async () => {
@@ -220,18 +324,35 @@ export function ProjectActionsMenu({
     if (!nextName) return;
     const projects =
       queryClient.getQueryData<{ projects: Project[] }>(queryKeys.projects())?.projects || [];
-    if (
-      directoryPaths.length > 0 &&
-      projects.some(
-        (entry) =>
-          entry.id !== project.id &&
-          normalizedDirectorySet(entry.rootDirs) === normalizedDirectorySet(directoryPaths),
-      )
-    ) {
-      toast.error(t("project.alreadyExists"));
+    const conflictingProject = directoryPaths.length > 0
+      ? projects.find(
+          (entry) =>
+            entry.id !== project.id &&
+            normalizedDirectorySet(entry.rootDirs) === normalizedDirectorySet(directoryPaths),
+        )
+      : undefined;
+    if (conflictingProject) {
+      const request = {
+        conflictingProject,
+        nextName,
+        paths: [...directoryPaths],
+      } satisfies ProjectMergeRequest;
+      if (nextName === conflictingProject.name) {
+        mergeMutation.mutate(projectMergeCommand(project, request, "current"));
+        return;
+      }
+      setMergeRequest(request);
+      setMergeNameChoice("");
+      setEditOpen(false);
       return;
     }
     editMutation.mutate({ nextName, paths: directoryPaths });
+  };
+  const confirmProjectMerge = () => {
+    if (!mergeRequest || !mergeNameChoice) {
+      return;
+    }
+    mergeMutation.mutate(projectMergeCommand(project, mergeRequest, mergeNameChoice));
   };
   const copyPaths = (paths: string[]) => {
     void navigator.clipboard.writeText(paths.join("\n")).then(
@@ -353,9 +474,11 @@ export function ProjectActionsMenu({
           <DropdownMenuSubTrigger>
             <span className="min-w-0 truncate">{entry.label}</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
-            {entry.items.map((item, index) => renderDropdownEntry(item, `${key}-${index}`))}
-          </DropdownMenuSubContent>
+          <DropdownMenuPortal>
+            <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
+              {entry.items.map((item, index) => renderDropdownEntry(item, `${key}-${index}`))}
+            </DropdownMenuSubContent>
+          </DropdownMenuPortal>
         </DropdownMenuSub>
       );
     }
@@ -381,9 +504,11 @@ export function ProjectActionsMenu({
           <ContextMenuSubTrigger>
             <span className="min-w-0 truncate">{entry.label}</span>
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
-            {entry.items.map((item, index) => renderContextEntry(item, `${key}-${index}`))}
-          </ContextMenuSubContent>
+          <ContextMenuPortal>
+            <ContextMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
+              {entry.items.map((item, index) => renderContextEntry(item, `${key}-${index}`))}
+            </ContextMenuSubContent>
+          </ContextMenuPortal>
         </ContextMenuSub>
       );
     }
@@ -439,10 +564,11 @@ export function ProjectActionsMenu({
         description={t("project.editDescription")}
         directoryPaths={directoryPaths}
         homeDirectory={homeDirectory}
-        isPending={editMutation.isPending}
+        isPending={editMutation.isPending || mergeMutation.isPending}
         name={name}
         open={editOpen}
         submitDisabled={
+          mergeMutation.isPending ||
           !name.trim() ||
           (name.trim() === project.name &&
             normalizedDirectoryList(directoryPaths) === normalizedDirectoryList(project.rootDirs))
@@ -455,12 +581,75 @@ export function ProjectActionsMenu({
         onOpenChange={(open) => {
           if (open) {
             openEdit();
-          } else if (!editMutation.isPending) {
+          } else if (!editMutation.isPending && !mergeMutation.isPending) {
             setEditOpen(false);
           }
         }}
         onSubmit={saveProject}
       />
+      <AlertDialog
+        open={Boolean(mergeRequest)}
+        onOpenChange={(open) => {
+          if (!open && !mergeMutation.isPending) {
+            setMergeRequest(null);
+            setMergeNameChoice("");
+            setEditOpen(true);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("project.mergeTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("project.mergeDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <RadioGroup
+            aria-label={t("project.mergeNameLabel")}
+            disabled={mergeMutation.isPending}
+            value={mergeNameChoice}
+            onValueChange={(value) => setMergeNameChoice(value as ProjectMergeNameChoice)}
+          >
+            <label
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-interactive-hover",
+                mergeNameChoice === "current" && "bg-interactive-selected",
+                mergeMutation.isPending && "cursor-not-allowed opacity-50",
+              )}
+            >
+              <RadioGroupItem className="mt-0.5" value="current" />
+              <span className="min-w-0 truncate font-medium">
+                {t("project.mergeUseName").replace("{name}", mergeRequest?.nextName || project.name)}
+              </span>
+            </label>
+            <label
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-interactive-hover",
+                mergeNameChoice === "existing" && "bg-interactive-selected",
+                mergeMutation.isPending && "cursor-not-allowed opacity-50",
+              )}
+            >
+              <RadioGroupItem className="mt-0.5" value="existing" />
+              <span className="min-w-0 truncate font-medium">
+                {t("project.mergeUseName").replace(
+                  "{name}",
+                  mergeRequest?.conflictingProject.name || "",
+                )}
+              </span>
+            </label>
+          </RadioGroup>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={mergeMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
+            <Button
+              disabled={mergeMutation.isPending || !mergeNameChoice}
+              onClick={confirmProjectMerge}
+            >
+              {mergeMutation.isPending ? <Spinner /> : null}
+              {t("project.mergeConfirm")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={deleteOpen} onOpenChange={(open) => !deleteMutation.isPending && setDeleteOpen(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>

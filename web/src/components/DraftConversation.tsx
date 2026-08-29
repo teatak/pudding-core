@@ -302,20 +302,31 @@ export function DraftConversation({ token, projectID }: { token: string; project
             onModelValueChange={setModelValue}
             onSubmitError={setSubmitError}
           />
-          {!showPresetSetup && starterPrompts.length > 0 ? (
-            <ChatColumn className="pudding-draft-suggestions mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
-              {starterPrompts.map((item, index) => {
-                return (
-                  <button
-                    key={item.id}
-                    className="rounded-full border border-input bg-background px-4 py-1.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                    type="button"
-                    onClick={() => setQuickSubmit({ id: Date.now() + index, text: item.prompt })}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
+          {!showPresetSetup && (starterPromptsQuery.isPending || starterPrompts.length > 0) ? (
+            <ChatColumn
+              aria-busy={starterPromptsQuery.isPending}
+              className="pudding-draft-suggestions mt-8 flex flex-wrap items-center justify-center gap-2 px-2"
+            >
+              {starterPromptsQuery.isPending ? (
+                <>
+                  <Skeleton aria-hidden="true" className="h-8 w-44 rounded-full" />
+                  <Skeleton aria-hidden="true" className="h-8 w-36 rounded-full" />
+                  <Skeleton aria-hidden="true" className="h-8 w-52 rounded-full" />
+                </>
+              ) : (
+                starterPrompts.map((item, index) => {
+                  return (
+                    <button
+                      key={item.id}
+                      className="rounded-full border border-input bg-background px-4 py-1.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                      type="button"
+                      onClick={() => setQuickSubmit({ id: Date.now() + index, text: item.prompt })}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })
+              )}
             </ChatColumn>
           ) : null}
         </div>

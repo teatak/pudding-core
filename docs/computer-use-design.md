@@ -246,9 +246,9 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 
 - 任一动作失败都不自动改用坐标、键盘、AppleScript 或剪贴板;坐标点击必须由模型显式选择。
 - 所有写操作执行前由 Helper 基于实时系统状态验证目标应用、窗口和元素。
-- 单动作只返回动作结果,不自动观察。模型仅在目标未知、必须检查 UI 变化或结果不确定时调用 observe。
-- `action_sequence` 只接受 2–32 个 `press`、`set_value`、`select` 或 `submit`。每一步都针对实时 AX 树重新解析稳定 `elementID`,后续目标不依赖中间状态发现时可连续执行。
-- 序列不是事务:遇到首个失败立即停止,已完成动作不回滚、不重试;结果明确返回 `completedCount`、`failedIndex`、已确认动作和失败信息。
+- 所有调用都传 `actions` 数组:单动作传 1 项,连续动作传 2–32 项。工具不自动观察,模型仅在目标未知、必须检查 UI 变化或结果不确定时调用 observe。
+- 每一步都针对实时 AX 树或窗口几何重新验证。仅在目标均已知且中间状态无需检查时连续执行；前一步可能移动窗口或目标时不得批量执行后续 pointer 动作。
+- 多步调用不是事务:遇到首个失败立即停止,已完成动作不回滚、不重试;结果明确返回 `completedCount`、`failedIndex`、已确认动作和失败信息。
 
 ## 6. Observation 契约
 
@@ -280,7 +280,7 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 - observation 是无服务端状态的界面快照,不是授权令牌或动作前置条件。
 - `elementID` 由元素的稳定 Accessibility 身份生成;模型可在同一 App 窗口仍存在时复用已知 ID。
 - Helper 在每次语义动作前重新遍历指定窗口并按稳定身份解析元素;找不到、不唯一、不再支持该动作或属于 secure 控件时拒绝执行。
-- 模型自主决定观察时机：仅在目标未知、必须检查 UI 变化或结果不确定时 observe。已知稳定目标可直接操作或使用 `action_sequence`。
+- 模型自主决定观察时机：仅在目标未知、必须检查 UI 变化或结果不确定时 observe。已知稳定目标可直接放入一次 `actions` 调用。
 - pointer 不依赖 observation token;坐标使用当前窗口归一化空间,Helper 执行前验证前台 App 和最上层目标窗口。
 - daemon 不保存 observation registry 或过期时间;当前 AX 树和当前窗口几何是唯一事实源。
 
@@ -322,32 +322,31 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 {
   "appID": "com.apple.TextEdit",
   "windowID": 42,
-  "action": "set_value",
-  "elementID": "ax_...",
-  "value": "hello"
+  "actions": [
+    {"type": "set_value", "elementID": "ax_...", "value": "hello"}
+  ]
 }
 ```
 
-`action` 只允许 `press`、`set_value`、`select`、`submit`、`click`、`drag`、`scroll` 和 `action_sequence`;只有单个 `set_value` 必须传顶层 `value`。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。指针动作要求目标 App 已显式切到前台,只确认事件投递,不宣称 App 状态已改变。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一 action 工具让审批、串行化和 transcript 展示共用一个入口。
+`actions` 必须包含 1–32 项,每项用 `type` 指定 `press`、`set_value`、`select`、`submit`、`click`、`drag` 或 `scroll`。不存在顶层单动作字段或特殊 sequence 类型。`set_value` 的 `value` 与语义动作的 `elementID` 均放在对应项中。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。指针动作要求目标 App 已显式切到前台,只确认事件投递,不宣称 App 状态已改变。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一数组协议让审批、串行化和 transcript 展示共用一个入口。
 
-批量语义动作仍使用同一工具,传 `action=action_sequence` 和 `actions` 数组:
+连续动作使用完全相同的数组协议:
 
 ```json
 {
   "appID": "com.apple.calculator",
   "windowID": 42,
-  "action": "action_sequence",
   "actions": [
-    {"elementID": "ax_clear", "action": "press"},
-    {"elementID": "ax_4", "action": "press"},
-    {"elementID": "ax_plus", "action": "press"},
-    {"elementID": "ax_4", "action": "press"},
-    {"elementID": "ax_equals", "action": "press"}
+    {"type": "press", "elementID": "ax_clear"},
+    {"type": "press", "elementID": "ax_4"},
+    {"type": "press", "elementID": "ax_plus"},
+    {"type": "press", "elementID": "ax_4"},
+    {"type": "press", "elementID": "ax_equals"}
   ]
 }
 ```
 
-序列禁止 pointer action、嵌套 sequence 和顶层 `elementID`/`value`;每个子动作执行前均在实时 AX 树中解析和验证目标。中途失败不会回滚已完成动作,也不会自动尝试剩余动作。
+每项执行前均在实时 AX 树或当前窗口几何中解析和验证目标。中途失败不会回滚已完成动作,也不会自动尝试剩余动作。
 
 新增工具时必须同步:
 

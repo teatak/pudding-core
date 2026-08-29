@@ -96,7 +96,7 @@ export function SessionItems({
   const cappedSessions = showAll || !canCollapse
     ? sessions
     : sessions.slice(0, collapsedSessionDisplayLimit);
-  const visibleSessions = cappedSessions.filter((session) => session.id !== draggingSessionID);
+  const visibleSessions = cappedSessions;
   const hiddenSessionCount = canCollapse ? sessions.length - collapsedSessionDisplayLimit : 0;
   if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
     return (
@@ -111,33 +111,37 @@ export function SessionItems({
 
   return (
     <SidebarMenu className="gap-0.5">
-      {visibleSessions.map((session, index) => (
-        <Fragment key={session.id}>
-          {dropIndex === index ? <SessionDropIndicator active /> : null}
-          <SessionItem
-            completed={Boolean(completedSessions[session.id])}
-            archivePending={archivePending}
-            hasProjects={hasProjects}
-            projectName={session.projectID ? projectNamesByID.get(session.projectID) : undefined}
-            projectChangePending={projectChangePendingID === session.id}
-            running={isSessionTurnRunning(session, runningTurns, turnPhases)}
-            selected={session.id === selectedSessionID}
-            session={session}
-            suppressInteractiveState={Boolean(draggingSessionID)}
-            onArchive={() => onArchive(session.id)}
-            onOpenSplit={() => onOpenSplit(session.id)}
-            onOpenProjectPicker={() => onOpenProjectPicker(session.id)}
-            onPinChange={(pinned) => onPinChange(session.id, pinned)}
-            onRemoveProject={() => onProjectChange(session.id, "")}
-            onPointerDragCancel={onPointerDragCancel}
-            onPointerDragEnd={(clientX, clientY) => onPointerDragEnd(session.id, clientX, clientY)}
-            onPointerDragMove={onPointerDragMove}
-            onPointerDragStart={(clientX, clientY) => onPointerDragStart(session.id, clientX, clientY)}
-            onRename={(title) => onRename(session.id, title)}
-            onSelect={() => onSelect(session.id)}
-          />
-        </Fragment>
-      ))}
+      {visibleSessions.map((session, index) => {
+        const dragging = session.id === draggingSessionID;
+        return (
+          <Fragment key={session.id}>
+            {dropIndex === index ? <SessionDropIndicator active /> : null}
+            <SessionItem
+              completed={Boolean(completedSessions[session.id])}
+              archivePending={archivePending}
+              dragging={dragging}
+              hasProjects={hasProjects}
+              projectName={session.projectID ? projectNamesByID.get(session.projectID) : undefined}
+              projectChangePending={projectChangePendingID === session.id}
+              running={isSessionTurnRunning(session, runningTurns, turnPhases)}
+              selected={session.id === selectedSessionID}
+              session={session}
+              suppressInteractiveState={Boolean(draggingSessionID)}
+              onArchive={() => onArchive(session.id)}
+              onOpenSplit={() => onOpenSplit(session.id)}
+              onOpenProjectPicker={() => onOpenProjectPicker(session.id)}
+              onPinChange={(pinned) => onPinChange(session.id, pinned)}
+              onRemoveProject={() => onProjectChange(session.id, "")}
+              onPointerDragCancel={onPointerDragCancel}
+              onPointerDragEnd={(clientX, clientY) => onPointerDragEnd(session.id, clientX, clientY)}
+              onPointerDragMove={onPointerDragMove}
+              onPointerDragStart={(clientX, clientY) => onPointerDragStart(session.id, clientX, clientY)}
+              onRename={(title) => onRename(session.id, title)}
+              onSelect={() => onSelect(session.id)}
+            />
+          </Fragment>
+        );
+      })}
       {dropIndex === visibleSessions.length ? <SessionDropIndicator active /> : null}
       {hiddenSessionCount > 0 ? (
         <SidebarMenuItem>

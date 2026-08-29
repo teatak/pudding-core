@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-
-	"github.com/teatak/pudding-core/internal/computer"
 )
 
 type RiskClass string
@@ -78,16 +76,18 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		if err != nil {
 			return ToolRisk{}, false
 		}
-		paths := []string{args.AppID, fmt.Sprintf("window:%d", args.WindowID), args.ElementID}
+		paths := []string{args.AppID, fmt.Sprintf("window:%d", args.WindowID)}
+		for _, action := range args.Actions {
+			paths = append(paths, action.ElementID)
+		}
+		operation := "computer_" + args.Actions[0].Type
 		summary := "Perform one action in a local macOS application."
-		if args.Action == computer.ActionSequence {
-			summary = "Perform an ordered action sequence in a local macOS application."
-			for _, action := range args.Actions {
-				paths = append(paths, action.ElementID)
-			}
+		if len(args.Actions) > 1 {
+			operation = "computer_actions"
+			summary = "Perform ordered actions in a local macOS application."
 		}
 		return ToolRisk{
-			Class: RiskClassWrite, Operation: "computer_" + args.Action, Scope: "computer",
+			Class: RiskClassWrite, Operation: operation, Scope: "computer",
 			Paths: compactRiskPaths(paths...), Summary: summary,
 		}, true
 	}

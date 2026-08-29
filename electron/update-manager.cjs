@@ -194,8 +194,8 @@ class UpdateManager {
       }
       return false;
     }
-    if (this.state.status === updateStatuses.available) {
-      return interactive ? this.confirmAvailableDownload(this.state.version) : false;
+    if (this.state.status === updateStatuses.available && interactive) {
+      return this.confirmAvailableDownload(this.state.version);
     }
     if (
       this.state.status === updateStatuses.checking ||
@@ -209,8 +209,11 @@ class UpdateManager {
       return false;
     }
 
+    const refreshingAvailable = this.state.status === updateStatuses.available;
     this.interactiveCheck = Boolean(interactive);
-    this.setState({ status: updateStatuses.checking, percent: null });
+    if (!refreshingAvailable) {
+      this.setState({ status: updateStatuses.checking, percent: null });
+    }
     try {
       await this.updater.checkForUpdates();
       return true;
@@ -312,6 +315,9 @@ class UpdateManager {
     this.onError(error);
     const installing = this.state.status === updateStatuses.installing;
     const interactive = this.takeInteractiveCheck() || this.state.status === updateStatuses.downloading;
+    if (this.state.status === updateStatuses.available && !interactive) {
+      return;
+    }
     this.setState({ status: updateStatuses.idle, version: "", percent: null });
     if (installing) {
       void this.onInteractiveResult({ kind: "install-error", error: errorMessage(error) });

@@ -153,6 +153,69 @@ test("a background check exposes download in the UI without prompting", async ()
   });
 });
 
+test("a later background check replaces an available update with the newest version", async () => {
+  const updater = new FakeUpdater();
+  const timers = [];
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    setTimeoutFn: (callback, delay) => {
+      const timer = { callback, delay, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeoutFn: () => {},
+  });
+
+  manager.start();
+  await timers[0].callback();
+  updater.emit("update-available", { version: "1.2.0" });
+
+  assert.equal(timers[1].delay, 6 * 60 * 60 * 1_000);
+  await timers[1].callback();
+  updater.emit("update-available", { version: "1.3.0" });
+
+  assert.equal(updater.checks, 2);
+  assert.deepEqual(manager.getState(), {
+    status: "available",
+    receivePreviewUpdates: false,
+    version: "1.3.0",
+    percent: null,
+  });
+});
+
+test("a failed background refresh keeps the available update", async () => {
+  const updater = new FakeUpdater();
+  const errors = [];
+  const states = [];
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    onError: (error) => errors.push(error.message),
+    onStateChange: (state) => states.push(state),
+  });
+
+  await manager.check(false);
+  updater.emit("update-available", { version: "1.2.0" });
+  const stateCountBeforeRefresh = states.length;
+  updater.checkForUpdates = async () => {
+    updater.checks += 1;
+    const error = new Error("offline");
+    updater.emit("error", error);
+    throw error;
+  };
+
+  assert.equal(await manager.check(false), false);
+  assert.deepEqual(errors, ["offline"]);
+  assert.equal(states.length, stateCountBeforeRefresh);
+  assert.deepEqual(manager.getState(), {
+    status: "available",
+    receivePreviewUpdates: false,
+    version: "1.2.0",
+    percent: null,
+  });
+});
+
 test("declining an interactive download keeps the update available", async () => {
   const updater = new FakeUpdater();
   const manager = new UpdateManager({

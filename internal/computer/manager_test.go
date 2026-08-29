@@ -103,6 +103,23 @@ func (f *fakeService) ReleaseSession(_ context.Context, sessionID string) error 
 	return nil
 }
 
+func semanticActions(elementID, actionType string, value *string) []ActionInput {
+	return []ActionInput{{Type: actionType, ElementID: elementID, Value: value}}
+}
+
+func pointerActions(pointer PointerInput) []ActionInput {
+	x, y := pointer.X, pointer.Y
+	action := ActionInput{
+		Type: pointer.Action, X: &x, Y: &y, ToX: pointer.ToX, ToY: pointer.ToY,
+		Button: pointer.Button, DeltaX: pointer.DeltaX, DeltaY: pointer.DeltaY,
+	}
+	if pointer.ClickCount != 0 {
+		count := pointer.ClickCount
+		action.ClickCount = &count
+	}
+	return []ActionInput{action}
+}
+
 func TestManagerRoutesSessionAndReusesStableElementID(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
@@ -110,14 +127,14 @@ func TestManagerRoutesSessionAndReusesStableElementID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions("button", ActionPress, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Action.Completed || service.lastSession != "session_a" {
+	if len(result.Actions) != 1 || !result.Actions[0].Completed || service.lastSession != "session_a" {
 		t.Fatalf("unexpected result: %#v session=%q", result, service.lastSession)
 	}
-	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
+	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions("button", ActionPress, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +143,7 @@ func TestManagerRoutesSessionAndReusesStableElementID(t *testing.T) {
 	}
 }
 
-func TestManagerActionSequenceDoesNotObserveAutomatically(t *testing.T) {
+func TestManagerActionsDoNotObserveAutomatically(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
 	_, err := manager.Observe(context.Background(), "session_a", "com.example.App", 42, 20)
@@ -134,11 +151,11 @@ func TestManagerActionSequenceDoesNotObserveAutomatically(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := "hello"
-	result, err := manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
-		{ElementID: "button", Action: ActionPress},
-		{ElementID: "row", Action: ActionSelect},
-		{ElementID: "field", Action: ActionSetValue, Value: &value},
-		{ElementID: "field", Action: ActionSubmit},
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, []ActionInput{
+		{ElementID: "button", Type: ActionPress},
+		{ElementID: "row", Type: ActionSelect},
+		{ElementID: "field", Type: ActionSetValue, Value: &value},
+		{ElementID: "field", Type: ActionSubmit},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -149,9 +166,9 @@ func TestManagerActionSequenceDoesNotObserveAutomatically(t *testing.T) {
 	if service.actions != 4 || service.observes != 1 {
 		t.Fatalf("native actions=%d observations=%d, want 4 and 1", service.actions, service.observes)
 	}
-	_, err = manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
-		{ElementID: "button", Action: ActionPress},
-		{ElementID: "button", Action: ActionPress},
+	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, []ActionInput{
+		{ElementID: "button", Type: ActionPress},
+		{ElementID: "button", Type: ActionPress},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +178,7 @@ func TestManagerActionSequenceDoesNotObserveAutomatically(t *testing.T) {
 	}
 }
 
-func TestManagerActionSequenceStopsAtFirstFailureWithoutObserving(t *testing.T) {
+func TestManagerActionsStopAtFirstFailureWithoutObserving(t *testing.T) {
 	service := &fakeService{
 		actErr:   &OperationError{Code: "computer_action_blocked", Message: "blocked", Outcome: "not_started"},
 		actErrAt: 2,
@@ -171,10 +188,10 @@ func TestManagerActionSequenceStopsAtFirstFailureWithoutObserving(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := manager.ActSequence(context.Background(), "session_a", "com.example.App", 42, []SemanticAction{
-		{ElementID: "button", Action: ActionPress},
-		{ElementID: "row", Action: ActionSelect},
-		{ElementID: "field", Action: ActionSubmit},
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, []ActionInput{
+		{ElementID: "button", Type: ActionPress},
+		{ElementID: "row", Type: ActionSelect},
+		{ElementID: "field", Type: ActionSubmit},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,17 +204,30 @@ func TestManagerActionSequenceStopsAtFirstFailureWithoutObserving(t *testing.T) 
 	}
 }
 
+func TestManagerRunsSemanticAndPointerActionsThroughOneArray(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
+	x, y := 0.5, 0.5
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, []ActionInput{
+		{Type: ActionPress, ElementID: "button"},
+		{Type: ActionClick, X: &x, Y: &y},
+	})
+	if err != nil || result.Failure != nil || result.CompletedCount != 2 || service.actions != 1 || service.pointers != 1 {
+		t.Fatalf("unexpected mixed actions result=%#v semantic=%d pointer=%d err=%v", result, service.actions, service.pointers, err)
+	}
+}
+
 func TestManagerPointerUsesCurrentWindowCoordinatesWithoutObservation(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 2})
+	result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, pointerActions(PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 2}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Action.Completed || result.Action.Action != ActionClick || result.Action.ClickCount != 2 || service.pointers != 1 {
+	if len(result.Actions) != 1 || !result.Actions[0].Completed || result.Actions[0].Action != ActionClick || result.Actions[0].ClickCount != 2 || service.pointers != 1 {
 		t.Fatalf("unexpected pointer result: %#v pointers=%d", result, service.pointers)
 	}
-	_, err = manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 1})
+	_, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, pointerActions(PointerInput{Action: ActionClick, X: 0.5, Y: 0.5, Button: PointerButtonLeft, ClickCount: 1}))
 	if err != nil || service.pointers != 2 {
 		t.Fatalf("second pointer result: err=%v pointers=%d", err, service.pointers)
 	}
@@ -206,7 +236,7 @@ func TestManagerPointerUsesCurrentWindowCoordinatesWithoutObservation(t *testing
 func TestManagerPointerRejectsOutOfBounds(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	_, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, PointerInput{Action: ActionClick, X: 1, Y: 0, Button: PointerButtonLeft, ClickCount: 1})
+	_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, pointerActions(PointerInput{Action: ActionClick, X: 1, Y: 0, Button: PointerButtonLeft, ClickCount: 1}))
 	assertOperationCode(t, err, "computer_invalid_request")
 	if service.pointers != 0 {
 		t.Fatalf("native pointer actions = %d, want 0", service.pointers)
@@ -222,8 +252,8 @@ func TestManagerRoutesDragAndScroll(t *testing.T) {
 	} {
 		service := &fakeService{}
 		manager := NewManager(service)
-		result, err := manager.Pointer(context.Background(), "session_a", "com.example.App", 42, pointer)
-		if err != nil || result.Action.Action != pointer.Action || service.pointers != 1 {
+		result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, pointerActions(pointer))
+		if err != nil || len(result.Actions) != 1 || result.Actions[0].Action != pointer.Action || service.pointers != 1 {
 			t.Fatalf("action=%s result=%#v pointers=%d err=%v", pointer.Action, result, service.pointers, err)
 		}
 	}
@@ -240,11 +270,11 @@ func TestManagerAcceptsSelectAndSubmitActions(t *testing.T) {
 		t.Run(tc.action, func(t *testing.T) {
 			service := &fakeService{}
 			manager := NewManager(service)
-			result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, tc.elementID, tc.action, nil)
+			result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions(tc.elementID, tc.action, nil))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Action.Action != tc.action || !result.Action.Completed {
+			if len(result.Actions) != 1 || result.Actions[0].Action != tc.action || !result.Actions[0].Completed {
 				t.Fatalf("unexpected result: %#v", result)
 			}
 		})
@@ -397,9 +427,9 @@ func TestManagerReturnsStatelessAtomicObserveCapture(t *testing.T) {
 	}
 	acted, err := manager.Act(
 		context.Background(), "session_a", "com.example.App", 42,
-		"button", ActionPress, nil,
+		semanticActions("button", ActionPress, nil),
 	)
-	if err != nil || !acted.Action.Completed {
+	if err != nil || len(acted.Actions) != 1 || !acted.Actions[0].Completed {
 		t.Fatalf("unexpected chained action: %#v err=%v", acted, err)
 	}
 }
@@ -420,11 +450,12 @@ func TestManagerDoesNotRetryNativeActionFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &fakeService{actErr: tt.err}
 			manager := NewManager(service)
-			_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil)
-			assertOperationCode(t, err, tt.err.Code)
-			failure := ErrorFailure(err)
-			if failure.Outcome != "not_started" || failure.Retryable {
-				t.Fatalf("unexpected native failure: %#v", failure)
+			result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions("button", ActionPress, nil))
+			if err != nil || result.Failure == nil || result.Failure.Code != tt.err.Code {
+				t.Fatalf("unexpected native failure: result=%#v err=%v", result, err)
+			}
+			if result.Failure.Outcome != "not_started" || result.Failure.Retryable {
+				t.Fatalf("unexpected native failure: %#v", result.Failure)
 			}
 			if service.actions != 1 || service.observes != 0 {
 				t.Fatalf("native failure retried work: actions=%d observes=%d", service.actions, service.observes)
@@ -450,12 +481,12 @@ func TestManagerRejectsOversizedActionValue(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
 	value := strings.Repeat("🙂", MaxActionValueCharacters+1)
-	_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionSetValue, &value)
+	_, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions("button", ActionSetValue, &value))
 	assertOperationCode(t, err, "computer_invalid_request")
 	if service.actions != 0 {
 		t.Fatalf("actions = %d, want 0", service.actions)
 	}
-	if _, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, "button", ActionPress, nil); err != nil {
+	if _, err = manager.Act(context.Background(), "session_a", "com.example.App", 42, semanticActions("button", ActionPress, nil)); err != nil {
 		t.Fatalf("valid action failed after oversized value: %v", err)
 	}
 }
@@ -465,11 +496,11 @@ func TestManagerSerializesActionsAcrossSessions(t *testing.T) {
 	manager := NewManager(service)
 	done := make(chan error, 2)
 	go func() {
-		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, semanticActions("button", ActionPress, nil))
 		done <- err
 	}()
 	go func() {
-		_, err := manager.Act(context.Background(), "session_b", "com.example.Second", 42, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_b", "com.example.Second", 42, semanticActions("button", ActionPress, nil))
 		done <- err
 	}()
 	select {
@@ -501,7 +532,7 @@ func TestManagerCancelledQueuedActionNeverReachesNativeService(t *testing.T) {
 	manager := NewManager(service)
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, "button", ActionPress, nil)
+		_, err := manager.Act(context.Background(), "session_a", "com.example.First", 41, semanticActions("button", ActionPress, nil))
 		firstDone <- err
 	}()
 	select {
@@ -513,7 +544,7 @@ func TestManagerCancelledQueuedActionNeverReachesNativeService(t *testing.T) {
 	queuedContext, cancelQueued := context.WithCancel(context.Background())
 	queuedDone := make(chan error, 1)
 	go func() {
-		_, err := manager.Act(queuedContext, "session_b", "com.example.Second", 42, "button", ActionPress, nil)
+		_, err := manager.Act(queuedContext, "session_b", "com.example.Second", 42, semanticActions("button", ActionPress, nil))
 		queuedDone <- err
 	}()
 	cancelQueued()

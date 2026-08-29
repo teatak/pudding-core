@@ -73,6 +73,7 @@ type SessionItemProps = {
   hasProjects: boolean;
   projectChangePending: boolean;
   suppressInteractiveState: boolean;
+  dragging: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
   onOpenProjectPicker: () => void;
@@ -96,6 +97,7 @@ export function SessionItem({
   hasProjects,
   projectChangePending,
   suppressInteractiveState,
+  dragging,
   onSelect,
   onOpenSplit,
   onOpenProjectPicker,
@@ -377,7 +379,14 @@ export function SessionItem({
   }
 
   const sessionItem = (
-    <SidebarMenuItem className={suppressInteractiveState ? "pointer-events-none" : undefined}>
+    <SidebarMenuItem
+      className={cn(
+        "transition-opacity",
+        suppressInteractiveState && "pointer-events-none",
+        dragging && "opacity-40",
+      )}
+      data-session-dragging={dragging || undefined}
+    >
       {editing ? (
         <SidebarMenuButton asChild className="h-[30px] px-2 py-1" isActive>
           <div className="cursor-text">

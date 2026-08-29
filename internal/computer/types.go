@@ -13,14 +13,13 @@ const (
 	ActionClick    = "click"
 	ActionDrag     = "drag"
 	ActionScroll   = "scroll"
-	ActionSequence = "action_sequence"
 
 	PointerButtonLeft  = "left"
 	PointerButtonRight = "right"
 
 	MaxAppIDBytes            = 512
 	MaxActionValueCharacters = 20_000
-	MaxActionSequenceSteps   = 32
+	MaxActionsPerCall        = 32
 
 	WindowStatusReady  = "ready"
 	WindowStatusNone   = "none"
@@ -179,17 +178,21 @@ type Failure struct {
 	Outcome     string   `json:"outcome"`
 }
 
-type ActionResult struct {
-	Action NativeAction `json:"action"`
+type ActionInput struct {
+	Type       string   `json:"type"`
+	ElementID  string   `json:"elementID,omitempty"`
+	Value      *string  `json:"value,omitempty"`
+	X          *float64 `json:"x,omitempty"`
+	Y          *float64 `json:"y,omitempty"`
+	ToX        *float64 `json:"toX,omitempty"`
+	ToY        *float64 `json:"toY,omitempty"`
+	Button     string   `json:"button,omitempty"`
+	ClickCount *int     `json:"clickCount,omitempty"`
+	DeltaX     *int     `json:"deltaX,omitempty"`
+	DeltaY     *int     `json:"deltaY,omitempty"`
 }
 
-type SemanticAction struct {
-	ElementID string  `json:"elementID"`
-	Action    string  `json:"action"`
-	Value     *string `json:"value,omitempty"`
-}
-
-type ActionSequenceResult struct {
+type ActionsResult struct {
 	Actions        []NativeAction `json:"actions"`
 	CompletedCount int            `json:"completedCount"`
 	FailedIndex    *int           `json:"failedIndex,omitempty"`
@@ -214,9 +217,7 @@ type Controller interface {
 	QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error)
 	Observe(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int) (Observation, error)
 	ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error)
-	Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (ActionResult, error)
-	ActSequence(ctx context.Context, sessionID, appID string, windowID uint32, actions []SemanticAction) (ActionSequenceResult, error)
-	Pointer(ctx context.Context, sessionID, appID string, windowID uint32, pointer PointerInput) (ActionResult, error)
+	Act(ctx context.Context, sessionID, appID string, windowID uint32, actions []ActionInput) (ActionsResult, error)
 	ReleaseSession(ctx context.Context, sessionID string) error
 }
 

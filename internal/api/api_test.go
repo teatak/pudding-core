@@ -111,6 +111,47 @@ func TestCreateProjectAllowsEmptyDirectoryList(t *testing.T) {
 	}
 }
 
+func TestMergeProjectMovesSessionsAndDeletesSource(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	target := &store.Project{ID: "merge_target", Name: "Target", RootDirs: []string{"/target"}}
+	source := &store.Project{ID: "merge_source", Name: "Source", RootDirs: []string{"/shared"}}
+	for _, project := range []*store.Project{target, source} {
+		if err := st.CreateProject(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.CreateSession(ctx, &store.Session{
+		ID: "merge_session", Provider: "mock", Model: "mock", ProjectID: source.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/projects/"+target.ID+"/merge", map[string]any{
+		"sourceProjectID": source.ID,
+		"name":            "Merged",
+		"rootDirs":        []string{"/shared"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	merged := decodeJSON[store.Project](t, resp)
+	if merged.ID != target.ID || merged.Name != "Merged" || !store.SameProjectDirs(merged.RootDirs, []string{"/shared"}) {
+		t.Fatalf("merged project = %+v", merged)
+	}
+	if _, err := st.GetProject(ctx, source.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("source project still exists: %v", err)
+	}
+	session, err := st.GetSession(ctx, "merge_session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ProjectID != target.ID {
+		t.Fatalf("session project = %q", session.ProjectID)
+	}
+}
+
 func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
 	ms := memstore.New()
 	homeDir := t.TempDir()

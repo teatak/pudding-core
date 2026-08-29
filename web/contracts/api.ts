@@ -60,6 +60,12 @@ export const patchProjectRequest = z.object({
   approvalMode: approvalMode.optional(),
 });
 
+export const mergeProjectRequest = z.object({
+  sourceProjectID: z.string().min(1),
+  name: z.string().min(1),
+  rootDirs: z.array(z.string()),
+});
+
 export const projectBrowserRoot = z.object({
   id: z.string(),
   name: z.string(),

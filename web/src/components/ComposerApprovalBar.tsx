@@ -669,6 +669,10 @@ function toolCallReason(operation: string, execution: string, hostAccessReason: 
     case "computer_set_value":
     case "computer_select":
     case "computer_submit":
+    case "computer_click":
+    case "computer_drag":
+    case "computer_scroll":
+    case "computer_actions":
       return t(`transcript.approvalToolCall.${operation}`);
     default:
       return "";
