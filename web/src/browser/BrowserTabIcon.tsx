@@ -21,7 +21,7 @@ export function BrowserTabIcon({
     >
       <BrowserFavicon
         className="size-full object-cover"
-        fallback={<Globe className="size-3/4" />}
+        fallback={<Globe className="size-[calc(100%_-_2px)]" />}
         faviconURL={faviconURL}
         pageURL={pageURL}
       />
