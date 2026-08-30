@@ -51,6 +51,16 @@ test("desktop packaging is only exposed through the complete Make pipeline", () 
   assert.match(makefile, /PUDDING_PACKAGING_PIPELINE=1/);
 });
 
+test("notary credentials are stored through a password-free Make target", () => {
+  const makefile = fs.readFileSync(path.resolve(__dirname, "..", "..", "Makefile"), "utf8");
+  assert.match(makefile, /PUDDING_NOTARY_PROFILE \?= pudding-notary/);
+  assert.match(makefile, /PUDDING_NOTARY_APPLE_ID \?= yangglivecn@icloud\.com/);
+  assert.match(makefile, /PUDDING_NOTARY_TEAM_ID \?= 7K47HJ79JA/);
+  assert.match(makefile, /desktop-notary-check:/);
+  assert.match(makefile, /desktop-notary-store:/);
+  assert.doesNotMatch(makefile, /--password/);
+});
+
 test("public release gate only accepts unused versions", () => {
   assert.doesNotThrow(() =>
     assertUnusedStatuses("v0.1.2", [

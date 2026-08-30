@@ -111,8 +111,13 @@ signing authorities, non-portable dylib paths, read-only bundle files, and artif
 Publishing is local and tag-driven. Before the first release on a Mac:
 
 - Install a valid Developer ID Application certificate and private key in the login keychain.
-- Store notarization credentials as the `pudding-notary` keychain profile.
+- Run `make desktop-notary-store` to store notarization credentials as the `pudding-notary` keychain profile.
 - Run `gh auth login` with an account that can create Releases in `teatak/pudding`.
+
+`desktop-notary-store` records the non-secret Apple ID and Team ID from the Makefile, then securely prompts for
+the app-specific password. The password is stored only in Keychain. Run `make desktop-notary-check` at any time
+to verify that the profile exists and Apple accepts the stored credentials. The publish pipeline performs the
+same check automatically before packaging.
 
 After changing the version, commit and push the version commit, then run one of:
 

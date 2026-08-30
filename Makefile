@@ -1,8 +1,11 @@
 MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
+PUDDING_NOTARY_PROFILE ?= pudding-notary
+PUDDING_NOTARY_APPLE_ID ?= yangglivecn@icloud.com
+PUDDING_NOTARY_TEAM_ID ?= 7K47HJ79JA
 
-.PHONY: test schema-check tidy clean embed brand-assets language-servers language-servers-ready computer-use-helper-dev computer-use-helper-test computer-use-fixture-dev computer-use-fixture-smoke computer-use-product-smoke computer-use-calculator-smoke computer-use-calculator-existing-smoke desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-computer-use-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-update-test desktop-preview-computer-use-update-test desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
+.PHONY: test schema-check tidy clean embed brand-assets language-servers language-servers-ready computer-use-helper-dev computer-use-helper-test computer-use-fixture-dev computer-use-fixture-smoke computer-use-product-smoke computer-use-calculator-smoke computer-use-calculator-existing-smoke desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-computer-use-update-test desktop-notary-check desktop-notary-store desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-update-test desktop-preview-computer-use-update-test desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
 
 brand-assets:
 	@bash scripts/render-brand-assets.sh
@@ -102,6 +105,19 @@ desktop-update-test: desktop-verify
 # 要求升级前后都包含 Computer Use Helper,并比较完整 designated requirement。
 desktop-computer-use-update-test: desktop-verify
 	@PUDDING_RELEASE_CHANNEL=stable PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY=1 node scripts/run-update-test.cjs
+
+# 验证 Keychain 中的公证 profile 存在且 Apple 凭据有效。
+desktop-notary-check:
+	@xcrun notarytool history \
+		--keychain-profile "$(PUDDING_NOTARY_PROFILE)" \
+		--output-format json >/dev/null
+	@echo "Notarization credentials are valid: $(PUDDING_NOTARY_PROFILE)"
+
+# 重新保存公证凭据。应用专用密码由 notarytool 安全提示输入,不进入 Makefile。
+desktop-notary-store:
+	@xcrun notarytool store-credentials "$(PUDDING_NOTARY_PROFILE)" \
+		--apple-id "$(PUDDING_NOTARY_APPLE_ID)" \
+		--team-id "$(PUDDING_NOTARY_TEAM_ID)"
 
 # 本机完成测试、tag、签名、公证，并上传 Draft Release。
 desktop-publish:

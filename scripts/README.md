@@ -22,6 +22,8 @@ called directly unless debugging the pipeline itself.
 | Test an older installed app updating to the built preview version | `make desktop-preview-update-test` |
 | Verify Computer Use identity remains stable across a stable update | `make desktop-computer-use-update-test` |
 | Verify Computer Use identity remains stable across a preview update | `make desktop-preview-computer-use-update-test` |
+| Check the saved Apple notarization profile | `make desktop-notary-check` |
+| Store or restore the Apple notarization profile | `make desktop-notary-store` |
 | Create a stable Draft Release | `make desktop-publish` |
 | Create a preview Draft Release | `make desktop-preview-publish` |
 | Resume only Draft creation or asset upload | `make desktop-publish-upload-resume` |
