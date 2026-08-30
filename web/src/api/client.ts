@@ -94,7 +94,6 @@ import {
   browserScrollRequest,
   browserScreenshot,
   browserScreenshotRequest,
-  browserState,
   listBrowserHistoryResponse,
   browserSyncRequest,
   browserTab,
@@ -129,7 +128,6 @@ import {
   type BrowserObservation,
   type BrowserMCPSession,
   type BrowserScreenshot,
-  type BrowserState,
   type BrowserHistoryEntry,
   type BrowserTab,
   type BackgroundProcess,
@@ -829,10 +827,6 @@ export function getAudioBindings(token: string, sessionID: string): Promise<{ bi
 
 export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[]; processMode?: "headless" | "webview" | "external" }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, listBrowserTabsResponse);
-}
-
-export function getBrowserState(token: string, sessionID: string): Promise<BrowserState> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/state`, browserState);
 }
 
 export async function clearBrowserState(token: string, sessionID: string): Promise<void> {
@@ -1589,5 +1583,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, mergeProjectRequest, patchProjectRequest, patchProviderRequest };

@@ -296,33 +296,22 @@ export function cacheElectronBrowserSnapshot(
   if (!electronBrowserSnapshotAllowed(snapshot, expectedSessionID)) {
     return null;
   }
+  const queryKey = queryKeys.browserTabs(snapshot.sessionID);
+  if (queryClient.getQueryState(queryKey)?.fetchStatus === "fetching") {
+    return snapshot.status === "lost" ? null : electronBrowserSnapshotToTab(snapshot);
+  }
   if (snapshot.status === "lost") {
-    queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => {
+    queryClient.setQueryData(queryKey, (current: BrowserTabsData | undefined) => {
       const tabs = (current?.tabs || []).filter((tab) => tab.id !== snapshot.tabID);
-      if (tabs.length === 0) {
-        queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), { hasState: false, sessionID: snapshot.sessionID, processMode: "webview" });
-      }
       return { tabs, processMode: "webview" };
     });
     return null;
   }
   const tab = electronBrowserSnapshotToTab(snapshot);
-  queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => ({
+  queryClient.setQueryData(queryKey, (current: BrowserTabsData | undefined) => ({
     tabs: upsertBrowserTab(current?.tabs || [], tab),
     processMode: "webview",
   }));
-  queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), {
-    hasState: true,
-    sessionID: snapshot.sessionID,
-    tabID: tab.id,
-    url: tab.url,
-    title: tab.title,
-    faviconURL: tab.faviconURL,
-    mode: "webview",
-    processMode: "webview",
-    createdAt: tab.createdAt,
-    updatedAt: tab.updatedAt,
-  });
   updateBrowserWorkspaceActivity(snapshot.sessionID, tab.id, {
     faviconURL: tab.faviconURL,
     title: tab.title,

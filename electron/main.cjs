@@ -365,6 +365,7 @@ function createMainWindow() {
       params,
       managedBrowserPartition,
       browserPreloadPath,
+      (url) => browserHost.allowsAttachmentURL(url),
     )) {
       console.warn("[electron] blocked unmanaged browser webview attachment");
     }

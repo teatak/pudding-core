@@ -84,6 +84,7 @@ async function run() {
       params,
       managedBrowserPartition,
       path.join(__dirname, "..", "browser-preload.cjs"),
+      (url) => host.allowsAttachmentURL(url),
     )) {
       finish(new Error("smoke webview rejected by managed attachment policy"));
     }

@@ -134,6 +134,9 @@ class FakeWebContents extends EventEmitter {
       this.debugger.emit("message", {}, "Page.frameNavigated", {
         frame: { id: "main", loaderId: loaderID, url: this.url },
       });
+      if (!this.suppressReloadStopEvent) {
+        queueMicrotask(() => this.emit("did-stop-loading"));
+      }
     });
   }
 
@@ -211,6 +214,76 @@ test("waits for a renderer webview and navigates it through persistent CDP", asy
   assert.equal(webContents.debugger.isAttached(), true);
   assert.equal(webContents.url, "https://example.org/");
 
+  host.closeAll();
+});
+
+test("a silent ensure keeps a restored browser tab in the background", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const opening = host.ensure({
+    sessionID: "session-restore",
+    tabID: "tab-restore",
+    url: "https://example.com/",
+    activate: false,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  await host.registerWebContents(required[0], new FakeWebContents(142));
+  const restored = await opening;
+
+  assert.equal(restored.activate, false);
+  host.closeAll();
+});
+
+test("keeps a managed tab while Electron replaces its webview guest", async () => {
+  const required = [];
+  const updates = [];
+  const host = new BrowserHost(
+    (snapshot) => updates.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+  );
+  const request = {
+    sessionID: "session-guest-replacement",
+    tabID: "tab-guest-replacement",
+    url: "https://example.com/",
+  };
+  const opening = host.ensure(request);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstGuest = new FakeWebContents(144);
+  await host.registerWebContents(required[0], firstGuest);
+  await opening;
+
+  firstGuest.destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+  const pending = host.listTabs({ sessionID: request.sessionID }).tabs;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].status, "pending");
+  assert.notEqual(updates.at(-1).status, "lost");
+
+  const replacementGuest = new FakeWebContents(145);
+  const restored = await host.registerWebContents(required.at(-1), replacementGuest);
+  assert.equal(restored.runtimeID, "webContents:145");
+  assert.equal(host.listTabs({ sessionID: request.sessionID }).tabs.length, 1);
+  host.closeAll();
+});
+
+test("recognizes only URLs owned by a managed browser tab", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const opening = host.ensure({
+    sessionID: "session-attachment",
+    tabID: "tab-attachment",
+    url: "https://example.com/managed",
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.allowsAttachmentURL("https://example.com/managed"), true);
+  assert.equal(host.allowsAttachmentURL("https://example.com/unmanaged"), false);
+  await host.registerWebContents(required[0], new FakeWebContents(143));
+  await opening;
   host.closeAll();
 });
 
@@ -1166,9 +1239,66 @@ test("reload ignores stale main-frame events until a new loader commits", async 
   webContents.debugger.emit("message", {}, "Page.frameNavigated", {
     frame: { id: "main", loaderId: "loader-reloaded", url: "about:blank" },
   });
+  webContents.emit("did-stop-loading");
   await reload;
   assert.equal(settled, true);
   assert.deepEqual(lifecycle, ["start:reload", "end:reload:true"]);
+  host.closeAll();
+});
+
+test("reload completes only after the replacement page stops loading", async () => {
+  let required;
+  const lifecycle = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    (event) => lifecycle.push(`start:${event.action}`),
+    (request) => {
+      required = request;
+    },
+    (event) => lifecycle.push(`end:${event.action}:${event.ok}`),
+  );
+  const opening = host.ensure({ sessionID: "session-reload-load", tabID: "tab-reload-load", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(61);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  webContents.suppressReloadStopEvent = true;
+
+  let settled = false;
+  const reload = host.reload({ sessionID: "session-reload-load", tabID: "tab-reload-load" }).finally(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.deepEqual(lifecycle, ["start:reload"]);
+
+  webContents.emit("did-stop-loading");
+  await reload;
+  assert.deepEqual(lifecycle, ["start:reload", "end:reload:true"]);
+  host.closeAll();
+});
+
+test("reload preserves the existing title until same-url metadata changes", async () => {
+  let required;
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+  );
+  const opening = host.ensure({ sessionID: "session-reload-title", tabID: "tab-reload-title", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(60);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  webContents.emit("page-title-updated", {}, "Dashboard");
+
+  const reloaded = await host.reload({ sessionID: "session-reload-title", tabID: "tab-reload-title" });
+
+  assert.equal(reloaded.title, "Dashboard");
   host.closeAll();
 });
 

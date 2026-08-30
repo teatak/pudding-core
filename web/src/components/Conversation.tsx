@@ -1,5 +1,5 @@
 import { Paperclip, Upload } from "@/components/icons";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
 import {
@@ -16,7 +16,8 @@ import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
-import { useWorkspaceActivities } from "@/state/workspaceActivityStore";
+import { type WorkspaceActivity, useWorkspaceActivities } from "@/state/workspaceActivityStore";
+import { mergeWorkspaceTabOrder, useWorkspaceTabOrder } from "@/state/workspaceTabOrderStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 const SUBMIT_ERROR_DURATION_MS = 5000;
@@ -54,13 +55,13 @@ export function Conversation({
   const floating = presentation === "floating";
   const workspaceOpen = useWorkspaceOpen(session.id);
   const workspaceActivities = useWorkspaceActivities(session.id);
+  const workspaceTabOrder = useWorkspaceTabOrder(session.id);
+  const orderedWorkspaceActivities = useMemo(
+    () => orderWorkspaceActivities(workspaceActivities, workspaceTabOrder),
+    [workspaceActivities, workspaceTabOrder],
+  );
   const browserAutomationActivity = useBrowserAutomationActivity(session.id);
-  const visibleWorkspaceActivities = browserAutomationActivity
-    ? workspaceActivities.filter(
-        (activity) => activity.kind !== "browser" || activity.resourceID !== browserAutomationActivity.tabID,
-      )
-    : workspaceActivities;
-  const hasVisibleActivities = visibleWorkspaceActivities.length > 0
+  const hasVisibleActivities = orderedWorkspaceActivities.length > 0
     || Boolean(browserAutomationActivity);
   const showActivitySurface = !floating
     && !workspaceOpen
@@ -251,8 +252,15 @@ export function Conversation({
         <aside
           className="pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
         >
-          <WorkspaceActivityCard activities={visibleWorkspaceActivities} />
-          <BrowserAutomationPip sessionID={session.id} />
+          <WorkspaceActivityCard
+            activities={orderedWorkspaceActivities}
+            browserPreview={browserAutomationActivity
+              ? {
+                  content: <BrowserAutomationPip embedded sessionID={session.id} />,
+                  resourceID: browserAutomationActivity.tabID,
+                }
+              : undefined}
+          />
         </aside>
       ) : null}
       <div
@@ -266,7 +274,7 @@ export function Conversation({
         {showComposerActivities ? (
           <ChatColumn className="relative z-10 mb-3 flex flex-col items-center gap-3">
             <WorkspaceActivityCard
-              activities={visibleWorkspaceActivities}
+              activities={orderedWorkspaceActivities}
               presentation="composer"
             />
             {browserAutomationActivity ? (
@@ -301,6 +309,37 @@ export function Conversation({
       <ChatDropOverlay mode={dragMode} />
     </div>
   );
+}
+
+function orderWorkspaceActivities(
+  activities: WorkspaceActivity[],
+  savedOrder: string[],
+) {
+  const activityByTabID = new Map<string, WorkspaceActivity>();
+  const activitiesWithoutTabID: WorkspaceActivity[] = [];
+  activities.forEach((activity) => {
+    const tabID = workspaceActivityTabID(activity);
+    if (tabID) {
+      activityByTabID.set(tabID, activity);
+    } else {
+      activitiesWithoutTabID.push(activity);
+    }
+  });
+  const orderedTabIDs = mergeWorkspaceTabOrder(savedOrder, [...activityByTabID.keys()]);
+  return [
+    ...orderedTabIDs.flatMap((tabID) => {
+      const activity = activityByTabID.get(tabID);
+      return activity ? [activity] : [];
+    }),
+    ...activitiesWithoutTabID,
+  ];
+}
+
+function workspaceActivityTabID(activity: WorkspaceActivity) {
+  if (!activity.resourceID) {
+    return "";
+  }
+  return `${activity.kind === "browser" ? "browser" : "widget"}:${activity.resourceID}`;
 }
 
 function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null }) {

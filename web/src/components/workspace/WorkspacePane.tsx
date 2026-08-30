@@ -58,8 +58,11 @@ import {
 } from "@/state/filePreviewStore";
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
-import { retainWorkspaceActivities } from "@/state/workspaceActivityStore";
-import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
+import {
+  retainWorkspaceActivities,
+  syncBrowserWorkspaceActivities,
+} from "@/state/workspaceActivityStore";
+import { setWorkspaceOpen } from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
   setVisibleUIContext,
@@ -74,6 +77,7 @@ import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 type WorkspacePaneProps = {
   token: string;
   activeSessionID?: string;
+  presented: boolean;
   sessionID?: string;
   secondarySessionID?: string;
   reserveTopRightActions?: 0 | 1 | 2;
@@ -82,6 +86,7 @@ type WorkspacePaneProps = {
 export const WorkspacePane = memo(function WorkspacePane({
   token,
   activeSessionID,
+  presented,
   sessionID,
   secondarySessionID,
   reserveTopRightActions = 0,
@@ -105,7 +110,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
   const actorSessionID = activeSessionID || sessionID || secondarySessionID || actorSessionIDRef.current;
-  const workspaceOpen = useWorkspaceOpen(actorSessionID);
   useEffect(() => {
     if (actorSessionID) {
       actorSessionIDRef.current = actorSessionID;
@@ -292,6 +296,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     activeBrowserSelection,
     activeSurface,
     browserActive,
+    browserTabsReady,
     browserTabs,
     browserSurfacePending,
     browserSurfaceVisible,
@@ -312,11 +317,25 @@ export const WorkspacePane = memo(function WorkspacePane({
     sessionID: actorSessionID,
     token,
   });
-  const requiredBrowserTabs = useBrowserRuntimeTabs(actorSessionID, browserTabs);
+  const requiredBrowserTabs = useBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
   const browserSurfaceTabs = useMemo(
-    () => mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs),
-    [browserTabs, requiredBrowserTabs],
+    () => browserTabsReady ? mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs) : [],
+    [browserTabs, browserTabsReady, requiredBrowserTabs],
   );
+  useEffect(() => {
+    if (!actorSessionID || !browserTabsReady) {
+      return;
+    }
+    syncBrowserWorkspaceActivities(
+      actorSessionID,
+      browserSurfaceTabs.map((tab) => ({
+        faviconURL: tab.faviconURL,
+        resourceID: tab.id,
+        title: tab.title,
+        url: tab.url,
+      })),
+    );
+  }, [actorSessionID, browserSurfaceTabs, browserTabsReady]);
   const projectActive = activeSurface === "project" && hasFileWorkspace;
   useEffect(() => {
     if (retainedTokenRef.current === token) {
@@ -910,7 +929,7 @@ export const WorkspacePane = memo(function WorkspacePane({
           activeCanvasItemID={activeCanvasItem?.id}
           activeFilePreviewID={activeFilePreviewID}
           activeSurface={activeSurface}
-          browserTabs={browserTabs}
+          browserTabs={browserSurfaceTabs}
           canvasItems={items}
           closingCanvasItemID={deleteMutation.isPending
             ? deleteMutation.variables?.id
@@ -1031,7 +1050,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         {actorSessionID && (browserSurfaceTabs.length > 0 || browserSurfaceVisible) ? (
           <BrowserWorkspaceSurface
             key={`browser:${actorSessionID}`}
-            active={browserActive && workspaceOpen}
+            active={browserActive && presented}
             activeTabID={activeBrowserTabID}
             pending={browserSurfacePending}
             sessionID={actorSessionID}

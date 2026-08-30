@@ -4,11 +4,14 @@ function hardenManagedBrowserWebview(
   params = {},
   managedPartition,
   trustedPreloadPath,
+  allowsManagedSource,
 ) {
   const partition = String(managedPartition || "").trim();
   const requestedPartition = String(params.partition || webPreferences.partition || "").trim();
   const sourceURL = String(params.src || "").trim();
-  if (!partition || requestedPartition !== partition || sourceURL !== "about:blank") {
+  const sourceAllowed = sourceURL === "about:blank"
+    || (typeof allowsManagedSource === "function" && allowsManagedSource(sourceURL));
+  if (!partition || requestedPartition !== partition || !sourceAllowed) {
     event?.preventDefault?.();
     return false;
   }

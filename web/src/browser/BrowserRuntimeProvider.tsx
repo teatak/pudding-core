@@ -1,8 +1,6 @@
 import {
-  createContext,
   memo,
   useCallback,
-  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -20,6 +18,13 @@ import {
 } from "@/browser/ElectronWebviewBrowser";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import {
+  BrowserRuntimeContext,
+  useBrowserRuntimeContext,
+  type BrowserAutomationActivity,
+  type BrowserRuntimeContextValue,
+  type BrowserRuntimeViewport,
+} from "@/browser/browserRuntimeContext";
+import {
   electronBrowserBridge,
   type ElectronBrowserAutomationEvent,
 } from "@/browser/electronBridge";
@@ -31,19 +36,14 @@ import {
 import { Check, Globe, X } from "@/components/icons";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
+import { recordWorkspaceActivity } from "@/state/workspaceActivityStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 type RuntimeEntry = {
   handle: ElectronWebviewRuntimeHandle;
   host: HTMLDivElement;
   presentation: string;
-};
-
-type ActiveViewport = {
-  interactive: boolean;
-  key: string;
-  pipPhase?: BrowserAutomationActivity["phase"];
-  priority: number;
+  presentationFrameID?: number;
 };
 
 type AutomationLease = {
@@ -55,36 +55,10 @@ type AutomationLease = {
   presentationFrameReady: boolean;
 };
 
-type BrowserAutomationActivity = {
-  action: ElectronBrowserAutomationEvent["action"];
-  ok?: boolean;
-  phase: "running" | "complete";
-  sessionID: string;
-  tabID: string;
-};
-
-type BrowserRuntimeContextValue = {
-  automationActivitiesBySession: Record<string, BrowserAutomationActivity>;
-  requiredTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;
-  runtimeTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;
-  registerRuntime: (
-    key: string,
-    host: HTMLDivElement,
-    handle: ElectronWebviewRuntimeHandle,
-  ) => () => void;
-  registerViewport: (
-    viewportID: string,
-    viewport: ActiveViewport,
-  ) => () => void;
-  retainTabs: (sessionID: string, tabs: ElectronBrowserSurfaceTab[]) => void;
-};
-
 const emptyRuntimeTabs: ElectronBrowserSurfaceTab[] = [];
 const automationPipCloseDelayMs = 30_000;
 const pipViewportPriority = 10;
 const workspaceViewportPriority = 20;
-
-const BrowserRuntimeContext = createContext<BrowserRuntimeContextValue | null>(null);
 
 export function BrowserRuntimeProvider({
   children,
@@ -100,19 +74,41 @@ export function BrowserRuntimeProvider({
   const [automationActivitiesBySession, setAutomationActivitiesBySession] = useState<
     Record<string, BrowserAutomationActivity>
   >({});
+  const [readyRuntimeKeys, setReadyRuntimeKeys] = useState<Set<string>>(() => new Set());
   const automationActivitiesRef = useRef<Record<string, BrowserAutomationActivity>>({});
   const runtimesRef = useRef(new Map<string, RuntimeEntry>());
-  const viewportsRef = useRef(new Map<string, ActiveViewport>());
+  const viewportsRef = useRef(new Map<string, BrowserRuntimeViewport>());
   const automationHideTimersRef = useRef(new Map<string, number>());
   const automationLeasesRef = useRef(new Map<string, AutomationLease>());
+  const retainedTokenRef = useRef(token);
 
   useEffect(() => {
+    if (retainedTokenRef.current === token) {
+      return;
+    }
+    retainedTokenRef.current = token;
     setRetainedTabsBySession({});
     automationHideTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     automationHideTimersRef.current.clear();
     automationActivitiesRef.current = {};
     setAutomationActivitiesBySession({});
+    setReadyRuntimeKeys(new Set());
   }, [token]);
+
+  const setRuntimeReady = useCallback((key: string, ready: boolean) => {
+    setReadyRuntimeKeys((current) => {
+      if (current.has(key) === ready) {
+        return current;
+      }
+      const next = new Set(current);
+      if (ready) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -124,16 +120,28 @@ export function BrowserRuntimeProvider({
         return;
       }
       setRetainedTabsBySession((current) => removeRuntimeTab(current, snapshot.sessionID, snapshot.tabID));
+      setRuntimeReady(runtimeKey(snapshot.sessionID, snapshot.tabID), false);
+      const activity = automationActivitiesRef.current[snapshot.sessionID];
+      if (activity?.tabID === snapshot.tabID) {
+        window.clearTimeout(automationHideTimersRef.current.get(snapshot.sessionID));
+        automationHideTimersRef.current.delete(snapshot.sessionID);
+        const remainingActivities = { ...automationActivitiesRef.current };
+        delete remainingActivities[snapshot.sessionID];
+        automationActivitiesRef.current = remainingActivities;
+        setAutomationActivitiesBySession(remainingActivities);
+      }
     });
-  }, []);
+  }, [setRuntimeReady]);
 
   const runtimeTabsBySession = useMemo(() => {
-    const next = { ...retainedTabsBySession };
+    const next = retainedTokenRef.current === token ? { ...retainedTabsBySession } : {};
     Object.entries(requiredTabsBySession).forEach(([sessionID, requiredTabs]) => {
       next[sessionID] = mergeRuntimeTabs(next[sessionID], requiredTabs);
     });
     return next;
-  }, [requiredTabsBySession, retainedTabsBySession]);
+  }, [requiredTabsBySession, retainedTabsBySession, token]);
+  const runtimeTabsBySessionRef = useRef(runtimeTabsBySession);
+  runtimeTabsBySessionRef.current = runtimeTabsBySession;
 
   const applyPresentations = useCallback(() => {
     const viewport = selectActiveViewport(viewportsRef.current);
@@ -142,25 +150,49 @@ export function BrowserRuntimeProvider({
       const automation = automationLeasesRef.current.get(key);
       if (automation) {
         const automationViewport = selectActiveViewport(viewportsRef.current, key);
+        const anchored = Boolean(
+          automationViewport && applyRuntimeGeometry(
+            runtime.host,
+            automationViewport.element,
+            automationViewport.clipElement,
+            automationViewport.interactive,
+          ),
+        );
+        if (!anchored) {
+          clearRuntimeGeometry(runtime.host);
+        }
         applyRuntimePresentation(
           runtime,
           "automation",
-          Boolean(automationViewport),
-          false,
-          automationViewport?.pipPhase,
+          anchored,
+          automationViewport?.interactive || false,
+          automationViewport?.pip,
+          automationViewport?.pipEmbedded,
         );
         return;
       }
       if (viewport?.key === key) {
+        if (!applyRuntimeGeometry(
+          runtime.host,
+          viewport.element,
+          viewport.clipElement,
+          viewport.interactive,
+        )) {
+          clearRuntimeGeometry(runtime.host);
+          applyRuntimePresentation(runtime, "standby", false, false);
+          return;
+        }
         applyRuntimePresentation(
           runtime,
           "visible",
           true,
           viewport.interactive,
-          viewport.pipPhase,
+          viewport.pip,
+          viewport.pipEmbedded,
         );
         return;
       }
+      clearRuntimeGeometry(runtime.host);
       applyRuntimePresentation(runtime, "standby", false, false);
     });
   }, []);
@@ -178,6 +210,7 @@ export function BrowserRuntimeProvider({
     runtimesRef.current.set(key, entry);
     applyPresentations();
     return () => {
+      window.cancelAnimationFrame(entry.presentationFrameID || 0);
       if (runtimesRef.current.get(key) !== entry) {
         return;
       }
@@ -211,10 +244,62 @@ export function BrowserRuntimeProvider({
     });
   }, []);
 
-  const registerViewport = useCallback((viewportID: string, viewport: ActiveViewport) => {
+  const finishAutomationActivity = useCallback((
+    sessionID: string,
+    activity: BrowserAutomationActivity,
+  ) => {
+    if (
+      activity.presence !== "closing"
+      || automationActivitiesRef.current[sessionID] !== activity
+    ) {
+      return;
+    }
+    const remainingActivities = { ...automationActivitiesRef.current };
+    delete remainingActivities[sessionID];
+    automationActivitiesRef.current = remainingActivities;
+    setAutomationActivitiesBySession(remainingActivities);
+  }, []);
+
+  const registerViewport = useCallback((viewportID: string, viewport: BrowserRuntimeViewport) => {
     viewportsRef.current.set(viewportID, viewport);
+    const syncGeometry = () => applyPresentations();
+    let transitionFrameID = 0;
+    const trackTransition = () => {
+      transitionFrameID = 0;
+      applyPresentations();
+      if (workspaceTransitionInProgress(viewport.clipElement)) {
+        transitionFrameID = window.requestAnimationFrame(trackTransition);
+      }
+    };
+    const startTransitionTracking = () => {
+      if (!transitionFrameID) {
+        transitionFrameID = window.requestAnimationFrame(trackTransition);
+      }
+    };
+    const resizeObserver = new ResizeObserver(syncGeometry);
+    resizeObserver.observe(viewport.element);
+    if (viewport.clipElement) {
+      resizeObserver.observe(viewport.clipElement);
+    }
+    const transitionObserver = viewport.clipElement
+      ? new MutationObserver(startTransitionTracking)
+      : null;
+    transitionObserver?.observe(viewport.clipElement!, {
+      attributeFilter: ["data-transition"],
+      attributes: true,
+    });
+    window.addEventListener("resize", syncGeometry);
+    window.addEventListener("scroll", syncGeometry, true);
     applyPresentations();
+    if (workspaceTransitionInProgress(viewport.clipElement)) {
+      startTransitionTracking();
+    }
     return () => {
+      window.cancelAnimationFrame(transitionFrameID);
+      transitionObserver?.disconnect();
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", syncGeometry);
+      window.removeEventListener("scroll", syncGeometry, true);
       if (viewportsRef.current.get(viewportID) !== viewport) {
         return;
       }
@@ -238,9 +323,21 @@ export function BrowserRuntimeProvider({
     const stopStart = bridge.onAutomationStart((event) => {
       window.clearTimeout(automationHideTimersRef.current.get(event.sessionID));
       automationHideTimersRef.current.delete(event.sessionID);
+      const tab = runtimeTabsBySessionRef.current[event.sessionID]?.find(
+        (entry) => entry.id === event.tabID,
+      );
+      recordWorkspaceActivity({
+        faviconURL: tab?.faviconURL,
+        kind: "browser",
+        resourceID: event.tabID,
+        sessionID: event.sessionID,
+        title: tab?.title,
+        url: tab?.url,
+      });
       const activity: BrowserAutomationActivity = {
         action: event.action,
         phase: "running",
+        presence: "visible",
         sessionID: event.sessionID,
         tabID: event.tabID,
       };
@@ -304,15 +401,15 @@ export function BrowserRuntimeProvider({
     });
     const stopEnd = bridge.onAutomationEnd((event) => {
       const currentActivity = automationActivitiesRef.current[event.sessionID];
-      if (
-        currentActivity?.tabID === event.tabID
+      const completedActivity = currentActivity?.tabID === event.tabID
         && currentActivity.action === event.action
-      ) {
-        const completedActivity: BrowserAutomationActivity = {
-          ...currentActivity,
-          ok: event.ok,
-          phase: "complete",
-        };
+        ? {
+            ...currentActivity,
+            ok: event.ok,
+            phase: "complete" as const,
+          }
+        : undefined;
+      if (completedActivity) {
         const nextActivities = {
           ...automationActivitiesRef.current,
           [event.sessionID]: completedActivity,
@@ -324,11 +421,17 @@ export function BrowserRuntimeProvider({
           if (automationActivitiesRef.current[event.sessionID] !== completedActivity) {
             return;
           }
-          const remainingActivities = { ...automationActivitiesRef.current };
-          delete remainingActivities[event.sessionID];
-          automationActivitiesRef.current = remainingActivities;
           automationHideTimersRef.current.delete(event.sessionID);
-          setAutomationActivitiesBySession(remainingActivities);
+          const closingActivity: BrowserAutomationActivity = {
+            ...completedActivity,
+            presence: "closing",
+          };
+          const nextActivities = {
+            ...automationActivitiesRef.current,
+            [event.sessionID]: closingActivity,
+          };
+          automationActivitiesRef.current = nextActivities;
+          setAutomationActivitiesBySession(nextActivities);
         }, automationPipCloseDelayMs);
         automationHideTimersRef.current.set(event.sessionID, timer);
       }
@@ -360,6 +463,8 @@ export function BrowserRuntimeProvider({
 
   const context = useMemo<BrowserRuntimeContextValue>(() => ({
     automationActivitiesBySession,
+    finishAutomationActivity,
+    readyRuntimeKeys,
     registerRuntime,
     registerViewport,
     requiredTabsBySession,
@@ -367,6 +472,8 @@ export function BrowserRuntimeProvider({
     runtimeTabsBySession,
   }), [
     automationActivitiesBySession,
+    finishAutomationActivity,
+    readyRuntimeKeys,
     registerRuntime,
     registerViewport,
     requiredTabsBySession,
@@ -385,6 +492,7 @@ export function BrowserRuntimeProvider({
             <BrowserRuntimeHost
               key={runtimeKey(sessionID, tab.id)}
               registerRuntime={registerRuntime}
+              setRuntimeReady={setRuntimeReady}
               sessionID={sessionID}
               tab={tab}
               token={token}
@@ -399,32 +507,48 @@ export function BrowserRuntimeProvider({
 export const BrowserViewportPlaceholder = memo(function BrowserViewportPlaceholder({
   active,
   interactive = true,
-  pipPhase,
+  pip = false,
+  pipEmbedded,
   priority = workspaceViewportPriority,
   sessionID,
   tabID,
 }: {
   active: boolean;
   interactive?: boolean;
-  pipPhase?: BrowserAutomationActivity["phase"];
+  pip?: boolean;
+  pipEmbedded?: boolean;
   priority?: number;
   sessionID: string;
   tabID?: string;
 }) {
   const { registerViewport } = useBrowserRuntimeContext();
   const viewportID = useId();
+  const elementRef = useRef<HTMLDivElement | null>(null);
   const key = tabID ? runtimeKey(sessionID, tabID) : "";
   const anchorName = tabID ? runtimeAnchorName(sessionID, tabID) : "--pudding-browser-none";
 
   useLayoutEffect(() => {
-    if (!active || !key) {
+    const element = elementRef.current;
+    if (!active || !key || !element) {
       return;
     }
-    return registerViewport(viewportID, { interactive, key, pipPhase, priority });
-  }, [active, interactive, key, pipPhase, priority, registerViewport, viewportID]);
+    const clipElement = element.closest(
+      ".pudding-browser-pip, .pudding-workspace-stage",
+    ) as HTMLElement | null;
+    return registerViewport(viewportID, {
+      clipElement: clipElement || undefined,
+      element,
+      interactive,
+      key,
+      pip,
+      pipEmbedded,
+      priority,
+    });
+  }, [active, interactive, key, pip, pipEmbedded, priority, registerViewport, viewportID]);
 
   return (
     <div
+      ref={elementRef}
       aria-hidden="true"
       className="pudding-browser-viewport-placeholder absolute inset-0"
       style={{ "--pudding-browser-anchor": anchorName } as CSSProperties}
@@ -459,41 +583,114 @@ export const BrowserViewportOverlay = memo(function BrowserViewportOverlay({
 });
 
 export const BrowserAutomationPip = memo(function BrowserAutomationPip({
+  embedded = false,
   sessionID,
 }: {
+  embedded?: boolean;
   sessionID: string;
 }) {
   const { t } = useI18n();
   const workspaceOpen = useWorkspaceOpen(sessionID);
-  const { automationActivitiesBySession, runtimeTabsBySession } = useBrowserRuntimeContext();
+  const {
+    automationActivitiesBySession,
+    finishAutomationActivity,
+    readyRuntimeKeys,
+    runtimeTabsBySession,
+  } = useBrowserRuntimeContext();
   const automationActivity = automationActivitiesBySession[sessionID];
-  if (!automationActivity || automationActivity.sessionID !== sessionID || workspaceOpen) {
+  const [entered, setEntered] = useState(false);
+  const [surfaceKey, setSurfaceKey] = useState("");
+  const entryKey = automationActivity
+    ? runtimeKey(automationActivity.sessionID, automationActivity.tabID)
+    : "";
+  const tab = automationActivity
+    ? runtimeTabsBySession[sessionID]?.find((entry) => entry.id === automationActivity.tabID)
+    : undefined;
+  const ready = Boolean(
+    automationActivity
+    && readyRuntimeKeys.has(runtimeKey(sessionID, automationActivity.tabID)),
+  );
+  const canPresent = Boolean(entryKey && !workspaceOpen && tab && ready);
+  useLayoutEffect(() => {
+    setEntered(false);
+    setSurfaceKey("");
+    if (!canPresent) {
+      return;
+    }
+    let revealFrame = 0;
+    const mountFrame = window.requestAnimationFrame(() => {
+      revealFrame = window.requestAnimationFrame(() => setEntered(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(mountFrame);
+      window.cancelAnimationFrame(revealFrame);
+    };
+  }, [canPresent, entryKey]);
+  useLayoutEffect(() => {
+    if (automationActivity?.presence === "closing") {
+      setSurfaceKey("");
+    }
+  }, [automationActivity?.presence]);
+
+  useEffect(() => {
+    if (
+      automationActivity?.presence === "closing"
+      && (workspaceOpen || !tab || !ready)
+    ) {
+      finishAutomationActivity(sessionID, automationActivity);
+    }
+  }, [automationActivity, finishAutomationActivity, ready, sessionID, tab, workspaceOpen]);
+
+  if (
+    !automationActivity
+    || automationActivity.sessionID !== sessionID
+    || workspaceOpen
+  ) {
     return null;
   }
-
-  const tab = runtimeTabsBySession[sessionID]?.find((entry) => entry.id === automationActivity.tabID);
-  const pageTitle = tab?.title?.trim()
-    || browserHost(tab?.url)
+  if (!tab || !ready) {
+    return null;
+  }
+  const pageTitle = tab.title?.trim()
+    || browserHost(tab.url)
     || t("browser.noTitle");
   const actionLabel = browserAutomationActionLabel(t, automationActivity.action);
   const completed = automationActivity.phase === "complete";
   const failed = completed && automationActivity.ok === false;
 
   return (
-    <aside
-      aria-label={`${actionLabel}: ${pageTitle}`}
-      aria-live="polite"
-      className="pudding-browser-pip pointer-events-none relative w-full overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl"
-      data-phase={automationActivity.phase}
-      role="status"
+    <div
+      className="pudding-browser-pip-presence"
+      data-presence={automationActivity.presence === "closing"
+        ? "closing"
+        : entered ? "visible" : "opening"}
+      onTransitionEnd={(event) => {
+        if (event.currentTarget !== event.target || event.propertyName !== "grid-template-rows") {
+          return;
+        }
+        if (automationActivity.presence === "closing") {
+          finishAutomationActivity(sessionID, automationActivity);
+          return;
+        }
+        setSurfaceKey(entryKey);
+      }}
     >
-      <div className="flex min-h-11 items-center gap-2 border-b border-border/70 bg-popover/95 px-2.5 py-2 backdrop-blur-md">
+      <aside
+        aria-label={`${actionLabel}: ${pageTitle}`}
+        aria-live="polite"
+        className={embedded
+          ? "pudding-browser-pip pointer-events-none relative w-full overflow-hidden border-t border-border/70 bg-popover text-popover-foreground"
+          : "pudding-browser-pip pointer-events-none relative w-full overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl"}
+        data-phase={automationActivity.phase}
+        role="status"
+      >
+        {embedded ? null : <div className="flex min-h-11 items-center gap-2 border-b border-border/70 bg-popover/95 px-2.5 py-2 backdrop-blur-md">
         <span className="grid size-6 shrink-0 place-items-center overflow-hidden rounded-md bg-muted text-muted-foreground">
           <BrowserFavicon
             className="size-full rounded-sm object-cover"
             fallback={<Globe className="size-3.5" />}
-            faviconURL={tab?.faviconURL}
-            pageURL={tab?.url || ""}
+            faviconURL={tab.faviconURL}
+            pageURL={tab.url || ""}
           />
         </span>
         <span className="min-w-0 flex-1">
@@ -512,42 +709,62 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
         ) : (
           <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
         )}
-      </div>
-      <div className="relative aspect-video overflow-hidden bg-muted/50">
-        <BrowserViewportPlaceholder
-          active
-          interactive={false}
-          pipPhase={automationActivity.phase}
-          priority={pipViewportPriority}
-          sessionID={sessionID}
-          tabID={automationActivity.tabID}
-        />
-      </div>
-    </aside>
+        </div>}
+        <div className="relative aspect-video overflow-hidden bg-muted/50">
+          {surfaceKey === entryKey && automationActivity.presence === "visible" ? (
+            <BrowserViewportPlaceholder
+              active
+              interactive={false}
+              pip
+              pipEmbedded={embedded}
+              priority={pipViewportPriority}
+              sessionID={sessionID}
+              tabID={automationActivity.tabID}
+            />
+          ) : null}
+        </div>
+      </aside>
+    </div>
   );
 });
 
 export function useBrowserAutomationActivity(sessionID: string) {
-  const { automationActivitiesBySession } = useBrowserRuntimeContext();
+  const {
+    automationActivitiesBySession,
+    readyRuntimeKeys,
+    runtimeTabsBySession,
+  } = useBrowserRuntimeContext();
   const activity = automationActivitiesBySession[sessionID];
-  return activity?.sessionID === sessionID ? activity : undefined;
+  return activity?.sessionID === sessionID
+    && readyRuntimeKeys.has(runtimeKey(sessionID, activity.tabID))
+    && runtimeTabsBySession[sessionID]?.some((tab) => tab.id === activity.tabID)
+    ? activity
+    : undefined;
 }
 
-export function useBrowserRuntimeTabs(sessionID: string, tabs: ElectronBrowserSurfaceTab[]) {
+export function useBrowserRuntimeTabs(
+  sessionID: string,
+  tabs: ElectronBrowserSurfaceTab[],
+  tabsReady: boolean,
+) {
   const { requiredTabsBySession, retainTabs } = useBrowserRuntimeContext();
   useEffect(() => {
-    retainTabs(sessionID, tabs);
-  }, [retainTabs, sessionID, tabs]);
+    if (tabsReady) {
+      retainTabs(sessionID, tabs);
+    }
+  }, [retainTabs, sessionID, tabs, tabsReady]);
   return requiredTabsBySession[sessionID] || emptyRuntimeTabs;
 }
 
 const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
   registerRuntime,
+  setRuntimeReady,
   sessionID,
   tab,
   token,
 }: {
   registerRuntime: BrowserRuntimeContextValue["registerRuntime"];
+  setRuntimeReady: (key: string, ready: boolean) => void;
   sessionID: string;
   tab: ElectronBrowserSurfaceTab;
   token: string;
@@ -555,7 +772,9 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ElectronWebviewRuntimeHandle | null>(null);
   const key = runtimeKey(sessionID, tab.id);
-  const anchorName = runtimeAnchorName(sessionID, tab.id);
+  const handleReadyChange = useCallback((ready: boolean) => {
+    setRuntimeReady(key, ready);
+  }, [key, setRuntimeReady]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -566,53 +785,25 @@ const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
     return registerRuntime(key, host, handle);
   }, [key, registerRuntime]);
 
-  useLayoutEffect(() => {
-    const host = hostRef.current;
-    if (!host) {
-      return;
-    }
-    const observer = new ResizeObserver(([entry]) => {
-      if (!entry) {
-        return;
-      }
-      const styles = getComputedStyle(host);
-      const runtimeWidth = Number.parseFloat(styles.getPropertyValue("--browser-runtime-width"));
-      const runtimeHeight = Number.parseFloat(styles.getPropertyValue("--browser-runtime-height"));
-      if (runtimeWidth <= 0 || runtimeHeight <= 0) {
-        return;
-      }
-      const scale = Math.min(
-        entry.contentRect.width / runtimeWidth,
-        entry.contentRect.height / runtimeHeight,
-      );
-      host.style.setProperty("--pudding-browser-runtime-scale", String(scale));
-    });
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <div
       ref={hostRef}
       className="pudding-browser-runtime-host pointer-events-none invisible fixed top-0 left-0 overflow-hidden opacity-0"
       onFocusCapture={activateBrowserPageFindRegion}
       onPointerDownCapture={activateBrowserPageFindRegion}
-      style={{ "--pudding-browser-anchor": anchorName } as CSSProperties}
     >
       <div className="pudding-browser-runtime-surface">
-        <ElectronWebviewBrowser ref={runtimeRef} activeTab={tab} sessionID={sessionID} token={token} />
+        <ElectronWebviewBrowser
+          ref={runtimeRef}
+          activeTab={tab}
+          sessionID={sessionID}
+          token={token}
+          onReadyChange={handleReadyChange}
+        />
       </div>
     </div>
   );
 });
-
-function useBrowserRuntimeContext() {
-  const context = useContext(BrowserRuntimeContext);
-  if (!context) {
-    throw new Error("BrowserRuntimeProvider is missing");
-  }
-  return context;
-}
 
 function runtimeKey(sessionID: string, tabID: string) {
   return `${sessionID}\u0000${tabID}`;
@@ -626,7 +817,7 @@ function runtimeAnchorName(sessionID: string, tabID: string) {
 }
 
 function selectActiveViewport(
-  viewports: Map<string, ActiveViewport>,
+  viewports: Map<string, BrowserRuntimeViewport>,
   key?: string,
 ) {
   return [...viewports.values()]
@@ -679,27 +870,120 @@ function completeAutomationLease(lease: AutomationLease, ok: boolean) {
   lease.complete(ok);
 }
 
+function applyRuntimeGeometry(
+  host: HTMLDivElement,
+  element: HTMLDivElement,
+  clipElement?: HTMLElement,
+  syncSurfaceSize = false,
+) {
+  const rect = element.getBoundingClientRect();
+  const clipRect = clipElement?.getBoundingClientRect();
+  const top = clipRect ? Math.max(rect.top, clipRect.top) : rect.top;
+  const left = clipRect ? Math.max(rect.left, clipRect.left) : rect.left;
+  const right = clipRect ? Math.min(rect.right, clipRect.right) : rect.right;
+  const bottom = clipRect ? Math.min(rect.bottom, clipRect.bottom) : rect.bottom;
+  const width = right - left;
+  const height = bottom - top;
+  if (rect.width <= 0 || width <= 0 || height <= 0) {
+    return false;
+  }
+  host.style.top = `${top}px`;
+  host.style.left = `${left}px`;
+  host.style.width = `${width}px`;
+  host.style.height = `${height}px`;
+  host.style.setProperty("--pudding-browser-surface-top", `${rect.top - top}px`);
+  host.style.setProperty("--pudding-browser-surface-left", `${rect.left - left}px`);
+  if (!syncSurfaceSize) {
+    const runtimeWidth = Number.parseFloat(
+      getComputedStyle(host).getPropertyValue("--browser-runtime-width"),
+    );
+    if (runtimeWidth > 0) {
+      host.style.setProperty(
+        "--pudding-browser-runtime-scale",
+        String(rect.width / runtimeWidth),
+      );
+    }
+  }
+  if (syncSurfaceSize) {
+    // Electron 会把 guest surface 尺寸换算为设备像素；向下取整会在右/下边缘
+    // 留出一条宿主底色。只放大内部 surface，外层 host 仍负责精确裁剪。
+    host.style.setProperty("--pudding-browser-surface-width", `${ceilToDevicePixel(rect.width)}px`);
+    host.style.setProperty("--pudding-browser-surface-height", `${ceilToDevicePixel(rect.height)}px`);
+  }
+  return true;
+}
+
+function ceilToDevicePixel(value: number) {
+  const scale = window.devicePixelRatio || 1;
+  return Math.ceil(value * scale) / scale;
+}
+
+function clearRuntimeGeometry(host: HTMLDivElement) {
+  host.style.removeProperty("top");
+  host.style.removeProperty("left");
+  host.style.removeProperty("width");
+  host.style.removeProperty("height");
+  host.style.removeProperty("--pudding-browser-surface-top");
+  host.style.removeProperty("--pudding-browser-surface-left");
+  host.style.removeProperty("--pudding-browser-surface-width");
+  host.style.removeProperty("--pudding-browser-surface-height");
+  host.style.removeProperty("--pudding-browser-runtime-scale");
+}
+
+function workspaceTransitionInProgress(element?: HTMLElement) {
+  return element?.dataset.transition === "opening"
+    || element?.dataset.transition === "closing";
+}
+
 function applyRuntimePresentation(
   runtime: RuntimeEntry,
   mode: "standby" | "visible" | "automation",
   anchored: boolean,
   interactive: boolean,
-  pipPhase?: BrowserAutomationActivity["phase"],
+  pip?: boolean,
+  pipEmbedded?: boolean,
 ) {
-  const presentation = `${mode}:${anchored ? "anchored" : "standby"}:${interactive ? "interactive" : "passive"}:${pipPhase || "workspace"}`;
+  const presentation = `${mode}:${anchored ? "anchored" : "standby"}:${interactive ? "interactive" : "passive"}:${pip ? "pip" : "workspace"}:${pipEmbedded ? "embedded" : "standalone"}`;
   if (runtime.presentation === presentation) {
     return;
   }
+  const wasVisible = runtime.host.dataset.presentation === "visible"
+    || (
+      runtime.host.dataset.presentation === "automation"
+      && runtime.host.dataset.anchored === "true"
+    );
   runtime.presentation = presentation;
+  window.cancelAnimationFrame(runtime.presentationFrameID || 0);
+  runtime.presentationFrameID = undefined;
   runtime.host.dataset.anchored = anchored ? "true" : "false";
   runtime.host.dataset.interactive = interactive ? "true" : "false";
-  runtime.host.dataset.presentation = mode;
-  if (pipPhase) {
-    runtime.host.dataset.pipPhase = pipPhase;
+  if (pip) {
+    runtime.host.dataset.pip = "true";
+    runtime.host.dataset.pipEmbedded = pipEmbedded ? "true" : "false";
   } else {
-    delete runtime.host.dataset.pipPhase;
+    delete runtime.host.dataset.pip;
+    delete runtime.host.dataset.pipEmbedded;
   }
-  runtime.host.setAttribute("aria-hidden", mode === "visible" && interactive ? "false" : "true");
+  if (mode === "visible" && anchored && !wasVisible) {
+    runtime.host.dataset.presentation = "standby";
+    runtime.host.setAttribute("aria-hidden", "true");
+    runtime.presentationFrameID = window.requestAnimationFrame(() => {
+      runtime.presentationFrameID = window.requestAnimationFrame(() => {
+        runtime.presentationFrameID = undefined;
+        if (runtime.presentation !== presentation) {
+          return;
+        }
+        runtime.host.dataset.presentation = "visible";
+        runtime.host.setAttribute("aria-hidden", interactive ? "false" : "true");
+      });
+    });
+    return;
+  }
+  runtime.host.dataset.presentation = mode;
+  runtime.host.setAttribute(
+    "aria-hidden",
+    mode === "visible" && anchored && interactive ? "false" : "true",
+  );
 }
 
 function mergeRuntimeTabs(

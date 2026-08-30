@@ -152,6 +152,48 @@ func TestElectronBridgeServiceOpenNewTabUsesSingleOpenRequest(t *testing.T) {
 	}
 }
 
+func TestElectronBridgeServiceRecoverEnsuresWithoutAutomation(t *testing.T) {
+	var ensured electronBridgeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/browser/tabs/ensure" {
+			t.Fatalf("recovery must not use the automation open path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&ensured); err != nil {
+			t.Fatal(err)
+		}
+		writeElectronBridgeTestJSON(w, electronBridgeSnapshot{
+			SessionID: ensured.SessionID,
+			TabID:     ensured.TabID,
+			Status:    "detached",
+			URL:       ensured.URL,
+			Title:     "Restored",
+			RuntimeID: "webContents:4",
+		})
+	}))
+	defer server.Close()
+
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab, err := service.Recover(context.Background(), "sess_restore", RecoverHint{
+		TabID: "tab_restore",
+		URL:   "https://restore.example/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ensured.SessionID != "sess_restore" || ensured.TabID != "tab_restore" || ensured.URL != "https://restore.example/" {
+		t.Fatalf("unexpected ensure request: %+v", ensured)
+	}
+	if ensured.Activate == nil || *ensured.Activate {
+		t.Fatalf("recovery must keep the restored tab in the background: %+v", ensured)
+	}
+	if tab.SessionID != ensured.SessionID || tab.ID != ensured.TabID || tab.URL != ensured.URL {
+		t.Fatalf("unexpected restored tab: %+v", tab)
+	}
+}
+
 func TestElectronBridgeServiceListTabsFiltersLostAndCrossSessionSnapshots(t *testing.T) {
 	const token = "bridge-token"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

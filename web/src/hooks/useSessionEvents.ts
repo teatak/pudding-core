@@ -2,12 +2,10 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import {
-  getBrowserState,
   getTurn,
   listBrowserTabs,
   listPendingApprovals,
   type AudioBindings,
-  type BrowserState,
   type BrowserTab,
   type BackgroundProcess,
   type PendingApproval,
@@ -19,7 +17,7 @@ import {
   hasElectronWebviewBrowser,
   markElectronBrowserSessionClosed,
 } from "@/browser/electronBridge";
-import { browserTabFaviconURL, browserTabTitle, upsertBrowserTab } from "@/browser/helpers";
+import { preferredBrowserTab, upsertBrowserTab } from "@/browser/helpers";
 import type { BrowserTabsData } from "@/browser/types";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
@@ -214,8 +212,10 @@ function syncBrowserStateFromEvent(
   if (!event.name?.startsWith("builtin_browser_")) {
     return;
   }
+  if (!revealVisibleSession) {
+    return;
+  }
   const syncedFromToolResult = syncBrowserToolResult(queryClient, event);
-  void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(event.sessionID) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(event.sessionID) });
   if (event.name === "builtin_browser_close" && event.phase === "ok") {
     retainBrowserActivities(
@@ -238,13 +238,15 @@ function publishBrowserActivity(
   queryClient: QueryClient,
   event: Extract<SessionEvent, { kind: "turn.tool" }>,
 ) {
-  const state = queryClient.getQueryData<BrowserState>(queryKeys.browserState(event.sessionID));
+  const tabs = queryClient.getQueryData<BrowserTabsData>(queryKeys.browserTabs(event.sessionID))?.tabs
+    .filter((tab) => tab.sessionID === event.sessionID) || [];
+  const tab = preferredBrowserTab(tabs, null);
   requestBrowserReveal(event.sessionID, {
-    faviconURL: state?.faviconURL,
-    resourceID: state?.tabID,
-    title: state?.title,
+    faviconURL: tab?.faviconURL,
+    resourceID: tab?.id,
+    title: tab?.title,
     toolName: event.name,
-    url: state?.url,
+    url: tab?.url,
   });
 }
 
@@ -259,7 +261,6 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
     }
     markElectronBrowserSessionClosed(event.sessionID);
     queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: [], processMode: processModeFallback });
-    queryClient.setQueryData(queryKeys.browserState(event.sessionID), { hasState: false, sessionID: event.sessionID, processMode: processModeFallback });
     return false;
   }
   const tab = browserTabFromToolContent(event.content, event.sessionID);
@@ -271,19 +272,6 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
     tabs: upsertBrowserTab(current?.tabs || [], tab),
     processMode: tab.mode || current?.processMode || processModeFallback,
   }));
-  const title = browserTabTitle(tab, tab.title || tab.url || "about:blank", "about:blank");
-  queryClient.setQueryData(queryKeys.browserState(event.sessionID), {
-    hasState: true,
-    sessionID: event.sessionID,
-    tabID: tab.id,
-    url: tab.url,
-    title,
-    faviconURL: browserTabFaviconURL(tab),
-    mode: tab.mode || processModeFallback,
-    processMode: tab.mode || processModeFallback,
-    createdAt: tab.createdAt,
-    updatedAt: tab.updatedAt,
-  });
   return true;
 }
 
@@ -379,25 +367,14 @@ function booleanField(value: unknown) {
 
 async function hydrateBrowserState(queryClient: QueryClient, token: string, sessionID: string) {
   try {
-    const [state, tabs] = await Promise.all([
-      queryClient.fetchQuery({
-        queryKey: queryKeys.browserState(sessionID),
-        queryFn: () => getBrowserState(token, sessionID),
-        staleTime: 0,
-      }),
-      queryClient.fetchQuery({
-        queryKey: queryKeys.browserTabs(sessionID),
-        queryFn: () => listBrowserTabs(token, sessionID),
-        staleTime: 0,
-      }),
-    ]);
+    const tabs = await queryClient.fetchQuery({
+      queryKey: queryKeys.browserTabs(sessionID),
+      queryFn: () => listBrowserTabs(token, sessionID),
+      staleTime: 0,
+    });
     const liveTabs = tabs.tabs.filter((tab) => tab.sessionID === sessionID);
-    if (liveTabs.length > 0) {
-      liveTabs.forEach((tab) => allowElectronBrowserTab(sessionID, tab.id));
-    } else if (state.hasState && state.tabID) {
-      allowElectronBrowserTab(sessionID, state.tabID);
-    }
-    return Boolean(state.hasState || liveTabs.length > 0);
+    liveTabs.forEach((tab) => allowElectronBrowserTab(sessionID, tab.id));
+    return liveTabs.length > 0;
   } catch (error) {
     console.warn("failed to hydrate browser state from tool event", error);
     return false;

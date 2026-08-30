@@ -41,11 +41,6 @@ import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
-import {
-  clearWorkspaceActivity,
-  useWorkspaceActivities,
-} from "@/state/workspaceActivityStore";
-import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 type ChatPaneRole = "primary" | "split";
 
@@ -78,7 +73,6 @@ export function ChatPane({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
-  const workspaceOpen = useWorkspaceOpen(sessionID);
   const floating = presentation === "floating";
   const clearSession = useOverlayStore((state) => state.clearSession);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
@@ -142,7 +136,6 @@ export function ChatPane({
   });
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
-  const workspaceActivities = useWorkspaceActivities(selectedSession?.id);
   const isPrimary = role === "primary";
   const showDraft = isPrimary && !sessionID;
   const sessionsPending = sessionsQuery.isPending;
@@ -258,12 +251,6 @@ export function ChatPane({
       unsubscribeMenu();
     };
   }, [floating, openConversationSearch, role, selectedSession]);
-
-  useEffect(() => {
-    if (workspaceOpen && selectedSession && workspaceActivities.length > 0) {
-      clearWorkspaceActivity(selectedSession.id);
-    }
-  }, [selectedSession, workspaceActivities, workspaceOpen]);
 
   useEffect(() => {
     if (!sessionsQuery.isSuccess) {

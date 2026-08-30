@@ -980,14 +980,6 @@ html[data-agent-console-resizing="true"] webview {
     height: var(--browser-runtime-height);
 }
 
-.pudding-browser-runtime-host[data-anchored="true"] {
-    position-anchor: var(--pudding-browser-anchor);
-    top: anchor(top);
-    left: anchor(left);
-    width: anchor-size(width);
-    height: anchor-size(height);
-}
-
 .pudding-browser-runtime-host[data-presentation="visible"] {
     visibility: visible;
     opacity: 1;
@@ -1005,13 +997,47 @@ html[data-agent-console-resizing="true"] webview {
     opacity: 1;
 }
 
-.pudding-browser-runtime-host[data-pip-phase] {
+.pudding-browser-runtime-host[data-pip="true"][data-pip-embedded="false"] {
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+}
+
+.pudding-browser-runtime-host[data-pip-embedded="true"] {
+    border-radius: 0;
+}
+
+.pudding-browser-pip-presence {
+    display: grid;
+    min-height: 0;
+    transform-origin: top;
+    transition:
+        grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 140ms ease-out,
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pudding-browser-pip-presence[data-presence="opening"],
+.pudding-browser-pip-presence[data-presence="closing"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(-4px);
+}
+
+.pudding-browser-pip-presence[data-presence="visible"] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: none;
+}
+
+.pudding-browser-pip-presence > .pudding-browser-pip {
+    min-height: 0;
 }
 
 .pudding-browser-runtime-surface {
     position: absolute;
-    inset: 0;
+    top: var(--pudding-browser-surface-top, 0);
+    left: var(--pudding-browser-surface-left, 0);
+    width: var(--pudding-browser-surface-width, 100%);
+    height: var(--pudding-browser-surface-height, 100%);
 }
 
 .pudding-browser-runtime-host[data-anchored="true"][data-interactive="false"] .pudding-browser-runtime-surface {
@@ -1021,25 +1047,6 @@ html[data-agent-console-resizing="true"] webview {
     height: var(--browser-runtime-height);
     transform: scale(var(--pudding-browser-runtime-scale));
     transform-origin: top left;
-}
-
-@keyframes pudding-browser-pip-enter {
-    from {
-        transform: translateY(0.5rem) scale(0.98);
-        opacity: 0;
-    }
-}
-
-.pudding-browser-pip[data-phase="running"],
-.pudding-browser-runtime-host[data-pip-phase="running"] {
-    animation: pudding-browser-pip-enter 160ms ease-out both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .pudding-browser-pip[data-phase],
-    .pudding-browser-runtime-host[data-pip-phase] {
-        animation: none;
-    }
 }
 
 .pudding-agent-console[data-mode="dock-left"],

@@ -1,4 +1,4 @@
-import type { BrowserHistoryEntry, BrowserState, BrowserTab } from "@/api/client";
+import type { BrowserHistoryEntry, BrowserTab } from "@/api/client";
 
 import type { BrowserCanvasPayload } from "./types";
 
@@ -148,21 +148,6 @@ export function faviconURLForPage(rawURL: string): string {
   } catch {
     return "";
   }
-}
-
-export function browserPayloadFromState(state: BrowserState | undefined): BrowserCanvasPayload | null {
-  if (!state?.hasState || !state.sessionID || !state.url) {
-    return null;
-  }
-  return {
-    kind: "browser",
-    sessionID: state.sessionID,
-    tabID: state.tabID,
-    url: state.url,
-    title: state.title,
-    faviconURL: state.faviconURL,
-    mode: state.processMode || state.mode,
-  };
 }
 
 function browserTabIsNewerThan(tab: BrowserTab | undefined, timestamp?: string): boolean {

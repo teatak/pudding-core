@@ -1,4 +1,5 @@
 import { Globe } from "@/components/icons";
+import { Fragment, type ReactNode } from "react";
 
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
@@ -11,9 +12,14 @@ import { cn } from "@/lib/utils";
 
 export function WorkspaceActivityCard({
   activities,
+  browserPreview,
   presentation = "rail",
 }: {
   activities: WorkspaceActivity[];
+  browserPreview?: {
+    content: ReactNode;
+    resourceID: string;
+  };
   presentation?: "composer" | "rail";
 }) {
   const { t } = useI18n();
@@ -21,26 +27,33 @@ export function WorkspaceActivityCard({
   if (activities.length === 0) {
     return null;
   }
-
   return (
     <div
       aria-label={t("workspace.recentArtifacts")}
       className={cn(
-        "pointer-events-auto flex min-w-0 gap-0.5 rounded-xl border border-border/70 bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-md",
+        "pointer-events-auto flex min-w-0 gap-0.5 border border-border/70 bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-md",
         presentation === "composer"
           ? "w-fit max-w-full overflow-x-auto rounded-lg p-0.5 shadow-sm overscroll-x-contain"
-          : "w-full flex-col overflow-hidden",
+          : "w-full flex-col overflow-hidden rounded-xl py-1.5",
       )}
       role="group"
     >
-      {activities.map((activity) => (
-        <WorkspaceActivityRow
-          key={`${activity.kind}:${activity.resourceID || activity.serial}`}
-          activity={activity}
-          presentation={presentation}
-          onOpen={() => openWorkspaceActivity(activity)}
-        />
-      ))}
+      {activities.map((activity) => {
+        const key = `${activity.kind}:${activity.resourceID || activity.serial}`;
+        const showPreview = presentation === "rail"
+          && activity.kind === "browser"
+          && activity.resourceID === browserPreview?.resourceID;
+        return (
+          <Fragment key={key}>
+            <WorkspaceActivityRow
+              activity={activity}
+              presentation={presentation}
+              onOpen={() => openWorkspaceActivity(activity)}
+            />
+            {showPreview ? <div className="mx-1.5">{browserPreview?.content}</div> : null}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -69,10 +82,9 @@ function WorkspaceActivityRow({
         "no-drag-region group justify-start text-left",
         presentation === "composer"
           ? "h-7 max-w-48 shrink-0 gap-1.5 rounded-md px-1.5 pr-2"
-          : "h-auto min-h-11 w-full gap-2 rounded-lg px-2.5 py-2",
+          : "mx-1.5 h-auto min-h-11 w-auto self-stretch gap-2 rounded-lg px-2.5 py-2",
       )}
       size="sm"
-      title={`${title} · ${detail}`}
       onClick={onOpen}
     >
       <WorkspaceActivityIcon activity={activity} presentation={presentation} />

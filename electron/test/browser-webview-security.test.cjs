@@ -55,7 +55,8 @@ test("hardens the managed browser webview before attachment", () => {
 test("rejects unmanaged webview attachments", () => {
   for (const params of [
     { partition: "persist:other", src: "about:blank" },
-    { partition: "persist:pudding-default", src: "https://example.com/" },
+    { partition: "persist:pudding-default", src: "file:///tmp/unmanaged.html" },
+    { partition: "persist:pudding-default", src: "data:text/html,unmanaged" },
   ]) {
     let prevented = false;
     assert.equal(hardenManagedBrowserWebview(
@@ -66,6 +67,32 @@ test("rejects unmanaged webview attachments", () => {
     ), false);
     assert.equal(prevented, true);
   }
+});
+
+test("allows a managed tab to reattach at its current URL", () => {
+  let prevented = false;
+  const sourceURL = "file:///tmp/managed.html";
+  assert.equal(hardenManagedBrowserWebview(
+    { preventDefault: () => { prevented = true; } },
+    {},
+    { partition: "persist:pudding-default", src: sourceURL },
+    "persist:pudding-default",
+    "/app/electron/browser-preload.cjs",
+    (url) => url === sourceURL,
+  ), true);
+  assert.equal(prevented, false);
+});
+
+test("rejects an unmanaged remote page in the managed browser partition", () => {
+  let prevented = false;
+  assert.equal(hardenManagedBrowserWebview(
+    { preventDefault: () => { prevented = true; } },
+    {},
+    { partition: "persist:pudding-default", src: "https://example.com/redirected" },
+    "persist:pudding-default",
+    "/app/electron/browser-preload.cjs",
+  ), false);
+  assert.equal(prevented, true);
 });
 
 test("credential suggestions require an explicit trusted user selection", () => {

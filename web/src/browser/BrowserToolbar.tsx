@@ -133,7 +133,6 @@ export function BrowserToolbar({
   const addressBlurTimerRef = useRef<number | undefined>(undefined);
   const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
   const embeddedBrowser = hasElectronWebviewBrowser();
-  const processModeFallback = embeddedBrowser ? "webview" : "headless";
   const tabsQuery = useQuery({
     enabled: Boolean(token && sessionID),
     queryKey: queryKeys.browserTabs(sessionID),
@@ -153,7 +152,6 @@ export function BrowserToolbar({
   const activeTab = activeTabProp || preferredBrowserTab(tabs, payload);
   const targetURL = browserTargetURL(activeTab, payload, payload?.updatedAt);
   const refreshBrowserQueries = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(sessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(sessionID) });
   };
 
@@ -211,18 +209,6 @@ export function BrowserToolbar({
       tabs: upsertBrowserTab(current?.tabs || [], tab),
       processMode: tab.mode || current?.processMode,
     }));
-    queryClient.setQueryData(queryKeys.browserState(sessionID), {
-      hasState: true,
-      sessionID,
-      tabID: tab.id,
-      url: tab.url,
-      title,
-      faviconURL,
-      mode: tab.mode,
-      processMode: tab.mode || processModeFallback,
-      createdAt: tab.createdAt,
-      updatedAt: tab.updatedAt,
-    });
     const syncedTab = shouldSyncBrowserTab
       ? await syncBrowserTab(token, sessionID, tab.id, {
           targetID: tab.targetID,
@@ -238,21 +224,8 @@ export function BrowserToolbar({
         tabs: upsertBrowserTab(current?.tabs || [], syncedTab),
         processMode: syncedTab.mode || current?.processMode,
       }));
-      queryClient.setQueryData(queryKeys.browserState(sessionID), {
-        hasState: true,
-        sessionID,
-        tabID: syncedTab.id,
-        url: syncedTab.url,
-        title,
-        faviconURL,
-        mode: syncedTab.mode,
-        processMode: syncedTab.mode || processModeFallback,
-        createdAt: syncedTab.createdAt,
-        updatedAt: syncedTab.updatedAt,
-      });
     }
     if (refreshAfterPersist) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(sessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(sessionID) });
     }
   };

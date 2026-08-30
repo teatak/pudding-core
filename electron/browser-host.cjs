@@ -51,6 +51,13 @@ class BrowserHost {
     return snapshot(slot);
   }
 
+  allowsAttachmentURL(rawURL) {
+    return [...this.slots.values()].some((slot) => (
+      sameNormalizedURL(slot.displayURL, rawURL, slot.fileRoots)
+      || sameNormalizedURL(slot.committedURL, rawURL, slot.fileRoots)
+    ));
+  }
+
   async loadURL(request) {
     const slot = this.ensureSlot(request);
     const url = normalizeURL(request.url, slot.fileRoots);
@@ -132,6 +139,7 @@ class BrowserHost {
     const webContents = await this.requireWebContents(slot);
     let succeeded = false;
     await this.noteAutomationStart(slot, "reload");
+    const load = waitForWebContentsLoad(webContents);
     try {
       const reloadURL = normalizeURL(request.url, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
       const actualURL = normalizeURL(slot.committedURL, slot.fileRoots);
@@ -147,9 +155,11 @@ class BrowserHost {
           }),
         );
       }
+      await load.promise;
       succeeded = true;
       return snapshot(slot);
     } finally {
+      load.cancel();
       await this.noteAutomationEnd(slot, "reload", succeeded);
     }
   }
@@ -656,7 +666,7 @@ class BrowserHost {
       navigationWaiter: null,
       historyIndex: 0,
       historyEntries: [],
-      activateOnCreate: true,
+      activateOnCreate: request.activate !== false,
       pendingOpenNavigation: null,
     };
     slot.sendCDP = (method, params) => this.sendCDP(slot, method, params);
@@ -1046,6 +1056,11 @@ class BrowserHost {
         const nextURL = normalizeURL(params?.frame?.url, slot.fileRoots);
         if (nextURL) {
           const commandNavigationPending = Boolean(slot.navigationWaiter);
+          const sameURL = sameNormalizedURL(
+            slot.committedURL || slot.displayURL,
+            nextURL,
+            slot.fileRoots,
+          );
           slot.mainFrameID = String(params?.frame?.id || slot.mainFrameID || "");
           slot.mainFrameLoaderID = String(params?.frame?.loaderId || slot.mainFrameLoaderID || "");
           slot.lastMainFrameNavigation = {
@@ -1054,11 +1069,13 @@ class BrowserHost {
             sameDocument: false,
           };
           slot.committedURL = nextURL;
-          slot.committedTitle = "";
           slot.selectionText = "";
           slot.findRequestID = 0;
           slot.displayURL = nextURL;
-          slot.displayTitle = "";
+          if (!sameURL) {
+            slot.committedTitle = "";
+            slot.displayTitle = "";
+          }
           slot.navigationError = null;
           resolveNavigationWaiter(slot, nextURL, slot.lastMainFrameNavigation.loaderID);
           if (commandNavigationPending) {
@@ -1109,10 +1126,15 @@ class BrowserHost {
     });
     webContents.on("destroyed", () => {
       if (this.slots.get(slot.key) === slot && slot.webContents === webContents) {
-        this.slots.delete(slot.key);
+        slot.webContents = null;
+        slot.cdpAttached = false;
+        slot.cdpReady = null;
         rejectWebviewWaiters(slot, new Error("browser tab destroyed"));
         rejectNavigationWaiter(slot, new Error("browser tab destroyed"));
-        if (!slot.disposed) this.onUpdate(lostSnapshot(slot));
+        if (!slot.disposed) {
+          this.requestWebview(slot);
+          this.noteUpdated(slot);
+        }
       }
     });
   }
@@ -1487,6 +1509,43 @@ function withTimeout(promise, ms, message) {
   ]).finally(() => {
     clearTimeout(timer);
   });
+}
+
+function waitForWebContentsLoad(webContents) {
+  let settled = false;
+  let timer;
+  let resolvePromise;
+  let rejectPromise;
+  const cleanup = () => {
+    clearTimeout(timer);
+    webContents.off("did-stop-loading", resolveLoad);
+    webContents.off("destroyed", rejectDestroyed);
+  };
+  const resolveLoad = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolvePromise();
+  };
+  const rejectDestroyed = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectPromise(new Error("browser tab destroyed while loading"));
+  };
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+    webContents.once("did-stop-loading", resolveLoad);
+    webContents.once("destroyed", rejectDestroyed);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("browser navigation load timed out"));
+    }, navigationTimeoutMS);
+  });
+  return { cancel: resolveLoad, promise };
 }
 
 function assertPNGData(dataBase64, source) {

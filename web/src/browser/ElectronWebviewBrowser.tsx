@@ -88,10 +88,12 @@ export type ElectronWebviewRuntimeHandle = {
 
 export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   activeTab?: ElectronBrowserSurfaceTab;
+  onReadyChange?: (ready: boolean) => void;
   sessionID: string;
   token: string;
 }>(function ElectronWebviewBrowser({
   activeTab: activeTabProp,
+  onReadyChange,
   sessionID,
   token,
 }, ref) {
@@ -217,6 +219,7 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
     webviewReadyCleanupRef.current = null;
     webviewRef.current = node;
     webviewReadyRef.current = false;
+    onReadyChange?.(false);
     navigationSeqRef.current = 0;
     failedNavigationSeqRef.current = 0;
     setNavigationLoading(false);
@@ -226,7 +229,9 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
     }
     const handleReady = () => {
       webviewReadyRef.current = true;
-      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
+      if (browserURLIsBlank(pendingTargetURLRef.current)) {
+        onReadyChange?.(true);
+      } else {
         setNavigationLoading(true);
       }
     };
@@ -255,6 +260,9 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       setNavigationLoading(false);
       if (navigationSeqRef.current > failedNavigationSeqRef.current) {
         updateLoadError(null);
+      }
+      if (!browserURLIsBlank(webviewCurrentURL(node))) {
+        onReadyChange?.(true);
       }
     };
     const handleFailLoad = (event: Event) => {
@@ -305,9 +313,10 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       node.removeEventListener("did-fail-load", handleFailLoad);
       if (webviewRef.current === node) {
         webviewReadyRef.current = false;
+        onReadyChange?.(false);
       }
     };
-  }, [ownerSessionID, queryClient, tabID, updateLoadError]);
+  }, [onReadyChange, ownerSessionID, queryClient, tabID, updateLoadError]);
 
   useEffect(() => {
     const handleCompositionStart = () => {
@@ -388,12 +397,12 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       return;
     }
     let disposed = false;
-    let registered = false;
+    let registeredWebContentsID = 0;
     let registrationInFlight = false;
     let retryDelayMS = 100;
     let retryTimer: number | undefined;
     const scheduleRetry = () => {
-      if (disposed || registered || retryTimer !== undefined) {
+      if (disposed || retryTimer !== undefined) {
         return;
       }
       retryTimer = window.setTimeout(() => {
@@ -403,14 +412,22 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       retryDelayMS = Math.min(retryDelayMS * 2, 1_500);
     };
     const register = () => {
-      if (disposed || registered || registrationInFlight) {
+      if (disposed) {
         return;
       }
       if (!webviewReadyRef.current || !node.isConnected) {
+        scheduleRetry();
         return;
       }
       const webContentsID = webviewContentsID(node);
       if (!webContentsID) {
+        scheduleRetry();
+        return;
+      }
+      if (registeredWebContentsID === webContentsID) {
+        return;
+      }
+      if (registrationInFlight) {
         scheduleRetry();
         return;
       }
@@ -430,8 +447,8 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
           createdAt: activeTab?.createdAt,
         })
         .then((snapshot) => {
-          if (!disposed) {
-            registered = true;
+          if (!disposed && webviewContentsID(node) === webContentsID) {
+            registeredWebContentsID = webContentsID;
             window.clearTimeout(retryTimer);
             retryTimer = undefined;
             cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID);
@@ -442,6 +459,9 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
         })
         .finally(() => {
           registrationInFlight = false;
+          if (!disposed && webviewContentsID(node) !== registeredWebContentsID) {
+            scheduleRetry();
+          }
         });
     };
     const listener = () => register();

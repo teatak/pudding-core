@@ -24,12 +24,13 @@ export type WorkspaceActivity = (BrowserWorkspaceActivity | CanvasWorkspaceActiv
 
 type WorkspaceActivityInput = BrowserWorkspaceActivity | CanvasWorkspaceActivity;
 type BrowserWorkspaceActivityMetadata = Pick<BrowserWorkspaceActivity, "faviconURL" | "title" | "url">;
+type BrowserWorkspaceResource = BrowserWorkspaceActivityMetadata & { resourceID: string };
 
 type WorkspaceActivityState = {
   activities: Record<string, WorkspaceActivity[] | undefined>;
-  clear: (sessionID: string, kind?: WorkspaceActivity["kind"]) => void;
   record: (activity: WorkspaceActivityInput) => void;
   retain: (sessionID: string, kind: WorkspaceActivity["kind"], resourceIDs: string[]) => void;
+  syncBrowsers: (sessionID: string, resources: BrowserWorkspaceResource[]) => void;
   updateBrowserMetadata: (
     sessionID: string,
     resourceID: string,
@@ -38,28 +39,10 @@ type WorkspaceActivityState = {
 };
 
 let activitySerial = 0;
-const maxActivitiesPerSession = 8;
 const emptyActivities: WorkspaceActivity[] = [];
 
 const useWorkspaceActivityStore = create<WorkspaceActivityState>((set) => ({
   activities: {},
-  clear: (sessionID, kind) =>
-    set((state) => {
-      const current = state.activities[sessionID] || [];
-      if (current.length === 0) {
-        return state;
-      }
-      const remaining = kind ? current.filter((activity) => activity.kind !== kind) : [];
-      if (remaining.length === current.length) {
-        return state;
-      }
-      return {
-        activities: {
-          ...state.activities,
-          [sessionID]: remaining,
-        },
-      };
-    }),
   record: (activity) =>
     set((state) => {
       activitySerial += 1;
@@ -72,7 +55,7 @@ const useWorkspaceActivityStore = create<WorkspaceActivityState>((set) => ({
       return {
         activities: {
           ...state.activities,
-          [activity.sessionID]: [nextActivity, ...remaining].slice(0, maxActivitiesPerSession),
+          [activity.sessionID]: [nextActivity, ...remaining],
         },
       };
     }),
@@ -86,6 +69,43 @@ const useWorkspaceActivityStore = create<WorkspaceActivityState>((set) => ({
       return remaining.length === current.length
         ? state
         : { activities: { ...state.activities, [sessionID]: remaining } };
+    }),
+  syncBrowsers: (sessionID, resources) =>
+    set((state) => {
+      const current = state.activities[sessionID] || [];
+      const existingByID = new Map(
+        current.flatMap((activity) => (
+          activity.kind === "browser" && activity.resourceID
+            ? [[activity.resourceID, activity] as const]
+            : []
+        )),
+      );
+      const browsers = resources.map((resource) => {
+        const existing = existingByID.get(resource.resourceID);
+        const normalized = normalizeWorkspaceActivity({
+          ...resource,
+          kind: "browser",
+          sessionID,
+        }) as BrowserWorkspaceActivity;
+        if (existing) {
+          return {
+            ...existing,
+            ...normalized,
+          };
+        }
+        activitySerial += 1;
+        return {
+          ...normalized,
+          serial: activitySerial,
+        };
+      });
+      const next = [
+        ...browsers,
+        ...current.filter((activity) => activity.kind !== "browser"),
+      ];
+      return sameWorkspaceActivities(current, next)
+        ? state
+        : { activities: { ...state.activities, [sessionID]: next } };
     }),
   updateBrowserMetadata: (sessionID, resourceID, metadata) =>
     set((state) => {
@@ -125,16 +145,19 @@ export function recordWorkspaceActivity(activity: WorkspaceActivityInput) {
   useWorkspaceActivityStore.getState().record(activity);
 }
 
-export function clearWorkspaceActivity(sessionID: string, kind?: WorkspaceActivity["kind"]) {
-  useWorkspaceActivityStore.getState().clear(sessionID, kind);
-}
-
 export function retainWorkspaceActivities(
   sessionID: string,
   kind: WorkspaceActivity["kind"],
   resourceIDs: string[],
 ) {
   useWorkspaceActivityStore.getState().retain(sessionID, kind, resourceIDs);
+}
+
+export function syncBrowserWorkspaceActivities(
+  sessionID: string,
+  resources: BrowserWorkspaceResource[],
+) {
+  useWorkspaceActivityStore.getState().syncBrowsers(sessionID, resources);
 }
 
 export function updateBrowserWorkspaceActivity(
@@ -187,4 +210,20 @@ function sameWorkspaceResource(left: WorkspaceActivity, right: WorkspaceActivity
     return left.resourceID === right.resourceID;
   }
   return left.kind === "browser" && right.kind === "browser" && left.url === right.url;
+}
+
+function sameWorkspaceActivities(current: WorkspaceActivity[], next: WorkspaceActivity[]) {
+  return current.length === next.length && current.every((activity, index) => {
+    const candidate = next[index];
+    if (activity === candidate) {
+      return true;
+    }
+    return activity.kind === "browser"
+      && candidate.kind === "browser"
+      && activity.resourceID === candidate.resourceID
+      && activity.serial === candidate.serial
+      && activity.title === candidate.title
+      && activity.url === candidate.url
+      && activity.faviconURL === candidate.faviconURL;
+  });
 }

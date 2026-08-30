@@ -22,7 +22,6 @@ export const queryKeys = {
   queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   audioBindings: () => ["audio", "bindings"] as const,
   audioRuntime: () => ["settings", "audio", "runtime"] as const,
-  browserState: (sessionID: string) => ["session", sessionID, "browser", "state"] as const,
   browserTabs: (sessionID: string) => ["session", sessionID, "browser", "tabs"] as const,
   browserHistory: (query?: string) => (query === undefined ? (["browser", "history"] as const) : (["browser", "history", query] as const)),
   browserHistoryRecent: (limit: number) => ["browser", "history", "recent", limit] as const,

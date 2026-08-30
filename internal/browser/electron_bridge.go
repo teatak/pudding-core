@@ -33,6 +33,7 @@ type electronBridgeRequest struct {
 	URL       string `json:"url,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty"`
 	FileRoot  string `json:"fileRoot,omitempty"`
+	Activate  *bool  `json:"activate,omitempty"`
 }
 
 type electronBridgeObserveRequest struct {
@@ -278,11 +279,18 @@ func (s *ElectronBridgeService) Recover(ctx context.Context, sessionID string, h
 		return TabSnapshot{}, err
 	}
 	var snapshot electronBridgeSnapshot
-	request := electronBridgeRequest{SessionID: sessionID, TabID: tabID, URL: authorizedURL.URL, FileRoot: authorizedURL.FileRoot}
+	activate := false
+	request := electronBridgeRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		URL:       authorizedURL.URL,
+		FileRoot:  authorizedURL.FileRoot,
+		Activate:  &activate,
+	}
 	if !hint.CreatedAt.IsZero() {
 		request.CreatedAt = hint.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	if err := s.post(ctx, "/browser/tabs/open", request, &snapshot); err != nil {
+	if err := s.post(ctx, "/browser/tabs/ensure", request, &snapshot); err != nil {
 		return TabSnapshot{}, err
 	}
 	return snapshot.tab(), nil

@@ -70,7 +70,6 @@ const consoleMinimumWidth = 380;
 const floatingDefaultWidth = 680;
 const floatingDefaultHeight = 420;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
-const dockMaximumWidth = 640;
 const workspaceTransitionDurationMs = 220;
 type WorkspaceTransitionPhase = "idle" | "opening" | "closing";
 const centeredLayoutConstraints = {
@@ -93,12 +92,6 @@ function readSavedSplitLayout() {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function workspaceTransitionDelay() {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? 1
-    : workspaceTransitionDurationMs;
 }
 
 function lockAgentConsoleResizeCursor(cursor: string) {
@@ -139,19 +132,13 @@ function dockSplitRatioBounds({
   const railWidth = railCollapsed ? 0 : sessionRailLayout.expandedWidthPx;
   if (chatDockSide === "left") {
     return {
-      maximum: Math.min(
-        sessionRailLayout.expandedWidthPx + dockMaximumWidth,
-        layoutWidth - workspaceMinimumWidth,
-      ) / layoutWidth,
+      maximum: (layoutWidth - workspaceMinimumWidth) / layoutWidth,
       minimum: (railWidth + consoleMinimumWidth) / layoutWidth,
     };
   }
   return {
     maximum: (layoutWidth - consoleMinimumWidth) / layoutWidth,
-    minimum: Math.max(
-      railWidth + workspaceMinimumWidth,
-      layoutWidth - dockMaximumWidth,
-    ) / layoutWidth,
+    minimum: (railWidth + workspaceMinimumWidth) / layoutWidth,
   };
 }
 
@@ -249,6 +236,16 @@ export function App() {
     },
     [chatDockSide],
   );
+  const finishWorkspaceTransition = useCallback(() => {
+    if (workspaceTransition === "idle") {
+      return;
+    }
+    setWorkspaceTransition("idle");
+    if (workspaceTransition === "closing") {
+      updateCenteredLayout(layoutNode?.clientWidth || 0, false);
+      setWorkspacePresent(false);
+    }
+  }, [layoutNode, updateCenteredLayout, workspaceTransition]);
   useLayoutEffect(() => {
     const sessionChanged = workspaceSessionRef.current !== workspaceSessionID;
     workspaceSessionRef.current = workspaceSessionID;
@@ -275,14 +272,6 @@ export function App() {
     } else {
       setWorkspaceTransition("closing");
     }
-    const timer = window.setTimeout(() => {
-      setWorkspaceTransition("idle");
-      if (!workspaceRequestedOpen) {
-        updateCenteredLayout(layoutNode?.clientWidth || 0, false);
-        setWorkspacePresent(false);
-      }
-    }, workspaceTransitionDelay());
-    return () => window.clearTimeout(timer);
   }, [
     agentConsoleMode,
     layoutNode,
@@ -634,13 +623,8 @@ export function App() {
   const preferredDockContainerWidth = railAdjustment === 0
     ? renderedChatContainerWidth
     : `calc(${renderedChatContainerWidth} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
-  const renderedDockMaximumWidth =
-    dockMaximumWidth +
-    (railCollapsed && chatDockSide === "left"
-      ? sessionRailLayout.expandedWidthPx
-      : 0);
-  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${preferredDockWidth}, min(${renderedDockMaximumWidth}px, calc(100% - min(${workspaceMinimumWidth}px, 50%))))`;
-  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${preferredDockContainerWidth}, min(${renderedDockMaximumWidth}px, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw)))) - 1px))`;
+  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${preferredDockWidth}, calc(100% - min(${workspaceMinimumWidth}px, 50%)))`;
+  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${preferredDockContainerWidth}, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw))) - 1px))`;
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: consoleDisplayMode === "dock-left" ? 2 : 0,
@@ -761,9 +745,15 @@ export function App() {
       data-transition={workspaceTransition}
       inert={!workspaceVisible}
       style={workspaceSurfaceStyle}
+      onAnimationEnd={(event) => {
+        if (event.currentTarget === event.target && workspaceOverlay) {
+          finishWorkspaceTransition();
+        }
+      }}
     >
       <WorkspacePane
         activeSessionID={workspaceSessionID}
+        presented={effectiveWorkspaceOpen}
         reserveTopRightActions={
           workspaceOccupiesStageTopRight ? stageToolbarActionCount : 0
         }
@@ -796,6 +786,15 @@ export function App() {
             ? (workspaceVisible ? dockedConsoleWidth : "100%")
             : "100%",
         zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
+      }}
+      onTransitionEnd={(event) => {
+        if (
+          event.currentTarget === event.target &&
+          event.propertyName === "width" &&
+          docked
+        ) {
+          finishWorkspaceTransition();
+        }
       }}
     >
       {chatArea}

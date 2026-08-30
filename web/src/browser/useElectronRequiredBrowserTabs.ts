@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
 import { syncBrowserTab, type BrowserTab } from "@/api/client";
+import { queryKeys } from "@/api/queryKeys";
 import {
   electronBrowserBridge,
   electronBrowserSnapshotToTab,
@@ -14,11 +16,18 @@ export type ElectronBrowserSurfaceTab = BrowserTab & {
 };
 
 type BrowserTabsBySession = Record<string, ElectronBrowserSurfaceTab[]>;
+const emptyBrowserTabsBySession: BrowserTabsBySession = {};
 
 export function useElectronRequiredBrowserTabs(token: string) {
+  const queryClient = useQueryClient();
   const [tabsBySession, setTabsBySession] = useState<BrowserTabsBySession>({});
+  const retainedTokenRef = useRef(token);
 
   useEffect(() => {
+    if (retainedTokenRef.current === token) {
+      return;
+    }
+    retainedTokenRef.current = token;
     setTabsBySession({});
   }, [token]);
 
@@ -74,6 +83,8 @@ export function useElectronRequiredBrowserTabs(token: string) {
             faviconURL: latest.faviconURL,
             canGoBack: latest.canGoBack,
             canGoForward: latest.canGoForward,
+          }).then(() => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
           }).catch(() => undefined);
         }, 350),
       );
@@ -83,9 +94,9 @@ export function useElectronRequiredBrowserTabs(token: string) {
       stopRequired();
       stopUpdated();
     };
-  }, [token]);
+  }, [queryClient, token]);
 
-  return tabsBySession;
+  return retainedTokenRef.current === token ? tabsBySession : emptyBrowserTabsBySession;
 }
 
 function requiredEventToTab(request: ElectronWebviewRequiredEvent): ElectronBrowserSurfaceTab | null {
