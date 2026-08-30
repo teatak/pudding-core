@@ -1,12 +1,14 @@
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -17,7 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FileCode2, FileDiff, Folders, Globe, X } from "@/components/icons";
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 
 import type { BrowserTab } from "@/api/client";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
@@ -62,6 +64,23 @@ function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] })
       {kind === "diff" ? <FileDiff className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
     </span>
   );
+}
+
+function SurfaceTabLeadingIcon({ tab }: { tab: SurfaceTab }) {
+  if (tab.kind === "project") {
+    return (
+      <span className="inline-flex size-full items-center justify-center text-current">
+        <Folders className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (tab.kind === "browser") {
+    return <BrowserTabIcon faviconURL={browserTabFaviconURL(tab.browser)} pageURL={tab.browser.url} />;
+  }
+  if (tab.kind === "widget") {
+    return <CanvasKindIcon className="!bg-transparent !text-current" kind={tab.widget.kind} size="xs" />;
+  }
+  return <FilePreviewTabIcon kind={tab.file.kind} />;
 }
 
 export type WorkspaceFilePreviewTab = {
@@ -124,6 +143,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   onSelectProject: () => void;
 }) {
   const scrollMask = useHorizontalScrollMask<HTMLDivElement>();
+  const [activeTabID, setActiveTabID] = useState<string>();
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
@@ -146,6 +166,11 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
     const tab = tabByID.get(id);
     return tab ? [tab] : [];
   });
+  const visibleTabs = closingBrowserTabID
+    ? tabs.filter((tab) => tab.kind !== "browser" || tab.id !== closingBrowserTabID)
+    : tabs;
+  const visibleTabIDs = visibleTabs.map(surfaceTabID);
+  const activeTab = activeTabID ? tabByID.get(activeTabID) : undefined;
   const orderSignature = createdTabIDs.join("\u0000");
 
   useEffect(() => {
@@ -157,6 +182,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   }
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveTabID(undefined);
     if (!over || active.id === over.id) {
       return;
     }
@@ -168,21 +194,27 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
     setWorkspaceTabOrder(orderScope, arrayMove(orderedIDs, from, to));
   };
 
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    setActiveTabID(String(active.id));
+  };
+
   return (
     <DndContext
       autoScroll
       collisionDetection={closestCenter}
       sensors={sensors}
+      onDragCancel={() => setActiveTabID(undefined)}
       onDragEnd={handleDragEnd}
+      onDragStart={handleDragStart}
     >
       <div
         ref={scrollMask.ref}
         className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
         style={scrollMask.style}
       >
-        <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
+        <SortableContext items={visibleTabIDs} strategy={horizontalListSortingStrategy}>
           <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5 px-px py-1">
-            {tabs.map((tab) => (
+            {visibleTabs.map((tab) => (
               <SortableSurfaceTabButton
                 key={surfaceTabID(tab)}
                 activeBrowserTabID={activeBrowserTabID}
@@ -207,9 +239,46 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
           </div>
         </SortableContext>
       </div>
+      <DragOverlay adjustScale={false} dropAnimation={null}>
+        {activeTab ? <SurfaceTabDragPreview projectLabel={projectLabel} tab={activeTab} /> : null}
+      </DragOverlay>
     </DndContext>
   );
 });
+
+function useSurfaceTabLabel(tab: SurfaceTab, projectLabel: string) {
+  const { t } = useI18n();
+  const label =
+    tab.kind === "project"
+      ? projectLabel
+      : tab.kind === "browser"
+        ? browserTabTitle(tab.browser, t("browser.newTab"), t("browser.newTab"))
+        : tab.kind === "widget"
+          ? titleForCanvasItem(tab.widget, t)
+          : tab.file.label || t("uiContext.filePreview");
+  return { label, t };
+}
+
+function SurfaceTabDragPreview({ projectLabel, tab }: { projectLabel: string; tab: SurfaceTab }) {
+  const { label } = useSurfaceTabLabel(tab, projectLabel);
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        workspaceTabClassName,
+        workspaceTabActiveClassName,
+        "w-28 min-w-20 cursor-grabbing whitespace-nowrap shadow-md",
+      )}
+    >
+      <span className="relative inline-flex size-(--workspace-toolbar-tab-icon) shrink-0">
+        <span className="inline-flex size-full items-center justify-center">
+          <SurfaceTabLeadingIcon tab={tab} />
+        </span>
+      </span>
+      <span className="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap">{label}</span>
+    </div>
+  );
+}
 
 function SortableSurfaceTabButton({
   activeBrowserTabID,
@@ -248,18 +317,7 @@ function SortableSurfaceTabButton({
   onSelectFilePreview: (previewID: string) => void;
   onSelectProject: () => void;
 }) {
-  const { t } = useI18n();
-  const browser = tab.kind === "browser" ? tab.browser : undefined;
-  const project = tab.kind === "project";
-  const file = tab.kind === "file" ? tab.file : undefined;
-  const widget = tab.kind === "widget" ? tab.widget : undefined;
-  const label = project
-    ? projectLabel
-    : browser
-      ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
-      : widget
-        ? titleForCanvasItem(widget, t)
-        : file?.label || t("uiContext.filePreview");
+  const { label, t } = useSurfaceTabLabel(tab, projectLabel);
   const selected =
     (tab.kind === "project" && activeSurface === "project") ||
     (tab.kind === "browser" && activeSurface === "browser" && tab.id === activeBrowserTabID) ||
@@ -270,7 +328,7 @@ function SortableSurfaceTabButton({
     (tab.kind === "widget" && tab.id === closingCanvasItemID);
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
     id: surfaceTabID(tab),
-    disabled: closePending,
+    disabled: Boolean(closingBrowserTabID) || closePending,
   });
   const horizontalTransform = transform ? { ...transform, y: 0, scaleX: 1, scaleY: 1 } : null;
   const closeLabel =
@@ -304,15 +362,14 @@ function SortableSurfaceTabButton({
         workspaceTabClassName,
         "group relative w-28 min-w-20 shrink whitespace-nowrap",
         selected && workspaceTabActiveClassName,
-        isDragging && "cursor-grabbing opacity-80 shadow-md",
+        isDragging && "cursor-grabbing opacity-0",
       )}
       data-active={selected}
       data-workspace-resource-tab
       disabled={closePending}
       style={{
-        transform: CSS.Transform.toString(horizontalTransform),
-        transition,
-        zIndex: isDragging ? 1 : undefined,
+        transform: isDragging ? undefined : CSS.Transform.toString(horizontalTransform),
+        transition: isDragging ? undefined : transition,
       }}
 
       type="button"
@@ -330,17 +387,7 @@ function SortableSurfaceTabButton({
     >
       <span className="relative inline-flex size-(--workspace-toolbar-tab-icon) shrink-0">
         <span className="inline-flex size-full items-center justify-center">
-          {project ? (
-            <span className="inline-flex size-full items-center justify-center text-current">
-              <Folders className="h-3.5 w-3.5" />
-            </span>
-          ) : browser ? (
-            <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
-          ) : widget ? (
-            <CanvasKindIcon className="!bg-transparent !text-current" kind={widget.kind} size="xs" />
-          ) : (
-            <FilePreviewTabIcon kind={file?.kind || "file"} />
-          )}
+          <SurfaceTabLeadingIcon tab={tab} />
         </span>
       </span>
       <span className="min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap">{label}</span>

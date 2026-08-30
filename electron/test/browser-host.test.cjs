@@ -217,6 +217,25 @@ test("waits for a renderer webview and navigates it through persistent CDP", asy
   host.closeAll();
 });
 
+test("reserves a new tab before its renderer webview is ready", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+
+  const created = host.createTab({
+    sessionID: "session-create",
+    tabID: "tab-create",
+    url: "about:blank",
+  });
+
+  assert.equal(created.status, "pending");
+  assert.equal(created.tabID, "tab-create");
+  assert.equal(created.runtimeID, "");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(required.length, 1);
+  assert.equal(required[0].tabID, "tab-create");
+  host.closeAll();
+});
+
 test("a silent ensure keeps a restored browser tab in the background", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));

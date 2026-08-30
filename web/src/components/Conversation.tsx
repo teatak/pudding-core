@@ -13,10 +13,11 @@ import { FloatingTurnConsole } from "@/components/FloatingTurnConsole";
 import { Transcript } from "@/components/Transcript";
 import type { TranscriptSearchState } from "@/components/transcript/types";
 import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
+import type { WorkspaceArtifact } from "@/components/workspace/types";
+import { useSessionWorkspaceArtifacts } from "@/hooks/useSessionWorkspaceArtifacts";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
-import { type WorkspaceActivity, useWorkspaceActivities } from "@/state/workspaceActivityStore";
 import { mergeWorkspaceTabOrder, useWorkspaceTabOrder } from "@/state/workspaceTabOrderStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
@@ -54,14 +55,14 @@ export function Conversation({
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
   const floating = presentation === "floating";
   const workspaceOpen = useWorkspaceOpen(session.id);
-  const workspaceActivities = useWorkspaceActivities(session.id);
+  const workspaceArtifacts = useSessionWorkspaceArtifacts(session.id, token, !workspaceOpen);
   const workspaceTabOrder = useWorkspaceTabOrder(session.id);
-  const orderedWorkspaceActivities = useMemo(
-    () => orderWorkspaceActivities(workspaceActivities, workspaceTabOrder),
-    [workspaceActivities, workspaceTabOrder],
+  const orderedWorkspaceArtifacts = useMemo(
+    () => orderWorkspaceArtifacts(workspaceArtifacts, workspaceTabOrder),
+    [workspaceArtifacts, workspaceTabOrder],
   );
   const browserAutomationActivity = useBrowserAutomationActivity(session.id);
-  const hasVisibleActivities = orderedWorkspaceActivities.length > 0
+  const hasVisibleActivities = orderedWorkspaceArtifacts.length > 0
     || Boolean(browserAutomationActivity);
   const showActivitySurface = !floating
     && !workspaceOpen
@@ -253,7 +254,7 @@ export function Conversation({
           className="pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
         >
           <WorkspaceActivityCard
-            activities={orderedWorkspaceActivities}
+            artifacts={orderedWorkspaceArtifacts}
             browserPreview={browserAutomationActivity
               ? {
                   content: <BrowserAutomationPip embedded sessionID={session.id} />,
@@ -274,7 +275,7 @@ export function Conversation({
         {showComposerActivities ? (
           <ChatColumn className="relative z-10 mb-3 flex flex-col items-center gap-3">
             <WorkspaceActivityCard
-              activities={orderedWorkspaceActivities}
+              artifacts={orderedWorkspaceArtifacts}
               presentation="composer"
             />
             {browserAutomationActivity ? (
@@ -311,35 +312,20 @@ export function Conversation({
   );
 }
 
-function orderWorkspaceActivities(
-  activities: WorkspaceActivity[],
+function orderWorkspaceArtifacts(
+  artifacts: WorkspaceArtifact[],
   savedOrder: string[],
 ) {
-  const activityByTabID = new Map<string, WorkspaceActivity>();
-  const activitiesWithoutTabID: WorkspaceActivity[] = [];
-  activities.forEach((activity) => {
-    const tabID = workspaceActivityTabID(activity);
-    if (tabID) {
-      activityByTabID.set(tabID, activity);
-    } else {
-      activitiesWithoutTabID.push(activity);
-    }
+  const artifactByTabID = new Map(artifacts.map((artifact) => [workspaceArtifactTabID(artifact), artifact]));
+  const orderedTabIDs = mergeWorkspaceTabOrder(savedOrder, [...artifactByTabID.keys()]);
+  return orderedTabIDs.flatMap((tabID) => {
+    const artifact = artifactByTabID.get(tabID);
+    return artifact ? [artifact] : [];
   });
-  const orderedTabIDs = mergeWorkspaceTabOrder(savedOrder, [...activityByTabID.keys()]);
-  return [
-    ...orderedTabIDs.flatMap((tabID) => {
-      const activity = activityByTabID.get(tabID);
-      return activity ? [activity] : [];
-    }),
-    ...activitiesWithoutTabID,
-  ];
 }
 
-function workspaceActivityTabID(activity: WorkspaceActivity) {
-  if (!activity.resourceID) {
-    return "";
-  }
-  return `${activity.kind === "browser" ? "browser" : "widget"}:${activity.resourceID}`;
+function workspaceArtifactTabID(artifact: WorkspaceArtifact) {
+  return `${artifact.kind === "browser" ? "browser" : "widget"}:${artifact.resourceID}`;
 }
 
 function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null }) {

@@ -1,10 +1,5 @@
 import { create } from "zustand";
 
-import {
-  recordWorkspaceActivity,
-  retainWorkspaceActivities,
-  type BrowserWorkspaceActivity,
-} from "@/state/workspaceActivityStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 type BrowserRevealState = {
@@ -49,23 +44,13 @@ export const useBrowserRevealStore = create<BrowserRevealState>((set) => ({
     }),
 }));
 
-export function requestBrowserReveal(
-  sessionID: string,
-  activity?: Omit<BrowserWorkspaceActivity, "kind" | "sessionID">,
-) {
-  if (activity) {
-    recordWorkspaceActivity({ ...activity, kind: "browser", sessionID });
-  }
-  useBrowserRevealStore.getState().requestReveal(sessionID, activity?.resourceID);
+export function requestBrowserReveal(sessionID: string, tabID?: string) {
+  useBrowserRevealStore.getState().requestReveal(sessionID, tabID);
 }
 
 export function openBrowserReveal(sessionID: string, tabID?: string) {
   useBrowserRevealStore.getState().requestReveal(sessionID, tabID);
   setWorkspaceOpen(sessionID, true);
-}
-
-export function retainBrowserActivities(sessionID: string, tabIDs: string[]) {
-  retainWorkspaceActivities(sessionID, "browser", tabIDs);
 }
 
 export function consumeBrowserReveal(sessionID: string, epoch: number) {

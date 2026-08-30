@@ -12,7 +12,7 @@ import {
   type HTMLAttributes,
 } from "react";
 
-import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
+import { listBrowserHistory, type BrowserHistoryEntry } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import {
@@ -24,17 +24,14 @@ import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBro
 import {
   browserQueryStaleTimeMS,
   browserCompactURL,
-  browserTargetURL,
   browserTabTitle,
   browserURLIsBlank,
-  preferredBrowserTab,
   uniqueBrowserHistoryBySite,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemGroup, ItemHeader, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
-import type { BrowserCanvasPayload } from "./types";
 
 type WebviewElement = HTMLElement & {
   getWebContentsId?: () => number;
@@ -87,7 +84,7 @@ export type ElectronWebviewRuntimeHandle = {
 };
 
 export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
-  activeTab?: ElectronBrowserSurfaceTab;
+  activeTab: ElectronBrowserSurfaceTab;
   onReadyChange?: (ready: boolean) => void;
   sessionID: string;
   token: string;
@@ -100,7 +97,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const webviewRef = useRef<WebviewElement | null>(null);
-  const payload = browserPayloadFromTab(activeTabProp);
   const webviewReadyRef = useRef(false);
   const webviewReadyCleanupRef = useRef<(() => void) | null>(null);
   const pendingTargetURLRef = useRef("");
@@ -117,22 +113,10 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
   const ownerSessionID = sessionID;
-  const tabsQuery = useQuery({
-    enabled: Boolean(token && ownerSessionID),
-    queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
-    queryFn: () => {
-      if (!ownerSessionID) {
-        throw new Error("browser session id missing");
-      }
-      return listBrowserTabs(token, ownerSessionID);
-    },
-    staleTime: browserQueryStaleTimeMS,
-  });
-  const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === ownerSessionID);
-  const activeTab = activeTabProp || preferredBrowserTab(tabs, payload);
-  const title = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.newTab"), t("browser.newTab")) : payload?.title || t("browser.newTab");
-  const tabID = activeTab?.id || payload?.tabID || "default";
-  const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, payload?.updatedAt));
+  const activeTab = activeTabProp;
+  const title = browserTabTitle(activeTab, t("browser.newTab"), t("browser.newTab"));
+  const tabID = activeTab.id;
+  const targetURL = normalizeWebviewURL(activeTab.url);
   const webviewRequestID = activeTabProp?.webviewRequestID || "";
   const recentHistoryQuery = useQuery({
     enabled: Boolean(token && ownerSessionID && browserURLIsBlank(targetURL)),
@@ -806,20 +790,4 @@ function webviewErrorHost(rawURL: string) {
   } catch {
     return "";
   }
-}
-
-function browserPayloadFromTab(tab: BrowserTab | undefined): (BrowserCanvasPayload & { updatedAt?: string }) | null {
-  if (!tab) {
-    return null;
-  }
-  return {
-    kind: "browser",
-    sessionID: tab.sessionID,
-    tabID: tab.id,
-    url: tab.url,
-    title: tab.title,
-    faviconURL: tab.faviconURL,
-    mode: tab.mode,
-    updatedAt: tab.updatedAt,
-  };
 }

@@ -18,8 +18,10 @@ import {
 } from "@/browser/ElectronWebviewBrowser";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import {
+  BrowserAutomationActivityContext,
   BrowserRuntimeContext,
   useBrowserRuntimeContext,
+  useVisibleBrowserAutomationActivity,
   type BrowserAutomationActivity,
   type BrowserRuntimeContextValue,
   type BrowserRuntimeViewport,
@@ -36,7 +38,6 @@ import {
 import { Check, Globe, X } from "@/components/icons";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
-import { recordWorkspaceActivity } from "@/state/workspaceActivityStore";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 type RuntimeEntry = {
@@ -55,7 +56,6 @@ type AutomationLease = {
   presentationFrameReady: boolean;
 };
 
-const emptyRuntimeTabs: ElectronBrowserSurfaceTab[] = [];
 const automationPipCloseDelayMs = 30_000;
 const pipViewportPriority = 10;
 const workspaceViewportPriority = 20;
@@ -140,9 +140,20 @@ export function BrowserRuntimeProvider({
     });
     return next;
   }, [requiredTabsBySession, retainedTabsBySession, token]);
-  const runtimeTabsBySessionRef = useRef(runtimeTabsBySession);
-  runtimeTabsBySessionRef.current = runtimeTabsBySession;
-
+  const visibleAutomationActivitiesRef = useRef<Record<string, BrowserAutomationActivity>>({});
+  const visibleAutomationActivitiesBySession = useMemo(() => {
+    const next = Object.fromEntries(Object.entries(automationActivitiesBySession).filter(
+      ([sessionID, activity]) => (
+        readyRuntimeKeys.has(runtimeKey(sessionID, activity.tabID))
+        && runtimeTabsBySession[sessionID]?.some((tab) => tab.id === activity.tabID)
+      ),
+    ));
+    if (sameAutomationActivityRecord(visibleAutomationActivitiesRef.current, next)) {
+      return visibleAutomationActivitiesRef.current;
+    }
+    visibleAutomationActivitiesRef.current = next;
+    return next;
+  }, [automationActivitiesBySession, readyRuntimeKeys, runtimeTabsBySession]);
   const applyPresentations = useCallback(() => {
     const viewport = selectActiveViewport(viewportsRef.current);
 
@@ -323,17 +334,6 @@ export function BrowserRuntimeProvider({
     const stopStart = bridge.onAutomationStart((event) => {
       window.clearTimeout(automationHideTimersRef.current.get(event.sessionID));
       automationHideTimersRef.current.delete(event.sessionID);
-      const tab = runtimeTabsBySessionRef.current[event.sessionID]?.find(
-        (entry) => entry.id === event.tabID,
-      );
-      recordWorkspaceActivity({
-        faviconURL: tab?.faviconURL,
-        kind: "browser",
-        resourceID: event.tabID,
-        sessionID: event.sessionID,
-        title: tab?.title,
-        url: tab?.url,
-      });
       const activity: BrowserAutomationActivity = {
         action: event.action,
         phase: "running",
@@ -482,25 +482,27 @@ export function BrowserRuntimeProvider({
   ]);
 
   return (
-    <BrowserRuntimeContext.Provider value={context}>
-      {children}
-      <div
-        className="pudding-browser-keepalive-layer pointer-events-none fixed inset-0 z-20 overflow-hidden"
-      >
-        {Object.entries(runtimeTabsBySession).flatMap(([sessionID, tabs]) =>
-          tabs.map((tab) => (
-            <BrowserRuntimeHost
-              key={runtimeKey(sessionID, tab.id)}
-              registerRuntime={registerRuntime}
-              setRuntimeReady={setRuntimeReady}
-              sessionID={sessionID}
-              tab={tab}
-              token={token}
-            />
-          )),
-        )}
-      </div>
-    </BrowserRuntimeContext.Provider>
+    <BrowserAutomationActivityContext.Provider value={visibleAutomationActivitiesBySession}>
+      <BrowserRuntimeContext.Provider value={context}>
+        {children}
+        <div
+          className="pudding-browser-keepalive-layer pointer-events-none fixed inset-0 z-20 overflow-hidden"
+        >
+          {Object.entries(runtimeTabsBySession).flatMap(([sessionID, tabs]) =>
+            tabs.map((tab) => (
+              <BrowserRuntimeHost
+                key={runtimeKey(sessionID, tab.id)}
+                registerRuntime={registerRuntime}
+                setRuntimeReady={setRuntimeReady}
+                sessionID={sessionID}
+                tab={tab}
+                token={token}
+              />
+            )),
+          )}
+        </div>
+      </BrowserRuntimeContext.Provider>
+    </BrowserAutomationActivityContext.Provider>
   );
 }
 
@@ -729,31 +731,24 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
 });
 
 export function useBrowserAutomationActivity(sessionID: string) {
-  const {
-    automationActivitiesBySession,
-    readyRuntimeKeys,
-    runtimeTabsBySession,
-  } = useBrowserRuntimeContext();
-  const activity = automationActivitiesBySession[sessionID];
-  return activity?.sessionID === sessionID
-    && readyRuntimeKeys.has(runtimeKey(sessionID, activity.tabID))
-    && runtimeTabsBySession[sessionID]?.some((tab) => tab.id === activity.tabID)
-    ? activity
-    : undefined;
+  return useVisibleBrowserAutomationActivity(sessionID);
 }
 
-export function useBrowserRuntimeTabs(
+export function useRetainBrowserRuntimeTabs(
   sessionID: string,
   tabs: ElectronBrowserSurfaceTab[],
   tabsReady: boolean,
 ) {
-  const { requiredTabsBySession, retainTabs } = useBrowserRuntimeContext();
+  const { retainTabs } = useBrowserRuntimeContext();
+  const retainableTabs = useMemo(
+    () => tabs.filter((tab) => Boolean(tab.targetID)),
+    [tabs],
+  );
   useEffect(() => {
     if (tabsReady) {
-      retainTabs(sessionID, tabs);
+      retainTabs(sessionID, retainableTabs);
     }
-  }, [retainTabs, sessionID, tabs, tabsReady]);
-  return requiredTabsBySession[sessionID] || emptyRuntimeTabs;
+  }, [retainTabs, retainableTabs, sessionID, tabsReady]);
 }
 
 const BrowserRuntimeHost = memo(function BrowserRuntimeHost({
@@ -1030,4 +1025,14 @@ function sameRuntimeTabs(
       current.length === next.length &&
       current.every((tab, index) => tab === next[index]),
   );
+}
+
+function sameAutomationActivityRecord(
+  current: Record<string, BrowserAutomationActivity>,
+  next: Record<string, BrowserAutomationActivity>,
+) {
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  return currentKeys.length === nextKeys.length
+    && currentKeys.every((key) => current[key] === next[key]);
 }

@@ -136,6 +136,8 @@ class BrowserBridgeServer {
     switch (path) {
       case "/browser/tabs/ensure":
         return this.browserHost.ensure(trustedBrowserRequest(body));
+      case "/browser/tabs/create":
+        return this.browserHost.createTab(trustedBrowserRequest(body));
       case "/browser/tabs/open":
         return this.browserHost.loadURL(trustedBrowserRequest(body));
       case "/browser/tabs/list":

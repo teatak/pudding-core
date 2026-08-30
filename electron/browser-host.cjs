@@ -51,6 +51,15 @@ class BrowserHost {
     return snapshot(slot);
   }
 
+  createTab(request) {
+    const slot = this.ensureSlot(request);
+    const url = normalizeURL(request.url, slot.fileRoots);
+    if (String(request.url || "").trim() && !url) {
+      throw navigationNotAllowedError(request.url);
+    }
+    return snapshot(slot);
+  }
+
   allowsAttachmentURL(rawURL) {
     return [...this.slots.values()].some((slot) => (
       sameNormalizedURL(slot.displayURL, rawURL, slot.fileRoots)

@@ -20,7 +20,7 @@ import {
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { useBrowserRuntimeTabs } from "@/browser/BrowserRuntimeProvider";
+import { useRetainBrowserRuntimeTabs } from "@/browser/BrowserRuntimeProvider";
 import { browserTabTitle } from "@/browser/helpers";
 import { activateBrowserPageFindRegion } from "@/browser/pageFindTarget";
 import type { GalleryLayout } from "@/components/canvas/CanvasItemContent";
@@ -58,10 +58,6 @@ import {
 } from "@/state/filePreviewStore";
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
-import {
-  retainWorkspaceActivities,
-  syncBrowserWorkspaceActivities,
-} from "@/state/workspaceActivityStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
@@ -277,12 +273,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const closedItems = useMemo(() => closedItemsQuery.data?.items ?? [], [closedItemsQuery.data?.items]);
   const savedItems = useMemo(() => savedItemsQuery.data?.items ?? [], [savedItemsQuery.data?.items]);
-  useEffect(() => {
-    if (!actorSessionID || itemsQuery.isLoading) {
-      return;
-    }
-    retainWorkspaceActivities(actorSessionID, "canvas", items.map((item) => item.id));
-  }, [actorSessionID, items, itemsQuery.isLoading]);
   const selectedCanvasItemID = activeCanvasItemIDs[actorSessionID];
   const activeCanvasItem = items.find((item) => item.id === selectedCanvasItemID) || topCanvasItem(items);
   const selectCanvasItem = useCallback((itemID: string) => {
@@ -317,25 +307,8 @@ export const WorkspacePane = memo(function WorkspacePane({
     sessionID: actorSessionID,
     token,
   });
-  const requiredBrowserTabs = useBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
-  const browserSurfaceTabs = useMemo(
-    () => browserTabsReady ? mergeBrowserSurfaceTabs(browserTabs, requiredBrowserTabs) : [],
-    [browserTabs, browserTabsReady, requiredBrowserTabs],
-  );
-  useEffect(() => {
-    if (!actorSessionID || !browserTabsReady) {
-      return;
-    }
-    syncBrowserWorkspaceActivities(
-      actorSessionID,
-      browserSurfaceTabs.map((tab) => ({
-        faviconURL: tab.faviconURL,
-        resourceID: tab.id,
-        title: tab.title,
-        url: tab.url,
-      })),
-    );
-  }, [actorSessionID, browserSurfaceTabs, browserTabsReady]);
+  useRetainBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
+  const browserSurfaceTabs = browserTabsReady ? browserTabs : [];
   const projectActive = activeSurface === "project" && hasFileWorkspace;
   useEffect(() => {
     if (retainedTokenRef.current === token) {
@@ -1088,19 +1061,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     </aside>
   );
 });
-
-function mergeBrowserSurfaceTabs<T extends { id: string }>(current: T[] | undefined, required: T[]) {
-  const next = [...(current || [])];
-  required.forEach((tab) => {
-    const index = next.findIndex((entry) => entry.id === tab.id);
-    if (index >= 0) {
-      next[index] = tab;
-    } else {
-      next.push(tab);
-    }
-  });
-  return next;
-}
 
 function sameResourceRecord<T>(current: Record<string, T>, next: Record<string, T>) {
   const currentKeys = Object.keys(current);

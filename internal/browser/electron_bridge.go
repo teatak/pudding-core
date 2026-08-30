@@ -202,7 +202,7 @@ func (s *ElectronBridgeService) SupportsMetadataRecovery() bool {
 func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
 	tabID := newID("tab")
 	var snapshot electronBridgeSnapshot
-	if err := s.post(ctx, "/browser/tabs/ensure", electronBridgeRequest{
+	if err := s.post(ctx, "/browser/tabs/create", electronBridgeRequest{
 		SessionID: sessionID,
 		TabID:     tabID,
 		URL:       "about:blank",

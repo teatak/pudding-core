@@ -138,6 +138,19 @@ export function upsertBrowserTab(tabs: BrowserTab[], tab: BrowserTab): BrowserTa
   return next;
 }
 
+export function mergeBrowserTabs<T extends { id: string }>(current: T[] | undefined, required: T[]) {
+  const next = [...(current || [])];
+  required.forEach((tab) => {
+    const index = next.findIndex((entry) => entry.id === tab.id);
+    if (index >= 0) {
+      next[index] = tab;
+    } else {
+      next.push(tab);
+    }
+  });
+  return next;
+}
+
 export function faviconURLForPage(rawURL: string): string {
   try {
     const url = new URL(rawURL);

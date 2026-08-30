@@ -76,21 +76,20 @@ func TestElectronBridgeServiceOpenListAndRelease(t *testing.T) {
 	}
 }
 
-func TestElectronBridgeServiceCreateTabEnsuresNativeSlot(t *testing.T) {
-	var ensured electronBridgeRequest
+func TestElectronBridgeServiceCreateTabReservesNativeSlot(t *testing.T) {
+	var created electronBridgeRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/browser/tabs/ensure" {
+		if r.URL.Path != "/browser/tabs/create" {
 			t.Fatalf("unexpected bridge path: %s", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&ensured); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
 			t.Fatal(err)
 		}
 		writeElectronBridgeTestJSON(w, electronBridgeSnapshot{
-			SessionID: ensured.SessionID,
-			TabID:     ensured.TabID,
-			Status:    "detached",
-			URL:       ensured.URL,
-			RuntimeID: "webContents:2",
+			SessionID: created.SessionID,
+			TabID:     created.TabID,
+			Status:    "pending",
+			URL:       created.URL,
 		})
 	}))
 	defer server.Close()
@@ -103,8 +102,8 @@ func TestElectronBridgeServiceCreateTabEnsuresNativeSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ensured.SessionID != "sess_blank" || ensured.TabID != tab.ID || ensured.URL != "about:blank" {
-		t.Fatalf("unexpected ensure request: %+v", ensured)
+	if created.SessionID != "sess_blank" || created.TabID != tab.ID || created.URL != "about:blank" {
+		t.Fatalf("unexpected create request: %+v", created)
 	}
 	if tab.SessionID != "sess_blank" || tab.ID == "" || tab.URL != "about:blank" || tab.Title != "" {
 		t.Fatalf("unexpected blank tab metadata: %+v", tab)

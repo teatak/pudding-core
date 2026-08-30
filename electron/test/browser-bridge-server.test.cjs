@@ -93,6 +93,24 @@ test("classifies rejected file URLs and only trusts bridge navigation requests",
   assert.equal(received.fileRoot, "/project");
 });
 
+test("routes native tab creation without waiting for a webview", async () => {
+  let received;
+  const server = new BrowserBridgeServer({
+    createTab(request) {
+      received = request;
+      return { status: "pending", tabID: request.tabID };
+    },
+  });
+  const result = await server.route("/browser/tabs/create", {
+    sessionID: "session-1",
+    tabID: "tab-1",
+    url: "about:blank",
+  });
+  assert.equal(received._fileAuthorized, true);
+  assert.equal(result.status, "pending");
+  assert.equal(result.tabID, "tab-1");
+});
+
 test("routes project file grant revocation", async () => {
   let received;
   const server = new BrowserBridgeServer({

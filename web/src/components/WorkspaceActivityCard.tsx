@@ -4,18 +4,18 @@ import { Fragment, type ReactNode } from "react";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
 import { ShellActionButton } from "@/components/ShellActionButton";
+import type { WorkspaceArtifact } from "@/components/workspace/types";
 import { useI18n } from "@/i18n";
 import { openBrowserReveal } from "@/state/browserRevealStore";
 import { openCanvasReveal } from "@/state/canvasRevealStore";
-import type { WorkspaceActivity } from "@/state/workspaceActivityStore";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceActivityCard({
-  activities,
+  artifacts,
   browserPreview,
   presentation = "rail",
 }: {
-  activities: WorkspaceActivity[];
+  artifacts: WorkspaceArtifact[];
   browserPreview?: {
     content: ReactNode;
     resourceID: string;
@@ -24,7 +24,7 @@ export function WorkspaceActivityCard({
 }) {
   const { t } = useI18n();
 
-  if (activities.length === 0) {
+  if (artifacts.length === 0) {
     return null;
   }
   return (
@@ -38,17 +38,17 @@ export function WorkspaceActivityCard({
       )}
       role="group"
     >
-      {activities.map((activity) => {
-        const key = `${activity.kind}:${activity.resourceID || activity.serial}`;
+      {artifacts.map((artifact) => {
+        const key = `${artifact.kind}:${artifact.resourceID}`;
         const showPreview = presentation === "rail"
-          && activity.kind === "browser"
-          && activity.resourceID === browserPreview?.resourceID;
+          && artifact.kind === "browser"
+          && artifact.resourceID === browserPreview?.resourceID;
         return (
           <Fragment key={key}>
             <WorkspaceActivityRow
-              activity={activity}
+              artifact={artifact}
               presentation={presentation}
-              onOpen={() => openWorkspaceActivity(activity)}
+              onOpen={() => openWorkspaceArtifact(artifact)}
             />
             {showPreview ? <div className="mx-1.5">{browserPreview?.content}</div> : null}
           </Fragment>
@@ -59,21 +59,21 @@ export function WorkspaceActivityCard({
 }
 
 function WorkspaceActivityRow({
-  activity,
+  artifact,
   presentation,
   onOpen,
 }: {
-  activity: WorkspaceActivity;
+  artifact: WorkspaceArtifact;
   presentation: "composer" | "rail";
   onOpen: () => void;
 }) {
   const { t } = useI18n();
-  const title = activity.title?.trim()
-    || (activity.kind === "browser" ? browserHost(activity.url) : "")
-    || t(activity.kind === "browser" ? "browser.noTitle" : "canvas.untitled");
-  const detail = activity.kind === "browser"
-    ? browserHost(activity.url) || t("workspace.activity.browser")
-    : t(canvasKindKey(activity.resourceKind));
+  const title = artifact.title?.trim()
+    || (artifact.kind === "browser" ? browserHost(artifact.url) : "")
+    || t(artifact.kind === "browser" ? "browser.noTitle" : "canvas.untitled");
+  const detail = artifact.kind === "browser"
+    ? browserHost(artifact.url) || t("workspace.activity.browser")
+    : t(canvasKindKey(artifact.resourceKind));
 
   return (
     <ShellActionButton
@@ -87,7 +87,7 @@ function WorkspaceActivityRow({
       size="sm"
       onClick={onOpen}
     >
-      <WorkspaceActivityIcon activity={activity} presentation={presentation} />
+      <WorkspaceActivityIcon artifact={artifact} presentation={presentation} />
       {presentation === "composer" ? (
         <span className="min-w-0 truncate text-xs font-medium">{title}</span>
       ) : (
@@ -101,14 +101,14 @@ function WorkspaceActivityRow({
 }
 
 function WorkspaceActivityIcon({
-  activity,
+  artifact,
   presentation,
 }: {
-  activity: WorkspaceActivity;
+  artifact: WorkspaceArtifact;
   presentation: "composer" | "rail";
 }) {
-  if (activity.kind === "canvas") {
-    return <CanvasKindIcon kind={activity.resourceKind} size={presentation === "composer" ? "xs" : "md"} />;
+  if (artifact.kind === "canvas") {
+    return <CanvasKindIcon kind={artifact.resourceKind} size={presentation === "composer" ? "xs" : "md"} />;
   }
   return (
     <span
@@ -122,19 +122,19 @@ function WorkspaceActivityIcon({
       <BrowserFavicon
         className="size-full rounded-sm object-cover"
         fallback={<Globe className="size-3.5" />}
-        faviconURL={activity.faviconURL}
-        pageURL={activity.url || ""}
+        faviconURL={artifact.faviconURL}
+        pageURL={artifact.url || ""}
       />
     </span>
   );
 }
 
-function openWorkspaceActivity(activity: WorkspaceActivity) {
-  if (activity.kind === "browser") {
-    openBrowserReveal(activity.sessionID, activity.resourceID);
+function openWorkspaceArtifact(artifact: WorkspaceArtifact) {
+  if (artifact.kind === "browser") {
+    openBrowserReveal(artifact.sessionID, artifact.resourceID);
     return;
   }
-  openCanvasReveal(activity.sessionID, activity.resourceID);
+  openCanvasReveal(artifact.sessionID, artifact.resourceID);
 }
 
 function browserHost(url: string | undefined) {

@@ -14,6 +14,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { AppIdentityIcon, appDisplayName } from "@/components/AppIdentity";
 import { AppIcon } from "@/components/AppIcon";
 import { Spinner } from "@/components/Spinner";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -53,8 +54,10 @@ export function SessionAppsControl({ session, token }: { session: Session; token
     return null;
   }
 
-  const visibleAppIDs = loadedAppIDs.slice(0, maxVisibleApps);
-  const hiddenAppCount = Math.max(0, loadedAppIDs.length - visibleAppIDs.length);
+  const overflowCount = Math.max(0, loadedAppIDs.length - maxVisibleApps);
+  const visibleAppCount = overflowCount === 1 ? maxVisibleApps + 1 : maxVisibleApps;
+  const visibleAppIDs = loadedAppIDs.slice(0, visibleAppCount);
+  const hiddenAppIDs = loadedAppIDs.slice(visibleAppCount);
 
   return (
     <div
@@ -95,10 +98,42 @@ export function SessionAppsControl({ session, token }: { session: Session; token
           </div>
         );
       })}
-      {hiddenAppCount > 0 ? (
-        <span className="-ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5">
-          +{hiddenAppCount}
-        </span>
+      {hiddenAppIDs.length > 0 ? (
+        <HoverCard openDelay={120} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <button
+              aria-label={t("apps.sessionMoreCount").replace("{count}", String(hiddenAppIDs.length))}
+              className="-ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:ml-0.5 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5"
+              type="button"
+            >
+              +{hiddenAppIDs.length}
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent align="end" side="bottom" sideOffset={8} className="w-52 p-1.5">
+            <div className="grid gap-0.5">
+              {hiddenAppIDs.map((appID) => {
+                const app = appsByID.get(appID);
+                const name = app ? appDisplayName(app, t) : appID;
+                const pending = unloadMutation.isPending && unloadMutation.variables === appID;
+                return (
+                  <div key={appID} className="flex h-9 min-w-0 items-center gap-2 rounded-md px-2 text-sm hover:bg-muted">
+                    <SessionAppIcon app={app} token={token} />
+                    <span className="min-w-0 flex-1 truncate">{name}</span>
+                    <button
+                      aria-label={t("apps.sessionUnload").replace("{name}", name)}
+                      className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      disabled={pending}
+                      type="button"
+                      onClick={() => unloadMutation.mutate(appID)}
+                    >
+                      {pending ? <Spinner className="size-3" /> : <X className="size-3.5" data-icon-weight="subtle" />}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       ) : null}
     </div>
   );

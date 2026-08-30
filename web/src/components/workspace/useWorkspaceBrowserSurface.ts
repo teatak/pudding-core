@@ -1,11 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   adoptBrowserTab,
   createBrowserTab,
-  listBrowserTabs,
   releaseBrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -16,10 +15,10 @@ import {
   electronBrowserBridge,
 } from "@/browser/electronBridge";
 import {
-  browserQueryStaleTimeMS,
   preferredBrowserTab,
   upsertBrowserTab,
 } from "@/browser/helpers";
+import { useSessionBrowserTabs } from "@/browser/useSessionBrowserTabs";
 import type { BrowserTabsData } from "@/browser/types";
 import type { WorkspaceSurface } from "@/components/workspace/types";
 import { useI18n } from "@/i18n";
@@ -27,6 +26,11 @@ import {
   consumeBrowserReveal,
   useBrowserReveal,
 } from "@/state/browserRevealStore";
+import {
+  mergeWorkspaceTabOrder,
+  useWorkspaceTabOrder,
+} from "@/state/workspaceTabOrderStore";
+import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 
 const SESSION_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v2";
 const LEGACY_WORKSPACE_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v1";
@@ -54,12 +58,14 @@ export function useWorkspaceBrowserSurface({
 }: UseWorkspaceBrowserSurfaceArgs) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const workspaceOpen = useWorkspaceOpen(sessionID);
   const [initialSessionSurfaces] = useState(readSessionSurfaces);
   const [initialSelectedBrowserTabs] = useState(readSelectedBrowserTabs);
   const currentSessionIDRef = useRef("");
   const sessionSurfaceRef = useRef<Record<string, WorkspaceSurface>>(initialSessionSurfaces);
   const surfaceSessionRef = useRef(sessionID);
   const selectedBrowserTabRef = useRef<Record<string, string>>(initialSelectedBrowserTabs);
+  const closingBrowserTabRef = useRef("");
   const readyTokenRef = useRef(token);
   const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>(
     () => sessionSurfaceRef.current[sessionID] || "workspace",
@@ -118,23 +124,19 @@ export function useWorkspaceBrowserSurface({
   }, [sessionID]);
 
   const browserReveal = useBrowserReveal(sessionID);
-  const browserTabsQuery = useQuery({
+  const { query: browserTabsQuery, tabs: browserTabs } = useSessionBrowserTabs(
+    sessionID,
+    token,
     enabled,
-    queryKey: sessionID ? queryKeys.browserTabs(sessionID) : ["browser", "missing-session"],
-    queryFn: () => {
-      if (!sessionID) {
-        throw new Error("browser session id missing");
-      }
-      return listBrowserTabs(token, sessionID);
-    },
-    staleTime: browserQueryStaleTimeMS,
-  });
-  const browserTabs = useMemo(
-    () => (browserTabsQuery.data?.tabs ?? [])
-      .filter((tab) => tab.sessionID === sessionID)
-      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
-    [browserTabsQuery.data?.tabs, sessionID],
   );
+  const workspaceTabOrder = useWorkspaceTabOrder(sessionID);
+  const visualBrowserTabs = useMemo(() => {
+    const tabsByID = new Map(browserTabs.map((tab) => [`browser:${tab.id}`, tab]));
+    return mergeWorkspaceTabOrder(workspaceTabOrder, [...tabsByID.keys()]).flatMap((id) => {
+      const tab = tabsByID.get(id);
+      return tab ? [tab] : [];
+    });
+  }, [browserTabs, workspaceTabOrder]);
   const browserTabsReady = Boolean(
     readyTokenRef.current === token
     && sessionID
@@ -379,17 +381,28 @@ export function useWorkspaceBrowserSurface({
       const previousSelectedTabID = selectedBrowserTabRef.current[targetSessionID];
       const previousSurface = sessionSurfaceRef.current[targetSessionID];
       const currentTabs = previousTabs?.tabs || [];
-      const closingIndex = currentTabs.findIndex((tab) => tab.id === tabID);
       const remaining = currentTabs.filter((tab) => tab.id !== tabID);
-      const replacement = remaining[Math.min(Math.max(closingIndex, 0), Math.max(remaining.length - 1, 0))];
-      if (previousSelectedTabID === tabID || !remaining.some((tab) => tab.id === previousSelectedTabID)) {
+      const closingVisualIndex = visualBrowserTabs.findIndex((tab) => tab.id === tabID);
+      const remainingVisualTabs = visualBrowserTabs.filter((tab) => tab.id !== tabID);
+      const replacement = closingVisualIndex >= 0
+        ? remainingVisualTabs[closingVisualIndex] || remainingVisualTabs[closingVisualIndex - 1]
+        : undefined;
+      const closeWorkspace = workspaceOpen
+        && remainingVisualTabs.length === 0
+        && itemsLength === 0
+        && !hasTransientSurface
+        && !hasProjectSurface;
+      if (
+        previousSelectedTabID === tabID
+        || !remainingVisualTabs.some((tab) => tab.id === previousSelectedTabID)
+      ) {
         rememberSelectedBrowserTab(targetSessionID, replacement?.id);
       }
       queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), {
         tabs: remaining,
         processMode: previousTabs?.processMode || processModeFallback,
       });
-      if (remaining.length === 0) {
+      if (remainingVisualTabs.length === 0) {
         const fallback = itemsLength > 0 || hasTransientSurface
           ? "canvas"
           : hasProjectSurface
@@ -398,11 +411,13 @@ export function useWorkspaceBrowserSurface({
         if (sessionSurfaceRef.current[targetSessionID] === "browser") {
           rememberSessionSurface(targetSessionID, fallback);
         }
-        if (currentSessionIDRef.current === targetSessionID) {
+        if (closeWorkspace) {
+          setWorkspaceOpen(targetSessionID, false);
+        } else if (currentSessionIDRef.current === targetSessionID) {
           setActiveSurfaceState((current) => (current === "browser" ? fallback : current));
         }
       }
-      return { previousSelectedTabID, previousSurface, previousTabs };
+      return { closeWorkspace, previousSelectedTabID, previousSurface, previousTabs };
     },
     onSuccess: ({ sessionID: targetSessionID }) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
@@ -418,7 +433,13 @@ export function useWorkspaceBrowserSurface({
           setActiveSurfaceState(context.previousSurface);
         }
       }
+      if (context?.closeWorkspace) {
+        setWorkspaceOpen(variables.targetSessionID, true);
+      }
       toast.error(t("browser.releaseFailed"));
+    },
+    onSettled: () => {
+      closingBrowserTabRef.current = "";
     },
   });
 
@@ -430,9 +451,11 @@ export function useWorkspaceBrowserSurface({
   }, [activeBrowserTab, enabled, sessionID]);
 
   const closeBrowserTab = useCallback((tabID: string) => {
-    if (sessionID) {
-      closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
+    if (!sessionID || closingBrowserTabRef.current) {
+      return;
     }
+    closingBrowserTabRef.current = tabID;
+    closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
   }, [closeBrowserTabMutation.mutate, sessionID]);
 
   return {

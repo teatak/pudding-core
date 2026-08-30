@@ -4,7 +4,6 @@ import type { BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { browserURLIsBlank, upsertBrowserTab } from "@/browser/helpers";
 import type { BrowserTabsData } from "@/browser/types";
-import { updateBrowserWorkspaceActivity } from "@/state/workspaceActivityStore";
 
 export type ElectronBrowserRequest = {
   sessionID: string;
@@ -312,10 +311,5 @@ export function cacheElectronBrowserSnapshot(
     tabs: upsertBrowserTab(current?.tabs || [], tab),
     processMode: "webview",
   }));
-  updateBrowserWorkspaceActivity(snapshot.sessionID, tab.id, {
-    faviconURL: tab.faviconURL,
-    title: tab.title,
-    url: tab.url,
-  });
   return tab;
 }

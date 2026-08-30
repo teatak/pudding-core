@@ -23,7 +23,7 @@ import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transc
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import { apiURL } from "@/state/apiBase";
-import { requestBrowserReveal, retainBrowserActivities } from "@/state/browserRevealStore";
+import { requestBrowserReveal } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 export function useSessionEvents(sessionID: string | undefined, token: string) {
@@ -217,12 +217,6 @@ function syncBrowserStateFromEvent(
   }
   const syncedFromToolResult = syncBrowserToolResult(queryClient, event);
   void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(event.sessionID) });
-  if (event.name === "builtin_browser_close" && event.phase === "ok") {
-    retainBrowserActivities(
-      event.sessionID,
-      browserTabsFromToolContent(event.content, event.sessionID).map((tab) => tab.id),
-    );
-  }
   const shouldReveal = revealVisibleSession && shouldRevealBrowserTool(event);
   if (shouldReveal && syncedFromToolResult) {
     publishBrowserActivity(queryClient, event);
@@ -241,13 +235,7 @@ function publishBrowserActivity(
   const tabs = queryClient.getQueryData<BrowserTabsData>(queryKeys.browserTabs(event.sessionID))?.tabs
     .filter((tab) => tab.sessionID === event.sessionID) || [];
   const tab = preferredBrowserTab(tabs, null);
-  requestBrowserReveal(event.sessionID, {
-    faviconURL: tab?.faviconURL,
-    resourceID: tab?.id,
-    title: tab?.title,
-    toolName: event.name,
-    url: tab?.url,
-  });
+  requestBrowserReveal(event.sessionID, tab?.id);
 }
 
 function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionEvent, { kind: "turn.tool" }>) {

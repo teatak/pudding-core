@@ -45,6 +45,7 @@ export type BrowserRuntimeContextValue = {
 };
 
 export const BrowserRuntimeContext = createContext<BrowserRuntimeContextValue | null>(null);
+export const BrowserAutomationActivityContext = createContext<Record<string, BrowserAutomationActivity>>({});
 
 export function useBrowserRuntimeContext() {
   const context = useContext(BrowserRuntimeContext);
@@ -52,4 +53,8 @@ export function useBrowserRuntimeContext() {
     throw new Error("BrowserRuntimeProvider is missing");
   }
   return context;
+}
+
+export function useVisibleBrowserAutomationActivity(sessionID: string) {
+  return useContext(BrowserAutomationActivityContext)[sessionID];
 }

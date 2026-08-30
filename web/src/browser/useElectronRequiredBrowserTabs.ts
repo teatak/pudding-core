@@ -9,7 +9,6 @@ import {
   type ElectronBrowserSnapshot,
   type ElectronWebviewRequiredEvent,
 } from "@/browser/electronBridge";
-import { updateBrowserWorkspaceActivity } from "@/state/workspaceActivityStore";
 
 export type ElectronBrowserSurfaceTab = BrowserTab & {
   webviewRequestID?: string;
@@ -47,14 +46,6 @@ export function useElectronRequiredBrowserTabs(token: string) {
     const pendingSnapshots = new Map<string, ElectronBrowserSnapshot>();
     const stopUpdated = bridge.onUpdated((snapshot) => {
       setTabsBySession((current) => updateRequiredTab(current, snapshot));
-      if (snapshot.status !== "lost") {
-        const tab = electronBrowserSnapshotToTab(snapshot);
-        updateBrowserWorkspaceActivity(snapshot.sessionID, snapshot.tabID, {
-          faviconURL: tab.faviconURL,
-          title: tab.title,
-          url: tab.url,
-        });
-      }
       const key = `${snapshot.sessionID}:${snapshot.tabID}`;
       window.clearTimeout(syncTimers.get(key));
       if (snapshot.status === "lost") {
