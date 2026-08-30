@@ -18,11 +18,11 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileCode2, FileDiff, Folders, Globe, X } from "@/components/icons";
+import { FileCode2, FileDiff, Folders, X } from "@/components/icons";
 import { memo, useEffect, useState } from "react";
 
 import type { BrowserTab } from "@/api/client";
-import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import { BrowserTabIcon } from "@/browser/BrowserTabIcon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
@@ -38,22 +38,6 @@ import {
   setWorkspaceTabOrder,
   useWorkspaceTabOrder,
 } from "@/state/workspaceTabOrderStore";
-
-function BrowserTabIcon({ faviconURL, pageURL }: { faviconURL?: string; pageURL: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-transparent text-current"
-    >
-      <BrowserFavicon
-        className="h-full w-full object-cover"
-        fallback={<Globe className="h-3.5 w-3.5" />}
-        faviconURL={faviconURL}
-        pageURL={pageURL}
-      />
-    </span>
-  );
-}
 
 function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] }) {
   return (
@@ -75,7 +59,13 @@ function SurfaceTabLeadingIcon({ tab }: { tab: SurfaceTab }) {
     );
   }
   if (tab.kind === "browser") {
-    return <BrowserTabIcon faviconURL={browserTabFaviconURL(tab.browser)} pageURL={tab.browser.url} />;
+    return (
+      <BrowserTabIcon
+        className="size-(--workspace-toolbar-tab-icon)"
+        faviconURL={browserTabFaviconURL(tab.browser)}
+        pageURL={tab.browser.url}
+      />
+    );
   }
   if (tab.kind === "widget") {
     return <CanvasKindIcon className="!bg-transparent !text-current" kind={tab.widget.kind} size="xs" />;

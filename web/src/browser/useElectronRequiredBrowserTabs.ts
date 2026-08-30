@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { syncBrowserTab, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
+  cacheElectronBrowserSnapshot,
   electronBrowserBridge,
   electronBrowserSnapshotToTab,
   type ElectronBrowserSnapshot,
@@ -75,6 +76,7 @@ export function useElectronRequiredBrowserTabs(token: string) {
             canGoBack: latest.canGoBack,
             canGoForward: latest.canGoForward,
           }).then(() => {
+            cacheElectronBrowserSnapshot(queryClient, latest, latest.sessionID);
             void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
           }).catch(() => undefined);
         }, 350),

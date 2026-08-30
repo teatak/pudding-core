@@ -1,7 +1,7 @@
-import { Globe } from "@/components/icons";
 import { Fragment, type ReactNode } from "react";
 
-import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import { BrowserTabIcon } from "@/browser/BrowserTabIcon";
+import { browserPageFaviconURL, browserPageTitle } from "@/browser/helpers";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
 import { ShellActionButton } from "@/components/ShellActionButton";
 import type { WorkspaceArtifact } from "@/components/workspace/types";
@@ -68,9 +68,9 @@ function WorkspaceActivityRow({
   onOpen: () => void;
 }) {
   const { t } = useI18n();
-  const title = artifact.title?.trim()
-    || (artifact.kind === "browser" ? browserHost(artifact.url) : "")
-    || t(artifact.kind === "browser" ? "browser.noTitle" : "canvas.untitled");
+  const title = artifact.kind === "browser"
+    ? browserPageTitle(artifact.title, artifact.url, t("browser.newTab"), t("browser.newTab"))
+    : artifact.title?.trim() || t("canvas.untitled");
   const detail = artifact.kind === "browser"
     ? browserHost(artifact.url) || t("workspace.activity.browser")
     : t(canvasKindKey(artifact.resourceKind));
@@ -111,21 +111,15 @@ function WorkspaceActivityIcon({
     return <CanvasKindIcon kind={artifact.resourceKind} size={presentation === "composer" ? "xs" : "md"} />;
   }
   return (
-    <span
+    <BrowserTabIcon
       className={cn(
-        "grid shrink-0 place-items-center overflow-hidden bg-info/15 text-info",
         presentation === "composer"
           ? "size-(--workspace-toolbar-tab-icon) rounded-[5px]"
           : "size-6 rounded-md",
       )}
-    >
-      <BrowserFavicon
-        className="size-full rounded-sm object-cover"
-        fallback={<Globe className="size-3.5" />}
-        faviconURL={artifact.faviconURL}
-        pageURL={artifact.url || ""}
-      />
-    </span>
+      faviconURL={browserPageFaviconURL(artifact.faviconURL, artifact.url)}
+      pageURL={artifact.url || ""}
+    />
   );
 }
 

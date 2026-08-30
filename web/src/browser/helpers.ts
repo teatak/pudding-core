@@ -32,8 +32,17 @@ export function browserAddressToURL(value: string): string {
 }
 
 export function browserTabTitle(tab: BrowserTab, fallback: string, blankFallback = fallback): string {
-  const title = (tab.title || "").trim();
-  const url = (tab.url || "").trim();
+  return browserPageTitle(tab.title, tab.url, fallback, blankFallback);
+}
+
+export function browserPageTitle(
+  rawTitle: string | undefined,
+  rawURL: string | undefined,
+  fallback: string,
+  blankFallback = fallback,
+): string {
+  const title = (rawTitle || "").trim();
+  const url = (rawURL || "").trim();
   if (browserURLIsBlank(url)) {
     return blankFallback;
   }
@@ -44,10 +53,15 @@ export function browserTabTitle(tab: BrowserTab, fallback: string, blankFallback
 }
 
 export function browserTabFaviconURL(tab: BrowserTab): string {
-  if (!browserTabIsReal(tab)) {
+  return browserPageFaviconURL(tab.faviconURL, tab.url);
+}
+
+export function browserPageFaviconURL(rawFaviconURL: string | undefined, rawPageURL: string | undefined): string {
+  const pageURL = (rawPageURL || "").trim();
+  if (browserURLIsBlank(pageURL)) {
     return "";
   }
-  return (tab.faviconURL || "").trim() || faviconURLForPage(tab.url);
+  return (rawFaviconURL || "").trim() || faviconURLForPage(pageURL);
 }
 
 export function preferredBrowserTab(tabs: BrowserTab[], payload: BrowserCanvasPayload | null): BrowserTab | undefined {
