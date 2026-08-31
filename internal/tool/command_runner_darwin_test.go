@@ -225,10 +225,9 @@ func TestMacOSCommandSandboxAllowsExternalNetwork(t *testing.T) {
 }
 
 func TestMacOSCommandSandboxRunsGoTest(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go is not installed")
-	}
 	project := t.TempDir()
+	env := mustCommandEnvironment(t)
+	requireTrustedSandboxCommand(t, "go", project, env)
 	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module sandbox.example/test\n\ngo 1.25\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +238,7 @@ func TestMacOSCommandSandboxRunsGoTest(t *testing.T) {
 		Executable:  "go",
 		Args:        []string{"test", "./..."},
 		CWD:         project,
-		Env:         mustCommandEnvironment(t),
+		Env:         env,
 		ProjectDirs: []string{project},
 	})
 	if result.exitCode != 0 {
@@ -248,10 +247,9 @@ func TestMacOSCommandSandboxRunsGoTest(t *testing.T) {
 }
 
 func TestMacOSCommandSandboxRunsNPMProjectScript(t *testing.T) {
-	if _, err := exec.LookPath("npm"); err != nil {
-		t.Skip("npm is not installed")
-	}
 	project := t.TempDir()
+	env := mustCommandEnvironment(t)
+	requireTrustedSandboxCommand(t, "npm", project, env)
 	packageJSON := `{"private":true,"scripts":{"check":"node -e \"require('fs').writeFileSync('built.txt','ok')\""}}`
 	if err := os.WriteFile(filepath.Join(project, "package.json"), []byte(packageJSON), 0o600); err != nil {
 		t.Fatal(err)
@@ -260,7 +258,7 @@ func TestMacOSCommandSandboxRunsNPMProjectScript(t *testing.T) {
 		Executable:  "npm",
 		Args:        []string{"run", "--silent", "check"},
 		CWD:         project,
-		Env:         mustCommandEnvironment(t),
+		Env:         env,
 		ProjectDirs: []string{project},
 	})
 	if result.exitCode != 0 {
@@ -423,11 +421,10 @@ func TestMacOSCommandSandboxUsesPrivateTemporaryAndPythonState(t *testing.T) {
 }
 
 func TestMacOSCommandSandboxUsesPrivateNodeState(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node is not installed")
-	}
 	home := t.TempDir()
 	project := t.TempDir()
+	env := mustCommandEnvironment(t)
+	requireTrustedSandboxCommand(t, "node", project, env)
 	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(home), commandSpec{
 		Executable: "node",
 		Args: []string{"-e", `
@@ -442,7 +439,7 @@ func TestMacOSCommandSandboxUsesPrivateNodeState(t *testing.T) {
 			}));
 		`},
 		CWD:         project,
-		Env:         mustCommandEnvironment(t),
+		Env:         env,
 		ProjectDirs: []string{project},
 	})
 	if result.exitCode != 0 {
@@ -475,6 +472,17 @@ func TestMacOSCommandSandboxUsesPrivateNodeState(t *testing.T) {
 		if npmResult.exitCode != 0 || strings.TrimSpace(npmResult.stdout) != paths["prefix"] {
 			t.Fatalf("npm prefix was not isolated: err=%v stdout=%q stderr=%q", npmResult.err, npmResult.stdout, npmResult.stderr)
 		}
+	}
+}
+
+func requireTrustedSandboxCommand(t *testing.T, name, cwd string, env []string) {
+	t.Helper()
+	executable, err := sandboxExecutable(name, cwd, env)
+	if err != nil {
+		t.Skipf("%s is unavailable: %v", name, err)
+	}
+	if _, err := sandboxExecutableRoot(executable, []string{cwd}); err != nil {
+		t.Skipf("%s is outside trusted sandbox toolchain locations: %v", name, err)
 	}
 }
 
