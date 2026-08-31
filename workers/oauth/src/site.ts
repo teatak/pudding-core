@@ -1,7 +1,7 @@
 const googleSiteVerification = "fyB0-L8lIT4f1VbiEdZKmxgvBNOTK1hcKM-CZATx4y0"
 const supportEmail = "yangglive@gmail.com"
 const downloadURL = "https://github.com/teatak/pudding/releases/latest"
-const repositoryURL = "https://github.com/teatak/pudding"
+const repositoryURL = "https://github.com/teatak/pudding-core"
 
 type PageOptions = {
   title: string
@@ -36,20 +36,20 @@ function homePage(origin: string): PageOptions {
   return {
     title: "Pudding",
     description:
-      "Pudding is a local-first desktop AI workspace for research, writing, coding, and connected work.",
+      "Pudding is an open-source AI workspace for macOS that brings chat, browser, terminal, files, canvas, and apps together.",
     pathname: "/",
     bodyClass: "home",
     content: `
       <main>
         <section class="hero shell" aria-labelledby="hero-title" aria-describedby="hero-purpose">
           <div class="hero-copy reveal">
-            <div class="eyebrow"><span class="status-dot"></span> Local-first desktop AI</div>
+            <div class="eyebrow"><span class="status-dot"></span> Open-source AI workspace</div>
             <h1 id="hero-title">Pudding</h1>
-            <p class="hero-tagline">Your AI workspace, close to home.</p>
-            <p class="hero-lede" id="hero-purpose"><strong>Pudding is a local-first desktop AI application for macOS.</strong> It helps users research information, write documents, work with code, organize projects, and connect optional services such as Gmail and GitHub from one desktop workspace.</p>
+            <p class="hero-tagline">Your AI workspace for real work.</p>
+            <p class="hero-lede" id="hero-purpose"><strong>Pudding is an open-source AI workspace for macOS.</strong> Work across chat, browser, terminal, files, canvas, and apps without losing context.</p>
             <div class="hero-actions">
               <a class="button primary" href="${downloadURL}">Download for macOS <span aria-hidden="true">↗</span></a>
-              <a class="button secondary" href="${repositoryURL}">View on GitHub</a>
+              <a class="button secondary" href="${repositoryURL}">View source on GitHub</a>
             </div>
             <p class="hero-note"><span aria-hidden="true">●</span> Public homepage · No sign-in required</p>
           </div>
@@ -92,7 +92,7 @@ function homePage(origin: string): PageOptions {
 
         <section class="proof-strip" aria-label="Pudding principles">
           <div class="shell proof-grid">
-            <div><strong>Local-first</strong><span>Your app data lives on your computer.</span></div>
+            <div><strong>Data on your Mac</strong><span>Your workspace data lives on your computer.</span></div>
             <div><strong>Multi-session</strong><span>Keep independent tasks moving in parallel.</span></div>
             <div><strong>Your providers</strong><span>Choose the AI and services you connect.</span></div>
           </div>
@@ -174,7 +174,7 @@ function privacyPage(origin: string): PageOptions {
     eyebrow: "Your data, explained",
     heading: "Privacy Policy",
     intro:
-      "Pudding is a local-first AI workspace. This policy explains how the Pudding apps and the OAuth services at x-t.top and oauth.x-t.top handle information.",
+      "Pudding is an open-source AI workspace for macOS. This policy explains how the Pudding apps and the OAuth services at x-t.top and oauth.x-t.top handle information.",
     content: `
       <section id="scope"><h2>1. Scope</h2><p>This policy applies to Pudding for desktop and the public website and OAuth exchange service hosted at <a href="${origin}">${escapeHTML(origin)}</a>. Pudding does not require a website account.</p></section>
       <section id="information"><h2>2. Information Pudding handles</h2>
@@ -203,7 +203,7 @@ function termsPage(origin: string): PageOptions {
     intro:
       "These terms govern your use of Pudding and the supporting public services at x-t.top and oauth.x-t.top. By using them, you agree to these terms.",
     content: `
-      <section><h2>1. The service</h2><p>Pudding is a local-first AI workspace. Its public OAuth service helps Pudding apps connect user-authorized services such as Gmail and GitHub. Features may change as Pudding evolves.</p></section>
+      <section><h2>1. The service</h2><p>Pudding is an open-source AI workspace for macOS. Its public OAuth service helps Pudding apps connect user-authorized services such as Gmail and GitHub. Features may change as Pudding evolves.</p></section>
       <section><h2>2. Your accounts and permissions</h2><p>You may connect only accounts you own or are authorized to use. You are responsible for your device, connected accounts, chosen AI providers, and actions you approve through Pudding. You may disconnect a service at any time.</p></section>
       <section><h2>3. Acceptable use</h2><p>Do not use Pudding or its OAuth service to violate law, infringe rights, access accounts without authorization, distribute malware, interfere with the service, or bypass security and usage controls.</p></section>
       <section><h2>4. Third-party services</h2><p>Pudding can interact with services operated by others, including Google, GitHub, Cloudflare, and AI model providers you configure. Their own terms and privacy policies govern their services. We are not responsible for third-party availability or changes.</p></section>
@@ -300,7 +300,7 @@ function html(options: PageOptions): Response {
   <meta property="og:description" content="${escapeHTML(options.description)}">
   <meta property="og:url" content="${canonical}">
   <meta property="og:image" content="https://x-t.top/og.png">
-  <meta property="og:image:alt" content="Pudding — Local-first AI workspace">
+  <meta property="og:image:alt" content="Pudding — Open-source AI workspace for macOS">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${escapeHTML(options.title)}">
   <meta name="twitter:description" content="${escapeHTML(options.description)}">
@@ -338,7 +338,7 @@ function siteHeader(pathname: string): string {
 function siteFooter(): string {
   return `<footer class="site-footer">
     <div class="shell footer-grid">
-      <div class="footer-brand"><a class="brand" href="/"><img src="/logo.png" alt=""><span>Pudding</span></a><p>A local-first desktop AI workspace.</p></div>
+      <div class="footer-brand"><a class="brand" href="/"><img src="/logo.png" alt=""><span>Pudding</span></a><p>An open-source AI workspace for macOS.</p></div>
       <div class="footer-links"><div><b>Product</b><a href="/#product">What it does</a><a href="${downloadURL}">Download</a><a href="${repositoryURL}">GitHub</a></div><div><b>Trust</b><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-deletion">Data deletion</a></div><div><b>Help</b><a href="/support">Support</a><a href="mailto:${supportEmail}">Contact</a></div></div>
     </div>
     <div class="shell footer-bottom"><span>© 2026 Pudding</span><span>Designed for work that stays yours.</span></div>
