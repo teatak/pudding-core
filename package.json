@@ -2,6 +2,7 @@
   "name": "pudding",
   "version": "0.2.8",
   "private": true,
+  "packageManager": "npm@11.6.0",
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/teatak/pudding-core",
   "description": "Pudding desktop application",

@@ -26,6 +26,8 @@ jobs:
             web/package-lock.json
       - name: Install native dependency
         run: brew install portaudio
+      - name: Use repository npm version
+        run: npm install --global npm@11.6.0
       - name: Install JavaScript dependencies
         run: |
           npm ci
