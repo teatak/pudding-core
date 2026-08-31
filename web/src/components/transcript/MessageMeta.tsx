@@ -72,25 +72,30 @@ export function MessageMeta({
           {actions}
           {hideStandardDetails ? null : (
             <>
-              <Button
-                aria-label={t("common.copy")}
-                className="size-6 bg-transparent active:translate-y-0"
-                size="icon-xs"
-                tabIndex={-1}
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  void navigator.clipboard.writeText(text).then(() => {
-                    setCopied(true);
-                    if (resetTimer.current) {
-                      window.clearTimeout(resetTimer.current);
-                    }
-                    resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
-                  });
-                }}
-              >
-                {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t(copied ? "common.copied" : "common.copy")}
+                    className="size-6 bg-transparent active:translate-y-0"
+                    size="icon-xs"
+                    tabIndex={-1}
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(text).then(() => {
+                        setCopied(true);
+                        if (resetTimer.current) {
+                          window.clearTimeout(resetTimer.current);
+                        }
+                        resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+                      });
+                    }}
+                  >
+                    {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t(copied ? "common.copied" : "common.copy")}</TooltipContent>
+              </Tooltip>
               {trailingActions}
               {uiContext ? (
                 <Tooltip>
