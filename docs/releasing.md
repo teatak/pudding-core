@@ -93,6 +93,8 @@ DMGs, ZIPs, their blockmaps, and one combined `latest-mac.yml` under
 - The app, daemon, language server, and bundled dylibs use the expected Developer ID and portable dependencies.
 - The app and daemon retain camera/audio-input entitlements, and the bundle declares camera, microphone, screen
   capture, and local-network usage descriptions. Unused Bluetooth and system-audio declarations are removed.
+- The app bundles the Pudding AGPL text, Electron/Chromium licenses, and generated notices for Go, npm, and native
+  third-party components. The verifier checks the staged app and the copies extracted from ZIP and DMG.
 - The managed-browser partition denies remote-page permission and device requests by default; native camera and
   microphone access remains daemon-owned.
 - ZIP/DMG signatures, notarization tickets, Gatekeeper assessments, and the DMG checksum are valid.
@@ -168,8 +170,8 @@ GitHub Prerelease without changing latest. Stable clients keep `allowPrerelease=
 preview package. Publishing fails before building if the public repository already contains that release or
 tag.
 
-The source tag in `teatak/pudding-core` identifies the exact private source commit. The matching public tag in
-`teatak/pudding` identifies that version's public manifest commit. Keep previous public releases available for
+The source tag in the public `teatak/pudding-core` repository identifies the exact source commit. The matching
+tag in `teatak/pudding` identifies that version's release-manifest commit. Keep previous releases available for
 rollback.
 
 The developer setting **Receive Pudding preview releases** opts the existing app into the beta channel. Preview

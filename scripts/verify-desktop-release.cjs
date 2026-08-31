@@ -137,6 +137,7 @@ function verifyAppBundle(bundlePath, label, expectedArch, verifyCustomCode = fal
   verifyMachOArchitecture(path.join(bundlePath, "Contents", "MacOS", "Pudding"), label, expectedArch);
   verifyHardwareEntitlements(bundlePath, label);
   verifyUsageDescriptions(bundlePath, label);
+  verifyLegalNotices(bundlePath, label);
   try {
     verifyComputerUseHelper(bundlePath, { label, expectedArch, signingAuthority });
   } catch (error) {
@@ -162,6 +163,36 @@ function verifyAppBundle(bundlePath, label, expectedArch, verifyCustomCode = fal
   }
   execFileSync("xcrun", ["stapler", "validate", bundlePath], { stdio: "inherit" });
   execFileSync("spctl", ["--assess", "--type", "execute", "--verbose=4", bundlePath], { stdio: "inherit" });
+}
+
+function verifyLegalNotices(bundlePath, label) {
+  const legalPath = path.join(bundlePath, "Contents", "Resources", "legal");
+  const requiredFiles = [
+    ["PUDDING-LICENSE.txt", 10_000],
+    ["THIRD_PARTY_NOTICES.txt", 10_000],
+    ["LICENSES.chromium.html", 10_000],
+  ];
+  for (const [fileName, minimumSize] of requiredFiles) {
+    const filePath = path.join(legalPath, fileName);
+    const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+    if (!stat?.isFile() || stat.size < minimumSize) {
+      fail(`${label} is missing a complete legal notice: ${fileName}`);
+    }
+  }
+
+  const notices = fs.readFileSync(path.join(legalPath, "THIRD_PARTY_NOTICES.txt"), "utf8");
+  for (const component of [
+    "Electron",
+    "ONNX Runtime",
+    "PortAudio",
+    "WebRTC Audio Processing",
+    "Abseil C++",
+    "github.com/teatak/seg",
+  ]) {
+    if (!notices.includes(component)) {
+      fail(`${label} third-party notices do not include ${component}`);
+    }
+  }
 }
 
 function verifyMachOArchitecture(codePath, label, expectedArch) {

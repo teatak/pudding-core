@@ -12,6 +12,8 @@ module.exports = async function afterPack(context) {
   const appPath = path.join(context.appOutDir, `${appName}.app`);
   const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
   const appRoot = path.join(appPath, "Contents", "Resources", "app");
+  const legalSourcePath = path.join(root, "dist", "legal");
+  const legalDestinationPath = path.join(appPath, "Contents", "Resources", "legal");
   const arch = Arch[context.arch];
   if (arch !== "arm64" && arch !== "x64") {
     throw new Error(`unsupported macOS desktop architecture: ${arch}`);
@@ -44,6 +46,7 @@ module.exports = async function afterPack(context) {
     path.join(runtimeRoot, "language-servers"),
     languageServersPath,
   );
+  copyLegalNotices(legalSourcePath, legalDestinationPath);
   setMinimumSystemVersion(infoPlistPath, arch);
   syncNestedBundleVersion(infoPlistPath, computerUseHelperInfoPlistPath);
 
@@ -71,6 +74,21 @@ exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-langua
   removeUnusedPrivacyUsageDescriptions(infoPlistPath);
   makeBundleOwnerWritable(appPath);
 };
+
+function copyLegalNotices(sourcePath, destinationPath) {
+  for (const fileName of [
+    "PUDDING-LICENSE.txt",
+    "THIRD_PARTY_NOTICES.txt",
+    "LICENSES.chromium.html",
+  ]) {
+    const filePath = path.join(sourcePath, fileName);
+    if (!fs.statSync(filePath, { throwIfNoEntry: false })?.isFile()) {
+      throw new Error(`generated legal notice is missing: ${filePath}`);
+    }
+  }
+  fs.rmSync(destinationPath, { force: true, recursive: true });
+  fs.cpSync(sourcePath, destinationPath, { recursive: true });
+}
 
 function setMinimumSystemVersion(infoPlistPath, arch) {
   const minimumVersion = arch === "x64" ? "15.5" : "14.0";
@@ -178,6 +196,7 @@ function makeBundleOwnerWritable(rootPath) {
 }
 
 module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;
+module.exports.copyLegalNotices = copyLegalNotices;
 module.exports.copyDirectoryWithPortableSymlinks = copyDirectoryWithPortableSymlinks;
 module.exports.removeUnusedPrivacyUsageDescriptions = removeUnusedPrivacyUsageDescriptions;
 module.exports.setMinimumSystemVersion = setMinimumSystemVersion;

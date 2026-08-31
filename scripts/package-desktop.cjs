@@ -46,6 +46,7 @@ function main(argv, env) {
     return;
   }
   validateNotaryCredentials(releaseEnv);
+  run(process.execPath, ["scripts/generate-third-party-notices.cjs"], releaseEnv);
 
   const builder = path.join(root, "node_modules", ".bin", "electron-builder");
   requireExecutable(builder, "electron-builder is missing; run npm install");

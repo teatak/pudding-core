@@ -6,12 +6,36 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  copyLegalNotices,
   copyDirectoryWithPortableSymlinks,
   makeBundleOwnerWritable,
   removeUnusedPrivacyUsageDescriptions,
   setMinimumSystemVersion,
   syncNestedBundleVersion,
 } = require("../../packaging/electron-builder-after-pack.cjs");
+
+test("packaging includes every generated legal notice", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-legal-"));
+  try {
+    const source = path.join(root, "source");
+    const destination = path.join(root, "Pudding.app", "Contents", "Resources", "legal");
+    const files = [
+      "PUDDING-LICENSE.txt",
+      "THIRD_PARTY_NOTICES.txt",
+      "LICENSES.chromium.html",
+    ];
+    fs.mkdirSync(source);
+    for (const fileName of files) {
+      fs.writeFileSync(path.join(source, fileName), fileName);
+    }
+
+    copyLegalNotices(source, destination);
+
+    assert.deepEqual(fs.readdirSync(destination).sort(), files.sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("packaging rewrites copied runtime symlinks to stay inside the app", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-symlinks-"));

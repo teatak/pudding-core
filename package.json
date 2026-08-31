@@ -2,12 +2,17 @@
   "name": "pudding",
   "version": "0.2.8",
   "private": true,
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/teatak/pudding-core",
   "description": "Pudding desktop application",
   "author": "teatak",
   "main": "electron/main.cjs",
   "scripts": {
+    "test": "npm run test:electron",
     "test:electron": "node --test electron/test/*.test.cjs",
-    "smoke:electron-browser": "npm --prefix web run smoke:electron-browser"
+    "smoke:electron-browser": "npm --prefix web run smoke:electron-browser",
+    "check:secrets": "node scripts/scan-secrets.cjs",
+    "legal:generate": "node scripts/generate-third-party-notices.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

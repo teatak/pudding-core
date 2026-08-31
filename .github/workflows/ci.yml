@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Install native dependency
+        run: brew install portaudio
+      - name: Install JavaScript dependencies
+        run: |
+          npm ci
+          npm --prefix web ci
+      - name: Check tracked files for secrets
+        run: npm run check:secrets
+      - name: Test Go packages
+        run: go test ./...
+      - name: Test Electron shell
+        run: npm test
+      - name: Build web app
+        run: npm --prefix web run build
+      - name: Generate third-party notices
+        run: npm run legal:generate
+
+  oauth-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/oauth
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: workers/oauth/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
