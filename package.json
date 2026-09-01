@@ -1,6 +1,6 @@
 {
   "name": "pudding",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "packageManager": "npm@11.6.0",
   "license": "AGPL-3.0-only",
