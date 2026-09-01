@@ -16,6 +16,7 @@
 - 删除旧 TTS provider、播放队列、句子切分、barge-in 和 speaker output owner。
 - 删除 `/sessions/{id}/audio/output` API、扬声器输出按钮及对应前端契约。
 - 精简 `audio.yaml`，保留 driver、ASR、AEC 和 NS；旧文件中的 TTS 字段可被忽略，配置重写后不再保留。
+- 更新 Browserslist 与 PostCSS selector parser 构建依赖，关闭两个高危和一个低危 Dependabot 告警。
 - 更新 mascot 场景渲染与交互细节，并删除旧 mascot 实现和双轨路径。
 - README 和项目文档调整为更聚焦的产品介绍。
 
@@ -26,6 +27,7 @@
 | 语音输出 | 中 | 旧 TTS、朗读、播放队列和扬声器输出绑定已移除。 |
 | 语音输入 | 中 | 保留 ASR 与原音输入，内部 service 和配置结构已精简。 |
 | 音频配置 | 低 | 旧 TTS 字段读取时被忽略，配置重写后自动清理。 |
+| 构建依赖 | 低 | 修复 Browserslist 与 PostCSS selector parser 已知漏洞，不进入桌面运行时。 |
 | 桌面界面 | 低 | 更新 mascot 场景和少量设置文案。 |
 | SQLite | 无 | schema 仍为 v13，本版没有迁移。 |
 | 自动更新 | 无 | 更新检查、下载、安装、架构选择和通道逻辑未变化。 |
@@ -44,6 +46,7 @@
 - Go 全量测试通过，包含 API、voice service、配置和 SQLite store。
 - Electron 全量测试：194 项通过。
 - `web/` TypeScript 检查和生产构建通过。
+- `web/` npm audit 通过：0 个已知漏洞。
 - `make schema-check` 通过，schema v13 release contract 有效。
 - `git diff --check` 在修正文档行尾后通过。
 
@@ -71,6 +74,10 @@
 
 - Refine the mascot scene rendering and interaction behavior while removing the superseded implementation.
 - Update the repository overview and supporting documentation around the current desktop product.
+
+### Security and Build Tooling
+
+- Update Browserslist and PostCSS selector parser to patched versions and clear the open dependency alerts.
 
 ### Updates and Distribution
 
