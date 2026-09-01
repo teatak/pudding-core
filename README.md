@@ -1,27 +1,41 @@
-# Pudding
+<p align="center">
+  <img src="assets/brand/PuddingOpenGraph.svg" alt="Pudding — Open-source AI workspace for macOS" width="840">
+</p>
 
-Pudding is the source repository for the Pudding daemon and Electron desktop app.
+<p align="center">
+  <strong>An open-source AI workspace for macOS.</strong><br>
+  Work across independent sessions with chat, projects, files, a browser, terminal, canvas, skills, and MCP apps in one desktop application.
+</p>
 
-> This is the source repository. Product downloads and update artifacts are published from
+<p align="center">
+  <a href="https://x-t.top">Website</a> ·
+  <a href="https://github.com/teatak/pudding/releases/latest">Download for macOS</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="https://github.com/teatak/pudding-core/issues">Issues</a>
+</p>
+
+> This is the source repository. Signed macOS downloads, update artifacts, and public release notes are published from
 > [`teatak/pudding`](https://github.com/teatak/pudding).
 
-Chinese text segmentation is provided by the separately maintained MIT-licensed
-[`teatak/seg`](https://github.com/teatak/seg) module.
+## What Pudding does
 
-This repo starts from a clean architecture:
+- **Independent sessions** — keep each task's conversation, context, tools, and permissions separate.
+- **Projects and files** — work with project folders and review file changes before accepting them.
+- **Built-in browser** — research and use web applications without leaving the workspace.
+- **Integrated terminal** — run development and automation tasks beside the conversation that requested them.
+- **Canvas and artifacts** — keep useful documents, plans, tables, images, and other outputs visible and reusable.
+- **Apps, skills, and MCP** — extend Pudding with built-in tools and connected services.
+- **Bring your own model** — connect OpenAI, Anthropic, Google, OpenAI-compatible providers, or local models through Ollama.
 
-- local-first
-- fully multi-session
-- explicit session routing
-- no backend focus state
-- daemon-owned hardware resources
-- session-owned transports and context
+Pudding is designed for work that spans more than a single chat: research a topic, inspect a project, run a command,
+review the result, and keep the useful output in the same workspace.
 
-The documentation index and status guide live in [docs/README.md](docs/README.md).
-Current architecture decisions live in [docs/technology-decisions.md](docs/technology-decisions.md).
-App package and connection field notes live in [docs/apps.md](docs/apps.md).
-Local tool-usage reporting is documented in [docs/tool-usage-report.md](docs/tool-usage-report.md).
-Desktop versioning, packaging, publishing, and update recovery are documented in [docs/releasing.md](docs/releasing.md).
+## Download
+
+Pudding currently targets macOS. Download the latest signed build from
+[`teatak/pudding` releases](https://github.com/teatak/pudding/releases/latest).
+
+This repository contains the source code. It does not publish application binaries.
 
 ## Development
 
@@ -46,10 +60,21 @@ npm --prefix web run build
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request and [SECURITY.md](SECURITY.md) for private
 vulnerability reporting.
 
-## Releases
+## Documentation
 
-Source development and source tags live in this repository. Signed DMGs, update metadata, and public release
-notes live in [`teatak/pudding`](https://github.com/teatak/pudding/releases).
+- [Documentation index and project status](docs/README.md)
+- [Architecture decisions](docs/technology-decisions.md)
+- [Apps and connections](docs/apps.md)
+- [Tool-usage reporting](docs/tool-usage-report.md)
+- [Versioning, packaging, and releases](docs/releasing.md)
+
+Chinese text segmentation is provided by the separately maintained MIT-licensed
+[`teatak/seg`](https://github.com/teatak/seg) module.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Report security vulnerabilities privately by
+following [SECURITY.md](SECURITY.md).
 
 ## License
 

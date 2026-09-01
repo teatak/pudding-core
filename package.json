@@ -5,7 +5,7 @@
   "packageManager": "npm@11.6.0",
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/teatak/pudding-core",
-  "description": "Pudding desktop application",
+  "description": "Open-source AI workspace for macOS",
   "author": "teatak",
   "main": "electron/main.cjs",
   "scripts": {
