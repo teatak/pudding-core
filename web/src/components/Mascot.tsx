@@ -56,11 +56,8 @@ const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
 const BODY_PATH = "M52 34 C56 34 72 34 76 34 C90 34 102 42 106 56 L108 84 C109 99 99 108 84 109 C71 111 57 111 44 109 C29 108 19 99 20 84 L22 56 C26 42 38 34 52 34 Z";
-const LEFT_ARM_PATH = "M30 85 C21 90 13 99 13 106";
-const RIGHT_ARM_PATH = "M98 85 C107 90 115 99 115 106";
-const LEFT_PALM_X = 14;
-const RIGHT_PALM_X = 114;
-const PALM_Y = 106;
+const LEFT_ARM_PATH = "M22 88 C17.5 91.5 11 98.5 8.5 104 C7 108 9 112 12.5 113 C16 114 19 111 19.5 107 C20 103 21.5 100 24.5 97";
+const RIGHT_ARM_PATH = "M106 88 C110.5 91.5 117 98.5 119.5 104 C121 108 119 112 115.5 113 C112 114 109 111 108.5 107 C108 103 106.5 100 103.5 97";
 const MOUTH_PATH = "M59 88.5 Q64 91 69 88.5";
 const FACE_SCREEN_PATH = "M40 53 H88 C96 53 100 58 100 66 V88 C100 96 95 100 87 100 H41 C33 100 28 96 28 88 V66 C28 58 32 53 40 53 Z";
 const FACE_SCREEN_GROOVE_TRANSFORM = "translate(64 77) scale(0.89) translate(-64 -77)";
@@ -557,86 +554,76 @@ export function Mascot({
             </svg>
           </span>
 
-          <span data-slot="body-back-shell" style={bodyBackShellStyle}>
-            <svg data-slot="body-back-shell-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <path
-                d={BODY_PATH}
-                fill="var(--mascot-shell-rear)"
-              />
-            </svg>
-          </span>
-
-          <span data-slot="arm-left-motion" style={compositeLayerStyle}>
+          <span data-slot="arm-left-motion" style={bodyBackShellStyle}>
             <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <path
-                d={LEFT_ARM_PATH}
-                fill="none"
-                stroke="var(--mascot-shell-outline)"
-                strokeLinecap="round"
-                strokeWidth="9.5"
-              />
-              <ellipse
-                cx={LEFT_PALM_X}
-                cy={PALM_Y}
-                fill="var(--mascot-shell-outline)"
-                rx="8"
-                ry="7"
-                transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
-              />
               <path
                 data-slot="arm-left-limb"
                 d={LEFT_ARM_PATH}
-                fill="none"
-                stroke={bodyMetalPaint}
-                strokeLinecap="round"
-                strokeWidth="5.5"
-              />
-              <ellipse
-                data-slot="arm-left-palm"
-                cx={LEFT_PALM_X}
-                cy={PALM_Y}
                 fill={bodyMetalPaint}
-                rx="6"
-                ry="5"
-                transform={`rotate(-52 ${LEFT_PALM_X} ${PALM_Y})`}
+                stroke="var(--mascot-shell-outline)"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.25"
               />
             </svg>
           </span>
 
-          <span data-slot="arm-right-motion" style={compositeLayerStyle}>
+          <span data-slot="arm-right-motion" style={bodyBackShellStyle}>
             <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-              <path
-                d={RIGHT_ARM_PATH}
-                fill="none"
-                stroke="var(--mascot-shell-outline)"
-                strokeLinecap="round"
-                strokeWidth="9.5"
-              />
-              <ellipse
-                cx={RIGHT_PALM_X}
-                cy={PALM_Y}
-                fill="var(--mascot-shell-outline)"
-                rx="8"
-                ry="7"
-                transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
-              />
               <path
                 data-slot="arm-right-limb"
                 d={RIGHT_ARM_PATH}
-                fill="none"
-                stroke={bodyMetalPaint}
-                strokeLinecap="round"
-                strokeWidth="5.5"
-              />
-              <ellipse
-                data-slot="arm-right-palm"
-                cx={RIGHT_PALM_X}
-                cy={PALM_Y}
                 fill={bodyMetalPaint}
-                rx="6"
-                ry="5"
-                transform={`rotate(52 ${RIGHT_PALM_X} ${PALM_Y})`}
+                stroke="var(--mascot-shell-outline)"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.25"
               />
+            </svg>
+          </span>
+
+          <span data-slot="body-back-shell" style={bodyBackShellStyle}>
+            <svg data-slot="body-back-shell-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <defs>
+                <linearGradient
+                  id={bodyMetalGradientID}
+                  gradientUnits="userSpaceOnUse"
+                  x1="64"
+                  x2="64"
+                  y1="34"
+                  y2="110"
+                >
+                  <stop offset="0" stopColor="var(--mascot-body-metal-top)" />
+                  <stop offset="1" stopColor="var(--mascot-body)" />
+                </linearGradient>
+              </defs>
+              <path
+                d={BODY_PATH}
+                fill={bodyMetalPaint}
+              />
+              <path
+                data-slot="body-metal-highlight"
+                d="M25.5 62 C26.5 51 32.5 42 43 38.5"
+                fill="none"
+                stroke="var(--mascot-metal-highlight)"
+                strokeLinecap="round"
+                strokeWidth="2.75"
+              />
+              {showHeadDebugFrame ? (
+                <rect
+                  data-slot="head-debug-frame"
+                  fill="none"
+                  height="76"
+                  rx="24"
+                  stroke="#00d5ff"
+                  strokeDasharray="3 3"
+                  strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
+                  width="86"
+                  x="21"
+                  y="34"
+                />
+              ) : null}
             </svg>
           </span>
 
@@ -667,58 +654,6 @@ export function Mascot({
               </svg>
             </span>
           </span>
-
-          <svg data-slot="body-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-            <defs>
-              <linearGradient
-                id={bodyMetalGradientID}
-                gradientUnits="userSpaceOnUse"
-                x1="64"
-                x2="64"
-                y1="34"
-                y2="110"
-              >
-                <stop offset="0" stopColor="var(--mascot-body-metal-top)" />
-                <stop offset="1" stopColor="var(--mascot-body)" />
-              </linearGradient>
-            </defs>
-            <path
-              d={BODY_PATH}
-              fill={bodyMetalPaint}
-            />
-            <path
-              data-slot="body-metal-highlight"
-              d="M25.5 62 C26.5 51 32.5 42 43 38.5"
-              fill="none"
-              stroke="var(--mascot-metal-highlight)"
-              strokeLinecap="round"
-              strokeWidth="2.75"
-            />
-            <path
-              data-slot="body-metal-shade"
-              d="M104.5 73 C107 86.5 105 96 98 101.5 C94 104.5 89.5 106 85 106.5"
-              fill="none"
-              stroke="var(--mascot-metal-shade)"
-              strokeLinecap="round"
-              strokeOpacity="0.72"
-              strokeWidth="2.75"
-            />
-            {showHeadDebugFrame ? (
-              <rect
-                data-slot="head-debug-frame"
-                fill="none"
-                height="76"
-                rx="24"
-                stroke="#00d5ff"
-                strokeDasharray="3 3"
-                strokeWidth="2"
-                vectorEffect="non-scaling-stroke"
-                width="86"
-                x="21"
-                y="34"
-              />
-            ) : null}
-          </svg>
 
           <svg data-slot="antenna-base-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
             <path
