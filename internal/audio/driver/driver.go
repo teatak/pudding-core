@@ -22,8 +22,8 @@ type InputRoutePrimer interface {
 	PrimeInputRoute(ctx context.Context, pcm frame.PCM16) error
 }
 
-// Driver owns local hardware access. Sessions may bind to capture/playback,
-// but they do not own the device implementation.
+// Driver owns local hardware access. Sessions may bind to capture, while the
+// playback methods are used only by InputRoutePrimer to prepare input routing.
 type Driver interface {
 	Name() string
 	Init(ctx context.Context) error

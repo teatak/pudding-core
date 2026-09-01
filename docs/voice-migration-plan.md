@@ -1,342 +1,79 @@
-# Voice Migration Plan
+# Voice Input Architecture
 
-> 状态:语音 runtime 发布链路收尾中。基础 macOS Electron bundle 已接入 daemon 启动前 dylib 打包与麦克风权限描述;Sherpa/模型仍走 runtime 下载。
-> 日期:2026-07-09。
-> 范围已收敛为单用户语音对话,旧项目只作为参考实现。
+> 状态:当前只保留语音输入能力。TTS / speaker output 已移除,后续如需重新引入必须重新设计并评估服务条款与发布方案。
+> 更新:2026-09-01。
 
-## 目标
-
-把旧项目里的语音对话能力迁到新项目,但只保留单用户语音闭环:
+## 当前范围
 
 ```text
-mic capture -> VAD -> ASR text -> engine.Submit -> assistant delta -> TTS -> playback
+mic capture -> WebRTC AEC/NS -> VAD -> ASR text -> engine.Submit
 ```
 
-## 不迁移
+保留:
 
-- 声纹识别 / speaker recognition。
-- Gemini Live / realtime audio transport。
-- meeting / diarize / 多人分段。
-- speaker tools / identity context。
-- raw audio 先不做。
-- KWS 先暂缓。
+- PortAudio 麦克风采集。
+- Sherpa ONNX SenseVoice + Silero VAD。
+- WebRTC AEC/NS capture processing。
+- session-scoped input binding。
+- ASR 音频保存与原音消息模式。
+
+不包含:
+
+- TTS、speaker output owner、assistant delta 朗读。
+- playback queue、sentence splitter、barge-in。
+- Edge TTS、macOS `say` 或其他语音合成 provider。
+- 声纹识别、Gemini Live、meeting、diarization、KWS。
+
+PortAudio 的 playback 接口仍仅用于打开麦克风前的输入路由提示音,不是助手语音输出能力。
 
 ## 架构原则
 
-- 硬件资源归 daemon:mic、speaker、driver、ASR、TTS、playback queue。
-- 业务 turn 归 engine:ASR 结果必须走 `engine.Submit`。
-- 后端不新增 focus / active session 概念。
-- 所有音频 API 必须显式带 `sessionID`。
-- canonical messages 仍然只由 engine/store 写入。
-- 不搬旧 `Runtime` 大结构。
-- 不把 WebSocket 当普通 submit/SSE 的替代品。
+- 麦克风等硬件资源归 daemon。
+- 业务 turn 归 engine;ASR 结果必须走 `engine.Submit`。
+- 后端没有 focus / active session 概念。
+- 音频 API 显式带 `sessionID`。
+- canonical messages 只由 engine/store 写入。
+- 切换前端 selected session 不改变 input owner。
 
 ## API 契约
 
-新增:
-
 | Method | Path | 用途 |
 | --- | --- | --- |
-| `GET` | `/sessions/{id}/audio/bindings` | 查看 daemon 音频 owner 快照 |
-| `POST` | `/sessions/{id}/audio/input` | 绑定/释放听写输入 |
-| `POST` | `/sessions/{id}/audio/output` | 绑定/释放语音输出 |
+| `GET` | `/sessions/{id}/audio/bindings` | 查看输入 owner 快照 |
+| `POST` | `/sessions/{id}/audio/input` | 绑定或释放语音输入 |
 
-`/sessions/{id}/audio/bindings` 是 daemon resource snapshot,不表示 UI focus;路径仍显式带 `sessionID`,避免新增无 session scope 的业务主路径。
-
-建议响应:
-
-```json
-{
-  "bindings": {
-    "inputOwner": "sess_x",
-    "inputMode": "transcribe",
-    "outputOwner": "sess_x"
-  }
-}
-```
-
-`POST /sessions/{id}/audio/input`:
+绑定请求:
 
 ```json
 { "enabled": true, "mode": "transcribe" }
 ```
 
-语义:
+`mode` 可选 `transcribe` 或 `raw`。删除 session 时自动释放其 input owner。
 
-- `enabled=true`:抢占 input owner;`mode` 可选 `transcribe` 或 `raw`。
-- `enabled=false`:仅当当前 owner 是该 session 时释放。
-- 删除 session 时自动释放其 input/output owner。
-- 切前端 selected session 不改变 owner。
+## 配置与运行资产
 
-## 后端模块
+配置文件是 `<home>/config/audio.yaml`,当前包含:
 
-建议新增:
+- PortAudio driver。
+- Sherpa ASR 与 Silero VAD。
+- WebRTC AEC/NS。
 
-```text
-internal/audio/
-  frame/
-  driver/
-  asr/
-  tts/
-  queue/
-  voice/
-```
+模型只从 `<home>/runtime/models` 加载:
 
-其中 `voice` 是新项目的 daemon audio service,只做路由和编排:
+- `asr/model.int8.onnx`
+- `asr/tokens.txt`
+- `vad/silero_vad.onnx`
 
-- 管理 session audio binding。
-- 管理 capture/playback lifecycle。
-- ASR sentence 生成 `clientMessageID`,调用 `engine.Submit`。
-- 订阅 session event,把 assistant text delta 聚句后送 TTS。
-- cancel/stop 时清 playback,并调用 `engine.Cancel(sessionID)`。
+找不到模型时不会启用 fake ASR;前端会先进入 runtime 下载流程。
 
-不要把 `voice` 写成旧项目 `Runtime`。
-
-## 当前已落地
-
-- `internal/audio/frame`:PCM16 frame 与 format 基础契约。
-- `internal/audio/driver`:daemon-owned driver interface 与 noop driver。
-- `internal/audio/driver/portaudio`:正式 mic capture + speaker playback driver;input 默认 16k/mono/PCM16,output 默认 24k/mono/PCM16。
-- `internal/audio/queue`:串行 playback queue,支持按 session / turn 清理。
-- `internal/audio/asr`:ASR client/event interface 与 fake client。
-- `internal/audio/asr/sherpa`:真实 sherpa-onnx SenseVoice + Silero VAD client。
-- `internal/audio/tts`:TTS client/event interface、noop/fake client、macOS `say` client、Edge TTS client;已迁入 TTS 文本清洗,会跳过纯标点/emoji 片段。
-- `internal/audio/voice`:session input/output binding manager、sentence splitter 与 AudioService 骨架。
-- AudioService:
-  - input binding 会启动真实 capture + ASR backend;释放 input owner 时停止 capture。
-  - ASR sentence 只在 session 拥有 input binding 时调用 `engine.Submit`。
-  - output owner 订阅 session event,把 `turn.delta` text 聚句后送入 playback queue。
-  - Edge TTS PCM event 会按 output owner 写入 PortAudio speaker playback;输出格式固定为 24k/mono/PCM16。
-  - TTS 播放结束后的短窗口会抑制 ASR sentence,减少 speaker 回灌尾巴变成用户输入。
-  - `/sessions/{id}/cancel` 会同步调用 `voice.CancelSession`,清理该 session 的 TTS 队列、丢弃未 flush 的 turn buffer,并取消当前属于该 session 的 TTS 播放。
-  - ASR sentence 在本 session 正在播 TTS 时会触发 barge-in:
-    - turn 仍在运行:先停 TTS / 清队列,再 best-effort `engine.Cancel`,然后提交 ASR 文本。
-    - turn 已完成但 TTS 仍在播:停 TTS / 清队列,忽略 `ErrNoRunningTurn`,继续提交 ASR 文本。
-  - `turn.completed` 会 flush 未成句尾巴。
-  - `turn.failed` / `turn.cancelled` 会取消对应 TTS turn。
-- API:
-  - `GET /sessions/{id}/audio/bindings`
-  - `POST /sessions/{id}/audio/input`
-  - `POST /sessions/{id}/audio/output`
-- daemon 启动时创建 `voice.Service`;删除 session 时释放其 input/output owner。
-- daemon 默认使用 Edge TTS(`zh-CN-YunxiaNeural`, speed=1.2);构造失败时 macOS 降级为真实 `macsay`(rate=230),非 macOS 降级为 noop。
-- `macsay` 会保留 stderr 到错误日志,便于排查系统 voice / audio device 问题。
-- daemon 默认使用 PortAudio 作为 capture/playback driver;input binding 时才请求并打开麦克风,output 只在收到 Edge PCM 时懒启动 speaker playback。
-- macOS Electron dev/release bundle 写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
-- `make desktop-bundle` 会复制 release daemon,把 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib 放入 bundle,随后完成 Developer ID 签名、公证、ZIP/DMG 生成和完整发布校验;不再支持 ad-hoc 发布包。
-- daemon 只从 `<home>/runtime/models` 加载 sherpa ASR/VAD 模型:
-  - `asr/model.int8.onnx`
-  - `asr/tokens.txt`
-  - `vad/silero_vad.onnx`
-- daemon ASR 默认对齐老项目:`engine=sherpa-sensevoice`,`language=zh`,`use_itn=false`,`num_threads=2`,`provider=cpu`;ASR 内置 VAD 为 `threshold=0.6`,`min_silence=400ms`,`min_speech=300ms`,`window_size=512`。
-- sherpa ASR 已补 VAD preroll:默认把 VAD segment 起点前 `500ms` PCM 拼回 SenseVoice 输入,减少首字被 VAD 起点延后吞掉。
-- 已接入 WebRTC AEC/NS:
-  - playback PCM 会作为 AEC render reference 注入。
-  - capture PCM 先过 AEC,再过 NS,最后送入 ASR/VAD。
-  - AEC/NS 配置写入 `<home>/config/audio.yaml`,默认 `aec.model=webrtc`,`ns.model=webrtc`,`ns.level=moderate`。
-  - WebRTC bridge 静态库是构建输入,不进入 runtime 下载目录;arm64 使用仓库内构建输入,x64
-    在 Apple Silicon 上由固定版本 WebRTC/Abseil 源码交叉编译并缓存到忽略的 `dist/` 目录。
-  - runtime 下载只覆盖模型资产:ASR 模型、VAD 模型和 tokens;daemon 启动前需要的 native dylib 随 `.app` bundle。
-- 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、WebRTC AEC/NS、Edge TTS。未接入的 KWS/声纹不写入配置。
-- 设置中心「关于」页会展示当前生效的语音配置、配置文件路径和 input/output owner。
-- 找不到模型时不会启用 fake ASR。
-- 找不到模型时,前端点击 mic 会先打开 runtime 下载弹窗,不直接进入 input binding。
-- 取消下载后再次点击 mic 会重新进入下载弹窗;下载失败 UI 只显示通用错误,不暴露路径、manifest 或缺文件细节。
-- 已补诊断日志:
-  - mic 权限检查/授权/拒绝/超时。
-  - PortAudio 初始化、capture start/stop、读取失败。
-  - Sherpa ASR 启动、VAD segment、ASR sentence decode。
-  - voice input/output binding、ASR sentence submit、submit 失败原因。
-- web contract/client/query key 已同步。
-- web Composer 已接入真实 input/output binding 图标开关;每次调用都显式传当前 `sessionID`。
-
-## 当前验证
+## 验证
 
 - `GOCACHE=/tmp/pudding-go-cache go test ./...`
-- `npx tsc -b`
-- 2026-07-09 收尾验证:
-  - `GOCACHE=/tmp/pudding-go-cache go test -tags "sqlite_fts5 webrtcaec" ./internal/audio/runtimeassets ./internal/api`
-  - `npm run build`
-  - `make desktop-bundle`
-  - `codesign --verify --deep --strict --verbose=2 dist/Pudding.app`
-  - 以 `PUDDING_HOME=/tmp/pudding-bundle-smoke-20260709` 短启动 `dist/Pudding.app`;release daemon 正常启动,缺 Sherpa/模型时 runtime status 为 `installed=false`,未因 dylib 或 codesign 退出。
-  - 以缺模型 smoke home 打开 Web UI:点击 mic 弹 runtime 下载弹窗;点击下载后取消,再次点击 mic 可重新进入下载弹窗,未出现“听写开关失败”。
-- `GOCACHE=/tmp/pudding-go-cache go test ./internal/audio/tts ./internal/audio/tts/macsay ./internal/audio/voice ./internal/daemon`
-- `GOCACHE=/tmp/pudding-go-cache go test ./internal/audio/driver/portaudio ./internal/audio/voice ./internal/daemon`
-- 真实 smoke:
-  - 临时 home 启动 daemon。
-  - `POST /sessions/{id}/audio/input {"enabled":true}` 能成功绑定 input owner。
-  - PortAudio 能打开默认麦克风,Sherpa 能启动并产生 ASR 事件。
-  - 临时 home 没有真实 provider profile,所以 ASR submit 到 engine 后停在 provider config unavailable;这不算完整演示。
-  - PortAudio `Input overflowed` 已改为丢帧继续读,避免 capture loop 退出。
-- 真实 E2E:
-  - 临时 home 复用真实 provider profile,不写 release 数据目录。
-  - 真实用户语音已跑出 ASR -> `engine.Submit` -> provider -> canonical messages。
-  - output owner 打开后,正式 `/sessions/{id}/submit` 触发 provider response -> session event -> `macsay` 播放,无 `macsay` 错误。
-  - input owner 单独打开复测成功,PortAudio/Sherpa 能在当前机器启动。
-  - input/output 复测后已释放 owner。
+- `npm run build` (在 `web/` 目录)
+- 真机验证麦克风权限、input binding、VAD/ASR 与 `engine.Submit` 链路。
 
-## 最终手动验收清单草案
+## 后续重新引入语音输出的前置条件
 
-浏览器:
-
-- session A 打开 Google,session B 打开 Baidu,来回切换不串页。
-- 关闭浏览器 tab 后当前 session browser surface 清空;切 session / 刷新不复活旧 tab。
-- 重新打开当前 session 浏览器,创建的是新的真实 webview tab,其他 session 不受影响。
-- 关闭/重开 app 后,只显示可恢复或新建成功的真实 browser surface,不显示旧截图或假内容。
-- LLM browser open / observe / click / type / scroll / screenshot 能操作当前 session tab。
-- Canvas 与 browser surface 反复切换,页面 DOM 不重载,自动化光标仍显示在 webview surface 上。
-
-语音 runtime:
-
-- 打包后的 `Pudding.app` 能启动 daemon,不因 dylib 或 ad-hoc codesign 退出。
-- bundle 内包含 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib。
-- 缺 Sherpa/模型时点击 mic 弹出下载弹窗,不出现听写开关失败。
-- 下载中取消后再次点击 mic 能重新进入下载弹窗。
-- 下载失败只显示通用失败文案,不暴露本地路径、manifest URL、缺文件名或栈细节。
-- 下载完成后自动重载 ASR backend,再次打开 mic 能进入真实 input binding。
-
-## 演示口径
-
-- 不做 fake 演示。
-- 可演示的最低门槛是真实 Edge TTS 或 `macsay` 输出接通。
-- 完整语音对话演示必须满足:本机 mic 权限 + PortAudio capture/playback + sherpa ASR/VAD 模型 + Edge TTS 网络可用 + session audio input/output binding 都真实可用。
-- 当前状态:不是 fake,已具备本机受控演示能力;完整麦克风对话演示时需要现场开真 mic 说一句确认当前输入环境。
-
-## 剩余风险
-
-- macOS TCC 权限被拒后需要用户在系统设置里重新打开,或开发机执行 `tccutil reset Microphone com.teatak.pudding.dev` 后重启 Electron dev app。
-- PortAudio 默认输入设备受系统当前设备影响;后续需要做设备枚举/选择。
-- Edge TTS 依赖外部网络和非官方 Edge 朗读协议;若 Microsoft 调整协议或 token,需要同步更新常量。
-- AEC/NS 已接 WebRTC bridge,但外放环境仍需真机验证参数;后续如仍误触发,优先调 NS level / AEC reference 时序。
-
-## 迁移阶段
-
-### 0. 契约设计
-
-预计 0.5 天。
-
-- 固化 API / binding / 前端 contract。
-- 明确 input/output owner 与 session 删除语义。
-
-### 1. 音频基础层
-
-预计 1-1.5 天。
-
-先迁最小接口和 fake 实现:
-
-- `audio/frame`
-- `audio/driver` + noop/fake
-- `audio/asr` interface + fake
-- `audio/tts` interface + fake
-- `audio/queue`
-- `wavenc` 可选
-
-先不接真实 driver / sherpa。
-
-### 2. AudioService
-
-预计 1.5-2 天。
-
-实现 daemon audio service:
-
-- binding manager。
-- ASR -> `engine.Submit`。
-- session event -> TTS。
-- playback queue。
-- stop/cancel 编排。
-
-### 3. 听写输入闭环
-
-预计 1.5-2 天。
-
-链路:
-
-```text
-mic frame -> VAD -> ASR sentence -> engine.Submit(sessionID, clientMessageID, text)
-```
-
-验收:
-
-- A session 开听写,B session 不受影响。
-- 切 selected session 不改变 input owner。
-- running 时 ASR 新句子按现有 queued input 规则排队。
-- audio service 生成稳定 `clientMessageID`。
-
-### 4. TTS 输出闭环
-
-预计 1.5-2 天。
-
-链路:
-
-```text
-turn.delta(text) -> sentence splitter -> tts.Speak -> playback queue
-```
-
-迁移:
-
-- `tts_sanitize`。
-- sentence splitter。
-- playback queue。
-
-验收:
-
-- 只有 output owner 的 session 会播放。
-- 关闭 output 后不继续合成旧文本。
-- cancel / failed / completed 时收尾正确。
-
-### 5. 真实后端接入
-
-预计 2-3 天。
-
-接入:
-
-- PortAudio。
-- sherpa ASR。
-- macOS say 或旧 TTS 实现。
-- VAD 最小版。
-
-不接 malgo。AEC/NS 先不接,后续单独做。
-
-### 6. 前端控件
-
-预计 1-1.5 天。
-
-- 听写开关。
-- 播音开关。
-- session rail 只读 input/output owner 图标。
-- i18n 文案。
-
-规则:
-
-- API 调用显式传 `sessionID`。
-- 禁止从全局 current session store 隐式取 target。
-
-### 7. 打断与测试
-
-预计 2-3 天。
-
-- 用户 stop:`/sessions/{id}/cancel` + 清 playback。
-- barge-in:用户说话时清 TTS/playback,再 cancel 当前 turn。
-- 单测覆盖:
-  - binding 抢占。
-  - 删除 session 释放 binding。
-  - ASR submit 不串 session。
-  - TTS 只播放 output owner session。
-  - cancel 清音频状态。
-
-### 8. 更好的 TTS
-
-已迁旧项目 Edge TTS;Sherpa TTS 已删除,不作为默认路径。
-
-迁移要求:
-
-- 适配新项目 `tts.Client` interface。
-- Edge TTS 输出 24k/mono/PCM16,直接接 PortAudio speaker playback。
-- playback/cancel/barge-in 仍由 `voice.Service` 统一编排。
-
-## 时间估算
-
-- 最小闭环:3-5 天。
-- 可日常用:6-8 天。
-- 稳定打磨版:约 2 周。
+- 选择明确允许该产品分发方式的 TTS provider 或本地模型。
+- 单独设计输出路由、取消语义、回声处理和 UI。
+- 不恢复已删除的旧 output owner / queue / fallback 路径。

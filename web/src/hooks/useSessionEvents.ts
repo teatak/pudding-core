@@ -438,7 +438,6 @@ function syncAudioBindingsFromEvent(queryClient: QueryClient, event: SessionEven
       bindings: {
         inputOwner: event.inputOwner,
         inputMode: event.inputMode,
-        outputOwner: event.outputOwner,
         inputLevel: event.inputLevel,
       },
     });

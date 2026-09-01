@@ -1,5 +1,5 @@
 // Package frame defines small audio frame contracts shared by capture, ASR,
-// TTS, and playback code. It intentionally stays transport-agnostic.
+// capture, processing, and playback code. It intentionally stays transport-agnostic.
 package frame
 
 import "time"

@@ -1,0 +1,320 @@
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+#root {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.mascot-scene-lab {
+  background: var(--background);
+  color: var(--foreground);
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.mascot-scene-lab-header,
+.mascot-scene-section-heading,
+.mascot-scene-actions,
+.mascot-scene-toolbar,
+.mascot-scene-toggle,
+.mascot-scene-derived {
+  align-items: center;
+  display: flex;
+}
+
+.mascot-scene-header-controls {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.mascot-scene-import-input {
+  display: none;
+}
+
+.mascot-scene-config-message {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  max-width: 360px;
+  text-align: right;
+}
+
+.mascot-scene-lab-header,
+.mascot-scene-section-heading {
+  justify-content: space-between;
+}
+
+.mascot-scene-lab-header h1,
+.mascot-scene-card h2,
+.mascot-scene-section-heading h2 {
+  margin: 0;
+}
+
+.mascot-scene-lab-header p,
+.mascot-scene-card p,
+.mascot-scene-section-heading p {
+  color: var(--muted-foreground);
+  margin: 6px 0 0;
+}
+
+.mascot-scene-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mascot-scene-toolbar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 14px;
+}
+
+.mascot-scene-toggle,
+.mascot-scene-actions,
+.mascot-scene-derived,
+.mascot-scene-input-control,
+.mascot-scene-mood-control,
+.mascot-scene-mood-control button {
+  gap: 8px;
+}
+
+.mascot-scene-input-control,
+.mascot-scene-mood-control,
+.mascot-scene-input-control button,
+.mascot-scene-mood-control button {
+  align-items: center;
+  display: flex;
+}
+
+.mascot-scene-input-control,
+.mascot-scene-mood-control {
+  border-left: 1px solid var(--border);
+  margin-left: 2px;
+  padding-left: 14px;
+}
+
+.mascot-scene-input-control > span,
+.mascot-scene-mood-control > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.mascot-scene-input-control button.is-selected,
+.mascot-scene-mood-control button.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.mascot-scene-field {
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.mascot-scene-pose-field {
+  min-width: 180px;
+}
+
+.mascot-scene-lab button,
+.mascot-scene-lab input,
+.mascot-scene-lab select {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  font: inherit;
+}
+
+.mascot-scene-lab button {
+  cursor: pointer;
+  padding: 7px 10px;
+}
+
+.mascot-scene-lab button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.mascot-scene-lab input,
+.mascot-scene-lab select {
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.mascot-scene-lab input[type="color"] {
+  padding: 3px;
+  width: 100%;
+}
+
+.mascot-scene-lab input[type="range"] {
+  min-height: auto;
+  padding: 0;
+}
+
+.mascot-scene-comparison {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 16px;
+}
+
+.mascot-scene-card,
+.mascot-scene-layer-list,
+.mascot-scene-layer-form,
+.mascot-scene-scene-config {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.mascot-scene-scene-config {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 2fr);
+  margin-top: 16px;
+}
+
+.mascot-scene-scene-config h2,
+.mascot-scene-scene-config p {
+  margin: 0;
+}
+
+.mascot-scene-scene-config p {
+  color: var(--muted-foreground);
+  margin-top: 6px;
+}
+
+.mascot-scene-preview-stage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 300px;
+  overflow: visible;
+}
+
+.mascot-scene-preview-stage[data-pointer-tracking="true"] {
+  cursor: crosshair;
+}
+
+.mascot-scene-errors {
+  background: color-mix(in srgb, #ef4444 12%, var(--card));
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  border-radius: 12px;
+  color: #dc2626;
+  padding: 12px;
+}
+
+.mascot-scene-editor {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 2fr);
+  margin-top: 16px;
+}
+
+.mascot-scene-layer-list {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+}
+
+.mascot-scene-layer-list > button {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.mascot-scene-layer-list > button.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.mascot-scene-layer-list small {
+  color: var(--muted-foreground);
+}
+
+.mascot-scene-layer-form {
+  display: grid;
+  gap: 14px;
+}
+
+.mascot-scene-form-grid,
+.mascot-scene-vector {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mascot-scene-vector {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 0;
+  padding: 12px;
+}
+
+.mascot-scene-motion-editor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mascot-scene-motion-frame {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 10px;
+}
+
+.mascot-scene-motion-frame > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  grid-column: 1 / -1;
+}
+
+.mascot-scene-vector legend {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.mascot-scene-derived {
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  justify-content: space-between;
+}
+
+.mascot-scene-note {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin: 0;
+}
+
+.mascot-scene-errors {
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .mascot-scene-comparison,
+  .mascot-scene-editor,
+  .mascot-scene-scene-config {
+    grid-template-columns: 1fr;
+  }
+
+  .mascot-scene-form-grid,
+  .mascot-scene-vector {
+    grid-template-columns: 1fr;
+  }
+}

@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +29,6 @@ import (
 	nsproc "github.com/teatak/pudding-core/internal/audio/dsp/ns"
 	"github.com/teatak/pudding-core/internal/audio/frame"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
-	audiotts "github.com/teatak/pudding-core/internal/audio/tts"
-	"github.com/teatak/pudding-core/internal/audio/tts/edgetts"
-	"github.com/teatak/pudding-core/internal/audio/tts/macsay"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/buildinfo"
@@ -188,19 +184,16 @@ func Start(opts Options) (*Daemon, error) {
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoaderWithApps(dir, apps, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithApps(apps))
 	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
-		Manager:           voice.NewManager(),
-		Submitter:         eng,
-		Canceler:          eng,
-		Events:            hub,
-		Driver:            audioDriver,
-		ASR:               defaultASR(dir, audioCfg),
-		AEC:               defaultAEC(audioCfg, audioDriver),
-		NS:                defaultNS(audioCfg, audioDriver),
-		TTS:               defaultTTS(audioCfg),
-		HomeDir:           dir,
-		SaveAudio:         audioCfg.ASRSaveAudio(),
-		MinEnergy:         audioCfg.ASR.VAD.MinEnergy,
-		PlaybackMinEnergy: audioCfg.ASR.VAD.PlaybackMinEnergy,
+		Manager:   voice.NewManager(),
+		Submitter: eng,
+		Events:    hub,
+		Driver:    audioDriver,
+		ASR:       defaultASR(dir, audioCfg),
+		AEC:       defaultAEC(audioCfg, audioDriver),
+		NS:        defaultNS(audioCfg, audioDriver),
+		HomeDir:   dir,
+		SaveAudio: audioCfg.ASRSaveAudio(),
+		MinEnergy: audioCfg.ASR.VAD.MinEnergy,
 	})
 	audioRuntime := runtimeassets.NewInstaller(dir, func(ctx context.Context) error {
 		currentAudio, err := cfg.Audio(ctx)
@@ -316,37 +309,6 @@ func localAddrFor(actualAddr string) string {
 		return net.JoinHostPort("127.0.0.1", port)
 	}
 	return actualAddr
-}
-
-func defaultTTS(cfg config.AudioConfig) audiotts.Client {
-	cfg = cfg.WithDefaults()
-	if !cfg.TTSEnabled() {
-		slog.Info("daemon: tts disabled by config")
-		return nil
-	}
-	profileName, profile := cfg.ActiveTTSProfile()
-	switch strings.ToLower(profileName) {
-	case "edge":
-		client, err := edgetts.New(edgetts.Config{
-			Voice: profile.Voice,
-			Speed: float32(profile.Speed),
-		})
-		if err == nil {
-			slog.Info("daemon: using edge tts", "tts", client.Name(), "profile", profileName)
-			return client
-		}
-		slog.Warn("daemon: edge tts unavailable", "err", err)
-	default:
-		slog.Warn("daemon: unsupported tts profile", "profile", profileName)
-	}
-	if runtime.GOOS == "darwin" {
-		client, err := macsay.New(macsay.Config{Rate: 230})
-		if err == nil {
-			return client
-		}
-		slog.Warn("daemon: macsay unavailable", "err", err)
-	}
-	return audiotts.NewNoop()
 }
 
 func defaultCaptureDriver(cfg config.AudioConfig) audiodriver.Driver {

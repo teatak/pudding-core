@@ -43,7 +43,7 @@ const (
 //	input.queued   seq, clientMessageID, text, status
 //	input.updated  seq, clientMessageID, text, status
 //	input.steered  seq, turnID, clientMessageID, userMessageID, text
-//	audio.bindings inputOwner, inputMode, outputOwner, inputLevel
+//	audio.bindings inputOwner, inputMode, inputLevel
 //	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload
 //	approval.resolved  turnID, callID, approvalID, approvalKind, status
@@ -64,7 +64,6 @@ type Event struct {
 	Status             string          `json:"status,omitempty"`
 	InputOwner         string          `json:"inputOwner,omitempty"`
 	InputMode          string          `json:"inputMode,omitempty"`
-	OutputOwner        string          `json:"outputOwner,omitempty"`
 	InputLevel         *float64        `json:"inputLevel,omitempty"`
 	CallID             string          `json:"callID,omitempty"` // turn.tool 专用
 	Name               string          `json:"name,omitempty"`

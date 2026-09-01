@@ -101,9 +101,8 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 	audioCfg = audioCfg.WithDefaults()
 
 	bindings := map[string]string{
-		"input_owner":  "—",
-		"input_mode":   "—",
-		"output_owner": "—",
+		"input_owner": "—",
+		"input_mode":  "—",
 	}
 	if s.voice != nil {
 		snap := s.voice.Snapshot()
@@ -111,12 +110,8 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			bindings["input_owner"] = snap.InputOwner
 			bindings["input_mode"] = string(snap.InputMode)
 		}
-		if snap.OutputOwner != "" {
-			bindings["output_owner"] = snap.OutputOwner
-		}
 	}
 
-	ttsProfileName, ttsProfile := audioCfg.ActiveTTSProfile()
 	sections := []desktopAboutSection{
 		aboutSection("version", "版本", aboutRows(
 			"pudding", buildinfo.Channel(),
@@ -130,12 +125,10 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 		)),
 		aboutSection("health", "健康自检", aboutRows(
 			"capture", enabledText(audioCfg.ASREnabled() && strings.EqualFold(audioCfg.Driver.Type, "portaudio")),
-			"playback", enabledText(audioCfg.TTSEnabled() && strings.EqualFold(ttsProfileName, "edge")),
 		)),
 		aboutSection("audio_bindings", "语音绑定", aboutRows(
 			"input_owner", bindings["input_owner"],
 			"input_mode", bindings["input_mode"],
-			"output_owner", bindings["output_owner"],
 		)),
 		aboutSection("audio_config", "语音配置文件", aboutRows(
 			"path", filepath.Join(s.home, "config", "audio.yaml"),
@@ -162,7 +155,6 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			"model_path", baseNameOrDash(audioCfg.ASR.VAD.ModelPath),
 			"threshold", floatText(audioCfg.ASR.VAD.Threshold),
 			"min_energy", floatText(audioCfg.ASR.VAD.MinEnergy),
-			"playback_min_energy", floatText(audioCfg.ASR.VAD.PlaybackMinEnergy),
 			"min_silence_millis", intText(audioCfg.ASR.VAD.MinSilenceMillis),
 			"min_speech_millis", intText(audioCfg.ASR.VAD.MinSpeechMillis),
 			"window_size", intText(audioCfg.ASR.VAD.WindowSize),
@@ -176,13 +168,6 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			"enabled", onOff(audioCfg.NSEnabled()),
 			"model", audioCfg.NS.Model,
 			"level", audioCfg.NS.Level,
-		)),
-		aboutSection("tts", "语音合成 (TTS)", aboutRows(
-			"enabled", onOff(audioCfg.TTSEnabled()),
-			"profile", ttsProfileName,
-			"backend", ttsProfileName,
-			"voice", ttsProfile.Voice,
-			"speed", floatText(ttsProfile.Speed),
 		)),
 	}
 	c.JSON(http.StatusOK, desktopAboutResponse{Sections: sections})

@@ -28,7 +28,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Input } from "@/components/ui/input";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
@@ -58,16 +57,12 @@ type VoiceFormState = {
   vadPrerollMillis: string;
   vadThreshold: string;
   vadMinEnergy: string;
-  vadPlaybackMinEnergy: string;
   aecEnabled: boolean;
   nsEnabled: boolean;
   nsLevel: string;
-  ttsEnabled: boolean;
-  ttsSpeed: string;
-  ttsVoice: string;
 };
 
-type VoiceToggleKey = "asrEnabled" | "asrSaveAudio" | "asrUseITN" | "aecEnabled" | "nsEnabled" | "ttsEnabled";
+type VoiceToggleKey = "asrEnabled" | "asrSaveAudio" | "asrUseITN" | "aecEnabled" | "nsEnabled";
 
 const VOICE_LANGUAGE_OPTIONS = ["zh", "en", "ja", "ko", "yue", "auto"];
 const VOICE_NS_LEVEL_OPTIONS = ["low", "moderate", "high", "very_high"];
@@ -96,11 +91,7 @@ export function VoiceSettings({ token, view = "general" }: { token: string; view
   });
   const savedConfig = audioQuery.data?.config;
   const aboutSections = aboutQuery.data?.sections || [];
-  const ttsReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "tts", ["backend"]);
-  const runtimeReadOnlyRows = [
-    ...voiceRuntimeReadOnlyRows(aboutSections, audioQuery.data?.path || "-", savedConfig?.driver.type || "-"),
-    ...ttsReadOnlyRows,
-  ];
+  const runtimeReadOnlyRows = voiceRuntimeReadOnlyRows(aboutSections, audioQuery.data?.path || "-", savedConfig?.driver.type || "-");
   const asrReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr", ["engine", "model_path", "tokens_path", "provider"]);
   const vadReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr_vad", ["model_path", "window_size"]);
   const dspReadOnlyRows = [
@@ -214,7 +205,6 @@ export function VoiceSettings({ token, view = "general" }: { token: string; view
   const disabled = audioQuery.isLoading || audioQuery.isError || resetMutation.isPending;
   const clearDisabled = disabled || clearRecordingsMutation.isPending;
   const resetDisabled = disabled || saving || clearRecordingsMutation.isPending;
-  const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
   const audioLoadError = audioQuery.isError ? (
     <Alert variant="destructive">
       <AlertDescription className="flex items-center justify-between gap-3">
@@ -395,18 +385,6 @@ export function VoiceSettings({ token, view = "general" }: { token: string; view
             onChange={(value) => setForm((prev) => ({ ...prev, vadMinEnergy: value }))}
           />
           <SettingsNumberField
-            description={t("settings.voice.vadPlaybackMinEnergyDesc")}
-            disabled={disabled}
-            id="pudding-voice-vad-playback-min-energy"
-            label={t("settings.voice.vadPlaybackMinEnergy")}
-            max={1}
-            min={0.001}
-            step={0.001}
-            value={form.vadPlaybackMinEnergy}
-            onBlur={saveCurrentVoiceForm}
-            onChange={(value) => setForm((prev) => ({ ...prev, vadPlaybackMinEnergy: value }))}
-          />
-          <SettingsNumberField
             description={t("settings.voice.vadMinSilenceDesc")}
             disabled={disabled}
             id="pudding-voice-vad-min-silence"
@@ -480,54 +458,6 @@ export function VoiceSettings({ token, view = "general" }: { token: string; view
         </div>
       </section> : null}
 
-      {view === "general" ? <section className="grid gap-3">
-        <div className="grid gap-2">
-          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.tts")}</h3>
-        </div>
-        <div className={SETTINGS_GROUP_CLASS}>
-          <SettingsToggleRow
-            checked={form.ttsEnabled}
-            description={t("settings.voice.ttsEnabledDesc")}
-            disabled={disabled}
-            id="pudding-voice-tts-enabled"
-            label={t("settings.voice.ttsEnabled")}
-            onChange={(next) => saveVoiceToggle("ttsEnabled", next)}
-          />
-          <SettingsControlRow
-            description={t("settings.voice.ttsVoiceDesc")}
-            disabled={disabled}
-            id="pudding-voice-tts-voice"
-            label={t("settings.voice.ttsVoice")}
-          >
-            <Input
-              className="w-48 max-w-full sm:ml-auto"
-              disabled={disabled}
-              id="pudding-voice-tts-voice"
-              placeholder={edge.voice || "zh-CN-YunxiaNeural"}
-              value={form.ttsVoice}
-              onBlur={saveCurrentVoiceForm}
-              onChange={(event) => setForm((prev) => ({ ...prev, ttsVoice: event.target.value }))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.currentTarget.blur();
-                }
-              }}
-            />
-          </SettingsControlRow>
-          <SettingsNumberField
-            description={t("settings.voice.ttsSpeedDesc")}
-            disabled={disabled}
-            id="pudding-voice-tts-speed"
-            label={t("settings.voice.ttsSpeed")}
-            max={2}
-            min={0.5}
-            step={0.05}
-            value={form.ttsSpeed}
-            onBlur={saveCurrentVoiceForm}
-            onChange={(value) => setForm((prev) => ({ ...prev, ttsSpeed: value }))}
-          />
-        </div>
-      </section> : null}
       {view === "advanced" ? <div className={SETTINGS_CARD_CLASS}>
         <SettingsActionRow
           description={t("settings.voice.resetDefaultsDesc")}
@@ -644,8 +574,8 @@ function voiceRuntimeReadOnlyRows(sections: DesktopAboutSection[], path: string,
     { id: "driver", label: "driver", value: driver },
   ];
   rows.push(...voiceSectionReadOnlyRows(sections, "driver", ["capture_sample_rate", "playback_sample_rate", "channels", "period_millis"]));
-  rows.push(...voiceSectionReadOnlyRows(sections, "health", ["capture", "playback"]));
-  rows.push(...voiceSectionReadOnlyRows(sections, "audio_bindings", ["input_owner", "input_mode", "output_owner"]));
+  rows.push(...voiceSectionReadOnlyRows(sections, "health", ["capture"]));
+  rows.push(...voiceSectionReadOnlyRows(sections, "audio_bindings", ["input_owner", "input_mode"]));
   return rows;
 }
 
@@ -687,18 +617,13 @@ function defaultVoiceForm(): VoiceFormState {
     vadPrerollMillis: "500",
     vadThreshold: "0.6",
     vadMinEnergy: "0.01",
-    vadPlaybackMinEnergy: "0.015",
     aecEnabled: true,
     nsEnabled: true,
     nsLevel: "moderate",
-    ttsEnabled: true,
-    ttsSpeed: "1.2",
-    ttsVoice: "zh-CN-YunxiaNeural",
   };
 }
 
 function voiceFormFromConfig(config: AudioConfig): VoiceFormState {
-  const edge = edgeTTSProfile(config);
   return {
     asrEnabled: config.asr.enabled ?? true,
     asrSaveAudio: config.asr.saveAudio ?? false,
@@ -710,18 +635,13 @@ function voiceFormFromConfig(config: AudioConfig): VoiceFormState {
     vadPrerollMillis: String(config.asr.vad.prerollMillis || 500),
     vadThreshold: String(config.asr.vad.threshold || 0.6),
     vadMinEnergy: String(config.asr.vad.minEnergy || 0.01),
-    vadPlaybackMinEnergy: String(config.asr.vad.playbackMinEnergy || 0.015),
     aecEnabled: config.aec.enabled ?? true,
     nsEnabled: config.ns.enabled ?? true,
     nsLevel: config.ns.level || "moderate",
-    ttsEnabled: config.tts.enabled ?? true,
-    ttsSpeed: String(edge.speed || 1.2),
-    ttsVoice: edge.voice || "zh-CN-YunxiaNeural",
   };
 }
 
 function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioConfig {
-  const edge = edgeTTSProfile(config);
   return {
     ...config,
     asr: {
@@ -735,7 +655,6 @@ function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioCo
         ...config.asr.vad,
         threshold: normalizedNumber(form.vadThreshold, config.asr.vad.threshold),
         minEnergy: normalizedNumber(form.vadMinEnergy, config.asr.vad.minEnergy),
-        playbackMinEnergy: normalizedNumber(form.vadPlaybackMinEnergy, config.asr.vad.playbackMinEnergy),
         minSilenceMillis: normalizedInteger(form.vadMinSilenceMillis, config.asr.vad.minSilenceMillis),
         minSpeechMillis: normalizedInteger(form.vadMinSpeechMillis, config.asr.vad.minSpeechMillis),
         prerollMillis: normalizedInteger(form.vadPrerollMillis, config.asr.vad.prerollMillis),
@@ -752,24 +671,7 @@ function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioCo
       model: "webrtc",
       level: form.nsLevel,
     },
-    tts: {
-      ...config.tts,
-      enabled: form.ttsEnabled,
-      profile: "edge",
-      profiles: {
-        ...config.tts.profiles,
-        edge: {
-          ...edge,
-          voice: form.ttsVoice.trim() || edge.voice || "zh-CN-YunxiaNeural",
-          speed: normalizedNumber(form.ttsSpeed, edge.speed || 1.2),
-        },
-      },
-    },
   };
-}
-
-function edgeTTSProfile(config: AudioConfig) {
-  return config.tts.profiles.edge || config.tts.profiles[config.tts.profile] || {};
 }
 
 function normalizedInteger(raw: string, fallback: number) {

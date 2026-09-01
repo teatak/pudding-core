@@ -768,7 +768,6 @@ export type AudioInputMode = z.infer<typeof audioInputMode>;
 export const audioBindings = z.object({
   inputOwner: z.string(),
   inputMode: z.union([audioInputMode, z.literal("")]).default(""),
-  outputOwner: z.string(),
   inputLevel: z.number().default(0),
 });
 export type AudioBindings = z.infer<typeof audioBindings>;
@@ -790,7 +789,6 @@ export const audioASRVADConfig = z.object({
   modelPath: z.string(),
   threshold: z.number(),
   minEnergy: z.number(),
-  playbackMinEnergy: z.number(),
   minSilenceMillis: z.number(),
   minSpeechMillis: z.number(),
   windowSize: z.number(),
@@ -817,22 +815,12 @@ export const audioNSConfig = z.object({
   model: z.string(),
   level: z.string(),
 });
-export const audioTTSProfile = z.object({
-  voice: z.string().optional(),
-  speed: z.number().optional(),
-});
-export const audioTTSConfig = z.object({
-  enabled: z.boolean().optional(),
-  profile: z.string(),
-  profiles: z.record(z.string(), audioTTSProfile),
-});
 export const audioConfig = z.object({
   version: z.number(),
   driver: audioDriverConfig,
   asr: audioASRConfig,
   aec: audioAECConfig,
   ns: audioNSConfig,
-  tts: audioTTSConfig,
 });
 export type AudioConfig = z.infer<typeof audioConfig>;
 export const audioConfigResponse = z.object({

@@ -15,7 +15,7 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
-| `audio.bindings` | — | — | `inputOwner`, `inputMode`, `outputOwner`, `inputLevel`;音频 owner 快照 |
+| `audio.bindings` | — | — | `inputOwner`, `inputMode`, `inputLevel`;音频输入 owner 快照 |
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
 | `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
 | `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`tool_call`), `status`, `reason?`, `payload?` |
@@ -61,9 +61,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |
 | `POST /sessions/{id}/queued-inputs/{clientMessageID}/steer` | `{turnID}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` / `queued_input_editing` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
-| `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, outputOwner, inputLevel}}` | 404 / 503 |
+| `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, inputLevel}}` | 404 / 503 |
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
-| `POST /sessions/{id}/audio/output` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status, session}` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |

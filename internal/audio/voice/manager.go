@@ -2,7 +2,6 @@
 package voice
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -32,10 +31,9 @@ func NormalizeInputMode(mode InputMode) (InputMode, error) {
 }
 
 type Bindings struct {
-	InputOwner  string    `json:"inputOwner"`
-	InputMode   InputMode `json:"inputMode"`
-	OutputOwner string    `json:"outputOwner"`
-	InputLevel  float64   `json:"inputLevel"`
+	InputOwner string    `json:"inputOwner"`
+	InputMode  InputMode `json:"inputMode"`
+	InputLevel float64   `json:"inputLevel"`
 }
 
 type Manager struct {
@@ -78,16 +76,6 @@ func (m *Manager) BindInput(sessionID string, enabled bool, modes ...InputMode) 
 	return m.bindings, nil
 }
 
-func (m *Manager) BindOutput(sessionID string, enabled bool) (Bindings, error) {
-	return m.bind(sessionID, enabled, func(bindings *Bindings, id string) {
-		bindings.OutputOwner = id
-	}, func(bindings *Bindings, id string) {
-		if bindings.OutputOwner == id {
-			bindings.OutputOwner = ""
-		}
-	})
-}
-
 func (m *Manager) ReleaseSession(sessionID string) Bindings {
 	id := strings.TrimSpace(sessionID)
 	m.mu.Lock()
@@ -96,27 +84,5 @@ func (m *Manager) ReleaseSession(sessionID string) Bindings {
 		m.bindings.InputOwner = ""
 		m.bindings.InputMode = ""
 	}
-	if m.bindings.OutputOwner == id {
-		m.bindings.OutputOwner = ""
-	}
 	return m.bindings
-}
-
-func (m *Manager) CancelSession(context.Context, string) bool {
-	return false
-}
-
-func (m *Manager) bind(sessionID string, enabled bool, set func(*Bindings, string), clear func(*Bindings, string)) (Bindings, error) {
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		return Bindings{}, ErrSessionRequired
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if enabled {
-		set(&m.bindings, id)
-	} else {
-		clear(&m.bindings, id)
-	}
-	return m.bindings, nil
 }

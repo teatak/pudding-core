@@ -1,0 +1,285 @@
+.mascot-scene-v1-adapter {
+  display: inline-block;
+  overflow: visible;
+  position: relative;
+}
+
+.mascot-scene-v1-paint-bounds {
+  contain: layout style paint;
+  inset: -25%;
+  isolation: isolate;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  transform: translateZ(0);
+}
+
+.mascot-scene-v1-art-viewport {
+  height: 66.666667%;
+  left: 16.666667%;
+  overflow: visible;
+  position: absolute;
+  top: 16.666667%;
+  width: 66.666667%;
+}
+
+.mascot-scene-prototype {
+  --mascot-blush: oklch(0.72 0.14 16 / 88%);
+  flex: none;
+  position: relative;
+}
+
+.mascot-scene-prototype[data-mood="error"] {
+  --mascot-feature-outline: color-mix(in oklch, var(--destructive), black 46%);
+  --mascot-screen: var(--mascot-error-screen);
+  --mascot-screen-edge: color-mix(in oklch, var(--destructive) 45%, var(--mascot-screen));
+  --mascot-screen-groove: color-mix(in oklch, var(--destructive), black 30%);
+}
+
+.mascot-scene-thinking-dot {
+  animation: mascot-scene-thinking-dot 1.2s steps(1, end) infinite;
+  opacity: 0.28;
+}
+
+.mascot-scene-thinking-dot-center {
+  animation-delay: 0.4s;
+}
+
+.mascot-scene-thinking-dot-right {
+  animation-delay: 0.8s;
+}
+
+.dark .mascot-scene-prototype {
+  --mascot-blush: oklch(0.62 0.12 16 / 82%);
+}
+
+@keyframes mascot-scene-thinking-dot {
+  0%,
+  24% {
+    opacity: 1;
+  }
+
+  25%,
+  100% {
+    opacity: 0.28;
+  }
+}
+
+.mascot-scene-scale {
+  position: absolute;
+  transform-origin: left top;
+  transform-style: preserve-3d;
+}
+
+.mascot-scene-perspective,
+.mascot-scene-ambient-motion,
+.mascot-scene-gesture-motion,
+.mascot-scene-state-motion,
+.mascot-scene-head,
+.mascot-scene-node,
+.mascot-scene-layer-state,
+.mascot-scene-layer-motion,
+.mascot-scene-asset-animation {
+  height: 128px;
+  inset: 0;
+  position: absolute;
+  transform-style: preserve-3d;
+  width: 128px;
+}
+
+.mascot-scene-ambient-motion {
+  animation: mascot-scene-ambient-motion 4.8s ease-in-out infinite;
+  transform-origin: 64px 77px;
+}
+
+.mascot-scene-gesture-motion {
+  transform-origin: 64px 77px;
+}
+
+.mascot-scene-state-motion {
+  transition: transform 220ms ease-out;
+}
+
+.mascot-scene-prototype[data-mood="error"] .mascot-scene-state-motion {
+  transform: translateY(1.5px);
+}
+
+.mascot-scene-layer-state {
+  opacity: 1;
+  transition:
+    opacity 180ms ease-out,
+    transform 220ms ease-out;
+}
+
+.mascot-scene-node[data-mood-active="false"] > .mascot-scene-layer-state {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.75px) scale(0.92);
+}
+
+.mascot-scene-prototype[data-mood="error"]
+  [data-layer-id="left-arm-plane"]
+  > .mascot-scene-layer-state {
+  transform: translateY(1px) rotateZ(-2deg);
+}
+
+.mascot-scene-prototype[data-mood="error"]
+  [data-layer-id="right-arm-plane"]
+  > .mascot-scene-layer-state {
+  transform: translateY(1px) rotateZ(2deg);
+}
+
+.mascot-scene-prototype [data-layer-id="front-plane"] .mascot-scene-asset *,
+.mascot-scene-prototype [data-layer-id="face-glass-plane"] .mascot-scene-asset * {
+  transition:
+    fill 180ms ease-out,
+    stroke 180ms ease-out;
+}
+
+@keyframes mascot-scene-ambient-motion {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.008);
+  }
+}
+
+.mascot-scene-asset-animation[data-asset-animation="blink"] {
+  animation-iteration-count: infinite;
+  animation-name: mascot-scene-blink;
+  animation-timing-function: linear;
+}
+
+.mascot-scene-asset-animation[data-asset-animation="mouth-idle"] {
+  animation-iteration-count: infinite;
+  animation-name: mascot-scene-mouth-idle;
+  animation-timing-function: linear;
+}
+
+@keyframes mascot-scene-blink {
+  0%,
+  60%,
+  70%,
+  84%,
+  89%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  64% {
+    transform: scaleY(0.344);
+  }
+  87%,
+  91% {
+    transform: scaleY(0.133);
+  }
+}
+
+@keyframes mascot-scene-mouth-idle {
+  0%,
+  20%,
+  25.5%,
+  62%,
+  65%,
+  100% {
+    transform: scale(1, 1);
+  }
+  23% {
+    transform: scale(0.58, 0.86);
+  }
+  63.5% {
+    transform: scale(0.79, 1.08);
+  }
+}
+
+.mascot-scene-layer-motion[data-idle-motion="true"] {
+  animation-iteration-count: infinite;
+  animation-name: mascot-scene-layer-idle-motion;
+  animation-timing-function: ease-in-out;
+}
+
+@keyframes mascot-scene-layer-idle-motion {
+  0%,
+  100% {
+    transform: translate3d(var(--mascot-scene-motion-rest-x), var(--mascot-scene-motion-rest-y), 0)
+      rotateZ(var(--mascot-scene-motion-rest-rotate));
+  }
+  50% {
+    transform: translate3d(var(--mascot-scene-motion-peak-x), var(--mascot-scene-motion-peak-y), 0)
+      rotateZ(var(--mascot-scene-motion-peak-rotate));
+  }
+}
+
+.mascot-scene-face {
+  align-items: center;
+  backface-visibility: visible;
+  display: flex;
+  justify-content: center;
+  opacity: 1;
+  position: absolute;
+  transform-style: preserve-3d;
+}
+
+.mascot-scene-face.is-far {
+  opacity: 0.2;
+}
+
+.mascot-scene-asset {
+  overflow: visible;
+  position: absolute;
+}
+
+.mascot-scene-axis {
+  background: color-mix(in srgb, var(--foreground) 48%, transparent);
+  display: block;
+  pointer-events: none;
+  position: absolute;
+}
+
+.mascot-scene-axis.is-horizontal {
+  height: 0.5px;
+  left: 0;
+  top: 50%;
+  width: 100%;
+}
+
+.mascot-scene-axis.is-vertical {
+  height: 100%;
+  left: 50%;
+  top: 0;
+  width: 0.5px;
+}
+
+.mascot-scene-prototype-error {
+  align-items: center;
+  background: color-mix(in srgb, #ef4444 12%, var(--card));
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  border-radius: 12px;
+  color: #dc2626;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot-scene-ambient-motion,
+  .mascot-scene-asset-animation,
+  .mascot-scene-layer-motion[data-idle-motion="true"],
+  .mascot-scene-thinking-dot {
+    animation: none;
+  }
+
+  .mascot-scene-layer-state,
+  .mascot-scene-state-motion,
+  .mascot-scene-prototype [data-layer-id="front-plane"] .mascot-scene-asset *,
+  .mascot-scene-prototype [data-layer-id="face-glass-plane"] .mascot-scene-asset * {
+    transition: none;
+  }
+
+  .mascot-scene-thinking-dot-center {
+    opacity: 1;
+  }
+}

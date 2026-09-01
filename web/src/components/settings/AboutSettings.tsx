@@ -34,7 +34,7 @@ export function AboutSettings({ token }: { token: string }) {
   );
 }
 
-const VOICE_ABOUT_SECTION_IDS = new Set(["audio_config", "driver", "health", "audio_bindings", "asr", "asr_vad", "aec", "ns", "tts"]);
+const VOICE_ABOUT_SECTION_IDS = new Set(["audio_config", "driver", "health", "audio_bindings", "asr", "asr_vad", "aec", "ns"]);
 
 function isVoiceAboutSection(section: DesktopAboutSection) {
   return VOICE_ABOUT_SECTION_IDS.has(section.id);

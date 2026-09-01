@@ -461,25 +461,13 @@ home 内容(第一阶段):
 
 ## 11. Audio
 
-第一阶段不做音频。
+当前只保留语音输入,详见 [voice-migration-plan.md](voice-migration-plan.md)。
 
-当前迁移计划见 [voice-migration-plan.md](voice-migration-plan.md)。范围已收敛为单用户语音对话,不迁移声纹、Gemini Live、meeting、多人与 raw audio。
-
-后续音频原则:
-
-- hardware belongs to daemon.
-- transport belongs to session.
-- mic / speaker / ASR / TTS 都通过 owner/binding 显式路由。
-- 切前端 selected session 不改变 audio owner。
-
-候选技术:
-
-- PortAudio
-- Sherpa ONNX
-- WebRTC AEC
-- Kokoro / Edge / macOS say 等 TTS
-
-音频必须在文本多会话架构稳定后再接。
+- hardware belongs to daemon。
+- mic / ASR 通过 session-scoped input binding 显式路由。
+- 切前端 selected session 不改变 input owner。
+- 当前实现使用 PortAudio、Sherpa ONNX 与 WebRTC AEC/NS。
+- TTS 与 speaker output 不在当前产品能力内。
 
 ## 12. 第一阶段验收
 

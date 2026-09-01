@@ -1,11 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Captions, Mic, Volume2 } from "@/components/icons";
+import { Captions, Mic } from "@/components/icons";
 import { toast } from "sonner";
 
 import {
   bindAudioInput,
-  bindAudioOutput,
   cancelAudioRuntimeInstall,
   getAudioRuntime,
   startAudioRuntimeInstall,
@@ -42,7 +41,6 @@ export function SessionAudioControls({
   const [selectedInputMode, setSelectedInputMode] = useState<AudioInputMode>("transcribe");
   const inputActive = bindings?.inputOwner === sessionID;
   const activeInputMode: AudioInputMode = bindings?.inputMode === "raw" ? "raw" : "transcribe";
-  const outputActive = bindings?.outputOwner === sessionID;
   const inputLevel = inputActive ? bindings?.inputLevel ?? 0 : 0;
   const invalidateAudioBindings = () => queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
   const setBindings = (next: AudioBindings) => {
@@ -54,7 +52,7 @@ export function SessionAudioControls({
     onMutate: async ({ enabled, mode }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
       const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", inputMode: "", outputOwner: "", inputLevel: 0 };
+      const current = previous?.bindings ?? { inputOwner: "", inputMode: "", inputLevel: 0 };
       queryClient.setQueryData(queryKeys.audioBindings(), {
         bindings: {
           ...current,
@@ -73,29 +71,6 @@ export function SessionAudioControls({
       toast.error(audioAPIErrorMessage(error, t("voice.inputFailed"), t));
     },
   });
-  const outputMutation = useMutation({
-    mutationFn: (enabled: boolean) => bindAudioOutput(token, sessionID, enabled),
-    onMutate: async (enabled) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
-      const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", inputMode: "", outputOwner: "", inputLevel: 0 };
-      queryClient.setQueryData(queryKeys.audioBindings(), {
-        bindings: {
-          ...current,
-          outputOwner: enabled ? sessionID : current.outputOwner === sessionID ? "" : current.outputOwner,
-        },
-      });
-      return { previous };
-    },
-    onSuccess: (result) => setBindings(result.bindings),
-    onError: (error, _enabled, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
-      }
-      toast.error(audioAPIErrorMessage(error, t("voice.outputFailed"), t));
-    },
-  });
-
   useEffect(() => {
     if (!inputActive || !bindings?.inputMode || inputMutation.isPending) {
       return;
@@ -175,13 +150,8 @@ export function SessionAudioControls({
         inputPendingMode={inputPendingMode}
         rawInputLabel={inputActive && displayInputMode === "raw" ? t("voice.inputRawOn") : t("voice.inputRawOff")}
         rawInputSupported={audioInputSupported === true}
-        outputActive={outputActive}
-        outputLabel={outputActive ? t("voice.outputOn") : t("voice.outputOff")}
-        outputBusy={outputMutation.isPending}
-        outputPending={outputMutation.isPending && outputMutation.variables === true}
         controlsLabel={t("voice.controls")}
         onInputModeClick={handleInputModeClick}
-        onOutputClick={() => outputMutation.mutate(!outputActive)}
       />
       <AudioRuntimeInstallDialog
         open={runtimeDialogOpen}
@@ -441,12 +411,7 @@ export function AudioControlButtons({
   inputPendingMode,
   rawInputLabel,
   rawInputSupported,
-  outputActive,
-  outputLabel,
-  outputBusy,
-  outputPending,
   onInputModeClick,
-  onOutputClick,
 }: {
   asrInputLabel: string;
   controlsLabel: string;
@@ -458,15 +423,9 @@ export function AudioControlButtons({
   inputPendingMode?: AudioInputMode;
   rawInputLabel: string;
   rawInputSupported: boolean;
-  outputActive: boolean;
-  outputLabel: string;
-  outputBusy?: boolean;
-  outputPending: boolean;
   onInputModeClick: (mode: AudioInputMode) => void;
-  onOutputClick: () => void;
 }) {
   const inputDisabled = inputBusy ?? inputPending;
-  const outputDisabled = outputBusy ?? outputPending;
   const asrButton = (
     <AudioInputButton
       active={inputActive && inputMode === "transcribe"}
@@ -498,33 +457,6 @@ export function AudioControlButtons({
       ) : (
         asrButton
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label={outputLabel}
-            aria-pressed={outputActive}
-            className={cn(
-              "rounded-full",
-              outputActive &&
-                "!bg-control-accent !text-control-accent-foreground hover:!bg-control-accent hover:opacity-90 active:!bg-control-accent active:opacity-80 disabled:opacity-100",
-              !outputActive && "text-muted-foreground",
-            )}
-            disabled={outputDisabled}
-            size="icon"
-            type="button"
-            variant="ghost"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              if (!outputDisabled) {
-                onOutputClick();
-              }
-            }}
-          >
-            {outputPending ? <Spinner className="size-4" /> : <Volume2 className="size-4" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{outputLabel}</TooltipContent>
-      </Tooltip>
     </div>
   );
 }

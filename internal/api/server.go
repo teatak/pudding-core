@@ -66,8 +66,6 @@ type Server struct {
 type voiceController interface {
 	Snapshot() voice.Bindings
 	BindInput(sessionID string, enabled bool, modes ...voice.InputMode) (voice.Bindings, error)
-	BindOutput(sessionID string, enabled bool) (voice.Bindings, error)
-	CancelSession(ctx context.Context, sessionID string) bool
 	ReleaseSession(sessionID string) voice.Bindings
 }
 
@@ -219,7 +217,6 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/desktop/photo").POST(s.desktopPhoto)
 	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)
 	app.Route("/sessions/:id/audio/input").POST(s.bindAudioInput)
-	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
 	app.Route("/sessions/:id/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/sessions/:id/browser/state").GET(s.getBrowserState).DELETE(s.clearBrowserState)
 	app.Route("/sessions/:id/browser/history").GET(s.listBrowserHistory).DELETE(s.clearBrowserHistory)
@@ -774,9 +771,6 @@ func (s *Server) purgeSession(ctx context.Context, id string) error {
 }
 
 func (s *Server) cancelSessionWork(ctx context.Context, id string) error {
-	if s.voice != nil {
-		s.voice.CancelSession(ctx, id)
-	}
 	// 先 cancel 进行中的 turn:否则 provider 流会继续跑到自然结束,
 	// 且收尾 FinishTurn 撞上已删除的 session。无进行中 turn 时 cancel 返回
 	// ErrNoRunningTurn,忽略即可。
@@ -1047,15 +1041,7 @@ func (s *Server) cancel(c *cart.Context) error {
 	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
-	voiceCancelled := false
-	if s.voice != nil {
-		voiceCancelled = s.voice.CancelSession(c.Request.Context(), id)
-	}
 	if err := s.engine.Cancel(id); err != nil {
-		if errors.Is(err, engine.ErrNoRunningTurn) && voiceCancelled {
-			c.JSON(http.StatusAccepted, map[string]string{"status": "cancelling"})
-			return nil
-		}
 		c.JSON(http.StatusConflict, map[string]string{"error": "no_running_turn"})
 		return nil
 	}

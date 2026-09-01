@@ -1047,17 +1047,6 @@ export function bindAudioInput(
   });
 }
 
-export function bindAudioOutput(
-  token: string,
-  sessionID: string,
-  enabled: boolean,
-): Promise<{ ok: boolean; bindings: AudioBindings }> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/output`, audioBindingResponse, {
-    method: "POST",
-    body: JSON.stringify(audioBindingRequest.parse({ enabled })),
-  });
-}
-
 export function getAudioRuntime(token: string): Promise<AudioRuntimeStatus> {
   return request(token, "/settings/audio/runtime", audioRuntimeStatus);
 }

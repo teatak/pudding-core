@@ -331,8 +331,14 @@ func TestAudioBindingsAreSessionScoped(t *testing.T) {
 
 	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_a/audio/bindings", nil)
 	got := decodeJSON[bindingsPayload](t, resp)
-	if got.Bindings.InputOwner != "" || got.Bindings.OutputOwner != "" {
+	if got.Bindings.InputOwner != "" {
 		t.Fatalf("initial bindings = %+v", got.Bindings)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/output", map[string]bool{"enabled": true})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed audio output endpoint status = %d, want 404", resp.StatusCode)
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/input", map[string]bool{"enabled": true})
@@ -341,15 +347,9 @@ func TestAudioBindingsAreSessionScoped(t *testing.T) {
 		t.Fatalf("bind input response status=%d body=%+v", resp.StatusCode, bound)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/output", map[string]bool{"enabled": true})
-	bound = decodeJSON[bindPayload](t, resp)
-	if resp.StatusCode != http.StatusOK || bound.Bindings.OutputOwner != "sess_a" {
-		t.Fatalf("bind output response status=%d body=%+v", resp.StatusCode, bound)
-	}
-
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/audio/input", map[string]any{"enabled": true, "mode": "raw"})
 	bound = decodeJSON[bindPayload](t, resp)
-	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" || bound.Bindings.InputMode != voice.InputModeRaw || bound.Bindings.OutputOwner != "sess_a" {
+	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" || bound.Bindings.InputMode != voice.InputModeRaw {
 		t.Fatalf("replace input response status=%d body=%+v", resp.StatusCode, bound)
 	}
 
@@ -367,7 +367,7 @@ func TestAudioBindingsAreSessionScoped(t *testing.T) {
 
 	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_b/audio/bindings", nil)
 	got = decodeJSON[bindingsPayload](t, resp)
-	if got.Bindings.InputOwner != "sess_b" || got.Bindings.OutputOwner != "" {
+	if got.Bindings.InputOwner != "sess_b" {
 		t.Fatalf("bindings after delete = %+v", got.Bindings)
 	}
 }
@@ -445,14 +445,6 @@ func (c *failingVoiceController) BindInput(string, bool, ...voice.InputMode) (vo
 	return voice.Bindings{}, c.inputErr
 }
 
-func (c *failingVoiceController) BindOutput(string, bool) (voice.Bindings, error) {
-	return voice.Bindings{}, nil
-}
-
-func (c *failingVoiceController) CancelSession(context.Context, string) bool {
-	return false
-}
-
 func (c *failingVoiceController) ReleaseSession(string) voice.Bindings {
 	return voice.Bindings{}
 }
@@ -482,8 +474,7 @@ func TestDesktopAboutIncludesAudioConfig(t *testing.T) {
 		rows["aec.enabled"] != "on" ||
 		rows["aec.model"] != "webrtc" ||
 		rows["ns.enabled"] != "on" ||
-		rows["ns.level"] != "moderate" ||
-		rows["tts.voice"] != "zh-CN-YunxiaNeural" {
+		rows["ns.level"] != "moderate" {
 		t.Fatalf("unexpected about rows: %+v", rows)
 	}
 	if !strings.HasSuffix(rows["audio_config.path"], filepath.Join("config", "audio.yaml")) {
@@ -531,7 +522,7 @@ func TestAudioConfigAPI(t *testing.T) {
 	if !strings.HasSuffix(payload.Path, filepath.Join("config", "audio.yaml")) {
 		t.Fatalf("path = %q", payload.Path)
 	}
-	if payload.Config.ASR.Language != "zh" || !payload.Config.AECEnabled() || !payload.Config.NSEnabled() || payload.Config.NS.Level != "moderate" || payload.Config.TTS.Profiles["edge"].Voice != "zh-CN-YunxiaNeural" {
+	if payload.Config.ASR.Language != "zh" || !payload.Config.AECEnabled() || !payload.Config.NSEnabled() || payload.Config.NS.Level != "moderate" {
 		t.Fatalf("unexpected initial audio config: %+v", payload.Config)
 	}
 
@@ -542,25 +533,20 @@ func TestAudioConfigAPI(t *testing.T) {
 	next.ASR.VAD.Threshold = 0.5
 	next.ASR.VAD.PrerollMillis = 650
 	next.NS.Level = "high"
-	edge := next.TTS.Profiles["edge"]
-	edge.Voice = "zh-CN-XiaoxiaoNeural"
-	edge.Speed = 1.4
-	next.TTS.Profiles["edge"] = edge
-
 	resp = req(t, http.MethodPut, srv.URL+"/settings/audio", next)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	updated := decodeJSON[audioPayload](t, resp)
-	if updated.Config.ASR.Language != "en" || !updated.Config.ASRUseITN() || updated.Config.ASR.VAD.Threshold != 0.5 || updated.Config.ASR.VAD.PrerollMillis != 650 || updated.Config.NS.Level != "high" || updated.Config.TTS.Profiles["edge"].Speed != 1.4 {
+	if updated.Config.ASR.Language != "en" || !updated.Config.ASRUseITN() || updated.Config.ASR.VAD.Threshold != 0.5 || updated.Config.ASR.VAD.PrerollMillis != 650 || updated.Config.NS.Level != "high" {
 		t.Fatalf("unexpected updated audio config: %+v", updated.Config)
 	}
 
 	resp = req(t, http.MethodGet, srv.URL+"/settings/audio", nil)
 	defer resp.Body.Close()
 	reloaded := decodeJSON[audioPayload](t, resp)
-	if reloaded.Config.ASR.Language != "en" || reloaded.Config.NS.Level != "high" || reloaded.Config.TTS.Profiles["edge"].Voice != "zh-CN-XiaoxiaoNeural" {
+	if reloaded.Config.ASR.Language != "en" || reloaded.Config.NS.Level != "high" {
 		t.Fatalf("audio config was not persisted: %+v", reloaded.Config)
 	}
 }

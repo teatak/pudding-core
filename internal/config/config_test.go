@@ -94,6 +94,9 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	audioYAML := string(b)
+	if strings.Contains(audioYAML, "\ntts:") || strings.Contains(audioYAML, "playback_min_energy:") {
+		t.Fatalf("audio.yaml contains removed TTS settings:\n%s", audioYAML)
+	}
 	for _, want := range []string{
 		"type: portaudio",
 		"engine: sherpa-sensevoice",
@@ -102,7 +105,6 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		"use_itn: false",
 		"preroll_millis: 500",
 		"level: moderate",
-		"voice: zh-CN-YunxiaNeural",
 	} {
 		if !strings.Contains(audioYAML, want) {
 			t.Fatalf("expected %q in audio.yaml:\n%s", want, audioYAML)
@@ -115,15 +117,11 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	audio.ASR.VAD.Threshold = 0.55
 	audio.ASR.VAD.PrerollMillis = 650
 	audio.NS.Level = "high"
-	edge := audio.TTS.Profiles["edge"]
-	edge.Voice = "zh-CN-XiaoxiaoNeural"
-	edge.Speed = 1.35
-	audio.TTS.Profiles["edge"] = edge
 	updatedAudio, err := m.SetAudio(ctx, audio)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updatedAudio.ASR.Language != "en" || !updatedAudio.ASRUseITN() || updatedAudio.ASR.VAD.Threshold != 0.55 || updatedAudio.ASR.VAD.PrerollMillis != 650 || updatedAudio.NS.Level != "high" || updatedAudio.TTS.Profiles["edge"].Speed != 1.35 {
+	if updatedAudio.ASR.Language != "en" || !updatedAudio.ASRUseITN() || updatedAudio.ASR.VAD.Threshold != 0.55 || updatedAudio.ASR.VAD.PrerollMillis != 650 || updatedAudio.NS.Level != "high" {
 		t.Fatalf("unexpected updated audio config: %+v", updatedAudio)
 	}
 	b, err = os.ReadFile(audioPath)
@@ -137,8 +135,6 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		"threshold: 0.55",
 		"preroll_millis: 650",
 		"level: high",
-		"voice: zh-CN-XiaoxiaoNeural",
-		"speed: 1.35",
 	} {
 		if !strings.Contains(audioYAML, want) {
 			t.Fatalf("expected %q in updated audio.yaml:\n%s", want, audioYAML)
@@ -413,11 +409,6 @@ func TestManagerResetAudioOnlyRewritesAudioYAML(t *testing.T) {
 	audio.ASR.Language = "en"
 	audio.ASR.SaveAudio = &enabled
 	audio.ASR.VAD.Threshold = 0.42
-	edge := audio.TTS.Profiles["edge"]
-	edge.Voice = "en-US-AriaNeural"
-	edge.Speed = 1.7
-	audio.TTS.Profiles["edge"] = edge
-	audio.TTS.Profiles["extra"] = AudioTTSProfile{Voice: "en-GB-SoniaNeural", Speed: 1.1}
 	if _, err := m.SetAudio(ctx, audio); err != nil {
 		t.Fatal(err)
 	}
@@ -429,9 +420,6 @@ func TestManagerResetAudioOnlyRewritesAudioYAML(t *testing.T) {
 	want := DefaultAudioConfig()
 	if !reflect.DeepEqual(reset, want) {
 		t.Fatalf("unexpected reset audio:\n got: %+v\nwant: %+v", reset, want)
-	}
-	if _, ok := reset.TTS.Profiles["extra"]; ok {
-		t.Fatalf("audio reset kept an extra TTS profile: %+v", reset.TTS.Profiles)
 	}
 	reloaded, err := m.Audio(ctx)
 	if err != nil {

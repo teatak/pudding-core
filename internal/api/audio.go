@@ -50,32 +50,6 @@ func (s *Server) bindAudioInput(c *cart.Context) error {
 	return s.writeAudioBindingResult(c, bindings, err)
 }
 
-func (s *Server) bindAudioOutput(c *cart.Context) error {
-	return s.bindAudio(c, func(sessionID string, enabled bool) (voice.Bindings, error) {
-		return s.voice.BindOutput(sessionID, enabled)
-	})
-}
-
-func (s *Server) bindAudio(c *cart.Context, bind func(string, bool) (voice.Bindings, error)) error {
-	if s.voice == nil {
-		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "audio_unavailable"})
-		return nil
-	}
-	id, _ := c.Param("id")
-	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
-		return s.fail(c, err)
-	}
-	var req audioBindingReq
-	if err := decode(c, &req); err != nil {
-		return badRequest(c, "invalid json body")
-	}
-	if req.Enabled == nil {
-		return badRequest(c, "enabled is required")
-	}
-	bindings, err := bind(id, *req.Enabled)
-	return s.writeAudioBindingResult(c, bindings, err)
-}
-
 func (s *Server) writeAudioBindingResult(c *cart.Context, bindings voice.Bindings, err error) error {
 	if errors.Is(err, voice.ErrSessionRequired) {
 		return badRequest(c, "session id is required")

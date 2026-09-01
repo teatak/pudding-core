@@ -14,7 +14,6 @@ type AudioConfig struct {
 	ASR     AudioASRConfig    `yaml:"asr" json:"asr"`
 	AEC     AudioAECConfig    `yaml:"aec" json:"aec"`
 	NS      AudioNSConfig     `yaml:"ns" json:"ns"`
-	TTS     AudioTTSConfig    `yaml:"tts" json:"tts"`
 }
 
 type AudioDriverConfig struct {
@@ -39,14 +38,13 @@ type AudioASRConfig struct {
 }
 
 type AudioASRVADConfig struct {
-	ModelPath         string  `yaml:"model_path" json:"modelPath"`
-	Threshold         float64 `yaml:"threshold" json:"threshold"`
-	MinEnergy         float64 `yaml:"min_energy" json:"minEnergy"`
-	PlaybackMinEnergy float64 `yaml:"playback_min_energy" json:"playbackMinEnergy"`
-	MinSilenceMillis  int     `yaml:"min_silence_millis" json:"minSilenceMillis"`
-	MinSpeechMillis   int     `yaml:"min_speech_millis" json:"minSpeechMillis"`
-	WindowSize        int     `yaml:"window_size" json:"windowSize"`
-	PrerollMillis     int     `yaml:"preroll_millis" json:"prerollMillis"`
+	ModelPath        string  `yaml:"model_path" json:"modelPath"`
+	Threshold        float64 `yaml:"threshold" json:"threshold"`
+	MinEnergy        float64 `yaml:"min_energy" json:"minEnergy"`
+	MinSilenceMillis int     `yaml:"min_silence_millis" json:"minSilenceMillis"`
+	MinSpeechMillis  int     `yaml:"min_speech_millis" json:"minSpeechMillis"`
+	WindowSize       int     `yaml:"window_size" json:"windowSize"`
+	PrerollMillis    int     `yaml:"preroll_millis" json:"prerollMillis"`
 }
 
 type AudioAECConfig struct {
@@ -58,17 +56,6 @@ type AudioNSConfig struct {
 	Enabled *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Model   string `yaml:"model" json:"model"`
 	Level   string `yaml:"level" json:"level"`
-}
-
-type AudioTTSConfig struct {
-	Enabled  *bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Profile  string                     `yaml:"profile" json:"profile"`
-	Profiles map[string]AudioTTSProfile `yaml:"profiles" json:"profiles"`
-}
-
-type AudioTTSProfile struct {
-	Voice string  `yaml:"voice,omitempty" json:"voice,omitempty"`
-	Speed float64 `yaml:"speed,omitempty" json:"speed,omitempty"`
 }
 
 func DefaultAudioConfig() AudioConfig {
@@ -94,14 +81,13 @@ func DefaultAudioConfig() AudioConfig {
 			NumThreads:                  2,
 			Provider:                    "cpu",
 			VAD: AudioASRVADConfig{
-				ModelPath:         "runtime/models/vad/silero_vad.onnx",
-				Threshold:         0.6,
-				MinEnergy:         0.01,
-				PlaybackMinEnergy: 0.015,
-				MinSilenceMillis:  400,
-				MinSpeechMillis:   300,
-				WindowSize:        512,
-				PrerollMillis:     500,
+				ModelPath:        "runtime/models/vad/silero_vad.onnx",
+				Threshold:        0.6,
+				MinEnergy:        0.01,
+				MinSilenceMillis: 400,
+				MinSpeechMillis:  300,
+				WindowSize:       512,
+				PrerollMillis:    500,
 			},
 		},
 		AEC: AudioAECConfig{
@@ -112,16 +98,6 @@ func DefaultAudioConfig() AudioConfig {
 			Enabled: &on,
 			Model:   "webrtc",
 			Level:   "moderate",
-		},
-		TTS: AudioTTSConfig{
-			Enabled: &on,
-			Profile: "edge",
-			Profiles: map[string]AudioTTSProfile{
-				"edge": {
-					Voice: "zh-CN-YunxiaNeural",
-					Speed: 1.2,
-				},
-			},
 		},
 	}
 }
@@ -215,9 +191,6 @@ func (c AudioConfig) WithDefaults() AudioConfig {
 	if c.ASR.VAD.MinEnergy <= 0 {
 		c.ASR.VAD.MinEnergy = d.ASR.VAD.MinEnergy
 	}
-	if c.ASR.VAD.PlaybackMinEnergy <= 0 {
-		c.ASR.VAD.PlaybackMinEnergy = d.ASR.VAD.PlaybackMinEnergy
-	}
 	if c.ASR.VAD.MinSilenceMillis <= 0 {
 		c.ASR.VAD.MinSilenceMillis = d.ASR.VAD.MinSilenceMillis
 	}
@@ -245,25 +218,6 @@ func (c AudioConfig) WithDefaults() AudioConfig {
 	if strings.TrimSpace(c.NS.Level) == "" {
 		c.NS.Level = d.NS.Level
 	}
-	if c.TTS.Enabled == nil {
-		c.TTS.Enabled = d.TTS.Enabled
-	}
-	if strings.TrimSpace(c.TTS.Profile) == "" {
-		c.TTS.Profile = d.TTS.Profile
-	}
-	if c.TTS.Profiles == nil {
-		c.TTS.Profiles = map[string]AudioTTSProfile{}
-	}
-	for name, profile := range d.TTS.Profiles {
-		current := c.TTS.Profiles[name]
-		if strings.TrimSpace(current.Voice) == "" {
-			current.Voice = profile.Voice
-		}
-		if current.Speed <= 0 {
-			current.Speed = profile.Speed
-		}
-		c.TTS.Profiles[name] = current
-	}
 	return c
 }
 
@@ -279,23 +233,12 @@ func (c AudioConfig) ASRSaveAudio() bool {
 	return boolSetting(c.ASR.SaveAudio, false)
 }
 
-func (c AudioConfig) TTSEnabled() bool {
-	return boolSetting(c.TTS.Enabled, true)
-}
-
 func (c AudioConfig) AECEnabled() bool {
 	return boolSetting(c.AEC.Enabled, true)
 }
 
 func (c AudioConfig) NSEnabled() bool {
 	return boolSetting(c.NS.Enabled, true)
-}
-
-func (c AudioConfig) ActiveTTSProfile() (string, AudioTTSProfile) {
-	c = c.WithDefaults()
-	name := strings.TrimSpace(c.TTS.Profile)
-	profile := c.TTS.Profiles[name]
-	return name, profile
 }
 
 func boolSetting(value *bool, fallback bool) bool {
@@ -333,9 +276,6 @@ func validateAudio(cfg AudioConfig) error {
 	if cfg.ASR.VAD.MinEnergy < 0 || cfg.ASR.VAD.MinEnergy > 1 {
 		return fmt.Errorf("%w: vad min energy must be 0..1", ErrInvalidSetting)
 	}
-	if cfg.ASR.VAD.PlaybackMinEnergy < 0 || cfg.ASR.VAD.PlaybackMinEnergy > 1 {
-		return fmt.Errorf("%w: vad playback min energy must be 0..1", ErrInvalidSetting)
-	}
 	if cfg.ASR.VAD.MinSilenceMillis < 100 || cfg.ASR.VAD.MinSilenceMillis > 5000 {
 		return fmt.Errorf("%w: vad min silence must be 100..5000", ErrInvalidSetting)
 	}
@@ -358,16 +298,6 @@ func validateAudio(cfg AudioConfig) error {
 	case "low", "moderate", "high", "very_high":
 	default:
 		return fmt.Errorf("%w: invalid ns level", ErrInvalidSetting)
-	}
-	profileName, profile := cfg.ActiveTTSProfile()
-	if strings.ToLower(strings.TrimSpace(profileName)) != "edge" {
-		return fmt.Errorf("%w: unsupported tts profile", ErrInvalidSetting)
-	}
-	if strings.TrimSpace(profile.Voice) == "" {
-		return fmt.Errorf("%w: missing tts voice", ErrInvalidSetting)
-	}
-	if profile.Speed < 0.5 || profile.Speed > 2 {
-		return fmt.Errorf("%w: tts speed must be 0.5..2", ErrInvalidSetting)
 	}
 	return nil
 }
