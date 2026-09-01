@@ -1,8 +1,8 @@
 # 吉祥物 2.5D Scene Lab 实施计划
 
-> 状态:实施中（阶段 3:统一表情状态）  
-> 日期:2026-09-01  
-> 实验入口:`web/dev/mascot-scene-lab.html`  
+> 状态:已完成（V1 生产替换）
+> 日期:2026-09-01
+> 实验入口:`web/dev/mascot-scene-lab.html`
 > 生产基线:`web/src/components/Mascot.tsx`、`web/src/styles.css`
 
 ## 0. 结论
