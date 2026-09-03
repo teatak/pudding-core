@@ -169,6 +169,7 @@ export {
   Split,
   Square,
   SquareMousePointer,
+  SquarePen,
   SquareTerminal,
   Star,
   Sun,

@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { type AppIconSpec } from "@/contracts/api";
-import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
+import { IdentityIcon, type IdentityIconShape, type IdentityIconSize } from "@/components/IdentityIcon";
 import { cn } from "@/lib/utils";
 
 export type { AppIconSpec };
@@ -11,11 +11,13 @@ const appIconSVGInflight = new Map<string, Promise<string>>();
 export function AppIcon({
   className,
   icon,
+  shape = "rounded",
   size = "md",
   src,
 }: {
   className?: string;
   icon?: AppIconSpec;
+  shape?: IdentityIconShape;
   size?: IdentityIconSize;
   src?: string;
 }) {
@@ -78,6 +80,7 @@ export function AppIcon({
       fallback="app"
       fallbackClassName="bg-muted"
       fit={icon ? "contain" : "cover"}
+      shape={shape}
       size={size}
       src={src && !hasIconColor ? src : undefined}
       style={iconStyle}

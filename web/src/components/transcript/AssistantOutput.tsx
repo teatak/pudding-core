@@ -314,7 +314,7 @@ function AssistantError({ error }: { error: string }) {
   const summary = t(unavailable ? "transcript.errorServiceUnavailable" : "transcript.errorRequestFailed");
   const summaryWithStatus = status ? `${summary} (${status})` : summary;
   return (
-    <div className="mt-1.5 min-w-0" role="alert">
+    <div className="min-w-0" role="alert">
       <TranscriptDisclosure
         icon={<CircleAlert className="size-3.5" />}
         iconClassName="text-destructive/70"

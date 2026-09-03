@@ -3,7 +3,7 @@ export const BODY_HIGHLIGHT_ASSET_ID = "body-highlight" as const;
 export const LEFT_ARM_ASSET_ID = "left-arm" as const;
 export const RIGHT_ARM_ASSET_ID = "right-arm" as const;
 export const ANTENNA_STEM_ASSET_ID = "antenna-stem" as const;
-export const ANTENNA_BASE_ASSET_ID = "antenna-base" as const;
+export const ANTENNA_ROOT_ASSET_ID = "antenna-root" as const;
 export const FACE_FRAME_ASSET_ID = "face-frame" as const;
 export const FACE_GLASS_ASSET_ID = "face-glass" as const;
 export const FACE_EYES_ASSET_ID = "face-eyes" as const;
@@ -20,7 +20,7 @@ export type SceneAssetID =
   | typeof LEFT_ARM_ASSET_ID
   | typeof RIGHT_ARM_ASSET_ID
   | typeof ANTENNA_STEM_ASSET_ID
-  | typeof ANTENNA_BASE_ASSET_ID
+  | typeof ANTENNA_ROOT_ASSET_ID
   | typeof FACE_FRAME_ASSET_ID
   | typeof FACE_GLASS_ASSET_ID
   | typeof FACE_EYES_ASSET_ID
@@ -37,7 +37,7 @@ export const SCENE_ASSET_OPTIONS: ReadonlyArray<{ id: SceneAssetID; label: strin
   { id: LEFT_ARM_ASSET_ID, label: "左手臂" },
   { id: RIGHT_ARM_ASSET_ID, label: "右手臂" },
   { id: ANTENNA_STEM_ASSET_ID, label: "天线杆" },
-  { id: ANTENNA_BASE_ASSET_ID, label: "天线底座" },
+  { id: ANTENNA_ROOT_ASSET_ID, label: "天线根部护罩" },
   { id: FACE_FRAME_ASSET_ID, label: "前部面框" },
   { id: FACE_GLASS_ASSET_ID, label: "内面罩玻璃" },
   { id: FACE_EYES_ASSET_ID, label: "眼睛" },
@@ -57,10 +57,10 @@ export const LEFT_ARM_PATH = "M22 88 C17.5 91.5 11 98.5 8.5 104 C7 108 9 112 12.
 export const RIGHT_ARM_VIEW_BOX = "101 86 20 29";
 export const RIGHT_ARM_PATH = "M106 88 C110.5 91.5 117 98.5 119.5 104 C121 108 119 112 115.5 113 C112 114 109 111 108.5 107 C108 103 106.5 100 103.5 97";
 export const ANTENNA_STEM_VIEW_BOX = "52 10 24 26";
-export const ANTENNA_STEM_PATH = "M64 30.5 C64.5 27 63.5 23 60 19";
+export const ANTENNA_STEM_PATH = "M64 32 C64.5 28 63.5 23 60 19";
 export const ANTENNA_TIP_CENTER = { x: 60, y: 19 } as const;
-export const ANTENNA_BASE_VIEW_BOX = "54 28 20 10";
-export const ANTENNA_BASE_PATH = "M59 35 L60.5 30 H67.5 L69 35 Z";
+export const ANTENNA_ROOT_VIEW_BOX = "55 27 18 10";
+export const ANTENNA_ROOT_PATH = "M61.2 29.5 C59.5 30.7 57.4 33.3 58.3 35.2 C58.8 36.3 61.6 36.7 64 36.7 C66.4 36.7 69.2 36.3 69.7 35.2 C70.6 33.3 68.5 30.7 66.8 29.5 C65.2 30.9 62.8 30.9 61.2 29.5 Z";
 export const FACE_FRAME_VIEW_BOX = "28 52 72 49";
 export const FACE_SCREEN_PATH = "M40 53 H88 C96 53 100 58 100 66 V88 C100 96 95 100 87 100 H41 C33 100 28 96 28 88 V66 C28 58 32 53 40 53 Z";
 export const FACE_SCREEN_GROOVE_TRANSFORM = "translate(64 77) scale(0.89) translate(-64 -77)";

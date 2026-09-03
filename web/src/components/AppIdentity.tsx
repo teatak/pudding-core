@@ -2,7 +2,7 @@ import { BookOpen, Globe, MousePointerClick, PackagePlus, PanelsTopLeft, ScanLin
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
-import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
+import { IdentityIcon, type IdentityIconShape, type IdentityIconSize } from "@/components/IdentityIcon";
 
 type Translate = (key: string) => string;
 
@@ -56,12 +56,13 @@ export function appDisplayDescription(app: AppDefinition, t: Translate) {
   return app.description || "";
 }
 
-export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: IdentityIconSize }) {
+export function BuiltinAppIcon({ appID, shape = "rounded", size = "md" }: { appID: string; shape?: IdentityIconShape; size?: IdentityIconSize }) {
   const Icon = builtinAppIcon(appID);
   return (
     <IdentityIcon
       aria-hidden="true"
       className={`pudding-app-icon ${builtinAppIconClass(appID)}`}
+      shape={shape}
       size={size}
     >
       <Icon className="size-[64%]" strokeWidth={2.2} />
@@ -101,17 +102,19 @@ export function AppIdentityIcon({
   app,
   icon,
   iconSrc,
+  shape = "rounded",
   size = "md",
 }: {
   app: AppDefinition;
   icon?: AppIconSpec;
   iconSrc?: string;
+  shape?: IdentityIconShape;
   size?: IdentityIconSize;
 }) {
   const resolvedIcon = icon ?? app.icon;
   return app.source === "builtin" ? (
-    <BuiltinAppIcon appID={app.id} size={size} />
+    <BuiltinAppIcon appID={app.id} shape={shape} size={size} />
   ) : (
-    <AppIcon icon={resolvedIcon} size={size} src={iconSrc} />
+    <AppIcon icon={resolvedIcon} shape={shape} size={size} src={iconSrc} />
   );
 }

@@ -141,11 +141,11 @@ export function SessionAppsControl({ session, token }: { session: Session; token
 
 function SessionAppIcon({ app, token }: { app: AppDefinition | undefined; token: string }) {
   return (
-    <span className="relative inline-grid size-6 place-items-center overflow-hidden rounded-full bg-[var(--agent-console-chrome-background)] ring-1 ring-[var(--agent-console-chrome-background)] [&_[data-slot=identity-icon]]:!size-6">
+    <span className="relative inline-grid size-6 place-items-center rounded-full ring-1 ring-[var(--agent-console-chrome-background)] [&_[data-slot=identity-icon]]:!size-6">
       {app ? (
-        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="sm" />
+        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} shape="circle" size="sm" />
       ) : (
-        <AppIcon size="sm" />
+        <AppIcon shape="circle" size="sm" />
       )}
     </span>
   );

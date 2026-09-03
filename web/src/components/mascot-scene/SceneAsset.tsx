@@ -1,9 +1,9 @@
 import { useId, type CSSProperties } from "react";
 
 import {
-  ANTENNA_BASE_ASSET_ID,
-  ANTENNA_BASE_PATH,
-  ANTENNA_BASE_VIEW_BOX,
+  ANTENNA_ROOT_ASSET_ID,
+  ANTENNA_ROOT_PATH,
+  ANTENNA_ROOT_VIEW_BOX,
   ANTENNA_STEM_ASSET_ID,
   ANTENNA_STEM_PATH,
   ANTENNA_STEM_VIEW_BOX,
@@ -68,8 +68,8 @@ export function SceneAsset({ assetID, size }: SceneAssetProps) {
       return <ArmAsset path={RIGHT_ARM_PATH} size={size} viewBox={RIGHT_ARM_VIEW_BOX} />;
     case ANTENNA_STEM_ASSET_ID:
       return <AntennaStemAsset size={size} />;
-    case ANTENNA_BASE_ASSET_ID:
-      return <AntennaBaseAsset size={size} />;
+    case ANTENNA_ROOT_ASSET_ID:
+      return <AntennaRootAsset size={size} />;
     case FACE_FRAME_ASSET_ID:
       return <FaceFrameAsset size={size} />;
     case FACE_GLASS_ASSET_ID:
@@ -130,17 +130,17 @@ function AntennaStemAsset({ size }: { size: SceneLayerSize }) {
   );
 }
 
-function AntennaBaseAsset({ size }: { size: SceneLayerSize }) {
+function AntennaRootAsset({ size }: { size: SceneLayerSize }) {
   return (
     <svg
       className="mascot-scene-asset"
       focusable="false"
       preserveAspectRatio="none"
       style={getAssetStyle(size)}
-      viewBox={ANTENNA_BASE_VIEW_BOX}
+      viewBox={ANTENNA_ROOT_VIEW_BOX}
     >
       <path
-        d={ANTENNA_BASE_PATH}
+        d={ANTENNA_ROOT_PATH}
         fill="var(--mascot-body-metal-top)"
         stroke="var(--mascot-shell-outline)"
         strokeLinejoin="round"

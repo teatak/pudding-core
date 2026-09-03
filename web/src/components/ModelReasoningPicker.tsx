@@ -227,7 +227,12 @@ export function ModelReasoningPicker({
             "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-[var(--composer-control-foreground)] transition-none",
             iconOnly
               ? "w-8 max-w-8 flex-none justify-center p-0"
-              : "min-w-0 max-w-[9.5rem] gap-1 pr-1.5 sm:max-w-[10.5rem]",
+              : cn(
+                  "min-w-0 gap-1 pr-1.5",
+                  reasoningLabel
+                    ? "max-w-[12rem] sm:max-w-[13rem]"
+                    : "max-w-[9.5rem] sm:max-w-[10.5rem]",
+                ),
             !iconOnly && (visibleModel ? "pl-1" : "pl-2"),
             className,
           )}

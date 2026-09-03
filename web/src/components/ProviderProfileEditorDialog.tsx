@@ -16,7 +16,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleHelp, Copy, Ellipsis, Eye, EyeOff, GripVertical, Plus, Trash, X } from "@/components/icons";
+import { CircleHelp, Copy, Ellipsis, Eye, EyeOff, GripVertical, Plus, SquarePen, Trash, X } from "@/components/icons";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -909,32 +909,36 @@ function SortableModelRow({
       >
         <GripVertical />
       </Button>
-      <button
-        aria-label={t("provider.editModel")}
-        className="h-12 min-w-0 truncate text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
-        disabled={disabled}
-        type="button"
-        onClick={onEdit}
-      >
+      <div className="min-w-0 truncate text-sm font-medium">
         {displayName}
-      </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button aria-label={t("provider.modelActions")} disabled={disabled} size="icon-sm" type="button" variant="ghost">
-            <Ellipsis />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem onSelect={onDuplicate}>
-            <Copy />
-            {t("provider.duplicateModel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-            <Trash />
-            {t("common.delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      </div>
+      <div className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button aria-label={t("provider.editModel")} disabled={disabled} size="icon-sm" type="button" variant="ghost" onClick={onEdit}>
+              <SquarePen />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("provider.editModel")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label={t("provider.modelActions")} disabled={disabled} size="icon-sm" type="button" variant="ghost">
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onSelect={onDuplicate}>
+              <Copy />
+              {t("provider.duplicateModel")}
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+              <Trash />
+              {t("common.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
 }
