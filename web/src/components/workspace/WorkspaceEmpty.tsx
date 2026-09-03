@@ -40,10 +40,24 @@ export function WorkspaceEmpty({
   onRestoreClosed: (entry: ClosedCanvasItem) => void;
 }) {
   const { t } = useI18n();
+  const hasContinuableCanvas = savedItems.length > 0 || closedItems.length > 0;
+  const descriptionKey = hasContinuableCanvas
+    ? "workspace.emptyContinueDescription"
+    : hasProject
+      ? "workspace.emptyStartDescription"
+      : "workspace.emptyBrowserDescription";
   return (
     <div className="pudding-workspace-empty h-full overflow-y-auto bg-[var(--workspace-background)]">
       <div className="flex min-h-full items-center justify-center px-6 py-16">
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-xl">
+          <div className="mb-7 text-center">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">
+              {t(hasContinuableCanvas ? "workspace.emptyContinueTitle" : "workspace.emptyStartTitle")}
+            </h2>
+            <p className="mx-auto mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">
+              {t(descriptionKey)}
+            </p>
+          </div>
           <div
             className={`pudding-workspace-empty-actions mx-auto gap-2 ${
               hasProject ? "grid w-full max-w-sm grid-cols-2" : "flex justify-center"

@@ -62,19 +62,21 @@ export function CanvasLibraryMenuSections({
   ));
   if (startLayout) {
     return (
-      <div className="mx-auto mt-8 grid w-full max-w-xl min-w-0 grid-cols-1 gap-4 border-t border-[var(--workspace-border)] pt-4 text-left">
+      <div className="mx-auto mt-9 grid w-full min-w-0 grid-cols-1 gap-6 border-t border-[var(--workspace-border)] pt-5 text-left">
         {savedItems.length > 0 ? (
           <section className="min-w-0">
-            <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
-              {t("canvas.savedWidgets")}
+            <div className="flex h-8 items-center px-2 text-xs font-medium text-foreground">
+              <span>{t("canvas.savedWidgets")}</span>
+              <span className="ml-1.5 font-normal tabular-nums text-muted-foreground">{savedItems.length}</span>
             </div>
-            <div className="grid max-h-56 gap-1 overflow-y-auto">{savedRows}</div>
+            <div className="grid max-h-48 gap-1 overflow-y-auto">{savedRows}</div>
           </section>
         ) : null}
         {closedItems.length > 0 ? (
           <section className="min-w-0">
             <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
               <span>{t("canvas.recentClosed")}</span>
+              <span className="ml-1.5 font-normal tabular-nums">{closedItems.length}</span>
               <Button className="-mr-1 ml-auto px-1.5 font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
                 {t("canvas.clearRecentClosed")}
               </Button>
@@ -114,7 +116,7 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove, startLayout }: { entry: S
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className={cn("group/saved mx-1 flex min-w-0 items-center rounded-md pr-2 hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-9" : "h-8")}>
+    <div className={cn("group/saved mx-1 flex min-w-0 items-center rounded-md pr-2 hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-10" : "h-8")}>
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onOpen}>
         <CanvasKindIcon className={libraryItemIconClassName} kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
@@ -132,8 +134,8 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore, startLayout }: { entr
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className={cn("group/closed mx-1 flex min-w-0 items-center rounded-md pr-2 hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-9" : "h-8")}>
-      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onRestore}>
+    <div className={cn("group/closed mx-1 flex min-w-0 items-center rounded-md pr-2 text-muted-foreground hover:bg-item-hover focus-within:bg-item-hover", startLayout ? "h-9" : "h-8")}>
+      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none" type="button" onClick={onRestore}>
         <CanvasKindIcon className={libraryItemIconClassName} kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
