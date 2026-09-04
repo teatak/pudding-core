@@ -17,6 +17,23 @@ func TestNormalizeProjectAllowsNamedProjectWithoutDirectories(t *testing.T) {
 	}
 }
 
+func TestBrowserHistoryMatchesVisibleURLInsteadOfScheme(t *testing.T) {
+	entry := &BrowserHistoryEntry{URL: "https://www.google.com/", Title: "Google"}
+	if BrowserHistoryMatches(entry, "s") {
+		t.Fatal("scheme must not participate in browser history search")
+	}
+	if !BrowserHistoryMatches(entry, "google") {
+		t.Fatal("visible host should participate in browser history search")
+	}
+	if !BrowserHistoryMatches(entry, "https://www.google.com/") {
+		t.Fatal("a pasted full URL should match its visible URL")
+	}
+	entry.URL = "https://www.google.com/search?q=pudding"
+	if !BrowserHistoryMatches(entry, "search") {
+		t.Fatal("visible path should participate in browser history search")
+	}
+}
+
 func TestNormalizeProjectRejectsUnnamedProjectWithoutDirectories(t *testing.T) {
 	project := &Project{ID: "project_empty"}
 	if err := NormalizeProject(project); !errors.Is(err, ErrInvalidProject) {

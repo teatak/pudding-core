@@ -104,6 +104,7 @@ class FakeWebContents extends EventEmitter {
     this.url = "about:blank";
     this.destroyed = false;
     this.reloadCount = 0;
+    this.stopCount = 0;
     this.findRequestID = 0;
     this.findRequests = [];
     this.stopFindActions = [];
@@ -134,10 +135,18 @@ class FakeWebContents extends EventEmitter {
       this.debugger.emit("message", {}, "Page.frameNavigated", {
         frame: { id: "main", loaderId: loaderID, url: this.url },
       });
+      if (!this.suppressReloadFinishEvent) {
+        queueMicrotask(() => this.emit("did-finish-load"));
+      }
       if (!this.suppressReloadStopEvent) {
         queueMicrotask(() => this.emit("did-stop-loading"));
       }
     });
+  }
+
+  stop() {
+    this.stopCount += 1;
+    this.emit("did-stop-loading");
   }
 
   findInPage(text, options) {
@@ -395,6 +404,15 @@ test("uses native webContents for page find, print, and tab zoom", async () => {
   assert.deepEqual(host.zoom({ ...request, action: "out" }), { factor: 1, percent: 100 });
   assert.deepEqual(host.zoom({ ...request, action: "reset" }), { factor: 1, percent: 100 });
   assert.deepEqual(host.getZoom(request), { factor: 1, percent: 100 });
+
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-stoppable", url: "https://example.com/" },
+  });
+  assert.equal(host.listTabs({ sessionID: request.sessionID }).tabs[0].loading, true);
+  const stopped = host.stop(request);
+  assert.equal(webContents.stopCount, 1);
+  assert.equal(stopped.loading, false);
+  assert.equal(stopped.navigationSettled, true);
 
   assert.deepEqual(await host.print(request), { ok: true, canceled: false, reason: "" });
   assert.deepEqual(webContents.printOptions, { printBackground: true, usePrinterDefaultPageSize: true });
@@ -671,15 +689,21 @@ test("captures dynamically updated favicons and publishes the resolved local ima
   webContents.emit("page-favicon-updated", {}, ["javascript:alert(1)", "https://discord.com/assets/favicon.ico"]);
   assert.equal(snapshots.at(-1).faviconURL, "https://discord.com/assets/favicon.ico");
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(resolutions, [{
-    url: "https://discord.com/assets/favicon.ico",
-    pageURL: "https://discord.com/login",
-  }]);
+  assert.deepEqual(resolutions, [
+    {
+      url: "https://discord.com/favicon.ico",
+      pageURL: "https://discord.com/login",
+    },
+    {
+      url: "https://discord.com/assets/favicon.ico",
+      pageURL: "https://discord.com/login",
+    },
+  ]);
   assert.equal(snapshots.at(-1).faviconURL, resolved);
   host.closeAll();
 });
 
-test("keeps the current favicon during navigation until the page reports a replacement", async () => {
+test("publishes a provisional site favicon before the page reports its final icon", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
   const request = { sessionID: "session-favicon-navigation", tabID: "tab-favicon-navigation", url: "https://www.google.com/" };
@@ -695,18 +719,104 @@ test("keeps the current favicon during navigation until the page reports a repla
     frame: { id: "main", loaderId: "loader-search", url: "https://www.google.com/search?q=weather" },
   });
   assert.equal(host.listTabs(request).tabs[0].faviconURL, faviconURL);
+  assert.equal(host.listTabs(request).tabs[0].faviconStale, false);
 
   webContents.debugger.emit("message", {}, "Page.frameNavigated", {
     frame: { id: "main", loaderId: "loader-example", url: "https://example.com/" },
   });
-  assert.equal(host.listTabs(request).tabs[0].faviconURL, faviconURL);
+  assert.equal(host.listTabs(request).tabs[0].faviconURL, "https://example.com/favicon.ico");
+  assert.equal(host.listTabs(request).tabs[0].faviconStale, true);
 
   const nextFaviconURL = "https://example.com/favicon.ico";
   webContents.emit("page-favicon-updated", {}, [nextFaviconURL]);
   assert.equal(host.listTabs(request).tabs[0].faviconURL, nextFaviconURL);
+  assert.equal(host.listTabs(request).tabs[0].faviconStale, false);
 
   webContents.emit("page-favicon-updated", {}, []);
   assert.equal(host.listTabs(request).tabs[0].faviconURL, "");
+  host.closeAll();
+});
+
+test("marks only a successfully settled navigation as a history visit", async () => {
+  const required = [];
+  const snapshots = [];
+  const host = new BrowserHost(
+    (snapshot) => snapshots.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+  );
+  const request = { sessionID: "session-history", tabID: "tab-history", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(72);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+  snapshots.length = 0;
+
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-redirect", url: "https://www.sina.com.cn/" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.some((snapshot) => snapshot.navigationSettled), false);
+  assert.equal(snapshots.at(-1).loading, true);
+
+  webContents.emit("did-finish-load");
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  assert.equal(snapshots.at(-1).url, "https://www.sina.com.cn/");
+  assert.equal(snapshots.at(-1).loading, false);
+  assert.equal(snapshots.at(-1).navigationSettled, true);
+
+  webContents.emit("did-finish-load");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.filter((snapshot) => snapshot.navigationSettled).length, 1);
+
+  webContents.emit("page-favicon-updated", {}, ["https://www.sina.com.cn/favicon.ico"]);
+  assert.equal(snapshots.at(-1).navigationSettled, undefined);
+
+  webContents.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://missing.example/", true);
+  webContents.emit("did-finish-load");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.at(-1).navigationSettled, undefined);
+  host.closeAll();
+});
+
+test("does not record a meta-refresh source page before the final navigation settles", async () => {
+  const required = [];
+  const snapshots = [];
+  const host = new BrowserHost(
+    (snapshot) => snapshots.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+  );
+  const request = { sessionID: "session-meta-refresh", tabID: "tab-meta-refresh", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(73);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+  snapshots.length = 0;
+
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-source", url: "https://sina.com/" },
+  });
+  webContents.emit("did-finish-load");
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(snapshots.filter((snapshot) => snapshot.navigationSettled).map((snapshot) => snapshot.url), []);
+
+  webContents.emit("did-start-navigation", {}, "https://www.sina.com.cn/", false, true);
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  assert.deepEqual(snapshots.filter((snapshot) => snapshot.navigationSettled).map((snapshot) => snapshot.url), []);
+
+  webContents.debugger.emit("message", {}, "Page.frameNavigated", {
+    frame: { id: "main", loaderId: "loader-final", url: "https://www.sina.com.cn/" },
+  });
+  webContents.emit("did-finish-load");
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  assert.deepEqual(snapshots.filter((snapshot) => snapshot.navigationSettled).map((snapshot) => snapshot.url), [
+    "https://www.sina.com.cn/",
+  ]);
   host.closeAll();
 });
 
@@ -903,6 +1013,35 @@ test("rejects a stale renderer registration", async () => {
   );
   host.closeAll();
   await assert.rejects(opening, /browser tab closed/);
+});
+
+test("a late renderer registration cannot recreate a closed tab", async () => {
+  const required = [];
+  const updates = [];
+  const host = new BrowserHost(
+    (snapshot) => updates.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+  );
+  const request = { sessionID: "session-closed-registration", tabID: "tab-closed", url: "about:blank" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(143);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  const closedSlot = host.getSlot(request);
+  host.closeTab(request);
+  const updateCountAfterClose = updates.length;
+  await assert.rejects(
+    host.registerWebContents(required[0], new FakeWebContents(144)),
+    /stale browser webview registration/,
+  );
+  host.noteUpdated(closedSlot);
+  assert.equal(updates.length, updateCountAfterClose);
+  assert.deepEqual(host.listTabs({ sessionID: request.sessionID }).tabs, []);
+  host.closeAll();
 });
 
 test("retries CDP setup when the same webview registers again", async () => {
@@ -1258,14 +1397,14 @@ test("reload ignores stale main-frame events until a new loader commits", async 
   webContents.debugger.emit("message", {}, "Page.frameNavigated", {
     frame: { id: "main", loaderId: "loader-reloaded", url: "about:blank" },
   });
-  webContents.emit("did-stop-loading");
+  webContents.emit("did-finish-load");
   await reload;
   assert.equal(settled, true);
   assert.deepEqual(lifecycle, ["start:reload", "end:reload:true"]);
   host.closeAll();
 });
 
-test("reload completes only after the replacement page stops loading", async () => {
+test("reload completes when the replacement main frame finishes", async () => {
   let required;
   const lifecycle = [];
   const host = new BrowserHost(
@@ -1282,6 +1421,7 @@ test("reload completes only after the replacement page stops loading", async () 
   const webContents = new FakeWebContents(61);
   await host.registerWebContents(required, webContents);
   await opening;
+  webContents.suppressReloadFinishEvent = true;
   webContents.suppressReloadStopEvent = true;
 
   let settled = false;
@@ -1292,7 +1432,7 @@ test("reload completes only after the replacement page stops loading", async () 
   assert.equal(settled, false);
   assert.deepEqual(lifecycle, ["start:reload"]);
 
-  webContents.emit("did-stop-loading");
+  webContents.emit("did-finish-load");
   await reload;
   assert.deepEqual(lifecycle, ["start:reload", "end:reload:true"]);
   host.closeAll();

@@ -56,7 +56,7 @@ import {
   useFilePreviews,
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
-import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
+import { consumeProjectFileReveal, useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 import {
@@ -309,7 +309,7 @@ export const WorkspacePane = memo(function WorkspacePane({
   });
   useRetainBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
   const browserSurfaceTabs = browserTabsReady ? browserTabs : [];
-  const projectActive = activeSurface === "project" && hasFileWorkspace;
+  const projectActive = activeSurface === "project" && projectTabVisible;
   useEffect(() => {
     if (retainedTokenRef.current === token) {
       return;
@@ -463,10 +463,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     selectProjectSurface();
   }, [activeFilePreview?.source, actorSessionID, hasFileWorkspace, selectProjectSurface, setActiveFilePreviewID]);
 
-  const closeProjectSurface = useCallback(() => {
-    if (!actorSessionID) return;
-    setProjectTabClosed(actorSessionID, true);
-    if (!projectActive) return;
+  const selectProjectFallbackSurface = useCallback(() => {
     if (browserTabs.length > 0) {
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
     } else if (surfaceFilePreviews.length > 0) {
@@ -480,10 +477,8 @@ export const WorkspacePane = memo(function WorkspacePane({
     }
   }, [
     activeBrowserTabID,
-    actorSessionID,
     browserTabs,
     items.length,
-    projectActive,
     selectBrowserTab,
     selectCanvasSurface,
     selectWorkspaceSurface,
@@ -491,15 +486,59 @@ export const WorkspacePane = memo(function WorkspacePane({
     surfaceFilePreviews,
   ]);
 
+  const closeProjectSurface = useCallback(() => {
+    if (!actorSessionID) return;
+    if (projectFileReveal?.sessionID === actorSessionID) {
+      consumeProjectFileReveal(actorSessionID, projectFileReveal.serial);
+    }
+    if (filePreviewReveal?.sessionID === actorSessionID) {
+      const pendingPreview = filePreviews.find((preview) => preview.id === filePreviewReveal.previewID);
+      if (pendingPreview?.source === "turn-diff") {
+        consumeFilePreviewReveal(filePreviewReveal.serial);
+      }
+    }
+    setProjectTabClosed(actorSessionID, true);
+    if (!projectActive) return;
+    selectProjectFallbackSurface();
+  }, [
+    actorSessionID,
+    filePreviewReveal,
+    filePreviews,
+    projectActive,
+    projectFileReveal,
+    selectProjectFallbackSurface,
+  ]);
+
   useEffect(() => {
-    if (activeSurface === "project" && !sessionQuery.isLoading && !hasFileWorkspace) {
+    if (activeSurface === "project" && projectTabClosed) {
+      selectProjectFallbackSurface();
+    }
+  }, [activeSurface, projectTabClosed, selectProjectFallbackSurface]);
+
+  useEffect(() => {
+    if (
+      activeSurface === "project"
+      && enabled
+      && !sessionQuery.isPending
+      && !workspaceRootsQuery.isPending
+      && !hasFileWorkspace
+    ) {
       if (items.length > 0) {
         selectCanvasSurface();
       } else {
         selectWorkspaceSurface();
       }
     }
-  }, [activeSurface, hasFileWorkspace, items.length, selectCanvasSurface, selectWorkspaceSurface, sessionQuery.isLoading]);
+  }, [
+    activeSurface,
+    enabled,
+    hasFileWorkspace,
+    items.length,
+    selectCanvasSurface,
+    selectWorkspaceSurface,
+    sessionQuery.isPending,
+    workspaceRootsQuery.isPending,
+  ]);
 
   useEffect(() => {
     if (projectFileReveal?.sessionID === actorSessionID && hasFileWorkspace) {

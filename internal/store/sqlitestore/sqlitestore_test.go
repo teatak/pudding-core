@@ -539,6 +539,13 @@ func TestBrowserHistoryIsGlobalSearchableAndDeletable(t *testing.T) {
 	if len(filtered) != 1 || filtered[0].ID != second.ID {
 		t.Fatalf("history search should match title or URL case-insensitively: %+v", filtered)
 	}
+	filtered, err = st.ListBrowserHistory(ctx, "s", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != second.ID {
+		t.Fatalf("history search must not match the URL scheme: %+v", filtered)
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

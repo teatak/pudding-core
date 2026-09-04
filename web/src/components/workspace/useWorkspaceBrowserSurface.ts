@@ -328,6 +328,7 @@ export function useWorkspaceBrowserSurface({
     if (
       !enabled ||
       !sessionID ||
+      closingBrowserTabRef.current ||
       browserActive ||
       !hasBrowserState ||
       hasTransientSurface ||
@@ -413,7 +414,8 @@ export function useWorkspaceBrowserSurface({
         }
         if (closeWorkspace) {
           setWorkspaceOpen(targetSessionID, false);
-        } else if (currentSessionIDRef.current === targetSessionID) {
+        }
+        if (currentSessionIDRef.current === targetSessionID) {
           setActiveSurfaceState((current) => (current === "browser" ? fallback : current));
         }
       }

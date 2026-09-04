@@ -21,9 +21,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { FileCode2, FileDiff, Folders, X } from "@/components/icons";
 import { memo, useEffect, useState } from "react";
 
-import type { BrowserTab } from "@/api/client";
 import { BrowserTabIcon } from "@/browser/BrowserTabIcon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
+import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
 import type { CanvasItem } from "@/contracts/api";
@@ -63,6 +63,7 @@ function SurfaceTabLeadingIcon({ tab }: { tab: SurfaceTab }) {
       <BrowserTabIcon
         className="size-(--workspace-toolbar-tab-icon)"
         faviconURL={browserTabFaviconURL(tab.browser)}
+        loading={tab.browser.loading}
         pageURL={tab.browser.url}
       />
     );
@@ -83,7 +84,7 @@ export type WorkspaceFilePreviewTab = {
 
 type SurfaceTab =
   | { kind: "project"; id: "project"; sortAt: number }
-  | { kind: "browser"; id: string; sortAt: number; browser: BrowserTab }
+  | { kind: "browser"; id: string; sortAt: number; browser: ElectronBrowserSurfaceTab }
   | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab }
   | { kind: "widget"; id: string; sortAt: number; widget: CanvasItem };
 
@@ -114,7 +115,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   activeCanvasItemID?: string;
   activeFilePreviewID?: string;
   activeSurface: WorkspaceSurface;
-  browserTabs: BrowserTab[];
+  browserTabs: ElectronBrowserSurfaceTab[];
   canvasItems: CanvasItem[];
   closingCanvasItemID?: string;
   closingBrowserTabID?: string;

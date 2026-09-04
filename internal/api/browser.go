@@ -27,6 +27,7 @@ type browserSyncReq struct {
 	FaviconURL   string `json:"faviconURL"`
 	CanGoBack    bool   `json:"canGoBack"`
 	CanGoForward bool   `json:"canGoForward"`
+	HistoryVisit bool   `json:"historyVisit"`
 }
 
 type browserObserveReq struct {
@@ -343,7 +344,7 @@ func (s *Server) openBrowserTab(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -383,7 +384,7 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		c.JSON(http.StatusOK, current)
 		return nil
 	}
-	if err := s.syncBrowserSnapshot(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserSnapshot(c.Request.Context(), sessionID, tab, req.HistoryVisit); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -433,7 +434,7 @@ func (s *Server) openBrowserSession(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -751,7 +752,7 @@ func (s *Server) backBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -771,7 +772,7 @@ func (s *Server) forwardBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -791,7 +792,7 @@ func (s *Server) reloadBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -995,18 +996,7 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	return err
 }
 
-func (s *Server) syncBrowserNavigation(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
-	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
-		return err
-	}
-	return s.recordBrowserHistory(ctx, tab)
-}
-
-func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
-	previous, err := s.store.GetBrowserTabState(ctx, sessionID, tab.ID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
+func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab browser.TabSnapshot, historyVisit bool) error {
 	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
 		return err
 	}
@@ -1014,20 +1004,11 @@ func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab 
 	if !ok {
 		return nil
 	}
-	if previous != nil && strings.TrimSpace(previous.URL) == in.URL {
-		return s.store.UpdateBrowserHistoryMetadata(ctx, in)
+	if historyVisit {
+		_, err := s.store.PutBrowserHistory(ctx, in)
+		return err
 	}
-	_, err = s.store.PutBrowserHistory(ctx, in)
-	return err
-}
-
-func (s *Server) recordBrowserHistory(ctx context.Context, tab browser.TabSnapshot) error {
-	in, ok := browserHistoryInputFromTab(tab)
-	if !ok {
-		return nil
-	}
-	_, err := s.store.PutBrowserHistory(ctx, in)
-	return err
+	return s.store.UpdateBrowserHistoryMetadata(ctx, in)
 }
 
 func browserHistoryInputFromTab(tab browser.TabSnapshot) (store.BrowserHistoryInput, bool) {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -2323,6 +2324,38 @@ func NormalizeBrowserHistoryLimit(limit int) int {
 		return BrowserHistoryMaxLimit
 	}
 	return limit
+}
+
+func BrowserHistoryMatches(entry *BrowserHistoryEntry, query string) bool {
+	if entry == nil {
+		return false
+	}
+	query = strings.ToLower(browserHistoryVisibleURL(query))
+	if query == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(entry.Title), query) ||
+		strings.Contains(strings.ToLower(browserHistoryVisibleURL(entry.URL)), query)
+}
+
+func browserHistoryVisibleURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme == "" {
+		return strings.TrimSpace(rawURL)
+	}
+	host := strings.TrimPrefix(parsed.Host, "www.")
+	path := parsed.EscapedPath()
+	if path == "/" {
+		path = ""
+	}
+	visible := host + path
+	if parsed.RawQuery != "" {
+		visible += "?" + parsed.RawQuery
+	}
+	if parsed.Fragment != "" {
+		visible += "#" + parsed.Fragment
+	}
+	return visible
 }
 
 func normalizeCanvasID(id string) string {

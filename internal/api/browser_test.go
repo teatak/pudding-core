@@ -231,8 +231,8 @@ func TestBrowserHistoryIsGlobalAndDeletable(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || opened.ID == "" {
 		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
 	}
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_history_a/browser/tabs/"+opened.ID+"/sync", map[string]string{
-		"url": "https://pudding.example/docs", "title": "Pudding docs",
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_history_a/browser/tabs/"+opened.ID+"/sync", map[string]any{
+		"url": "https://pudding.example/docs", "title": "Pudding docs", "historyVisit": true,
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -275,6 +275,48 @@ func TestBrowserHistoryIsGlobalAndDeletable(t *testing.T) {
 	entries, err := st.ListBrowserHistory(ctx, "", 20)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("history should be cleared globally: entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestBrowserHistoryRecordsOnlySettledFinalURL(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_redirect", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_redirect/browser/open", map[string]string{"url": "https://sina.com/"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || opened.ID == "" {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+	entries, err := st.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("history recorded before navigation settled: entries=%+v err=%v", entries, err)
+	}
+
+	finalURL := "https://www.sina.com.cn/"
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_redirect/browser/tabs/"+opened.ID+"/sync", map[string]any{
+		"url": finalURL, "title": "新浪网", "historyVisit": true,
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("settled sync status=%d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_redirect/browser/tabs/"+opened.ID+"/sync", map[string]any{
+		"url": finalURL, "title": "新浪网", "faviconURL": "https://www.sina.com.cn/favicon.ico",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metadata sync status=%d", resp.StatusCode)
+	}
+
+	entries, err = st.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("final history entries=%+v err=%v", entries, err)
+	}
+	if entries[0].URL != finalURL || entries[0].Title != "新浪网" || entries[0].FaviconURL != "https://www.sina.com.cn/favicon.ico" {
+		t.Fatalf("final history entry=%+v", entries[0])
 	}
 }
 

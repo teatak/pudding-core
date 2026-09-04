@@ -992,6 +992,7 @@ export const browserSyncRequest = z.object({
   faviconURL: z.string().optional(),
   canGoBack: z.boolean().optional(),
   canGoForward: z.boolean().optional(),
+  historyVisit: z.boolean().optional(),
 });
 export const browserObserveRequest = z.object({
   maxTextChars: z.number().optional(),

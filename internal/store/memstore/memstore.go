@@ -1838,11 +1838,11 @@ func (m *Memstore) ClearBrowserState(_ context.Context, sessionID string) error 
 func (m *Memstore) ListBrowserHistory(_ context.Context, query string, limit int) ([]*store.BrowserHistoryEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = strings.TrimSpace(query)
 	limit = store.NormalizeBrowserHistoryLimit(limit)
 	out := make([]*store.BrowserHistoryEntry, 0, len(m.browserHistory))
 	for _, entry := range m.browserHistory {
-		if query != "" && !strings.Contains(strings.ToLower(entry.URL), query) && !strings.Contains(strings.ToLower(entry.Title), query) {
+		if !store.BrowserHistoryMatches(entry, query) {
 			continue
 		}
 		out = append(out, cloneBrowserHistoryEntry(entry))

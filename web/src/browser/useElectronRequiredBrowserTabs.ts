@@ -12,6 +12,7 @@ import {
 } from "@/browser/electronBridge";
 
 export type ElectronBrowserSurfaceTab = BrowserTab & {
+  loading?: boolean;
   webviewRequestID?: string;
 };
 
@@ -22,12 +23,14 @@ export function useElectronRequiredBrowserTabs(token: string) {
   const queryClient = useQueryClient();
   const [tabsBySession, setTabsBySession] = useState<BrowserTabsBySession>({});
   const retainedTokenRef = useRef(token);
+  const lostRequestIDsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (retainedTokenRef.current === token) {
       return;
     }
     retainedTokenRef.current = token;
+    lostRequestIDsRef.current.clear();
     setTabsBySession({});
   }, [token]);
 
@@ -41,55 +44,68 @@ export function useElectronRequiredBrowserTabs(token: string) {
       if (!tab) {
         return;
       }
+      const key = browserTabKey(tab.sessionID, tab.id);
+      const lostRequestID = lostRequestIDsRef.current.get(key);
+      if (lostRequestID === "*" || lostRequestID === request.requestID) {
+        return;
+      }
+      lostRequestIDsRef.current.delete(key);
       setTabsBySession((current) => upsertSessionTab(current, tab));
     });
-    const syncTimers = new Map<string, number>();
-    const pendingSnapshots = new Map<string, ElectronBrowserSnapshot>();
+    const syncQueues = new Map<string, Promise<void>>();
+    let disposed = false;
     const stopUpdated = bridge.onUpdated((snapshot) => {
+      if (snapshot.status === "lost") {
+        lostRequestIDsRef.current.set(
+          browserTabKey(snapshot.sessionID, snapshot.tabID),
+          snapshot.webviewRequestID || "*",
+        );
+      }
       setTabsBySession((current) => updateRequiredTab(current, snapshot));
       const key = `${snapshot.sessionID}:${snapshot.tabID}`;
-      window.clearTimeout(syncTimers.get(key));
       if (snapshot.status === "lost") {
-        syncTimers.delete(key);
-        pendingSnapshots.delete(key);
         return;
       }
-      if (snapshot.status === "pending") {
-        pendingSnapshots.delete(key);
+      if (snapshot.status === "pending" || !token || snapshot.loadError || snapshot.loading) {
         return;
       }
-      pendingSnapshots.set(key, snapshot);
-      syncTimers.set(
-        key,
-        window.setTimeout(() => {
-          syncTimers.delete(key);
-          const latest = pendingSnapshots.get(key);
-          pendingSnapshots.delete(key);
-          if (!latest || !token || latest.loadError) {
+      const queued = (syncQueues.get(key) || Promise.resolve())
+        .then(async () => {
+          if (disposed) {
             return;
           }
-          void syncBrowserTab(token, latest.sessionID, latest.tabID, {
-            targetID: latest.runtimeID,
-            url: latest.url,
-            title: latest.title,
-            faviconURL: latest.faviconURL,
-            canGoBack: latest.canGoBack,
-            canGoForward: latest.canGoForward,
-          }).then(() => {
-            cacheElectronBrowserSnapshot(queryClient, latest, latest.sessionID);
-            void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
-          }).catch(() => undefined);
-        }, 350),
-      );
+          await syncBrowserTab(token, snapshot.sessionID, snapshot.tabID, {
+            targetID: snapshot.runtimeID,
+            url: snapshot.url,
+            title: snapshot.title,
+            faviconURL: snapshot.faviconStale ? "" : snapshot.faviconURL,
+            canGoBack: snapshot.canGoBack,
+            canGoForward: snapshot.canGoForward,
+            historyVisit: snapshot.navigationSettled === true,
+          });
+          cacheElectronBrowserSnapshot(queryClient, snapshot, snapshot.sessionID);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (syncQueues.get(key) === queued) {
+            syncQueues.delete(key);
+          }
+        });
+      syncQueues.set(key, queued);
     });
     return () => {
-      syncTimers.forEach((timer) => window.clearTimeout(timer));
+      disposed = true;
       stopRequired();
       stopUpdated();
     };
   }, [queryClient, token]);
 
   return retainedTokenRef.current === token ? tabsBySession : emptyBrowserTabsBySession;
+}
+
+function browserTabKey(sessionID: string, tabID: string) {
+  return `${sessionID.trim()}\u0000${tabID.trim()}`;
 }
 
 function requiredEventToTab(request: ElectronWebviewRequiredEvent): ElectronBrowserSurfaceTab | null {
@@ -126,6 +142,7 @@ function updateRequiredTab(current: BrowserTabsBySession, snapshot: ElectronBrow
   const previous = tabs.find((tab) => tab.id === snapshot.tabID);
   const tab: ElectronBrowserSurfaceTab = {
     ...electronBrowserSnapshotToTab(snapshot),
+    loading: snapshot.loading,
     webviewRequestID: previous?.webviewRequestID,
   };
   return upsertSessionTab(current, tab);
@@ -166,6 +183,7 @@ function sameSurfaceTab(left: ElectronBrowserSurfaceTab, right: ElectronBrowserS
     left.url === right.url &&
     left.title === right.title &&
     left.faviconURL === right.faviconURL &&
+    left.loading === right.loading &&
     left.canGoBack === right.canGoBack &&
     left.canGoForward === right.canGoForward &&
     left.mode === right.mode &&

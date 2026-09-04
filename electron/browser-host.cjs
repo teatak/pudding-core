@@ -6,6 +6,7 @@ const { fileURLToPath, pathToFileURL } = require("node:url");
 const webviewReadyTimeoutMS = 10_000;
 const cdpCommandTimeoutMS = 8_000;
 const navigationTimeoutMS = 15_000;
+const navigationSettlementDelayMS = 500;
 const screenshotMaxDimension = 16_384;
 const screenshotMaxPixels = 32 * 1024 * 1024;
 const screenshotMaxBytes = 64 * 1024 * 1024;
@@ -148,7 +149,6 @@ class BrowserHost {
     const webContents = await this.requireWebContents(slot);
     let succeeded = false;
     await this.noteAutomationStart(slot, "reload");
-    const load = waitForWebContentsLoad(webContents);
     try {
       const reloadURL = normalizeURL(request.url, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
       const actualURL = normalizeURL(slot.committedURL, slot.fileRoots);
@@ -164,13 +164,23 @@ class BrowserHost {
           }),
         );
       }
-      await load.promise;
+      await waitForMainFrameLoad(slot, webContents);
       succeeded = true;
       return snapshot(slot);
     } finally {
-      load.cancel();
       await this.noteAutomationEnd(slot, "reload", succeeded);
     }
+  }
+
+  stop(request) {
+    const slot = this.requireLiveSlot(request);
+    slot.webContents.stop();
+    const navigationSettled = slot.pendingHistoryVisit && !browserURLIsBlank(slot.committedURL);
+    slot.loading = false;
+    slot.pendingHistoryVisit = false;
+    cancelNavigationSettlement(slot);
+    this.noteUpdated(slot, { navigationSettled });
+    return snapshot(slot, { navigationSettled });
   }
 
   async observe(request) {
@@ -525,6 +535,7 @@ class BrowserHost {
     this.slots.delete(slot.key);
     clearInterval(slot.webviewRequestTimer);
     slot.webviewRequestTimer = null;
+    cancelNavigationSettlement(slot);
     rejectWebviewWaiters(slot, new Error("browser tab closed"));
     rejectNavigationWaiter(slot, new Error("browser tab closed"));
     if (slot.webContents && !slot.webContents.isDestroyed()) {
@@ -540,11 +551,13 @@ class BrowserHost {
     const key = slotKey(request);
     const sessionID = normalizeSessionID(request.sessionID);
     const tabID = normalizeTabID(request.tabID);
-    const pending = this.slots.get(key) || null;
-    const existing = pending || this.ensureSlot(request);
+    const existing = this.slots.get(key);
+    if (!existing || existing.disposed) {
+      throw new Error("stale browser webview registration");
+    }
     acceptTrustedFileRoots(existing, request);
     const requestID = String(request.requestID || "");
-    if (!existing.webContents && pending?.webviewRequestID && requestID !== pending.webviewRequestID) {
+    if (!existing.webContents && existing.webviewRequestID && requestID !== existing.webviewRequestID) {
       throw new Error("stale browser webview registration");
     }
     if (existing?.webContents === webContents) {
@@ -585,11 +598,15 @@ class BrowserHost {
       faviconURL: "",
       faviconSourceURL: "",
       faviconResolveID: 0,
+      faviconStale: false,
       navigationError: loadError,
+      loading: false,
+      pendingHistoryVisit: false,
       cdpAttached: false,
       cdpReady: null,
       mainFrameID: "",
       mainFrameLoaderID: "",
+      navigationSettlementTimer: null,
       selectionText: "",
       automatedInputDepth: 0,
       credentialUserGestureAt: 0,
@@ -657,8 +674,11 @@ class BrowserHost {
       faviconURL: "",
       faviconSourceURL: "",
       faviconResolveID: 0,
+      faviconStale: false,
       fileRoots,
       navigationError: null,
+      loading: false,
+      pendingHistoryVisit: false,
       webviewWaiters: new Set(),
       webviewRequestID: "",
       webviewRequestTimer: null,
@@ -667,6 +687,7 @@ class BrowserHost {
       commandQueue: Promise.resolve(),
       mainFrameID: "",
       mainFrameLoaderID: "",
+      navigationSettlementTimer: null,
       selectionText: "",
       automatedInputDepth: 0,
       credentialUserGestureAt: 0,
@@ -816,15 +837,24 @@ class BrowserHost {
     return result;
   }
 
-  updateFavicon(slot, candidates) {
+  updateFavicon(slot, candidates, options = {}) {
     const sourceURL = (Array.isArray(candidates) ? candidates : [candidates])
       .map((candidate) => normalizeURL(candidate, slot.fileRoots))
       .find(Boolean) || "";
-    if (!sourceURL || (slot.faviconSourceURL === sourceURL && slot.faviconURL)) {
+    if (!sourceURL) {
+      return false;
+    }
+    const provisional = options.provisional === true;
+    if (slot.faviconSourceURL === sourceURL && slot.faviconURL) {
+      if (!provisional && slot.faviconStale) {
+        slot.faviconStale = false;
+        return true;
+      }
       return false;
     }
     slot.faviconSourceURL = sourceURL;
     slot.faviconURL = sourceURL;
+    slot.faviconStale = provisional;
     const resolveID = ++slot.faviconResolveID;
     const pageURL = normalizeURL(slot.committedURL, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
     void Promise.resolve(this.resolveFavicon({ url: sourceURL, pageURL })).then((resolvedURL) => {
@@ -923,6 +953,7 @@ class BrowserHost {
   async runNavigation(slot, command, targetURL = "") {
     const deadline = Date.now() + navigationTimeoutMS;
     const generation = ++slot.navigationGeneration;
+    cancelNavigationSettlement(slot);
     rejectNavigationWaiter(slot, new Error("browser navigation superseded"));
     const committed = createNavigationWaiter(slot, generation, targetURL);
     try {
@@ -956,16 +987,38 @@ class BrowserHost {
     return { currentIndex: slot.historyIndex, entries: slot.historyEntries };
   }
 
-  scheduleHistoryRefresh(slot) {
+  scheduleHistoryRefresh(slot, options) {
     void this.runCommand(slot, async () => {
       if (this.slots.get(slot.key) !== slot || slot.disposed) {
         return;
       }
       await this.waitForNavigationHistory(slot, Date.now() + navigationTimeoutMS);
       if (this.slots.get(slot.key) === slot && !slot.disposed) {
-        this.noteUpdated(slot);
+        this.noteUpdated(slot, options);
       }
     }).catch(() => undefined);
+  }
+
+  scheduleNavigationSettlement(slot, webContents) {
+    cancelNavigationSettlement(slot);
+    const stoppedURL = slot.committedURL;
+    const stoppedLoaderID = slot.mainFrameLoaderID;
+    slot.navigationSettlementTimer = setTimeout(() => {
+      slot.navigationSettlementTimer = null;
+      if (
+        slot.webContents !== webContents
+        || slot.disposed
+        || slot.loading
+        || slot.navigationError
+        || !slot.pendingHistoryVisit
+        || slot.committedURL !== stoppedURL
+        || slot.mainFrameLoaderID !== stoppedLoaderID
+      ) {
+        return;
+      }
+      slot.pendingHistoryVisit = false;
+      this.noteUpdated(slot, { navigationSettled: true });
+    }, navigationSettlementDelayMS);
   }
 
   bindSlotEvents(slot) {
@@ -1033,6 +1086,7 @@ class BrowserHost {
         slot.faviconURL = "";
         slot.faviconSourceURL = "";
         slot.faviconResolveID += 1;
+        slot.faviconStale = false;
         this.noteUpdated(slot);
         return;
       }
@@ -1040,6 +1094,19 @@ class BrowserHost {
         return;
       }
       this.noteUpdated(slot);
+    });
+    webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+      if (slot.webContents !== webContents || slot.disposed || isMainFrame === false) {
+        return;
+      }
+      cancelNavigationSettlement(slot);
+    });
+    webContents.on("did-finish-load", () => {
+      if (slot.webContents !== webContents || slot.disposed) {
+        return;
+      }
+      slot.loading = false;
+      this.scheduleNavigationSettlement(slot, webContents);
     });
     webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (slot.webContents !== webContents || isMainFrame === false || isNavigationAbortCode(errorCode)) {
@@ -1054,6 +1121,9 @@ class BrowserHost {
         code: String(errorDescription || errorCode || "ERR_FAILED"),
         description: String(errorDescription || ""),
       };
+      slot.loading = false;
+      slot.pendingHistoryVisit = false;
+      cancelNavigationSettlement(slot);
       rejectNavigationWaiter(slot, new Error(`browser navigation failed: ${errorDescription || errorCode || "ERR_FAILED"}`));
       this.noteUpdated(slot);
     });
@@ -1064,14 +1134,18 @@ class BrowserHost {
       if (method === "Page.frameNavigated" && !params?.frame?.parentId) {
         const nextURL = normalizeURL(params?.frame?.url, slot.fileRoots);
         if (nextURL) {
+          cancelNavigationSettlement(slot);
           const commandNavigationPending = Boolean(slot.navigationWaiter);
+          const previousURL = slot.committedURL || slot.displayURL;
           const sameURL = sameNormalizedURL(
-            slot.committedURL || slot.displayURL,
+            previousURL,
             nextURL,
             slot.fileRoots,
           );
           slot.mainFrameID = String(params?.frame?.id || slot.mainFrameID || "");
           slot.mainFrameLoaderID = String(params?.frame?.loaderId || slot.mainFrameLoaderID || "");
+          slot.loading = true;
+          slot.pendingHistoryVisit = true;
           slot.lastMainFrameNavigation = {
             url: nextURL,
             loaderID: String(params?.frame?.loaderId || ""),
@@ -1084,12 +1158,16 @@ class BrowserHost {
           if (!sameURL) {
             slot.committedTitle = "";
             slot.displayTitle = "";
+            slot.faviconStale = slot.faviconStale
+              || (Boolean(slot.faviconURL) && !sameNormalizedOrigin(previousURL, nextURL, slot.fileRoots));
+          }
+          if (!slot.faviconURL || slot.faviconStale) {
+            this.updateFavicon(slot, conventionalFaviconURL(nextURL), { provisional: true });
           }
           slot.navigationError = null;
           resolveNavigationWaiter(slot, nextURL, slot.lastMainFrameNavigation.loaderID);
-          if (commandNavigationPending) {
-            this.noteUpdated(slot);
-          } else {
+          this.noteUpdated(slot);
+          if (!commandNavigationPending) {
             this.scheduleHistoryRefresh(slot);
           }
         }
@@ -1102,6 +1180,9 @@ class BrowserHost {
           const commandNavigationPending = Boolean(slot.navigationWaiter);
           slot.committedURL = nextURL;
           slot.displayURL = nextURL;
+          cancelNavigationSettlement(slot);
+          slot.loading = false;
+          slot.pendingHistoryVisit = false;
           slot.selectionText = "";
           slot.lastMainFrameNavigation = {
             url: nextURL,
@@ -1110,9 +1191,9 @@ class BrowserHost {
           };
           resolveNavigationWaiter(slot, nextURL, slot.mainFrameLoaderID, true);
           if (commandNavigationPending) {
-            this.noteUpdated(slot);
+            this.noteUpdated(slot, { navigationSettled: true });
           } else {
-            this.scheduleHistoryRefresh(slot);
+            this.scheduleHistoryRefresh(slot, { navigationSettled: true });
           }
         }
       } else if (method === "Runtime.bindingCalled" && params?.name === selectionBindingName) {
@@ -1135,6 +1216,7 @@ class BrowserHost {
     });
     webContents.on("destroyed", () => {
       if (this.slots.get(slot.key) === slot && slot.webContents === webContents) {
+        cancelNavigationSettlement(slot);
         slot.webContents = null;
         slot.cdpAttached = false;
         slot.cdpReady = null;
@@ -1237,10 +1319,13 @@ class BrowserHost {
     });
   }
 
-  noteUpdated(slot) {
+  noteUpdated(slot, options) {
+    if (slot.disposed || this.slots.get(slot.key) !== slot) {
+      return;
+    }
     slot.version += 1;
     slot.updatedAt = new Date().toISOString();
-    this.onUpdate(snapshot(slot));
+    this.onUpdate(snapshot(slot, options));
   }
 
   noteAutomationStart(slot, action) {
@@ -1358,12 +1443,19 @@ function selectionTextFromEvaluation(value) {
 }
 
 function markSlotNavigationIntent(slot, url) {
+  cancelNavigationSettlement(slot);
   slot.displayURL = url;
   slot.displayTitle = "";
   slot.selectionText = "";
   slot.navigationError = null;
+  slot.loading = true;
   slot.version += 1;
   slot.updatedAt = new Date().toISOString();
+}
+
+function cancelNavigationSettlement(slot) {
+  clearTimeout(slot.navigationSettlementTimer);
+  slot.navigationSettlementTimer = null;
 }
 
 function normalizeSelectionText(value) {
@@ -1520,41 +1612,53 @@ function withTimeout(promise, ms, message) {
   });
 }
 
-function waitForWebContentsLoad(webContents) {
+function waitForMainFrameLoad(slot, webContents) {
+  if (!slot.loading) {
+    return Promise.resolve();
+  }
   let settled = false;
   let timer;
-  let resolvePromise;
-  let rejectPromise;
   const cleanup = () => {
     clearTimeout(timer);
+    webContents.off("did-finish-load", resolveLoad);
     webContents.off("did-stop-loading", resolveLoad);
+    webContents.off("did-fail-load", rejectLoad);
     webContents.off("destroyed", rejectDestroyed);
   };
-  const resolveLoad = () => {
+  let resolvePromise;
+  let rejectPromise;
+  function resolveLoad() {
     if (settled) return;
     settled = true;
     cleanup();
     resolvePromise();
-  };
-  const rejectDestroyed = () => {
+  }
+  function rejectLoad(_event, errorCode, errorDescription, _validatedURL, isMainFrame) {
+    if (settled || isMainFrame === false || isNavigationAbortCode(errorCode)) return;
+    settled = true;
+    cleanup();
+    rejectPromise(new Error(`browser navigation failed: ${errorDescription || errorCode || "ERR_FAILED"}`));
+  }
+  function rejectDestroyed() {
     if (settled) return;
     settled = true;
     cleanup();
     rejectPromise(new Error("browser tab destroyed while loading"));
-  };
-  const promise = new Promise((resolve, reject) => {
+  }
+  return new Promise((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
+    webContents.once("did-finish-load", resolveLoad);
     webContents.once("did-stop-loading", resolveLoad);
+    webContents.on("did-fail-load", rejectLoad);
     webContents.once("destroyed", rejectDestroyed);
     timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error("browser navigation load timed out"));
+      reject(new Error("browser main-frame load timed out"));
     }, navigationTimeoutMS);
   });
-  return { cancel: resolveLoad, promise };
 }
 
 function assertPNGData(dataBase64, source) {
@@ -1866,6 +1970,36 @@ function sameNormalizedURL(left, right, fileRoots = []) {
   const leftURL = normalizeURL(left, fileRoots);
   const rightURL = normalizeURL(right, fileRoots);
   return Boolean(leftURL && rightURL && leftURL === rightURL);
+}
+
+function sameNormalizedOrigin(left, right, fileRoots = []) {
+  const leftURL = normalizeURL(left, fileRoots);
+  const rightURL = normalizeURL(right, fileRoots);
+  if (!leftURL || !rightURL) {
+    return false;
+  }
+  try {
+    const leftParsed = new URL(leftURL);
+    const rightParsed = new URL(rightURL);
+    if (leftParsed.protocol === "file:" || rightParsed.protocol === "file:") {
+      return leftURL === rightURL;
+    }
+    return leftParsed.origin === rightParsed.origin;
+  } catch {
+    return false;
+  }
+}
+
+function conventionalFaviconURL(rawURL) {
+  try {
+    const url = new URL(rawURL);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    return `${url.origin}/favicon.ico`;
+  } catch {
+    return "";
+  }
 }
 
 function trustedFileRoots(request) {
@@ -2322,7 +2456,7 @@ function browserZoomResult(factor) {
   };
 }
 
-function snapshot(slot) {
+function snapshot(slot, options = {}) {
   const webContents = slot.webContents;
   const pending = !webContents;
   const destroyed = Boolean(webContents?.isDestroyed());
@@ -2340,6 +2474,9 @@ function snapshot(slot) {
     profileID: "default",
     runtimeID: pending || destroyed ? "" : `webContents:${webContents.id}`,
     version: slot.version,
+    loading: slot.loading === true,
+    faviconStale: slot.faviconStale === true,
+    navigationSettled: options.navigationSettled === true || undefined,
     activate: slot.activateOnCreate !== false,
     createdAt: slot.createdAt,
     updatedAt: slot.updatedAt,
@@ -2363,7 +2500,10 @@ function lostSnapshot(slot) {
     canGoForward: false,
     profileID: "default",
     runtimeID: "",
+    webviewRequestID: slot.webviewRequestID || undefined,
     version: slot.version + 1,
+    loading: false,
+    faviconStale: false,
     createdAt: slot.createdAt,
     updatedAt: new Date().toISOString(),
   };
@@ -2380,7 +2520,10 @@ function lostSnapshotFromRequest(request) {
     canGoForward: false,
     profileID: "default",
     runtimeID: "",
+    webviewRequestID: String(request.webviewRequestID || request.requestID || "") || undefined,
     version: 0,
+    loading: false,
+    faviconStale: false,
     createdAt: "",
     updatedAt: new Date().toISOString(),
   };

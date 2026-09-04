@@ -1388,6 +1388,11 @@ ipcMain.handle("pudding:browser:reload", (event, request) => {
   return browserHost.reload(request || {});
 });
 
+ipcMain.handle("pudding:browser:stop", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.stop(untrustedBrowserRequest(request));
+});
+
 ipcMain.handle("pudding:browser:read-selection", (event, request) => {
   assertTrustedSender(event);
   return browserHost.readSelection(request || {});

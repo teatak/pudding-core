@@ -53,7 +53,7 @@ export function browserPageTitle(
 }
 
 export function browserTabFaviconURL(tab: BrowserTab): string {
-  return browserPageFaviconURL(tab.faviconURL, tab.url);
+  return (tab.faviconURL || "").trim();
 }
 
 export function browserPageFaviconURL(rawFaviconURL: string | undefined, rawPageURL: string | undefined): string {

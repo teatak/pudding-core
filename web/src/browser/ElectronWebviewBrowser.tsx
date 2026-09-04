@@ -110,7 +110,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   const hostCompositionActiveRef = useRef(false);
   const webviewFocusLeaseRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
-  const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
   const ownerSessionID = sessionID;
   const activeTab = activeTabProp;
@@ -185,7 +184,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       if (!bridge) {
         throw new Error("browser bridge unavailable");
       }
-      setNavigationLoading(true);
       updateLoadError(null);
       return bridge.loadURL({ sessionID: ownerSessionID, tabID, url });
     },
@@ -193,7 +191,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID);
     },
     onError: (error) => {
-      setNavigationLoading(false);
       console.warn("[browser] recent history navigation failed", error);
     },
   });
@@ -206,7 +203,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
     onReadyChange?.(false);
     navigationSeqRef.current = 0;
     failedNavigationSeqRef.current = 0;
-    setNavigationLoading(false);
     updateLoadError(null);
     if (!node) {
       return;
@@ -215,18 +211,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       webviewReadyRef.current = true;
       if (browserURLIsBlank(pendingTargetURLRef.current)) {
         onReadyChange?.(true);
-      } else {
-        setNavigationLoading(true);
-      }
-    };
-    const handleStartLoading = () => {
-      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
-        setNavigationLoading(true);
-      }
-    };
-    const handleStopLoading = () => {
-      if (!loadErrorRef.current) {
-        setNavigationLoading(false);
       }
     };
     const handleStartNavigation = (event: Event) => {
@@ -235,13 +219,9 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
         return;
       }
       navigationSeqRef.current += 1;
-      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
-        setNavigationLoading(true);
-      }
       updateLoadError(null);
     };
     const handleFinishLoad = () => {
-      setNavigationLoading(false);
       if (navigationSeqRef.current > failedNavigationSeqRef.current) {
         updateLoadError(null);
       }
@@ -263,7 +243,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
         description: loadEvent.errorDescription || "",
         url: failedURL,
       };
-      setNavigationLoading(false);
       updateLoadError(error);
       const bridge = electronBrowserBridge();
       const webContentsID = webviewContentsID(node);
@@ -283,15 +262,11 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
       }
     };
     node.addEventListener("dom-ready", handleReady);
-    node.addEventListener("did-start-loading", handleStartLoading);
-    node.addEventListener("did-stop-loading", handleStopLoading);
     node.addEventListener("did-start-navigation", handleStartNavigation);
     node.addEventListener("did-finish-load", handleFinishLoad);
     node.addEventListener("did-fail-load", handleFailLoad);
     webviewReadyCleanupRef.current = () => {
       node.removeEventListener("dom-ready", handleReady);
-      node.removeEventListener("did-start-loading", handleStartLoading);
-      node.removeEventListener("did-stop-loading", handleStopLoading);
       node.removeEventListener("did-start-navigation", handleStartNavigation);
       node.removeEventListener("did-finish-load", handleFinishLoad);
       node.removeEventListener("did-fail-load", handleFailLoad);
@@ -491,7 +466,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
           onOpen={(url) => openRecentMutation.mutate(url)}
         />
       ) : null}
-      {navigationLoading && !loadError ? <BrowserNavigationLoading label={t("browser.loadingPage")} /> : null}
       {loadError ? <BrowserLoadErrorPage error={loadError} onReload={reloadAfterError} /> : null}
       {automationCursor ? <BrowserAutomationCursor cursor={automationCursor} /> : null}
     </div>
@@ -683,16 +657,6 @@ function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorSt
         data-icon-weight="subtle"
         style={iconStyle}
       />
-    </div>
-  );
-}
-
-function BrowserNavigationLoading({ label }: { label: string }) {
-  return (
-    <div aria-label={label} className="pointer-events-none absolute inset-x-0 top-0 z-10">
-      <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-info/10">
-        <div className="h-full w-1/2 animate-pulse bg-info/80" />
-      </div>
     </div>
   );
 }

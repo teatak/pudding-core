@@ -37,7 +37,11 @@ export type ElectronBrowserSnapshot = {
   canGoForward: boolean;
   profileID: string;
   runtimeID: string;
+  webviewRequestID?: string;
   version: number;
+  loading: boolean;
+  faviconStale: boolean;
+  navigationSettled?: boolean;
   activate?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -156,6 +160,7 @@ export type ElectronBrowserBridge = {
   back: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   forward: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   reload: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
+  stop: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   readSelection?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSelection>;
   findInPage?: (request: ElectronBrowserRequest & { text: string; forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<{ requestID: number }>;
   stopFindInPage?: (request: ElectronBrowserRequest) => Promise<{ ok: boolean }>;

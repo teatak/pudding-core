@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   back: (request) => ipcRenderer.invoke("pudding:browser:back", request),
   forward: (request) => ipcRenderer.invoke("pudding:browser:forward", request),
   reload: (request) => ipcRenderer.invoke("pudding:browser:reload", request),
+  stop: (request) => ipcRenderer.invoke("pudding:browser:stop", request),
   readSelection: (request) => ipcRenderer.invoke("pudding:browser:read-selection", request),
   findInPage: (request) => ipcRenderer.invoke("pudding:browser:find", request),
   stopFindInPage: (request) => ipcRenderer.invoke("pudding:browser:stop-find", request),

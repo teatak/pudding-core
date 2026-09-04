@@ -17,15 +17,12 @@ func (s *Store) ListBrowserHistory(ctx context.Context, query string, limit int)
 	defer s.mu.Unlock()
 	query = strings.TrimSpace(query)
 	limit = store.NormalizeBrowserHistoryLimit(limit)
-	statement := `SELECT ` + browserHistoryColumns + ` FROM browser_history`
-	args := make([]any, 0, 2)
-	if query != "" {
-		statement += ` WHERE (url LIKE ? ESCAPE '\' COLLATE NOCASE OR title LIKE ? ESCAPE '\' COLLATE NOCASE)`
-		pattern := "%" + escapeBrowserHistoryLike(query) + "%"
-		args = append(args, pattern, pattern)
+	statement := `SELECT ` + browserHistoryColumns + ` FROM browser_history ORDER BY visited_at DESC, id DESC`
+	args := make([]any, 0, 1)
+	if query == "" {
+		statement += ` LIMIT ?`
+		args = append(args, limit)
 	}
-	statement += ` ORDER BY visited_at DESC, id DESC LIMIT ?`
-	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -37,7 +34,13 @@ func (s *Store) ListBrowserHistory(ctx context.Context, query string, limit int)
 		if err != nil {
 			return nil, err
 		}
+		if !store.BrowserHistoryMatches(entry, query) {
+			continue
+		}
 		out = append(out, entry)
+		if len(out) == limit {
+			break
+		}
 	}
 	return out, rows.Err()
 }
@@ -158,10 +161,4 @@ func scanBrowserHistory(row messageScanner) (*store.BrowserHistoryEntry, error) 
 	entry.CreatedAt = timeFromMS(created)
 	entry.UpdatedAt = timeFromMS(updated)
 	return &entry, nil
-}
-
-func escapeBrowserHistoryLike(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `%`, `\%`)
-	return strings.ReplaceAll(value, `_`, `\_`)
 }
