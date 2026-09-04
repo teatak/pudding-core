@@ -19,7 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FileCode2, FileDiff, Folders, X } from "@/components/icons";
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 
 import { BrowserTabIcon } from "@/browser/BrowserTabIcon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
@@ -27,17 +27,16 @@ import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBro
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
 import type { CanvasItem } from "@/contracts/api";
-import type { WorkspaceSurface } from "@/components/workspace/types";
 import { Spinner } from "@/components/Spinner";
 import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   mergeWorkspaceTabOrder,
-  reconcileWorkspaceTabOrder,
   setWorkspaceTabOrder,
   useWorkspaceTabOrder,
-} from "@/state/workspaceTabOrderStore";
+  type WorkspaceTabKey,
+} from "@/state/workspaceStore";
 
 function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] }) {
   return (
@@ -89,15 +88,11 @@ type SurfaceTab =
   | { kind: "widget"; id: string; sortAt: number; widget: CanvasItem };
 
 export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
-  activeBrowserTabID,
-  activeCanvasItemID,
-  activeFilePreviewID,
-  activeSurface,
+  activeTab,
   browserTabs,
   canvasItems,
   closingCanvasItemID,
   closingBrowserTabID,
-  filePreviewActive,
   filePreviewTabs,
   orderScope,
   projectLabel,
@@ -111,15 +106,11 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   onSelectFilePreview,
   onSelectProject,
 }: {
-  activeBrowserTabID?: string;
-  activeCanvasItemID?: string;
-  activeFilePreviewID?: string;
-  activeSurface: WorkspaceSurface;
+  activeTab: WorkspaceTabKey | null;
   browserTabs: ElectronBrowserSurfaceTab[];
   canvasItems: CanvasItem[];
   closingCanvasItemID?: string;
   closingBrowserTabID?: string;
-  filePreviewActive: boolean;
   filePreviewTabs: WorkspaceFilePreviewTab[];
   orderScope: string;
   projectLabel: string;
@@ -134,7 +125,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   onSelectProject: () => void;
 }) {
   const scrollMask = useHorizontalScrollMask<HTMLDivElement>();
-  const [activeTabID, setActiveTabID] = useState<string>();
+  const [activeTabID, setActiveTabID] = useState<WorkspaceTabKey>();
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
@@ -161,13 +152,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
     ? tabs.filter((tab) => tab.kind !== "browser" || tab.id !== closingBrowserTabID)
     : tabs;
   const visibleTabIDs = visibleTabs.map(surfaceTabID);
-  const activeTab = activeTabID ? tabByID.get(activeTabID) : undefined;
-  const orderSignature = createdTabIDs.join("\u0000");
-
-  useEffect(() => {
-    reconcileWorkspaceTabOrder(orderScope, createdTabIDs);
-  }, [orderScope, orderSignature]);
-
+  const draggedTab = activeTabID ? tabByID.get(activeTabID) : undefined;
   if (createdTabs.length === 0) {
     return null;
   }
@@ -177,8 +162,8 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
     if (!over || active.id === over.id) {
       return;
     }
-    const from = orderedIDs.indexOf(String(active.id));
-    const to = orderedIDs.indexOf(String(over.id));
+    const from = orderedIDs.indexOf(String(active.id) as WorkspaceTabKey);
+    const to = orderedIDs.indexOf(String(over.id) as WorkspaceTabKey);
     if (from < 0 || to < 0) {
       return;
     }
@@ -186,7 +171,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
   };
 
   const handleDragStart = ({ active }: DragStartEvent) => {
-    setActiveTabID(String(active.id));
+    setActiveTabID(String(active.id) as WorkspaceTabKey);
   };
 
   return (
@@ -208,13 +193,9 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
             {visibleTabs.map((tab) => (
               <SortableSurfaceTabButton
                 key={surfaceTabID(tab)}
-                activeBrowserTabID={activeBrowserTabID}
-                activeCanvasItemID={activeCanvasItemID}
-                activeFilePreviewID={activeFilePreviewID}
-                activeSurface={activeSurface}
+                activeTab={activeTab}
                 closingBrowserTabID={closingBrowserTabID}
                 closingCanvasItemID={closingCanvasItemID}
-                filePreviewActive={filePreviewActive}
                 projectLabel={projectLabel}
                 tab={tab}
                 onCloseBrowser={onCloseBrowser}
@@ -231,7 +212,7 @@ export const WorkspaceResourceTabs = memo(function WorkspaceResourceTabs({
         </SortableContext>
       </div>
       <DragOverlay adjustScale={false} dropAnimation={null}>
-        {activeTab ? <SurfaceTabDragPreview projectLabel={projectLabel} tab={activeTab} /> : null}
+        {draggedTab ? <SurfaceTabDragPreview projectLabel={projectLabel} tab={draggedTab} /> : null}
       </DragOverlay>
     </DndContext>
   );
@@ -272,13 +253,9 @@ function SurfaceTabDragPreview({ projectLabel, tab }: { projectLabel: string; ta
 }
 
 function SortableSurfaceTabButton({
-  activeBrowserTabID,
-  activeCanvasItemID,
-  activeFilePreviewID,
-  activeSurface,
+  activeTab,
   closingBrowserTabID,
   closingCanvasItemID,
-  filePreviewActive,
   projectLabel,
   tab,
   onCloseBrowser,
@@ -290,13 +267,9 @@ function SortableSurfaceTabButton({
   onSelectFilePreview,
   onSelectProject,
 }: {
-  activeBrowserTabID?: string;
-  activeCanvasItemID?: string;
-  activeFilePreviewID?: string;
-  activeSurface: WorkspaceSurface;
+  activeTab: WorkspaceTabKey | null;
   closingBrowserTabID?: string;
   closingCanvasItemID?: string;
-  filePreviewActive: boolean;
   projectLabel: string;
   tab: SurfaceTab;
   onCloseBrowser: (tabID: string) => void;
@@ -309,11 +282,7 @@ function SortableSurfaceTabButton({
   onSelectProject: () => void;
 }) {
   const { label, t } = useSurfaceTabLabel(tab, projectLabel);
-  const selected =
-    (tab.kind === "project" && activeSurface === "project") ||
-    (tab.kind === "browser" && activeSurface === "browser" && tab.id === activeBrowserTabID) ||
-    (tab.kind === "file" && filePreviewActive && tab.id === activeFilePreviewID) ||
-    (tab.kind === "widget" && activeSurface === "canvas" && !filePreviewActive && tab.id === activeCanvasItemID);
+  const selected = surfaceTabID(tab) === activeTab;
   const closePending =
     (tab.kind === "browser" && tab.id === closingBrowserTabID) ||
     (tab.kind === "widget" && tab.id === closingCanvasItemID);
@@ -414,6 +383,8 @@ function SortableSurfaceTabButton({
   );
 }
 
-function surfaceTabID(tab: SurfaceTab) {
+function surfaceTabID(tab: SurfaceTab): WorkspaceTabKey {
+  if (tab.kind === "project") return "project";
+  if (tab.kind === "widget") return `canvas:${tab.id}`;
   return `${tab.kind}:${tab.id}`;
 }

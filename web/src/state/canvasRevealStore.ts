@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { canvasWorkspaceTabKey, openWorkspaceTab } from "@/state/workspaceStore";
 
 type CanvasReveal = {
   itemID: string;
@@ -32,7 +32,7 @@ export function requestCanvasReveal(sessionID: string, itemID: string) {
 
 export function openCanvasReveal(sessionID: string, itemID: string) {
   useCanvasRevealStore.getState().request(sessionID, itemID);
-  setWorkspaceOpen(sessionID, true);
+  openWorkspaceTab(sessionID, canvasWorkspaceTabKey(itemID));
 }
 
 export function consumeCanvasReveal(serial: number) {

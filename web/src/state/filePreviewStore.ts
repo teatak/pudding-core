@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import type { TurnFileChange } from "@/api/client";
 import { turnFileDiffChanges } from "@/lib/turnFileChanges";
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { fileWorkspaceTabKey, openWorkspaceTab, setWorkspaceOpen } from "@/state/workspaceStore";
 
 export type FilePreview = {
   callID?: string;
@@ -100,12 +100,13 @@ const useFilePreviewStore = create<FilePreviewState>((set) => ({
 
 export function openFilePreview(preview: FilePreviewInput) {
   const previewID = useFilePreviewStore.getState().openPreview(preview);
-  setWorkspaceOpen(preview.sessionID, true);
-  window.requestAnimationFrame(() => {
-    if (useFilePreviewStore.getState().previews[preview.sessionID]?.some((entry) => entry.id === previewID)) {
-      setWorkspaceOpen(preview.sessionID, true);
-    }
-  });
+  if (preview.source === "turn-diff") {
+    // Whether a turn diff belongs in the project tab depends on the resolved
+    // workspace roots. Let WorkspacePane choose once that server state is ready.
+    setWorkspaceOpen(preview.sessionID, true);
+    return;
+  }
+  openWorkspaceTab(preview.sessionID, fileWorkspaceTabKey(previewID));
 }
 
 export function openTurnFileChanges(sessionID: string, turnID: string, changes: TurnFileChange[], selectedChangeID?: string) {

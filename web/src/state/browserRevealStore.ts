@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { browserWorkspaceTabKey, openWorkspaceTab, setWorkspaceOpen } from "@/state/workspaceStore";
 
 type BrowserRevealState = {
   epochs: Record<string, number | undefined>;
@@ -50,7 +50,11 @@ export function requestBrowserReveal(sessionID: string, tabID?: string) {
 
 export function openBrowserReveal(sessionID: string, tabID?: string) {
   useBrowserRevealStore.getState().requestReveal(sessionID, tabID);
-  setWorkspaceOpen(sessionID, true);
+  if (tabID) {
+    openWorkspaceTab(sessionID, browserWorkspaceTabKey(tabID));
+  } else {
+    setWorkspaceOpen(sessionID, true);
+  }
 }
 
 export function consumeBrowserReveal(sessionID: string, epoch: number) {

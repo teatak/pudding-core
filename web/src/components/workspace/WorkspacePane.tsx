@@ -30,7 +30,7 @@ import {
 } from "@/components/canvas/CanvasItemSurface";
 import { titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
-import { asRecord, numberValue, stringValue } from "@/components/canvas/canvasPayload";
+import { asRecord, stringValue } from "@/components/canvas/canvasPayload";
 import { Spinner } from "@/components/Spinner";
 import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
 import {
@@ -57,8 +57,20 @@ import {
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
 import { consumeProjectFileReveal, useVisibleProjectFileReveal } from "@/state/projectRevealStore";
-import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import {
+  canvasWorkspaceTabKey,
+  fileWorkspaceTabKey,
+  getWorkspaceSessionUI,
+  mergeWorkspaceTabOrder,
+  nextWorkspaceTabAfterClose,
+  openWorkspaceTab,
+  replaceWorkspaceSessionUI,
+  setWorkspaceActiveTab,
+  updateWorkspaceSessionUI,
+  useProjectTabOpen,
+  workspaceTabResourceID,
+  type WorkspaceTabKey,
+} from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
   setVisibleUIContext,
@@ -94,14 +106,12 @@ export const WorkspacePane = memo(function WorkspacePane({
   const retainedTokenRef = useRef(token);
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
-  const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
+  const [activeProjectTurnDiffIDs, setActiveProjectTurnDiffIDs] = useState<Record<string, string>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
   const [validatedProjectReveal, setValidatedProjectReveal] = useState<{ serial: number; sessionID: string }>();
-  const hadResourcesRef = useRef(false);
-  const resourceSessionIDRef = useRef("");
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
   const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
@@ -110,6 +120,20 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (actorSessionID) {
       actorSessionIDRef.current = actorSessionID;
     }
+  }, [actorSessionID]);
+  const setActiveProjectTurnDiffID = useCallback((previewID: string | undefined) => {
+    if (!actorSessionID) return;
+    setActiveProjectTurnDiffIDs((current) => {
+      if (previewID) {
+        return current[actorSessionID] === previewID
+          ? current
+          : { ...current, [actorSessionID]: previewID };
+      }
+      if (!current[actorSessionID]) return current;
+      const next = { ...current };
+      delete next[actorSessionID];
+      return next;
+    });
   }, [actorSessionID]);
   const primaryFilePreviews = useFilePreviews(sessionID);
   const secondaryFilePreviews = useFilePreviews(secondarySessionID);
@@ -128,31 +152,6 @@ export const WorkspacePane = memo(function WorkspacePane({
       ...allFilePreviews,
     ];
   }, [allFilePreviews, retainedFilePreviews, secondarySessionID, sessionID]);
-  const [activeFilePreviewIDs, setActiveFilePreviewIDs] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    const primaryPreviewID = primaryFilePreviews.at(-1)?.id;
-    const secondaryPreviewID = secondaryFilePreviews.at(-1)?.id;
-    if (sessionID && primaryPreviewID) initial[sessionID] = primaryPreviewID;
-    if (secondarySessionID && secondaryPreviewID) initial[secondarySessionID] = secondaryPreviewID;
-    return initial;
-  });
-  const activeFilePreviewID = actorSessionID ? activeFilePreviewIDs[actorSessionID] : undefined;
-  const setActiveFilePreviewID = useCallback((previewID: string | undefined) => {
-    if (!actorSessionID) {
-      return;
-    }
-    setActiveFilePreviewIDs((current) => {
-      if (previewID) {
-        return current[actorSessionID] === previewID ? current : { ...current, [actorSessionID]: previewID };
-      }
-      if (!current[actorSessionID]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[actorSessionID];
-      return next;
-    });
-  }, [actorSessionID]);
   useEffect(() => {
     const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
     setRetainedFilePreviews((current) => {
@@ -166,7 +165,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     });
   }, [allFilePreviews, secondarySessionID, sessionID]);
   const enabled = Boolean(token && actorSessionID);
-  const projectTabClosed = useProjectTabClosed(actorSessionID);
+  const projectTabOpen = useProjectTabOpen(actorSessionID);
 
   const sessionQuery = useQuery({
     enabled,
@@ -184,7 +183,7 @@ export const WorkspacePane = memo(function WorkspacePane({
   const hasFileWorkspace = hasProject || Boolean(workspaceRootsQuery.data?.roots.length);
   const temporaryFileWorkspace = !hasProject && Boolean(workspaceRootsQuery.data?.temporary);
   const fileWorkspaceLabel = temporaryFileWorkspace ? t("workspace.sessionFiles") : t("workspace.project");
-  const projectTabVisible = hasFileWorkspace && !projectTabClosed;
+  const projectTabVisible = hasFileWorkspace && projectTabOpen;
   const projectRevealReady = !projectFileReveal || (
     validatedProjectReveal?.serial === projectFileReveal.serial
     && validatedProjectReveal.sessionID === projectFileReveal.sessionID
@@ -221,9 +220,18 @@ export const WorkspacePane = memo(function WorkspacePane({
   );
   const surfaceFilePreviews = useMemo(
     () => filePreviews.filter((preview) => (
-      preview.source !== "turn-diff" || (!sessionQuery.isLoading && !hasFileWorkspace)
+      preview.source !== "turn-diff" || (
+        !sessionQuery.isPending
+        && !workspaceRootsQuery.isPending
+        && !hasFileWorkspace
+      )
     )),
-    [filePreviews, hasFileWorkspace, sessionQuery.isLoading],
+    [
+      filePreviews,
+      hasFileWorkspace,
+      sessionQuery.isPending,
+      workspaceRootsQuery.isPending,
+    ],
   );
   const workspaceFilePreviewTabs = useMemo(
     () => surfaceFilePreviews.map((preview) => ({
@@ -273,20 +281,22 @@ export const WorkspacePane = memo(function WorkspacePane({
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const closedItems = useMemo(() => closedItemsQuery.data?.items ?? [], [closedItemsQuery.data?.items]);
   const savedItems = useMemo(() => savedItemsQuery.data?.items ?? [], [savedItemsQuery.data?.items]);
-  const selectedCanvasItemID = activeCanvasItemIDs[actorSessionID];
-  const activeCanvasItem = items.find((item) => item.id === selectedCanvasItemID) || topCanvasItem(items);
-  const selectCanvasItem = useCallback((itemID: string) => {
-    if (!actorSessionID) return;
-    setActiveCanvasItemIDs((current) => (
-      current[actorSessionID] === itemID ? current : { ...current, [actorSessionID]: itemID }
-    ));
-  }, [actorSessionID]);
+  const availableNonBrowserTabs = useMemo<WorkspaceTabKey[]>(() => [
+    ...surfaceFilePreviews.map((preview) => ({ key: fileWorkspaceTabKey(preview.id), at: preview.openedAt })),
+    ...items.map((item) => ({ key: canvasWorkspaceTabKey(item.id), at: Date.parse(item.createdAt) })),
+    ...(projectTabVisible ? [{ key: "project" as const, at: Number.MAX_SAFE_INTEGER }] : []),
+  ].sort((left, right) => left.at - right.at || left.key.localeCompare(right.key)).map((entry) => entry.key), [
+    items,
+    projectTabVisible,
+    surfaceFilePreviews,
+  ]);
   const {
     activeBrowserTabID,
     activeBrowserSelection,
-    activeSurface,
+    activeTab,
     browserActive,
     browserTabsReady,
+    browserTabsResolved,
     browserTabs,
     browserSurfacePending,
     browserSurfaceVisible,
@@ -294,37 +304,44 @@ export const WorkspacePane = memo(function WorkspacePane({
     closingBrowserTabID,
     createNewBrowserTab,
     creatingBrowserTab,
-    selectCanvasSurface,
     selectBrowserTab,
-    selectProjectSurface,
-    selectWorkspaceSurface,
   } = useWorkspaceBrowserSurface({
+    availableNonBrowserTabs,
     enabled,
-    hasProjectSurface: projectTabVisible,
-    hasTransientSurface: surfaceFilePreviews.length > 0,
-    itemsLength: items.length,
-    itemsPending: itemsQuery.isLoading,
     sessionID: actorSessionID,
     token,
   });
   useRetainBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
   const browserSurfaceTabs = browserTabsReady ? browserTabs : [];
-  const projectActive = activeSurface === "project" && projectTabVisible;
+  const availableWorkspaceTabs = useMemo<WorkspaceTabKey[]>(() => [
+    ...browserTabs.map((tab) => ({ key: `browser:${tab.id}` as const, at: Date.parse(tab.createdAt) })),
+    ...surfaceFilePreviews.map((preview) => ({ key: fileWorkspaceTabKey(preview.id), at: preview.openedAt })),
+    ...items.map((item) => ({ key: canvasWorkspaceTabKey(item.id), at: Date.parse(item.createdAt) })),
+    ...(projectTabVisible ? [{ key: "project" as const, at: Number.MAX_SAFE_INTEGER }] : []),
+  ].sort((left, right) => left.at - right.at || left.key.localeCompare(right.key)).map((entry) => entry.key), [
+    browserTabs,
+    items,
+    projectTabVisible,
+    surfaceFilePreviews,
+  ]);
+  const activeSurface = workspaceSurface(activeTab);
+  const activeCanvasItemID = workspaceTabResourceID(activeTab, "canvas");
+  const activeCanvasItem = items.find((item) => item.id === activeCanvasItemID);
+  const activeFilePreviewID = workspaceTabResourceID(activeTab, "file");
+  const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
+  const activeProjectTurnDiffID = activeProjectTurnDiffIDs[actorSessionID];
+  const activeProjectTurnDiff = filePreviews.find((preview) => preview.id === activeProjectTurnDiffID && preview.source === "turn-diff");
+  const projectActive = activeTab === "project";
+  const filePreviewActive = Boolean(activeFilePreview);
   useEffect(() => {
     if (retainedTokenRef.current === token) {
       return;
     }
     retainedTokenRef.current = token;
     setRetainedFilePreviews({});
-    setActiveFilePreviewIDs({});
+    setActiveProjectTurnDiffIDs({});
     setCanvasGalleryActiveIndices({});
   }, [token]);
-  const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
-  const filePreviewActive = Boolean(
-    activeFilePreview
-      && surfaceFilePreviews.some((preview) => preview.id === activeFilePreview.id)
-      && activeSurface === "canvas",
-  );
 
   const visibleUIContext = useMemo<UIContextPart | undefined>(() => {
     if (!actorSessionID) {
@@ -411,29 +428,25 @@ export const WorkspacePane = memo(function WorkspacePane({
       return;
     }
     const preview = filePreviews.find((entry) => entry.id === filePreviewReveal.previewID);
-    if (!preview || (preview.source === "turn-diff" && sessionQuery.isLoading)) {
+    if (!preview || (preview.source === "turn-diff" && (sessionQuery.isPending || workspaceRootsQuery.isPending))) {
       return;
     }
-    setActiveFilePreviewID(filePreviewReveal.previewID);
     if (preview.source === "turn-diff" && hasFileWorkspace) {
-      setProjectTabClosed(actorSessionID, false);
-      selectProjectSurface();
+      setActiveProjectTurnDiffID(preview.id);
+      openWorkspaceTab(actorSessionID, "project");
     } else {
-      selectCanvasSurface();
+      openWorkspaceTab(actorSessionID, fileWorkspaceTabKey(preview.id));
     }
     consumeFilePreviewReveal(filePreviewReveal.serial);
-  }, [actorSessionID, filePreviewReveal, filePreviews, hasFileWorkspace, selectCanvasSurface, selectProjectSurface, sessionQuery.isLoading]);
-
-  useEffect(() => {
-    if (activeFilePreviewID && !filePreviews.some((preview) => preview.id === activeFilePreviewID)) {
-      setActiveFilePreviewID(undefined);
-    }
-  }, [activeFilePreviewID, filePreviews]);
-
-  const selectPersistentCanvasSurface = useCallback(() => {
-    setActiveFilePreviewID(undefined);
-    selectCanvasSurface();
-  }, [selectCanvasSurface, setActiveFilePreviewID]);
+  }, [
+    actorSessionID,
+    filePreviewReveal,
+    filePreviews,
+    hasFileWorkspace,
+    sessionQuery.isPending,
+    setActiveProjectTurnDiffID,
+    workspaceRootsQuery.isPending,
+  ]);
 
   useEffect(() => {
     if (!canvasReveal || canvasReveal.sessionID !== actorSessionID) {
@@ -442,49 +455,26 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (!items.some((item) => item.id === canvasReveal.itemID)) {
       return;
     }
-    selectCanvasItem(canvasReveal.itemID);
-    selectPersistentCanvasSurface();
+    openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(canvasReveal.itemID));
     consumeCanvasReveal(canvasReveal.serial);
   }, [actorSessionID, canvasReveal, items]);
 
-  const createBrowserSurface = useCallback(() => {
-    setActiveFilePreviewID(undefined);
-    createNewBrowserTab();
-  }, [createNewBrowserTab, setActiveFilePreviewID]);
+  const createBrowserSurface = useCallback(() => createNewBrowserTab(), [createNewBrowserTab]);
 
   const activateProjectSurface = useCallback(() => {
-    if (!hasFileWorkspace) {
-      return;
-    }
-    setProjectTabClosed(actorSessionID, false);
-    if (activeFilePreview?.source !== "turn-diff") {
-      setActiveFilePreviewID(undefined);
-    }
-    selectProjectSurface();
-  }, [activeFilePreview?.source, actorSessionID, hasFileWorkspace, selectProjectSurface, setActiveFilePreviewID]);
+    if (hasFileWorkspace) openWorkspaceTab(actorSessionID, "project");
+  }, [actorSessionID, hasFileWorkspace]);
 
-  const selectProjectFallbackSurface = useCallback(() => {
-    if (browserTabs.length > 0) {
-      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else if (surfaceFilePreviews.length > 0) {
-      setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
-      selectCanvasSurface();
-    } else if (items.length > 0) {
-      setActiveFilePreviewID(undefined);
-      selectCanvasSurface();
-    } else {
-      selectWorkspaceSurface();
-    }
-  }, [
-    activeBrowserTabID,
-    browserTabs,
-    items.length,
-    selectBrowserTab,
-    selectCanvasSurface,
-    selectWorkspaceSurface,
-    setActiveFilePreviewID,
-    surfaceFilePreviews,
-  ]);
+  const closeLocalWorkspaceTab = useCallback((closingTab: WorkspaceTabKey, closeProject = false) => {
+    updateWorkspaceSessionUI(actorSessionID, (current) => ({
+      ...current,
+      activeTab: current.activeTab === closingTab
+        ? nextWorkspaceTabAfterClose(closingTab, availableWorkspaceTabs, current.tabOrder)
+        : current.activeTab,
+      projectTabOpen: closeProject ? false : current.projectTabOpen,
+      tabOrder: current.tabOrder.filter((tab) => tab !== closingTab),
+    }));
+  }, [actorSessionID, availableWorkspaceTabs]);
 
   const closeProjectSurface = useCallback(() => {
     if (!actorSessionID) return;
@@ -497,116 +487,43 @@ export const WorkspacePane = memo(function WorkspacePane({
         consumeFilePreviewReveal(filePreviewReveal.serial);
       }
     }
-    setProjectTabClosed(actorSessionID, true);
-    if (!projectActive) return;
-    selectProjectFallbackSurface();
+    closeLocalWorkspaceTab("project", true);
   }, [
     actorSessionID,
+    closeLocalWorkspaceTab,
     filePreviewReveal,
     filePreviews,
-    projectActive,
     projectFileReveal,
-    selectProjectFallbackSurface,
   ]);
-
-  useEffect(() => {
-    if (activeSurface === "project" && projectTabClosed) {
-      selectProjectFallbackSurface();
-    }
-  }, [activeSurface, projectTabClosed, selectProjectFallbackSurface]);
-
-  useEffect(() => {
-    if (
-      activeSurface === "project"
-      && enabled
-      && !sessionQuery.isPending
-      && !workspaceRootsQuery.isPending
-      && !hasFileWorkspace
-    ) {
-      if (items.length > 0) {
-        selectCanvasSurface();
-      } else {
-        selectWorkspaceSurface();
-      }
-    }
-  }, [
-    activeSurface,
-    enabled,
-    hasFileWorkspace,
-    items.length,
-    selectCanvasSurface,
-    selectWorkspaceSurface,
-    sessionQuery.isPending,
-    workspaceRootsQuery.isPending,
-  ]);
-
-  useEffect(() => {
-    if (projectFileReveal?.sessionID === actorSessionID && hasFileWorkspace) {
-      setProjectTabClosed(actorSessionID, false);
-      selectProjectSurface();
-    }
-  }, [actorSessionID, hasFileWorkspace, projectFileReveal?.serial, selectProjectSurface]);
 
   const selectFilePreview = useCallback((previewID: string) => {
-    selectCanvasSurface();
-    setActiveFilePreviewID(previewID);
-  }, [selectCanvasSurface, setActiveFilePreviewID]);
+    setWorkspaceActiveTab(actorSessionID, fileWorkspaceTabKey(previewID));
+  }, [actorSessionID]);
 
   const selectProjectTurnDiff = useCallback((previewID: string) => {
-    setProjectTabClosed(actorSessionID, false);
-    setActiveFilePreviewID(previewID);
-    selectProjectSurface();
-  }, [actorSessionID, selectProjectSurface, setActiveFilePreviewID]);
+    setActiveProjectTurnDiffID(previewID);
+    openWorkspaceTab(actorSessionID, "project");
+  }, [actorSessionID, setActiveProjectTurnDiffID]);
 
   const deactivateProjectTurnDiff = useCallback(() => {
-    if (activeFilePreview?.source === "turn-diff") {
-      setActiveFilePreviewID(undefined);
-    }
-  }, [activeFilePreview?.source, setActiveFilePreviewID]);
+    setActiveProjectTurnDiffID(undefined);
+  }, [setActiveProjectTurnDiffID]);
 
   const closeProjectTurnDiffs = useCallback((previewIDs: string[]) => {
     const closing = new Set(previewIDs);
     projectTurnDiffPreviews
       .filter((preview) => closing.has(preview.id))
       .forEach((preview) => closeFilePreview(preview.sessionID, preview.id));
-    if (activeFilePreviewID && closing.has(activeFilePreviewID)) {
+    if (activeProjectTurnDiffID && closing.has(activeProjectTurnDiffID)) {
       const remaining = projectTurnDiffPreviews.filter((preview) => !closing.has(preview.id));
-      setActiveFilePreviewID(remaining.at(-1)?.id);
+      setActiveProjectTurnDiffID(remaining.at(-1)?.id);
     }
-  }, [activeFilePreviewID, projectTurnDiffPreviews, setActiveFilePreviewID]);
+  }, [activeProjectTurnDiffID, projectTurnDiffPreviews, setActiveProjectTurnDiffID]);
 
   const removeFilePreview = useCallback((preview: FilePreview) => {
     closeFilePreview(preview.sessionID, preview.id);
-    if (activeFilePreviewID !== preview.id) {
-      return;
-    }
-    const closedIndex = surfaceFilePreviews.findIndex((entry) => entry.id === preview.id);
-    const next = surfaceFilePreviews[closedIndex + 1] || surfaceFilePreviews[closedIndex - 1];
-    if (next) {
-      setActiveFilePreviewID(next.id);
-    } else if (browserTabs.length > 0) {
-      setActiveFilePreviewID(undefined);
-      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else {
-      setActiveFilePreviewID(undefined);
-      if (items.length === 0 && projectTabVisible) {
-        selectProjectSurface();
-      } else if (items.length === 0) {
-        selectWorkspaceSurface();
-      }
-    }
-  }, [
-    activeBrowserTabID,
-    activeFilePreviewID,
-    browserTabs,
-    items.length,
-    projectTabVisible,
-    selectBrowserTab,
-    selectProjectSurface,
-    selectWorkspaceSurface,
-    setActiveFilePreviewID,
-    surfaceFilePreviews,
-  ]);
+    closeLocalWorkspaceTab(fileWorkspaceTabKey(preview.id));
+  }, [closeLocalWorkspaceTab]);
 
   const galleryLayoutMutation = useMutation({
     mutationFn: ({ item, layout }: { item: CanvasItem; layout: GalleryLayout }) => {
@@ -672,21 +589,19 @@ export const WorkspacePane = memo(function WorkspacePane({
       const key = queryKeys.canvasItems(actorSessionID);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<{ items: CanvasItem[] }>(key);
+      const previousUI = getWorkspaceSessionUI(actorSessionID);
       queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
         items: (current?.items || []).filter((entry) => entry.id !== item.id),
       }));
-      if (activeCanvasItem?.id === item.id) {
-        const next = topCanvasItem(items.filter((entry) => entry.id !== item.id));
-        setActiveCanvasItemIDs((current) => {
-          if (next) return { ...current, [actorSessionID]: next.id };
-          return withoutKey(current, actorSessionID);
-        });
-      }
-      return { previous };
+      closeLocalWorkspaceTab(canvasWorkspaceTabKey(item.id));
+      return { previous, previousUI };
     },
     onError: (_error, _item, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.canvasItems(actorSessionID), context.previous);
+      }
+      if (context?.previousUI) {
+        replaceWorkspaceSessionUI(actorSessionID, context.previousUI);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
@@ -711,20 +626,19 @@ export const WorkspacePane = memo(function WorkspacePane({
       const key = queryKeys.canvasItems(actorSessionID);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<{ items: CanvasItem[] }>(key);
+      const previousUI = getWorkspaceSessionUI(actorSessionID);
       queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
         items: (current?.items || []).filter((entry) => entry.id !== item.id),
       }));
-      if (activeCanvasItem?.id === item.id) {
-        const next = topCanvasItem(items.filter((entry) => entry.id !== item.id));
-        setActiveCanvasItemIDs((current) => next
-          ? { ...current, [actorSessionID]: next.id }
-          : withoutKey(current, actorSessionID));
-      }
-      return { previous };
+      closeLocalWorkspaceTab(canvasWorkspaceTabKey(item.id));
+      return { previous, previousUI };
     },
     onError: (error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.canvasItems(actorSessionID), context.previous);
+      }
+      if (context?.previousUI) {
+        replaceWorkspaceSessionUI(actorSessionID, context.previousUI);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
@@ -760,8 +674,7 @@ export const WorkspacePane = memo(function WorkspacePane({
       queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
         items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
       }));
-      selectCanvasItem(item.id);
-      selectPersistentCanvasSurface();
+      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(item.id));
       if (actorSessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
@@ -777,8 +690,7 @@ export const WorkspacePane = memo(function WorkspacePane({
       void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
         queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
       );
-      selectCanvasItem(entry.sourceItemID);
-      selectPersistentCanvasSurface();
+      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(entry.sourceItemID));
       return;
     }
     restoreMutation.mutate(entry);
@@ -804,8 +716,7 @@ export const WorkspacePane = memo(function WorkspacePane({
       queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
         items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
       }));
-      selectCanvasItem(item.id);
-      selectPersistentCanvasSurface();
+      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(item.id));
     },
     onError: () => toast.error(t("canvas.openSavedFailed")),
   });
@@ -824,87 +735,55 @@ export const WorkspacePane = memo(function WorkspacePane({
   });
 
   useEffect(() => {
-    if (itemsQuery.isLoading) return;
+    if (itemsQuery.isPending) return;
     if (items.length === 0) {
       seenCanvasItemIDsRef.current = new Set();
       hasSeenCanvasItemsRef.current = true;
-      setActiveCanvasItemIDs((current) => (
-        current[actorSessionID] ? withoutKey(current, actorSessionID) : current
-      ));
       return;
     }
     const seenIDs = seenCanvasItemIDsRef.current;
     const newItems = hasSeenCanvasItemsRef.current ? items.filter((item) => !seenIDs.has(item.id)) : [];
     seenCanvasItemIDsRef.current = new Set(items.map((item) => item.id));
     hasSeenCanvasItemsRef.current = true;
-    const selected = activeCanvasItemIDs[actorSessionID];
     if (newItems.length > 0) {
-      selectCanvasItem(newItems.at(-1)!.id);
-      selectPersistentCanvasSurface();
-    } else if (!selected || !items.some((item) => item.id === selected)) {
-      selectCanvasItem(items[0].id);
+      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(newItems.at(-1)!.id));
     }
-  }, [activeCanvasItemIDs, actorSessionID, items, itemsQuery.isLoading]);
-
-  const totalResourceCount = items.length + browserTabs.length + surfaceFilePreviews.length + (projectTabVisible ? 1 : 0);
-  useEffect(() => {
-    if (resourceSessionIDRef.current !== actorSessionID) {
-      resourceSessionIDRef.current = actorSessionID;
-      hadResourcesRef.current = totalResourceCount > 0;
-      return;
-    }
-    if (totalResourceCount > 0) {
-      hadResourcesRef.current = true;
-      return;
-    }
-    if (hadResourcesRef.current) {
-      hadResourcesRef.current = false;
-      setWorkspaceOpen(actorSessionID, false);
-    }
-  }, [actorSessionID, totalResourceCount]);
+  }, [actorSessionID, items, itemsQuery.isPending]);
 
   useEffect(() => {
-    if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;
-    if (surfaceFilePreviews.length > 0) {
-      setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
-    } else if (browserTabs.length > 0) {
-      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else if (projectTabVisible) {
-      selectProjectSurface();
-    } else {
-      selectWorkspaceSurface();
-    }
+    const resourcesReady = enabled
+      && browserTabsResolved
+      && itemsQuery.isSuccess
+      && !itemsQuery.isFetching
+      && sessionQuery.isSuccess
+      && !sessionQuery.isFetching
+      && workspaceRootsQuery.isSuccess
+      && !workspaceRootsQuery.isFetching;
+    if (!resourcesReady) return;
+    updateWorkspaceSessionUI(actorSessionID, (current) => {
+      const tabOrder = mergeWorkspaceTabOrder(current.tabOrder, availableWorkspaceTabs);
+      const activeTab = current.activeTab && tabOrder.includes(current.activeTab)
+        ? current.activeTab
+        : tabOrder[0] || null;
+      return activeTab === current.activeTab && sameWorkspaceTabOrder(tabOrder, current.tabOrder)
+        ? current
+        : { ...current, activeTab, tabOrder };
+    });
   }, [
-    activeBrowserTabID,
-    activeSurface,
-    browserTabs,
-    filePreviewActive,
-    surfaceFilePreviews,
-    items.length,
+    activeTab,
+    actorSessionID,
+    availableWorkspaceTabs,
+    browserTabsResolved,
+    enabled,
     itemsQuery.isFetching,
-    itemsQuery.isLoading,
-    projectTabVisible,
+    itemsQuery.isSuccess,
+    sessionQuery.isFetching,
+    sessionQuery.isSuccess,
+    workspaceRootsQuery.isFetching,
+    workspaceRootsQuery.isSuccess,
   ]);
 
-  const closeWorkspaceBrowser = useCallback((tabID: string) => {
-    const closingLastActiveBrowser =
-      activeSurface === "browser" && activeBrowserTabID === tabID && browserTabs.length === 1;
-    closeBrowserTab(tabID);
-    if (closingLastActiveBrowser && surfaceFilePreviews.length > 0) {
-      const fallbackPreviewID = surfaceFilePreviews.some((preview) => preview.id === activeFilePreviewID)
-        ? activeFilePreviewID!
-        : surfaceFilePreviews[0].id;
-      selectFilePreview(fallbackPreviewID);
-    }
-  }, [
-    activeBrowserTabID,
-    activeFilePreviewID,
-    activeSurface,
-    browserTabs.length,
-    closeBrowserTab,
-    selectFilePreview,
-    surfaceFilePreviews,
-  ]);
+  const closeWorkspaceBrowser = useCallback((tabID: string) => closeBrowserTab(tabID), [closeBrowserTab]);
   const closeWorkspaceCanvasItem = useCallback((itemID: string) => {
     const item = items.find((entry) => entry.id === itemID);
     if (item) requestCloseCanvasItem(item);
@@ -915,14 +794,11 @@ export const WorkspacePane = memo(function WorkspacePane({
   }, [removeFilePreview, surfaceFilePreviews]);
   const activateWorkspaceBrowser = useCallback((tabID: string) => {
     activateBrowserPageFindRegion();
-    setActiveFilePreviewID(undefined);
     selectBrowserTab(tabID);
-  }, [selectBrowserTab, setActiveFilePreviewID]);
+  }, [selectBrowserTab]);
   const activateWorkspaceCanvasItem = useCallback((itemID: string) => {
-    setActiveFilePreviewID(undefined);
-    selectCanvasItem(itemID);
-    selectCanvasSurface();
-  }, [selectCanvasItem, selectCanvasSurface, setActiveFilePreviewID]);
+    setWorkspaceActiveTab(actorSessionID, canvasWorkspaceTabKey(itemID));
+  }, [actorSessionID]);
 
   return (
     <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
@@ -937,10 +813,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         )}
       >
         <WorkspaceResourceTabs
-          activeBrowserTabID={activeBrowserTabID}
-          activeCanvasItemID={activeCanvasItem?.id}
-          activeFilePreviewID={activeFilePreviewID}
-          activeSurface={activeSurface}
+          activeTab={activeTab}
           browserTabs={browserSurfaceTabs}
           canvasItems={items}
           closingCanvasItemID={deleteMutation.isPending
@@ -949,7 +822,6 @@ export const WorkspacePane = memo(function WorkspacePane({
               ? closeSavedMutation.variables?.item.id
               : undefined}
           closingBrowserTabID={closingBrowserTabID}
-          filePreviewActive={filePreviewActive}
           filePreviewTabs={workspaceFilePreviewTabs}
           orderScope={actorSessionID || "workspace"}
           projectLabel={fileWorkspaceLabel}
@@ -1037,7 +909,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         {actorSessionID ? (
           <ProjectBrowserSurface
             active={projectActive}
-            activeTurnDiffID={activeFilePreview?.source === "turn-diff" ? activeFilePreview.id : undefined}
+            activeTurnDiffID={activeProjectTurnDiff?.id}
             hasProject={hasProject}
             projectStateReady={projectRevealReady}
             sessionID={actorSessionID}
@@ -1121,17 +993,13 @@ function canvasGalleryStateKey(sessionID: string, itemID: string) {
   return `${sessionID}\u0000${itemID}`;
 }
 
-function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const next = { ...record };
-  delete next[key];
-  return next;
+function sameWorkspaceTabOrder(left: readonly WorkspaceTabKey[], right: readonly WorkspaceTabKey[]) {
+  return left.length === right.length && left.every((tab, index) => tab === right[index]);
 }
 
-function topCanvasItem(items: CanvasItem[]) {
-  return items.reduce<CanvasItem | undefined>((top, item) => {
-    if (!top) return item;
-    const topZ = numberValue(asRecord(top.window)?.z, 0);
-    const itemZ = numberValue(asRecord(item.window)?.z, 0);
-    return itemZ >= topZ ? item : top;
-  }, undefined);
+function workspaceSurface(tab: WorkspaceTabKey | null) {
+  if (!tab) return "workspace" as const;
+  if (tab === "project") return "project" as const;
+  if (tab.startsWith("browser:")) return "browser" as const;
+  return "canvas" as const;
 }

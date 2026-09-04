@@ -1,5 +1,3 @@
-export type WorkspaceSurface = "workspace" | "canvas" | "browser" | "project";
-
 export type BrowserWorkspaceArtifact = {
   createdAt: string;
   faviconURL?: string;

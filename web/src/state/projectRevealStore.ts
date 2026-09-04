@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import type { FilePreviewInput } from "@/state/filePreviewStore";
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { openWorkspaceTab } from "@/state/workspaceStore";
 
 export type ProjectFileRevealInput = {
   absolutePath?: string;
@@ -49,7 +49,7 @@ const useProjectRevealStore = create<ProjectRevealState>((set) => ({
 
 export function requestProjectFileReveal(input: ProjectFileRevealInput) {
   useProjectRevealStore.getState().request(input);
-  setWorkspaceOpen(input.sessionID, true);
+  openWorkspaceTab(input.sessionID, "project");
 }
 
 export function consumeProjectFileReveal(sessionID: string, serial: number) {

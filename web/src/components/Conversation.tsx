@@ -18,8 +18,12 @@ import { useSessionWorkspaceArtifacts } from "@/hooks/useSessionWorkspaceArtifac
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
-import { mergeWorkspaceTabOrder, useWorkspaceTabOrder } from "@/state/workspaceTabOrderStore";
-import { useWorkspaceOpen } from "@/state/workspaceStore";
+import {
+  mergeWorkspaceTabOrder,
+  useWorkspaceOpen,
+  useWorkspaceTabOrder,
+  type WorkspaceTabKey,
+} from "@/state/workspaceStore";
 
 const SUBMIT_ERROR_DURATION_MS = 5000;
 
@@ -304,9 +308,11 @@ export function Conversation({
 
 function orderWorkspaceArtifacts(
   artifacts: WorkspaceArtifact[],
-  savedOrder: string[],
+  savedOrder: WorkspaceTabKey[],
 ) {
-  const artifactByTabID = new Map(artifacts.map((artifact) => [workspaceArtifactTabID(artifact), artifact]));
+  const artifactByTabID = new Map<WorkspaceTabKey, WorkspaceArtifact>(
+    artifacts.map((artifact) => [workspaceArtifactTabID(artifact), artifact]),
+  );
   const orderedTabIDs = mergeWorkspaceTabOrder(savedOrder, [...artifactByTabID.keys()]);
   return orderedTabIDs.flatMap((tabID) => {
     const artifact = artifactByTabID.get(tabID);
@@ -315,7 +321,7 @@ function orderWorkspaceArtifacts(
 }
 
 function workspaceArtifactTabID(artifact: WorkspaceArtifact) {
-  return `${artifact.kind === "browser" ? "browser" : "widget"}:${artifact.resourceID}`;
+  return `${artifact.kind === "browser" ? "browser" : "canvas"}:${artifact.resourceID}` as const;
 }
 
 function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null }) {
