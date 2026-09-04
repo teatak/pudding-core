@@ -22,7 +22,15 @@ import type { AssistantOverlay, AssistantOverlayPart } from "@/state/overlayStor
 type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
 type ApprovalMenuAction = "approve-session" | "approve-turn" | "deny" | "review-git" | "review-patch";
 
-export function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval; token: string }) {
+export function ComposerApprovalBar({
+  approval,
+  preview = false,
+  token,
+}: {
+  approval?: ComposerApproval;
+  preview?: boolean;
+  token: string;
+}) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [pendingAction, setPendingAction] = useState<"turn" | "session" | "deny" | null>(null);
@@ -57,7 +65,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
     : current.reason;
 
   async function approve(scope: "turn" | "session") {
-    if (pending) {
+    if (pending || preview) {
       return;
     }
     setPendingAction(scope);
@@ -74,7 +82,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   }
 
   async function pickProjectDirs() {
-    if (pending || pickingProjectDir || hasPayloadProjectDirs) {
+    if (pending || pickingProjectDir || hasPayloadProjectDirs || preview) {
       return;
     }
     setPickingProjectDir(true);
@@ -95,7 +103,7 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   }
 
   async function deny() {
-    if (pending) {
+    if (pending || preview) {
       return;
     }
     setPendingAction("deny");
@@ -214,12 +222,9 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   return (
     <ComposerFloatingPanel
       className={cn(
-        "right-4 mb-1 overflow-y-auto rounded-b-lg text-xs sm:right-8",
-        isComputerAppApproval
-          ? "px-2.5 py-2 sm:left-auto sm:w-[28rem] sm:max-w-[calc(100%-4rem)]"
-          : "grid gap-1 px-3 py-2",
+        "overflow-y-auto text-xs",
+        !isComputerAppApproval && "grid gap-1",
       )}
-      data-computer-approval={isComputerAppApproval ? "true" : undefined}
       onKeyDown={(event) => {
         if (isComputerAppApproval && event.key === "Escape") {
           event.preventDefault();
@@ -234,7 +239,6 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
           approveLabel={t("transcript.approvalAllowComputerApp")}
           denyDescription={t("transcript.approvalDenyDesc")}
           denyLabel={t("transcript.approvalRejectComputerApp")}
-          heading={title}
           pendingAction={pendingAction}
           onApprove={() => void approve("session")}
           onDeny={() => void deny()}
@@ -388,7 +392,6 @@ function ComputerApprovalTarget({
   approveLabel,
   denyDescription,
   denyLabel,
-  heading,
   pendingAction,
   onApprove,
   onDeny,
@@ -398,7 +401,6 @@ function ComputerApprovalTarget({
   approveLabel: string;
   denyDescription: string;
   denyLabel: string;
-  heading: string;
   pendingAction: "turn" | "session" | "deny" | null;
   onApprove: () => void;
   onDeny: () => void;
@@ -406,12 +408,7 @@ function ComputerApprovalTarget({
   const identity = useDesktopApplicationIdentity(appID);
 
   return (
-    <div className="grid min-w-0 gap-1.5">
-      <div className="flex min-w-0 items-center gap-1.5 px-0.5 text-[11px] font-medium text-muted-foreground">
-        <ShieldCheck className="size-3.5 shrink-0" />
-        <span className="truncate">{heading}</span>
-      </div>
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
         {identity?.iconURL ? (
           <AppIcon className="shrink-0" size="md" src={identity.iconURL} />
         ) : (
@@ -446,7 +443,6 @@ function ComputerApprovalTarget({
             {denyLabel}
           </Button>
         </div>
-      </div>
     </div>
   );
 }

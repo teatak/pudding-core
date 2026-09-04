@@ -58,6 +58,7 @@ import { composerShellClassName } from "@/components/composerControlStyles";
 import { ComposerTextArea, parseSlashSubmitCommand, type ComposerTextAreaHandle, type SlashCommand, type SlashSubmitCommand } from "@/components/ComposerTextArea";
 import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
+import { composerTestPresentation } from "@/dev/composerTestState";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
@@ -166,10 +167,17 @@ export function Composer({
   // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
   const overlayRunning = Boolean(runningTurnID);
-  const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
-  const activeTurnPlan = useOverlayStore((state) => state.activeTurnPlans[sessionID]);
-  const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
-  const running = overlayRunning || session.running;
+  const livePendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
+  const liveActiveTurnPlan = useOverlayStore((state) => state.activeTurnPlans[sessionID]);
+  const livePendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
+  const testPresentation = useMemo(
+    () => import.meta.env.DEV ? composerTestPresentation(sessionID) : undefined,
+    [sessionID],
+  );
+  const pendingApproval = testPresentation ? testPresentation.approval : livePendingApproval;
+  const activeTurnPlan = testPresentation ? testPresentation.plan : liveActiveTurnPlan;
+  const pendingInputFlow = testPresentation ? testPresentation.inputFlow : livePendingInputFlow;
+  const running = testPresentation ? Boolean(testPresentation.plan) : overlayRunning || session.running;
   const projectID = session.projectID || "";
   const audioBindingsQuery = useQuery({
     queryKey: queryKeys.audioBindings(),
@@ -1042,9 +1050,13 @@ export function Composer({
           data-composer-presentation={presentation}
         >
           {pendingApproval ? (
-            <ComposerApprovalBar approval={pendingApproval} token={token} />
+            <ComposerApprovalBar approval={pendingApproval} preview={Boolean(testPresentation?.approval)} token={token} />
           ) : pendingInputFlow ? (
-            <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />
+            <InputFlowPanel
+              key={pendingInputFlow.id}
+              request={pendingInputFlow}
+              onSubmit={testPresentation?.inputFlow ? () => undefined : (submission) => inputFlowSubmitMutation.mutate(submission)}
+            />
           ) : null}
           <div
             className={cn(

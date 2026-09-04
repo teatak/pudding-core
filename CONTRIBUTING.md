@@ -27,6 +27,18 @@ npm --prefix web run build
 Start the development desktop app with `make desktop-dev`. Development data is stored separately from release
 data as described in `AGENTS.md`.
 
+LLM-driven Composer states can be previewed in the real conversation layout without calling a model:
+
+```bash
+PUDDING_COMPOSER_TEST_STATE=approval make desktop-dev
+PUDDING_COMPOSER_TEST_STATE=app-approval make desktop-dev
+PUDDING_COMPOSER_TEST_STATE=interaction make desktop-dev
+PUDDING_COMPOSER_TEST_STATE=steps make desktop-dev
+```
+
+These states are available only in the unpackaged development desktop app and do not call the backend when
+their simulated controls are used.
+
 ## Pull requests
 
 1. Create a short-lived branch from `main`.

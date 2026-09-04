@@ -73,12 +73,14 @@ const defaultAddr = app.isPackaged ? "127.0.0.1:9669" : "127.0.0.1:9679";
 const daemonAddr = (process.env.PUDDING_DAEMON_ADDR || defaultAddr).trim();
 const apiBase = trimTrailingSlash(process.env.PUDDING_API_BASE || `http://${daemonAddr}`);
 const devURL = trimTrailingSlash(process.env.PUDDING_DEV_URL || "");
+const composerTestState = app.isPackaged ? "" : String(process.env.PUDDING_COMPOSER_TEST_STATE || "").trim();
 console.info("[electron] starting", {
   version: packageMetadata.version,
   channel: packageMetadata.puddingReleaseChannel || (app.isPackaged ? "stable" : "dev"),
   packaged: app.isPackaged,
   home: puddingHomePath(),
   daemonAddr,
+  composerTestState: composerTestState || undefined,
 });
 const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SCHEME || "pudding");
 const macTrafficLightPosition = { x: 18, y: 18 };
@@ -1627,6 +1629,9 @@ async function loadRenderer(window, token) {
   url.searchParams.set("theme", state.theme);
   url.searchParams.set("resolvedTheme", state.resolved);
   url.searchParams.set("locale", shellLocale);
+  if (!app.isPackaged) {
+    url.searchParams.set("composerTestState", composerTestState || "off");
+  }
   await window.loadURL(url.toString());
 }
 

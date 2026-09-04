@@ -271,6 +271,25 @@ export function BrowserRuntimeProvider({
     setAutomationActivitiesBySession(remainingActivities);
   }, []);
 
+  const dismissCompletedAutomationActivity = useCallback((sessionID: string) => {
+    const activity = automationActivitiesRef.current[sessionID];
+    if (activity?.phase !== "complete" || activity.presence !== "visible") {
+      return;
+    }
+    window.clearTimeout(automationHideTimersRef.current.get(sessionID));
+    automationHideTimersRef.current.delete(sessionID);
+    const closingActivity: BrowserAutomationActivity = {
+      ...activity,
+      presence: "closing",
+    };
+    const nextActivities = {
+      ...automationActivitiesRef.current,
+      [sessionID]: closingActivity,
+    };
+    automationActivitiesRef.current = nextActivities;
+    setAutomationActivitiesBySession(nextActivities);
+  }, []);
+
   const registerViewport = useCallback((viewportID: string, viewport: BrowserRuntimeViewport) => {
     viewportsRef.current.set(viewportID, viewport);
     const syncGeometry = () => applyPresentations();
@@ -421,17 +440,7 @@ export function BrowserRuntimeProvider({
           if (automationActivitiesRef.current[event.sessionID] !== completedActivity) {
             return;
           }
-          automationHideTimersRef.current.delete(event.sessionID);
-          const closingActivity: BrowserAutomationActivity = {
-            ...completedActivity,
-            presence: "closing",
-          };
-          const nextActivities = {
-            ...automationActivitiesRef.current,
-            [event.sessionID]: closingActivity,
-          };
-          automationActivitiesRef.current = nextActivities;
-          setAutomationActivitiesBySession(nextActivities);
+          dismissCompletedAutomationActivity(event.sessionID);
         }, automationPipCloseDelayMs);
         automationHideTimersRef.current.set(event.sessionID, timer);
       }
@@ -459,10 +468,11 @@ export function BrowserRuntimeProvider({
       });
       automationLeasesRef.current.clear();
     };
-  }, [applyPresentations]);
+  }, [applyPresentations, dismissCompletedAutomationActivity]);
 
   const context = useMemo<BrowserRuntimeContextValue>(() => ({
     automationActivitiesBySession,
+    dismissCompletedAutomationActivity,
     finishAutomationActivity,
     readyRuntimeKeys,
     registerRuntime,
@@ -472,6 +482,7 @@ export function BrowserRuntimeProvider({
     runtimeTabsBySession,
   }), [
     automationActivitiesBySession,
+    dismissCompletedAutomationActivity,
     finishAutomationActivity,
     readyRuntimeKeys,
     registerRuntime,
@@ -585,9 +596,11 @@ export const BrowserViewportOverlay = memo(function BrowserViewportOverlay({
 });
 
 export const BrowserAutomationPip = memo(function BrowserAutomationPip({
+  collapseOnComplete = false,
   embedded = false,
   sessionID,
 }: {
+  collapseOnComplete?: boolean;
   embedded?: boolean;
   sessionID: string;
 }) {
@@ -595,6 +608,7 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
   const workspaceOpen = useWorkspaceOpen(sessionID);
   const {
     automationActivitiesBySession,
+    dismissCompletedAutomationActivity,
     finishAutomationActivity,
     readyRuntimeKeys,
     runtimeTabsBySession,
@@ -633,6 +647,16 @@ export const BrowserAutomationPip = memo(function BrowserAutomationPip({
       setSurfaceKey("");
     }
   }, [automationActivity?.presence]);
+
+  useEffect(() => {
+    if (
+      collapseOnComplete
+      && automationActivity?.phase === "complete"
+      && automationActivity.presence === "visible"
+    ) {
+      dismissCompletedAutomationActivity(sessionID);
+    }
+  }, [automationActivity, collapseOnComplete, dismissCompletedAutomationActivity, sessionID]);
 
   useEffect(() => {
     if (

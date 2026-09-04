@@ -416,8 +416,17 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 
 .pudding-conversation {
     --pudding-composer-mascot-size: 3rem;
+    --pudding-composer-mascot-overhang: 2.5rem;
     --pudding-composer-mascot-right: 0.5rem;
-    --pudding-composer-mascot-gap: 0.5rem;
+    --pudding-composer-bottom-dock-gap: 0.5rem;
+    --pudding-composer-bottom-dock-inline-safe: calc(
+        var(--pudding-composer-mascot-size) + var(--pudding-composer-mascot-right) + var(--pudding-composer-bottom-dock-gap)
+    );
+    --pudding-composer-mask-height: 1rem;
+}
+
+.pudding-composer-floating-panel {
+    bottom: calc(100% + var(--pudding-composer-bottom-dock-gap, 0.5rem));
 }
 
 .pudding-composer-mascot-anchor {
@@ -429,7 +438,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
     height: var(--pudding-composer-mascot-size);
     overflow: visible;
     pointer-events: auto;
-    transform: translateY(-82%);
+    transform: translateY(calc(0px - var(--pudding-composer-mascot-overhang)));
 }
 
 .dark .pudding-composer-shell {
@@ -1197,17 +1206,6 @@ html:has([data-workspace-presentation="canvas"] .pudding-browser-workspace-surfa
 
 [data-composer-presentation="floating"] .pudding-composer-suggestion {
     left: 1rem;
-}
-
-[data-composer-presentation="floating"] .pudding-composer-floating-panel {
-    right: auto;
-    left: 50%;
-    width: min(34rem, calc(100% - 2rem));
-    transform: translateX(-50%);
-}
-
-[data-composer-presentation="floating"] .pudding-composer-floating-panel[data-computer-approval="true"] {
-    width: min(28rem, calc(100% - 2rem));
 }
 
 [data-composer-presentation="floating"] [data-composer-text-input="true"] {

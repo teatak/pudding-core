@@ -25,6 +25,7 @@ export type BrowserRuntimeViewport = {
 
 export type BrowserRuntimeContextValue = {
   automationActivitiesBySession: Record<string, BrowserAutomationActivity>;
+  dismissCompletedAutomationActivity: (sessionID: string) => void;
   readyRuntimeKeys: Set<string>;
   requiredTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;
   runtimeTabsBySession: Record<string, ElectronBrowserSurfaceTab[]>;

@@ -145,24 +145,30 @@ export function TranscriptView({
         </div>
       ) : null}
       {showJumpLatest && hasItems ? (
-        <Button
-          aria-label={jumpLatestLabel}
-          className={
-            newMessageCount > 0
-              ? "absolute inset-x-0 z-40 mx-auto h-9 w-fit gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
-              : "absolute inset-x-0 z-40 mx-auto rounded-full border border-border shadow-md"
-          }
-          size={newMessageCount > 0 ? "default" : "icon"}
+        <div
+          className="pudding-conversation-bottom-dock pointer-events-none absolute inset-x-0 z-20"
           style={{
-            bottom: "calc(var(--pudding-composer-overlay-height, 0px) + 1.25rem)",
+            bottom: "calc(var(--pudding-composer-overlay-height, 0px) + var(--pudding-composer-bottom-dock-gap, 0.5rem))",
           }}
-          type="button"
-          variant={newMessageCount > 0 ? "default" : "secondary"}
-          onClick={onJumpLatest}
         >
-          <ArrowDown />
-          {newMessageCount > 0 ? <span>{jumpLatestLabel}</span> : null}
-        </Button>
+          <ChatColumn className="flex justify-center [padding-inline:var(--pudding-composer-bottom-dock-inline-safe)]">
+            <Button
+              aria-label={jumpLatestLabel}
+              className={
+                newMessageCount > 0
+                  ? "pointer-events-auto h-9 w-fit shrink-0 gap-1.5 rounded-full px-3 text-sm font-semibold shadow-md [&_svg]:size-4"
+                  : "pointer-events-auto shrink-0 rounded-full border border-border shadow-md"
+              }
+              size={newMessageCount > 0 ? "default" : "icon"}
+              type="button"
+              variant={newMessageCount > 0 ? "default" : "secondary"}
+              onClick={onJumpLatest}
+            >
+              <ArrowDown />
+              {newMessageCount > 0 ? <span>{jumpLatestLabel}</span> : null}
+            </Button>
+          </ChatColumn>
+        </div>
       ) : null}
     </div>
   );

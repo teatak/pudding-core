@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import { z } from "zod";
 
 import { App } from "@/App";
+import { initComposerTestState } from "@/dev/composerTestState";
 import "@/styles.css";
 import { startLocaleSync } from "@/i18n";
 import { restoreInitialAppRoute } from "@/lib/route";
@@ -20,6 +21,9 @@ import {
 initAPIBase();
 initShellMode();
 initThemeFromLaunch();
+if (import.meta.env.DEV) {
+  initComposerTestState();
+}
 
 applyTheme(readStoredTheme());
 startThemeSync();

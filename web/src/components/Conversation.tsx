@@ -68,7 +68,6 @@ export function Conversation({
     && !workspaceOpen
     && hasVisibleActivities;
   const showActivityRail = showActivitySurface && activityRailFits;
-  const showComposerActivities = showActivitySurface && !activityRailFits;
   const handleSubmitStart = useCallback(() => {
     setSubmitSignal((signal) => signal + 1);
   }, []);
@@ -213,7 +212,7 @@ export function Conversation({
     <div
       ref={conversationRef}
       className={
-        "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-mask-height:1rem] [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
+        "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
         (floating ? "bg-transparent" : "bg-background")
       }
       data-file-drop-target=""
@@ -249,9 +248,12 @@ export function Conversation({
           token={token}
         />
       )}
-      {showActivityRail ? (
+      {showActivitySurface ? (
         <aside
-          className="pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
+          className={showActivityRail
+            ? "pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
+            : "pointer-events-none absolute top-0 right-0 bottom-[var(--pudding-composer-overlay-height)] z-20 flex w-14 min-h-0 flex-col overflow-hidden py-4 pr-4"
+          }
         >
           <WorkspaceActivityCard
             artifacts={orderedWorkspaceArtifacts}
@@ -261,6 +263,7 @@ export function Conversation({
                   resourceID: browserAutomationActivity.tabID,
                 }
               : undefined}
+            presentation={showActivityRail ? "rail" : "dock"}
           />
         </aside>
       ) : null}
@@ -272,19 +275,6 @@ export function Conversation({
             : "pointer-events-none absolute inset-x-0 bottom-0"
         }
       >
-        {showComposerActivities ? (
-          <ChatColumn className="relative z-10 mb-3 flex flex-col items-center gap-3">
-            <WorkspaceActivityCard
-              artifacts={orderedWorkspaceArtifacts}
-              presentation="composer"
-            />
-            {browserAutomationActivity ? (
-              <div className="w-60 max-w-full">
-                <BrowserAutomationPip sessionID={session.id} />
-              </div>
-            ) : null}
-          </ChatColumn>
-        ) : null}
         <div className={floating ? undefined : "relative z-30"}>
           <Composer
             droppedFiles={droppedFiles}

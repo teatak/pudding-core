@@ -351,7 +351,7 @@ function FloatingUIPanel({
 }) {
   return (
     <ComposerFloatingPanel
-      className="flex w-[min(34rem,calc(100%-2rem))] flex-col overflow-hidden sm:w-[min(34rem,calc(100%-5rem))]"
+      className="flex flex-col gap-2 overflow-hidden"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -359,7 +359,7 @@ function FloatingUIPanel({
         }
       }}
     >
-      <div className="flex min-w-0 shrink-0 items-start gap-2 px-3 py-2">
+      <div className="flex min-w-0 shrink-0 items-start gap-2">
         <TextCursorInput className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{title}</div>
@@ -367,7 +367,7 @@ function FloatingUIPanel({
         </div>
         <Button
           aria-label={cancelLabel}
-          className="-mr-1 -mt-1 size-7 shrink-0 rounded-full"
+          className="size-7 shrink-0 rounded-full"
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -376,7 +376,7 @@ function FloatingUIPanel({
           <X className="size-4" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </ComposerFloatingPanel>
   );
 }
