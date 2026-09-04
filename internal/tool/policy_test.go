@@ -92,16 +92,23 @@ func TestClassifyToolCallCodeReadRisk(t *testing.T) {
 }
 
 func TestClassifyToolCallFilePatchRisk(t *testing.T) {
-	risk, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"main.go","edits":[{"old_text":"a","new_text":"b"}]}]}`))
+	risk, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"main.go","action":"edit","hunks":[{"start_line":1,"old_lines":["a"],"new_lines":["b"]}]}]}`))
 	if !ok || risk.Class != RiskClassWrite || risk.Operation != "file_patch" || risk.Scope != "project" || !risk.LowRisk || len(risk.Paths) != 1 {
 		t.Fatalf("unexpected patch apply risk: %+v ok=%v", risk, ok)
 	}
-	destructive, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"old.go","delete":true}]}`))
+	destructive, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"old.go","action":"delete"}]}`))
 	if !ok || destructive.Class != RiskClassDestructive || destructive.LowRisk {
 		t.Fatalf("delete patch must remain destructive: %+v ok=%v", destructive, ok)
 	}
-	if _, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[]}`)); ok {
-		t.Fatal("empty patch must not be classified")
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"scope":"project","files":[]}`),
+		json.RawMessage(`{"scope":"wrong","files":[{"path":"a","action":"delete"}]}`),
+		json.RawMessage(`{"scope":"project","files":[`),
+	} {
+		invalid, ok := ClassifyToolCall(FilePatch, raw)
+		if !ok || invalid.Class != RiskClassWrite || invalid.Operation != "file_patch" {
+			t.Fatalf("known patch tool must stay on the validated approval path: %+v ok=%v raw=%s", invalid, ok, raw)
+		}
 	}
 }
 

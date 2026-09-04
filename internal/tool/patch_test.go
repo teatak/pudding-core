@@ -36,6 +36,10 @@ func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 		{name: "wrong files type", args: `{"scope":"project","files":"large patch"}`, kind: "invalid_type", field: "files", expected: "array", hasOffset: true},
 		{name: "missing files", args: `{"scope":"project"}`, kind: "missing_field", field: "files", expected: "array"},
 		{name: "empty files", args: `{"scope":"project","files":[]}`, kind: "empty_files", field: "files", expected: "non-empty array"},
+		{name: "removed base revision", args: `{"scope":"project","files":[{"path":"notes.txt","action":"delete","base_revision":"sha256:abc123"}]}`, kind: "unknown_field"},
+		{name: "invalid action", args: `{"scope":"project","files":[{"path":"notes.txt","action":"write"}]}`, kind: "invalid_action", field: "files[0].action", expected: "create, replace, edit, or delete"},
+		{name: "missing hunk input", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"new_lines":["new"]}]}]}`, kind: "hunk_old_lines_required", field: "files[0].hunks[0].old_lines", expected: "array"},
+		{name: "missing hunk output", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"]}]}]}`, kind: "hunk_new_lines_required", field: "files[0].hunks[0].new_lines", expected: "array"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -98,7 +102,7 @@ func TestFilePatchSizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 
 	tooManyFiles := make([]map[string]any, patchMaxFiles+1)
 	for index := range tooManyFiles {
-		tooManyFiles[index] = map[string]any{"path": "file-" + strconv.Itoa(index) + ".txt", "new_text": "content\n"}
+		tooManyFiles[index] = map[string]any{"path": "file-" + strconv.Itoa(index) + ".txt", "action": "create", "content": "content\n"}
 	}
 	tooMany := patchTestCall(runner, "session_size", root, FilePatch, map[string]any{
 		"scope": "project",
@@ -115,8 +119,9 @@ func TestFilePatchSizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 	tooLarge := patchTestCall(runner, "session_size", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
-			"path":     "large.txt",
-			"new_text": strings.Repeat("x", patchMaxFileBytes+1),
+			"path":    "large.txt",
+			"action":  "create",
+			"content": strings.Repeat("x", patchMaxFileBytes+1),
 		}},
 	})
 	if tooLarge.Ok || !strings.Contains(tooLarge.Content, `"reason":"file_too_large"`) {
@@ -132,9 +137,9 @@ func TestFilePatchUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": "update.txt", "new_text": "new line\n"},
-			{"path": "nested/create.txt", "new_text": "created\n"},
-			{"path": "delete.txt", "delete": true},
+			{"path": "update.txt", "action": "replace", "content": "new line\n"},
+			{"path": "nested/create.txt", "action": "create", "content": "created\n"},
+			{"path": "delete.txt", "action": "delete"},
 		},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_batch", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
@@ -183,7 +188,7 @@ func TestFilePatchUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 	assertNoPatchTempFiles(t, root)
 }
 
-func TestFilePatchSupportsOrderedEdits(t *testing.T) {
+func TestFilePatchSupportsMultipleHunks(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
 	original := "package main\n\nfunc message() string {\n\treturn \"old\"\n}\n"
@@ -192,10 +197,11 @@ func TestFilePatchSupportsOrderedEdits(t *testing.T) {
 	applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
-			"path": "main.go",
-			"edits": []map[string]any{
-				{"old_text": "func message() string", "new_text": "func greeting() string"},
-				{"old_text": "return \"old\"", "new_text": "return \"new\""},
+			"path":   "main.go",
+			"action": "edit",
+			"hunks": []map[string]any{
+				{"start_line": 3, "old_lines": []string{"func message() string {"}, "new_lines": []string{"func greeting() string {"}},
+				{"start_line": 4, "old_lines": []string{"\treturn \"old\""}, "new_lines": []string{"\treturn \"new\""}},
 			},
 		}},
 	})
@@ -207,38 +213,165 @@ func TestFilePatchSupportsOrderedEdits(t *testing.T) {
 	}
 }
 
-func TestFilePatchRejectsAmbiguousOrConflictingEdits(t *testing.T) {
+func TestFilePatchHunksUseOriginalLinesAndPreserveLineEndings(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "one\r\ntwo\r\nthree")
+	runner := NewBuiltinRunner()
+	applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks": []map[string]any{
+				{"start_line": 1, "old_lines": []string{"one"}, "new_lines": []string{"ONE", "inserted"}},
+				{"start_line": 3, "old_lines": []string{"three"}, "new_lines": []string{"THREE"}},
+			},
+		}},
+	})
+	if !applied.Ok {
+		t.Fatalf("multi-hunk apply failed: %+v", applied)
+	}
+	if got := readPatchTestFile(t, path); got != "ONE\r\ninserted\r\ntwo\r\nTHREE" {
+		t.Fatalf("original line coordinates or CRLF ending were not preserved: %q", got)
+	}
+}
+
+func TestFilePatchHunkDeletesLinesWithExplicitEmptyNewLines(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "keep\nremove\n")
+	runner := NewBuiltinRunner()
+	applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks":  []map[string]any{{"start_line": 2, "old_lines": []string{"remove"}, "new_lines": []string{}}},
+		}},
+	})
+	if !applied.Ok {
+		t.Fatalf("line deletion failed: %+v", applied)
+	}
+	if got := readPatchTestFile(t, path); got != "keep\n" {
+		t.Fatalf("line deletion changed the remaining ending: %q", got)
+	}
+}
+
+func TestFilePatchHunkInsertsAndAppendsLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		original  string
+		startLine int
+		newLines  []string
+		want      string
+	}{
+		{name: "insert before existing line", original: "one\ntwo\n", startLine: 2, newLines: []string{"inserted"}, want: "one\ninserted\ntwo\n"},
+		{name: "append without final newline", original: "one", startLine: 2, newLines: []string{"two"}, want: "one\ntwo"},
+		{name: "append with final newline", original: "one\n", startLine: 2, newLines: []string{"two"}, want: "one\ntwo\n"},
+		{name: "insert into empty file", original: "", startLine: 1, newLines: []string{"one"}, want: "one"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "notes.txt")
+			writePatchTestFile(t, path, test.original)
+			runner := NewBuiltinRunner()
+			applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+				"scope": "project",
+				"files": []map[string]any{{
+					"path":   "notes.txt",
+					"action": "edit",
+					"hunks":  []map[string]any{{"start_line": test.startLine, "old_lines": []string{}, "new_lines": test.newLines}},
+				}},
+			})
+			if !applied.Ok {
+				t.Fatalf("line insertion failed: %+v", applied)
+			}
+			if got := readPatchTestFile(t, path); got != test.want {
+				t.Fatalf("line insertion result=%q want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFilePatchHunkRequiresExplicitNewLines(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "old\n")
+	runner := NewBuiltinRunner()
+	result := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks":  []map[string]any{{"start_line": 1, "old_lines": []string{"old"}}},
+		}},
+	})
+	if result.Ok || !strings.Contains(result.Content, `"errorKind":"hunk_new_lines_required"`) {
+		t.Fatalf("missing new_lines should fail: %+v", result)
+	}
+	if got := readPatchTestFile(t, path); got != "old\n" {
+		t.Fatalf("invalid hunk changed worktree: %q", got)
+	}
+}
+
+func TestFilePatchTargetsDuplicateTextByLine(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "same\nsame\n")
 	runner := NewBuiltinRunner()
 
-	ambiguous := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+	applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
-			"path":  "notes.txt",
-			"edits": []map[string]any{{"old_text": "same", "new_text": "changed"}},
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks":  []map[string]any{{"start_line": 2, "old_lines": []string{"same"}, "new_lines": []string{"changed"}}},
 		}},
 	})
-	if ambiguous.Ok || !strings.Contains(ambiguous.Content, `"reason":"edit_text_ambiguous"`) {
-		t.Fatalf("ambiguous edit should fail: %+v", ambiguous)
+	if !applied.Ok {
+		t.Fatalf("positioned duplicate edit should apply: %+v", applied)
 	}
+	if got := readPatchTestFile(t, path); got != "same\nchanged\n" {
+		t.Fatalf("wrong duplicate occurrence was changed: %q", got)
+	}
+}
 
-	conflicting := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+func TestFilePatchRejectsMismatchedOrOverlappingHunks(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "first\nsecond\nthird\n")
+	runner := NewBuiltinRunner()
+
+	mismatched := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
-			"path": "notes.txt",
-			"edits": []map[string]any{
-				{"old_text": "same", "new_text": "changed", "replace_all": true},
-				{"old_text": "missing", "new_text": "never"},
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks":  []map[string]any{{"start_line": 2, "old_lines": []string{"third"}, "new_lines": []string{"changed"}}},
+		}},
+	})
+	if mismatched.Ok || !strings.Contains(mismatched.Content, `"reason":"hunk_lines_mismatch"`) {
+		t.Fatalf("mismatched positioned edit should fail: %+v", mismatched)
+	}
+
+	overlapping := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks": []map[string]any{
+				{"start_line": 1, "old_lines": []string{"first", "second"}, "new_lines": []string{"one"}},
+				{"start_line": 2, "old_lines": []string{"second"}, "new_lines": []string{"two"}},
 			},
 		}},
 	})
-	if conflicting.Ok || !strings.Contains(conflicting.Content, `"reason":"edit_text_not_found"`) {
-		t.Fatalf("conflicting edit should fail: %+v", conflicting)
+	if overlapping.Ok || !strings.Contains(overlapping.Content, `"reason":"hunk_overlap"`) {
+		t.Fatalf("overlapping hunks should fail: %+v", overlapping)
 	}
-	if got := readPatchTestFile(t, path); got != "same\nsame\n" {
-		t.Fatalf("failed edits changed worktree: %q", got)
+	if got := readPatchTestFile(t, path); got != "first\nsecond\nthird\n" {
+		t.Fatalf("failed hunks changed worktree: %q", got)
 	}
 }
 
@@ -249,9 +382,10 @@ func TestFilePatchRequiresOneFileOperation(t *testing.T) {
 	result := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
-			"path":     "notes.txt",
-			"new_text": "new\n",
-			"edits":    []map[string]any{{"old_text": "old", "new_text": "new"}},
+			"path":    "notes.txt",
+			"action":  "edit",
+			"content": "new\n",
+			"hunks":   []map[string]any{{"start_line": 1, "old_lines": []string{"old"}, "new_lines": []string{"new"}}},
 		}},
 	})
 	if result.Ok || !strings.Contains(result.Content, `"reason":"invalid_arguments"`) {
@@ -269,8 +403,8 @@ func TestFilePatchRejectsDriftWithoutPartialWrites(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": "first.txt", "new_text": "first new\n"},
-			{"path": "second.txt", "new_text": "second new\n"},
+			{"path": "first.txt", "action": "replace", "content": "first new\n"},
+			{"path": "second.txt", "action": "replace", "content": "second new\n"},
 		},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_drift", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
@@ -299,7 +433,7 @@ func TestFilePatchFailsClosedWithoutApprovalSnapshot(t *testing.T) {
 	runner := NewBuiltinRunner()
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "new_text": "approved\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n"}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_missing", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -326,7 +460,7 @@ func TestFilePatchRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	runner := NewBuiltinRunner()
 	approvedArgs, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "new_text": "approved\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n"}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_changed", Name: FilePatch, Args: approvedArgs, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -334,7 +468,7 @@ func TestFilePatchRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	}
 	call.Args, _ = json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "new_text": "different\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "different\n"}},
 	})
 
 	result := runner.Call(context.Background(), call)
@@ -353,7 +487,7 @@ func TestFilePatchRejectsExpiredApprovalSnapshot(t *testing.T) {
 	runner := NewBuiltinRunner()
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "new_text": "new\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new\n"}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_expired", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -418,7 +552,7 @@ func TestFilePatchRejectsCrossRootAndNoop(t *testing.T) {
 
 	noop := patchTestCallWithRoots(runner, "session_a", []string{firstRoot}, FilePatch, map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "first.txt", "new_text": "same\n"}},
+		"files": []map[string]any{{"path": "first.txt", "action": "replace", "content": "same\n"}},
 	})
 	if noop.Ok || !strings.Contains(noop.Content, `"reason":"no_changes"`) {
 		t.Fatalf("no-op patch should fail: %+v", noop)
@@ -427,8 +561,8 @@ func TestFilePatchRejectsCrossRootAndNoop(t *testing.T) {
 	crossRoot := patchTestCallWithRoots(runner, "session_a", []string{firstRoot, secondRoot}, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": first, "new_text": "first new\n"},
-			{"path": second, "new_text": "second new\n"},
+			{"path": first, "action": "replace", "content": "first new\n"},
+			{"path": second, "action": "replace", "content": "second new\n"},
 		},
 	})
 	if crossRoot.Ok || !strings.Contains(crossRoot.Content, `"reason":"cross_root_patch"`) {

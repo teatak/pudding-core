@@ -11,6 +11,7 @@ import {
 
 import {
   attachmentsFromContentParts,
+  assistantDisclosureKey,
   localFoldersFromContentParts,
   projectReferencesFromContentParts,
   textFromContentParts,
@@ -128,7 +129,7 @@ export function useTranscriptViewModel({
                 messages: outputs,
                 model: modelFromTurn(turn),
               },
-              key: `assistant:${turn.id}:initial`,
+              key: `assistant:turn:${turn.id}`,
               kind: "assistant",
             });
           }
@@ -153,7 +154,7 @@ export function useTranscriptViewModel({
                 messages: segment.outputs,
                 model: modelFromTurn(turn),
               },
-              key: `assistant:${segment.user.id}`,
+              key: assistantSegmentKey(segment.user, turn.id),
               kind: "assistant",
             });
           }
@@ -175,7 +176,7 @@ export function useTranscriptViewModel({
               overlay,
               phase: phaseForTurn,
             },
-            key: `assistant:${turn.id}:live`,
+            key: liveAssistantSegmentKey(overlay, messageSegments.at(-1)?.user),
             kind: "assistant",
           });
         } else if (phaseForTurn) {
@@ -195,6 +196,7 @@ export function useTranscriptViewModel({
         });
         items.push({
           anchorID: turn.id,
+          clientMessageID: turn.clientMessageID,
           fileChanges: turn.fileChanges,
           fileChangeState: turn.fileChangeState,
           key: transcriptTurnKey({
@@ -223,6 +225,7 @@ export function useTranscriptViewModel({
             overlay,
             phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
           },
+          clientMessageID: turn.clientMessageID,
           key: transcriptTurnKey({
             clientMessageID: turn.clientMessageID,
             sessionID,
@@ -262,6 +265,7 @@ export function useTranscriptViewModel({
                   phase: phaseForTurn,
                 }
             : undefined,
+        clientMessageID: turn.clientMessageID,
         key: transcriptTurnKey({
           clientMessageID: turn.clientMessageID,
           sessionID,
@@ -312,7 +316,7 @@ export function useTranscriptViewModel({
       if (appliedGuides.length > 0 || waitingGuides.length > 0) {
         sequence.push({
           assistant,
-          key: `assistant:${overlay.turnID}:live`,
+          key: liveAssistantSegmentKey(overlay),
           kind: "assistant",
         });
       }
@@ -452,6 +456,23 @@ function splitTurnMessages(messages: Message[]) {
     segments[segments.length - 1].outputs.push(message);
   }
   return segments;
+}
+
+function assistantSegmentKey(user: Pick<Message, "clientMessageID" | "id">, turnID: string) {
+  return assistantDisclosureKey({
+    clientMessageID: user.clientMessageID,
+    messageID: user.id,
+    turnID,
+  });
+}
+
+function liveAssistantSegmentKey(overlay: AssistantOverlay, user?: Pick<Message, "clientMessageID" | "id">) {
+  if (overlay.clientMessageID) {
+    return assistantDisclosureKey({ clientMessageID: overlay.clientMessageID, turnID: overlay.turnID });
+  }
+  return user
+    ? assistantSegmentKey(user, overlay.turnID)
+    : assistantDisclosureKey({ turnID: overlay.turnID });
 }
 
 function userFromPending(message: PendingUserMessage, options: { pending?: boolean } = {}): UserInputVM {

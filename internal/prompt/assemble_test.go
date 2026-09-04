@@ -330,6 +330,11 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	if strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) {
 		t.Fatalf("code prompt still treats terminal as an App:\n%s", code.SystemInstruction)
 	}
+	if !strings.Contains(code.SystemInstruction, "builtin_file_slice.numberedContent") ||
+		!strings.Contains(code.SystemInstruction, "direct line counting is acceptable") ||
+		!strings.Contains(code.SystemInstruction, "read a fresh numbered slice") {
+		t.Fatalf("code prompt missing line-safe patch workflow:\n%s", code.SystemInstruction)
+	}
 	if !strings.Contains(code.SystemInstruction, "Treat verification as part of the implementation") ||
 		!strings.Contains(code.SystemInstruction, "go test ./...") ||
 		!strings.Contains(code.SystemInstruction, "typecheck") ||

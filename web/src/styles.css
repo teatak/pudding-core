@@ -422,7 +422,9 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
     --pudding-composer-bottom-dock-inline-safe: calc(
         var(--pudding-composer-mascot-size) + var(--pudding-composer-mascot-right) + var(--pudding-composer-bottom-dock-gap)
     );
-    --pudding-composer-mask-height: 1rem;
+    --pudding-composer-mask-height: calc(
+        var(--pudding-composer-mascot-overhang) + var(--pudding-composer-bottom-dock-gap)
+    );
 }
 
 .pudding-composer-floating-panel {

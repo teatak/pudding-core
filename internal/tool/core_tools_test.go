@@ -83,6 +83,22 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	}
 }
 
+func TestFileToolDescriptionsExplainLineSafePatchWorkflow(t *testing.T) {
+	descriptions := make(map[string]string)
+	for _, definition := range BuiltinDefinitions() {
+		descriptions[definition.Name] = definition.Description
+	}
+	if !strings.Contains(descriptions[FileRead], "direct line counting is acceptable") || !strings.Contains(descriptions[FileRead], "long, truncated, or unfamiliar files") {
+		t.Fatalf("file read must redirect line-based edits to numbered tools: %q", descriptions[FileRead])
+	}
+	if !strings.Contains(descriptions[FileSlice], "numberedContent") || !strings.Contains(descriptions[FileSlice], "old_lines") {
+		t.Fatalf("file slice must explain how to construct patch hunks: %q", descriptions[FileSlice])
+	}
+	if !strings.Contains(descriptions[FilePatch], "builtin_file_slice.numberedContent") || !strings.Contains(descriptions[FilePatch], "short complete builtin_file_read") || !strings.Contains(descriptions[FilePatch], "fresh numbered slice") {
+		t.Fatalf("file patch must explain the line-safe workflow: %q", descriptions[FilePatch])
+	}
+}
+
 func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
 	defs := BuiltinDefinitions()
 	if HasDefinition(CoreDefinitionsForMode(store.ModeChat, defs), PlanUpdate) {

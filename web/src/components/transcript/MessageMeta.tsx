@@ -15,11 +15,7 @@ import type { TurnModelVM } from "./types";
 
 export function InterruptedBadge() {
   const { t } = useI18n();
-  return (
-    <div className="mt-2">
-      <Badge variant="outline">{t("transcript.interrupted")}</Badge>
-    </div>
-  );
+  return <Badge variant="outline">{t("transcript.interrupted")}</Badge>;
 }
 
 export function MessageMeta({

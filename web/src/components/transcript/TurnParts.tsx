@@ -66,18 +66,18 @@ const processFileToolNames = new Set([
 
 export function TurnParts({
   disclosure,
+  disclosureRootKey,
   displaySettings,
   parts,
   sessionID,
   token = "",
-  turnID,
 }: {
   disclosure?: TurnDisclosureState;
+  disclosureRootKey: string;
   displaySettings?: TranscriptDisplaySettings;
   parts: TurnPartVM[];
   sessionID?: string;
   token?: string;
-  turnID: string;
 }) {
   const showReasoningContent = displaySettings?.showReasoning ?? true;
   const showRawToolInfo = displaySettings?.showRawToolInfo ?? true;
@@ -86,11 +86,11 @@ export function TurnParts({
     <>
       {renderParts.map((part, index) => {
         const partKey = part.key || `${part.type}:${index}`;
-        const disclosureKey = `${turnID}:${partKey}`;
+        const disclosureKey = `${disclosureRootKey}:${partKey}`;
         return renderTranscriptPart({
           disclosure,
           disclosureKey,
-          disclosureRootKey: turnID,
+          disclosureRootKey,
           part,
           partKey,
           sessionID,
@@ -257,6 +257,16 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
 
 function isProcessPart(part: TurnPartVM) {
   return part.type === "thought" || part.type === "tool_use";
+}
+
+function isActiveProcessPart(part: TurnPartVM) {
+  if (part.type === "thought") {
+    return Boolean(part.active);
+  }
+  if (part.type === "tool_use") {
+    return Boolean(part.active) || part.phase === "streaming_args" || part.phase === "running";
+  }
+  return false;
 }
 
 function ProcessActivityGlyph({ active, icon: Icon }: { active: boolean; icon: LucideIcon }) {
@@ -821,7 +831,7 @@ function ThoughtPart({
 
   return (
     <TranscriptDisclosure
-      icon={<ProcessActivityGlyph active={showActivitySpinner} icon={Lightbulb} />}
+      icon={<ProcessActivityGlyph active={showActivitySpinner || active} icon={Lightbulb} />}
       open={canShowContent ? open : undefined}
       title={active ? t("transcript.thinking") : t("transcript.thought")}
       onSummaryClick={handleThoughtSummaryClick}
@@ -881,7 +891,7 @@ function ProcessCompactPart({
 function currentProcessPart(parts: TurnPartVM[]) {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index];
-    if ((part.type === "thought" || part.type === "tool_use") && part.active) {
+    if (isActiveProcessPart(part)) {
       return part;
     }
   }
@@ -1142,13 +1152,13 @@ function ToolUsePart({
   const screenshotTool = isBrowserScreenshotTool(toolName);
   const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_session";
   const showDetails = codeTool || (mediaInspectionTool && !screenshotTool) || showRawInfo;
-  const active = part.active || part.phase === "streaming_args" || part.phase === "running";
+  const active = isActiveProcessPart(part);
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
   const Icon = toolPartIcon(part);
   const appID = computerToolAppID(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
-  const activityActive = showActivitySpinner || Boolean(part.active);
+  const activityActive = showActivitySpinner || active;
   const toneClass = "text-muted-foreground";
   const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
   const disclosure = !showDetails ? (

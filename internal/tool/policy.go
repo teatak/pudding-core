@@ -121,19 +121,26 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		return classifyGitWriteCall(name, raw)
 	}
 	if name == FilePatch {
+		baseRisk := ToolRisk{
+			Class:     RiskClassWrite,
+			Operation: "file_patch",
+			Scope:     managedScopeProject,
+			Summary:   "Apply a multi-file patch to project files.",
+			LowRisk:   true,
+		}
 		args, argumentErr := decodeFilePatchArgs(raw)
 		if argumentErr != nil || strings.TrimSpace(args.Scope) != managedScopeProject || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
-			return ToolRisk{}, false
+			return baseRisk, true
 		}
 		paths := make([]string, 0, len(args.Files))
 		destructive := false
 		for _, file := range args.Files {
 			path := strings.TrimSpace(file.Path)
 			if path == "" {
-				return ToolRisk{}, false
+				return baseRisk, true
 			}
 			paths = append(paths, path)
-			destructive = destructive || file.Delete
+			destructive = destructive || strings.TrimSpace(file.Action) == "delete"
 		}
 		if destructive {
 			return ToolRisk{
@@ -144,14 +151,8 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 				Summary:   "Apply a multi-file patch that deletes project files.",
 			}, true
 		}
-		return ToolRisk{
-			Class:     RiskClassWrite,
-			Operation: "file_patch",
-			Scope:     managedScopeProject,
-			Paths:     compactRiskPaths(paths...),
-			Summary:   "Apply a multi-file patch to project files.",
-			LowRisk:   true,
-		}, true
+		baseRisk.Paths = compactRiskPaths(paths...)
+		return baseRisk, true
 	}
 	var args struct {
 		Scope         string `json:"scope"`

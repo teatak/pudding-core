@@ -5,7 +5,7 @@ import { useI18n } from "@/i18n";
 
 import { AssistantOutput, AssistantOutputMeta, CompactPendingMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
-import type { AssistantOutputVM, TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState, UserInputVM } from "./types";
+import { assistantDisclosureKey, type AssistantOutputVM, type TranscriptDisplaySettings, type TranscriptTurnVM, type TurnDisclosureState, type UserInputVM } from "./types";
 import { UserInput } from "./UserInput";
 
 function TranscriptTurnView({
@@ -40,6 +40,10 @@ function TranscriptTurnView({
   const { t } = useI18n();
   const anchorTurnID = turn.anchorID || turn.turnID || turn.key;
   const assistantTurnID = turn.turnID || turn.key;
+  const primaryAssistantDisclosureRootKey = `${assistantTurnID}:${assistantDisclosureKey({
+    clientMessageID: turn.clientMessageID,
+    turnID: assistantTurnID,
+  })}`;
   const sequenceAssistants = turn.sequence?.filter((item) => item.kind === "assistant").map((item) => item.assistant) || [];
   const metaAssistant = sequenceAssistants.at(-1) || turn.assistant;
   return (
@@ -65,10 +69,10 @@ function TranscriptTurnView({
               <AssistantOutput
                 assistant={turn.assistant}
                 disclosure={disclosure}
+                disclosureRootKey={primaryAssistantDisclosureRootKey}
                 displaySettings={displaySettings}
                 sessionID={sessionID}
                 token={token}
-                turnID={assistantTurnID}
                 onContentGrow={onAssistantContentGrow}
                 onRevealComplete={onAssistantRevealComplete}
               />
@@ -90,10 +94,10 @@ function TranscriptTurnView({
                 <AssistantOutput
                   assistant={item.assistant}
                   disclosure={disclosure}
+                  disclosureRootKey={`${assistantTurnID}:${item.key}`}
                   displaySettings={displaySettings}
                   sessionID={sessionID}
                   token={token}
-                  turnID={assistantTurnID}
                   onContentGrow={onAssistantContentGrow}
                   onRevealComplete={onAssistantRevealComplete}
                 />

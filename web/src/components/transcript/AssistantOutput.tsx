@@ -25,34 +25,34 @@ import type { TranscriptDisplaySettings } from "./types";
 export const AssistantOutput = memo(function AssistantOutput({
   assistant,
   disclosure,
+  disclosureRootKey,
   displaySettings,
   onContentGrow,
   onRevealComplete,
   sessionID,
   token,
-  turnID,
 }: {
   assistant: AssistantOutputVM;
   disclosure?: TurnDisclosureState;
+  disclosureRootKey: string;
   displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
   sessionID: string;
   token: string;
-  turnID: string;
 }) {
   if (assistant.kind === "canonical") {
-    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} displaySettings={displaySettings} sessionID={sessionID} token={token} turnID={turnID} />;
+    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} sessionID={sessionID} token={token} />;
   }
   if (assistant.kind === "live") {
     return (
       <LiveAssistantOutput
         assistant={assistant}
         disclosure={disclosure}
+        disclosureRootKey={disclosureRootKey}
         displaySettings={displaySettings}
         sessionID={sessionID}
         token={token}
-        turnID={turnID}
         onContentGrow={onContentGrow}
         onRevealComplete={onRevealComplete}
       />
@@ -64,17 +64,17 @@ export const AssistantOutput = memo(function AssistantOutput({
 function CanonicalAssistantOutput({
   assistant,
   disclosure,
+  disclosureRootKey,
   displaySettings,
   sessionID,
   token,
-  turnID,
 }: {
   assistant: Extract<AssistantOutputVM, { kind: "canonical" }>;
   disclosure?: TurnDisclosureState;
+  disclosureRootKey: string;
   displaySettings?: TranscriptDisplaySettings;
   sessionID: string;
   token: string;
-  turnID: string;
 }) {
   const parts = useMemo(() => partsFromMessages(assistant.messages), [assistant.messages]);
   const text = useMemo(() => assistantTextFromMessages(assistant.messages), [assistant.messages]);
@@ -85,7 +85,7 @@ function CanonicalAssistantOutput({
   return (
     <div className="group flex min-w-0 flex-col" data-transcript-message-role="assistant">
       <div className="selectable-text min-w-0 text-sm leading-6">
-        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
+        {parts.length > 0 ? <TurnParts disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} /> : null}
         {assistant.error ? <AssistantError error={assistant.error} /> : null}
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
@@ -174,7 +174,7 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
       title={t("transcript.compactMark")}
     >
       <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 text-foreground/80">
-        <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
+        <TurnParts disclosureRootKey={message.turnID} parts={partsFromMessages([message])} sessionID={sessionID} token="" />
       </div>
     </TranscriptDisclosure>
   );
@@ -218,21 +218,21 @@ function compactMetadata(
 function LiveAssistantOutput({
   assistant,
   disclosure,
+  disclosureRootKey,
   displaySettings,
   onContentGrow,
   onRevealComplete,
   sessionID,
   token,
-  turnID,
 }: {
   assistant: Extract<AssistantOutputVM, { kind: "live" }>;
   disclosure?: TurnDisclosureState;
+  disclosureRootKey: string;
   displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
   sessionID: string;
   token: string;
-  turnID: string;
 }) {
   const { overlay, phase } = assistant;
   const streaming = overlay.status === "streaming";
@@ -278,7 +278,8 @@ function LiveAssistantOutput({
     onContentGrow?.();
   }, [overlay.parts, text, onContentGrow]);
   useLayoutEffect(() => {
-    const waitingForCanonical = overlay.status === "completed" && Boolean(overlay.assistantMessageID) && !assistant.canonicalReady;
+    const waitingForCanonical =
+      overlay.status !== "streaming" && Boolean(overlay.assistantMessageID) && !assistant.canonicalReady;
     if (streaming || overlay.revealed || text !== overlay.text || waitingForCanonical) {
       return;
     }
@@ -298,7 +299,7 @@ function LiveAssistantOutput({
   return (
     <div className="selectable-text min-w-0 text-sm leading-6">
       <div className="min-w-0">
-        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
+        {parts.length > 0 ? <TurnParts disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} /> : null}
       </div>
       {footerPhase ? <AssistantPhaseItem phase={footerPhase} /> : null}
       {overlay.status === "failed" && overlay.error ? <AssistantError error={overlay.error} /> : null}

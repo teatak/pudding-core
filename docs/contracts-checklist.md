@@ -111,7 +111,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `builtin_git_stage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"staged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_unstage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"unstaged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_commit` | `code` | `{scope:"project", cwd?, message}` | `{ok, status:"committed", cwd, repoRoot, commit, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_file_patch` | `code` | `{scope:"project", files:[{path, new_text?, edits?, delete?}]}` | `{ok, status:"applied", projectRoot, files, fileCount, additions, deletions, warnings}`;Project Files App 加载后可用，一次调用校验并原子应用整个批次 |
+| `builtin_file_patch` | `code` | `{scope:"project", files:[{path, action:"create"|"replace"|"edit"|"delete", content?, hunks?}]}` | `{ok, status:"applied", projectRoot, files, fileCount, additions, deletions, warnings}`;一次调用校验并原子应用整个批次 |
 
 `builtin_command_run` 接受完整 `command`,由固定平台 shell 执行,模型不能指定 shell
 executable。cwd 必须位于当前 Project/turn grant 授权目录中;前台默认 timeout 为 60 秒,
@@ -164,12 +164,16 @@ transcript 对 command、Git、file tool result 使用结构化 renderer。折�
 i18n 显示名和结构化摘要,不得把内部 snake_case tool name 作为主显示。原始 args /
 result 只在“原始数据”二级 disclosure 展开后渲染。
 
-`builtin_file_patch` 每个 file 必须且只能提供 `new_text`、`edits` 或
-`delete:true` 中的一种;只支持同一 Project root 内的 UTF-8 regular file,单次最多
-16 个文件。审批前根据本次 tool call 生成完整 unified diff 和源文件 hash 快照,
-审批通过后消费同一快照;模型无需再次提交 patch id。任一文件漂移则整包拒绝。
-apply 先准备同目录临时文件,再通过 backup + rename 提交,失败时逆序回滚。修改完成后
-由 Turn 文件 Diff 记录本轮产物,供 transcript 与项目浏览器统一审阅。
+`builtin_file_patch` 每个 file 必须显式提供 `action`:`create`/`replace` 使用完整
+`content`,`edit` 使用 `hunks`,`delete` 不接受内容。单个 hunk 使用基于修改前文件的
+`start_line` 定位,并以 `old_lines` 精确校验原文、`new_lines` 表示替换结果;数组元素均为
+不含换行符的整行。空 `old_lines` 表示在 `start_line` 前插入,原文件行数加一表示追加;
+空 `new_lines` 表示删除,两者不能同时为空。hunk 不得重叠,同一文件最多 64 个。工具只
+支持同一 Project root 内的 UTF-8 regular file,单次最多 16 个文件。审批前根据本次 tool call 生成完整
+unified diff 和源文件 hash 快照,审批通过后消费同一快照;模型无需提交额外 revision
+或 patch id。任一文件漂移则整包拒绝。apply 先准备同目录临时文件,再通过
+backup + rename 提交,失败时逆序回滚。修改完成后由 Turn 文件 Diff 记录本轮产物,
+供 transcript 与项目浏览器统一审阅。
 
 ## settings 约定键
 

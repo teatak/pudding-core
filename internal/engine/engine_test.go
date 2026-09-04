@@ -4879,7 +4879,7 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 	case 1:
 		args, _ := json.Marshal(map[string]any{
 			"scope": "project",
-			"files": []map[string]any{{"path": "notes.txt", "new_text": "new text\n"}},
+			"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new text\n"}},
 		})
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_file_patch", Name: tool.FilePatch, ArgsDelta: string(args)}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}

@@ -45,16 +45,20 @@ export function useWorkspaceBrowserSurface({
 }: UseWorkspaceBrowserSurfaceArgs) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const activeTab = useWorkspaceActiveTab(sessionID);
+  const storedActiveTab = useWorkspaceActiveTab(sessionID);
   const workspaceTabOrder = useWorkspaceTabOrder(sessionID);
-  const closingBrowserTabRef = useRef("");
   const readyTokenRef = useRef(token);
   const [browserSelections, setBrowserSelections] = useState<Record<string, string>>({});
+  const [releasingBrowserTabID, setReleasingBrowserTabID] = useState("");
   const [readyBrowserSessionIDs, setReadyBrowserSessionIDs] = useState<ReadonlySet<string>>(() => new Set());
   const processModeFallback = electronBrowserBridge() ? "webview" : "headless";
 
   const browserReveal = useBrowserReveal(sessionID);
-  const { query: browserTabsQuery, tabs: browserTabs } = useSessionBrowserTabs(sessionID, token, enabled);
+  const { query: browserTabsQuery, tabs: resolvedBrowserTabs } = useSessionBrowserTabs(sessionID, token, enabled);
+  const browserTabs = useMemo(
+    () => resolvedBrowserTabs.filter((tab) => tab.id !== releasingBrowserTabID),
+    [releasingBrowserTabID, resolvedBrowserTabs],
+  );
   const visualBrowserTabs = useMemo(() => {
     const tabsByID = new Map(browserTabs.map((tab) => [browserWorkspaceTabKey(tab.id), tab]));
     return mergeWorkspaceTabOrder(workspaceTabOrder, [...tabsByID.keys()]).flatMap((id) => {
@@ -81,6 +85,10 @@ export function useWorkspaceBrowserSurface({
   }, [token]);
 
   useEffect(() => {
+    setReleasingBrowserTabID("");
+  }, [sessionID, token]);
+
+  useEffect(() => {
     if (!enabled || !sessionID || !browserTabsQuery.isSuccess || browserTabsQuery.isFetching) return;
     setReadyBrowserSessionIDs((current) => {
       if (current.has(sessionID)) return current;
@@ -90,6 +98,18 @@ export function useWorkspaceBrowserSurface({
     });
   }, [browserTabsQuery.isFetching, browserTabsQuery.isSuccess, enabled, sessionID]);
 
+  const storedBrowserTabID = workspaceTabResourceID(storedActiveTab, "browser");
+  const activeTab = storedBrowserTabID === releasingBrowserTabID
+    ? nextWorkspaceTabAfterClose(
+        browserWorkspaceTabKey(storedBrowserTabID),
+        [
+          ...availableNonBrowserTabs,
+          ...browserTabs.map((tab) => browserWorkspaceTabKey(tab.id)),
+          browserWorkspaceTabKey(storedBrowserTabID),
+        ],
+        workspaceTabOrder,
+      )
+    : storedActiveTab;
   const requestedBrowserTabID = workspaceTabResourceID(activeTab, "browser");
   const activeBrowserTab = browserTabs.find((tab) => tab.id === requestedBrowserTabID)
     || visualBrowserTabs[0];
@@ -105,7 +125,7 @@ export function useWorkspaceBrowserSurface({
     if (!bridge || !enabled || !sessionID) return;
     return bridge.onUpdated((snapshot) => {
       if (snapshot.sessionID !== sessionID) return;
-      if (snapshot.tabID === closingBrowserTabRef.current) return;
+      if (snapshot.tabID === releasingBrowserTabID) return;
       const queryKey = queryKeys.browserTabs(sessionID);
       if (!browserTabsReady && queryClient.getQueryState(queryKey)?.fetchStatus === "fetching") return;
       const current = queryClient.getQueryData<BrowserTabsData>(queryKey);
@@ -129,7 +149,7 @@ export function useWorkspaceBrowserSurface({
         void adoptBrowserTab(token, tab.sessionID, tab.id).catch(() => undefined);
       }
     });
-  }, [browserTabsReady, enabled, queryClient, sessionID, token]);
+  }, [browserTabsReady, enabled, queryClient, releasingBrowserTabID, sessionID, token]);
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -213,7 +233,7 @@ export function useWorkspaceBrowserSurface({
       const remainingTabs = (previousTabs?.tabs || []).filter((tab) => tab.id !== tabID);
       const availableTabs = [
         ...availableNonBrowserTabs,
-        ...(previousTabs?.tabs || []).map((tab) => browserWorkspaceTabKey(tab.id)),
+        ...resolvedBrowserTabs.map((tab) => browserWorkspaceTabKey(tab.id)),
       ];
       const fallback = nextWorkspaceTabAfterClose(closingKey, availableTabs, previousUI.tabOrder);
       updateWorkspaceSessionUI(targetSessionID, (current) => ({
@@ -231,6 +251,7 @@ export function useWorkspaceBrowserSurface({
       await queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
     },
     onError: (_error, variables, context) => {
+      setReleasingBrowserTabID((current) => current === variables.tabID ? "" : current);
       if (context?.previousTabs) {
         queryClient.setQueryData(queryKeys.browserTabs(variables.targetSessionID), context.previousTabs);
       }
@@ -239,10 +260,20 @@ export function useWorkspaceBrowserSurface({
       }
       toast.error(t("browser.releaseFailed"));
     },
-    onSettled: () => {
-      closingBrowserTabRef.current = "";
-    },
   });
+
+  useEffect(() => {
+    if (
+      closeBrowserTabMutation.isPending
+      || !releasingBrowserTabID
+      || resolvedBrowserTabs.some((tab) => tab.id === releasingBrowserTabID)
+    ) return;
+    setReleasingBrowserTabID("");
+  }, [
+    closeBrowserTabMutation.isPending,
+    releasingBrowserTabID,
+    resolvedBrowserTabs,
+  ]);
 
   useEffect(() => {
     if (!enabled || !sessionID || !activeBrowserTab) return;
@@ -250,10 +281,15 @@ export function useWorkspaceBrowserSurface({
   }, [activeBrowserTab, enabled, sessionID]);
 
   const closeBrowserTab = useCallback((tabID: string) => {
-    if (!sessionID || closingBrowserTabRef.current) return;
-    closingBrowserTabRef.current = tabID;
+    if (!sessionID || closeBrowserTabMutation.isPending || releasingBrowserTabID) return;
+    setReleasingBrowserTabID(tabID);
     closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
-  }, [closeBrowserTabMutation.mutate, sessionID]);
+  }, [
+    closeBrowserTabMutation.isPending,
+    closeBrowserTabMutation.mutate,
+    releasingBrowserTabID,
+    sessionID,
+  ]);
 
   return {
     activeBrowserSelection,

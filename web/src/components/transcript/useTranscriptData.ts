@@ -183,5 +183,5 @@ function mergePendingUsers(queuedInputs: QueuedInput[], overlayPending: PendingU
     indexByClientID.set(pending.clientMessageID, out.length);
     out.push(pending);
   }
-  return out;
+  return out.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
 }

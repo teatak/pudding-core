@@ -9,6 +9,7 @@ import "vditor/dist/js/icons/ant.js";
 import luteURL from "vditor/dist/js/lute/lute.min.js?url";
 import mermaidScriptURL from "vditor/dist/js/mermaid/mermaid.min.js?url";
 
+import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 
 import type { ProjectEditorSelection } from "./ProjectEditor";
@@ -25,6 +26,21 @@ type CodeCopyAction = {
   key: string;
   x: number;
   y: number;
+};
+
+type MermaidRenderResult = {
+  svg: string;
+};
+
+type MermaidAPI = {
+  initialize: (config: Record<string, unknown>) => void;
+  render: (id: string, source: string) => Promise<MermaidRenderResult>;
+  puddingAsyncRenderer?: boolean;
+};
+
+type CachedMermaid = {
+  renderID: string;
+  svg: string;
 };
 
 const CODE_BLOCK_LANGUAGE_HINTS = [
@@ -65,16 +81,28 @@ const CODE_BLOCK_LANGUAGE_HINTS = [
 ];
 
 let vditorMermaidScriptPromise: Promise<void> | undefined;
+// Vditor renders every Mermaid block while mounting. Queue the work between
+// paints and reuse completed SVGs so it cannot hold up session navigation.
+let mermaidRenderQueue = Promise.resolve();
+const mermaidRenderCache = new Map<string, CachedMermaid>();
+const mermaidRenderPending = new Map<string, Promise<CachedMermaid>>();
+const mermaidRenderCacheLimit = 32;
 
 function ensureVditorMermaidScript() {
   const scriptID = "vditorMermaidScript";
-  if (document.getElementById(scriptID)) return Promise.resolve();
   if (vditorMermaidScriptPromise) return vditorMermaidScriptPromise;
+  if (document.getElementById(scriptID)) {
+    installAsyncMermaidRenderer();
+    return Promise.resolve();
+  }
   vditorMermaidScriptPromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
     script.id = scriptID;
     script.src = mermaidScriptURL;
-    script.onload = () => resolve();
+    script.onload = () => {
+      installAsyncMermaidRenderer();
+      resolve();
+    };
     script.onerror = () => {
       script.remove();
       vditorMermaidScriptPromise = undefined;
@@ -83,6 +111,85 @@ function ensureVditorMermaidScript() {
     document.head.appendChild(script);
   });
   return vditorMermaidScriptPromise;
+}
+
+function installAsyncMermaidRenderer() {
+  const mermaid = (window as Window & { mermaid?: MermaidAPI }).mermaid;
+  if (!mermaid || mermaid.puddingAsyncRenderer) return;
+
+  const initialize = mermaid.initialize.bind(mermaid);
+  const render = mermaid.render.bind(mermaid);
+  let activeConfig: Record<string, unknown> = {};
+
+  mermaid.initialize = (config) => {
+    activeConfig = config;
+    initialize(config);
+  };
+  mermaid.render = (id, source) => {
+    const config = activeConfig;
+    const cacheKey = `${JSON.stringify(config)}\n${source}`;
+    const cached = mermaidRenderCache.get(cacheKey);
+    if (cached) {
+      mermaidRenderCache.delete(cacheKey);
+      mermaidRenderCache.set(cacheKey, cached);
+      return Promise.resolve(rebaseMermaidSVG(cached, id));
+    }
+
+    let pending = mermaidRenderPending.get(cacheKey);
+    if (!pending) {
+      pending = mermaidRenderQueue
+        .then(waitForMermaidRenderOpportunity)
+        .then(async () => {
+          initialize(config);
+          const result = await render(id, source);
+          const next = { renderID: id, svg: result.svg };
+          mermaidRenderCache.set(cacheKey, next);
+          if (mermaidRenderCache.size > mermaidRenderCacheLimit) {
+            const oldestKey = mermaidRenderCache.keys().next().value;
+            if (oldestKey) mermaidRenderCache.delete(oldestKey);
+          }
+          return next;
+        });
+      mermaidRenderPending.set(cacheKey, pending);
+      mermaidRenderQueue = pending.then(() => undefined, () => undefined);
+      void pending.then(
+        () => mermaidRenderPending.delete(cacheKey),
+        () => mermaidRenderPending.delete(cacheKey),
+      );
+    }
+    return pending.then((result) => rebaseMermaidSVG(result, id));
+  };
+  mermaid.puddingAsyncRenderer = true;
+}
+
+function rebaseMermaidSVG(cached: CachedMermaid, renderID: string): MermaidRenderResult {
+  return {
+    svg: cached.renderID === renderID
+      ? cached.svg
+      : cached.svg.split(cached.renderID).join(renderID),
+  };
+}
+
+function waitForMermaidRenderOpportunity() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => window.setTimeout(resolve, 0));
+  });
+}
+
+function scheduleAfterPaint(callback: () => void) {
+  let firstFrame = 0;
+  let secondFrame = 0;
+  let idleCallback = 0;
+  firstFrame = requestAnimationFrame(() => {
+    secondFrame = requestAnimationFrame(() => {
+      idleCallback = window.requestIdleCallback(callback, { timeout: 300 });
+    });
+  });
+  return () => {
+    cancelAnimationFrame(firstFrame);
+    cancelAnimationFrame(secondFrame);
+    if (idleCallback) window.cancelIdleCallback(idleCallback);
+  };
 }
 
 export function ProjectMarkdownEditor({
@@ -112,6 +219,7 @@ export function ProjectMarkdownEditor({
   const revealRef = useRef(reveal);
   const syncingRef = useRef(false);
   const copiedResetTimerRef = useRef<number | undefined>(undefined);
+  const [editorReady, setEditorReady] = useState(false);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
   const [codeCopyActions, setCodeCopyActions] = useState<CodeCopyAction[]>([]);
   const [hoveredCodeKey, setHoveredCodeKey] = useState<string>();
@@ -130,6 +238,7 @@ export function ProjectMarkdownEditor({
     let tableObserver: MutationObserver | undefined;
     let editorResizeObserver: ResizeObserver | undefined;
     let codeCopyLayoutFrame = 0;
+    setEditorReady(false);
     const scheduleCodeCopyLayout = (editor: Vditor) => {
       window.cancelAnimationFrame(codeCopyLayoutFrame);
       codeCopyLayoutFrame = window.requestAnimationFrame(() => {
@@ -139,77 +248,81 @@ export function ProjectMarkdownEditor({
     };
     const dark = document.documentElement.classList.contains("dark");
     let editor: Vditor | undefined;
-    void ensureVditorMermaidScript().catch(() => undefined).then(() => {
-      if (disposed) return;
-      const nextEditor = new Vditor(host, {
-        _lutePath: luteURL,
-        cache: { enable: false },
-        height: "auto",
-        icon: null as never,
-        i18n: window.VditorI18n,
-        lang: locale === "zh-TW" ? "zh_TW" : locale === "en" ? "en_US" : "zh_CN",
-        mode: "ir",
-        placeholder: t("project.browserMarkdownEditor"),
-        preview: {
-          hljs: {
-            enable: false,
-            langs: CODE_BLOCK_LANGUAGE_HINTS,
+    const cancelStart = scheduleAfterPaint(() => {
+      void ensureVditorMermaidScript().catch(() => undefined).then(() => {
+        if (disposed) return;
+        const nextEditor = new Vditor(host, {
+          _lutePath: luteURL,
+          cache: { enable: false },
+          height: "auto",
+          icon: null as never,
+          i18n: window.VditorI18n,
+          lang: locale === "zh-TW" ? "zh_TW" : locale === "en" ? "en_US" : "zh_CN",
+          mode: "ir",
+          placeholder: t("project.browserMarkdownEditor"),
+          preview: {
+            hljs: {
+              enable: false,
+              langs: CODE_BLOCK_LANGUAGE_HINTS,
+            },
+            markdown: {
+              codeBlockPreview: true,
+              mathBlockPreview: false,
+              sanitize: true,
+            },
+            mode: "editor",
+            theme: {
+              current: "",
+              path: "",
+            },
           },
-          markdown: {
-            codeBlockPreview: true,
-            mathBlockPreview: false,
-            sanitize: true,
+          theme: dark ? "dark" : "classic",
+          toolbar: [],
+          value: valueRef.current,
+          after: () => {
+            if (disposed) {
+              nextEditor.destroy();
+              return;
+            }
+            vditorRef.current = nextEditor;
+            setEditorReady(true);
+            const editorRoot = nextEditor.vditor.ir?.element;
+            if (editorRoot) {
+              tableObserver = new MutationObserver(() => {
+                scheduleTableLayout(nextEditor);
+                scheduleCodeCopyLayout(nextEditor);
+              });
+              tableObserver.observe(editorRoot, {
+                attributes: true,
+                attributeFilter: ["class"],
+                characterData: true,
+                childList: true,
+                subtree: true,
+              });
+            }
+            if (containerRef.current) {
+              editorResizeObserver = new ResizeObserver(() => scheduleCodeCopyLayout(nextEditor));
+              editorResizeObserver.observe(containerRef.current);
+            }
+            scheduleTableLayout(nextEditor);
+            scheduleCodeCopyLayout(nextEditor);
+            revealEditorPosition(nextEditor, revealRef.current);
           },
-          mode: "editor",
-          theme: {
-            current: "",
-            path: "",
+          input: (markdown) => {
+            valueRef.current = markdown;
+            setSelectionAction(undefined);
+            scheduleTableLayout(nextEditor);
+            scheduleCodeCopyLayout(nextEditor);
+            if (!syncingRef.current) onChangeRef.current(markdown);
           },
-        },
-        theme: dark ? "dark" : "classic",
-        toolbar: [],
-        value: valueRef.current,
-        after: () => {
-          if (disposed) {
-            nextEditor.destroy();
-            return;
-          }
-          vditorRef.current = nextEditor;
-          const editorRoot = nextEditor.vditor.ir?.element;
-          if (editorRoot) {
-            tableObserver = new MutationObserver(() => {
-              scheduleTableLayout(nextEditor);
-              scheduleCodeCopyLayout(nextEditor);
-            });
-            tableObserver.observe(editorRoot, {
-              attributes: true,
-              attributeFilter: ["class"],
-              characterData: true,
-              childList: true,
-              subtree: true,
-            });
-          }
-          if (containerRef.current) {
-            editorResizeObserver = new ResizeObserver(() => scheduleCodeCopyLayout(nextEditor));
-            editorResizeObserver.observe(containerRef.current);
-          }
-          scheduleTableLayout(nextEditor);
-          scheduleCodeCopyLayout(nextEditor);
-          revealEditorPosition(nextEditor, revealRef.current);
-        },
-        input: (markdown) => {
-          valueRef.current = markdown;
-          setSelectionAction(undefined);
-          scheduleTableLayout(nextEditor);
-          scheduleCodeCopyLayout(nextEditor);
-          if (!syncingRef.current) onChangeRef.current(markdown);
-        },
+        });
+        editor = nextEditor;
       });
-      editor = nextEditor;
     });
 
     return () => {
       disposed = true;
+      cancelStart();
       tableObserver?.disconnect();
       editorResizeObserver?.disconnect();
       window.cancelAnimationFrame(codeCopyLayoutFrame);
@@ -308,6 +421,11 @@ export function ProjectMarkdownEditor({
       onScrollCapture={() => setSelectionAction(undefined)}
     >
       <div ref={hostRef} className="pudding-vditor-host min-h-full" />
+      {!editorReady ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted-foreground">
+          <Spinner aria-label={t("common.loading")} className="size-5" />
+        </div>
+      ) : null}
       {codeCopyActions.map((action) => {
         const copied = copiedCodeKey === action.key;
         return (

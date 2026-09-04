@@ -377,7 +377,7 @@ func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, 
 			return nil, 0, newCodeRenameError("rename_too_large", "rename source and destination text exceeds 2 MiB")
 		}
 		newText := next
-		files = append(files, patchFileArg{Path: resolvedPath, NewText: &newText})
+		files = append(files, patchFileArg{Path: resolvedPath, Action: "replace", Content: &newText})
 	}
 	if len(files) == 0 {
 		return nil, 0, newCodeRenameError("rename_no_changes", "the language server returned no effective rename edits")

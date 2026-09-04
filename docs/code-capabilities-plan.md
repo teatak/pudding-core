@@ -331,7 +331,8 @@ agent read/search
   "files": [
     {
       "path": "internal/foo.go",
-      "edits": [{"old_text": "...", "new_text": "..."}]
+      "action": "edit",
+      "hunks": [{"start_line": 12, "old_lines": ["..."], "new_lines": ["..."]}]
     }
   ]
 }
@@ -635,33 +636,35 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 - 把测试、lint、build 的结果从原始终端文本提升为可定位的结构化诊断。
 - 不新增绕过 command 审批策略的自动执行路径。
 
-#### C8.1 Patch V2 局部 edits
+#### C8.1 Patch V3 定位 hunks
 
-`builtin_file_patch.files[]` 支持三种互斥操作:
+`builtin_file_patch.files[]` 使用显式 `action`:
 
-- `new_text`:创建文件或显式全文替换。
-- `delete:true`:删除已有文本文件。
-- `edits`:对已有文件执行一组有序 exact replacement。
+- `create`:以 `content` 创建文件,目标已存在则拒绝。
+- `replace`:以 `content` 全文替换,目标不存在则拒绝。
+- `edit`:以 `hunks` 修改已有文件。
+- `delete`:删除已有文本文件。
 
-单个 edit 结构:
+单个 hunk 结构:
 
 ```jsonc
 {
-  "old_text": "existing text",
-  "new_text": "replacement text",
-  "replace_all": false
+  "start_line": 35,
+  "old_lines": ["existing line"],
+  "new_lines": ["replacement line"]
 }
 ```
 
 约束:
 
-- 每个文件最多 64 个 edits,按数组顺序应用到内存快照。
-- `old_text` 必须非空;默认只能唯一匹配,多处匹配必须显式 `replace_all`。
-- 任意 edit 不匹配或存在歧义时,整个 patch 失败,工作树不变。
+- 每个文件最多 64 个 hunks;全部 `start_line` 均基于修改前的原文件。
+- 非空 `old_lines` 必须从 `start_line` 起逐行精确匹配;重复文本由行号唯一定位。
+- `old_lines`/`new_lines` 每个元素是一整行且不包含换行符;空 `old_lines` 表示插入,
+  空 `new_lines` 表示删除,两者不能同时为空。
+- hunk 范围不得重叠;任意 hunk 越界或不匹配时,整个 patch 失败,工作树不变。
 - 后端基于最终内存文本生成 unified diff;apply 流程继续使用原有 hash 校验、
   backup + rename 与失败回滚。
-- 修改已有文件时优先使用 edits;创建文件或确实需要全文替换时才使用
-  `new_text`。
+- 不要求模型提交 `base_revision`;审批快照的文件 hash 是执行漂移校验的唯一事实源。
 
 #### C8.2 Command verification metadata
 

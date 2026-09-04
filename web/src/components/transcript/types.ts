@@ -209,3 +209,18 @@ export function transcriptTurnKey({
   }
   return `turn:session:${sessionID}`;
 }
+
+export function assistantDisclosureKey({
+  clientMessageID,
+  messageID,
+  turnID,
+}: {
+  clientMessageID?: string;
+  messageID?: string;
+  turnID: string;
+}) {
+  if (clientMessageID) {
+    return `assistant:client:${clientMessageID}`;
+  }
+  return messageID ? `assistant:message:${messageID}` : `assistant:turn:${turnID}`;
+}
