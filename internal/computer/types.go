@@ -145,7 +145,7 @@ type NativeObservationCapture struct {
 type NativeAction struct {
 	AppID      string   `json:"appID"`
 	ElementID  string   `json:"elementID"`
-	Action     string   `json:"action"`
+	Action     string   `json:"type"`
 	Completed  bool     `json:"completed"`
 	X          *float64 `json:"x,omitempty"`
 	Y          *float64 `json:"y,omitempty"`

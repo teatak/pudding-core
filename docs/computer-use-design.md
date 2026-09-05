@@ -211,11 +211,11 @@ native/macos/computer-use-helper/
 
 归一化时:
 
-- 默认只返回可见窗口和有限深度的交互元素;table/outline 使用 `AXVisibleRows`,并以每行的绝对 `AXIndex` 生成路径。缺少唯一绝对索引的可见行子树仅可读取,不暴露动作。
+- 只观察指定窗口,按广度优先遍历并使用统一节点预算（默认 200、最多 1000）,不再另设隐藏深度上限。预算不足时返回 `truncated=true`。table/outline 使用 `AXVisibleRows`,并以每行的绝对 `AXIndex` 生成路径。缺少唯一绝对索引的可见行子树仅可读取,不暴露动作。
 - secure text field 只返回角色和位置,绝不返回值或任何动作。
 - 普通文本设置 UTF-8 字节上限,AX value 超限时标记 `valueTruncated`。
-- `elementID` 是指定 App 窗口内的稳定元素引用。优先由 AX identifier 生成,其次由 role/subrole + label 生成;仅在元素没有 identifier 和 label 时使用结构路径。frame、value 和普通树路径变化不会改变已有 identifier/label 元素的 ID。
-- 相同 role/subrole + label 无法唯一解析时拒绝动作,不使用位置或其它隐式 fallback 猜测目标。
+- `elementID` 在父级身份作用域内优先由 AX identifier 生成,其次由 role/subrole + label 生成;无 identifier 的行使用绝对索引路径,其余无 identifier/label 元素使用结构路径。父级作用域不变时,frame、value 和元素自身路径变化不会改变有 identifier/label 的 ID。窗口标题不参与根身份,避免改标题后所有子元素重新编号。
+- 不同父级下的同名控件可分别定位;同一作用域内仍无法唯一解析的控件拒绝动作,不使用位置或其它隐式 fallback 猜测目标。
 - 不把原始 AX 指针暴露给 daemon 或模型。
 
 ### 5.3 截图
@@ -247,8 +247,8 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 - 任一动作失败都不自动改用坐标、键盘、AppleScript 或剪贴板;坐标点击必须由模型显式选择。
 - 所有写操作执行前由 Helper 基于实时系统状态验证目标应用、窗口和元素。
 - 所有调用都传 `actions` 数组:单动作传 1 项,连续动作传 2–32 项。工具不自动观察,模型仅在目标未知、必须检查 UI 变化或结果不确定时调用 observe。
-- 每一步都针对实时 AX 树或窗口几何重新验证。仅在目标均已知且中间状态无需检查时连续执行；前一步可能移动窗口或目标时不得批量执行后续 pointer 动作。
-- 多步调用不是事务:遇到首个失败立即停止,已完成动作不回滚、不重试;结果明确返回 `completedCount`、`failedIndex`、已确认动作和失败信息。
+- 每一步都针对实时 AX 树或窗口几何重新验证。语义动作只遍历身份字段,在目标上检查动作能力,不读取所有控件的 value、frame、selection 等完整观测数据;完整数据仅在显式 observe 时读取,不跨动作缓存 AX 对象。仅在目标均已知且中间状态无需检查时连续执行；前一步可能移动窗口或目标时不得批量执行后续 pointer 动作。
+- 多步调用不是事务:遇到首个失败立即停止,已完成动作不回滚、不重试。模型输入和结果项统一使用 `type`;结果返回 `completedCount`、从 0 开始的 `failedIndex` 和已确认动作。`result.failure.outcome` 保留失败项的真实状态;已完成前缀且失败项未执行时,工具顶层 `outcome=partial`、`retryable=false`,不能重放整个批次。
 
 ## 6. Observation 契约
 
@@ -348,6 +348,8 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 每项执行前均在实时 AX 树或当前窗口几何中解析和验证目标。中途失败不会回滚已完成动作,也不会自动尝试剩余动作。
 
+已知窗口、前台状态和目标坐标仍有效时直接复用,不固定执行“激活 → 截图 → 动作”。仅在需要切换前台时调用 `use_app(foreground=true)`,仅在视觉信息缺失或已发生相关变化时请求截图。
+
 新增工具时必须同步:
 
 - `internal/app/builtin.go` 的 Computer App 定义。
@@ -380,11 +382,13 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - 不接受任意脚本、shell command 或 AppleScript。
 - 错误返回稳定 `code`、`message`、`retryable` 和 `outcome`;权限错误另带机器可读的 `permission` 或 `permissions`。
 
-`outcome`:
+原生单步 `outcome`:
 
-- `not_started`:确认动作没有执行,调用方可在重新观察后决定是否重试。
+- `not_started`:确认动作没有执行,调用方根据错误决定下一步,不强制重新观察。
 - `completed`:动作已完成。
 - `unknown`:动作可能已执行但响应丢失,必须重新观察,禁止直接重试。
+
+模型工具的多步结果另外使用顶层 `partial` 表示“已完成前缀,失败项未开始”;若失败项效果未知,顶层保持 `unknown`。失败项自己的 `outcome` 不会被改写成 `completed`。`partial` 由结果推导,不写入原生错误或引入额外会话状态。
 
 ## 9. 错误语义
 

@@ -155,6 +155,10 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Every builtin_computer_act call uses an actions array") ||
 		!strings.Contains(computerSkill.Content, "one item in it for a single action") ||
 		!strings.Contains(computerSkill.Content, "Do not narrate routine Computer Use progress") ||
+		!strings.Contains(computerSkill.Content, "only if it must be brought forward") ||
+		!strings.Contains(computerSkill.Content, "only when visual information is missing or stale") ||
+		!strings.Contains(computerSkill.Content, "Never replay that prefix") ||
+		strings.Contains(computerSkill.Content, "First call builtin_computer_use_app with foreground=true") ||
 		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
 		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)
 	}

@@ -26,7 +26,21 @@ final class AccessibilityService {
   private struct ElementRecord {
     let element: AXUIElement
     let parent: AXUIElement?
-    let snapshot: ObservedElementSnapshot
+    let elementID: String
+    let role: String?
+    let subrole: String?
+    let label: String?
+    let identityStable: Bool
+
+    var secure: Bool { subrole == (kAXSecureTextFieldSubrole as String) }
+  }
+
+  private struct ElementPosition {
+    let element: AXUIElement
+    let parent: AXUIElement?
+    let path: [Int]
+    let parentID: String?
+    let identityStable: Bool
   }
 
   private struct ObservationChild {
@@ -57,7 +71,7 @@ final class AccessibilityService {
       observedAt: Date(),
       truncated: collection.truncated,
       windows: collection.windows,
-      elements: collection.records.map(\.snapshot)
+      elements: collection.records.map { snapshot(for: $0, windowID: windowID) }
     )
   }
 
@@ -77,20 +91,23 @@ final class AccessibilityService {
       targetWindow: targetWindow,
       maxElements: 1_000
     )
-    let matches = collection.records.filter { $0.snapshot.elementID == elementID }
+    let matches = collection.records.filter { $0.elementID == elementID }
     guard let record = matches.first else {
       throw HelperError.elementNotFound(elementID)
     }
     guard matches.count == 1 else {
       throw HelperError.ambiguousElement(elementID)
     }
-    guard !record.snapshot.secure else {
+    guard !record.secure else {
       throw HelperError.elementNotActionable("secure fields cannot be operated")
+    }
+    guard record.identityStable else {
+      throw HelperError.elementNotActionable("the element has no stable identity")
     }
 
     switch action {
     case .press:
-      guard record.snapshot.actions.contains(ElementAction.press.rawValue) else {
+      guard actionNames(record.element).contains(kAXPressAction as String) else {
         throw HelperError.elementNotActionable("AXPress is unavailable")
       }
       let error = AXUIElementPerformAction(record.element, kAXPressAction as CFString)
@@ -127,15 +144,15 @@ final class AccessibilityService {
         throw HelperError.actionFailed("AXValue verification failed")
       }
     case .select:
-      guard record.snapshot.actions.contains(ElementAction.select.rawValue) else {
+      guard supportedActions(record.element, parent: record.parent, secure: false)
+        .contains(ElementAction.select.rawValue) else {
         throw HelperError.elementNotActionable("AX selection is unavailable")
       }
       try select(record)
     case .submit:
-      guard record.snapshot.actions.contains(ElementAction.submit.rawValue),
-        let dispatch = submitDispatch(
+      guard let dispatch = submitDispatch(
           record.element,
-          secure: record.snapshot.secure
+          secure: record.secure
         )
       else {
         throw HelperError.elementNotActionable(
@@ -179,18 +196,6 @@ final class AccessibilityService {
     return app
   }
 
-  private func windowSnapshots(for pid: pid_t) -> [ApplicationWindowSnapshot] {
-    let appElement = AXUIElementCreateApplication(pid)
-    return windows(of: appElement).enumerated().map { index, window in
-      ApplicationWindowSnapshot(
-        index: index,
-        windowID: windowID(of: window),
-        title: boundedAttributeString(window, kAXTitleAttribute as CFString),
-        frame: frame(of: window)
-      )
-    }
-  }
-
   private func collectElements(
     pid: pid_t,
     windowID requestedWindowID: UInt32,
@@ -216,93 +221,60 @@ final class AccessibilityService {
     else {
       throw HelperError.windowNotFound(requestedWindowID)
     }
-    let appWindows = [allWindows[resolvedIndex]]
-    let windowSnapshots = appWindows.enumerated().map { index, window in
-      ApplicationWindowSnapshot(
-        index: index,
-        windowID: windowID(of: window) ?? requestedWindowID,
-        title: boundedAttributeString(window, kAXTitleAttribute as CFString),
-        frame: frame(of: window)
-      )
-    }
-
+    let window = allWindows[resolvedIndex]
+    let windowSnapshot = ApplicationWindowSnapshot(
+      index: 0,
+      windowID: windowID(of: window) ?? requestedWindowID,
+      title: candidates[resolvedIndex].title,
+      frame: candidates[resolvedIndex].frame
+    )
     var records: [ElementRecord] = []
-    var truncated = false
-    for (windowIndex, window) in appWindows.enumerated() {
-      let currentWindowID = windowID(of: window) ?? requestedWindowID
-      var queue: [(
-        element: AXUIElement,
-        parent: AXUIElement?,
-        depth: Int,
-        path: [Int],
-        identityStable: Bool
-      )] = [
-        (window, nil, 0, [], true)
-      ]
-      var cursor = 0
-      while cursor < queue.count {
-        if records.count >= maxElements {
-          truncated = true
-          break
-        }
-        let (element, parent, depth, path, identityStable) = queue[cursor]
-        cursor += 1
-        let role = attributeString(element, kAXRoleAttribute as CFString)
-        let subrole = attributeString(element, kAXSubroleAttribute as CFString)
-        let identifier = boundedAttributeString(element, kAXIdentifierAttribute as CFString)
-        let label = boundedAttributeString(element, kAXTitleAttribute as CFString)
-        let elementFrame = frame(of: element)
-        let rawValue = copyAttribute(element, kAXValueAttribute as CFString)
-        let elementID = ElementIdentity.make(
-          windowIndex: windowIndex,
-          path: path,
-          role: role,
-          subrole: subrole,
-          identifier: identifier,
-          label: label
+    let root = ElementPosition(
+      element: window, parent: nil, path: [], parentID: nil, identityStable: true
+    )
+    let truncated = ElementTraversal.walk(root: root, limit: maxElements) { position in
+      let element = position.element
+      let role = attributeString(element, kAXRoleAttribute as CFString)
+      let subrole = attributeString(element, kAXSubroleAttribute as CFString)
+      let identifier = boundedAttributeString(element, kAXIdentifierAttribute as CFString)
+      let label = boundedAttributeString(element, kAXTitleAttribute as CFString)
+      let elementID = ElementIdentity.make(
+        windowIndex: 0, path: position.path, role: role, subrole: subrole,
+        identifier: identifier, label: label, parentID: position.parentID
+      )
+      records.append(ElementRecord(
+        element: element, parent: position.parent, elementID: elementID,
+        role: role, subrole: subrole, label: label, identityStable: position.identityStable
+      ))
+      return observationChildren(of: element, role: role).map { child in
+        ElementPosition(
+          element: child.element, parent: element,
+          path: position.path + [child.pathIndex], parentID: elementID,
+          identityStable: position.identityStable && child.identityStable
         )
-        let secure = subrole == (kAXSecureTextFieldSubrole as String)
-        let actions = identityStable
-          ? supportedActions(
-            element,
-            parent: parent,
-            secure: secure
-          )
-          : []
-        let snapshot = ObservedElementSnapshot(
-          elementID: elementID,
-          windowIndex: windowIndex,
-          windowID: currentWindowID,
-          role: role,
-          subrole: subrole,
-          label: label,
-          description: boundedAttributeString(element, kAXDescriptionAttribute as CFString),
-          value: ValueSanitizer.string(rawValue, secure: secure),
-          valueTruncated: ValueSanitizer.isTruncated(rawValue, secure: secure),
-          secure: secure,
-          enabled: attributeBool(element, kAXEnabledAttribute as CFString),
-          focused: attributeBool(element, kAXFocusedAttribute as CFString),
-          selected: selectedState(element, parent: parent),
-          frame: elementFrame,
-          actions: actions
-        )
-        records.append(ElementRecord(element: element, parent: parent, snapshot: snapshot))
-
-        if depth < 8 {
-          for child in observationChildren(of: element, role: role) {
-            queue.append((
-              child.element,
-              element,
-              depth + 1,
-              path + [child.pathIndex],
-              identityStable && child.identityStable
-            ))
-          }
-        }
       }
-      if truncated { break }
     }
-    return (windowSnapshots, records, truncated)
+    return ([windowSnapshot], records, truncated)
+  }
+
+  // Full AX values and presentation attributes are read only for an explicit observe.
+  // Actions share the identity traversal, then query capabilities on their target only.
+  private func snapshot(for record: ElementRecord, windowID: UInt32) -> ObservedElementSnapshot {
+    let element = record.element
+    let rawValue = record.secure ? nil : copyAttribute(element, kAXValueAttribute as CFString)
+    return ObservedElementSnapshot(
+      elementID: record.elementID, windowIndex: 0, windowID: windowID,
+      role: record.role, subrole: record.subrole, label: record.label,
+      description: boundedAttributeString(element, kAXDescriptionAttribute as CFString),
+      value: ValueSanitizer.string(rawValue, secure: record.secure),
+      valueTruncated: ValueSanitizer.isTruncated(rawValue, secure: record.secure),
+      secure: record.secure,
+      enabled: attributeBool(element, kAXEnabledAttribute as CFString),
+      focused: attributeBool(element, kAXFocusedAttribute as CFString),
+      selected: selectedState(element, parent: record.parent), frame: frame(of: element),
+      actions: record.identityStable
+        ? supportedActions(element, parent: record.parent, secure: record.secure) : []
+    )
   }
 
   private func windows(of app: AXUIElement) -> [AXUIElement] {

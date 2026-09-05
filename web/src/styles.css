@@ -1258,32 +1258,32 @@ html:has([data-workspace-presentation="canvas"] .pudding-browser-workspace-surfa
 }
 
 .pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-top {
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px);
-    mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 7px, #000 20px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 14px, #000 40px);
+    mask-image: linear-gradient(to bottom, transparent 0, rgb(0 0 0 / 0.45) 14px, #000 40px);
 }
 
 .pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-bottom {
-    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), rgb(0 0 0 / 0.45) calc(100% - 7px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 40px), rgb(0 0 0 / 0.45) calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 40px), rgb(0 0 0 / 0.45) calc(100% - 14px), transparent 100%);
 }
 
 .pudding-session-rail [data-slot="sidebar-content"].pudding-session-rail-content-fade-both {
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgb(0 0 0 / 0.45) 7px,
-    #000 20px,
-    #000 calc(100% - 20px),
-    rgb(0 0 0 / 0.45) calc(100% - 7px),
+    rgb(0 0 0 / 0.45) 14px,
+    #000 40px,
+    #000 calc(100% - 40px),
+    rgb(0 0 0 / 0.45) calc(100% - 14px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgb(0 0 0 / 0.45) 7px,
-    #000 20px,
-    #000 calc(100% - 20px),
-    rgb(0 0 0 / 0.45) calc(100% - 7px),
+    rgb(0 0 0 / 0.45) 14px,
+    #000 40px,
+    #000 calc(100% - 40px),
+    rgb(0 0 0 / 0.45) calc(100% - 14px),
     transparent 100%
   );
 }

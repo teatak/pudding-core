@@ -24,21 +24,24 @@ enum ElementIdentity {
     role: String?,
     subrole: String?,
     identifier: String?,
-    label: String?
+    label: String?,
+    parentID: String? = nil
   ) -> String {
     let fields: [String]
-    if let identifier = normalized(identifier) {
-      fields = ["identifier", String(windowIndex), role ?? "", subrole ?? "", identifier]
+    let scope = [String(windowIndex), parentID ?? "", role ?? "", subrole ?? ""]
+    if role == "AXWindow" {
+      // Window titles often change after an action (document edits, navigation, etc.).
+      // The request's windowID already scopes the tree; never rename all descendants.
+      fields = ["window", String(windowIndex)]
+    } else if let identifier = normalized(identifier) {
+      fields = ["identifier"] + scope + [identifier]
+    } else if role == "AXRow" {
+      // Visible rows have absolute AX indices. Equal row titles are not unique keys.
+      fields = ["row"] + scope + [path.map(String.init).joined(separator: ".")]
     } else if let label = normalized(label) {
-      fields = ["label", String(windowIndex), role ?? "", subrole ?? "", label]
+      fields = ["label"] + scope + [label]
     } else {
-      fields = [
-        "path",
-        String(windowIndex),
-        path.map(String.init).joined(separator: "."),
-        role ?? "",
-        subrole ?? "",
-      ]
+      fields = ["path"] + scope + [path.map(String.init).joined(separator: ".")]
     }
     let payload =
       fields

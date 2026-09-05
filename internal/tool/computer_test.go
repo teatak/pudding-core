@@ -107,22 +107,91 @@ func TestComputerPermissionFailuresRemainStructured(t *testing.T) {
 }
 
 func TestComputerActionsFailurePreservesPartialResult(t *testing.T) {
-	failedIndex := 1
-	result := computerActionsFailure(Result{}, computer.ActionsResult{
-		Actions:        []computer.NativeAction{{AppID: "com.example.App", ElementID: "first", Action: computer.ActionPress, Completed: true}},
-		CompletedCount: 1,
-		FailedIndex:    &failedIndex,
-		Failure:        &computer.Failure{Code: "computer_action_blocked", Message: "blocked", Outcome: "completed"},
+	for _, tc := range []struct {
+		completed                    int
+		failureOutcome, batchOutcome string
+		batchRetryable               bool
+	}{
+		{0, "not_started", "not_started", true},
+		{0, "unknown", "unknown", false},
+		{1, "not_started", "partial", false},
+		{1, "unknown", "unknown", false},
+	} {
+		t.Run(tc.batchOutcome, func(t *testing.T) {
+			actions := make([]computer.NativeAction, tc.completed)
+			if tc.completed > 0 {
+				actions[0] = computer.NativeAction{AppID: "com.example.App", ElementID: "first", Action: computer.ActionPress, Completed: true}
+			}
+			result := computerActionsFailure(Result{}, computer.ActionsResult{
+				Actions: actions, CompletedCount: tc.completed, FailedIndex: &tc.completed,
+				Failure: &computer.Failure{Code: "computer_action_blocked", Message: "blocked", Outcome: tc.failureOutcome, Retryable: true},
+			})
+			var payload struct {
+				OK        bool                   `json:"ok"`
+				Outcome   string                 `json:"outcome"`
+				Retryable bool                   `json:"retryable"`
+				Result    computer.ActionsResult `json:"result"`
+			}
+			if result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil || payload.OK ||
+				payload.Outcome != tc.batchOutcome || payload.Retryable != tc.batchRetryable ||
+				payload.Result.CompletedCount != tc.completed || payload.Result.FailedIndex == nil ||
+				*payload.Result.FailedIndex != tc.completed || payload.Result.Failure == nil ||
+				payload.Result.Failure.Outcome != tc.failureOutcome || !payload.Result.Failure.Retryable {
+				t.Fatalf("unexpected batch failure: %s", result.Content)
+			}
+		})
+	}
+}
+
+func TestComputerActionResultsUseTheInputDiscriminator(t *testing.T) {
+	runner := NewBuiltinRunner(WithComputer(&fakeComputerController{}))
+	result := runner.Call(context.Background(), Call{
+		SessionID: "session_a", CallID: "act", Name: ComputerAct,
+		Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"actions":[{"type":"press","elementID":"button"},{"type":"click","x":0.2,"y":0.3}]}`),
 	})
 	var payload struct {
-		OK      bool                   `json:"ok"`
-		Code    string                 `json:"code"`
-		Outcome string                 `json:"outcome"`
-		Result  computer.ActionsResult `json:"result"`
+		Result struct {
+			Actions []map[string]any `json:"actions"`
+		} `json:"result"`
 	}
-	if result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil || payload.OK || payload.Code != "computer_action_blocked" || payload.Outcome != "completed" || payload.Result.CompletedCount != 1 {
-		t.Fatalf("unexpected sequence failure: %+v content=%s", result, result.Content)
+	if !result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil || len(payload.Result.Actions) != 2 {
+		t.Fatalf("invalid action result: %+v", result)
 	}
+	for index, want := range []string{"press", "click"} {
+		item := payload.Result.Actions[index]
+		if item["type"] != want || item["action"] != nil {
+			t.Fatalf("inconsistent action discriminator: %#v", item)
+		}
+	}
+}
+
+func TestComputerActionExamplesMatchTheRuntimeContract(t *testing.T) {
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Name != ComputerAct {
+			continue
+		}
+		var sizes []int
+		for _, line := range strings.Split(definition.Description, "\n") {
+			if !strings.HasPrefix(line, "{") {
+				continue
+			}
+			args, err := decodeComputerActArgs([]byte(line))
+			if err != nil {
+				t.Fatalf("invalid documented action example: %v\n%s", err, line)
+			}
+			sizes = append(sizes, len(args.Actions))
+		}
+		if len(sizes) != 2 || sizes[0] != 1 || sizes[1] != 2 {
+			t.Fatalf("missing single-action and batch examples: %v", sizes)
+		}
+		for _, rule := range []string{"outcome=partial", "result.failure.outcome", "zero-based", "Never replay the completed prefix"} {
+			if !strings.Contains(definition.Description, rule) {
+				t.Fatalf("missing batch recovery rule: %s", rule)
+			}
+		}
+		return
+	}
+	t.Fatal("Computer Act definition not found")
 }
 
 type fakeComputerController struct {

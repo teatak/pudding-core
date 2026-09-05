@@ -180,7 +180,7 @@ func TestManagerActionsDoNotObserveAutomatically(t *testing.T) {
 
 func TestManagerActionsStopAtFirstFailureWithoutObserving(t *testing.T) {
 	service := &fakeService{
-		actErr:   &OperationError{Code: "computer_action_blocked", Message: "blocked", Outcome: "not_started"},
+		actErr:   &OperationError{Code: "computer_action_blocked", Message: "blocked", Outcome: "not_started", Retryable: true},
 		actErrAt: 2,
 	}
 	manager := NewManager(service)
@@ -196,7 +196,7 @@ func TestManagerActionsStopAtFirstFailureWithoutObserving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Failure == nil || result.Failure.Code != "computer_action_blocked" || result.Failure.Outcome != "completed" || result.FailedIndex == nil || *result.FailedIndex != 1 || result.CompletedCount != 1 || len(result.Actions) != 1 {
+	if result.Failure == nil || result.Failure.Code != "computer_action_blocked" || result.Failure.Outcome != "not_started" || !result.Failure.Retryable || result.FailedIndex == nil || *result.FailedIndex != 1 || result.CompletedCount != 1 || len(result.Actions) != 1 {
 		t.Fatalf("unexpected partial sequence result: %#v", result)
 	}
 	if service.actions != 2 || service.observes != 1 {

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -359,7 +360,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 		lines = maxFileSliceLines
 		truncated = true
 	}
-	var slice fileLineSlice
+	var records []fileLineRecord
 	switch origin {
 	case "start":
 		start := args.Start
@@ -377,7 +378,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 			end = start + maxFileSliceLines - 1
 			truncated = true
 		}
-		slice, err = readLineRange(resolved.target, start, end)
+		records, err = readLineRange(resolved.target, start, end)
 	case "end":
 		if args.Skip < 0 {
 			return toolJSONError(out, "invalid_skip", "skip must be greater than or equal to 0")
@@ -385,7 +386,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 		if args.Skip > maxFileSliceSkip {
 			return toolJSONError(out, "skip_too_large", "skip exceeds the maximum")
 		}
-		slice, err = readLineRangeFromEnd(resolved.target, lines, args.Skip)
+		records, err = readLineRangeFromEnd(resolved.target, lines, args.Skip)
 	default:
 		return toolJSONError(out, "invalid_origin", "origin must be start or end")
 	}
@@ -395,23 +396,29 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 	switch order {
 	case "natural":
 	case "reverse":
-		reverseLineRecords(slice.lines)
+		reverseLineRecords(records)
 	default:
 		return toolJSONError(out, "invalid_order", "order must be natural or reverse")
 	}
-	content, numbered, payloadTruncated := renderLineSlice(slice.lines, maxFileSlicePayload)
+	content, numbered, renderedLines := renderLineSlice(records, maxFileSlicePayload)
+	truncated = truncated || renderedLines < len(records)
+	start, end := 0, 0
+	if renderedLines > 0 {
+		first, last := records[0].number, records[renderedLines-1].number
+		start, end = min(first, last), max(first, last)
+	}
 	out.Ok = true
 	out.Content = jsonString(resolved.payload(map[string]any{
 		"ok":              true,
 		"scope":           args.Scope,
 		"origin":          origin,
 		"order":           order,
-		"start":           slice.start,
-		"end":             slice.end,
-		"lines":           len(slice.lines),
+		"start":           start,
+		"end":             end,
+		"lines":           renderedLines,
 		"content":         content,
 		"numberedContent": numbered,
-		"truncated":       truncated || slice.truncated || payloadTruncated,
+		"truncated":       truncated,
 	}))
 	out.SummaryKind = SummaryReadChars
 	out.SummaryCount = utf8.RuneCountInString(content)
@@ -494,12 +501,20 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 func (r *BuiltinRunner) fileWrite(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope   string `json:"scope"`
-		Path    string `json:"path"`
-		Content string `json:"content"`
+		Scope   string  `json:"scope"`
+		Path    string  `json:"path"`
+		Content *string `json:"content"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(call.Args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return toolJSONError(out, "invalid_arguments", "file write arguments must contain exactly one JSON object")
+	}
+	if strings.TrimSpace(args.Scope) == "" || strings.TrimSpace(args.Path) == "" || args.Content == nil {
+		return toolJSONError(out, "invalid_arguments", "scope, path, and string content are required; content may be an explicit empty string")
 	}
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
@@ -508,13 +523,13 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 	if err := os.MkdirAll(filepath.Dir(resolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	if err := os.WriteFile(resolved.target, []byte(args.Content), 0o600); err != nil {
+	if err := os.WriteFile(resolved.target, []byte(*args.Content), 0o600); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
 	}
 	out.Ok = true
-	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(args.Content))}))
+	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(*args.Content))}))
 	out.SummaryKind = SummaryChangedLines
-	out.SummaryCount = countLines(args.Content)
+	out.SummaryCount = countLines(*args.Content)
 	return out
 }
 
@@ -1400,17 +1415,10 @@ type fileLineRecord struct {
 	text   string
 }
 
-type fileLineSlice struct {
-	start     int
-	end       int
-	lines     []fileLineRecord
-	truncated bool
-}
-
-func readLineRange(path string, start, end int) (fileLineSlice, error) {
+func readLineRange(path string, start, end int) ([]fileLineRecord, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return fileLineSlice{}, err
+		return nil, err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
@@ -1428,20 +1436,15 @@ func readLineRange(path string, start, end int) (fileLineSlice, error) {
 		out = append(out, fileLineRecord{number: lineNo, text: scanner.Text()})
 	}
 	if err := scanner.Err(); err != nil {
-		return fileLineSlice{}, err
+		return nil, err
 	}
-	actualStart, actualEnd := 0, 0
-	if len(out) > 0 {
-		actualStart = out[0].number
-		actualEnd = out[len(out)-1].number
-	}
-	return fileLineSlice{start: actualStart, end: actualEnd, lines: out}, nil
+	return out, nil
 }
 
-func readLineRangeFromEnd(path string, lines, skip int) (fileLineSlice, error) {
+func readLineRangeFromEnd(path string, lines, skip int) ([]fileLineRecord, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return fileLineSlice{}, err
+		return nil, err
 	}
 	defer file.Close()
 	windowSize := lines + skip
@@ -1461,7 +1464,7 @@ func readLineRangeFromEnd(path string, lines, skip int) (fileLineSlice, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fileLineSlice{}, err
+		return nil, err
 	}
 	end := len(window) - skip
 	if end < 0 {
@@ -1471,19 +1474,13 @@ func readLineRangeFromEnd(path string, lines, skip int) (fileLineSlice, error) {
 	if start < 0 {
 		start = 0
 	}
-	out := append([]fileLineRecord(nil), window[start:end]...)
-	actualStart, actualEnd := 0, 0
-	if len(out) > 0 {
-		actualStart = out[0].number
-		actualEnd = out[len(out)-1].number
-	}
-	return fileLineSlice{start: actualStart, end: actualEnd, lines: out}, nil
+	return window[start:end], nil
 }
 
-func renderLineSlice(lines []fileLineRecord, maxChars int) (string, string, bool) {
+func renderLineSlice(lines []fileLineRecord, maxBytes int) (string, string, int) {
 	var content strings.Builder
 	var numbered strings.Builder
-	truncated := false
+	renderedLines := 0
 	for i, line := range lines {
 		next := line.text
 		prefix := ""
@@ -1492,14 +1489,14 @@ func renderLineSlice(lines []fileLineRecord, maxChars int) (string, string, bool
 		}
 		numberedLine := prefix + strconv.Itoa(line.number) + ": " + line.text
 		contentLine := prefix + next
-		if content.Len()+len(contentLine) > maxChars || numbered.Len()+len(numberedLine) > maxChars {
-			truncated = true
+		if content.Len()+len(contentLine) > maxBytes || numbered.Len()+len(numberedLine) > maxBytes {
 			break
 		}
 		content.WriteString(contentLine)
 		numbered.WriteString(numberedLine)
+		renderedLines++
 	}
-	return content.String(), numbered.String(), truncated
+	return content.String(), numbered.String(), renderedLines
 }
 
 func reverseLineRecords(lines []fileLineRecord) {

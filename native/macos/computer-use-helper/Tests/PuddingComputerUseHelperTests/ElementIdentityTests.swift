@@ -97,3 +97,70 @@ import Testing
   #expect(duplicate.allSatisfy { !$0.stable })
   #expect(invalid.allSatisfy { !$0.stable })
 }
+
+@Test func identicalLabelsAndIdentifiersAreScopedToTheirParents() {
+  for identifier in [nil, "remove"] as [String?] {
+    let first = ElementIdentity.make(
+      windowIndex: 0, path: [1, 0], role: "AXButton", subrole: nil,
+      identifier: identifier, label: "Remove", parentID: "first-row"
+    )
+    let second = ElementIdentity.make(
+      windowIndex: 0, path: [2, 0], role: "AXButton", subrole: nil,
+      identifier: identifier, label: "Remove", parentID: "second-row"
+    )
+    #expect(first != second)
+  }
+}
+
+@Test func scopedIdentitySurvivesARebuiltNamedParent() {
+  func childID(parentPath: [Int], childPath: [Int]) -> String {
+    let parentID = ElementIdentity.make(
+      windowIndex: 0, path: parentPath, role: "AXGroup", subrole: nil,
+      identifier: "toolbar", label: nil
+    )
+    return ElementIdentity.make(
+      windowIndex: 0, path: childPath, role: "AXButton", subrole: nil,
+      identifier: nil, label: "Save", parentID: parentID
+    )
+  }
+  #expect(childID(parentPath: [1], childPath: [1, 2]) ==
+    childID(parentPath: [9], childPath: [9, 4]))
+}
+
+@Test func changingWindowTitleDoesNotRenameDescendants() {
+  func childID(windowTitle: String) -> String {
+    let windowID = ElementIdentity.make(
+      windowIndex: 0, path: [], role: "AXWindow", subrole: nil,
+      identifier: nil, label: windowTitle
+    )
+    return ElementIdentity.make(
+      windowIndex: 0, path: [0], role: "AXButton", subrole: nil,
+      identifier: "4", label: "4", parentID: windowID
+    )
+  }
+  #expect(childID(windowTitle: "0") == childID(windowTitle: "4+4"))
+}
+
+@Test func equalRowLabelsKeepTheirAbsoluteRowIdentity() {
+  let first = ElementIdentity.make(
+    windowIndex: 0, path: [0, 1], role: "AXRow", subrole: nil,
+    identifier: nil, label: "Unread", parentID: "table"
+  )
+  let second = ElementIdentity.make(
+    windowIndex: 0, path: [0, 100], role: "AXRow", subrole: nil,
+    identifier: nil, label: "Unread", parentID: "table"
+  )
+  #expect(first != second)
+}
+
+@Test func indistinguishableSiblingsRemainAmbiguous() {
+  let first = ElementIdentity.make(
+    windowIndex: 0, path: [0, 1], role: "AXButton", subrole: nil,
+    identifier: nil, label: "Save", parentID: "toolbar"
+  )
+  let second = ElementIdentity.make(
+    windowIndex: 0, path: [0, 2], role: "AXButton", subrole: nil,
+    identifier: nil, label: "Save", parentID: "toolbar"
+  )
+  #expect(first == second)
+}

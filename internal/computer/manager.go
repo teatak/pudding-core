@@ -218,10 +218,6 @@ func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uin
 		}
 		if actionErr != nil {
 			failure := ErrorFailure(actionErr)
-			if result.CompletedCount > 0 && failure.Outcome == "not_started" {
-				failure.Outcome = "completed"
-				failure.Retryable = false
-			}
 			result.FailedIndex = &index
 			result.Failure = &failure
 			return result, nil

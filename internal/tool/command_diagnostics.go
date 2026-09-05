@@ -265,15 +265,15 @@ func resolveCommandDiagnosticPath(rawPath, cwd string, projectDirs []string) (st
 func commandDiagnosticExcerpt(path string, line int) (string, int, int) {
 	start := max(1, line-commandDiagnosticContext)
 	end := line + commandDiagnosticContext
-	slice, err := readLineRange(path, start, end)
-	if err != nil || len(slice.lines) == 0 {
+	records, err := readLineRange(path, start, end)
+	if err != nil || len(records) == 0 {
 		return "", line, line
 	}
-	lines := make([]string, 0, len(slice.lines))
-	for _, item := range slice.lines {
+	lines := make([]string, 0, len(records))
+	for _, item := range records {
 		lines = append(lines, truncateDiagnosticText(item.text, maxFileSearchExcerptLineChars))
 	}
-	return strings.Join(lines, "\n"), slice.start, slice.end
+	return strings.Join(lines, "\n"), records[0].number, records[len(records)-1].number
 }
 
 func truncateDiagnosticText(value string, limit int) string {

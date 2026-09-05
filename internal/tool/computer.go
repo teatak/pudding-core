@@ -189,9 +189,16 @@ func (r *BuiltinRunner) computerAct(ctx context.Context, call Call) Result {
 
 func computerActionsFailure(out Result, result computer.ActionsResult) Result {
 	failure := result.Failure
+	// The failed item's outcome is not the batch outcome. Never mark an unexecuted
+	// item completed or advertise replaying a batch whose prefix already ran.
+	outcome := failure.Outcome
+	if result.CompletedCount > 0 && outcome == "not_started" {
+		outcome = "partial"
+	}
 	payload := map[string]any{
 		"ok": false, "code": failure.Code, "error": failure.Message,
-		"retryable": failure.Retryable, "outcome": failure.Outcome, "result": result,
+		"retryable": result.CompletedCount == 0 && outcome == "not_started" && failure.Retryable,
+		"outcome":   outcome, "result": result,
 	}
 	if failure.Permission != "" {
 		payload["permission"] = failure.Permission

@@ -5,6 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -212,6 +213,7 @@ export function RailPanel({
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollPointerRef = useRef<{ x: number; y: number } | null>(null);
   const optimisticPinnedIndexes = optimisticPinnedOrder === null
@@ -462,14 +464,19 @@ export function RailPanel({
     onOverlayOpenChangeRef.current = onOverlayOpenChange;
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) {
+    const content = scrollContentRef.current;
+    if (!container || !content) {
       return;
     }
-    const frame = window.requestAnimationFrame(() => updateContentFade(container));
-    return () => window.cancelAnimationFrame(frame);
-  }, [collapsedGroups, isError, isLoading, projects.length, sessions.length]);
+    const update = () => updateContentFade(container);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   function updateContentFade(container: HTMLDivElement) {
     const next = {
@@ -797,7 +804,7 @@ export function RailPanel({
           <SidebarContent
             ref={scrollContainerRef}
             className={cn(
-              "touch-pan-y gap-2 pt-2 pb-2 overscroll-contain",
+              "touch-pan-y pt-2 pb-2 overscroll-contain",
               contentFade.top && contentFade.bottom
                 ? "pudding-session-rail-content-fade-both"
                 : contentFade.top
@@ -809,100 +816,47 @@ export function RailPanel({
             onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-session-action]")}
             onScroll={(event) => updateContentFade(event.currentTarget)}
           >
-            {isLoading ? (
-              <SessionListSkeleton />
-            ) : isError ? (
-              <SessionListError onRefetch={onRefetch} />
-            ) : (
-              <>
-                {showPinnedGroup ? (
-                  <Collapsible asChild open={Boolean(draggingSessionID) || !pinnedCollapsed}>
-                    <SidebarGroup
-                      className="rounded-md px-2 py-0"
-                      data-session-drop-target={draggingSessionID ? "pinned" : undefined}
-                    >
-                      <CollapsibleSessionGroupLabel
-                        activity={pinnedCollapsed
-                          ? sessionGroupActivity(pinnedSessions, runningTurns, turnPhases, completedSessions)
-                          : undefined}
-                        collapsed={draggingSessionID ? false : pinnedCollapsed}
-                        icon="pinned"
-                        interactionDisabled={Boolean(draggingSessionID)}
-                        label={t("session.pinned")}
-                        onToggle={() => toggleGroupCollapsed("pinned")}
-                      />
-                      <CollapsibleContent
-                        className={cn(
-                          "pudding-session-group-content",
-                          draggingSessionID ? "overflow-visible" : "overflow-hidden",
-                        )}
+            <div ref={scrollContentRef} className="flex shrink-0 flex-col gap-2">
+              {isLoading ? (
+                <SessionListSkeleton />
+              ) : isError ? (
+                <SessionListError onRefetch={onRefetch} />
+              ) : (
+                <>
+                  {showPinnedGroup ? (
+                    <Collapsible asChild open={Boolean(draggingSessionID) || !pinnedCollapsed}>
+                      <SidebarGroup
+                        className="rounded-md px-2 py-0"
+                        data-session-drop-target={draggingSessionID ? "pinned" : undefined}
                       >
-                        <SidebarGroupContent className="pt-0.5">
-                          <SessionItems
-                            archivePending={archivePending}
-                            hasProjects={projects.length > 0}
-                            projectChangePendingID={projectChangePendingID}
-                            projectNamesByID={projectNamesByID}
-                            selectedSessionID={selectedSessionID}
-                            sessions={pinnedSessions}
-                            showEmptyState={false}
-                            draggingSessionID={draggingSessionID}
-                            dropIndex={dragTarget?.kind === "pinned" ? dragTarget.indicatorIndex : null}
-                            showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
-                            onArchive={onArchive}
-                            onOpenSplit={onOpenSplit}
-                            onOpenProjectPicker={setProjectPickerSessionID}
-                            onPinChange={onPinChange}
-                            onProjectChange={onProjectChange}
-                            onPointerDragCancel={clearDragState}
-                            onPointerDragEnd={handlePointerDrop}
-                            onPointerDragMove={handlePointerDragMove}
-                            onPointerDragStart={handlePointerDragStart}
-                            onRename={onRename}
-                            onSelect={onSelect}
-                          />
-                        </SidebarGroupContent>
-                      </CollapsibleContent>
-                    </SidebarGroup>
-                  </Collapsible>
-                ) : null}
-                <div className="flex flex-col gap-2 rounded-md">
-                  {sessions.length === 0 && projects.length === 0 ? (
-                    <SessionEmptyState />
-                  ) : chatSessions.length > 0 || recentDropEnabled ? (
-                    <Collapsible asChild open={recentDropEnabled || !chatCollapsed}>
-                      <SidebarGroup className="rounded-md px-2 py-0">
                         <CollapsibleSessionGroupLabel
-                          activity={chatCollapsed
-                            ? sessionGroupActivity(chatSessions, runningTurns, turnPhases, completedSessions)
+                          activity={pinnedCollapsed
+                            ? sessionGroupActivity(pinnedSessions, runningTurns, turnPhases, completedSessions)
                             : undefined}
-                          collapsed={recentDropEnabled ? false : chatCollapsed}
-                          icon="chat"
+                          collapsed={draggingSessionID ? false : pinnedCollapsed}
+                          icon="pinned"
                           interactionDisabled={Boolean(draggingSessionID)}
-                          label={t("session.chats")}
-                          onToggle={() => toggleGroupCollapsed("chat")}
+                          label={t("session.pinned")}
+                          onToggle={() => toggleGroupCollapsed("pinned")}
                         />
-                        <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                          <SidebarGroupContent
-                            className={cn(
-                              "rounded-md pt-0.5",
-                              recentDropEnabled && "min-h-8",
-                              dragTarget?.kind === "recent" &&
-                                "pudding-session-drop-row pudding-session-drop-row-active",
-                            )}
-                            data-session-drop-target={recentDropEnabled ? "recent" : undefined}
-                          >
+                        <CollapsibleContent
+                          className={cn(
+                            "pudding-session-group-content",
+                            draggingSessionID ? "overflow-visible" : "overflow-hidden",
+                          )}
+                        >
+                          <SidebarGroupContent className="pt-0.5">
                             <SessionItems
                               archivePending={archivePending}
                               hasProjects={projects.length > 0}
                               projectChangePendingID={projectChangePendingID}
                               projectNamesByID={projectNamesByID}
                               selectedSessionID={selectedSessionID}
-                              sessions={chatSessions}
-                              showEmptyState={sessions.length === 0}
+                              sessions={pinnedSessions}
+                              showEmptyState={false}
                               draggingSessionID={draggingSessionID}
-                              dropIndex={null}
-                              showEmptyDropTarget={Boolean(recentDropEnabled && chatSessions.length === 0)}
+                              dropIndex={dragTarget?.kind === "pinned" ? dragTarget.indicatorIndex : null}
+                              showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
                               onArchive={onArchive}
                               onOpenSplit={onOpenSplit}
                               onOpenProjectPicker={setProjectPickerSessionID}
@@ -920,137 +874,192 @@ export function RailPanel({
                       </SidebarGroup>
                     </Collapsible>
                   ) : null}
-                  {projectGroups.length > 0 ? (
-                    <Collapsible open={Boolean(draggingSessionID) || !projectsCollapsed}>
-                      <ProjectSortHeader
-                        collapsed={draggingSessionID ? false : projectsCollapsed}
-                        interactionDisabled={Boolean(draggingSessionID)}
-                        mode={projectSortMode}
-                        onCreateProject={onCreateProject}
-                        onModeChange={changeProjectSortMode}
-                        onToggle={() => toggleGroupCollapsed("projects")}
-                      />
-                      <CollapsibleContent
-                        className="pudding-session-group-content overflow-hidden"
-                        style={draggingProjectKey ? { overflow: "visible" } : undefined}
-                      >
-                        <div
-                          className="relative flex flex-col gap-0.5 py-1"
-                          onDragLeave={handleProjectDragLeave}
-                          onDragOver={handleProjectDragOver}
-                          onDrop={handleProjectDrop}
-                        >
-                          {projectDropTarget ? (
-                            <span
-                              aria-hidden="true"
-                              className="pointer-events-none absolute right-3 left-3 z-20 h-0 overflow-visible"
-                              style={{ top: projectDropTarget.top }}
+                  <div className="flex flex-col gap-2 rounded-md">
+                    {sessions.length === 0 && projects.length === 0 ? (
+                      <SessionEmptyState />
+                    ) : chatSessions.length > 0 || recentDropEnabled ? (
+                      <Collapsible asChild open={recentDropEnabled || !chatCollapsed}>
+                        <SidebarGroup className="rounded-md px-2 py-0">
+                          <CollapsibleSessionGroupLabel
+                            activity={chatCollapsed
+                              ? sessionGroupActivity(chatSessions, runningTurns, turnPhases, completedSessions)
+                              : undefined}
+                            collapsed={recentDropEnabled ? false : chatCollapsed}
+                            icon="chat"
+                            interactionDisabled={Boolean(draggingSessionID)}
+                            label={t("session.chats")}
+                            onToggle={() => toggleGroupCollapsed("chat")}
+                          />
+                          <CollapsibleContent className="pudding-session-group-content overflow-hidden">
+                            <SidebarGroupContent
+                              className={cn(
+                                "rounded-md pt-0.5",
+                                recentDropEnabled && "min-h-8",
+                                dragTarget?.kind === "recent" &&
+                                  "pudding-session-drop-row pudding-session-drop-row-active",
+                              )}
+                              data-session-drop-target={recentDropEnabled ? "recent" : undefined}
                             >
-                              <span className="absolute top-0 right-0 left-2 h-0.5 -translate-y-1/2 rounded-full bg-info" />
-                              <span className="absolute top-0 left-0.5 size-2.5 -translate-y-1/2 rounded-full border-2 border-info bg-sidebar" />
-                            </span>
-                          ) : null}
-                          {projectGroups.map((group) => {
-                            const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
-                            const hasSessions = group.sessions.length > 0;
-                            const isDraggedSessionSourceProject = Boolean(
-                              draggedSession &&
-                              !draggedSession.pinned &&
-                              group.project &&
-                              draggedSession.projectID === group.project.id,
-                            );
-                            const projectDropEnabled = Boolean(
-                              draggedSession &&
-                              !draggedSessionRunning &&
-                              group.project &&
-                              (draggedSession.pinned || draggedSession.projectID !== group.project.id),
-                            );
-                            const projectDropActive = Boolean(
-                              dragTarget?.kind === "project" &&
-                              dragTarget.projectID === group.project?.id,
-                            );
-                            return (
-                              <Collapsible
-                                key={group.key}
-                                asChild
-                                open={draggingProjectKey ? false : !projectCollapsed}
+                              <SessionItems
+                                archivePending={archivePending}
+                                hasProjects={projects.length > 0}
+                                projectChangePendingID={projectChangePendingID}
+                                projectNamesByID={projectNamesByID}
+                                selectedSessionID={selectedSessionID}
+                                sessions={chatSessions}
+                                showEmptyState={sessions.length === 0}
+                                draggingSessionID={draggingSessionID}
+                                dropIndex={null}
+                                showEmptyDropTarget={Boolean(recentDropEnabled && chatSessions.length === 0)}
+                                onArchive={onArchive}
+                                onOpenSplit={onOpenSplit}
+                                onOpenProjectPicker={setProjectPickerSessionID}
+                                onPinChange={onPinChange}
+                                onProjectChange={onProjectChange}
+                                onPointerDragCancel={clearDragState}
+                                onPointerDragEnd={handlePointerDrop}
+                                onPointerDragMove={handlePointerDragMove}
+                                onPointerDragStart={handlePointerDragStart}
+                                onRename={onRename}
+                                onSelect={onSelect}
+                              />
+                            </SidebarGroupContent>
+                          </CollapsibleContent>
+                        </SidebarGroup>
+                      </Collapsible>
+                    ) : null}
+                    {projectGroups.length > 0 ? (
+                      <Collapsible open={Boolean(draggingSessionID) || !projectsCollapsed}>
+                        <ProjectSortHeader
+                          collapsed={draggingSessionID ? false : projectsCollapsed}
+                          interactionDisabled={Boolean(draggingSessionID)}
+                          mode={projectSortMode}
+                          onCreateProject={onCreateProject}
+                          onModeChange={changeProjectSortMode}
+                          onToggle={() => toggleGroupCollapsed("projects")}
+                        />
+                        <CollapsibleContent
+                          className="pudding-session-group-content overflow-hidden"
+                          style={draggingProjectKey ? { overflow: "visible" } : undefined}
+                        >
+                          <div
+                            className="relative flex flex-col gap-0.5 py-1"
+                            onDragLeave={handleProjectDragLeave}
+                            onDragOver={handleProjectDragOver}
+                            onDrop={handleProjectDrop}
+                          >
+                            {projectDropTarget ? (
+                              <span
+                                aria-hidden="true"
+                                className="pointer-events-none absolute right-3 left-3 z-20 h-0 overflow-visible"
+                                style={{ top: projectDropTarget.top }}
                               >
-                                <SidebarGroup
-                                  className={cn(
-                                    "rounded-md px-2 py-0",
-                                    projectDropActive && "pudding-session-drop-project-active",
-                                  )}
-                                  data-project-group-key={group.key}
-                                  data-session-drop-target={projectDropEnabled ? "project" : undefined}
-                                  data-session-project-id={projectDropEnabled ? group.project?.id : undefined}
+                                <span className="absolute top-0 right-0 left-2 h-0.5 -translate-y-1/2 rounded-full bg-info" />
+                                <span className="absolute top-0 left-0.5 size-2.5 -translate-y-1/2 rounded-full border-2 border-info bg-sidebar" />
+                              </span>
+                            ) : null}
+                            {projectGroups.map((group) => {
+                              const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
+                              const hasSessions = group.sessions.length > 0;
+                              const isDraggedSessionSourceProject = Boolean(
+                                draggedSession &&
+                                !draggedSession.pinned &&
+                                group.project &&
+                                draggedSession.projectID === group.project.id,
+                              );
+                              const projectDropEnabled = Boolean(
+                                draggedSession &&
+                                !draggedSessionRunning &&
+                                group.project &&
+                                (draggedSession.pinned || draggedSession.projectID !== group.project.id),
+                              );
+                              const projectDropActive = Boolean(
+                                dragTarget?.kind === "project" &&
+                                dragTarget.projectID === group.project?.id,
+                              );
+                              return (
+                                <Collapsible
+                                  key={group.key}
+                                  asChild
+                                  open={draggingProjectKey ? false : !projectCollapsed}
                                 >
-                                  <div className="rounded-md">
-                                    <CollapsibleSessionGroupLabel
-                                      active={draftActive && draftProjectID === group.projectID}
-                                      activity={projectCollapsed
-                                        ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
-                                        : undefined}
-                                      actions={group.project ? (
-                                        <RailProjectActionsMenu
-                                          homeDirectory={homeDirectory}
-                                          project={group.project}
-                                          token={token}
-                                        />
-                                      ) : undefined}
-                                      collapsed={projectCollapsed}
-                                      dropTargetActive={projectDropActive}
-                                      interactionDisabled={isDraggedSessionSourceProject}
-                                      icon="project"
-                                      label={group.label}
-                                      reorderable={projectSortMode === "custom"}
-                                      dragging={draggingProjectKey === group.key}
-                                      actionLabel={t("session.create")}
-                                      onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
-                                      onDragEnd={clearProjectDragState}
-                                      onDragStart={(event) => handleProjectDragStart(event, group.key)}
-                                      onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
-                                    />
-                                  </div>
-                                  {hasSessions ? (
-                                    <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                                      <SidebarGroupContent className="pt-0.5">
-                                        <SessionItems
-                                          archivePending={archivePending}
-                                          hasProjects={projects.length > 0}
-                                          projectChangePendingID={projectChangePendingID}
-                                          projectNamesByID={projectNamesByID}
-                                          selectedSessionID={selectedSessionID}
-                                          sessions={group.sessions}
-                                          showEmptyState={false}
-                                          draggingSessionID={draggingSessionID}
-                                          dropIndex={null}
-                                          showEmptyDropTarget={false}
-                                          onArchive={onArchive}
-                                          onOpenSplit={onOpenSplit}
-                                          onOpenProjectPicker={setProjectPickerSessionID}
-                                          onPinChange={onPinChange}
-                                          onProjectChange={onProjectChange}
-                                          onPointerDragCancel={clearDragState}
-                                          onPointerDragEnd={handlePointerDrop}
-                                          onPointerDragMove={handlePointerDragMove}
-                                          onPointerDragStart={handlePointerDragStart}
-                                          onRename={onRename}
-                                          onSelect={onSelect}
-                                        />
-                                      </SidebarGroupContent>
-                                    </CollapsibleContent>
-                                  ) : null}
-                                </SidebarGroup>
-                              </Collapsible>
-                            );
-                          })}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  ) : null}
-                </div>
-              </>
-            )}
+                                  <SidebarGroup
+                                    className={cn(
+                                      "rounded-md px-2 py-0",
+                                      projectDropActive && "pudding-session-drop-project-active",
+                                    )}
+                                    data-project-group-key={group.key}
+                                    data-session-drop-target={projectDropEnabled ? "project" : undefined}
+                                    data-session-project-id={projectDropEnabled ? group.project?.id : undefined}
+                                  >
+                                    <div className="rounded-md">
+                                      <CollapsibleSessionGroupLabel
+                                        active={draftActive && draftProjectID === group.projectID}
+                                        activity={projectCollapsed
+                                          ? sessionGroupActivity(group.sessions, runningTurns, turnPhases, completedSessions)
+                                          : undefined}
+                                        actions={group.project ? (
+                                          <RailProjectActionsMenu
+                                            homeDirectory={homeDirectory}
+                                            project={group.project}
+                                            token={token}
+                                          />
+                                        ) : undefined}
+                                        collapsed={projectCollapsed}
+                                        dropTargetActive={projectDropActive}
+                                        interactionDisabled={isDraggedSessionSourceProject}
+                                        icon="project"
+                                        label={group.label}
+                                        reorderable={projectSortMode === "custom"}
+                                        dragging={draggingProjectKey === group.key}
+                                        actionLabel={t("session.create")}
+                                        onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
+                                        onDragEnd={clearProjectDragState}
+                                        onDragStart={(event) => handleProjectDragStart(event, group.key)}
+                                        onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
+                                      />
+                                    </div>
+                                    {hasSessions ? (
+                                      <CollapsibleContent className="pudding-session-group-content overflow-hidden">
+                                        <SidebarGroupContent className="pt-0.5">
+                                          <SessionItems
+                                            archivePending={archivePending}
+                                            hasProjects={projects.length > 0}
+                                            projectChangePendingID={projectChangePendingID}
+                                            projectNamesByID={projectNamesByID}
+                                            selectedSessionID={selectedSessionID}
+                                            sessions={group.sessions}
+                                            showEmptyState={false}
+                                            draggingSessionID={draggingSessionID}
+                                            dropIndex={null}
+                                            showEmptyDropTarget={false}
+                                            onArchive={onArchive}
+                                            onOpenSplit={onOpenSplit}
+                                            onOpenProjectPicker={setProjectPickerSessionID}
+                                            onPinChange={onPinChange}
+                                            onProjectChange={onProjectChange}
+                                            onPointerDragCancel={clearDragState}
+                                            onPointerDragEnd={handlePointerDrop}
+                                            onPointerDragMove={handlePointerDragMove}
+                                            onPointerDragStart={handlePointerDragStart}
+                                            onRename={onRename}
+                                            onSelect={onSelect}
+                                          />
+                                        </SidebarGroupContent>
+                                      </CollapsibleContent>
+                                    ) : null}
+                                  </SidebarGroup>
+                                </Collapsible>
+                              );
+                            })}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
             {dragPreview ? (
               <SessionDragPreview
                 point={dragPreviewPointRef.current}
