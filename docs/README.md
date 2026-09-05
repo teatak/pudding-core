@@ -26,6 +26,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区四应用、标签、资料库与统一专注改造方案；待从开发版基线和专注模式开始实施 |
 | [computer-use-design.md](computer-use-design.md) | macOS Computer Use 设计完成，等待按阶段实施 |
 | [transcript-virtualization-plan.md](transcript-virtualization-plan.md) | Transcript 会话窗口虚拟化已实现，持续回归 |
 | [workspace-resize-performance-plan.md](workspace-resize-performance-plan.md) | Workspace 拖拽性能与 WebView 保活层改造 |
