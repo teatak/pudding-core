@@ -49,9 +49,8 @@ type ChatPaneProps = {
   sessionID: string | undefined;
   draftActive?: boolean;
   draftProjectID?: string;
-  presentation?: "default" | "floating";
   reserveTopLeftInset?: boolean;
-  reserveTopRightActions?: 0 | 1 | 2;
+  reserveWorkspaceControl?: boolean;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: ChatPaneRole;
@@ -64,16 +63,14 @@ export function ChatPane({
   sessionID,
   draftActive = false,
   draftProjectID,
-  presentation = "default",
   reserveTopLeftInset = true,
-  reserveTopRightActions = 0,
+  reserveWorkspaceControl = false,
   role,
 }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
-  const floating = presentation === "floating";
   const clearSession = useOverlayStore((state) => state.clearSession);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
   const [conversationSearchFocusSignal, setConversationSearchFocusSignal] = useState(0);
@@ -159,12 +156,9 @@ export function ChatPane({
     ...(isPrimary && railCollapsed && reserveTopLeftInset
       ? { paddingLeft: "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))" }
       : {}),
-    ...(reserveTopRightActions > 0
+    ...(reserveWorkspaceControl
       ? {
-          paddingRight:
-            reserveTopRightActions === 2
-              ? "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + var(--toolbar-icon-button-size) + 1rem)"
-              : "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + 0.5rem)",
+          paddingRight: "calc(var(--toolbar-edge-inset) + var(--workspace-control-width) + 0.5rem)",
         }
       : {}),
   };
@@ -223,7 +217,6 @@ export function ChatPane({
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         activeChatPaneRole !== role ||
-        floating ||
         !selectedSession ||
         event.altKey ||
         (!event.metaKey && !event.ctrlKey) ||
@@ -250,7 +243,7 @@ export function ChatPane({
       window.removeEventListener("keydown", handleKeyDown);
       unsubscribeMenu();
     };
-  }, [floating, openConversationSearch, role, selectedSession]);
+  }, [openConversationSearch, role, selectedSession]);
 
   useEffect(() => {
     if (!sessionsQuery.isSuccess) {
@@ -307,7 +300,7 @@ export function ChatPane({
 
   return (
     <section
-      className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden"
+      className="pudding-chat-pane relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden"
       data-chat-pane-role={role}
       onFocusCapture={() => {
         activeChatPaneRole = role;
@@ -318,7 +311,7 @@ export function ChatPane({
         activateConversationFindRegion();
       }}
     >
-      {floating ? null : <header
+      <header
         className="pudding-chat-pane-header flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-(--toolbar-edge-inset)"
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
         style={Object.keys(headerStyle).length ? headerStyle : undefined}
@@ -339,14 +332,12 @@ export function ChatPane({
           ) : (
             <div className="no-drag-region relative z-30 inline-flex h-8 min-w-0 max-w-full items-center gap-1 overflow-visible text-sm font-normal">
               {headerProjectName ? (
-                <>
-                  <HeaderLeadingIcon>
-                    <FolderClosed aria-hidden="true" />
-                  </HeaderLeadingIcon>
-                  <HeaderProjectLink name={headerProjectName} onClick={openProjects} />
-                </>
+                <HeaderProjectLink name={headerProjectName} onClick={openProjects} />
               ) : null}
-              <span className="inline-flex h-7 min-w-0 items-center truncate rounded-md border border-transparent px-2 leading-6">
+              <span className={cn(
+                "inline-flex h-7 min-w-0 items-center truncate rounded-md border border-transparent px-2 leading-6",
+                headerProjectName && "-ml-2",
+              )}>
                 {headerTitle}
               </span>
             </div>
@@ -378,7 +369,8 @@ export function ChatPane({
             </Tooltip>
           ) : null}
         </div>
-      </header>}
+
+      </header>
       <div className="flex min-h-0 flex-1 flex-col">
         {showDraft ? (
           <DraftConversation token={token} projectID={draftProjectID} />
@@ -389,7 +381,6 @@ export function ChatPane({
             searchSlot={role}
             session={selectedSession}
             token={token}
-            presentation={presentation}
             onSearchOpenChange={changeConversationSearchOpen}
           />
         ) : sessionsPending ? (
@@ -491,20 +482,17 @@ function HeaderSessionTitle({
         editing ? "flex w-full" : "inline-flex",
       )}
     >
-      <HeaderLeadingIcon label={projectName ? undefined : t(`mode.${session.activeMode}`)}>
-        {projectName ? (
-          <FolderClosed aria-hidden="true" />
-        ) : (
-          <SessionModeIcon mode={session.activeMode} />
-        )}
-      </HeaderLeadingIcon>
       {projectName ? (
         <HeaderProjectLink name={projectName} onClick={onOpenProject} />
-      ) : null}
+      ) : (
+        <HeaderLeadingIcon label={t(`mode.${session.activeMode}`)}>
+          <SessionModeIcon mode={session.activeMode} />
+        </HeaderLeadingIcon>
+      )}
       <div
         className={cn(
           "relative grid h-7 min-w-0 max-w-full items-center",
-          editing ? cn("shrink", !projectName && "-ml-2") : "overflow-visible",
+          editing ? "shrink -ml-2" : "overflow-visible",
         )}
         style={editing && editWidth ? { width: `min(${editWidth}px, 100%)` } : undefined}
       >
@@ -541,10 +529,7 @@ function HeaderSessionTitle({
         ) : (
           <ShellActionButton
             aria-label={t("session.rename")}
-            className={cn(
-              "col-start-1 row-start-1 h-7 min-w-0 shrink cursor-default justify-start rounded-md px-2 text-left text-sm leading-6",
-              projectName ? "w-full" : "-ml-2 w-[calc(100%+1rem)]",
-            )}
+            className="col-start-1 row-start-1 -ml-2 h-7 min-w-0 w-[calc(100%+1rem)] shrink cursor-default justify-start rounded-md px-2 text-left text-sm leading-6"
             size="sm"
             onDoubleClick={startEditing}
           >
@@ -598,15 +583,18 @@ function HeaderSessionTitle({
 
 function HeaderProjectLink({ name, onClick }: { name: string; onClick: () => void }) {
   return (
-    <span className="flex min-w-0 max-w-56 shrink items-center gap-1 font-medium">
+    <span className="flex min-w-0 max-w-64 shrink items-center gap-1 font-medium">
+      <HeaderLeadingIcon label={name}>
+        <FolderClosed aria-hidden="true" />
+      </HeaderLeadingIcon>
       <ShellActionButton
-        className="no-drag-region pointer-events-auto -ml-2 h-(--toolbar-icon-button-size) min-w-0 max-w-full shrink truncate rounded-md pr-2 pl-2 text-sm"
+        className="pudding-chat-project-detail no-drag-region pointer-events-auto -ml-2 h-(--toolbar-icon-button-size) min-w-0 max-w-full shrink truncate rounded-md pr-2 pl-2 text-sm"
         size="sm"
         onClick={onClick}
       >
         {name}
       </ShellActionButton>
-      <span className="shrink-0 text-muted-foreground">/</span>
+      <span className="pudding-chat-project-detail mr-2 shrink-0 text-muted-foreground">/</span>
     </span>
   );
 }

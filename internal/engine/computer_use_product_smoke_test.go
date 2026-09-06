@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,7 @@ func TestComputerUseCalculatorExistingSmoke(t *testing.T) {
 }
 
 type computerUseSmokeScenario struct {
+	selection     computer.AppSelection
 	name          string
 	appID         string
 	expectOwned   bool
@@ -55,6 +57,7 @@ type computerUseSmokeScenario struct {
 }
 
 type computerUseSmokeAction struct {
+	input   *computer.ActionInput
 	callID  string
 	action  string
 	value   *string
@@ -330,6 +333,10 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 		}
 		name, callID = tool.ComputerUseApp, "call_computer_use"
 		args = map[string]any{"appID": c.scenario.appID, "foreground": c.scenario.foreground}
+		if c.scenario.selection.PID != 0 {
+			args.(map[string]any)["pid"] = c.scenario.selection.PID
+			args.(map[string]any)["appPath"] = c.scenario.selection.AppPath
+		}
 	case stage == 3:
 		var result struct {
 			OK     bool               `json:"ok"`
@@ -456,6 +463,9 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 }
 
 func (c *computerUseSmokeClient) smokeActionCall(action computerUseSmokeAction) (string, string, any, error) {
+	if action.input != nil {
+		return tool.ComputerAct, action.callID, map[string]any{"appID": c.scenario.appID, "windowID": c.windowID, "actions": []computer.ActionInput{*action.input}}, nil
+	}
 	if action.pointer {
 		pointer, err := smokePointerClickArgs(c.observation, c.windowID)
 		if err != nil {
@@ -466,7 +476,7 @@ func (c *computerUseSmokeClient) smokeActionCall(action computerUseSmokeAction) 
 	}
 	element := smokeElement(c.observation.Elements, action.action, action.matches)
 	if element == nil {
-		return "", "", nil, fmt.Errorf("%s action target %s was not observed", c.scenario.name, action.callID)
+		return "", "", nil, fmt.Errorf("%s action target %s was not observed: %s", c.scenario.name, action.callID, smokeElementsJSON(c.observation.Elements))
 	}
 	item := map[string]any{"elementID": element.ElementID, "type": action.action}
 	if action.value != nil {
@@ -705,4 +715,76 @@ func waitComputerUseSmokeTurn(t *testing.T, ms *memstore.Memstore, sessionID str
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("Computer Use smoke did not finish in time")
+}
+
+func TestComputerUseElectronSmoke(t *testing.T) {
+	if os.Getenv("PUDDING_COMPUTER_USE_ELECTRON_SMOKE") != "1" {
+		t.Skip("opt-in Electron fixture")
+	}
+	pid, err := strconv.ParseInt(os.Getenv("PUDDING_CU_FIXTURE_PID"), 10, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := "你好🙂"
+	selected := "你好"
+	replacement := "布丁"
+	paste := "剪贴板🙂"
+	field := func(e computer.Element) bool { return smokeElementName(e) == "CU editor" }
+	hasText := func(value string) func([]computer.Element) error {
+		return func(es []computer.Element) error {
+			for _, e := range es {
+				if field(e) && e.Value != nil && *e.Value == value {
+					return nil
+				}
+			}
+			return fmt.Errorf("editor did not become %q: %+v", value, es)
+		}
+	}
+	key := func(id, key string, mods ...string) computerUseSmokeAction {
+		return computerUseSmokeAction{callID: id, action: computer.ActionPressKey, input: &computer.ActionInput{Type: computer.ActionPressKey, Key: key, Modifiers: mods}}
+	}
+	scenario := computerUseSmokeScenario{
+		name: "electron", appID: "com.github.Electron", foreground: true, selection: computer.AppSelection{PID: int32(pid), AppPath: os.Getenv("PUDDING_CU_FIXTURE_PATH")},
+		windowMatches: func(w computer.CapturableWindow) bool { return w.Title != nil && *w.Title == "CU first" },
+		actions: []computerUseSmokeAction{
+			{callID: "focus", action: computer.ActionFocus, matches: field},
+			key("select_all", "a", "command"),
+			{callID: "unicode", action: computer.ActionTypeText, input: &computer.ActionInput{Type: computer.ActionTypeText, Value: &text}, verify: hasText(text)},
+			{callID: "select_text", action: computer.ActionSelectText, value: &selected, matches: field},
+			{callID: "replace_text", action: computer.ActionTypeText, input: &computer.ActionInput{Type: computer.ActionTypeText, Value: &replacement}, verify: hasText("布丁🙂")},
+			key("select_all_paste", "a", "command"),
+			{callID: "paste", action: computer.ActionPaste, input: &computer.ActionInput{Type: computer.ActionPaste, Value: &paste}, verify: hasText(paste)},
+			key("next_field", "tab"),
+			{callID: "find", action: computer.ActionPressKey, input: &computer.ActionInput{Type: computer.ActionPressKey, Key: "f", Modifiers: []string{"command"}}, verify: func(es []computer.Element) error {
+				for _, e := range es {
+					if smokeElementName(e) == "CU find" && e.Focused != nil && *e.Focused {
+						return nil
+					}
+				}
+				return errors.New("Command+F did not focus dialog input")
+			}},
+			{callID: "escape", action: computer.ActionPressKey, input: &computer.ActionInput{Type: computer.ActionPressKey, Key: "escape"}, verify: func(es []computer.Element) error {
+				if !smokeHasValue(es, "dialog closed") {
+					return errors.New("Escape did not close dialog")
+				}
+				return nil
+			}},
+		},
+	}
+	if os.Getenv("PUDDING_CU_IME_SMOKE") == "1" {
+		physical := []computerUseSmokeAction{scenario.actions[0], key("ime_select_all", "a", "command"), key("ime_clear", "backspace")}
+		for i, letter := range []string{"n", "i", "h", "a", "o"} {
+			physical = append(physical, key(fmt.Sprintf("ime_%d", i), letter))
+		}
+		commit := key("ime_commit", "space")
+		commit.verify = hasText("你好")
+		physical = append(physical, commit)
+		scenario.actions = append(physical, scenario.actions[1:]...)
+	}
+	runComputerUseSmoke(t, "PUDDING_COMPUTER_USE_ELECTRON_SMOKE", scenario)
+}
+
+func smokeElementsJSON(es []computer.Element) string {
+	data, _ := json.Marshal(es)
+	return string(data)
 }

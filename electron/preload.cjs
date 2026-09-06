@@ -35,6 +35,14 @@ contextBridge.exposeInMainWorld("puddingElectronShell", {
 });
 
 contextBridge.exposeInMainWorld("puddingElectronDesktop", {
+  subscribeComputerPreview: (request) => ipcRenderer.invoke("pudding:desktop:computer-preview:subscribe", request),
+  acknowledgeComputerPreview: (request) => ipcRenderer.send("pudding:desktop:computer-preview:ack", request),
+  revealComputerPreview: (request) => ipcRenderer.invoke("pudding:desktop:computer-preview:reveal", request),
+  onComputerPreview: (listener) => {
+    const wrapped = (_event, preview) => listener(preview);
+    ipcRenderer.on("pudding:desktop:computer-preview", wrapped);
+    return () => ipcRenderer.off("pudding:desktop:computer-preview", wrapped);
+  },
   getDroppedFilePath: (file) => {
     if (!file || !webUtils?.getPathForFile) {
       return "";

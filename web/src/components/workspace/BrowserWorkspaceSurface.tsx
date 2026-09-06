@@ -1,4 +1,3 @@
-import { ChevronDown, ChevronUp } from "@/components/icons";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -18,7 +17,6 @@ import {
 } from "@/browser/pageFindTarget";
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +36,6 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
   token: string;
 }) {
   const { t } = useI18n();
-  const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const activeTab = tabs.find((tab) => tab.id === activeTabID) || tabs[0];
   const browserKey = `${sessionID}:${activeTab?.id || "empty"}`;
@@ -103,12 +100,11 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
           "pudding-browser-workspace-surface pointer-events-none absolute inset-0 z-30 min-h-0 overflow-hidden text-card-foreground shadow-none",
           !active && "hidden",
         )}
-        data-console-collapsed={consoleCollapsed}
         onFocusCapture={activateBrowserPageFindRegion}
         onPointerDownCapture={activateBrowserPageFindRegion}
       >
-        <div className="pudding-browser-workspace-viewport absolute inset-0 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)]">
-          <div className="canvas-window-drag-handle pointer-events-auto flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
+        <div className="pudding-browser-workspace-viewport absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+          {activeTab ? <div className="canvas-window-drag-handle pointer-events-auto flex h-11 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-content-toolbar-background)] px-3">
             <BrowserToolbar
               key={`toolbar:${browserKey}`}
               active={active}
@@ -117,7 +113,7 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
               token={token}
               onOpenFind={openBrowserFind}
             />
-          </div>
+          </div> : null}
           <div className="relative min-h-0 flex-1 overflow-hidden">
             <BrowserViewportPlaceholder
               active={active && Boolean(activeTab)}
@@ -142,17 +138,6 @@ export const BrowserWorkspaceSurface = memo(function BrowserWorkspaceSurface({
             onOpenChange={changeBrowserFindOpen}
           />
         </div>
-        <Button
-          aria-label={t(consoleCollapsed ? "agentConsole.showBrowserBar" : "agentConsole.hideBrowserBar")}
-          className="pudding-browser-console-toggle pointer-events-auto absolute right-3 shrink-0 rounded-full border border-border/70 shadow-sm"
-          data-console-collapsed={consoleCollapsed}
-          size="icon-sm"
-          type="button"
-          variant="secondary"
-          onClick={() => setConsoleCollapsed((collapsed) => !collapsed)}
-        >
-          {consoleCollapsed ? <ChevronUp /> : <ChevronDown />}
-        </Button>
       </BrowserViewportOverlay>
     </>
   );

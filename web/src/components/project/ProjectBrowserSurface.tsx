@@ -38,7 +38,7 @@ import { ProjectTree } from "./ProjectTree";
 import { projectBrowserError } from "./projectErrors";
 import { projectAbsolutePath, projectParentPath, projectPathContains, projectSelectionKey, projectTabKey } from "./projectPaths";
 import { resolveProjectFileReveal, type ProjectEditorReveal } from "./projectReveal";
-import { isProjectGitDiffTab, type ProjectEntryTarget, type ProjectSelection } from "./types";
+import { isProjectGitDiffTab, type ProjectEntryTarget, type ProjectSelection, type ProjectTreeReveal } from "./types";
 import { useProjectWorkspace } from "./useProjectWorkspace";
 
 type NameRequest =
@@ -60,27 +60,27 @@ function resolveProjectSurfaceMode(width: number): ProjectSurfaceMode {
 
 export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   active,
-  activeTurnDiffID,
+  activePreviewID,
   hasProject,
   projectStateReady,
   sessionID,
   token,
-  turnDiffTabs,
-  onActivateTurnDiff,
-  onCloseTurnDiffs,
-  onDeactivateTurnDiff,
+  previewTabs,
+  onActivatePreview,
+  onClosePreviews,
+  onDeactivatePreview,
   onVisibleContextChange,
 }: {
   active: boolean;
-  activeTurnDiffID?: string;
+  activePreviewID?: string;
   hasProject: boolean;
   projectStateReady: boolean;
   sessionID: string;
   token: string;
-  turnDiffTabs: FilePreview[];
-  onActivateTurnDiff: (previewID: string) => void;
-  onCloseTurnDiffs: (previewIDs: string[]) => void;
-  onDeactivateTurnDiff: () => void;
+  previewTabs: FilePreview[];
+  onActivatePreview: (previewID: string) => void;
+  onClosePreviews: (previewIDs: string[]) => void;
+  onDeactivatePreview: () => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
 }) {
   const { t } = useI18n();
@@ -95,6 +95,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest>();
   const [dirtyBySession, setDirtyBySession] = useState<Record<string, string[]>>({});
   const [editorReveal, setEditorReveal] = useState<ProjectEditorReveal>();
+  const [treeReveal, setTreeReveal] = useState<ProjectTreeReveal>();
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const [sidebarView, setSidebarView] = useState<ProjectSidebarView>("files");
@@ -139,7 +140,8 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     () => (rootsQuery.data?.roots || []).map((root) => root.temporary ? { ...root, name: t("workspace.sessionFiles") } : root),
     [rootsQuery.data?.roots, t],
   );
-  const activeTurnDiff = turnDiffTabs.find((preview) => preview.id === activeTurnDiffID);
+  const activePreview = previewTabs.find((preview) => preview.id === activePreviewID);
+  const activeTurnDiff = activePreview?.source === "turn-diff" ? activePreview : undefined;
   const narrow = surfaceMode === "narrow";
   const compact = surfaceMode !== "wide";
   const activeTurnChanges = useMemo(
@@ -188,10 +190,10 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       : []
   )));
   const selectedAbsolutePath = useMemo(() => {
-    if (activeTurnDiff || !workspace.selected || isProjectGitDiffTab(workspace.selected)) return undefined;
+    if (activePreview || !workspace.selected || isProjectGitDiffTab(workspace.selected)) return undefined;
     const root = roots.find((candidate) => candidate.id === workspace.selected?.rootID);
     return root ? projectAbsolutePath(root.path, workspace.selected.path) : undefined;
-  }, [activeTurnDiff, roots, workspace.selected]);
+  }, [activePreview, roots, workspace.selected]);
   const visibleContext = useMemo<UIContextPart>(() => {
     if (activeTurnChange) {
       return {
@@ -229,13 +231,13 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   useEffect(() => workspace.removeUnavailableRoots(roots), [roots.map((root) => root.id).join("\n"), sessionID]);
   useEffect(() => {
     if (activeTurnDiffSelection) {
-      workspace.reveal(activeTurnDiffSelection);
+      workspace.expandTo(activeTurnDiffSelection);
     }
   }, [activeTurnDiffSelection?.path, activeTurnDiffSelection?.rootID]);
   useEffect(() => {
     if (!narrow) return;
-    setNarrowPane(activeTurnDiff || workspace.selected ? "viewer" : "tree");
-  }, [activeTurnDiff?.id, narrow, sessionID, workspace.activeKey]);
+    setNarrowPane(activePreview || workspace.selected ? "viewer" : "tree");
+  }, [activePreview?.id, narrow, sessionID, workspace.activeKey]);
   useEffect(() => {
     setNameRequest(undefined);
     setDeleteTarget(undefined);
@@ -243,6 +245,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     setResourceClipboard((current) => current?.sessionID === sessionID ? current : undefined);
     setDragMoveRequest(undefined);
     setSidebarView("files");
+    setTreeReveal(undefined);
   }, [sessionID]);
   useEffect(() => {
     if (!active) return;
@@ -289,7 +292,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     }
     const selection = resolveProjectFileReveal(roots, fileReveal);
     if (selection) {
-      onDeactivateTurnDiff();
+      onDeactivatePreview();
       workspace.openPreview(selection);
       setNarrowPane("viewer");
       setEditorReveal(fileReveal.line && fileReveal.line > 0 ? {
@@ -306,7 +309,11 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     consumeProjectFileReveal(sessionID, fileReveal.serial);
   }, [fileReveal?.serial, projectStateReady, rootWatchSignature, rootsQuery.isError, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
-  const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
+  const invalidateProject = (targetSessionID: string) => Promise.all([
+ queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] }),
+ queryClient.invalidateQueries({ queryKey: ["library"] }),
+ queryClient.invalidateQueries({ queryKey: ["library-recent"] }),
+ ]);
   const refreshGitRoots = async (targetSessionID: string, rootIDs: string[]) => {
     const gitRootIDs = new Set(gitRoots.map((root) => root.id));
     const uniqueRootIDs = Array.from(new Set(rootIDs)).filter((rootID) => gitRootIDs.has(rootID));
@@ -558,7 +565,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
 
   const openSearchMatch = (match: ProjectSearchMatch) => {
     const selection = { rootID: match.rootID, path: match.path };
-    onDeactivateTurnDiff();
+    onDeactivatePreview();
     workspace.openPreview(selection);
     setNarrowPane("viewer");
     searchRevealSerial.current += 1;
@@ -567,6 +574,13 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       line: match.line,
       serial: searchRevealSerial.current,
     });
+  };
+
+  const revealInTree = (selection: ProjectSelection) => {
+    workspace.expandTo(selection);
+    setSidebarView("files");
+    setNarrowPane("tree");
+    setTreeReveal({ ...selection, sessionID });
   };
 
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
@@ -578,14 +592,15 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       activeView={sidebarView}
       files={(
         <ProjectTree
-          active={active}
+          active={active && (!narrow || narrowPane === "tree")}
           canPaste={resourceClipboard?.sessionID === sessionID}
           error={rootsQuery.error}
           expandedKeys={workspace.expandedKeys}
           gitStatuses={gitStatuses}
           loading={rootsQuery.isLoading}
           roots={roots}
-          selected={activeTurnDiff ? activeTurnDiffSelection : workspace.selected}
+          reveal={treeReveal}
+          selected={activePreview ? activeTurnDiffSelection : workspace.selected}
           sessionID={sessionID}
           token={token}
           onCopyAbsolutePath={copyAbsolutePath}
@@ -597,12 +612,12 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           onDuplicate={duplicateEntry}
           onMove={moveEntry}
           onOpenPinned={(selection) => {
-            onDeactivateTurnDiff();
+            onDeactivatePreview();
             workspace.openPinned(selection);
             setNarrowPane("viewer");
           }}
           onOpenPreview={(selection) => {
-            onDeactivateTurnDiff();
+            onDeactivatePreview();
             workspace.openPreview(selection);
             setNarrowPane("viewer");
           }}
@@ -611,6 +626,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           onReference={referenceEntry}
           onRename={requestRename}
           onRevealInFinder={revealEntry}
+          onRevealed={(request) => setTreeReveal(current => current === request ? undefined : current)}
           onToggle={workspace.toggleDirectory}
         />
       )}
@@ -621,7 +637,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
           sessionID={sessionID}
           token={token}
           onOpenDiff={(selection, pinned) => {
-            onDeactivateTurnDiff();
+            onDeactivatePreview();
             workspace.openGitDiff(selection, pinned);
             setNarrowPane("viewer");
           }}
@@ -642,34 +658,39 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   );
   const projectViewer = (
     <ProjectFileViewer
-      active={active}
+      active={active && (!narrow || narrowPane === "viewer")}
+      activePreview={activePreview}
       activeTurnDiff={activeTurnDiff}
       activeTurnDiffSelection={activeTurnDiffSelection}
       absolutePath={selectedAbsolutePath}
       dirtyKeys={dirtyKeys}
       discardRequest={discardRequest}
       reveal={editorReveal}
-      selection={activeTurnDiff ? undefined : workspace.selected}
+      selection={activePreview ? undefined : workspace.selected}
       sessionID={sessionID}
       showFilesAction={narrow}
       tabs={workspace.tabs}
-      turnDiffTabs={turnDiffTabs}
+      openFiles={workspace.openFiles}
+      roots={roots}
+      previewTabs={previewTabs}
       token={token}
       onActivate={(selection) => {
-        onDeactivateTurnDiff();
+        onDeactivatePreview();
         workspace.activate(selection);
       }}
-      onActivateTurnDiff={onActivateTurnDiff}
-      onCloseTurnDiffs={onCloseTurnDiffs}
+      onActivatePreview={onActivatePreview}
+      onClosePreviews={onClosePreviews}
       onDirtyChange={setDirty}
       onOpenPreview={(selection) => {
-        onDeactivateTurnDiff();
+        onDeactivatePreview();
         workspace.openPreview(selection);
       }}
       onPin={workspace.pinTab}
+      onPinInSession={workspace.openPinnedInSession}
+      onMoveTab={workspace.moveTab}
       onReference={referenceSelection}
       onRequestClose={requestClose}
-      onReveal={workspace.reveal}
+      onReveal={revealInTree}
       onShowFiles={() => setNarrowPane("tree")}
     />
   );
@@ -677,29 +698,26 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <div
       ref={surfaceRef}
       aria-hidden={!active}
-      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
+      data-project-workspace
+      className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-panel-background)] text-card-foreground", !active && "hidden")}
     >
-      {narrow ? (
-        <div className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]">
-          {narrowPane === "tree" ? projectSidebar : projectViewer}
-        </div>
-      ) : (
-        <ResizablePanelGroup
-          className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
-          defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
-          id="project-browser-layout"
-          orientation="horizontal"
-          onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout)}
-        >
-          <ResizablePanel id="tree" className="min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
-            {projectSidebar}
-          </ResizablePanel>
-          <ResizableHandle className="pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize" />
-          <ResizablePanel id="viewer" className="min-w-0" minSize={compact ? 240 : 280}>
-            {projectViewer}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      )}
+      {/* Keep the viewer mounted so responsive layout changes preserve drafts and editor state. */}
+      <ResizablePanelGroup
+        className={cn("relative h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]", narrow && "[&>[data-panel]]:absolute [&>[data-panel]]:inset-0")}
+        defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
+        disabled={narrow}
+        id="project-browser-layout"
+        orientation="horizontal"
+        onLayoutChanged={(layout) => { if (!narrow) savePanelLayout(layoutStorageKeys.projectBrowserRatio, layout); }}
+      >
+        <ResizablePanel id="tree" hidden={narrow && narrowPane !== "tree"} className="h-full min-w-0" minSize={compact ? 160 : 180} maxSize="45%">
+          {projectSidebar}
+        </ResizablePanel>
+        <ResizableHandle disabled={narrow} className={cn("pudding-project-browser-resize-handle cursor-ew-resize after:cursor-ew-resize", narrow && "hidden")} />
+        <ResizablePanel id="viewer" hidden={narrow && narrowPane !== "viewer"} className="h-full min-w-0" minSize={compact ? 240 : 280}>
+          {projectViewer}
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       <ProjectNameDialog
         initialName={nameRequest?.mode === "rename" ? nameRequest.target.name : ""}

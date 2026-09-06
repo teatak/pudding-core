@@ -26,8 +26,8 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区四应用、标签、资料库与统一专注改造方案；待从开发版基线和专注模式开始实施 |
-| [computer-use-design.md](computer-use-design.md) | macOS Computer Use 设计完成，等待按阶段实施 |
+| [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区统一内容标签、项目内部文件、资源库与专注改造；保留分阶段验收记录 |
+| [computer-use-design.md](computer-use-design.md) | macOS Computer Use 已实现，含输入/实例定位/独立截图及真实 Electron 回归 |
 | [transcript-virtualization-plan.md](transcript-virtualization-plan.md) | Transcript 会话窗口虚拟化已实现，持续回归 |
 | [workspace-resize-performance-plan.md](workspace-resize-performance-plan.md) | Workspace 拖拽性能与 WebView 保活层改造 |
 | [attachments-multimodal-plan.md](attachments-multimodal-plan.md) | 图片主链路已完成；文本/PDF、音频与 GC 仍未完成 |

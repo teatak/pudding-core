@@ -46,6 +46,8 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate, NSTableViewData
 {
   private var primaryWindow: NSWindow?
   private var secondaryWindow: NSWindow?
+  private var resizeSignal: DispatchSourceSignal?
+  private var previewSizeIndex = 0
   private var count = 0
   private let countValue = NSTextField(labelWithString: "0")
   private let confirmedValue = NSTextField(labelWithString: "not confirmed")
@@ -63,6 +65,19 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate, NSTableViewData
     secondaryWindow = makeSecondaryWindow()
     primaryWindow?.makeKeyAndOrderFront(nil)
     secondaryWindow?.orderFront(nil)
+    // Test-owned processes can change the capture aspect without adding UI input.
+    signal(SIGUSR1, SIG_IGN)
+    let resizeSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+    resizeSignal.setEventHandler { [weak self] in
+      Task { @MainActor in
+        guard let self else { return }
+        let sizes = [NSSize(width: 520, height: 500), NSSize(width: 960, height: 500), NSSize(width: 360, height: 640)]
+        self.previewSizeIndex = (self.previewSizeIndex + 1) % sizes.count
+        self.primaryWindow?.setContentSize(sizes[self.previewSizeIndex])
+      }
+    }
+    resizeSignal.resume()
+    self.resizeSignal = resizeSignal
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

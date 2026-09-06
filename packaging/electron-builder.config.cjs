@@ -48,6 +48,8 @@ module.exports = {
   },
   files: [
     "electron/**/*.cjs",
+    "internal/browser/tab_limits.json",
+    "!electron/smoke{,/**/*}",
     "!electron/test{,/**/*}",
     "package.json",
   ],

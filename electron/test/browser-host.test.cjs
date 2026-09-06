@@ -1770,19 +1770,22 @@ test("revokes project file grants while preserving ordinary web tabs", async (t)
 
 test("caps persistent webviews per session and globally", () => {
   const host = new BrowserHost();
-  for (let index = 0; index < 8; index += 1) {
+  const limits = require("../../internal/browser/tab_limits.json");
+  for (let index = 0; index < limits.perSession; index += 1) {
     host.ensureSlot({ sessionID: "session-limit", tabID: `tab-${index}`, url: "about:blank" });
   }
   assert.throws(
     () => host.ensureSlot({ sessionID: "session-limit", tabID: "tab-over", url: "about:blank" }),
     /browser tab limit reached/,
   );
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < limits.total - limits.perSession; index += 1) {
     host.ensureSlot({ sessionID: "session-limit-2", tabID: `tab-second-${index}`, url: "about:blank" });
   }
   assert.throws(
     () => host.ensureSlot({ sessionID: "session-limit-3", tabID: "tab-global-over", url: "about:blank" }),
     /browser tab limit reached/,
   );
+  host.closeTab({ sessionID: "session-limit", tabID: "tab-0" });
+  assert.doesNotThrow(() => host.ensureSlot({ sessionID: "session-limit", tabID: "tab-replacement", url: "about:blank" }));
   host.closeAll();
 });

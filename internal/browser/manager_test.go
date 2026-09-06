@@ -47,7 +47,7 @@ func TestNormalizeURLRejectsUnsupportedSchemes(t *testing.T) {
 
 func TestManagerPersistentTabLimits(t *testing.T) {
 	manager := NewManager(Config{})
-	for i := 0; i < maxTabsPerSession; i++ {
+	for i := 0; i < tabLimits.PerSession; i++ {
 		id := "tab_" + strconv.Itoa(i)
 		manager.tabs[id] = &tabBinding{id: id, sessionID: "session_limit", commandMu: &sync.Mutex{}}
 		if manager.sessions["session_limit"] == nil {
@@ -60,6 +60,18 @@ func TestManagerPersistentTabLimits(t *testing.T) {
 	}
 	if !manager.canCreateTab("session_other") {
 		t.Fatal("global capacity should still allow another session")
+	}
+	for len(manager.tabs) < tabLimits.Total {
+		id := "other_" + strconv.Itoa(len(manager.tabs))
+		manager.tabs[id] = &tabBinding{id: id, sessionID: "session_other"}
+	}
+	if manager.canCreateTab("session_third") {
+		t.Fatal("global tab limit should reject another session")
+	}
+	delete(manager.tabs, "tab_0")
+	delete(manager.sessions["session_limit"], "tab_0")
+	if !manager.canCreateTab("session_limit") {
+		t.Fatal("released tab should restore capacity")
 	}
 }
 

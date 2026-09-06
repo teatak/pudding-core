@@ -13,8 +13,9 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { AppIdentityIcon, appDisplayName } from "@/components/AppIdentity";
 import { AppIcon } from "@/components/AppIcon";
+import { AppPopoverContent } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -54,14 +55,16 @@ export function SessionAppsControl({ session, token }: { session: Session; token
     return null;
   }
 
-  const overflowCount = Math.max(0, loadedAppIDs.length - maxVisibleApps);
-  const visibleAppCount = overflowCount === 1 ? maxVisibleApps + 1 : maxVisibleApps;
+  const visibleAppCount = loadedAppIDs.length <= maxVisibleApps + 1
+    ? loadedAppIDs.length
+    : maxVisibleApps;
   const visibleAppIDs = loadedAppIDs.slice(0, visibleAppCount);
-  const hiddenAppIDs = loadedAppIDs.slice(visibleAppCount);
+  const hiddenAppCount = loadedAppIDs.length - visibleAppIDs.length;
+  const loadedAppsLabel = t("apps.sessionLoadedCount").replace("{count}", String(loadedAppIDs.length));
 
   return (
     <div
-      aria-label={t("apps.sessionLoadedCount").replace("{count}", String(loadedAppIDs.length))}
+      aria-label={loadedAppsLabel}
       className="group/apps flex h-8 max-w-48 items-center overflow-visible px-1"
       role="group"
     >
@@ -74,7 +77,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
           <div
             key={appID}
             className={cn(
-              "group/app relative -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full",
+              "pudding-session-apps-expanded group/app relative -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full",
               "transition-[margin] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
               "hover:z-20 focus-within:z-20",
               pending && "z-20",
@@ -98,20 +101,23 @@ export function SessionAppsControl({ session, token }: { session: Session; token
           </div>
         );
       })}
-      {hiddenAppIDs.length > 0 ? (
-        <HoverCard openDelay={120} closeDelay={100}>
-          <HoverCardTrigger asChild>
+      {loadedAppIDs.length > 1 ? (
+        <Popover>
+          <PopoverTrigger asChild>
             <button
-              aria-label={t("apps.sessionMoreCount").replace("{count}", String(hiddenAppIDs.length))}
-              className="-ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:ml-0.5 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5"
+              aria-label={loadedAppsLabel}
+              className="pudding-session-apps-trigger -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5"
+              data-overflow={hiddenAppCount > 0}
               type="button"
             >
-              +{hiddenAppIDs.length}
+              <span className="pudding-session-apps-compact-count">+{loadedAppIDs.length - 1}</span>
+              <span className="pudding-session-apps-overflow-count">+{hiddenAppCount}</span>
             </button>
-          </HoverCardTrigger>
-          <HoverCardContent align="end" side="bottom" sideOffset={8} className="w-52 p-1.5">
+          </PopoverTrigger>
+          <AppPopoverContent aria-label={loadedAppsLabel} align="end" side="bottom" sideOffset={8} className="max-h-[var(--radix-popover-content-available-height)] w-64 overflow-y-auto p-1.5">
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">{loadedAppsLabel}</p>
             <div className="grid gap-0.5">
-              {hiddenAppIDs.map((appID) => {
+              {loadedAppIDs.map((appID) => {
                 const app = appsByID.get(appID);
                 const name = app ? appDisplayName(app, t) : appID;
                 const pending = unloadMutation.isPending && unloadMutation.variables === appID;
@@ -132,8 +138,8 @@ export function SessionAppsControl({ session, token }: { session: Session; token
                 );
               })}
             </div>
-          </HoverCardContent>
-        </HoverCard>
+          </AppPopoverContent>
+        </Popover>
       ) : null}
     </div>
   );

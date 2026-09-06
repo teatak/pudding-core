@@ -98,6 +98,10 @@ func (s *Server) renameProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return s.projectMutationError(c, err)
 	}
+	actor, _ := c.Param("id")
+	if err := s.store.MoveLibraryFileReferences(c.Request.Context(), actor, root.Path, rel, root.Path, entry.Path); err != nil {
+		return s.fail(c, err)
+	}
 	c.JSON(http.StatusOK, projectEntryMutationView{
 		RootID: root.ID,
 		Name:   entry.Name,
@@ -144,6 +148,10 @@ func (s *Server) moveProjectEntry(c *cart.Context) error {
 	entry, err := projectfs.Move(sourceRoot.Path, sourcePath, targetRoot.Path, targetParentPath, req.Name)
 	if err != nil {
 		return s.projectMutationError(c, err)
+	}
+	actor, _ := c.Param("id")
+	if err := s.store.MoveLibraryFileReferences(c.Request.Context(), actor, sourceRoot.Path, sourcePath, targetRoot.Path, entry.Path); err != nil {
+		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, projectEntryMutationView{RootID: targetRoot.ID, Name: entry.Name, Path: entry.Path, Type: entry.Type})
 	return nil

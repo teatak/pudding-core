@@ -327,3 +327,18 @@ class FakeHelper extends EventEmitter {
     }
   }
 }
+
+test("ComputerUseHost never reports cancelled keyboard delivery as not_started", async () => {
+  const fake = new FakeHelper();
+  const host = createHost(fake);
+  const controller = new AbortController();
+  const pending = host.keyboard({bundleID:"com.example.App",windowID:42,action:"type_text",value:"你好🙂"},{signal:controller.signal});
+  const rejected = assert.rejects(pending,error=>error.code==="computer_action_cancelled"&&error.outcome==="unknown");
+  await fake.waitForRequests(1);
+  assert.equal(fake.requests[0].command,"keyboard");
+  controller.abort();
+  await rejected;
+  assert.equal(fake.killed,true);
+  assert.equal(fake.requests.length,1);
+  await host.stop();
+});

@@ -28,11 +28,12 @@ type ElectronBridgeService struct {
 }
 
 type bridgeApplication struct {
-	BundleID     string `json:"bundleID"`
-	Name         string `json:"name"`
-	Running      bool   `json:"running"`
-	Active       bool   `json:"active"`
-	Controllable bool   `json:"controllable"`
+	Instances    []ApplicationInstance `json:"instances"`
+	BundleID     string                `json:"bundleID"`
+	Name         string                `json:"name"`
+	Running      bool                  `json:"running"`
+	Active       bool                  `json:"active"`
+	Controllable bool                  `json:"controllable"`
 }
 
 type bridgeCapturableWindow struct {
@@ -60,11 +61,15 @@ type bridgeObservation struct {
 }
 
 type bridgeObservationCapture struct {
-	Observation bridgeObservation `json:"observation"`
-	Capture     *Capture          `json:"capture,omitempty"`
+	Observation      *bridgeObservation `json:"observation"`
+	ObservationError *Failure           `json:"observationError,omitempty"`
+	CaptureError     *Failure           `json:"captureError,omitempty"`
+	Capture          *Capture           `json:"capture,omitempty"`
 }
 
 type bridgeNativeAction struct {
+	Key        string   `json:"key,omitempty"`
+	Modifiers  []string `json:"modifiers,omitempty"`
 	BundleID   string   `json:"bundleID"`
 	ElementID  string   `json:"elementID"`
 	Action     string   `json:"action"`
@@ -147,14 +152,14 @@ func (s *ElectronBridgeService) ListApps(ctx context.Context, sessionID string) 
 	}
 	out := AppList{Apps: make([]Application, 0, len(raw.Apps))}
 	for _, item := range raw.Apps {
-		out.Apps = append(out.Apps, Application{AppID: item.BundleID, Name: item.Name, Running: item.Running, Active: item.Active, Controllable: item.Controllable})
+		out.Apps = append(out.Apps, Application{AppID: item.BundleID, Name: item.Name, Running: item.Running, Active: item.Active, Controllable: item.Controllable, Instances: item.Instances})
 	}
 	return out, nil
 }
 
-func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID string, foreground bool) (NativeUse, error) {
+func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID string, foreground bool, selection AppSelection) (NativeUse, error) {
 	var raw bridgeNativeUse
-	if err := s.request(ctx, http.MethodPost, "/computer/apps/use", map[string]any{"sessionID": sessionID, "appID": appID, "foreground": foreground}, &raw, "unknown"); err != nil {
+	if err := s.request(ctx, http.MethodPost, "/computer/apps/use", map[string]any{"sessionID": sessionID, "appID": appID, "foreground": foreground, "appPath": selection.AppPath, "pid": selection.PID}, &raw, "unknown"); err != nil {
 		return NativeUse{}, err
 	}
 	windows := make([]CapturableWindow, 0, len(raw.Windows))
@@ -186,22 +191,25 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, appID st
 	return Observation{AppID: raw.BundleID, WindowID: raw.WindowID, Name: raw.Name, PID: raw.PID, ObservedAt: raw.ObservedAt, Truncated: raw.Truncated, Windows: raw.Windows, Elements: raw.Elements}, nil
 }
 
-func (s *ElectronBridgeService) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error) {
+func (s *ElectronBridgeService) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string, includeAccessibility bool) (NativeObservationCapture, error) {
 	var raw bridgeObservationCapture
 	err := s.post(ctx, "/computer/observe-capture", map[string]any{
 		"sessionID": sessionID, "appID": appID, "windowID": windowID,
-		"maxElements": maxElements, "output": output,
+		"maxElements": maxElements, "output": output, "includeAccessibility": includeAccessibility,
 	}, &raw)
 	if err != nil {
 		return NativeObservationCapture{}, err
 	}
-	observation := Observation{
-		AppID: raw.Observation.BundleID, WindowID: raw.Observation.WindowID,
-		Name: raw.Observation.Name, PID: raw.Observation.PID,
-		ObservedAt: raw.Observation.ObservedAt, Truncated: raw.Observation.Truncated,
-		Windows: raw.Observation.Windows, Elements: raw.Observation.Elements,
+	var observation *Observation
+	if raw.Observation != nil {
+		observation = &Observation{
+			AppID: raw.Observation.BundleID, WindowID: raw.Observation.WindowID,
+			Name: raw.Observation.Name, PID: raw.Observation.PID,
+			ObservedAt: raw.Observation.ObservedAt, Truncated: raw.Observation.Truncated,
+			Windows: raw.Observation.Windows, Elements: raw.Observation.Elements,
+		}
 	}
-	return NativeObservationCapture{Observation: observation, Capture: raw.Capture}, nil
+	return NativeObservationCapture{Observation: observation, Capture: raw.Capture, ObservationError: raw.ObservationError, CaptureError: raw.CaptureError}, nil
 }
 
 func (s *ElectronBridgeService) Act(ctx context.Context, sessionID, appID string, windowID uint32, elementID, action string, value *string) (NativeAction, error) {
@@ -259,6 +267,9 @@ func (s *ElectronBridgeService) request(ctx context.Context, method, path string
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+s.token)
+	if turnID, _ := ctx.Value(activityTurnKey{}).(string); turnID != "" {
+		req.Header.Set("X-Pudding-Turn-ID", turnID)
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -288,4 +299,22 @@ func (s *ElectronBridgeService) request(ctx context.Context, method, path string
 		return &OperationError{Code: "computer_invalid_response", Message: "Computer Use bridge returned invalid JSON", Outcome: uncertainOutcome, Cause: err}
 	}
 	return nil
+}
+
+func (s *ElectronBridgeService) Keyboard(ctx context.Context, sessionID, appID string, windowID uint32, input ActionInput) (NativeAction, error) {
+	body := map[string]any{"sessionID": sessionID, "appID": appID, "windowID": windowID, "action": input.Type}
+	if input.Key != "" {
+		body["key"] = input.Key
+	}
+	if len(input.Modifiers) > 0 {
+		body["modifiers"] = input.Modifiers
+	}
+	if input.Value != nil {
+		body["value"] = *input.Value
+	}
+	var raw bridgeNativeAction
+	if err := s.request(ctx, http.MethodPost, "/computer/keyboard", body, &raw, "unknown"); err != nil {
+		return NativeAction{}, err
+	}
+	return NativeAction{AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed, Key: raw.Key, Modifiers: raw.Modifiers}, nil
 }

@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileX, Globe, MousePointer2, RefreshCw } from "@/components/icons";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { FileX, MousePointer2, RefreshCw } from "@/components/icons";
 import {
   createElement,
   forwardRef,
@@ -12,9 +12,7 @@ import {
   type HTMLAttributes,
 } from "react";
 
-import { listBrowserHistory, type BrowserHistoryEntry } from "@/api/client";
-import { queryKeys } from "@/api/queryKeys";
-import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import { BrowserStartPage } from "@/browser/BrowserStartPage";
 import {
   cacheElectronBrowserSnapshot,
   electronBrowserBridge,
@@ -22,14 +20,10 @@ import {
 } from "@/browser/electronBridge";
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import {
-  browserQueryStaleTimeMS,
-  browserCompactURL,
   browserTabTitle,
   browserURLIsBlank,
-  uniqueBrowserHistoryBySite,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
-import { Item, ItemContent, ItemGroup, ItemHeader, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 
@@ -117,12 +111,6 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
   const tabID = activeTab.id;
   const targetURL = normalizeWebviewURL(activeTab.url);
   const webviewRequestID = activeTabProp?.webviewRequestID || "";
-  const recentHistoryQuery = useQuery({
-    enabled: Boolean(token && ownerSessionID && browserURLIsBlank(targetURL)),
-    queryKey: queryKeys.browserHistoryRecent(16),
-    queryFn: () => listBrowserHistory(token, ownerSessionID, "", 64),
-    staleTime: 0,
-  });
   pendingTargetURLRef.current = targetURL;
   webviewRequestIDRef.current = webviewRequestID;
   tabCreatedAtRef.current = activeTab?.createdAt;
@@ -460,8 +448,10 @@ export const ElectronWebviewBrowser = forwardRef<ElectronWebviewRuntimeHandle, {
         webpreferences: "contextIsolation=yes,sandbox=yes",
       } satisfies WebviewProps)}
       {browserURLIsBlank(targetURL) && !loadError ? (
-        <BrowserEmptyState
-          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 16)}
+        <BrowserStartPage
+          token={token}
+          sessionID={ownerSessionID}
+          pending={openRecentMutation.isPending}
           openingURL={openRecentMutation.isPending ? openRecentMutation.variables : undefined}
           onOpen={(url) => openRecentMutation.mutate(url)}
         />
@@ -561,70 +551,6 @@ function acquireWebviewFocusLease(node: HTMLElement) {
 function isEditableHostElement(element: HTMLElement) {
   const tagName = element.tagName.toLowerCase();
   return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
-}
-
-function BrowserEmptyState({
-  history,
-  openingURL,
-  onOpen,
-}: {
-  history: BrowserHistoryEntry[];
-  openingURL?: string;
-  onOpen: (url: string) => void;
-}) {
-  const { t } = useI18n();
-
-  return (
-    <div className="absolute inset-0 z-[1] overflow-y-auto bg-[var(--workspace-chrome-background)]">
-      <div className="flex min-h-full items-center justify-center px-6 py-8">
-        <div className="w-full max-w-5xl text-center">
-          {history.length > 0 ? (
-            <div className="mx-auto max-w-[55rem]">
-              <ItemGroup className="flex flex-row flex-wrap justify-center gap-4">
-                {history.map((entry) => (
-                  <Item
-                    key={entry.id}
-                    asChild
-                    className="w-24 min-w-0 flex-none flex-col flex-nowrap gap-2 px-2 py-2 text-center text-[13px] font-normal text-foreground/85 transition-none hover:bg-accent disabled:cursor-wait disabled:opacity-70"
-                  >
-                    <button
-                      disabled={Boolean(openingURL)}
-                      type="button"
-                      onClick={() => onOpen(entry.url)}
-                    >
-                      <ItemHeader className="justify-center">
-                        <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
-                          {openingURL === entry.url ? <Spinner className="size-5" /> : <BrowserRecentFavicon entry={entry} />}
-                        </span>
-                      </ItemHeader>
-                      <ItemContent className="w-full flex-none gap-0">
-                        <ItemTitle className="block w-full truncate text-center text-[13px] font-normal">
-                          {entry.title || browserCompactURL(entry.url)}
-                        </ItemTitle>
-                      </ItemContent>
-                    </button>
-                  </Item>
-                ))}
-              </ItemGroup>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("browser.emptyHint")}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
-  return (
-    <BrowserFavicon
-      className="size-6 object-contain"
-      fallback={<Globe className="size-6 text-muted-foreground" />}
-      faviconURL={entry.faviconURL}
-      pageURL={entry.url}
-    />
-  );
 }
 
 function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorState }) {

@@ -1,5 +1,5 @@
 import { FilePlus2, FolderPlus, LocateFixed, SquareTerminal, Trash2 } from "@/components/icons";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import {
   AppContextMenuContent as ProjectMenuContent,
@@ -108,15 +108,22 @@ export function ProjectTabContextMenu({
   onReveal: (tab: ProjectTab) => void;
 }) {
   const { t } = useI18n();
+  const revealAfterClose = useRef(false);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ProjectMenuContent>
+      <ProjectMenuContent onCloseAutoFocus={(event) => {
+        if (!revealAfterClose.current) return;
+        revealAfterClose.current = false;
+        // Hand focus to the tree after the menu releases its focus scope.
+        event.preventDefault();
+        onReveal(tab);
+      }}>
         <ProjectMenuItem onSelect={() => onClose(tab)}>{t("project.browserCloseTab")}</ProjectMenuItem>
         <ProjectMenuItem onSelect={() => onCloseOthers(tab)}>{t("project.browserCloseOthers")}</ProjectMenuItem>
         <ProjectMenuItem onSelect={() => onCloseRight(tab)}>{t("project.browserCloseRight")}</ProjectMenuItem>
         <ContextMenuSeparator />
-        <ProjectMenuItem onSelect={() => onReveal(tab)}><LocateFixed />{t("project.browserRevealInTree")}</ProjectMenuItem>
+        <ProjectMenuItem onSelect={() => { revealAfterClose.current = true; }}><LocateFixed />{t("project.browserRevealInTree")}</ProjectMenuItem>
       </ProjectMenuContent>
     </ContextMenu>
   );

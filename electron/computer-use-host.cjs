@@ -10,6 +10,8 @@ const supportedCommands = new Set([
   "observe_capture",
   "act",
   "pointer",
+  "keyboard",
+  "reveal_window",
 ]);
 
 class ComputerUseError extends Error {
@@ -70,6 +72,10 @@ class ComputerUseHost {
 
   act(params, options = {}) {
     return this.request("act", params, options);
+  }
+
+  keyboard(params, options = {}) {
+    return this.request("keyboard", params, options);
   }
 
   pointer(params, options = {}) {
@@ -405,7 +411,7 @@ function cancelledError(outcome) {
 }
 
 function uncertainOutcome(command) {
-  return command === "use_app" || command === "quit_app" || command === "act" || command === "pointer"
+  return command === "use_app" || command === "quit_app" || command === "act" || command === "pointer" || command === "keyboard"
     ? "unknown"
     : "not_started";
 }

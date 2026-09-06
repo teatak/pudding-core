@@ -1,6 +1,6 @@
 {
   "name": "pudding",
-  "version": "0.2.11",
+  "version": "0.3.0",
   "private": true,
   "packageManager": "npm@11.6.0",
   "license": "AGPL-3.0-only",
@@ -12,6 +12,7 @@
     "test": "npm run test:electron",
     "test:electron": "node --test electron/test/*.test.cjs",
     "smoke:electron-browser": "npm --prefix web run smoke:electron-browser",
+    "smoke:electron-workspace": "npm --prefix web run smoke:electron-workspace",
     "check:secrets": "node scripts/scan-secrets.cjs",
     "legal:generate": "node scripts/generate-third-party-notices.cjs"
   },

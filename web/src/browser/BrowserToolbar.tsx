@@ -1,24 +1,22 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, History, RefreshCw, Trash2, X } from "@/components/icons";
-import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { LibraryFavoriteButton } from "@/components/workspace/LibraryFavoriteButton";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ArrowRight, RefreshCw, X } from "@/components/icons";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   APIError,
   backBrowserTab,
-  clearBrowserHistory,
-  deleteBrowserHistoryEntry,
   forwardBrowserTab,
-  listBrowserHistory,
   listBrowserTabs,
   openBrowserTab,
   openBrowserURL,
   reloadBrowserTab,
-  type BrowserHistoryEntry,
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { BrowserFavicon } from "@/browser/BrowserFavicon";
+import { BrowserAddressField } from "./BrowserAddressField";
+import { browserOpenErrorDescription, type BrowserOpenAttempt } from "./browserErrors";
 import { BrowserOptionsMenu } from "@/browser/BrowserOptionsMenu";
 import {
   allowElectronBrowserTab,
@@ -28,7 +26,6 @@ import {
 } from "@/browser/electronBridge";
 import {
   browserAddressToURL,
-  browserCompactURL,
   browserDisplayURL,
   browserQueryStaleTimeMS,
   browserTargetURL,
@@ -38,49 +35,12 @@ import {
 import type { BrowserCanvasPayload, BrowserNavigationAction, BrowserTabsData } from "@/browser/types";
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import { Spinner } from "@/components/Spinner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ConfirmationDialog";
 import { Button } from "@/components/ui/button";
-import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
-
-type BrowserOpenAttempt = {
-  url: string;
-};
 
 type PersistTabOptions = {
   refreshAfterPersist?: boolean;
 };
-
-function browserOpenErrorDescription(attempt: BrowserOpenAttempt | null, error: unknown): string {
-  const lines: string[] = [];
-  if (attempt?.url) {
-    lines.push(`URL: ${attempt.url}`);
-  }
-  const message =
-    error instanceof APIError
-      ? `${error.status} ${error.code}`
-      : error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : "";
-  if (message) {
-    lines.push(`Error: ${message}`);
-  }
-  return lines.join("\n");
-}
 
 function isBrowserNavigationAbortError(error: unknown): boolean {
   const message =
@@ -125,13 +85,6 @@ export function BrowserToolbar({
   const payload = browserPayloadFromTab(activeTabProp);
   const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
   const [pendingSubmittedURL, setPendingSubmittedURL] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historySearch, setHistorySearch] = useState("");
-  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(-1);
-  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
-  const deferredHistorySearch = useDeferredValue(historySearch.trim());
-  const addressInputRef = useRef<HTMLInputElement>(null);
-  const addressBlurTimerRef = useRef<number | undefined>(undefined);
   const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
   const embeddedBrowser = hasElectronWebviewBrowser();
   const tabsQuery = useQuery({
@@ -140,16 +93,6 @@ export function BrowserToolbar({
     queryFn: () => listBrowserTabs(token, sessionID),
     staleTime: browserQueryStaleTimeMS,
   });
-  const historyQuery = useQuery({
-    enabled: Boolean(active && historyOpen && deferredHistorySearch && token && sessionID),
-    queryKey: queryKeys.browserHistory(deferredHistorySearch),
-    queryFn: () => listBrowserHistory(token, sessionID, deferredHistorySearch, 10),
-    placeholderData: keepPreviousData,
-    staleTime: 0,
-  });
-  const historyCandidates = historyQuery.data?.history || [];
-  const historyEntries = deferredHistorySearch ? historyCandidates.slice(0, 10) : [];
-  const historyVisible = historyOpen && historyEntries.length > 0;
   const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === sessionID);
   const activeTab = activeTabProp || preferredBrowserTab(tabs, payload);
   const targetURL = browserTargetURL(activeTab, payload, payload?.updatedAt);
@@ -166,37 +109,6 @@ export function BrowserToolbar({
     }
     setURLDraft(browserDisplayURL(targetURL));
   }, [pendingSubmittedURL, targetURL]);
-
-  useEffect(() => {
-    setSelectedHistoryIndex((current) => Math.min(current, historyEntries.length - 1));
-  }, [historyEntries.length]);
-
-  useEffect(() => () => window.clearTimeout(addressBlurTimerRef.current), []);
-
-  useEffect(() => {
-    if (!active) {
-      setHistoryOpen(false);
-      setClearHistoryOpen(false);
-      return;
-    }
-    const focusAddressInput = () => {
-      const input = addressInputRef.current;
-      input?.focus();
-      input?.select();
-      setHistorySearch("");
-      setSelectedHistoryIndex(-1);
-      setHistoryOpen(false);
-    };
-    const focusAddressBar = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "l" || (!event.metaKey && !event.ctrlKey) || event.altKey) {
-        return;
-      }
-      event.preventDefault();
-      focusAddressInput();
-    };
-    window.addEventListener("keydown", focusAddressBar);
-    return () => window.removeEventListener("keydown", focusAddressBar);
-  }, [active]);
 
   const persistTab = async (tab: BrowserTab, options: PersistTabOptions = {}) => {
     if (tab.sessionID !== sessionID) {
@@ -248,27 +160,6 @@ export function BrowserToolbar({
         return;
       }
       toast.error(t("browser.openFailed"), { description: browserOpenErrorDescription(lastOpenAttemptRef.current, error) });
-    },
-  });
-  const deleteHistoryMutation = useMutation({
-    mutationFn: (historyID: string) => deleteBrowserHistoryEntry(token, sessionID, historyID),
-    onSuccess: () => {
-      setSelectedHistoryIndex(-1);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
-    },
-    onError: (error) => {
-      toast.error(t("browser.historyDeleteFailed"), { description: browserOpenErrorDescription(null, error) });
-    },
-  });
-  const clearHistoryMutation = useMutation({
-    mutationFn: () => clearBrowserHistory(token, sessionID),
-    onSuccess: () => {
-      setClearHistoryOpen(false);
-      setHistoryOpen(false);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
-    },
-    onError: (error) => {
-      toast.error(t("browser.historyClearFailed"), { description: browserOpenErrorDescription(null, error) });
     },
   });
   const navigationMutation = useMutation({
@@ -328,25 +219,16 @@ export function BrowserToolbar({
       return;
     }
     const url = browserAddressToURL(draft);
-    setHistoryOpen(false);
     setPendingSubmittedURL(url);
     setURLDraft(browserDisplayURL(url));
     openMutation.mutate(url);
   };
 
-  const selectHistoryEntry = (entry: BrowserHistoryEntry) => {
-    navigateToAddress(entry.url);
-  };
-
   return (
-    <form
+    <div
       className="canvas-window-no-drag flex min-w-0 flex-1 items-center gap-2"
       onDoubleClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
-      onSubmit={(event) => {
-        event.preventDefault();
-        navigateToAddress(urlDraft);
-      }}
     >
       <div className="grid shrink-0 grid-cols-3 gap-0.5">
         <Button
@@ -383,223 +265,23 @@ export function BrowserToolbar({
           {pageLoading ? <X className={navIconClass} /> : <RefreshCw className={navIconClass} />}
         </Button>
       </div>
-      <Popover
-        open={historyVisible}
-        onOpenChange={(open) => setHistoryOpen(open && Boolean(historySearch.trim()))}
-      >
-        <PopoverAnchor asChild>
-          <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
-            <Input
-              ref={addressInputRef}
-              aria-autocomplete="list"
-              aria-expanded={historyVisible}
-              className="h-7 min-w-0 flex-1 border-0 bg-transparent pr-8 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-              placeholder={t("browser.urlPlaceholder")}
-              value={urlDraft}
-              onBlur={() => {
-                window.clearTimeout(addressBlurTimerRef.current);
-                addressBlurTimerRef.current = window.setTimeout(() => {
-                  const focused = document.activeElement;
-                  if (focused === addressInputRef.current || (focused instanceof Element && focused.closest('[data-slot="popover-content"]'))) {
-                    return;
-                  }
-                  setHistoryOpen(false);
-                }, 0);
-              }}
-              onChange={(event) => {
-                setURLDraft(event.target.value);
-                setHistorySearch(event.target.value);
-                setSelectedHistoryIndex(-1);
-                setHistoryOpen(Boolean(event.target.value.trim()));
-              }}
-              onFocus={(event) => {
-                window.clearTimeout(addressBlurTimerRef.current);
-                const input = event.currentTarget;
-                setHistorySearch("");
-                setSelectedHistoryIndex(-1);
-                setHistoryOpen(false);
-                window.setTimeout(() => {
-                  if (document.activeElement === input) {
-                    input.select();
-                  }
-                }, 0);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setHistoryOpen(false);
-                  return;
-                }
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setHistoryOpen(Boolean(historySearch.trim()));
-                  setSelectedHistoryIndex((current) => Math.min(current + 1, historyEntries.length - 1));
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setHistoryOpen(Boolean(historySearch.trim()));
-                  setSelectedHistoryIndex((current) => (current <= 0 ? historyEntries.length - 1 : current - 1));
-                  return;
-                }
-                if (event.key === "Enter" && historyOpen && selectedHistoryIndex >= 0) {
-                  const entry = historyEntries[selectedHistoryIndex];
-                  if (entry) {
-                    event.preventDefault();
-                    selectHistoryEntry(entry);
-                  }
-                }
-              }}
-            />
-            <Button
-              aria-label={t("browser.openURL")}
-              className={cn(
-                navButtonClass,
-                "absolute top-0.5 right-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-0 group-focus-within:opacity-100",
-              )}
-              disabled={openMutation.isPending || !urlDraft.trim()}
-              size="icon-sm"
-              type="submit"
-              variant="ghost"
-            >
-              {openMutation.isPending ? <Spinner className={navIconClass} /> : <CornerDownLeft className={navIconClass} />}
-            </Button>
-          </div>
-        </PopoverAnchor>
-        <PopoverContent
-          align="start"
-          avoidCollisions={false}
-          className="gap-0 rounded-xl border border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-0"
-          sideOffset={6}
-          style={{ width: "var(--radix-popover-trigger-width)" }}
-          onCloseAutoFocus={(event) => event.preventDefault()}
-          onInteractOutside={(event) => {
-            if (event.target === addressInputRef.current) {
-              event.preventDefault();
-            }
-          }}
-          onOpenAutoFocus={(event) => event.preventDefault()}
-        >
-          <Command
-            className="rounded-md p-0"
-            shouldFilter={false}
-            value={selectedHistoryIndex >= 0 ? historyEntries[selectedHistoryIndex]?.id || "__none__" : "__none__"}
-            onValueChange={(value) => setSelectedHistoryIndex(historyEntries.findIndex((entry) => entry.id === value))}
-          >
-            <CommandList className="max-h-[22.25rem]">
-              <CommandGroup heading={deferredHistorySearch ? t("browser.historyResults") : undefined}>
-                {historyEntries.map((entry, index) => (
-                  <CommandItem
-                    key={entry.id}
-                    className={cn(
-                      "h-10 min-w-0 py-1.5 pr-1 [&>svg:last-child]:hidden",
-                      selectedHistoryIndex === index && "!bg-interactive-selected text-foreground",
-                    )}
-                    value={entry.id}
-                    onMouseEnter={() => setSelectedHistoryIndex(index)}
-                    onSelect={() => selectHistoryEntry(entry)}
-                  >
-                    <div className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-muted-foreground">
-                      <HistoryFavicon pageURL={entry.url} url={entry.faviconURL} />
-                    </div>
-                    <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-sm">
-                      <span className="min-w-0 truncate">{entry.title || historyURLLabel(entry.url)}</span>
-                      <span aria-hidden="true" className="shrink-0 text-muted-foreground/45">·</span>
-                      <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{browserCompactURL(entry.url)}</span>
-                    </div>
-                    <Button
-                      aria-label={t("browser.historyDelete")}
-                      className="size-7 shrink-0 text-muted-foreground opacity-0 group-data-selected/command-item:opacity-100 hover:text-destructive group-hover/command-item:opacity-100"
-                      disabled={deleteHistoryMutation.isPending && deleteHistoryMutation.variables === entry.id}
-                      size="icon-sm"
-                      type="button"
-                      variant="ghost"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteHistoryMutation.mutate(entry.id);
-                      }}
-                      onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                    >
-                      {deleteHistoryMutation.isPending && deleteHistoryMutation.variables === entry.id ? (
-                        <Spinner className="size-3.5" />
-                      ) : (
-                        <Trash2 className="size-3.5" />
-                      )}
-                    </Button>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-          {historyEntries.length > 0 ? (
-            <div className="mt-1 flex items-center justify-between border-t px-1 pt-1">
-              <div className="flex items-center gap-1.5 px-2 text-xs text-muted-foreground">
-                <History className="size-3.5" />
-                {t("browser.historyGlobal")}
-              </div>
-              <Button
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setHistoryOpen(false);
-                  setClearHistoryOpen(true);
-                }}
-              >
-                {t("browser.historyClear")}
-              </Button>
-            </div>
-          ) : null}
-        </PopoverContent>
-      </Popover>
+      <BrowserAddressField
+        active={active}
+        sessionID={sessionID}
+        token={token}
+        value={urlDraft}
+        onChange={setURLDraft}
+        onSubmit={navigateToAddress}
+        pending={openMutation.isPending}
+      />
+      {activeTab && /^https?:\/\//.test(activeTab.url || "") ? <LibraryFavoriteButton token={token} sessionID={sessionID} target={{kind:"web", url:activeTab.url!, title:activeTab.title}} /> : null}
       <BrowserOptionsMenu
         active={active}
         activeTab={activeTab}
         sessionID={sessionID}
         onOpenFind={onOpenFind}
       />
-      <AlertDialog open={clearHistoryOpen} onOpenChange={setClearHistoryOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("browser.historyClearTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("browser.historyClearDescription")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={clearHistoryMutation.isPending}
-              variant="destructive"
-              onClick={() => clearHistoryMutation.mutate()}
-            >
-              {t("browser.historyClear")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </form>
-  );
-}
-
-function historyURLLabel(rawURL: string) {
-  try {
-    return new URL(rawURL).hostname || rawURL;
-  } catch {
-    return rawURL;
-  }
-}
-
-function HistoryFavicon({ pageURL, url }: { pageURL: string; url?: string }) {
-  return (
-    <BrowserFavicon
-      className="size-4 object-contain"
-      fallback={<Globe className="size-4" />}
-      faviconURL={url}
-      pageURL={pageURL}
-    />
+    </div>
   );
 }
 

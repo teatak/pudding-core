@@ -193,7 +193,7 @@ type BrowserRuntimePresentation = "standby" | "visible" | "automation";
 #### standby
 
 - 用于非活动 tab、其他 session、非 Browser Surface和 Workspace 收起状态。
-- 使用统一的 1024×720 非零保活尺寸。
+- 使用统一的 1280×720 非零保活尺寸（以 `styles.css` 的 runtime 尺寸变量为准）。
 - `visibility:hidden`、`pointer-events:none`。
 - 不绑定 anchor，不跟随 Workspace 或窗口变化。
 - 不允许 Renderer 用户输入命中。
@@ -215,7 +215,7 @@ type BrowserRuntimePresentation = "standby" | "visible" | "automation";
 
 `automation` 不是第二个浏览器实例，也不创建新的 WebView；它只是同一 runtime 的短暂 presentation。
 
-统一 runtime viewport 是明确产品常量，不是失败 fallback；当前固定为 1024×720。
+统一 runtime viewport 是明确产品常量，不是失败 fallback；当前固定为 1280×720。2026-09-05 源码 Electron 验收确认，20 个隐藏网页在连续分栏拖动中保持该尺寸，没有收到 resize 事件；这不替代生产构建下的完整性能矩阵。
 
 ## 4. 生命周期
 

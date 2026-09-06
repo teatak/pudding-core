@@ -15,6 +15,13 @@ struct ApplicationSnapshot: Codable, Equatable {
   let running: Bool
   let active: Bool
   let controllable: Bool
+  let instances: [ApplicationInstanceSnapshot]
+}
+
+struct ApplicationInstanceSnapshot: Codable, Equatable {
+  let pid: Int32
+  let appPath: String?
+  let active: Bool
 }
 
 struct ApplicationIdentitySnapshot: Codable, Equatable {
@@ -84,8 +91,10 @@ struct CaptureSnapshot: Codable, Equatable {
 }
 
 struct ObservationCaptureSnapshot: Codable, Equatable {
-  let observation: ObservationSnapshot
-  let capture: CaptureSnapshot
+  let observation: ObservationSnapshot?
+  let observationError: ErrorDetail?
+  let capture: CaptureSnapshot?
+  let captureError: ErrorDetail?
 }
 
 struct UseApplicationSnapshot: Codable, Equatable {
@@ -157,6 +166,7 @@ struct ErrorSnapshot: Codable, Equatable {
 enum HelperError: Error, LocalizedError {
   case permissionRequired(String)
   case appNotFound(String)
+  case ambiguousApplication(String)
   case appNotAllowed(String)
   case windowNotFound(UInt32)
   case elementNotFound(String)
@@ -175,6 +185,8 @@ enum HelperError: Error, LocalizedError {
     switch self {
     case .permissionRequired:
       return "computer_permission_required"
+    case .ambiguousApplication:
+      return "computer_app_ambiguous"
     case .appNotFound:
       return "computer_app_not_found"
     case .appNotAllowed:
@@ -213,6 +225,8 @@ enum HelperError: Error, LocalizedError {
     switch self {
     case .permissionRequired(let permission):
       return "permission required: \(permission)"
+    case .ambiguousApplication(let reason):
+      return "application instance is ambiguous: \(reason)"
     case .appNotFound(let bundleID):
       return "application not found: \(bundleID)"
     case .appNotAllowed(let bundleID):
@@ -234,7 +248,8 @@ enum HelperError: Error, LocalizedError {
     case .pointerTargetChanged(let reason):
       return "pointer target changed: \(reason)"
     case .appNotForeground(let bundleID, let foregroundApplication):
-      return "application must be foreground for pointer input: \(bundleID); current foreground app: \(foregroundApplication)"
+      return
+        "application must be foreground for keyboard or pointer input: \(bundleID); current foreground app: \(foregroundApplication)"
     case .responseTooLarge:
       return "Computer Use response is too large"
     case .applicationNotInstalled(let bundleID):

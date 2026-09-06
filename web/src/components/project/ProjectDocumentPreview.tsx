@@ -1,3 +1,4 @@
+import { AppTooltip } from "@/components/AppTooltip";
 import { ChevronRight } from "@/components/icons";
 import { useMemo } from "react";
 import { parse as parseYAML } from "yaml";
@@ -54,8 +55,8 @@ function TablePreview({ delimiter, value }: { delimiter: string; value: string }
         <thead className="sticky top-0 z-[1] bg-muted/90 backdrop-blur">
           <tr>
             {header.map((cell, index) => (
-              <th className="max-w-96 border-r border-b border-border/70 px-3 py-2 font-medium last:border-r-0" key={index} title={cell}>
-                <span className="block truncate">{cell || String(index + 1)}</span>
+              <th className="max-w-96 border-r border-b border-border/70 px-3 py-2 font-medium last:border-r-0" key={index}>
+                <AppTooltip content={cell || String(index + 1)}><span className="block truncate">{cell || String(index + 1)}</span></AppTooltip>
               </th>
             ))}
           </tr>
@@ -64,7 +65,7 @@ function TablePreview({ delimiter, value }: { delimiter: string; value: string }
           {body.map((row, rowIndex) => (
             <tr className="odd:bg-muted/20 hover:bg-muted/40" key={rowIndex}>
               {header.map((_, columnIndex) => (
-                <td className="max-w-96 border-r border-b border-border/50 px-3 py-2 align-top last:border-r-0" key={columnIndex} title={row[columnIndex] || ""}>
+                <td className="max-w-96 border-r border-b border-border/50 px-3 py-2 align-top last:border-r-0" key={columnIndex}>
                   <span className="block whitespace-pre-wrap break-words">{row[columnIndex] || ""}</span>
                 </td>
               ))}

@@ -6,7 +6,6 @@ import {
   Braces,
   Camera,
   CircleAlert,
-  CircleCheck,
   CircleX,
   Clock3,
   CloudSun,
@@ -25,7 +24,6 @@ import {
   Info,
   Keyboard,
   LayoutGrid,
-  Lightbulb,
   ListChecks,
   ListTree,
   LocateFixed,
@@ -47,8 +45,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Sparkles,
-  Square,
   SquareTerminal,
   TextCursorInput,
   Trash2,
@@ -56,229 +52,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "@/components/icons";
-import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
-
 type Translate = (key: string) => string;
-
-export type TurnActivitySummary = {
-  active: boolean;
-  detail?: string;
-  failed?: boolean;
-  label: string;
-  phase?: TurnPhaseState["phase"];
-  toolIcon?: LucideIcon;
-};
-
-export function describeFloatingTurnActivity({
-  overlay,
-  phase,
-  running,
-  t,
-}: {
-  overlay?: AssistantOverlay;
-  phase?: TurnPhaseState;
-  running: boolean;
-  t: Translate;
-}): TurnActivitySummary {
-  if (!running) {
-    if (phase?.phase === "error" || overlay?.status === "failed") {
-      return { active: false, failed: true, label: t("agentConsole.turnFailed"), phase: "error" };
-    }
-    if (
-      phase?.phase === "cancelled" ||
-      overlay?.status === "cancelled" ||
-      overlay?.interrupted
-    ) {
-      return { active: false, label: t("agentConsole.turnStopped"), phase: "cancelled" };
-    }
-    return { active: false, label: t("agentConsole.turnCompleted") };
-  }
-
-  const approval = findLastPart(overlay?.parts, "approval");
-  if (phase?.phase === "awaiting_approval" || (approval && !approval.status)) {
-    return {
-      active: true,
-      label: t("agentConsole.needsApproval"),
-      phase: "awaiting_approval",
-    };
-  }
-
-  const tool = findLastPart(overlay?.parts, "tool");
-  if (tool && isActiveTool(tool, phase)) {
-    return describeToolActivity(tool, phase, t);
-  }
-
-  switch (phase?.phase) {
-    case "submitting":
-      return { active: true, label: t("transcript.phaseSubmitting"), phase: phase.phase };
-    case "awaiting_model":
-      return {
-        active: true,
-        label: t(phase.activity === "steering" ? "transcript.phaseSteering" : "transcript.phaseAwaitingModel"),
-        phase: phase.phase,
-      };
-    case "thinking":
-      return { active: true, label: t("transcript.thinking"), phase: phase.phase };
-    case "streaming_text":
-      return { active: true, label: t("agentConsole.generatingReply"), phase: phase.phase };
-    case "streaming_tool_args":
-      return { active: true, label: t("transcript.toolReadingArgs"), phase: phase.phase };
-    case "executing_tool":
-      return { active: true, label: t("transcript.toolRunning"), phase: phase.phase };
-    case "awaiting_followup":
-      return { active: true, label: t("transcript.phaseAwaitingFollowup"), phase: phase.phase };
-    case "error":
-      return { active: false, failed: true, label: t("agentConsole.turnFailed"), phase: phase.phase };
-    case "cancelled":
-      return { active: false, label: t("agentConsole.turnStopped"), phase: phase.phase };
-    default:
-      if (overlay?.text.trim()) {
-        return { active: true, label: t("agentConsole.generatingReply"), phase: "streaming_text" };
-      }
-      return { active: true, label: t("transcript.phaseAwaitingModel"), phase: "awaiting_model" };
-  }
-}
-
-function describeToolActivity(
-  tool: Extract<AssistantOverlayPart, { type: "tool" }>,
-  phase: TurnPhaseState | undefined,
-  t: Translate,
-): TurnActivitySummary {
-  const name = tool.name || "";
-  const detail = toolActivityDetail(name, tool.argsText);
-  const label = t("transcript.toolRunningName").replace(
-    "{name}",
-    toolDisplayName(name, t("transcript.tool"), t),
-  );
-
-  return {
-    active: true,
-    detail,
-    label,
-    phase: phase?.phase === "streaming_tool_args" ? "streaming_tool_args" : "executing_tool",
-    toolIcon: toolIcon(name),
-  };
-}
-
-function isActiveTool(
-  tool: Extract<AssistantOverlayPart, { type: "tool" }>,
-  phase?: TurnPhaseState,
-) {
-  return (
-    tool.phase === "streaming_args" ||
-    tool.phase === "running" ||
-    phase?.phase === "streaming_tool_args" ||
-    phase?.phase === "executing_tool"
-  );
-}
-
-function toolActivityDetail(name: string, argsText: string) {
-  const args = parseObject(argsText);
-  if (!args) {
-    return "";
-  }
-  if (name === "builtin_file_copy" || name === "builtin_file_move") {
-    const from = shortPath(readString(args, "from_path"));
-    const to = shortPath(readString(args, "to_path"));
-    return from && to ? `${from} → ${to}` : from || to;
-  }
-  if (name.startsWith("builtin_file_") || name.startsWith("builtin_code_")) {
-    return shortPath(readString(args, "path"));
-  }
-  if (
-    name === "builtin_browser_open" ||
-    name === "builtin_web_fetch" ||
-    name === "builtin_rest_request" ||
-    name === "builtin_graphql_request"
-  ) {
-    return shortURL(readString(args, "url") || readString(args, "endpoint"));
-  }
-  if (name === "builtin_web_search" || name.endsWith("_search")) {
-    return shortValue(readString(args, "query"));
-  }
-  if (name === "builtin_command_run") {
-    return shortValue(readString(args, "command").split(/\r?\n/, 1)[0]);
-  }
-  if (name.startsWith("builtin_browser_")) {
-    return shortValue(
-      readString(args, "url") ||
-        readString(args, "ref") ||
-        readString(args, "selector") ||
-        readString(args, "tab_id"),
-    );
-  }
-  if (name.startsWith("builtin_computer_")) {
-    const appID = readString(args, "appID");
-    const windowID = typeof args.windowID === "number" ? `#${args.windowID}` : "";
-    return shortValue([appID, windowID].filter(Boolean).join(" "));
-  }
-  return shortValue(
-    readString(args, "path") ||
-      readString(args, "url") ||
-      readString(args, "query") ||
-      readString(args, "name"),
-  );
-}
-
-function readString(value: Record<string, unknown>, key: string) {
-  return typeof value[key] === "string" ? String(value[key]).trim() : "";
-}
-
-function shortPath(value: string) {
-  const normalized = value.replaceAll("\\", "/").replace(/\/$/, "");
-  const parts = normalized.split("/").filter(Boolean);
-  return shortValue(parts.slice(-2).join("/"));
-}
-
-function shortURL(value: string) {
-  try {
-    const url = new URL(value);
-    return shortValue(`${url.hostname}${url.pathname === "/" ? "" : url.pathname}`);
-  } catch {
-    return shortValue(value);
-  }
-}
-
-const maximumToolDetailCharacters = 80;
-
-function shortValue(value: string) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  const characters = Array.from(normalized);
-  if (characters.length <= maximumToolDetailCharacters) {
-    return normalized;
-  }
-  return `${characters.slice(0, maximumToolDetailCharacters).join("")}…`;
-}
-
-function parseObject(value: string) {
-  if (!value.trim()) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function findLastPart<T extends AssistantOverlayPart["type"]>(
-  parts: AssistantOverlayPart[] | undefined,
-  type: T,
-): Extract<AssistantOverlayPart, { type: T }> | undefined {
-  if (!parts) {
-    return undefined;
-  }
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    const part = parts[index];
-    if (part.type === type) {
-      return part as Extract<AssistantOverlayPart, { type: T }>;
-    }
-  }
-  return undefined;
-}
 
 export function toolIcon(name: string | undefined): LucideIcon {
   if (name?.startsWith("canvas_")) {

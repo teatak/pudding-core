@@ -2,6 +2,17 @@ import Testing
 
 @testable import PuddingComputerUseHelper
 
+@Test func previewRevealRequiresExactWindowAndProcess() throws {
+  let request = ProtocolRequest(id: "reveal", command: "reveal_window",
+    params: ProtocolParameters(bundleID: "com.example.App", windowID: 42, pid: 123))
+  #expect(try request.helperCommand() == .revealWindow(bundleID: "com.example.App", windowID: 42, pid: 123))
+  for pid: Int32? in [nil, 0, -1] {
+    let invalid = ProtocolRequest(id: "invalid", command: "reveal_window",
+      params: ProtocolParameters(bundleID: "com.example.App", windowID: 42, pid: pid))
+    #expect(throws: ArgumentError.self) { try invalid.helperCommand() }
+  }
+}
+
 @Test func protocolObserveDefaultsToBoundedTree() throws {
   let request = ProtocolRequest(
     id: "req-1",
@@ -26,7 +37,7 @@ import Testing
     )
   )
 
-  #expect(throws: ArgumentError.invalidOption("value", "allowed only for set_value")) {
+  #expect(throws: ArgumentError.invalidOption("value", "allowed only for set_value/select_text")) {
     try request.helperCommand()
   }
 }

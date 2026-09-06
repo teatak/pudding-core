@@ -5,6 +5,10 @@ import Foundation
 struct PuddingComputerUseHelper {
   static func main() async {
     do {
+      if Array(CommandLine.arguments.dropFirst()) == ["preview"] {
+        try await WindowPreview().run()
+        return
+      }
       let command = try ArgumentParser.parse(Array(CommandLine.arguments.dropFirst()))
       let runtime = HelperRuntime()
       if command == .serve {

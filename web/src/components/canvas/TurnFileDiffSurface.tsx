@@ -59,7 +59,7 @@ export function TurnFileDiffSurface({
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-2.5">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--workspace-border)] bg-[var(--workspace-content-toolbar-background)] px-2.5">
         <FileDiff className="size-4 shrink-0 text-muted-foreground" />
         {selected ? (
           <DropdownMenu>

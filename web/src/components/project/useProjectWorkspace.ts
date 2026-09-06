@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { arrayMove } from "@dnd-kit/sortable";
 
 import type { ProjectBrowserRoot } from "@/api/client";
 
 import { projectPathContains, projectTabKey, replaceProjectPath } from "./projectPaths";
-import type { ProjectGitDiffSelection, ProjectSelection, ProjectTab } from "./types";
+import { isProjectGitDiffTab, type ProjectGitDiffSelection, type ProjectSelection, type ProjectTab } from "./types";
 
 type ProjectWorkspace = {
   activeKey?: string;
@@ -38,14 +39,12 @@ export function useProjectWorkspace(sessionID: string) {
 
   const update = (change: (current: ProjectWorkspace) => ProjectWorkspace) => updateSession(sessionID, change);
 
-  const revealInSession = (targetSessionID: string, selection: ProjectSelection) => {
-    updateSession(targetSessionID, (current) => {
+  const expandTo = (selection: ProjectSelection) => {
+    update((current) => {
       const expandedKeys = expandedKeysForSelection(current.expandedKeys, selection);
       return expandedKeys === current.expandedKeys ? current : { ...current, expandedKeys };
     });
   };
-
-  const reveal = (selection: ProjectSelection) => revealInSession(sessionID, selection);
 
   const openTabInSession = (targetSessionID: string, selection: ProjectSelection | ProjectGitDiffSelection, pinned: boolean) => {
     const candidate = { ...selection, pinned } as ProjectTab;
@@ -148,6 +147,7 @@ export function useProjectWorkspace(sessionID: string) {
 
   return {
     ...workspace,
+    openFiles: Object.entries(bySession).flatMap(([sessionID, workspace]) => workspace.tabs.filter(tab => !isProjectGitDiffTab(tab)).map(selection => ({ sessionID, selection }))),
     selected,
     activate,
     closeKeys,
@@ -161,6 +161,11 @@ export function useProjectWorkspace(sessionID: string) {
     },
     openPinned: (selection: ProjectSelection) => open(selection, true),
     pinTab: (selection: ProjectTab) => openTabInSession(sessionID, selection, true),
+    moveTab: (activeID: string, overID: string) => update((current) => {
+      const from = current.tabs.findIndex((tab) => projectTabKey(tab) === activeID);
+      const to = current.tabs.findIndex((tab) => projectTabKey(tab) === overID);
+      return from < 0 || to < 0 || from === to ? current : { ...current, tabs: arrayMove(current.tabs, from, to) };
+    }),
     openPinnedInSession: (targetSessionID: string, selection: ProjectSelection) => openInSession(targetSessionID, selection, true),
     openPreview: (selection: ProjectSelection) => open(selection, false),
     openGitDiff: (selection: ProjectGitDiffSelection, pinned = false) => openTabInSession(sessionID, selection, pinned),
@@ -185,7 +190,7 @@ export function useProjectWorkspace(sessionID: string) {
     renameUnder: (target: ProjectSelection, nextPath: string) => renameUnderInSession(sessionID, target, nextPath),
     renameUnderInSession,
     moveUnderInSession,
-    reveal,
+    expandTo,
     toggleDirectory: (rootID: string, path: string) => update((current) => {
       const key = `${rootID}:${path}`;
       const expandedKeys = current.expandedKeys.includes(key)

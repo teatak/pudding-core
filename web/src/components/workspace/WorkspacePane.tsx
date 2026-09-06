@@ -1,35 +1,34 @@
+import { useRecentOpen } from "./useRecentOpen";
+import { useLibrary } from "./useLibrary";
+import { AppTooltip } from "@/components/AppTooltip";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FolderClosed, Plus } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import { BrowserTabIcon } from "@/browser/BrowserTabIcon";
+import { browserTabFaviconURL } from "@/browser/helpers";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   APIError,
-  clearClosedCanvasItems,
-  createClosedCanvasItem,
   deleteCanvasItem,
-  deleteClosedCanvasItem,
   deleteSavedCanvasItem,
-  listClosedCanvasItems,
   listCanvasItems,
-  listSavedCanvasItems,
   getSession,
-  listProjectBrowserRoots,
   putCanvasItem,
   openSavedCanvasItem,
   saveCanvasItem,
-  type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { useRetainBrowserRuntimeTabs } from "@/browser/BrowserRuntimeProvider";
 import { browserTabTitle } from "@/browser/helpers";
-import { activateBrowserPageFindRegion } from "@/browser/pageFindTarget";
 import type { GalleryLayout } from "@/components/canvas/CanvasItemContent";
 import {
   CanvasItemActions,
   CanvasItemSurface,
 } from "@/components/canvas/CanvasItemSurface";
-import { titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
-import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
+import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
+import { filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { asRecord, stringValue } from "@/components/canvas/canvasPayload";
 import { Spinner } from "@/components/Spinner";
 import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
@@ -43,8 +42,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ConfirmationDialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
+import type { CanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { turnFileChangeFullPath, turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
@@ -52,22 +50,23 @@ import { consumeCanvasReveal, useVisibleCanvasReveal } from "@/state/canvasRevea
 import {
   closeFilePreview,
   consumeFilePreviewReveal,
-  type FilePreview,
   useFilePreviews,
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
-import { consumeProjectFileReveal, useVisibleProjectFileReveal } from "@/state/projectRevealStore";
+import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import {
   canvasWorkspaceTabKey,
   fileWorkspaceTabKey,
-  getWorkspaceSessionUI,
+  closeWorkspaceTab,
+  closeWorkspaceTabs,
+  reconcileWorkspaceTabs,
   mergeWorkspaceTabOrder,
-  nextWorkspaceTabAfterClose,
-  openWorkspaceTab,
-  replaceWorkspaceSessionUI,
-  setWorkspaceActiveTab,
+  useWorkspaceSessionUI,
+  resolveCanvasTabs,
   updateWorkspaceSessionUI,
-  useProjectTabOpen,
+  openWorkspaceView,
+  openWorkspaceTab,
+  setWorkspaceActiveTab,
   workspaceTabResourceID,
   type WorkspaceTabKey,
 } from "@/state/workspaceStore";
@@ -77,9 +76,9 @@ import {
   type UIContextPart,
 } from "@/state/uiContextStore";
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
-import { WorkspaceEmpty } from "./WorkspaceEmpty";
-import { WorkspaceResourceMenu } from "./WorkspaceResourceMenu";
-import { WorkspaceResourceTabs } from "./WorkspaceResourceTabs";
+import { WorkspaceContentTabs, type WorkspaceContentTab } from "./WorkspaceContentTabs";
+import type { ClosedCanvasEntry } from "./CanvasLibraryRows";
+import { WorkspaceLibrary } from "./WorkspaceLibrary";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 
 type WorkspacePaneProps = {
@@ -88,7 +87,7 @@ type WorkspacePaneProps = {
   presented: boolean;
   sessionID?: string;
   secondarySessionID?: string;
-  reserveTopRightActions?: 0 | 1 | 2;
+  reserveWorkspaceControl?: boolean;
 };
 
 export const WorkspacePane = memo(function WorkspacePane({
@@ -97,19 +96,15 @@ export const WorkspacePane = memo(function WorkspacePane({
   presented,
   sessionID,
   secondarySessionID,
-  reserveTopRightActions = 0,
+  reserveWorkspaceControl = false,
 }: WorkspacePaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const actorSessionIDRef = useRef("");
-  const canvasSessionStateRef = useRef("");
-  const retainedTokenRef = useRef(token);
-  const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
-  const hasSeenCanvasItemsRef = useRef(false);
+  const librarySearchRef = useRef<HTMLInputElement>(null);
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
-  const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
-  const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
-  const [activeProjectTurnDiffIDs, setActiveProjectTurnDiffIDs] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<({ kind: "canvas"; item: CanvasItem } | { kind: "saved"; item: { id: string; title?: string } }) & { sessionID: string }>();
+  const [pendingCanvasClose, setPendingCanvasClose] = useState<{ sessionID: string; keys: WorkspaceTabKey[] }>();
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
   const [validatedProjectReveal, setValidatedProjectReveal] = useState<{ serial: number; sessionID: string }>();
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
@@ -121,51 +116,19 @@ export const WorkspacePane = memo(function WorkspacePane({
       actorSessionIDRef.current = actorSessionID;
     }
   }, [actorSessionID]);
-  const setActiveProjectTurnDiffID = useCallback((previewID: string | undefined) => {
-    if (!actorSessionID) return;
-    setActiveProjectTurnDiffIDs((current) => {
-      if (previewID) {
-        return current[actorSessionID] === previewID
-          ? current
-          : { ...current, [actorSessionID]: previewID };
-      }
-      if (!current[actorSessionID]) return current;
-      const next = { ...current };
-      delete next[actorSessionID];
-      return next;
-    });
-  }, [actorSessionID]);
   const primaryFilePreviews = useFilePreviews(sessionID);
   const secondaryFilePreviews = useFilePreviews(secondarySessionID);
-  const allFilePreviews = useMemo(
-    () =>
-      [...primaryFilePreviews, ...secondaryFilePreviews].filter(
-        (preview, index, all) => all.findIndex((entry) => entry.id === preview.id) === index,
-      ),
-    [primaryFilePreviews, secondaryFilePreviews],
-  );
-  const filePreviews = actorSessionID === secondarySessionID ? secondaryFilePreviews : primaryFilePreviews;
-  const mountedFilePreviews = useMemo(() => {
-    const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
-    return [
-      ...Object.values(retainedFilePreviews).filter((preview) => !activeSessionIDs.has(preview.sessionID)),
-      ...allFilePreviews,
-    ];
-  }, [allFilePreviews, retainedFilePreviews, secondarySessionID, sessionID]);
-  useEffect(() => {
-    const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
-    setRetainedFilePreviews((current) => {
-      const next = Object.fromEntries(
-        Object.entries(current).filter(([, preview]) => !activeSessionIDs.has(preview.sessionID)),
-      );
-      allFilePreviews.forEach((preview) => {
-        next[preview.id] = preview;
-      });
-      return sameResourceRecord(current, next) ? current : next;
-    });
-  }, [allFilePreviews, secondarySessionID, sessionID]);
+  const sessionFilePreviews = actorSessionID === secondarySessionID ? secondaryFilePreviews : primaryFilePreviews;
+  const workspaceUI = useWorkspaceSessionUI(actorSessionID);
+  const projectTabOrder = workspaceUI.project.tabOrder;
+  const filePreviews = useMemo(() => {
+    const byKey = new Map(sessionFilePreviews.map((preview) => [fileWorkspaceTabKey(preview.id), preview]));
+    return mergeWorkspaceTabOrder(projectTabOrder, [...byKey.keys()]).map((key) => byKey.get(key)!);
+  }, [sessionFilePreviews, projectTabOrder]);
   const enabled = Boolean(token && actorSessionID);
-  const projectTabOpen = useProjectTabOpen(actorSessionID);
+  const activeTab = workspaceUI.activeTab;
+  const activeApp = activeTab.startsWith("browser:") ? "browser" : activeTab.startsWith("canvas:") ? "artifacts" : activeTab;
+  const projectActiveTab = workspaceUI.project.activeTab;
 
   const sessionQuery = useQuery({
     enabled,
@@ -174,16 +137,6 @@ export const WorkspacePane = memo(function WorkspacePane({
     staleTime: 10_000,
   });
   const hasProject = Boolean(sessionQuery.data?.projectID);
-  const workspaceRootsQuery = useQuery({
-    enabled,
-    queryKey: queryKeys.projectBrowserRoots(actorSessionID),
-    queryFn: () => listProjectBrowserRoots(token, actorSessionID),
-    staleTime: 10_000,
-  });
-  const hasFileWorkspace = hasProject || Boolean(workspaceRootsQuery.data?.roots.length);
-  const temporaryFileWorkspace = !hasProject && Boolean(workspaceRootsQuery.data?.temporary);
-  const fileWorkspaceLabel = temporaryFileWorkspace ? t("workspace.sessionFiles") : t("workspace.project");
-  const projectTabVisible = hasFileWorkspace && projectTabOpen;
   const projectRevealReady = !projectFileReveal || (
     validatedProjectReveal?.serial === projectFileReveal.serial
     && validatedProjectReveal.sessionID === projectFileReveal.sessionID
@@ -214,50 +167,6 @@ export const WorkspacePane = memo(function WorkspacePane({
       cancelled = true;
     };
   }, [actorSessionID, projectFileReveal?.serial, queryClient, sessionQuery.refetch]);
-  const projectTurnDiffPreviews = useMemo(
-    () => hasFileWorkspace ? filePreviews.filter((preview) => preview.source === "turn-diff") : [],
-    [filePreviews, hasFileWorkspace],
-  );
-  const surfaceFilePreviews = useMemo(
-    () => filePreviews.filter((preview) => (
-      preview.source !== "turn-diff" || (
-        !sessionQuery.isPending
-        && !workspaceRootsQuery.isPending
-        && !hasFileWorkspace
-      )
-    )),
-    [
-      filePreviews,
-      hasFileWorkspace,
-      sessionQuery.isPending,
-      workspaceRootsQuery.isPending,
-    ],
-  );
-  const workspaceFilePreviewTabs = useMemo(
-    () => surfaceFilePreviews.map((preview) => ({
-      id: preview.id,
-      kind: preview.source === "turn-diff" ? "diff" as const : "file" as const,
-      label: preview.source === "turn-diff" ? t("turnFiles.tab") : filePreviewTitle(preview.path),
-      openedAt: preview.openedAt,
-      path: preview.source === "turn-diff"
-        ? (() => {
-            const changes = turnFileDiffChanges(preview.fileChanges || []);
-            const change = changes.find((item) => item.id === preview.selectedFileChangeID) || changes[0];
-            return change ? turnFileChangeLabel(change, changes) : t("turnFiles.tab");
-          })()
-        : preview.path,
-    })),
-    [surfaceFilePreviews, t],
-  );
-
-  useEffect(() => {
-    if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
-      return;
-    }
-    canvasSessionStateRef.current = actorSessionID;
-    seenCanvasItemIDsRef.current = new Set();
-    hasSeenCanvasItemsRef.current = false;
-  }, [actorSessionID]);
 
   const itemsQuery = useQuery({
     enabled,
@@ -265,48 +174,31 @@ export const WorkspacePane = memo(function WorkspacePane({
     queryFn: () => listCanvasItems(token, actorSessionID),
     staleTime: Infinity,
   });
-  const closedItemsQuery = useQuery({
-    enabled,
-    queryKey: queryKeys.closedCanvasItems(actorSessionID),
-    queryFn: () => listClosedCanvasItems(token, actorSessionID),
-    staleTime: 30_000,
-  });
-  const savedItemsQuery = useQuery({
-    enabled,
-    queryKey: queryKeys.savedCanvasItems(),
-    queryFn: () => listSavedCanvasItems(token, actorSessionID),
-    staleTime: 30_000,
-  });
+  const libraryQuery = useLibrary(token, actorSessionID, enabled);
 
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
-  const closedItems = useMemo(() => closedItemsQuery.data?.items ?? [], [closedItemsQuery.data?.items]);
-  const savedItems = useMemo(() => savedItemsQuery.data?.items ?? [], [savedItemsQuery.data?.items]);
-  const availableNonBrowserTabs = useMemo<WorkspaceTabKey[]>(() => [
-    ...surfaceFilePreviews.map((preview) => ({ key: fileWorkspaceTabKey(preview.id), at: preview.openedAt })),
-    ...items.map((item) => ({ key: canvasWorkspaceTabKey(item.id), at: Date.parse(item.createdAt) })),
-    ...(projectTabVisible ? [{ key: "project" as const, at: Number.MAX_SAFE_INTEGER }] : []),
-  ].sort((left, right) => left.at - right.at || left.key.localeCompare(right.key)).map((entry) => entry.key), [
-    items,
-    projectTabVisible,
-    surfaceFilePreviews,
-  ]);
+  const canvasTabs = useMemo(() => resolveCanvasTabs(workspaceUI, items), [workspaceUI, items]);
+  const openCanvasItems = useMemo(() => items.filter((item) => !canvasTabs.closedCanvasTabs?.[canvasWorkspaceTabKey(item.id)]), [items, canvasTabs]);
+  const closedItems = useMemo<ClosedCanvasEntry[]>(() => items.flatMap((item) => {
+    const closedAt = canvasTabs.closedCanvasTabs?.[canvasWorkspaceTabKey(item.id)];
+    return closedAt ? [{ ...item, closedAt }] : [];
+  }).sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt)), [items, canvasTabs]);
   const {
     activeBrowserTabID,
     activeBrowserSelection,
-    activeTab,
     browserActive,
     browserTabsReady,
     browserTabsResolved,
     browserTabs,
     browserSurfacePending,
-    browserSurfaceVisible,
-    closeBrowserTab,
-    closingBrowserTabID,
+    browserSurfaceError,
+    retryBrowserTabs,
+    closeBrowserTabs,
+    closingBrowserTabIDs,
     createNewBrowserTab,
     creatingBrowserTab,
-    selectBrowserTab,
+    openBrowserFromLibrary,
   } = useWorkspaceBrowserSurface({
-    availableNonBrowserTabs,
     enabled,
     sessionID: actorSessionID,
     token,
@@ -314,40 +206,23 @@ export const WorkspacePane = memo(function WorkspacePane({
   useRetainBrowserRuntimeTabs(actorSessionID, browserTabs, browserTabsReady);
   const browserSurfaceTabs = browserTabsReady ? browserTabs : [];
   const availableWorkspaceTabs = useMemo<WorkspaceTabKey[]>(() => [
-    ...browserTabs.map((tab) => ({ key: `browser:${tab.id}` as const, at: Date.parse(tab.createdAt) })),
-    ...surfaceFilePreviews.map((preview) => ({ key: fileWorkspaceTabKey(preview.id), at: preview.openedAt })),
-    ...items.map((item) => ({ key: canvasWorkspaceTabKey(item.id), at: Date.parse(item.createdAt) })),
-    ...(projectTabVisible ? [{ key: "project" as const, at: Number.MAX_SAFE_INTEGER }] : []),
-  ].sort((left, right) => left.at - right.at || left.key.localeCompare(right.key)).map((entry) => entry.key), [
-    browserTabs,
-    items,
-    projectTabVisible,
-    surfaceFilePreviews,
-  ]);
-  const activeSurface = workspaceSurface(activeTab);
+    "project", ...filePreviews.map((preview) => fileWorkspaceTabKey(preview.id)),
+    ...items.map((item) => canvasWorkspaceTabKey(item.id)),
+    ...browserTabs.map((tab) => `browser:${tab.id}` as const),
+  ], [filePreviews, items, browserTabs]);
   const activeCanvasItemID = workspaceTabResourceID(activeTab, "canvas");
   const activeCanvasItem = items.find((item) => item.id === activeCanvasItemID);
-  const activeFilePreviewID = workspaceTabResourceID(activeTab, "file");
+  useRecentOpen(token,actorSessionID,presented && activeApp === "artifacts" && activeCanvasItem ? {kind:"canvas",itemID:activeCanvasItem.id} : undefined);
+  const activeFilePreviewID = workspaceTabResourceID(projectActiveTab, "file");
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
-  const activeProjectTurnDiffID = activeProjectTurnDiffIDs[actorSessionID];
-  const activeProjectTurnDiff = filePreviews.find((preview) => preview.id === activeProjectTurnDiffID && preview.source === "turn-diff");
-  const projectActive = activeTab === "project";
-  const filePreviewActive = Boolean(activeFilePreview);
-  useEffect(() => {
-    if (retainedTokenRef.current === token) {
-      return;
-    }
-    retainedTokenRef.current = token;
-    setRetainedFilePreviews({});
-    setActiveProjectTurnDiffIDs({});
-    setCanvasGalleryActiveIndices({});
-  }, [token]);
+  const projectActive = activeApp === "project";
+  const filePreviewActive = projectActive && Boolean(activeFilePreview);
 
   const visibleUIContext = useMemo<UIContextPart | undefined>(() => {
     if (!actorSessionID) {
       return undefined;
     }
-    if (projectActive) {
+    if (projectActive && !filePreviewActive) {
       return projectUIContext || { type: "ui_context", surface: "project" };
     }
     if (filePreviewActive && activeFilePreview) {
@@ -374,7 +249,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         kind: activeFilePreview.source,
       };
     }
-    if (activeSurface === "canvas") {
+    if (activeApp === "artifacts") {
       if (!activeCanvasItem) {
         return { type: "ui_context", surface: "canvas" };
       }
@@ -388,7 +263,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         kind: stringValue(payload?.kind) || activeCanvasItem.kind,
       };
     }
-    if (activeSurface === "browser") {
+    if (activeApp === "browser") {
       const tab = browserTabs.find((entry) => entry.id === activeBrowserTabID);
       return tab
         ? {
@@ -409,7 +284,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     activeBrowserSelection,
     activeCanvasItem,
     activeFilePreview,
-    activeSurface,
+    activeApp,
     actorSessionID,
     browserTabs,
     filePreviewActive,
@@ -428,24 +303,13 @@ export const WorkspacePane = memo(function WorkspacePane({
       return;
     }
     const preview = filePreviews.find((entry) => entry.id === filePreviewReveal.previewID);
-    if (!preview || (preview.source === "turn-diff" && (sessionQuery.isPending || workspaceRootsQuery.isPending))) {
-      return;
-    }
-    if (preview.source === "turn-diff" && hasFileWorkspace) {
-      setActiveProjectTurnDiffID(preview.id);
-      openWorkspaceTab(actorSessionID, "project");
-    } else {
-      openWorkspaceTab(actorSessionID, fileWorkspaceTabKey(preview.id));
-    }
+    if (!preview) return;
+    openWorkspaceTab(actorSessionID, fileWorkspaceTabKey(preview.id));
     consumeFilePreviewReveal(filePreviewReveal.serial);
   }, [
     actorSessionID,
     filePreviewReveal,
     filePreviews,
-    hasFileWorkspace,
-    sessionQuery.isPending,
-    setActiveProjectTurnDiffID,
-    workspaceRootsQuery.isPending,
   ]);
 
   useEffect(() => {
@@ -455,82 +319,28 @@ export const WorkspacePane = memo(function WorkspacePane({
     if (!items.some((item) => item.id === canvasReveal.itemID)) {
       return;
     }
-    openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(canvasReveal.itemID));
+    setWorkspaceActiveTab(actorSessionID, canvasWorkspaceTabKey(canvasReveal.itemID));
     consumeCanvasReveal(canvasReveal.serial);
   }, [actorSessionID, canvasReveal, items]);
 
-  const createBrowserSurface = useCallback(() => createNewBrowserTab(), [createNewBrowserTab]);
-
-  const activateProjectSurface = useCallback(() => {
-    if (hasFileWorkspace) openWorkspaceTab(actorSessionID, "project");
-  }, [actorSessionID, hasFileWorkspace]);
-
-  const closeLocalWorkspaceTab = useCallback((closingTab: WorkspaceTabKey, closeProject = false) => {
-    updateWorkspaceSessionUI(actorSessionID, (current) => ({
-      ...current,
-      activeTab: current.activeTab === closingTab
-        ? nextWorkspaceTabAfterClose(closingTab, availableWorkspaceTabs, current.tabOrder)
-        : current.activeTab,
-      projectTabOpen: closeProject ? false : current.projectTabOpen,
-      tabOrder: current.tabOrder.filter((tab) => tab !== closingTab),
-    }));
-  }, [actorSessionID, availableWorkspaceTabs]);
-
-  const closeProjectSurface = useCallback(() => {
-    if (!actorSessionID) return;
-    if (projectFileReveal?.sessionID === actorSessionID) {
-      consumeProjectFileReveal(actorSessionID, projectFileReveal.serial);
-    }
-    if (filePreviewReveal?.sessionID === actorSessionID) {
-      const pendingPreview = filePreviews.find((preview) => preview.id === filePreviewReveal.previewID);
-      if (pendingPreview?.source === "turn-diff") {
-        consumeFilePreviewReveal(filePreviewReveal.serial);
-      }
-    }
-    closeLocalWorkspaceTab("project", true);
-  }, [
-    actorSessionID,
-    closeLocalWorkspaceTab,
-    filePreviewReveal,
-    filePreviews,
-    projectFileReveal,
-  ]);
-
-  const selectFilePreview = useCallback((previewID: string) => {
-    setWorkspaceActiveTab(actorSessionID, fileWorkspaceTabKey(previewID));
+  const closeLocalWorkspaceTab = useCallback((closingTab: WorkspaceTabKey) => {
+    closeWorkspaceTab(actorSessionID, closingTab);
   }, [actorSessionID]);
-
-  const selectProjectTurnDiff = useCallback((previewID: string) => {
-    setActiveProjectTurnDiffID(previewID);
-    openWorkspaceTab(actorSessionID, "project");
-  }, [actorSessionID, setActiveProjectTurnDiffID]);
-
-  const deactivateProjectTurnDiff = useCallback(() => {
-    setActiveProjectTurnDiffID(undefined);
-  }, [setActiveProjectTurnDiffID]);
-
-  const closeProjectTurnDiffs = useCallback((previewIDs: string[]) => {
-    const closing = new Set(previewIDs);
-    projectTurnDiffPreviews
-      .filter((preview) => closing.has(preview.id))
-      .forEach((preview) => closeFilePreview(preview.sessionID, preview.id));
-    if (activeProjectTurnDiffID && closing.has(activeProjectTurnDiffID)) {
-      const remaining = projectTurnDiffPreviews.filter((preview) => !closing.has(preview.id));
-      setActiveProjectTurnDiffID(remaining.at(-1)?.id);
-    }
-  }, [activeProjectTurnDiffID, projectTurnDiffPreviews, setActiveProjectTurnDiffID]);
-
-  const removeFilePreview = useCallback((preview: FilePreview) => {
-    closeFilePreview(preview.sessionID, preview.id);
-    closeLocalWorkspaceTab(fileWorkspaceTabKey(preview.id));
-  }, [closeLocalWorkspaceTab]);
+  const selectFilePreview = useCallback((previewID: string) => setWorkspaceActiveTab(actorSessionID, fileWorkspaceTabKey(previewID)), [actorSessionID]);
+  const deactivateFilePreview = useCallback(() => setWorkspaceActiveTab(actorSessionID, "project"), [actorSessionID]);
+  const closeFilePreviews = useCallback((previewIDs: string[]) => {
+    filePreviews.filter((preview) => previewIDs.includes(preview.id)).forEach((preview) => {
+      closeFilePreview(preview.sessionID, preview.id);
+      closeLocalWorkspaceTab(fileWorkspaceTabKey(preview.id));
+    });
+  }, [filePreviews, closeLocalWorkspaceTab]);
 
   const galleryLayoutMutation = useMutation({
     mutationFn: ({ item, layout }: { item: CanvasItem; layout: GalleryLayout }) => {
       const payload = asRecord(item.item) || {};
       const title = titleForCanvasItem(item, t);
       const kind = stringValue(payload.kind) || item.kind;
-      return putCanvasItem(token, actorSessionID, item.id, {
+      return putCanvasItem(token, item.sessionID, item.id, {
         id: item.id,
         kind,
         title,
@@ -538,8 +348,8 @@ export const WorkspacePane = memo(function WorkspacePane({
         window: item.window,
       });
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+    onSuccess: (_result, { item }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(item.sessionID) });
     },
     onError: () => {
       toast.error(t("canvas.galleryLayoutFailed"));
@@ -555,17 +365,33 @@ export const WorkspacePane = memo(function WorkspacePane({
     galleryLayoutMutation.mutate({ item, layout });
   }, [galleryLayoutMutation.mutate]);
 
+  const closeContentTabsNow = async (targetSessionID: string, keys: WorkspaceTabKey[]) => {
+    const browserIDs = keys.flatMap((key) => { const id = workspaceTabResourceID(key, "browser"); return id ? [id] : []; });
+    try {
+      if (browserIDs.length) await closeBrowserTabs(targetSessionID, browserIDs);
+      closeWorkspaceTabs(targetSessionID, keys.filter((key) => !key.startsWith("browser:")));
+      setPendingCanvasClose(undefined);
+    } catch {
+      // Browser release reports the failure; keep the remaining canvas tabs open.
+    }
+  };
   const saveItemMutation = useMutation({
-    mutationFn: (item: CanvasItem) => saveCanvasItem(token, actorSessionID, item.id),
-    onSuccess: (result) => {
-      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
-        items: (current?.items || []).map((item) => item.id === result.item.id ? result.item : item),
-      }));
-      queryClient.setQueryData<{ items: SavedCanvasItem[] }>(queryKeys.savedCanvasItems(), (current) => ({
-        items: [result.savedItem, ...(current?.items || []).filter((item) => item.id !== result.savedItem.id)],
-      }));
+    mutationFn: async ({ targetSessionID, itemIDs, closeAfterSave }: { targetSessionID: string; itemIDs: string[]; closeAfterSave?: WorkspaceTabKey[] }) => {
+      for (const id of itemIDs) {
+        const key = queryKeys.canvasItems(targetSessionID);
+        const item = queryClient.getQueryData<{ items: CanvasItem[] }>(key)?.items.find((entry) => entry.id === id);
+        if (!item || (closeAfterSave && !(item.sourceSavedItemID && item.savedDirty))) continue;
+        const result = await saveCanvasItem(token, targetSessionID, id);
+        queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
+          items: (current?.items || []).map((entry) => entry.id === result.item.id ? result.item : entry),
+        }));
+      }
+    },
+    onSuccess: (_result, { targetSessionID, closeAfterSave }) => {
+      if (closeAfterSave) void closeContentTabsNow(targetSessionID, closeAfterSave);
       toast.success(t("canvas.saveDone"));
     },
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: ["library"] }); },
     onError: (error) => {
       toast.error(error instanceof APIError && error.code === "saved_canvas_conflict"
         ? t("canvas.saveConflict")
@@ -574,157 +400,46 @@ export const WorkspacePane = memo(function WorkspacePane({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (item: CanvasItem) => {
-      await createClosedCanvasItem(token, actorSessionID, {
-        sourceItemID: item.id,
-        kind: item.kind,
-        title: titleForCanvasItem(item, t),
-        item: item.item,
-        window: item.window,
-        closedAt: new Date().toISOString(),
-      });
-      await deleteCanvasItem(token, actorSessionID, item.id);
-    },
-    onMutate: async (item) => {
-      const key = queryKeys.canvasItems(actorSessionID);
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<{ items: CanvasItem[] }>(key);
-      const previousUI = getWorkspaceSessionUI(actorSessionID);
-      queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
-        items: (current?.items || []).filter((entry) => entry.id !== item.id),
-      }));
-      closeLocalWorkspaceTab(canvasWorkspaceTabKey(item.id));
-      return { previous, previousUI };
-    },
-    onError: (_error, _item, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.canvasItems(actorSessionID), context.previous);
-      }
-      if (context?.previousUI) {
-        replaceWorkspaceSessionUI(actorSessionID, context.previousUI);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-      toast.error(t("canvas.closeFailed"));
-    },
+    mutationFn: (item: CanvasItem) => deleteCanvasItem(token, item.sessionID, item.id),
     onSuccess: (_result, item) => {
-      if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-      }
-    },
-  });
-
-  const closeSavedMutation = useMutation({
-    mutationFn: async ({ item, saveChanges }: { item: CanvasItem; saveChanges: boolean }) => {
-      if (saveChanges) {
-        await saveCanvasItem(token, actorSessionID, item.id);
-      }
-      await deleteCanvasItem(token, actorSessionID, item.id);
-    },
-    onMutate: async ({ item }) => {
-      const key = queryKeys.canvasItems(actorSessionID);
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<{ items: CanvasItem[] }>(key);
-      const previousUI = getWorkspaceSessionUI(actorSessionID);
+      const key = queryKeys.canvasItems(item.sessionID);
       queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
         items: (current?.items || []).filter((entry) => entry.id !== item.id),
       }));
-      closeLocalWorkspaceTab(canvasWorkspaceTabKey(item.id));
-      return { previous, previousUI };
+      const remaining = queryClient.getQueryData<{ items: CanvasItem[] }>(key)?.items || [];
+      updateWorkspaceSessionUI(item.sessionID, (current) => resolveCanvasTabs(current, remaining));
+      setPendingDelete(undefined);
+      void queryClient.invalidateQueries({ queryKey: key });
     },
-    onError: (error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.canvasItems(actorSessionID), context.previous);
-      }
-      if (context?.previousUI) {
-        replaceWorkspaceSessionUI(actorSessionID, context.previousUI);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
-      toast.error(error instanceof APIError && error.code === "saved_canvas_conflict"
-        ? t("canvas.saveConflict")
-        : t("canvas.closeFailed"));
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
-    },
+    onError: () => toast.error(t("canvas.deleteFailed")),
   });
-
-  const requestCloseCanvasItem = useCallback((item: CanvasItem) => {
-    if (!item.sourceSavedItemID) {
-      deleteMutation.mutate(item);
-      return;
-    }
-    if (item.savedDirty) {
-      setPendingSavedClose(item);
-      return;
-    }
-    closeSavedMutation.mutate({ item, saveChanges: false });
-  }, [closeSavedMutation.mutate, deleteMutation.mutate]);
-
-  const restoreMutation = useMutation({
-    mutationFn: async (entry: ClosedCanvasItem) => {
-      const item = await putCanvasItem(token, actorSessionID, entry.sourceItemID, canvasPayloadFromClosedItem(entry));
-      await deleteClosedCanvasItem(token, actorSessionID, entry.id);
-      return item;
-    },
-    onSuccess: (item) => {
-      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
-        items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
-      }));
-      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(item.id));
-      if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-      }
-    },
-    onError: () => {
-      toast.error(t("canvas.restoreFailed"));
-    },
-  });
-
-  const restoreClosedItem = (entry: ClosedCanvasItem) => {
-    if (items.some((item) => item.id === entry.sourceItemID)) {
-      void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
-        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
-      );
-      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(entry.sourceItemID));
-      return;
-    }
-    restoreMutation.mutate(entry);
+  const requestCloseContentTabs = (keys: WorkspaceTabKey[]) => {
+    if (saveItemMutation.isPending || pendingCanvasClose || closingBrowserTabIDs.length) return;
+    const selected = openCanvasItems.filter((item) => keys.includes(canvasWorkspaceTabKey(item.id)));
+    if (selected.some((item) => item.sourceSavedItemID && item.savedDirty)) {
+      setPendingCanvasClose({ sessionID: actorSessionID, keys });
+    } else void closeContentTabsNow(actorSessionID, keys);
   };
-
-  const removeClosedMutation = useMutation({
-    mutationFn: (entry: ClosedCanvasItem) => deleteClosedCanvasItem(token, actorSessionID, entry.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-    },
-  });
-
-  const clearClosedMutation = useMutation({
-    mutationFn: () => clearClosedCanvasItems(token, actorSessionID),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-    },
-  });
+  const pendingCanvasItems = pendingCanvasClose?.sessionID === actorSessionID
+    ? items.filter((item) => pendingCanvasClose.keys.includes(canvasWorkspaceTabKey(item.id))) : [];
+  const restoreClosedItem = (item: ClosedCanvasEntry) => openWorkspaceTab(item.sessionID, canvasWorkspaceTabKey(item.id));
 
   const openSavedMutation = useMutation({
-    mutationFn: (entry: SavedCanvasItem) => openSavedCanvasItem(token, actorSessionID, entry.id),
+    mutationFn: ({ entry, targetSessionID }: { entry: { id: string }; targetSessionID: string }) => openSavedCanvasItem(token, targetSessionID, entry.id),
     onSuccess: (item) => {
-      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
+      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(item.sessionID), (current) => ({
         items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
       }));
-      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(item.id));
+      openWorkspaceTab(item.sessionID, canvasWorkspaceTabKey(item.id));
     },
     onError: () => toast.error(t("canvas.openSavedFailed")),
   });
 
   const removeSavedMutation = useMutation({
-    mutationFn: (entry: SavedCanvasItem) => deleteSavedCanvasItem(token, actorSessionID, entry.id),
+    mutationFn: ({ entry, targetSessionID }: { entry: { id: string }; targetSessionID: string }) => deleteSavedCanvasItem(token, targetSessionID, entry.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
+      setPendingDelete(undefined);
+      void queryClient.invalidateQueries({ queryKey: ["library"] });
       void queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === "session"
           && query.queryKey[2] === "canvas"
@@ -735,154 +450,64 @@ export const WorkspacePane = memo(function WorkspacePane({
   });
 
   useEffect(() => {
-    if (itemsQuery.isPending) return;
-    if (items.length === 0) {
-      seenCanvasItemIDsRef.current = new Set();
-      hasSeenCanvasItemsRef.current = true;
-      return;
-    }
-    const seenIDs = seenCanvasItemIDsRef.current;
-    const newItems = hasSeenCanvasItemsRef.current ? items.filter((item) => !seenIDs.has(item.id)) : [];
-    seenCanvasItemIDsRef.current = new Set(items.map((item) => item.id));
-    hasSeenCanvasItemsRef.current = true;
-    if (newItems.length > 0) {
-      openWorkspaceTab(actorSessionID, canvasWorkspaceTabKey(newItems.at(-1)!.id));
-    }
-  }, [actorSessionID, items, itemsQuery.isPending]);
+    if (!enabled) return;
+    reconcileWorkspaceTabs(actorSessionID, "project", availableWorkspaceTabs);
+    if (browserTabsResolved) reconcileWorkspaceTabs(actorSessionID, "browser", availableWorkspaceTabs);
+    if (itemsQuery.isSuccess && !itemsQuery.isFetching) updateWorkspaceSessionUI(actorSessionID, (current) => resolveCanvasTabs(current, items));
+  }, [activeTab, actorSessionID, availableWorkspaceTabs, browserTabsResolved, enabled, itemsQuery.isFetching, itemsQuery.isSuccess, items, workspaceUI]);
 
-  useEffect(() => {
-    const resourcesReady = enabled
-      && browserTabsResolved
-      && itemsQuery.isSuccess
-      && !itemsQuery.isFetching
-      && sessionQuery.isSuccess
-      && !sessionQuery.isFetching
-      && workspaceRootsQuery.isSuccess
-      && !workspaceRootsQuery.isFetching;
-    if (!resourcesReady) return;
-    updateWorkspaceSessionUI(actorSessionID, (current) => {
-      const tabOrder = mergeWorkspaceTabOrder(current.tabOrder, availableWorkspaceTabs);
-      const activeTab = current.activeTab && tabOrder.includes(current.activeTab)
-        ? current.activeTab
-        : tabOrder[0] || null;
-      return activeTab === current.activeTab && sameWorkspaceTabOrder(tabOrder, current.tabOrder)
-        ? current
-        : { ...current, activeTab, tabOrder };
-    });
-  }, [
-    activeTab,
-    actorSessionID,
-    availableWorkspaceTabs,
-    browserTabsResolved,
-    enabled,
-    itemsQuery.isFetching,
-    itemsQuery.isSuccess,
-    sessionQuery.isFetching,
-    sessionQuery.isSuccess,
-    workspaceRootsQuery.isFetching,
-    workspaceRootsQuery.isSuccess,
-  ]);
-
-  const closeWorkspaceBrowser = useCallback((tabID: string) => closeBrowserTab(tabID), [closeBrowserTab]);
-  const closeWorkspaceCanvasItem = useCallback((itemID: string) => {
-    const item = items.find((entry) => entry.id === itemID);
-    if (item) requestCloseCanvasItem(item);
-  }, [items, requestCloseCanvasItem]);
-  const closeWorkspaceFilePreview = useCallback((previewID: string) => {
-    const preview = surfaceFilePreviews.find((entry) => entry.id === previewID);
-    if (preview) removeFilePreview(preview);
-  }, [removeFilePreview, surfaceFilePreviews]);
-  const activateWorkspaceBrowser = useCallback((tabID: string) => {
-    activateBrowserPageFindRegion();
-    selectBrowserTab(tabID);
-  }, [selectBrowserTab]);
-  const activateWorkspaceCanvasItem = useCallback((itemID: string) => {
-    setWorkspaceActiveTab(actorSessionID, canvasWorkspaceTabKey(itemID));
-  }, [actorSessionID]);
-
+  const contentTabs: WorkspaceContentTab[] = [
+    ...(workspaceUI.tabOrder.includes("project") ? [{ id: "project" as const, title: t("workspace.app.project"), kind: "project" as const, icon: <FolderClosed className="size-4" /> }] : []),
+    ...browserSurfaceTabs.map((tab) => ({
+        id: `browser:${tab.id}` as const, title: browserTabTitle(tab, t("browser.newTab"), t("browser.newTab")), kind: "browser" as const,
+        closing: closingBrowserTabIDs.includes(tab.id),
+        icon: <BrowserTabIcon className="size-4" faviconURL={browserTabFaviconURL(tab)} pageURL={tab.url} />,
+      })),
+    ...openCanvasItems.map((item) => ({
+        id: canvasWorkspaceTabKey(item.id), title: titleForCanvasItem(item, t), kind: "canvas" as const,
+        closing: (deleteMutation.isPending && deleteMutation.variables?.id === item.id) || (saveItemMutation.isPending && saveItemMutation.variables?.closeAfterSave && saveItemMutation.variables.targetSessionID === item.sessionID && saveItemMutation.variables.itemIDs.includes(item.id)),
+        icon: <CanvasKindIcon kind={item.kind} size="xs" />,
+      })),
+  ];
   return (
     <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
-      <div
+      <WorkspaceContentTabs
+        sessionID={actorSessionID}
+        tabs={contentTabs}
+        closing={closingBrowserTabIDs.length > 0 || saveItemMutation.isPending || Boolean(pendingCanvasClose)}
+        onClose={requestCloseContentTabs}
         className={cn(
-          "relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pl-(--workspace-toolbar-pl)",
-          reserveTopRightActions === 2
-            ? "pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+var(--toolbar-icon-button-size)+0.875rem)]"
-            : reserveTopRightActions === 1
-              ? "pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+0.375rem)]"
-              : "pr-(--workspace-toolbar-pr)",
+          "pudding-workspace-topbar relative z-30 !pl-(--workspace-toolbar-pl)",
+          activeApp === "library" && "pudding-workspace-topbar-empty",
+          reserveWorkspaceControl
+            ? "!pr-[calc(var(--workspace-toggle-right)+var(--workspace-control-width)+0.5rem)]"
+            : "!pr-(--workspace-toolbar-pr)",
         )}
-      >
-        <WorkspaceResourceTabs
-          activeTab={activeTab}
-          browserTabs={browserSurfaceTabs}
-          canvasItems={items}
-          closingCanvasItemID={deleteMutation.isPending
-            ? deleteMutation.variables?.id
-            : closeSavedMutation.isPending
-              ? closeSavedMutation.variables?.item.id
-              : undefined}
-          closingBrowserTabID={closingBrowserTabID}
-          filePreviewTabs={workspaceFilePreviewTabs}
-          orderScope={actorSessionID || "workspace"}
-          projectLabel={fileWorkspaceLabel}
-          projectTabVisible={projectTabVisible}
-          onCloseBrowser={closeWorkspaceBrowser}
-          onCloseCanvasItem={closeWorkspaceCanvasItem}
-          onCloseFilePreview={closeWorkspaceFilePreview}
-          onCloseProject={closeProjectSurface}
-          onSelectBrowser={activateWorkspaceBrowser}
-          onSelectCanvasItem={activateWorkspaceCanvasItem}
-          onSelectFilePreview={selectFilePreview}
-          onSelectProject={activateProjectSurface}
-        />
-        {actorSessionID && activeSurface !== "workspace" ? (
-          <WorkspaceResourceMenu
-            closedItems={closedItems}
-            creatingBrowser={creatingBrowserTab}
-            hasProject={hasFileWorkspace}
-            projectLabel={fileWorkspaceLabel}
-            projectTabVisible={projectTabVisible}
-            savedItems={savedItems}
-            onClearClosed={() => clearClosedMutation.mutate()}
-            onCreateBrowser={createBrowserSurface}
-            onOpenProject={activateProjectSurface}
-            onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
-            onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
-            onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
-            onRestoreClosed={restoreClosedItem}
-          />
-        ) : null}
-        <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
-        {secondarySessionID && sessionQuery.data?.title ? (
-          <span
-            className="no-drag-region max-w-32 shrink-0 truncate rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
-          >
-            {sessionQuery.data.title}
-          </span>
-        ) : null}
-      </div>
+        trailingAction={contentTabs.length > 0 ? <AppTooltip content={t("workspace.app.library")}>
+          <Button data-workspace-add aria-label={t("workspace.app.library")} aria-pressed={activeApp === "library"} className="size-7 shrink-0 self-center rounded-md text-muted-foreground aria-pressed:bg-muted" size="icon-sm" variant="ghost" onClick={() => { openWorkspaceView(actorSessionID, "library"); librarySearchRef.current?.focus({ preventScroll: true }); }}><Plus className="size-4" /></Button>
+        </AppTooltip> : null}
+        actions={secondarySessionID && sessionQuery.data?.title ? <span className="pudding-workspace-session-label max-w-24 truncate text-[11px] text-muted-foreground">{sessionQuery.data.title}</span> : null}
+      />
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
-        {activeSurface === "workspace" ? (
-          <WorkspaceEmpty
-            closedItems={closedItems}
-            disabled={!actorSessionID}
-            creatingBrowser={creatingBrowserTab}
-            hasProject={hasFileWorkspace}
-            projectLabel={fileWorkspaceLabel}
-            savedItems={savedItems}
-            onClearClosed={() => clearClosedMutation.mutate()}
-            onCreateBrowser={createBrowserSurface}
-            onOpenProject={activateProjectSurface}
-            onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
-            onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
-            onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
-            onRestoreClosed={restoreClosedItem}
-          />
+        <WorkspaceLibrary key={actorSessionID} searchRef={librarySearchRef}
+          onOpenProject={() => openWorkspaceView(actorSessionID, "project")}
+          onNewBrowserTab={createNewBrowserTab} creatingBrowserTab={creatingBrowserTab}
+          active={activeApp === "library"} sessionID={actorSessionID} token={token} entries={libraryQuery.data?.entries || []} closedItems={closedItems}
+          resourceQueries={{ saved: libraryQuery, closed: itemsQuery }}
+          onOpenSaved={(entry) => openSavedMutation.mutate({ entry, targetSessionID: actorSessionID })} onRestoreClosed={restoreClosedItem}
+          onRemoveSaved={(item) => setPendingDelete({ kind: "saved", item, sessionID: actorSessionID })} onRemoveClosed={(item) => setPendingDelete({ kind: "canvas", item, sessionID: item.sessionID })}
+          onOpenBrowserURL={openBrowserFromLibrary}
+        />
+        {activeApp === "browser" && !browserSurfaceTabs.length && !browserSurfacePending && browserSurfaceError ? (
+          <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm text-muted-foreground">
+            <p>{t("browser.loadFailed")}</p>
+            <Button variant="outline" onClick={() => void retryBrowserTabs()}>{t("common.refresh")}</Button>
+          </div>
         ) : null}
-        {items.map((item) => (
+        {openCanvasItems.map((item) => (
           <CanvasItemSurface
             key={`${actorSessionID}:${item.id}`}
-            active={activeSurface === "canvas" && !filePreviewActive && activeCanvasItem?.id === item.id}
+            active={activeApp === "artifacts" && !filePreviewActive && activeCanvasItem?.id === item.id}
             activeIndex={canvasGalleryActiveIndices[canvasGalleryStateKey(actorSessionID, item.id)] || 0}
             item={item}
             token={token}
@@ -890,48 +515,39 @@ export const WorkspacePane = memo(function WorkspacePane({
             onGalleryLayoutChange={changeCanvasGalleryLayout}
           />
         ))}
-        {activeSurface === "canvas" && !filePreviewActive && activeCanvasItem ? (
+        {activeApp === "artifacts" && !filePreviewActive && activeCanvasItem ? (
           <div className="absolute top-3 right-3 z-20">
             <CanvasItemActions
               item={activeCanvasItem}
-              saving={saveItemMutation.isPending && saveItemMutation.variables?.id === activeCanvasItem.id}
+              saving={saveItemMutation.isPending && saveItemMutation.variables?.targetSessionID === activeCanvasItem.sessionID && saveItemMutation.variables.itemIDs.includes(activeCanvasItem.id)}
               token={token}
-              onSave={() => saveItemMutation.mutate(activeCanvasItem)}
+              onSave={() => saveItemMutation.mutate({ targetSessionID: activeCanvasItem.sessionID, itemIDs: [activeCanvasItem.id] })}
+              onDelete={() => setPendingDelete({ kind: "canvas", item: activeCanvasItem, sessionID: activeCanvasItem.sessionID })}
               onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item: activeCanvasItem, layout })}
             />
           </div>
         ) : null}
-        {activeSurface === "canvas" && !filePreviewActive && itemsQuery.isLoading && items.length === 0 ? (
+        {activeApp === "artifacts" && !filePreviewActive && itemsQuery.isLoading && items.length === 0 ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--workspace-background)] text-muted-foreground">
             <Spinner className="size-5" />
           </div>
         ) : null}
         {actorSessionID ? (
           <ProjectBrowserSurface
-            active={projectActive}
-            activeTurnDiffID={activeProjectTurnDiff?.id}
+            active={projectActive && presented}
+            activePreviewID={activeFilePreview?.id}
             hasProject={hasProject}
             projectStateReady={projectRevealReady}
             sessionID={actorSessionID}
             token={token}
-            turnDiffTabs={projectTurnDiffPreviews}
-            onActivateTurnDiff={selectProjectTurnDiff}
-            onCloseTurnDiffs={closeProjectTurnDiffs}
-            onDeactivateTurnDiff={deactivateProjectTurnDiff}
+            previewTabs={filePreviews}
+            onActivatePreview={selectFilePreview}
+            onClosePreviews={closeFilePreviews}
+            onDeactivatePreview={deactivateFilePreview}
             onVisibleContextChange={setProjectUIContext}
           />
         ) : null}
-        {mountedFilePreviews.filter((preview) => !(
-          hasFileWorkspace && preview.sessionID === actorSessionID && preview.source === "turn-diff"
-        )).map((preview) => (
-          <FilePreviewSurface
-            key={preview.id}
-            active={filePreviewActive && preview.id === activeFilePreview?.id}
-            preview={preview}
-            token={token}
-          />
-        ))}
-        {actorSessionID && (browserSurfaceTabs.length > 0 || browserSurfaceVisible) ? (
+        {actorSessionID && (browserSurfaceTabs.length > 0 || browserSurfacePending) ? (
           <BrowserWorkspaceSurface
             key={`browser:${actorSessionID}`}
             active={browserActive && presented}
@@ -943,25 +559,47 @@ export const WorkspacePane = memo(function WorkspacePane({
           />
         ) : null}
       </div>
-      <AlertDialog open={Boolean(pendingSavedClose)} onOpenChange={(open) => !open && setPendingSavedClose(undefined)}>
+      <AlertDialog open={Boolean(pendingDelete && pendingDelete.sessionID === actorSessionID)} onOpenChange={(open) => !open && !deleteMutation.isPending && !removeSavedMutation.isPending && setPendingDelete(undefined)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(pendingDelete?.kind === "saved" ? "canvas.deleteSavedWidget" : "canvas.delete")}</AlertDialogTitle>
+            <AlertDialogDescription>{t(pendingDelete?.kind === "saved" ? "canvas.deleteSavedDescription" : "canvas.deleteDescription").replace("{title}", pendingDelete?.item.title || t("canvas.untitled"))}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending || removeSavedMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction disabled={deleteMutation.isPending || removeSavedMutation.isPending} onClick={(event) => {
+              event.preventDefault();
+              if (pendingDelete?.kind === "canvas") deleteMutation.mutate(pendingDelete.item);
+              else if (pendingDelete?.kind === "saved") removeSavedMutation.mutate({ entry: pendingDelete.item, targetSessionID: pendingDelete.sessionID });
+            }}>{t("common.delete")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(pendingCanvasClose && pendingCanvasClose.sessionID === actorSessionID)} onOpenChange={(open) => !open && !saveItemMutation.isPending && setPendingCanvasClose(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("canvas.closeSavedTitle")}</AlertDialogTitle>
             <AlertDialogDescription>{t("canvas.closeSavedDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
+          <ul className="max-h-48 overflow-y-auto text-sm text-muted-foreground">
+            {pendingCanvasItems.map((item) => <li className="flex items-center gap-2 py-1" key={item.id}><CanvasKindIcon kind={item.kind} size="xs" /><span className="min-w-0 flex-1 truncate">{titleForCanvasItem(item, t)}</span>{item.sourceSavedItemID && item.savedDirty ? <span aria-label={t("project.browserUnsaved")} className="size-1.5 shrink-0 rounded-full bg-foreground/60" /> : null}</li>)}
+          </ul>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={saveItemMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="outline"
+              disabled={saveItemMutation.isPending}
               onClick={() => {
-                if (pendingSavedClose) closeSavedMutation.mutate({ item: pendingSavedClose, saveChanges: false });
+                if (pendingCanvasClose) void closeContentTabsNow(pendingCanvasClose.sessionID, pendingCanvasClose.keys);
               }}
             >
               {t("canvas.closeWithoutSaving")}
             </AlertDialogAction>
             <AlertDialogAction
-              onClick={() => {
-                if (pendingSavedClose) closeSavedMutation.mutate({ item: pendingSavedClose, saveChanges: true });
+              disabled={saveItemMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                if (pendingCanvasClose) saveItemMutation.mutate({ targetSessionID: pendingCanvasClose.sessionID, itemIDs: pendingCanvasItems.map((item) => item.id), closeAfterSave: pendingCanvasClose.keys });
               }}
             >
               {t("canvas.saveAndClose")}
@@ -973,33 +611,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   );
 });
 
-function sameResourceRecord<T>(current: Record<string, T>, next: Record<string, T>) {
-  const currentKeys = Object.keys(current);
-  const nextKeys = Object.keys(next);
-  return currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === next[key]);
-}
-
-function canvasPayloadFromClosedItem(item: ClosedCanvasItem): CanvasItemPayload {
-  return {
-    id: item.sourceItemID,
-    kind: item.kind,
-    title: item.title,
-    item: item.item,
-    window: item.window,
-  };
-}
-
 function canvasGalleryStateKey(sessionID: string, itemID: string) {
   return `${sessionID}\u0000${itemID}`;
-}
-
-function sameWorkspaceTabOrder(left: readonly WorkspaceTabKey[], right: readonly WorkspaceTabKey[]) {
-  return left.length === right.length && left.every((tab, index) => tab === right[index]);
-}
-
-function workspaceSurface(tab: WorkspaceTabKey | null) {
-  if (!tab) return "workspace" as const;
-  if (tab === "project") return "project" as const;
-  if (tab.startsWith("browser:")) return "browser" as const;
-  return "canvas" as const;
 }

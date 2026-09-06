@@ -38,6 +38,7 @@ const { MobileAccessBridge } = require("./mobile-access-bridge.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { ComputerUseBridgeServer } = require("./computer-use-bridge-server.cjs");
 const { ComputerUseHost } = require("./computer-use-host.cjs");
+const { ComputerUsePreview } = require("./computer-use-preview.cjs");
 const { ComputerUsePermissionCoordinator } = require("./computer-use-permissions.cjs");
 const {
   DesktopPermissionController,
@@ -141,6 +142,7 @@ const browserCredentialVault = new BrowserCredentialVault({
 const browserCredentials = new BrowserCredentialController({ vault: browserCredentialVault });
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const computerUseHost = new ComputerUseHost({ binaryPath: resolveComputerUseHelperBinary() });
+const computerUsePreview = new ComputerUsePreview({ binaryPath: resolveComputerUseHelperBinary(), host: computerUseHost });
 let computerUsePermissionCoordinator = null;
 async function openDesktopPermissionSettings(permission) {
   const url = desktopPermissionSettingsURL(permission);
@@ -169,6 +171,7 @@ computerUsePermissionCoordinator = new ComputerUsePermissionCoordinator({
 });
 const computerUseBridgeServer = new ComputerUseBridgeServer(computerUseHost, {
   permissionCoordinator: computerUsePermissionCoordinator,
+  onActivity: (target) => computerUsePreview.noteActivity(target),
 });
 const projectFileWatcher = new ProjectFileWatcher();
 const mobileAccessBridge = new MobileAccessBridge({ apiBase, webBase: devURL || apiBase });
@@ -1235,6 +1238,19 @@ ipcMain.handle("pudding:desktop:computer-use-permission-guide:get", (event) => {
   return computerUsePermissionCoordinator.currentGuide();
 });
 
+ipcMain.handle("pudding:desktop:computer-preview:subscribe", (event, request) => {
+  assertTrustedSender(event);
+  computerUsePreview.subscribe(event.sender, request);
+});
+ipcMain.on("pudding:desktop:computer-preview:ack", (event, request) => {
+  assertTrustedSender(event);
+  computerUsePreview.acknowledge(event.sender, request);
+});
+ipcMain.handle("pudding:desktop:computer-preview:reveal", (event, request) => {
+  assertTrustedSender(event);
+  return computerUsePreview.reveal(event.sender, request);
+});
+
 ipcMain.handle("pudding:desktop:computer-use-permission-guide:deny", (event, requestID) => {
   assertTrustedSender(event);
   return computerUsePermissionCoordinator.deny(requestID);
@@ -1829,6 +1845,7 @@ async function prepareForUpdateInstall() {
 }
 
 async function stopDesktopResources() {
+  computerUsePreview.stop();
   const results = await Promise.allSettled([
     stopManagedDaemonAndWait(),
     browserBridgeServer.stop(),

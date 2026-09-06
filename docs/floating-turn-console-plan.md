@@ -1,6 +1,6 @@
 # 浮动 Turn 控制台改造计划
 
-> 状态:MVP 已实施,待 Electron 实机回归
+> 状态：历史方案，2026-09-05 被[工作区左侧专注方案](workspace-redesign-plan.md)替代。浮动模式及其 UI 路径已删除；以下保留为历史记录。
 > 日期:2026-08-03
 > 范围:Electron 桌面端 Web UI 的 Agent Console floating presentation。
 > 结论:浮动模式改为“当前 Turn 控制台”;完整会话历史继续由 full / dock-left / dock-right presentation 承载。

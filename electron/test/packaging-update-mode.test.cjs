@@ -17,6 +17,11 @@ test("desktop development and packaging use the same exact Electron version", ()
   );
 });
 
+test("desktop packaging includes the shared browser capacity policy and excludes smoke runners", () => {
+  assert.equal(loadConfigValue("files.includes('internal/browser/tab_limits.json')", signedBuildEnv()), "true");
+  assert.equal(loadConfigValue("files.includes('!electron/smoke{,/**/*}')", signedBuildEnv()), "true");
+});
+
 test("direct Electron Builder packaging is rejected", () => {
   assert.throws(
     () => loadConfigValue("appId", { PUDDING_PACKAGING_PIPELINE: "" }),

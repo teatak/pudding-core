@@ -3,6 +3,8 @@ export type ProjectSelection = {
   path: string;
 };
 
+export type ProjectTreeReveal = ProjectSelection & { sessionID: string };
+
 export type ProjectFileTab = ProjectSelection & {
   pinned: boolean;
 };

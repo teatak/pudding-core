@@ -38,8 +38,6 @@ const (
 	maxScreenshotBytes      = 64 * 1024 * 1024
 	cdpCommandTimeout       = 8 * time.Second
 	globalProcessKey        = "global"
-	maxTabsPerSession       = 8
-	maxTabsTotal            = 16
 )
 
 var (
@@ -1652,7 +1650,7 @@ func (m *Manager) canCreateTab(sessionID string) bool {
 }
 
 func (m *Manager) canCreateTabLocked(sessionID string) bool {
-	return len(m.tabs) < maxTabsTotal && len(m.sessions[sessionID]) < maxTabsPerSession
+	return len(m.tabs) < tabLimits.Total && len(m.sessions[sessionID]) < tabLimits.PerSession
 }
 
 func (m *Manager) sessionBindings(sessionID string) []*tabBinding {

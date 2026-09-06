@@ -1,3 +1,7 @@
+import { useRecentOpen } from "@/components/workspace/useRecentOpen";
+import { AppTooltip } from "@/components/AppTooltip";
+import type { ProjectBrowserRoot } from "@/api/client";
+import { FilePreviewSurface } from "@/components/canvas/FilePreviewSurface";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Maximize2, Minimize2, Minus, Plus, Save } from "@/components/icons";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -8,12 +12,14 @@ import { queryKeys } from "@/api/queryKeys";
 import { TurnFileDiffSurface } from "@/components/canvas/TurnFileDiffSurface";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { WorkspaceStartPage } from "@/components/workspace/WorkspaceStartPage";
 import { useI18n } from "@/i18n";
 import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
 import { languageFromPath } from "@/lib/fileLanguage";
 import type { FilePreview } from "@/state/filePreviewStore";
 
 import { ProjectFileTabs } from "./ProjectFileTabs";
+import { ProjectStartIllustration } from "./ProjectStartIllustration";
 import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { projectBrowserError } from "./projectErrors";
@@ -47,6 +53,7 @@ type SaveDraftRequest = {
 
 export function ProjectFileViewer({
   active,
+  activePreview,
   activeTurnDiff,
   activeTurnDiffSelection,
   absolutePath,
@@ -57,20 +64,25 @@ export function ProjectFileViewer({
   sessionID,
   showFilesAction = false,
   tabs,
-  turnDiffTabs,
+  openFiles,
+  roots,
+  previewTabs,
   token,
   onActivate,
-  onActivateTurnDiff,
-  onCloseTurnDiffs,
+  onActivatePreview,
+  onClosePreviews,
   onDirtyChange,
   onOpenPreview,
   onPin,
+  onPinInSession,
+  onMoveTab,
   onReference,
   onRequestClose,
   onReveal,
   onShowFiles,
 }: {
   active: boolean;
+  activePreview?: FilePreview;
   activeTurnDiff?: FilePreview;
   activeTurnDiffSelection?: ProjectSelection;
   absolutePath?: string;
@@ -81,80 +93,172 @@ export function ProjectFileViewer({
   sessionID: string;
   showFilesAction?: boolean;
   tabs: ProjectTab[];
-  turnDiffTabs: FilePreview[];
+  openFiles: { sessionID: string; selection: ProjectSelection }[];
+  roots: ProjectBrowserRoot[];
+  previewTabs: FilePreview[];
   token: string;
   onActivate: (selection: ProjectTab) => void;
-  onActivateTurnDiff: (previewID: string) => void;
-  onCloseTurnDiffs: (previewIDs: string[]) => void;
+  onActivatePreview: (previewID: string) => void;
+  onClosePreviews: (previewIDs: string[]) => void;
   onDirtyChange: (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onOpenPreview: (selection: ProjectSelection) => void;
   onPin: (selection: ProjectTab) => void;
+  onPinInSession: (sessionID: string, selection: ProjectSelection) => void;
+  onMoveTab: (activeID: string, overID: string) => void;
   onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
   onRequestClose: (keys: string[]) => void;
   onReveal: (selection: ProjectSelection) => void;
   onShowFiles?: () => void;
 }) {
   const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [drafts, setDrafts] = useState<Record<string, FileDraft>>({});
-  const draftsRef = useRef(drafts);
-  draftsRef.current = drafts;
-  const updateDrafts = (update: (current: Record<string, FileDraft>) => Record<string, FileDraft>) => {
-    const next = update(draftsRef.current);
-    draftsRef.current = next;
-    setDrafts(next);
-  };
-  const [fileViewModes, setFileViewModes] = useState<Record<string, FileViewMode>>({});
-  const [documentExpandedPaths, setDocumentExpandedPaths] = useState<Record<string, string[]>>({});
-  const [resourceRevision, setResourceRevision] = useState(0);
+  const [requestedView, setRequestedView] = useState<{ sessionID: string; key: string; mode: FileViewMode }>();
   const gitDiffSelection = selection && isProjectGitDiffTab(selection) ? selection : undefined;
   const fileSelection = selection && !isProjectGitDiffTab(selection) ? selection : undefined;
-  const selectionKey = fileSelection ? projectSelectionKey(fileSelection) : "";
-  const draftKey = selectionKey ? `${sessionID}:${selectionKey}` : "";
-  const isImage = Boolean(fileSelection && isProjectImagePath(fileSelection.path));
-  const isSVG = Boolean(fileSelection && isProjectSVGPath(fileSelection.path));
-  const isPDF = Boolean(fileSelection && isProjectPDFPath(fileSelection.path));
+  const openTurnDiffFile = (mode: FileViewMode) => {
+    if (!activeTurnDiffSelection) return;
+    setRequestedView({ sessionID, key: projectSelectionKey(activeTurnDiffSelection), mode });
+    onOpenPreview(activeTurnDiffSelection);
+  };
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
+      <ProjectFileTabs
+        active={selection}
+        activePreviewID={activePreview?.id}
+        dirtyKeys={dirtyKeys}
+        leadingAction={showFilesAction ? (
+          <button
+            aria-label={t("project.browserFiles")}
+            className="inline-flex h-full w-8 items-center justify-center text-muted-foreground hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground"
+            type="button"
+            onClick={onShowFiles}
+          >
+            <Folders className="size-4" />
+          </button>
+        ) : undefined}
+        tabs={tabs}
+        roots={roots}
+        previewTabs={previewTabs}
+        onActivate={onActivate}
+        onActivatePreview={onActivatePreview}
+        onClosePreviews={onClosePreviews}
+        onPin={onPin}
+        onMoveTab={onMoveTab}
+        onRequestClose={onRequestClose}
+        onReveal={onReveal}
+      />
+      {activeTurnDiff ? (
+        <div className="relative min-h-0 flex-1">
+          <TurnFileDiffSurface
+            active={active}
+            preview={activeTurnDiff}
+            token={token}
+            onOpenPreview={activeTurnDiffSelection ? () => openTurnDiffFile("preview") : undefined}
+            onOpenSource={activeTurnDiffSelection ? () => openTurnDiffFile("source") : undefined}
+          />
+        </div>
+      ) : activePreview ? (
+        <div className="relative min-h-0 flex-1"><FilePreviewSurface active={active} preview={activePreview} token={token} /></div>
+      ) : gitDiffSelection ? (
+        <ProjectGitDiffViewer active={active} selection={gitDiffSelection} sessionID={sessionID} token={token} />
+      ) : null}
+
+      {!selection && !activePreview ? <WorkspaceStartPage icon={<ProjectStartIllustration />} title={t("workspace.projectStartTitle")} /> : null}
+      <div className="min-h-0 flex-1" hidden={Boolean(activePreview || gitDiffSelection || !fileSelection)}>
+        {/* Keep visited editors attached to their open tab; closing a tab disposes its editor. */}
+        {openFiles.map(({ sessionID: documentSessionID, selection: documentSelection }) => {
+          const key = projectSelectionKey(documentSelection);
+          const selected = documentSessionID === sessionID && key === (fileSelection && projectSelectionKey(fileSelection)) && !activePreview;
+          return <ProjectFileDocument
+            key={`${documentSessionID}:${key}`}
+            active={active && selected}
+            visible={selected}
+            absolutePath={selected ? absolutePath : undefined}
+            selection={documentSelection}
+            sessionID={documentSessionID}
+            roots={documentSessionID === sessionID ? roots : []}
+            token={token}
+            discardRequest={discardRequest}
+            reveal={documentSessionID === sessionID && reveal?.key === key ? reveal : undefined}
+            requestedView={requestedView?.sessionID === documentSessionID && requestedView.key === key ? requestedView : undefined}
+            onDirtyChange={onDirtyChange}
+            onPin={() => onPinInSession(documentSessionID, documentSelection)}
+            onReference={onReference}
+          />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProjectFileDocument({ active, visible, absolutePath, selection, sessionID, roots, token, discardRequest, reveal, requestedView, onDirtyChange, onPin, onReference }: {
+  active: boolean;
+  visible: boolean;
+  absolutePath?: string;
+  selection: ProjectSelection;
+  sessionID: string;
+  roots: ProjectBrowserRoot[];
+  token: string;
+  discardRequest?: { id: number; keys: string[]; sessionID: string };
+  reveal?: ProjectEditorReveal;
+  requestedView?: { mode: FileViewMode };
+  onDirtyChange: (sessionID: string, selection: ProjectSelection, dirty: boolean) => void;
+  onPin: () => void;
+  onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
+}) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<FileDraft>();
+  const draftRef = useRef(draft);
+  const updateDraft = (next: FileDraft | undefined) => {
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const [viewMode, setViewMode] = useState<FileViewMode>("preview");
+  const [expandedPaths, setExpandedPaths] = useState(["$"]);
+  const visited = useRef(active);
+  if (active) visited.current = true;
+  const [resourceRevision, setResourceRevision] = useState(0);
+  const selectionKey = projectSelectionKey(selection);
+  const isImage = isProjectImagePath(selection.path);
+  const isSVG = isProjectSVGPath(selection.path);
+  const isPDF = isProjectPDFPath(selection.path);
   const isResourcePreview = isImage || isPDF;
-  const documentPreviewKind = fileSelection ? projectDocumentPreviewKind(fileSelection.path) : undefined;
+  const documentPreviewKind = projectDocumentPreviewKind(selection.path);
   const fileQuery = useQuery({
-    enabled: active && Boolean(fileSelection) && (!isResourcePreview || isSVG),
-    queryKey: fileSelection
-      ? queryKeys.projectFile(sessionID, fileSelection.rootID, fileSelection.path)
-      : ["session", sessionID, "project", "file", "none"],
-    queryFn: () => {
-      if (!fileSelection) throw new Error("project file missing");
-      return getProjectFile(token, sessionID, fileSelection.rootID, fileSelection.path);
-    },
+    enabled: active && (!isResourcePreview || isSVG),
+    queryKey: queryKeys.projectFile(sessionID, selection.rootID, selection.path),
+    queryFn: () => getProjectFile(token, sessionID, selection.rootID, selection.path),
     retry: false,
     staleTime: 0,
   });
   const file = fileQuery.data;
-  const draft = draftKey ? drafts[draftKey] : undefined;
+  useRecentOpen(token,sessionID,active && !fileQuery.isError && (isResourcePreview || file) && roots.some((root) => root.id === selection.rootID)
+    ? {kind:"file",rootID:selection.rootID,path:selection.path} : undefined);
   const content = draft?.content ?? file?.content ?? "";
   const dirty = Boolean(draft && draft.content !== draft.baseContent);
   const externalConflict = Boolean(draft?.externalRevision);
   const isMarkdown = file?.mime === "text/markdown" || /\.(?:md|markdown)$/i.test(file?.name || "");
   const supportsViewMode = isMarkdown || Boolean(documentPreviewKind) || isSVG;
-  const fileViewMode = supportsViewMode && draftKey ? fileViewModes[draftKey] ?? "preview" : "source";
+  const fileViewMode = supportsViewMode ? viewMode : "source";
   const expandedDocumentPaths = useMemo(
-    () => new Set(documentExpandedPaths[draftKey] ?? ["$"]),
-    [documentExpandedPaths, draftKey],
+    () => new Set(expandedPaths),
+    [expandedPaths],
   );
   const resourceURL = useMemo(() => {
-    if (!isResourcePreview || !fileSelection) return "";
-    const url = projectResourceURL(token, sessionID, fileSelection.rootID, fileSelection.path);
+    if (!isResourcePreview) return "";
+    const url = projectResourceURL(token, sessionID, selection.rootID, selection.path);
     return `${url}${url.includes("?") ? "&" : "?"}v=${resourceRevision}`;
-  }, [fileSelection?.path, fileSelection?.rootID, isResourcePreview, resourceRevision, sessionID, token]);
+  }, [selection.path, selection.rootID, isResourcePreview, resourceRevision, sessionID, token]);
 
   useEffect(() => {
-    if (!reveal || reveal.key !== selectionKey || !draftKey) {
+    if (!reveal || reveal.key !== selectionKey) {
       return;
     }
-    setFileViewModes((current) => ({ ...current, [draftKey]: documentPreviewKind || isSVG ? "source" : "preview" }));
-  }, [documentPreviewKind, draftKey, isSVG, reveal?.serial, selectionKey]);
+    setViewMode(documentPreviewKind || isSVG ? "source" : "preview");
+  }, [documentPreviewKind, isSVG, reveal?.serial, selectionKey]);
 
   useEffect(() => {
-    if (!active || !absolutePath || !fileSelection) {
+    if (!active || !absolutePath) {
       return;
     }
     const refetch = () => {
@@ -163,48 +267,23 @@ export function ProjectFileViewer({
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git"] });
     };
     return watchElectronProjectFile(absolutePath, refetch);
-  }, [absolutePath, active, draftKey, isResourcePreview, isSVG]);
+  }, [absolutePath, active, isResourcePreview, isSVG, sessionID]);
 
   useEffect(() => {
-    if (!discardRequest) return;
-    updateDrafts((current) => {
-      const next = { ...current };
-      discardRequest.keys.forEach((key) => delete next[`${discardRequest.sessionID}:${key}`]);
-      return next;
-    });
-  }, [discardRequest]);
+    if (discardRequest?.sessionID === sessionID && discardRequest.keys.includes(selectionKey)) updateDraft(undefined);
+  }, [discardRequest, sessionID, selectionKey]);
 
   useEffect(() => {
-    if (!fileSelection || !file) {
+    if (!file) return;
+    const existing = draftRef.current;
+    if (!existing || existing.content === existing.baseContent || existing.content === file.content) {
+      updateDraft({ baseContent: file.content, baseRevision: file.revision, content: file.content });
+      if (existing && existing.content !== existing.baseContent) onDirtyChange(sessionID, selection, false);
       return;
     }
-    const key = `${sessionID}:${projectSelectionKey(fileSelection)}`;
-    const existing = draftsRef.current[key];
-    if (!existing || existing.content === existing.baseContent) {
-      updateDrafts((current) => ({
-        ...current,
-        [key]: { baseContent: file.content, baseRevision: file.revision, content: file.content },
-      }));
-      return;
-    }
-    if (existing.content === file.content) {
-      updateDrafts((current) => ({
-        ...current,
-        [key]: { baseContent: file.content, baseRevision: file.revision, content: file.content },
-      }));
-      onDirtyChange(sessionID, fileSelection, false);
-      return;
-    }
-    if (existing.baseRevision === file.revision) {
-      if (existing.externalRevision) {
-        updateDrafts((current) => ({ ...current, [key]: { ...existing, externalRevision: undefined } }));
-      }
-      return;
-    }
-    if (existing.externalRevision !== file.revision) {
-      updateDrafts((current) => ({ ...current, [key]: { ...existing, externalRevision: file.revision } }));
-    }
-  }, [file, fileSelection, sessionID]);
+    const externalRevision = existing.baseRevision === file.revision ? undefined : file.revision;
+    if (existing.externalRevision !== externalRevision) updateDraft({ ...existing, externalRevision });
+  }, [file, selection, sessionID]);
 
   const saveMutation = useMutation({
     mutationFn: ({ expectedRevision, target, targetSessionID, value }: SaveDraftRequest) => {
@@ -216,16 +295,12 @@ export function ProjectFileViewer({
       });
     },
     onSuccess: (saved, variables) => {
-      const key = `${variables.targetSessionID}:${projectSelectionKey(saved)}`;
-      const latestContent = draftsRef.current[key]?.content ?? saved.content;
+      const latestContent = draftRef.current?.content ?? saved.content;
       const stillDirty = latestContent !== saved.content;
       queryClient.setQueryData(queryKeys.projectFile(variables.targetSessionID, saved.rootID, saved.path), saved);
       void queryClient.invalidateQueries({ queryKey: ["session", variables.targetSessionID, "project", "git"] });
       if (isProjectSVGPath(saved.path)) setResourceRevision((current) => current + 1);
-      updateDrafts((current) => ({
-        ...current,
-        [key]: { baseContent: saved.content, baseRevision: saved.revision, content: latestContent },
-      }));
+      updateDraft({ baseContent: saved.content, baseRevision: saved.revision, content: latestContent });
       onDirtyChange(variables.targetSessionID, saved, stillDirty);
       toast.success(t("project.browserSaved"));
     },
@@ -243,7 +318,7 @@ export function ProjectFileViewer({
   });
 
   const save = (overwrite = false) => {
-    if (!fileSelection || !draft || !dirty || saveMutation.isPending || fileQuery.isError) {
+    if (!draft || !dirty || saveMutation.isPending || fileQuery.isError) {
       return;
     }
     if (externalConflict && !overwrite) {
@@ -252,40 +327,30 @@ export function ProjectFileViewer({
     }
     saveMutation.mutate({
       expectedRevision: overwrite && file ? file.revision : draft.baseRevision,
-      target: { rootID: fileSelection.rootID, path: fileSelection.path },
+      target: { rootID: selection.rootID, path: selection.path },
       targetSessionID: sessionID,
       value: draft.content,
     });
   };
 
   const changeContent = (value: string) => {
-    if (!fileSelection || !file) return;
-    const key = `${sessionID}:${projectSelectionKey(fileSelection)}`;
-    const previous = drafts[key] || { baseContent: file.content, baseRevision: file.revision, content: file.content };
+    if (!file) return;
+    const previous = draftRef.current || { baseContent: file.content, baseRevision: file.revision, content: file.content };
     let nextDirty = value !== previous.baseContent;
     if (previous.externalRevision && (value === previous.baseContent || value === file.content)) {
-      updateDrafts((current) => ({
-        ...current,
-        [key]: { baseContent: file.content, baseRevision: file.revision, content: file.content },
-      }));
+      updateDraft({ baseContent: file.content, baseRevision: file.revision, content: file.content });
       nextDirty = false;
     } else {
-      updateDrafts((current) => ({
-        ...current,
-        [key]: { ...previous, content: value, externalRevision: nextDirty ? previous.externalRevision : undefined },
-      }));
+      updateDraft({ ...previous, content: value, externalRevision: nextDirty ? previous.externalRevision : undefined });
     }
-    onDirtyChange(sessionID, fileSelection, nextDirty);
-    if (nextDirty) onPin(fileSelection);
+    onDirtyChange(sessionID, selection, nextDirty);
+    if (nextDirty && !dirty) onPin();
   };
 
   const reloadExternal = () => {
-    if (!fileSelection || !file) return;
-    updateDrafts((current) => ({
-      ...current,
-      [draftKey]: { baseContent: file.content, baseRevision: file.revision, content: file.content },
-    }));
-    onDirtyChange(sessionID, fileSelection, false);
+    if (!file) return;
+    updateDraft({ baseContent: file.content, baseRevision: file.revision, content: file.content });
+    onDirtyChange(sessionID, selection, false);
   };
 
   const previewFile = useMemo<ProjectFile | undefined>(
@@ -298,67 +363,29 @@ export function ProjectFileViewer({
       && !(documentPreviewKind && fileViewMode === "preview")
       && !(isSVG && fileViewMode === "preview"),
   );
-  const openTurnDiffFile = (mode: FileViewMode) => {
-    if (!activeTurnDiffSelection) return;
-    const key = `${sessionID}:${projectSelectionKey(activeTurnDiffSelection)}`;
-    setFileViewModes((current) => ({ ...current, [key]: mode }));
-    onOpenPreview(activeTurnDiffSelection);
-  };
+  useEffect(() => {
+    if (requestedView) setViewMode(requestedView.mode);
+  }, [requestedView]);
+
+  if (!visited.current) return null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
-      <ProjectFileTabs
-        active={selection}
-        activeTurnDiffID={activeTurnDiff?.id}
-        dirtyKeys={dirtyKeys}
-        leadingAction={showFilesAction ? (
-          <button
-            aria-label={t("project.browserFiles")}
-            className="inline-flex h-full w-8 items-center justify-center text-muted-foreground hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground"
-            type="button"
-            onClick={onShowFiles}
-          >
-            <Folders className="size-4" />
-          </button>
-        ) : undefined}
-        tabs={tabs}
-        turnDiffTabs={turnDiffTabs}
-        onActivate={onActivate}
-        onActivateTurnDiff={onActivateTurnDiff}
-        onCloseTurnDiffs={onCloseTurnDiffs}
-        onPin={onPin}
-        onRequestClose={onRequestClose}
-        onReveal={onReveal}
-      />
-      {activeTurnDiff ? (
-        <div className="relative min-h-0 flex-1">
-          <TurnFileDiffSurface
-            active={active}
-            preview={activeTurnDiff}
-            token={token}
-            onOpenPreview={activeTurnDiffSelection ? () => openTurnDiffFile("preview") : undefined}
-            onOpenSource={activeTurnDiffSelection ? () => openTurnDiffFile("source") : undefined}
-          />
-        </div>
-      ) : gitDiffSelection ? (
-        <ProjectGitDiffViewer active={active} selection={gitDiffSelection} sessionID={sessionID} token={token} />
-      ) : (
-      <>
-      {fileSelection && (!isImage || (isSVG && fileViewMode === "source")) ? (
-        <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-file-editor-background)] px-2.5">
-          <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || fileSelection.path}</code>
+    <div data-project-document={`${sessionID}:${selectionKey}`} hidden={!visible} className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
+      {!isImage || (isSVG && fileViewMode === "source") ? (
+        <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-content-toolbar-background)] px-2.5">
+          <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || selection.path}</code>
           {!isResourcePreview || isSVG ? (
             <div className="flex shrink-0 items-center gap-1">
               {isSVG ? (
-                <Button aria-label={t("project.browserPreview")} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "preview" }))}>
+                <Button aria-label={t("project.browserPreview")} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("preview")}>
                   <Eye />
                 </Button>
               ) : supportsViewMode ? (
                 <>
-                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "preview" }))}>
+                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("preview")}>
                     {isMarkdown ? <FilePenLine /> : <Eye />}
                   </Button>
-                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "source" }))}>
+                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("source")}>
                     <FileCode2 />
                   </Button>
                 </>
@@ -378,19 +405,17 @@ export function ProjectFileViewer({
           <Button size="sm" type="button" variant="outline" onClick={() => save(true)}>{t("project.browserOverwriteExternal")}</Button>
         </div>
       ) : null}
-      <div className={sourceEditorVisible ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-auto"}>
-        {!fileSelection ? (
-          <ProjectViewerStatus icon={<Folders className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
-        ) : isImage && (!isSVG || fileViewMode === "preview") ? (
+      <div className={sourceEditorVisible ? "min-h-0 flex-1 overflow-hidden" : "relative min-h-0 flex-1 overflow-auto"}>
+        {isImage && (!isSVG || fileViewMode === "preview") ? (
           <ProjectImagePreview
             key={resourceURL}
             active={active}
-            alt={fileSelection.path}
+            alt={selection.path}
             src={resourceURL}
-            onShowSource={isSVG ? () => setFileViewModes((current) => ({ ...current, [draftKey]: "source" })) : undefined}
+            onShowSource={isSVG ? () => setViewMode("source") : undefined}
           />
         ) : isPDF ? (
-          <ProjectPDFPreview key={resourceURL} src={resourceURL} title={fileSelection.path} />
+          <ProjectPDFPreview key={resourceURL} src={resourceURL} title={selection.path} />
         ) : fileQuery.isError ? (
           <ProjectViewerStatus>{projectBrowserError(fileQuery.error, t)}</ProjectViewerStatus>
         ) : fileQuery.isLoading && !file ? (
@@ -398,29 +423,27 @@ export function ProjectFileViewer({
         ) : previewFile && isMarkdown && fileViewMode === "preview" ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectMarkdownEditor
-              key={draftKey}
               path={previewFile.path}
               reveal={reveal?.key === selectionKey ? reveal : undefined}
               value={content}
               onChange={changeContent}
               onSave={() => save()}
-              onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
+              onReferenceSelection={(range) => onReference(selection, range)}
             />
           </Suspense>
         ) : previewFile && documentPreviewKind && fileViewMode === "preview" ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectDocumentPreview
-              key={draftKey}
               expandedPaths={expandedDocumentPaths}
               kind={documentPreviewKind}
               path={previewFile.path}
               value={content}
               onExpandedPathChange={(path, expanded) => {
-                setDocumentExpandedPaths((current) => {
-                  const next = new Set(current[draftKey] ?? ["$"]);
+                setExpandedPaths((current) => {
+                  const next = new Set(current);
                   if (expanded) next.add(path);
                   else next.delete(path);
-                  return { ...current, [draftKey]: Array.from(next) };
+                  return Array.from(next);
                 });
               }}
             />
@@ -428,13 +451,12 @@ export function ProjectFileViewer({
         ) : previewFile ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectEditor
-              key={draftKey}
               path={previewFile.path}
               reveal={reveal?.key === selectionKey ? reveal : undefined}
               value={content}
               onChange={changeContent}
               onSave={() => save()}
-              onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
+              onReferenceSelection={(range) => onReference(selection, range)}
             />
           </Suspense>
         ) : null}
@@ -447,8 +469,6 @@ export function ProjectFileViewer({
           {languageFromPath(file.path) ? <><span aria-hidden="true">·</span><span>{languageFromPath(file.path)}</span></> : null}
         </div>
       ) : null}
-      </>
-      )}
     </div>
   );
 }
@@ -515,54 +535,50 @@ function ProjectImagePreview({ active, alt, src, onShowSource }: { active: boole
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
-      <div className="flex h-8 shrink-0 items-center gap-2 px-2.5">
+      <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-content-toolbar-background)] px-2.5">
         <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs">{alt}</code>
         {!failed ? (
           <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
             {onShowSource ? (
-              <Button
+              <AppTooltip content={t("project.browserSource")}><Button
                 aria-label={t("project.browserSource")}
                 className={viewModeButtonClassName}
                 size="icon-sm"
-                title={t("project.browserSource")}
                 type="button"
                 variant="ghost"
                 onClick={onShowSource}
               >
                 <FileCode2 />
-              </Button>
+              </Button></AppTooltip>
             ) : null}
-            <Button
+            <AppTooltip content={t("project.browserZoomOut")}><Button
               aria-label={t("project.browserZoomOut")}
               disabled={scale <= 0.1}
               size="icon-sm"
-              title={t("project.browserZoomOut")}
               type="button"
               variant="ghost"
               onClick={() => changeScale(1 / 1.2)}
             >
               <Minus />
-            </Button>
+            </Button></AppTooltip>
             <span className="min-w-12 px-1.5 text-center text-xs tabular-nums">
               {layoutReady ? `${Math.round(scale * 100)}%` : null}
             </span>
-            <Button
+            <AppTooltip content={t("project.browserZoomIn")}><Button
               aria-label={t("project.browserZoomIn")}
               disabled={scale >= 8}
               size="icon-sm"
-              title={t("project.browserZoomIn")}
               type="button"
               variant="ghost"
               onClick={() => changeScale(1.2)}
             >
               <Plus />
-            </Button>
-            <Button
+            </Button></AppTooltip>
+            <AppTooltip content={t(zoomMode === "fit" ? "project.browserZoomReset" : "project.browserZoomFit")}><Button
               aria-label={t(zoomMode === "fit" ? "project.browserZoomReset" : "project.browserZoomFit")}
               aria-pressed={zoomMode === "fit"}
               className={viewModeButtonClassName}
               size="icon-sm"
-              title={t(zoomMode === "fit" ? "project.browserZoomReset" : "project.browserZoomFit")}
               type="button"
               variant="ghost"
               onClick={() => {
@@ -575,7 +591,7 @@ function ProjectImagePreview({ active, alt, src, onShowSource }: { active: boole
               }}
             >
               {zoomMode === "fit" ? <Maximize2 /> : <Minimize2 />}
-            </Button>
+            </Button></AppTooltip>
           </div>
         ) : null}
       </div>

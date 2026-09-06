@@ -23,6 +23,57 @@ enum SubmitPolicy {
 }
 
 final class AccessibilityService {
+  func revealWindow(_ target: CapturableWindowSnapshot) throws {
+    guard let bundleID = target.bundleID, AppPolicy.allows(bundleID: bundleID, pid: target.pid),
+      let application = NSRunningApplication(processIdentifier: target.pid), application.bundleIdentifier == bundleID else {
+      throw HelperError.windowNotFound(target.windowID)
+    }
+    guard AXIsProcessTrusted() else { throw HelperError.permissionRequired("accessibility") }
+    let app = AXUIElementCreateApplication(target.pid)
+    let matches = windows(of: app).filter { matchesWindow($0, target: target) }
+    guard matches.count == 1 else { throw HelperError.windowNotFound(target.windowID) }
+    guard application.activate(options: []),
+      AXUIElementPerformAction(matches[0], kAXRaiseAction as CFString) == .success else {
+      throw HelperError.useFailed("application rejected window reveal")
+    }
+  }
+
+  @discardableResult
+  static func enableElectronAccessibility(pid: pid_t, application: AXUIElement) throws -> Bool {
+    guard let url = NSRunningApplication(processIdentifier: pid)?.bundleURL,
+      FileManager.default.fileExists(
+        atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
+    else { return false }
+    var current: CFTypeRef?
+    if AXUIElementCopyAttributeValue(application, "AXManualAccessibility" as CFString, &current)
+      == .success, current as? Bool == true
+    {
+      return false
+    }
+    let result = AXUIElementSetAttributeValue(
+      application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    guard result == .success else {
+      throw HelperError.elementNotActionable(
+        "Electron accessibility activation failed: \(result.rawValue)")
+    }
+    return true
+  }
+
+  static func uniqueTextRange(text: String, selection: String) throws -> NSRange {
+    let source = text as NSString
+    let found = source.range(of: selection)
+    guard !selection.isEmpty, found.location != NSNotFound else {
+      throw HelperError.elementNotActionable("selected text was not found")
+    }
+    let remaining = NSRange(
+      location: found.location + 1, length: source.length - found.location - 1)
+    guard source.range(of: selection, range: remaining).location == NSNotFound else {
+      throw HelperError.ambiguousElement(
+        "select_text matches more than once; supply a unique text span")
+    }
+    return found
+  }
+
   private struct ElementRecord {
     let element: AXUIElement
     let parent: AXUIElement?
@@ -54,10 +105,10 @@ final class AccessibilityService {
     windowID: UInt32,
     targetWindow: CapturableWindowSnapshot,
     maxElements: Int
-  ) throws -> ObservationSnapshot {
+  ) async throws -> ObservationSnapshot {
     try requireAccessibility()
     let app = try runningApplication(bundleID: bundleID, pid: targetWindow.pid)
-    let collection = try collectElements(
+    let collection = try await collectElements(
       pid: app.processIdentifier,
       windowID: windowID,
       targetWindow: targetWindow,
@@ -82,10 +133,10 @@ final class AccessibilityService {
     elementID: String,
     action: ElementAction,
     value: String?
-  ) throws -> ActionSnapshot {
+  ) async throws -> ActionSnapshot {
     try requireAccessibility()
     let app = try runningApplication(bundleID: bundleID, pid: targetWindow.pid)
-    let collection = try collectElements(
+    let collection = try await collectElements(
       pid: app.processIdentifier,
       windowID: windowID,
       targetWindow: targetWindow,
@@ -106,6 +157,54 @@ final class AccessibilityService {
     }
 
     switch action {
+    case .focus:
+      guard attributeIsSettable(record.element, kAXFocusedAttribute as CFString) else {
+        throw HelperError.elementNotActionable("control cannot receive focus")
+      }
+      guard
+        AXUIElementSetAttributeValue(
+          record.element, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
+      else {
+        throw HelperError.actionFailed("control rejected focus")
+      }
+      guard
+        try await verifyChange({
+          self.attributeBool(record.element, kAXFocusedAttribute as CFString) == true
+        })
+      else {
+        throw HelperError.actionFailed("control did not receive focus")
+      }
+    case .selectText:
+      guard let value, !value.isEmpty,
+        let text = copyAttribute(record.element, kAXValueAttribute as CFString) as? String,
+        attributeIsSettable(record.element, kAXSelectedTextRangeAttribute as CFString)
+      else {
+        throw HelperError.elementNotActionable(
+          "select_text requires text and a selectable text control")
+      }
+      let range = try Self.uniqueTextRange(text: text, selection: value)
+      var selected = CFRange(location: range.location, length: range.length)
+      guard let axRange = AXValueCreate(.cfRange, &selected),
+        AXUIElementSetAttributeValue(
+          record.element, kAXSelectedTextRangeAttribute as CFString, axRange) == .success
+      else {
+        throw HelperError.actionFailed("cannot set selected text range")
+      }
+      guard
+        try await verifyChange({
+          guard
+            let result = self.copyAttribute(
+              record.element, kAXSelectedTextRangeAttribute as CFString),
+            CFGetTypeID(result as CFTypeRef) == AXValueGetTypeID()
+          else { return false }
+          var actual = CFRange()
+          return AXValueGetValue(
+            unsafeBitCast(result as CFTypeRef, to: AXValue.self), .cfRange, &actual)
+            && actual.location == selected.location && actual.length == selected.length
+        })
+      else {
+        throw HelperError.actionFailed("selected text range did not match")
+      }
     case .press:
       guard actionNames(record.element).contains(kAXPressAction as String) else {
         throw HelperError.elementNotActionable("AXPress is unavailable")
@@ -144,13 +243,16 @@ final class AccessibilityService {
         throw HelperError.actionFailed("AXValue verification failed")
       }
     case .select:
-      guard supportedActions(record.element, parent: record.parent, secure: false)
-        .contains(ElementAction.select.rawValue) else {
+      guard
+        supportedActions(record.element, parent: record.parent, secure: false)
+          .contains(ElementAction.select.rawValue)
+      else {
         throw HelperError.elementNotActionable("AX selection is unavailable")
       }
       try select(record)
     case .submit:
-      guard let dispatch = submitDispatch(
+      guard
+        let dispatch = submitDispatch(
           record.element,
           secure: record.secure
         )
@@ -196,21 +298,46 @@ final class AccessibilityService {
     return app
   }
 
+  private func verifyChange(_ matches: () -> Bool) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(1)
+    while !matches(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    return matches()
+  }
+
   private func collectElements(
     pid: pid_t,
     windowID requestedWindowID: UInt32,
     targetWindow: CapturableWindowSnapshot,
     maxElements: Int
+  ) async throws -> (
+    windows: [ApplicationWindowSnapshot], records: [ElementRecord], truncated: Bool
+  ) {
+    let appElement = AXUIElementCreateApplication(pid)
+    let enabled = try Self.enableElectronAccessibility(pid: pid, application: appElement)
+    var collection = try collectElementsOnce(
+      pid: pid, windowID: requestedWindowID, targetWindow: targetWindow, maxElements: maxElements)
+    // Electron builds its renderer AX tree asynchronously on first enablement.
+    // Re-read state only; never resend an action or keep a separate activation flag.
+    if enabled {
+      let deadline = Date().addingTimeInterval(2)
+      while !collection.records.contains(where: { $0.role == "AXWebArea" }), Date() < deadline {
+        try await Task.sleep(for: .milliseconds(50))
+        collection = try collectElementsOnce(
+          pid: pid, windowID: requestedWindowID, targetWindow: targetWindow,
+          maxElements: maxElements)
+      }
+    }
+    return collection
+  }
+
+  private func collectElementsOnce(
+    pid: pid_t, windowID requestedWindowID: UInt32,
+    targetWindow: CapturableWindowSnapshot, maxElements: Int
   ) throws -> (windows: [ApplicationWindowSnapshot], records: [ElementRecord], truncated: Bool) {
     let appElement = AXUIElementCreateApplication(pid)
     let allWindows = windows(of: appElement)
     let candidates = allWindows.enumerated().map { index, window in
-      ApplicationWindowSnapshot(
-        index: index,
-        windowID: windowID(of: window),
-        title: boundedAttributeString(window, kAXTitleAttribute as CFString),
-        frame: frame(of: window)
-      )
+      self.windowSnapshot(window, index: index)
     }
     guard
       let resolvedIndex = WindowResolver.resolveIndex(
@@ -242,10 +369,11 @@ final class AccessibilityService {
         windowIndex: 0, path: position.path, role: role, subrole: subrole,
         identifier: identifier, label: label, parentID: position.parentID
       )
-      records.append(ElementRecord(
-        element: element, parent: position.parent, elementID: elementID,
-        role: role, subrole: subrole, label: label, identityStable: position.identityStable
-      ))
+      records.append(
+        ElementRecord(
+          element: element, parent: position.parent, elementID: elementID,
+          role: role, subrole: subrole, label: label, identityStable: position.identityStable
+        ))
       return observationChildren(of: element, role: role).map { child in
         ElementPosition(
           element: child.element, parent: element,
@@ -336,6 +464,12 @@ final class AccessibilityService {
     if attributeIsSettable(element, kAXValueAttribute as CFString) {
       actions.append(ElementAction.setValue.rawValue)
     }
+    if attributeIsSettable(element, kAXFocusedAttribute as CFString) {
+      actions.append(ElementAction.focus.rawValue)
+    }
+    if attributeIsSettable(element, kAXSelectedTextRangeAttribute as CFString) {
+      actions.append(ElementAction.selectText.rawValue)
+    }
     if attributeIsSettable(element, kAXSelectedAttribute as CFString)
       || parent.map({ attributeIsSettable($0, kAXSelectedRowsAttribute as CFString) }) == true
     {
@@ -352,8 +486,9 @@ final class AccessibilityService {
     secure: Bool
   ) -> SubmitDispatch? {
     let role = attributeString(element, kAXRoleAttribute as CFString)
-    let editableText = (role == (kAXTextFieldRole as String)
-      || role == (kAXComboBoxRole as String))
+    let editableText =
+      (role == (kAXTextFieldRole as String)
+        || role == (kAXComboBoxRole as String))
       && attributeIsSettable(element, kAXValueAttribute as CFString)
     return SubmitPolicy.resolve(
       secure: secure,
@@ -487,6 +622,19 @@ final class AccessibilityService {
       return number
     }
     return nil
+  }
+
+  func matchesWindow(_ window: AXUIElement, target: CapturableWindowSnapshot) -> Bool {
+    WindowResolver.resolveIndex(
+      requestedWindowID: target.windowID, targetWindow: target,
+      candidates: [windowSnapshot(window, index: 0)]) == 0
+  }
+
+  private func windowSnapshot(_ window: AXUIElement, index: Int) -> ApplicationWindowSnapshot {
+    ApplicationWindowSnapshot(
+      index: index, windowID: windowID(of: window),
+      title: boundedAttributeString(window, kAXTitleAttribute as CFString), frame: frame(of: window)
+    )
   }
 
   private func frame(of element: AXUIElement) -> FrameSnapshot? {

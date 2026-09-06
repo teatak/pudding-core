@@ -54,7 +54,7 @@ import Testing
 }
 
 @Test func pressRejectsValue() {
-  #expect(throws: ArgumentError.invalidOption("--value", "allowed only for set_value")) {
+  #expect(throws: ArgumentError.invalidOption("--value", "allowed only for set_value/select_text")) {
     try ArgumentParser.parse([
       "act",
       "--bundle-id", "com.apple.calculator",

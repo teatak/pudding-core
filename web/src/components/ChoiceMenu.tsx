@@ -159,7 +159,7 @@ export function ChoiceMenu<T>({
             disabled={disabled}
             type="button"
           >
-            <div className="truncate text-sm font-medium">{item.label}</div>
+            <div className="truncate text-sm font-normal">{item.label}</div>
             {item.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div> : null}
           </button>
         );

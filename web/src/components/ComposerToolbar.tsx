@@ -1,5 +1,4 @@
 import { ArrowUp } from "@/components/icons";
-import type { ReactNode } from "react";
 
 import type { AudioBindings, Session } from "@/api/client";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
@@ -24,9 +23,7 @@ type ComposerToolbarProps = {
   cancelPending: boolean;
   compacting: boolean;
   context?: UIContextPart;
-  inputSlot?: ReactNode;
   mentionMenuOpen: boolean;
-  presentation?: "default" | "floating";
   projectID: string;
   reasoningEffort: string;
   sendEnabled: boolean;
@@ -53,9 +50,7 @@ export function ComposerToolbar({
   cancelPending,
   compacting,
   context,
-  inputSlot,
   mentionMenuOpen,
-  presentation = "default",
   projectID,
   reasoningEffort,
   sendEnabled,
@@ -75,10 +70,9 @@ export function ComposerToolbar({
   onUIContextEnabledChange,
 }: ComposerToolbarProps) {
   const { t } = useI18n();
-  const floating = presentation === "floating";
 
   return (
-    <div className={floating ? "flex min-w-0 items-center gap-2 p-1.5" : "flex min-w-0 items-center gap-2 px-1.5 pb-1.5"}>
+    <div className="flex min-w-0 items-center gap-2 px-1.5 pb-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <ComposerAddButton
           active={mentionMenuOpen}
@@ -86,16 +80,15 @@ export function ComposerToolbar({
           label={t("composer.addMenuTitle")}
           onClick={onAddClick}
         />
-        {inputSlot}
-        {floating ? null : <ProjectComposerControls projectID={projectID} token={token} />}
-        {!floating && context ? (
+        <ProjectComposerControls projectID={projectID} token={token} />
+        {context ? (
           <UIContextControl
             context={context}
             enabled={uiContextEnabled}
             onEnabledChange={onUIContextEnabledChange}
           />
         ) : null}
-        {floating ? null : <BackgroundProcessControl sessionID={session.id} token={token} />}
+        <BackgroundProcessControl sessionID={session.id} token={token} />
         {compacting ? (
           <span
             aria-live="polite"
@@ -107,10 +100,9 @@ export function ComposerToolbar({
         ) : null}
       </div>
       <div className="ml-auto flex min-w-0 items-center gap-1">
-        {floating ? null : <ContextUsageRing token={token} sessionID={session.id} />}
+        <ContextUsageRing token={token} sessionID={session.id} />
         <ModelReasoningPicker
           className="min-w-0"
-          iconOnly={floating}
           token={token}
           session={session}
           reasoningValue={reasoningEffort}

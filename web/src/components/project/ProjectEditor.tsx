@@ -1,4 +1,7 @@
 import * as monaco from "monaco-editor/editor";
+// The API entry excludes folding and language registration.
+import "monaco-editor/basic-languages/monaco.contribution";
+import "monaco-editor/editor/contrib/folding/browser/folding";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import { useEffect, useRef, useState } from "react";
 
@@ -365,6 +368,7 @@ function monacoLanguageFromPath(path: string) {
   if (filename === "dockerfile" || filename.startsWith("dockerfile.")) return "dockerfile";
   if (filename === ".env" || filename.startsWith(".env.")) return "ini";
   const language = languageFromPath(path) || "plaintext";
+  if (language === "c") return "cpp";
   if (language === "shellscript") return "shell";
   if (language === "json" || language === "jsonc") return "javascript";
   if (language === "jsx") return "javascript";

@@ -38,6 +38,27 @@ func TestElectronBridgeMapsBundleIDsAndRoutesSession(t *testing.T) {
 	}
 }
 
+func TestElectronBridgeActivityTurnIsRequestScoped(t *testing.T) {
+	var turns []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turns = append(turns, r.Header.Get("X-Pudding-Turn-ID"))
+		writeJSON(w, map[string]any{"apps": []any{}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ctx := range []context.Context{WithActivityTurn(context.Background(), "turn-a"), WithActivityTurn(context.Background(), "turn-b"), context.Background()} {
+		if _, err := service.ListApps(ctx, "session"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(turns) != 3 || turns[0] != "turn-a" || turns[1] != "turn-b" || turns[2] != "" {
+		t.Fatalf("turn identity leaked across requests: %v", turns)
+	}
+}
+
 func TestElectronBridgePreservesActionOutcome(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -105,7 +126,7 @@ func TestElectronBridgeRoutesApplicationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launched, err := service.UseApp(context.Background(), "session_a", "com.example.App", true)
+	launched, err := service.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
 	if err != nil || launched.PID != 42 || !launched.NewlyLaunched || len(launched.Windows) != 1 || launched.Windows[0].WindowID != 7 {
 		t.Fatalf("unexpected launch: %#v err=%v", launched, err)
 	}
@@ -137,7 +158,7 @@ func TestElectronBridgeRoutesAtomicObserveCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.ObserveCapture(context.Background(), "session_a", "com.example.App", 7, 50, "/tmp/window.png")
+	result, err := service.ObserveCapture(context.Background(), "session_a", "com.example.App", 7, 50, "/tmp/window.png", true)
 	if err != nil || result.Observation.PID != 42 || result.Capture == nil || result.Capture.Width != 100 {
 		t.Fatalf("unexpected observe-capture: %#v err=%v", result, err)
 	}
@@ -192,7 +213,7 @@ func TestElectronBridgeMarksUseTransportFailureUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.UseApp(context.Background(), "session_a", "com.example.App", false)
+	_, err = service.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
 	failure := ErrorFailure(err)
 	if failure.Outcome != "unknown" || failure.Retryable {
 		t.Fatalf("unexpected use transport failure: %#v", failure)

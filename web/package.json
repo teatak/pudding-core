@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "desktop:dev": "electron ../electron/main.cjs",
     "smoke:electron-browser": "electron ../electron/smoke/browser-dev-smoke.cjs",
-    "preview": "vite preview --host 127.0.0.1"
+    "smoke:electron-workspace": "electron ../electron/smoke/workspace-dev-smoke.cjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

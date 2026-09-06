@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { adoptBrowserTab, createBrowserTab, releaseBrowserTab } from "@/api/client";
+import { adoptBrowserTab, createBrowserTab, openBrowserTab, releaseBrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
   allowElectronBrowserTab,
@@ -17,28 +17,22 @@ import { useI18n } from "@/i18n";
 import { consumeBrowserReveal, useBrowserReveal } from "@/state/browserRevealStore";
 import {
   browserWorkspaceTabKey,
-  getWorkspaceSessionUI,
   mergeWorkspaceTabOrder,
-  nextWorkspaceTabAfterClose,
+  closeWorkspaceTab,
   openWorkspaceTab,
-  replaceWorkspaceSessionUI,
   setWorkspaceActiveTab,
-  updateWorkspaceSessionUI,
   useWorkspaceActiveTab,
   useWorkspaceTabOrder,
   workspaceTabResourceID,
-  type WorkspaceTabKey,
 } from "@/state/workspaceStore";
 
 type UseWorkspaceBrowserSurfaceArgs = {
-  availableNonBrowserTabs: WorkspaceTabKey[];
   enabled: boolean;
   sessionID: string;
   token: string;
 };
 
 export function useWorkspaceBrowserSurface({
-  availableNonBrowserTabs,
   enabled,
   sessionID,
   token,
@@ -55,10 +49,7 @@ export function useWorkspaceBrowserSurface({
 
   const browserReveal = useBrowserReveal(sessionID);
   const { query: browserTabsQuery, tabs: resolvedBrowserTabs } = useSessionBrowserTabs(sessionID, token, enabled);
-  const browserTabs = useMemo(
-    () => resolvedBrowserTabs.filter((tab) => tab.id !== releasingBrowserTabID),
-    [releasingBrowserTabID, resolvedBrowserTabs],
-  );
+  const browserTabs = resolvedBrowserTabs;
   const visualBrowserTabs = useMemo(() => {
     const tabsByID = new Map(browserTabs.map((tab) => [browserWorkspaceTabKey(tab.id), tab]));
     return mergeWorkspaceTabOrder(workspaceTabOrder, [...tabsByID.keys()]).flatMap((id) => {
@@ -99,26 +90,14 @@ export function useWorkspaceBrowserSurface({
   }, [browserTabsQuery.isFetching, browserTabsQuery.isSuccess, enabled, sessionID]);
 
   const storedBrowserTabID = workspaceTabResourceID(storedActiveTab, "browser");
-  const activeTab = storedBrowserTabID === releasingBrowserTabID
-    ? nextWorkspaceTabAfterClose(
-        browserWorkspaceTabKey(storedBrowserTabID),
-        [
-          ...availableNonBrowserTabs,
-          ...browserTabs.map((tab) => browserWorkspaceTabKey(tab.id)),
-          browserWorkspaceTabKey(storedBrowserTabID),
-        ],
-        workspaceTabOrder,
-      )
-    : storedActiveTab;
-  const requestedBrowserTabID = workspaceTabResourceID(activeTab, "browser");
+  const requestedBrowserTabID = storedBrowserTabID;
   const activeBrowserTab = browserTabs.find((tab) => tab.id === requestedBrowserTabID)
     || visualBrowserTabs[0];
   const activeBrowserTabID = activeBrowserTab?.id;
-  const browserActive = Boolean(requestedBrowserTabID);
+  const browserActive = storedActiveTab.startsWith("browser:");
   const activeBrowserSelection = activeBrowserTab
     ? browserSelections[`${sessionID}:${activeBrowserTab.id}`] || ""
     : "";
-  const hasBrowserState = browserTabs.length > 0;
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -144,7 +123,7 @@ export function useWorkspaceBrowserSurface({
       if (!tab) return;
       if (isNewTab) {
         if (snapshot.activate !== false) {
-          openWorkspaceTab(sessionID, browserWorkspaceTabKey(tab.id));
+          setWorkspaceActiveTab(sessionID, browserWorkspaceTabKey(tab.id));
         }
         void adoptBrowserTab(token, tab.sessionID, tab.id).catch(() => undefined);
       }
@@ -174,19 +153,24 @@ export function useWorkspaceBrowserSurface({
     if (!bridge?.onAutomationStart || !enabled || !sessionID) return;
     return bridge.onAutomationStart((event) => {
       if (event.sessionID !== sessionID || event.action === "screenshot") return;
-      openWorkspaceTab(sessionID, browserWorkspaceTabKey(event.tabID));
+      // Automation selects its tab; workspace presentation belongs to the user.
+      setWorkspaceActiveTab(sessionID, browserWorkspaceTabKey(event.tabID));
     });
   }, [enabled, sessionID]);
 
   const createBrowserTabMutation = useMutation({
-    mutationFn: async (targetSessionID: string) => {
+    mutationFn: async ({ targetSessionID, url }: { targetSessionID: string; url?: string }) => {
       if (!targetSessionID) throw new Error("browser session id missing");
-      return { sessionID: targetSessionID, tab: await createBrowserTab(token, targetSessionID) };
+      const tab = await createBrowserTab(token, targetSessionID);
+      allowElectronBrowserTab(targetSessionID, tab.id);
+      clearElectronBrowserSessionGate(targetSessionID);
+      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({ tabs: upsertBrowserTab(current?.tabs || [], tab), processMode: tab.mode || current?.processMode || processModeFallback }));
+      openWorkspaceTab(targetSessionID, browserWorkspaceTabKey(tab.id));
+      return { sessionID: targetSessionID, tab: url ? await openBrowserTab(token, targetSessionID, tab.id, { url }) : tab };
     },
     onSuccess: ({ sessionID: targetSessionID, tab }) => {
       allowElectronBrowserTab(targetSessionID, tab.id);
       clearElectronBrowserSessionGate(targetSessionID);
-      openWorkspaceTab(targetSessionID, browserWorkspaceTabKey(tab.id));
       queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({
         tabs: upsertBrowserTab(current?.tabs || [], tab),
         processMode: tab.mode || current?.processMode || processModeFallback,
@@ -198,13 +182,14 @@ export function useWorkspaceBrowserSurface({
 
   const createNewBrowserTab = useCallback(() => {
     if (!sessionID || createBrowserTabMutation.isPending) return;
-    createBrowserTabMutation.mutate(sessionID);
+    createBrowserTabMutation.mutate({ targetSessionID: sessionID });
   }, [createBrowserTabMutation.isPending, createBrowserTabMutation.mutate, sessionID]);
 
-  const selectBrowserTab = useCallback((tabID: string) => {
-    if (!sessionID || !browserTabs.some((tab) => tab.id === tabID)) return;
-    setWorkspaceActiveTab(sessionID, browserWorkspaceTabKey(tabID));
-  }, [browserTabs, sessionID]);
+  const openBrowserFromLibrary = useCallback((url: string) => {
+    const existing = browserTabs.find((tab) => tab.url === url);
+    if (existing) { openWorkspaceTab(sessionID, browserWorkspaceTabKey(existing.id)); return; }
+    if (sessionID && !createBrowserTabMutation.isPending) createBrowserTabMutation.mutate({ targetSessionID: sessionID, url });
+  }, [browserTabs, sessionID, createBrowserTabMutation.isPending, createBrowserTabMutation.mutate]);
 
   useEffect(() => {
     if (!enabled || !sessionID || !browserReveal) return;
@@ -216,98 +201,58 @@ export function useWorkspaceBrowserSurface({
       consumeBrowserReveal(sessionID, browserReveal.epoch);
       return;
     }
-    openWorkspaceTab(sessionID, browserWorkspaceTabKey(tab.id));
+    setWorkspaceActiveTab(sessionID, browserWorkspaceTabKey(tab.id));
     consumeBrowserReveal(sessionID, browserReveal.epoch);
   }, [activeBrowserTab, browserReveal, browserTabs, browserTabsResolved, enabled, sessionID]);
 
-  const closeBrowserTabMutation = useMutation({
-    mutationFn: async ({ targetSessionID, tabID }: { targetSessionID: string; tabID: string }) => {
-      await releaseBrowserTab(token, targetSessionID, tabID);
-      return { sessionID: targetSessionID, tabID };
+  const closeBrowserTabsMutation = useMutation({
+    mutationFn: async ({ targetSessionID, tabIDs }: { targetSessionID: string; tabIDs: string[] }) => {
+      const queryKey = queryKeys.browserTabs(targetSessionID);
+      for (const tabID of tabIDs) {
+        setReleasingBrowserTabID(tabID);
+        await queryClient.cancelQueries({ queryKey });
+        await releaseBrowserTab(token, targetSessionID, tabID);
+        closeWorkspaceTab(targetSessionID, browserWorkspaceTabKey(tabID));
+        queryClient.setQueryData<BrowserTabsData>(queryKey, (current) => ({
+          tabs: (current?.tabs || []).filter((tab) => tab.id !== tabID),
+          processMode: current?.processMode || processModeFallback,
+        }));
+      }
     },
-    onMutate: async ({ targetSessionID, tabID }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-      const previousTabs = queryClient.getQueryData<BrowserTabsData>(queryKeys.browserTabs(targetSessionID));
-      const previousUI = getWorkspaceSessionUI(targetSessionID);
-      const closingKey = browserWorkspaceTabKey(tabID);
-      const remainingTabs = (previousTabs?.tabs || []).filter((tab) => tab.id !== tabID);
-      const availableTabs = [
-        ...availableNonBrowserTabs,
-        ...resolvedBrowserTabs.map((tab) => browserWorkspaceTabKey(tab.id)),
-      ];
-      const fallback = nextWorkspaceTabAfterClose(closingKey, availableTabs, previousUI.tabOrder);
-      updateWorkspaceSessionUI(targetSessionID, (current) => ({
-        ...current,
-        activeTab: current.activeTab === closingKey ? fallback : current.activeTab,
-        tabOrder: current.tabOrder.filter((tab) => tab !== closingKey),
-      }));
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), {
-        tabs: remainingTabs,
-        processMode: previousTabs?.processMode || processModeFallback,
-      });
-      return { previousTabs, previousUI };
-    },
-    onSuccess: async ({ sessionID: targetSessionID }) => {
+    onSettled: async (_result, _error, { targetSessionID }) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
+      setReleasingBrowserTabID("");
     },
-    onError: (_error, variables, context) => {
-      setReleasingBrowserTabID((current) => current === variables.tabID ? "" : current);
-      if (context?.previousTabs) {
-        queryClient.setQueryData(queryKeys.browserTabs(variables.targetSessionID), context.previousTabs);
-      }
-      if (context?.previousUI) {
-        replaceWorkspaceSessionUI(variables.targetSessionID, context.previousUI);
-      }
-      toast.error(t("browser.releaseFailed"));
-    },
+    onError: () => toast.error(t("browser.releaseFailed")),
   });
-
-  useEffect(() => {
-    if (
-      closeBrowserTabMutation.isPending
-      || !releasingBrowserTabID
-      || resolvedBrowserTabs.some((tab) => tab.id === releasingBrowserTabID)
-    ) return;
-    setReleasingBrowserTabID("");
-  }, [
-    closeBrowserTabMutation.isPending,
-    releasingBrowserTabID,
-    resolvedBrowserTabs,
-  ]);
 
   useEffect(() => {
     if (!enabled || !sessionID || !activeBrowserTab) return;
     clearElectronBrowserSessionGate(sessionID);
   }, [activeBrowserTab, enabled, sessionID]);
 
-  const closeBrowserTab = useCallback((tabID: string) => {
-    if (!sessionID || closeBrowserTabMutation.isPending || releasingBrowserTabID) return;
-    setReleasingBrowserTabID(tabID);
-    closeBrowserTabMutation.mutate({ targetSessionID: sessionID, tabID });
-  }, [
-    closeBrowserTabMutation.isPending,
-    closeBrowserTabMutation.mutate,
-    releasingBrowserTabID,
-    sessionID,
-  ]);
+  const closeBrowserTabs = useCallback(async (targetSessionID: string, tabIDs: string[]) => {
+    if (!targetSessionID || closeBrowserTabsMutation.isPending || tabIDs.length === 0) return;
+    await closeBrowserTabsMutation.mutateAsync({ targetSessionID, tabIDs: [...new Set(tabIDs)] });
+  }, [closeBrowserTabsMutation.isPending, closeBrowserTabsMutation.mutateAsync]);
 
   return {
     activeBrowserSelection,
     activeBrowserTab,
     activeBrowserTabID,
-    activeTab,
     browserActive,
-    browserSurfacePending: createBrowserTabMutation.isPending || (browserActive && !browserTabsReady),
-    browserSurfaceVisible: browserActive || hasBrowserState || createBrowserTabMutation.isPending,
+    browserSurfacePending: createBrowserTabMutation.isPending || (browserActive && !browserTabsReady && browserTabsQuery.isFetching),
+    browserSurfaceError: !browserTabsReady && browserTabsQuery.isError,
+    retryBrowserTabs: browserTabsQuery.refetch,
     browserTabs,
     browserTabsReady,
     browserTabsResolved,
-    closeBrowserTab,
-    closingBrowserTabID: closeBrowserTabMutation.isPending
-      ? closeBrowserTabMutation.variables?.tabID
-      : undefined,
+    closeBrowserTabs,
+    closingBrowserTabIDs: closeBrowserTabsMutation.isPending && closeBrowserTabsMutation.variables?.targetSessionID === sessionID
+      ? closeBrowserTabsMutation.variables.tabIDs
+      : [],
     createNewBrowserTab,
+    openBrowserFromLibrary,
     creatingBrowserTab: createBrowserTabMutation.isPending,
-    selectBrowserTab,
   };
 }

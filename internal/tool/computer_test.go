@@ -207,7 +207,7 @@ func (f *fakeComputerController) ListApps(_ context.Context, sessionID string) (
 	return computer.AppList{Apps: []computer.Application{{AppID: "com.example.App", Name: "Example"}}}, nil
 }
 
-func (f *fakeComputerController) UseApp(_ context.Context, sessionID, appID string, foreground bool) (computer.UseResult, error) {
+func (f *fakeComputerController) UseApp(_ context.Context, sessionID, appID string, foreground bool, selection computer.AppSelection) (computer.UseResult, error) {
 	f.lastSession = sessionID
 	f.foreground = foreground
 	launchID := "launch_1"
@@ -230,13 +230,13 @@ func (f *fakeComputerController) Observe(_ context.Context, sessionID, appID str
 	return computer.Observation{AppID: appID, WindowID: &windowID, Elements: []computer.Element{{ElementID: "button", WindowID: &windowID, Actions: []string{computer.ActionPress}}}}, nil
 }
 
-func (f *fakeComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string) (computer.NativeObservationCapture, error) {
+func (f *fakeComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string, includeAccessibility bool) (computer.NativeObservationCapture, error) {
 	f.lastSession = sessionID
 	if err := os.WriteFile(output, tinyPNG, 0o600); err != nil {
 		return computer.NativeObservationCapture{}, err
 	}
 	return computer.NativeObservationCapture{
-		Observation: computer.Observation{AppID: appID, WindowID: &windowID},
+		Observation: &computer.Observation{AppID: appID, WindowID: &windowID},
 		Capture:     &computer.Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1},
 	}, nil
 }
@@ -515,4 +515,67 @@ var tinyPNG = []byte{
 	0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d,
 	0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
 	0x42, 0x60, 0x82,
+}
+
+type channelComputerController struct {
+	fakeComputerController
+	axError    bool
+	imageError bool
+}
+
+func (f *channelComputerController) ObserveCapture(_ context.Context, sessionID, appID string, windowID uint32, _ int, output string, ax bool) (computer.NativeObservationCapture, error) {
+	result := computer.NativeObservationCapture{}
+	failure := &computer.Failure{Code: "computer_permission_required", Message: "channel unavailable", Outcome: "not_started"}
+	if ax {
+		if f.axError {
+			result.ObservationError = failure
+		} else {
+			result.Observation = &computer.Observation{AppID: appID, WindowID: &windowID}
+		}
+	}
+	if f.imageError {
+		result.CaptureError = failure
+	} else {
+		if err := os.WriteFile(output, tinyPNG, 0o600); err != nil {
+			return result, err
+		}
+		result.Capture = &computer.Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1}
+	}
+	return result, nil
+}
+func TestComputerObservePreservesSuccessfulChannel(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		ax         bool
+		axError    bool
+		imageError bool
+	}{
+		{"AX failure keeps image", true, true, false}, {"image failure keeps AX", true, false, true}, {"image only", false, false, false}, {"both failed", true, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := NewBuiltinRunner(WithComputer(&channelComputerController{axError: tt.axError, imageError: tt.imageError}), WithHomeDir(t.TempDir()))
+			args, _ := json.Marshal(map[string]any{"appID": "com.example.App", "windowID": 42, "includeScreenshot": true, "includeAccessibility": tt.ax})
+			result := runner.Call(context.Background(), Call{SessionID: "session", CallID: "observe", Name: ComputerObserve, Args: args})
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(result.Content), &body); err != nil {
+				t.Fatal(err)
+			}
+			if result.Ok != (!tt.imageError || tt.ax && !tt.axError) || (len(result.Attachments) > 0) != !tt.imageError || (body["observation"] != nil) != (tt.ax && !tt.axError) {
+				t.Fatalf("unexpected result %+v", result)
+			}
+		})
+	}
+}
+func TestComputerSelectionAndKeyboardApprovalDetails(t *testing.T) {
+	details, err := computerUseAppApprovalDetails(Call{Args: json.RawMessage(`{"appID":"com.github.Electron","appPath":"/tmp/Source.app","pid":123}`)})
+	if err != nil || details["appPath"] != "/tmp/Source.app" || details["pid"] != int32(123) {
+		t.Fatalf("details=%+v err=%v", details, err)
+	}
+	details, err = computerActApprovalDetails(Call{Args: json.RawMessage(`{"appID":"com.github.Electron","windowID":42,"actions":[{"type":"press_key","key":"f","modifiers":["command"]}]}`)})
+	if err != nil || details["key"] != "f" {
+		t.Fatalf("details=%+v err=%v", details, err)
+	}
+	if _, err := decodeComputerObserveArgs([]byte(`{"appID":"com.example.App","windowID":42,"includeAccessibility":false}`)); err == nil {
+		t.Fatal("accepted no observation channels")
+	}
 }

@@ -300,7 +300,7 @@ function ProcessCompactActivityGlyph({
 }
 
 function DesktopAppActivityIcon({ appID }: { appID: string }) {
-  const identity = useDesktopApplicationIdentity(appID);
+  const { data: identity } = useDesktopApplicationIdentity(appID);
   return identity?.iconURL ? (
     <AppIcon className="size-4 rounded-[4px]" size="xs" src={identity.iconURL} />
   ) : (

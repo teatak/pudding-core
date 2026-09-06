@@ -1,5 +1,4 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { PanelRightClose, PanelRightOpen } from "@/components/icons";
 import {
   useCallback,
   useEffect,
@@ -13,7 +12,7 @@ import { useGroupRef } from "react-resizable-panels";
 
 import { claimMobilePairing } from "@/api/client";
 import { BrowserRuntimeProvider } from "@/browser/BrowserRuntimeProvider";
-import { AgentConsoleLayoutControl } from "@/components/AgentConsoleLayoutControl";
+import { WorkspaceFocusControl } from "@/components/WorkspaceFocusControl";
 import { AppsPane } from "@/components/AppsPane";
 import { AppToaster } from "@/components/AppToaster";
 import { ChatPane } from "@/components/ChatPane";
@@ -22,7 +21,6 @@ import { ProjectCreateDialog } from "@/components/ProjectCreateDialog";
 import { OAuthReturnHandler } from "@/components/OAuthReturnHandler";
 import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
-import { ShellActionButton } from "@/components/ShellActionButton";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ComputerUsePermissionGuide } from "@/components/ComputerUsePermissionGuide";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
@@ -44,10 +42,6 @@ import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { saveLastAppRoute, type AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
-import {
-  useAgentConsoleMode,
-  type AgentConsoleMode,
-} from "@/state/agentConsoleStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
 import {
   getRailCollapsedPreference,
@@ -57,26 +51,22 @@ import {
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 import {
+  minimumFocusChatWidth,
+  setWorkspaceFocusChatWidth,
   setWorkspaceOpen,
   useActiveWorkspaceSessionID,
-  useWorkspaceOpen,
+  useWorkspaceFocusChatWidth,
+  useWorkspacePresentation,
 } from "@/state/workspaceStore";
 
-type ConsoleDisplayMode = "full" | AgentConsoleMode;
-
-const floatingInset = 16;
-const floatingBottomInset = 4;
+const focusWorkspaceMinimumWidth = 220;
 const consoleMinimumWidth = 380;
-const floatingDefaultWidth = 680;
-const floatingDefaultHeight = 420;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const workspaceTransitionDurationMs = 220;
 type WorkspaceTransitionPhase = "idle" | "opening" | "closing";
 const centeredLayoutConstraints = {
   dockedMinimumWidth: workspaceLayout.drawerBreakpointPx,
   railChatMinimumWidth: workspaceLayout.railAutoCollapsePx,
-  railWorkspaceMinimumWidth:
-    sessionRailLayout.expandedWidthPx + workspaceMinimumWidth,
   thirdColumnMinimumWidth: Math.min(
     consoleMinimumWidth,
     workspaceMinimumWidth,
@@ -121,24 +111,20 @@ function readDockSplitRatio() {
 }
 
 function dockSplitRatioBounds({
-  chatDockSide,
   layoutWidth,
   railCollapsed,
+  minimumChatWidth = consoleMinimumWidth,
+  minimumWorkspaceWidth = workspaceMinimumWidth,
 }: {
-  chatDockSide: "left" | "right";
   layoutWidth: number;
   railCollapsed: boolean;
+  minimumChatWidth?: number;
+  minimumWorkspaceWidth?: number;
 }) {
   const railWidth = railCollapsed ? 0 : sessionRailLayout.expandedWidthPx;
-  if (chatDockSide === "left") {
-    return {
-      maximum: (layoutWidth - workspaceMinimumWidth) / layoutWidth,
-      minimum: (railWidth + consoleMinimumWidth) / layoutWidth,
-    };
-  }
   return {
-    maximum: (layoutWidth - consoleMinimumWidth) / layoutWidth,
-    minimum: (railWidth + workspaceMinimumWidth) / layoutWidth,
+    maximum: (layoutWidth - minimumWorkspaceWidth) / layoutWidth,
+    minimum: (railWidth + minimumChatWidth) / layoutWidth,
   };
 }
 
@@ -161,8 +147,10 @@ export function App() {
     standaloneViewActive ? undefined : selectedSessionID,
     showSplit ? splitSessionID : undefined,
   );
-  const workspaceOpen = useWorkspaceOpen(workspaceSessionID);
-  const agentConsoleMode = useAgentConsoleMode();
+  const workspacePresentation = useWorkspacePresentation(workspaceSessionID);
+  const workspaceOpen = workspacePresentation !== "hidden";
+  const focused = workspacePresentation === "focused" && !standaloneViewActive;
+  const focusChatWidth = useWorkspaceFocusChatWidth(workspaceSessionID);
   const railCollapsed = useRailCollapsed();
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [pairingCode] = useState(() => pendingPairingCode());
@@ -170,7 +158,7 @@ export function App() {
   const [layoutNode, setLayoutNode] = useState<HTMLDivElement | null>(null);
   const [centeredLayout, setCenteredLayout] = useState(() =>
     resolveCenteredLayoutPresentation({
-      chatDockSide: "left",
+      focused: false,
       constraints: centeredLayoutConstraints,
       layoutWidth: 0,
       leftGroupRatio: workspaceLayout.defaultLeftGroupRatio,
@@ -189,25 +177,23 @@ export function App() {
   const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
   const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
   const workspaceRequestedOpen = canUseWorkspace && workspaceOpen;
-  const workspaceTransitionEnabled = agentConsoleMode !== "floating";
   const [workspacePresent, setWorkspacePresent] = useState(workspaceRequestedOpen);
   const [workspaceTransition, setWorkspaceTransition] = useState<WorkspaceTransitionPhase>("idle");
   const workspaceRequestRef = useRef(workspaceRequestedOpen);
   const workspaceSessionRef = useRef(workspaceSessionID);
   const effectiveWorkspaceOpen = canUseWorkspace && workspacePresent;
   const workspaceVisible = effectiveWorkspaceOpen && workspaceTransition !== "closing";
-  const workspaceDockRequested =
-    effectiveWorkspaceOpen && agentConsoleMode !== "floating";
-  const chatDockSide = agentConsoleMode === "dock-right" ? "right" : "left";
+  const workspaceDockRequested = effectiveWorkspaceOpen;
   const updateCenteredLayout = useCallback(
     (
       layoutWidth: number,
       nextWorkspaceDockRequested: boolean,
-      nextSplitRatio = dockSplitRatioRef.current,
+      nextSplitRatio = dockSplitRatio,
     ) => {
       const expandedBounds = dockSplitRatioBounds({
-        chatDockSide,
         layoutWidth,
+        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed: false,
       });
       const feasibleExpandedRatio = clamp(
@@ -216,7 +202,7 @@ export function App() {
         expandedBounds.maximum,
       );
       const next = resolveCenteredLayoutPresentation({
-        chatDockSide,
+        focused,
         constraints: centeredLayoutConstraints,
         layoutWidth,
         leftGroupRatio: feasibleExpandedRatio,
@@ -234,7 +220,7 @@ export function App() {
       setCenteredLayout(next);
       return next;
     },
-    [chatDockSide],
+    [dockSplitRatio, focused],
   );
   const finishWorkspaceTransition = useCallback(() => {
     if (workspaceTransition === "idle") {
@@ -249,11 +235,11 @@ export function App() {
   useLayoutEffect(() => {
     const sessionChanged = workspaceSessionRef.current !== workspaceSessionID;
     workspaceSessionRef.current = workspaceSessionID;
-    if (!workspaceTransitionEnabled || (sessionChanged && !workspaceRequestedOpen)) {
+    if (sessionChanged && !workspaceRequestedOpen) {
       workspaceRequestRef.current = workspaceRequestedOpen;
       updateCenteredLayout(
         layoutNode?.clientWidth || 0,
-        workspaceRequestedOpen && agentConsoleMode !== "floating",
+        workspaceRequestedOpen,
       );
       setWorkspaceTransition("idle");
       setWorkspacePresent(workspaceRequestedOpen);
@@ -273,12 +259,10 @@ export function App() {
       setWorkspaceTransition("closing");
     }
   }, [
-    agentConsoleMode,
     layoutNode,
     updateCenteredLayout,
     workspaceRequestedOpen,
     workspaceSessionID,
-    workspaceTransitionEnabled,
   ]);
   // workspaceOpen 只表达用户意图。停靠/抽屉以及 rail 的响应式展示由
   // 两个共享 Chat 的组合区域统一求解，不写回用户偏好。
@@ -303,9 +287,7 @@ export function App() {
   function openProjectCreate() {
     setProjectCreateOpen(true);
   }
-  const consoleDisplayMode: ConsoleDisplayMode =
-    effectiveWorkspaceOpen && !workspaceOverlay ? agentConsoleMode : "full";
-  const showConsoleSplit = showSplit && consoleDisplayMode !== "floating";
+  const showConsoleSplit = showSplit && !focused;
   const activeSessionIDs = (
     standaloneViewActive
       ? []
@@ -434,14 +416,19 @@ export function App() {
         normalized,
       );
       const bounds = dockSplitRatioBounds({
-        chatDockSide,
         layoutWidth,
+        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed:
           getRailCollapsedPreference() ||
           presentation.railResponsiveCollapsed,
       });
       normalized = clamp(normalized, bounds.minimum, bounds.maximum);
       updateCenteredLayout(layoutWidth, workspaceDockRequested, normalized);
+    }
+    if (focused) {
+      setWorkspaceFocusChatWidth(workspaceSessionID, layoutWidth * normalized);
+      return;
     }
     dockSplitRatioRef.current = normalized;
     setDockSplitRatio(normalized);
@@ -456,7 +443,10 @@ export function App() {
     if (layoutWidth <= 0) {
       return;
     }
-    commitDockSplitRatio(dockSplitRatioRef.current + delta / layoutWidth);
+    const ratio = focused
+      ? focusChatWidth / layoutWidth
+      : dockSplitRatioRef.current;
+    commitDockSplitRatio(ratio + delta / layoutWidth);
   };
 
   const startDockResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -464,13 +454,14 @@ export function App() {
       event.button !== 0 ||
       !layoutNode ||
       !agentConsoleRef.current ||
-      (consoleDisplayMode !== "dock-left" && consoleDisplayMode !== "dock-right")
+      !workspaceDocked
     ) {
       return;
     }
     event.preventDefault();
     const pointerID = event.pointerId;
     const resizeHandle = event.currentTarget;
+    resizeHandle.focus();
     const agentConsoleNode = agentConsoleRef.current;
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
@@ -491,7 +482,9 @@ export function App() {
     document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
 
-    let liveSplitRatio = dockSplitRatioRef.current;
+    let liveSplitRatio = focused
+      ? agentConsoleNode.getBoundingClientRect().width / layoutNode.clientWidth
+      : dockSplitRatioRef.current;
     let resizeFrame = 0;
     let pendingClientX: number | undefined;
     let cleaned = false;
@@ -508,19 +501,18 @@ export function App() {
         getRailCollapsedPreference() ||
         presentation.railResponsiveCollapsed;
       const bounds = dockSplitRatioBounds({
-        chatDockSide,
         layoutWidth,
+        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed: liveRailCollapsed,
       });
       liveSplitRatio = clamp(rawRatio, bounds.minimum, bounds.maximum);
-      dockSplitRatioRef.current = liveSplitRatio;
+      if (!focused) dockSplitRatioRef.current = liveSplitRatio;
       const railWidth = liveRailCollapsed
         ? 0
         : sessionRailLayout.expandedWidthPx;
       const leftGroupWidth = layoutWidth * liveSplitRatio;
-      const chatWidth = chatDockSide === "left"
-        ? leftGroupWidth - railWidth
-        : layoutWidth - leftGroupWidth;
+      const chatWidth = leftGroupWidth - railWidth;
       agentConsoleNode.style.width = `${chatWidth}px`;
     };
     const scheduleUpdate = (clientX: number) => {
@@ -595,27 +587,13 @@ export function App() {
   };
 
   const docked = workspaceDocked;
-  const consoleNeedsLeftInset =
-    consoleDisplayMode === "full" || consoleDisplayMode === "dock-left";
-  const workspaceStartsAtStageLeft = consoleDisplayMode !== "dock-left";
-  const workspaceToolbarPadding =
-    railCollapsed && workspaceStartsAtStageLeft
-      ? workspaceOverlay
-        ? `max(var(--toolbar-edge-inset), calc(var(--traffic-inset) + var(--toolbar-edge-inset) - (100vw - min(100vw, ${workspaceLayout.drawerWidthPx}px))))`
-        : "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
-      : "0.75rem";
+  const workspaceToolbarPadding = "0.75rem";
   const renderedDockSplitRatio = consoleInteracting
     ? dockSplitRatioRef.current
     : dockSplitRatio;
-  const renderedChatRatio = chatDockSide === "left"
-    ? renderedDockSplitRatio
-    : 1 - renderedDockSplitRatio;
+  const renderedChatRatio = renderedDockSplitRatio;
   const renderedChatPercent = `${renderedChatRatio * 100}%`;
-  const railAdjustment = railCollapsed
-    ? 0
-    : chatDockSide === "left"
-      ? -(1 - renderedDockSplitRatio) * sessionRailLayout.expandedWidthPx
-      : renderedChatRatio * sessionRailLayout.expandedWidthPx;
+  const railAdjustment = railCollapsed ? 0 : -(1 - renderedDockSplitRatio) * sessionRailLayout.expandedWidthPx;
   const preferredDockWidth = railAdjustment === 0
     ? renderedChatPercent
     : `calc(${renderedChatPercent} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
@@ -623,33 +601,21 @@ export function App() {
   const preferredDockContainerWidth = railAdjustment === 0
     ? renderedChatContainerWidth
     : `calc(${renderedChatContainerWidth} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
-  const dockedConsoleWidth = `clamp(min(${consoleMinimumWidth}px, 50%), ${preferredDockWidth}, calc(100% - min(${workspaceMinimumWidth}px, 50%)))`;
-  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(min(${consoleMinimumWidth}px, 50cqw), ${preferredDockContainerWidth}, calc(100cqw - min(${workspaceMinimumWidth}px, 50cqw))) - 1px))`;
+  const minimumChatWidth = focused ? minimumFocusChatWidth : consoleMinimumWidth;
+  const minimumWorkspaceWidth = focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth;
+  const dockedConsoleWidth = `clamp(${minimumChatWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockWidth}, calc(100% - min(${minimumWorkspaceWidth}px, 50%)))`;
+  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(${minimumChatWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockContainerWidth}, calc(100cqw - min(${minimumWorkspaceWidth}px, 50cqw))) - 1px))`;
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
-    order: consoleDisplayMode === "dock-left" ? 2 : 0,
+    order: 2,
     width: workspaceOverlay ? `min(100%, ${workspaceLayout.drawerWidthPx}px)` : undefined,
   } as CSSProperties;
-  const chatOccupiesStageTopRight =
-    consoleDisplayMode === "full" ||
-    consoleDisplayMode === "dock-right" ||
-    workspaceTransition === "closing";
-  const workspaceOccupiesStageTopRight = consoleDisplayMode !== "dock-right";
-  const stageToolbarActionCount: 0 | 1 | 2 =
-    !canUseWorkspace
-      ? 0
-      : workspaceVisible && !workspaceOverlay
-        ? 2
-        : 1;
+  const chatOccupiesStageTopRight = !docked || workspaceTransition === "closing";
+  const reserveWorkspaceControl = canUseWorkspace;
 
   const chatArea = (
     <main
-      className={cn(
-        "flex h-full w-full min-w-0 flex-col",
-        consoleDisplayMode === "floating"
-          ? "overflow-visible bg-transparent"
-          : "overflow-hidden bg-background",
-      )}
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-background"
     >
       <ResizablePanelGroup
         className="min-h-0 flex-1"
@@ -664,17 +630,14 @@ export function App() {
           }
         }}
       >
-        <ResizablePanel id="primary" className="min-h-0" minSize={splitLayout.minPanePx}>
+        <ResizablePanel id="primary" className="min-h-0" minSize={focused ? 0 : splitLayout.minPanePx}>
           <ChatPane
             draftActive={draftActive}
             draftProjectID={draftActive ? draftProjectID : undefined}
-            presentation={consoleDisplayMode === "floating" ? "floating" : "default"}
-            reserveTopLeftInset={consoleNeedsLeftInset}
-            reserveTopRightActions={
-              chatOccupiesStageTopRight ? stageToolbarActionCount : 0
-            }
+            reserveTopLeftInset
+            reserveWorkspaceControl={chatOccupiesStageTopRight && reserveWorkspaceControl}
             role="primary"
-            sessionID={selectedSessionID}
+            sessionID={focused ? workspaceSessionID : selectedSessionID}
             token={token}
           />
         </ResizablePanel>
@@ -696,26 +659,9 @@ export function App() {
     </main>
   );
 
-  const workspaceToggleLabel = t(
-    workspaceRequestedOpen ? "workspace.close" : "workspace.open",
-  );
-  const stageToolbarActions = canUseWorkspace ? (
-    <div className="no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[60] flex h-(--toolbar-h) items-center gap-2">
-      {workspaceVisible && !workspaceOverlay
-        ? <AgentConsoleLayoutControl />
-        : null}
-      <div className="pudding-workspace-toggle flex items-center">
-        <ShellActionButton
-          aria-label={workspaceToggleLabel}
-          aria-pressed={workspaceRequestedOpen}
-          className="no-drag-region pointer-events-auto"
-          size="icon-sm"
-          tabIndex={-1}
-          onClick={() => setWorkspaceOpen(workspaceSessionID, !workspaceRequestedOpen)}
-        >
-          {workspaceRequestedOpen ? <PanelRightClose /> : <PanelRightOpen />}
-        </ShellActionButton>
-      </div>
+  const workspaceToolbarActions = canUseWorkspace ? (
+    <div className="no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[60] flex h-(--toolbar-h) items-center">
+      <WorkspaceFocusControl sessionID={workspaceSessionID} />
     </div>
   ) : null;
 
@@ -741,7 +687,6 @@ export function App() {
           "absolute inset-y-0 right-0 z-50 flex-none border-l border-[var(--workspace-border)] shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
       )}
       data-presentation={workspaceOverlay ? "overlay" : docked ? "docked" : "inline"}
-      data-dock-side={agentConsoleMode === "dock-right" ? "left" : "right"}
       data-transition={workspaceTransition}
       inert={!workspaceVisible}
       style={workspaceSurfaceStyle}
@@ -754,9 +699,7 @@ export function App() {
       <WorkspacePane
         activeSessionID={workspaceSessionID}
         presented={effectiveWorkspaceOpen}
-        reserveTopRightActions={
-          workspaceOccupiesStageTopRight ? stageToolbarActionCount : 0
-        }
+        reserveWorkspaceControl={reserveWorkspaceControl}
         secondarySessionID={showSplit ? splitSessionID : undefined}
         sessionID={selectedSessionID}
         token={token}
@@ -770,22 +713,16 @@ export function App() {
       className={cn(
         "pudding-agent-console min-h-0 min-w-0",
         docked && "pudding-workspace-width-transition",
-        consoleDisplayMode === "floating"
-          ? "pointer-events-none overflow-visible"
-          : "overflow-hidden",
+        "overflow-hidden",
       )}
-      data-mode={consoleDisplayMode}
       style={{
         flexShrink: 0,
-        height: consoleDisplayMode === "floating" ? `min(${floatingDefaultHeight}px, 100%)` : "100%",
-        order: consoleDisplayMode === "dock-right" ? 2 : 0,
+        height: "100%",
+        order: 0,
         position: "relative",
-        width: consoleDisplayMode === "floating"
-          ? `min(${floatingDefaultWidth}px, 100%)`
-          : docked
+        width: docked
             ? (workspaceVisible ? dockedConsoleWidth : "100%")
             : "100%",
-        zIndex: consoleDisplayMode === "floating" ? 40 : "auto",
       }}
       onTransitionEnd={(event) => {
         if (
@@ -802,21 +739,8 @@ export function App() {
   );
   const sessionStage = (
     <>
-      {/* 始终保留同一父节点，避免 floating 与 docked 互切时重挂 ChatPane。 */}
-      <div
-        className={cn(
-          consoleDisplayMode === "floating"
-            ? "pointer-events-none absolute z-40 flex items-end justify-center"
-            : "contents",
-        )}
-        style={
-          consoleDisplayMode === "floating"
-            ? {
-                inset: `calc(var(--toolbar-h) + ${floatingInset}px) ${floatingInset}px ${floatingBottomInset}px`,
-              }
-            : undefined
-        }
-      >
+      {/* 保留同一父节点，切换专注布局时不重建对话和输入区。 */}
+      <div className="contents">
         {agentConsole}
       </div>
       {workspaceOverlay ? (
@@ -836,7 +760,7 @@ export function App() {
           aria-orientation="vertical"
           aria-valuemax={100}
           aria-valuemin={0}
-          aria-valuenow={Math.round(renderedDockSplitRatio * 100)}
+          aria-valuenow={Math.round((focused ? focusChatWidth / (layoutNode?.clientWidth || focusChatWidth) : renderedDockSplitRatio) * 100)}
           className={cn(
             "pudding-shell-divider group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-ew-resize touch-none items-center justify-center outline-none transition-opacity duration-[var(--workspace-transition-duration)] before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 focus-visible:before:bg-muted-foreground/80",
             !workspaceVisible && "pointer-events-none opacity-0",
@@ -844,19 +768,9 @@ export function App() {
           role="separator"
           tabIndex={0}
           onKeyDown={(event) => {
-            const increaseKey =
-              consoleDisplayMode === "dock-left" ? "ArrowRight" : "ArrowLeft";
-            const decreaseKey =
-              consoleDisplayMode === "dock-left" ? "ArrowLeft" : "ArrowRight";
-            if (event.key !== increaseKey && event.key !== decreaseKey) {
-              return;
-            }
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
-            moveDockDivider(
-              event.key === increaseKey
-                ? consoleDisplayMode === "dock-left" ? 20 : -20
-                : consoleDisplayMode === "dock-left" ? -20 : 20,
-            );
+            moveDockDivider(event.key === "ArrowRight" ? 20 : -20);
           }}
           onPointerDown={startDockResize}
         >
@@ -879,18 +793,18 @@ export function App() {
 
   return (
     <EditorTypographyProvider token={token}>
-      <BrowserRuntimeProvider token={token}>
-        <TooltipProvider delayDuration={250}>
+      <TooltipProvider delayDuration={250}>
+        <BrowserRuntimeProvider token={token}>
           <OAuthReturnHandler token={token} />
           <div className="relative flex h-full overflow-hidden">
             <div
-              aria-hidden="true"
-              className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)"
-            />
-            <div
               ref={setLayoutNode}
-              className="relative flex h-full min-w-0 flex-1 bg-background"
+              className="isolate relative flex h-full min-w-0 flex-1 bg-background"
             >
+              <div
+                aria-hidden="true"
+                className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)"
+              />
               <SessionRail
                 activeSessionIDs={activeSessionIDs}
                 draftActive={draftActive}
@@ -904,22 +818,22 @@ export function App() {
                     ? "hidden"
                     : workspaceOverlay
                       ? "overlay"
-                      : agentConsoleMode === "floating"
-                        ? "canvas"
-                        : "docked"
+                      : "docked"
                 }
                 className={cn(
-                  "pudding-session-stage relative h-full min-w-0 flex-1 overflow-hidden bg-background",
-                  (consoleDisplayMode === "full" || docked) && "flex",
+                  "pudding-session-stage relative flex h-full min-w-0 flex-1 overflow-hidden bg-background",
                 )}
                 style={{
+                  "--workspace-control-width": workspaceOpen
+                    ? "calc(var(--toolbar-icon-button-size) * 2 + 0.25rem)"
+                    : "var(--toolbar-icon-button-size)",
                   "--workspace-inline-content-width": dockedWorkspaceWidth,
                   "--workspace-transition-duration": `${workspaceTransitionDurationMs}ms`,
                 } as CSSProperties}
               >
                 {standalonePane || sessionStage}
-                {stageToolbarActions}
               </div>
+              {workspaceToolbarActions}
             </div>
           </div>
           <ProjectCreateDialog
@@ -931,8 +845,8 @@ export function App() {
           <SettingsDialog token={token} showTrigger={false} />
           <ComputerUsePermissionGuide />
           <AppToaster />
-        </TooltipProvider>
-      </BrowserRuntimeProvider>
+        </BrowserRuntimeProvider>
+      </TooltipProvider>
     </EditorTypographyProvider>
   );
 }

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 13
+	currentSchemaVersion       = 17
 )
 
 var (
@@ -29,6 +31,7 @@ type schemaMigration func(*sql.Tx) error
 
 // schemaMigrations is keyed by the destination version. Version 1 is the
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
+// Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
 	2: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
@@ -295,6 +298,74 @@ var schemaMigrations = map[int]schemaMigration{
 		_, err := tx.Exec(`DROP TABLE IF EXISTS usage_calibrations`)
 		return err
 	},
+	17: func(tx *sql.Tx) error {
+		// Unversioned current layouts also replay data migrations. The old table
+		// is absent on those layouts; versioned legacy databases retain it.
+		exists, err := tableColumnExists(tx, "canvas_closed_items", "session_id")
+		if err != nil {
+			return err
+		}
+		if exists {
+			if _, err := tx.Exec(`
+			INSERT INTO canvas_items(
+				session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,
+				kind,title,item_json,window_json,visible,created_at,updated_at
+			)
+			SELECT session_id,source_item_id,'default',session_id,actor_session_id,actor_session_id,
+				kind,title,item_json,window_json,0,created_at,closed_at
+			FROM canvas_closed_items WHERE 1
+			ON CONFLICT(session_id,id) DO NOTHING;
+			DROP TABLE canvas_closed_items;
+		`); err != nil {
+				return err
+			}
+		}
+
+		// Current unversioned layouts already contain the relation; do not re-star
+		// saved versions when replaying bootstrap data migrations.
+		exists, err = tableColumnExists(tx, "library_favorites", "id")
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := tx.Exec(`CREATE TABLE library_favorites (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('canvas','web')),
+    source_session_id TEXT NOT NULL DEFAULT '',
+    saved_item_id TEXT REFERENCES canvas_saved_items(id) ON DELETE CASCADE,
+    url TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    CHECK ((kind='canvas' AND saved_item_id IS NOT NULL AND url='')
+        OR (kind='web' AND saved_item_id IS NULL AND url<>''))
+);
+CREATE UNIQUE INDEX library_favorites_canvas ON library_favorites(saved_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX library_favorites_web ON library_favorites(url) WHERE kind='web';
+
+INSERT INTO library_favorites(id,kind,saved_item_id,created_at)
+SELECT 'canvas:' || id,'canvas',id,created_at FROM canvas_saved_items;
+`); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS library_recent_opens (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('file','canvas')),
+    source_session_id TEXT NOT NULL,
+    canvas_item_id TEXT,
+    root_path TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    opened_at INTEGER NOT NULL,
+    FOREIGN KEY(source_session_id,canvas_item_id) REFERENCES canvas_items(session_id,id) ON DELETE CASCADE,
+    CHECK ((kind='canvas' AND canvas_item_id IS NOT NULL AND root_path='' AND path='')
+        OR (kind='file' AND canvas_item_id IS NULL AND root_path<>'' AND path<>''))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS library_recent_canvas ON library_recent_opens(source_session_id,canvas_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX IF NOT EXISTS library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
+CREATE INDEX IF NOT EXISTS library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);
+`)
+		return err
+	},
 }
 
 func addTableColumnIfMissing(tx *sql.Tx, table, column, definition string) error {
@@ -440,6 +511,9 @@ func prepareSchema(db *sql.DB, path string) error {
 			}
 		}
 	}
+	if version != baselineSchemaVersion && schemaMigrations[version] == nil {
+		return fmt.Errorf("%w: no supported migration from v%d", ErrUnsupportedSchema, version)
+	}
 	migrated := version < currentSchemaVersion
 	migrationBackupPath := ""
 	if migrated {
@@ -447,12 +521,11 @@ func prepareSchema(db *sql.DB, path string) error {
 		if err != nil {
 			return err
 		}
-		for next := version + 1; next <= currentSchemaVersion; next++ {
-			migration, ok := schemaMigrations[next]
-			if !ok {
-				return fmt.Errorf("sqlite: missing migration to schema v%d", next)
+		for _, next := range slices.Sorted(maps.Keys(schemaMigrations)) {
+			if next <= version {
+				continue
 			}
-			if err := runSchemaMigration(db, next, migration); err != nil {
+			if err := runSchemaMigration(db, next, schemaMigrations[next]); err != nil {
 				return err
 			}
 		}
@@ -681,14 +754,24 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
-		"computer_app_grants": {"session_id", "app_id", "created_at"},
+		"computer_app_grants":  {"session_id", "app_id", "created_at"},
+		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
+		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
 	})
 	delete(out.tables, "usage_calibrations")
+	delete(out.tables, "canvas_closed_items")
+	for i, index := range out.indexes {
+		if index == "canvas_closed_items_closed_at" {
+			out.indexes = append(out.indexes[:i], out.indexes[i+1:]...)
+			break
+		}
+	}
 	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
-	out.indexes = append(out.indexes, "sessions_archived_at")
-	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations"}
+	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
+	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
+	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}
 	return out
 }()
 

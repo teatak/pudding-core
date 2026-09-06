@@ -38,7 +38,12 @@ final class ApplicationLifecycleService {
         controllable: AppPolicy.allows(bundleID: bundleID)
           && instances.allSatisfy {
             AppPolicy.allows(bundleID: bundleID, pid: $0.processIdentifier)
-          }
+          },
+        instances: instances.map {
+          ApplicationInstanceSnapshot(
+            pid: $0.processIdentifier, appPath: $0.bundleURL?.resolvingSymlinksInPath().path,
+            active: $0.isActive)
+        }
       )
     }.sorted {
       if $0.active != $1.active { return $0.active }
@@ -52,11 +57,12 @@ final class ApplicationLifecycleService {
       throw HelperError.applicationNotInstalled(bundleID)
     }
     let bundle = Bundle(url: url)
-    let name = ValueSanitizer.bounded(
-      (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-      ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
-      ?? url.deletingPathExtension().lastPathComponent
-    ) ?? bundleID
+    let name =
+      ValueSanitizer.bounded(
+        (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+          ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+          ?? url.deletingPathExtension().lastPathComponent
+      ) ?? bundleID
     knownApplications[bundleID] = name
     return ApplicationIdentitySnapshot(
       bundleID: bundleID,
@@ -65,7 +71,9 @@ final class ApplicationLifecycleService {
     )
   }
 
-  func use(bundleID: String, foreground: Bool) async throws -> UseApplicationSnapshot {
+  func use(bundleID: String, foreground: Bool, appPath: String? = nil, pid: Int32? = nil)
+    async throws -> UseApplicationSnapshot
+  {
     guard AppPolicy.allows(bundleID: bundleID) else {
       throw HelperError.appNotAllowed(bundleID)
     }
@@ -77,7 +85,37 @@ final class ApplicationLifecycleService {
         throw HelperError.appNotAllowed(bundleID)
       }
     }
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+    if let pid, pid <= 0 { throw ArgumentError.invalidOption("pid", "must be positive") }
+    let requestedURL: URL?
+    if let appPath {
+      guard appPath.hasPrefix("/") else {
+        throw ArgumentError.invalidOption("appPath", "must be absolute")
+      }
+      let url = URL(fileURLWithPath: appPath).resolvingSymlinksInPath()
+      guard url.pathExtension == "app", Bundle(url: url)?.bundleIdentifier == bundleID else {
+        throw ArgumentError.invalidOption("appPath", "must be an app bundle matching appID")
+      }
+      requestedURL = url
+    } else {
+      requestedURL = nil
+    }
+    let matches = runningInstances.filter { app in
+      (pid == nil || app.processIdentifier == pid)
+        && (requestedURL == nil || app.bundleURL?.resolvingSymlinksInPath() == requestedURL)
+    }
+    guard matches.count <= 1 else {
+      throw HelperError.ambiguousApplication(
+        "\(bundleID): \(matches.map { String($0.processIdentifier) }.joined(separator: ", ")); choose appPath or pid from list_apps"
+      )
+    }
+    if pid != nil, matches.isEmpty {
+      throw HelperError.appNotFound("requested PID/path does not match \(bundleID)")
+    }
+    let selected = matches.first
+    guard
+      let url = requestedURL ?? selected?.bundleURL
+        ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    else {
       throw HelperError.applicationNotInstalled(bundleID)
     }
     guard CGPreflightScreenCaptureAccess() else {
@@ -86,13 +124,14 @@ final class ApplicationLifecycleService {
     do {
       let application: NSRunningApplication
       let newlyLaunched: Bool
-      if let running = preferredRunningApplication(runningInstances), !foreground {
+      if let running = selected, !foreground || pid != nil {
         application = running
         newlyLaunched = false
       } else {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.addsToRecentItems = false
+        configuration.createsNewApplicationInstance = requestedURL != nil && selected == nil
         application = try await NSWorkspace.shared.openApplication(
           at: url,
           configuration: configuration
@@ -102,14 +141,22 @@ final class ApplicationLifecycleService {
       guard AppPolicy.allows(bundleID: bundleID, pid: application.processIdentifier) else {
         throw HelperError.appNotAllowed(bundleID)
       }
-      knownApplications[bundleID] = ValueSanitizer.bounded(
-        application.localizedName ?? bundleID
-      ) ?? bundleID
-      let discovery: (
-        status: WindowDiscoveryStatus,
-        error: ErrorDetail?,
-        windows: [CapturableWindowSnapshot]
-      )
+      guard application.bundleIdentifier == bundleID,
+        requestedURL == nil || application.bundleURL?.resolvingSymlinksInPath() == requestedURL,
+        pid == nil || application.processIdentifier == pid
+      else {
+        throw HelperError.useFailed("launched application did not match the requested identity")
+      }
+      knownApplications[bundleID] =
+        ValueSanitizer.bounded(
+          application.localizedName ?? bundleID
+        ) ?? bundleID
+      let discovery:
+        (
+          status: WindowDiscoveryStatus,
+          error: ErrorDetail?,
+          windows: [CapturableWindowSnapshot]
+        )
       do {
         let windows = try await screenCapture.waitForWindows(
           bundleID: bundleID,
@@ -184,13 +231,6 @@ final class ApplicationLifecycleService {
     }
   }
 
-  private func preferredRunningApplication(
-    _ applications: [NSRunningApplication]
-  ) -> NSRunningApplication? {
-    applications.first(where: \.isActive)
-      ?? applications.min { $0.processIdentifier < $1.processIdentifier }
-  }
-
   private func activate(pid: pid_t, bundleID: String) async throws {
     guard let application = NSRunningApplication(processIdentifier: pid),
       application.activate(options: [.activateAllWindows])
@@ -211,9 +251,11 @@ final class ApplicationLifecycleService {
   ) async throws {
     let application = AXUIElementCreateApplication(pid)
     var rawWindows: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(
-      application, kAXWindowsAttribute as CFString, &rawWindows
-    ) == .success, let windows = rawWindows as? [AXUIElement] else {
+    guard
+      AXUIElementCopyAttributeValue(
+        application, kAXWindowsAttribute as CFString, &rawWindows
+      ) == .success, let windows = rawWindows as? [AXUIElement]
+    else {
       throw HelperError.useFailed("application windows could not be raised: \(bundleID)")
     }
     var raised = false
@@ -245,9 +287,11 @@ final class ApplicationLifecycleService {
       return false
     }
     for target in targetWindows {
-      guard let targetIndex = ordered.firstIndex(where: {
-        ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == target.windowID
-      }) else {
+      guard
+        let targetIndex = ordered.firstIndex(where: {
+          ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == target.windowID
+        })
+      else {
         return false
       }
       let targetFrame = CGRect(
@@ -281,11 +325,13 @@ final class ApplicationLifecycleService {
     ]
     var urls: [URL] = []
     for root in roots where FileManager.default.fileExists(atPath: root.path) {
-      guard let enumerator = FileManager.default.enumerator(
-        at: root,
-        includingPropertiesForKeys: [.isApplicationKey],
-        options: [.skipsHiddenFiles, .skipsPackageDescendants]
-      ) else { continue }
+      guard
+        let enumerator = FileManager.default.enumerator(
+          at: root,
+          includingPropertiesForKeys: [.isApplicationKey],
+          options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        )
+      else { continue }
       for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
         urls.append(url)
       }

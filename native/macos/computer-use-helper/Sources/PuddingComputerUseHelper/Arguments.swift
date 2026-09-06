@@ -2,12 +2,16 @@ import Foundation
 
 enum HelperCommand: Equatable {
   case serve
+  case revealWindow(bundleID: String, windowID: UInt32, pid: Int32)
   case permissions(promptAccessibility: Bool, promptScreenRecording: Bool)
   case listApps
   case applicationIdentity(bundleID: String)
   case observe(bundleID: String, windowID: UInt32, maxElements: Int)
-  case observeCapture(bundleID: String, windowID: UInt32, maxElements: Int, output: String)
-  case useApp(bundleID: String, foreground: Bool)
+  case observeCapture(
+    bundleID: String, windowID: UInt32, maxElements: Int, output: String,
+    includeAccessibility: Bool = true)
+  case useApp(bundleID: String, foreground: Bool, appPath: String? = nil, pid: Int32? = nil)
+  case keyboard(bundleID: String, windowID: UInt32, input: KeyboardInput)
   case quitApp(bundleID: String, pid: Int32)
   case act(
     bundleID: String,
@@ -57,7 +61,8 @@ struct PointerInput: Equatable {
     deltaY: Int?
   ) throws -> PointerInput {
     guard normalized(x), normalized(y) else {
-      throw ArgumentError.invalidOption("coordinates", "must be between 0 inclusive and 1 exclusive")
+      throw ArgumentError.invalidOption(
+        "coordinates", "must be between 0 inclusive and 1 exclusive")
     }
     switch action {
     case .click:
@@ -74,7 +79,8 @@ struct PointerInput: Equatable {
         button: resolvedButton, clickCount: resolvedCount, deltaX: nil, deltaY: nil)
     case .drag:
       guard let toX, let toY, normalized(toX), normalized(toY) else {
-        throw ArgumentError.invalidOption("drag", "toX and toY must be between 0 inclusive and 1 exclusive")
+        throw ArgumentError.invalidOption(
+          "drag", "toX and toY must be between 0 inclusive and 1 exclusive")
       }
       guard button == nil, clickCount == nil, deltaX == nil, deltaY == nil else {
         throw ArgumentError.invalidOption("action", "drag accepts only start and end coordinates")
@@ -112,6 +118,10 @@ enum ElementAction: String, Codable, Equatable {
   case setValue = "set_value"
   case select
   case submit
+  case focus
+  case selectText = "select_text"
+
+  var requiresValue: Bool { self == .setValue || self == .selectText }
 }
 
 enum ArgumentError: Error, LocalizedError, Equatable {
@@ -212,6 +222,7 @@ struct ArgumentParser {
       var windowID: UInt32?
       var maxElements = 200
       var output: String?
+      var includeAccessibility = true
       while let option = cursor.next() {
         switch option {
         case "--bundle-id":
@@ -228,6 +239,8 @@ struct ArgumentParser {
             throw ArgumentError.invalidOption(option, raw)
           }
           maxElements = parsed
+        case "--image-only":
+          includeAccessibility = false
         case "--output":
           output = try cursor.requireValue(option)
         default:
@@ -238,24 +251,34 @@ struct ArgumentParser {
         bundleID: try require(bundleID, "--bundle-id"),
         windowID: try require(windowID, "--window-id"),
         maxElements: maxElements,
-        output: try require(output, "--output")
+        output: try require(output, "--output"), includeAccessibility: includeAccessibility
       )
     case "use-app":
       var bundleID: String?
       var foreground = false
+      var appPath: String?
+      var pid: Int32?
       while let option = cursor.next() {
         switch option {
         case "--bundle-id":
           bundleID = try cursor.requireValue(option)
         case "--foreground":
           foreground = true
+        case "--app-path":
+          appPath = try cursor.requireValue(option)
+        case "--pid":
+          let raw = try cursor.requireValue(option)
+          guard let parsed = Int32(raw), parsed > 0 else {
+            throw ArgumentError.invalidOption(option, raw)
+          }
+          pid = parsed
         default:
           throw ArgumentError.unknownOption(option)
         }
       }
       return .useApp(
         bundleID: try require(bundleID, "--bundle-id"),
-        foreground: foreground
+        foreground: foreground, appPath: appPath, pid: pid
       )
     case "quit-app":
       var bundleID: String?
@@ -278,6 +301,34 @@ struct ArgumentParser {
         bundleID: try require(bundleID, "--bundle-id"),
         pid: try require(pid, "--pid")
       )
+    case "keyboard":
+      var bundleID: String?
+      var windowID: UInt32?
+      var action: String?
+      var key: String?
+      var value: String?
+      var modifiers: [String] = []
+      while let option = cursor.next() {
+        switch option {
+        case "--bundle-id": bundleID = try cursor.requireValue(option)
+        case "--window-id":
+          let raw = try cursor.requireValue(option)
+          guard let parsed = UInt32(raw), parsed > 0 else {
+            throw ArgumentError.invalidOption(option, raw)
+          }
+          windowID = parsed
+        case "--action": action = try cursor.requireValue(option)
+        case "--key": key = try cursor.requireValue(option)
+        case "--value": value = try cursor.requireValue(option)
+        case "--modifier": modifiers.append(try cursor.requireValue(option))
+        default: throw ArgumentError.unknownOption(option)
+        }
+      }
+      return .keyboard(
+        bundleID: try require(bundleID, "--bundle-id"),
+        windowID: try require(windowID, "--window-id"),
+        input: try KeyboardInput.validated(
+          action: try require(action, "--action"), key: key, modifiers: modifiers, value: value))
     case "act":
       var bundleID: String?
       var windowID: UInt32?
@@ -309,11 +360,11 @@ struct ArgumentParser {
         }
       }
       let resolvedAction = try require(action, "--action")
-      if resolvedAction == .setValue, value == nil {
+      if resolvedAction.requiresValue, value == nil {
         throw ArgumentError.missingOption("--value")
       }
-      if resolvedAction != .setValue, value != nil {
-        throw ArgumentError.invalidOption("--value", "allowed only for set_value")
+      if !resolvedAction.requiresValue, value != nil {
+        throw ArgumentError.invalidOption("--value", "allowed only for set_value/select_text")
       }
       return .act(
         bundleID: try require(bundleID, "--bundle-id"),

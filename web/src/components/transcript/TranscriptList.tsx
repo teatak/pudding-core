@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
+import { useTranscriptViewportStore } from "@/state/transcriptViewportStore";
 
 import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 import { TranscriptTurn } from "./TranscriptTurn";
@@ -75,11 +76,14 @@ export const TranscriptList = memo(function TranscriptList({
   turnReveal?: TranscriptTurnReveal;
   turns: TranscriptTurnVM[];
 }) {
+  const viewportKey = `${searchSlot}:${sessionID}`;
+  const [savedViewport] = useState(() => useTranscriptViewportStore.getState().viewports[viewportKey]);
   const activeSearchElementsRef = useRef<HTMLElement[]>([]);
   const activeSearchTargetRef = useRef("");
-  const followLatestRef = useRef(true);
-  const initialScrollSessionRef = useRef("");
+  const followLatestRef = useRef(savedViewport?.atLatest ?? true);
+  const initialScrollCompleteRef = useRef(false);
   const isAtLatestRef = useRef(true);
+  const previousJumpLatestSignalRef = useRef(jumpLatestSignal);
   const listElementRef = useRef<HTMLDivElement | null>(null);
   const previousLastTurnKeyRef = useRef<string | null>(null);
   const revealedMessageElementsRef = useRef<HTMLElement[]>([]);
@@ -90,6 +94,8 @@ export const TranscriptList = memo(function TranscriptList({
   const turnCount = itemKeys.length - 1;
   const lastTurnKey = itemKeys[turnCount - 1] || "";
   const shouldFollowTurnAppend = isAtLatestRef.current;
+  const navigating = Boolean(turnReveal || (searchState.target &&
+    activeSearchTargetRef.current !== searchTargetKey(searchState.target, searchState.terms)));
 
   const syncViewportScrollbar = useCallback(
     (atLatest: boolean) => {
@@ -121,27 +127,34 @@ export const TranscriptList = memo(function TranscriptList({
     (instance: { isAtEnd: (threshold?: number) => boolean }) => {
       const atLatest = instance.isAtEnd(SCROLL_END_THRESHOLD_PX);
       if (atLatest || !followLatestRef.current) {
-        setLatestState(atLatest);
+        setLatestState(atLatest && followLatestRef.current);
       }
     },
     [setLatestState],
   );
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
-    anchorTo: "end",
+    anchorTo: navigating ? "start" : "end",
     count: itemKeys.length,
     estimateSize,
     followOnAppend: false,
     gap: TURN_GAP_PX,
     getItemKey,
     getScrollElement: () => scrollElement,
+    initialMeasurementsCache: savedViewport?.measurements,
+    initialOffset: savedViewport?.scrollOffset,
     measureElement: measureTranscriptItem,
     onChange: handleVirtualizerChange,
     overscan: TURN_OVERSCAN,
     paddingStart: LIST_PADDING_TOP_PX,
     scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
+    // Streaming height changes must not synchronously resize an observed ancestor.
+    useAnimationFrameWithResizeObserver: true,
     // resizeItem 会同步修正 scrollTop；turn transform 必须在同一帧提交。
     useFlushSync: true,
   });
+  // Explicit navigation owns the scroll target. Pending row measurements must
+  // not compensate against the old offset before its scroll event arrives.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = navigating ? () => false : undefined;
   const virtualItems = virtualizer.getVirtualItems();
   const virtualRenderVersion = virtualItems.map((item) => item.key).join("\u0000");
   const resizeMountedElement = useCallback((index: number, node: HTMLDivElement) => {
@@ -172,31 +185,37 @@ export const TranscriptList = memo(function TranscriptList({
     loadMore: onLoadHistory,
   });
 
-  useLayoutEffect(() => {
-    virtualizer.measure();
-    initialScrollSessionRef.current = "";
-    previousLastTurnKeyRef.current = null;
-    followLatestRef.current = true;
-    activeSearchTargetRef.current = "";
-    revealedTurnSerialRef.current = 0;
-    historyLoader.reset();
-  }, [historyLoader.reset, sessionID, virtualizer]);
+  useLayoutEffect(() => () => {
+    if (initialScrollCompleteRef.current) {
+      useTranscriptViewportStore.getState().save(viewportKey, {
+        atLatest: isAtLatestRef.current,
+        measurements: virtualizer.takeSnapshot(),
+        scrollOffset: virtualizer.scrollOffset ?? 0,
+      });
+    }
+  }, [viewportKey, virtualizer]);
 
   useLayoutEffect(() => {
     if (
       !scrollElement ||
       itemKeys.length === 0 ||
-      initialScrollSessionRef.current === sessionID ||
+      initialScrollCompleteRef.current ||
       turnReveal ||
       searchState.target
     ) {
       return;
     }
-    initialScrollSessionRef.current = sessionID;
+    initialScrollCompleteRef.current = true;
+    if (savedViewport && !savedViewport.atLatest) {
+      followLatestRef.current = false;
+      virtualizer.scrollToOffset(savedViewport.scrollOffset, { behavior: "instant" });
+      setLatestState(false);
+      return;
+    }
     followLatestRef.current = true;
     virtualizer.scrollToEnd({ behavior: "instant" });
     setLatestState(true);
-  }, [itemKeys.length, scrollElement, searchState.target, sessionID, setLatestState, turnReveal, virtualizer]);
+  }, [itemKeys.length, savedViewport, scrollElement, searchState.target, setLatestState, turnReveal, virtualizer]);
 
   useLayoutEffect(() => {
     const previousLastTurnKey = previousLastTurnKeyRef.current;
@@ -209,9 +228,10 @@ export const TranscriptList = memo(function TranscriptList({
   }, [lastTurnKey, shouldFollowTurnAppend, virtualizer]);
 
   useLayoutEffect(() => {
-    if (jumpLatestSignal <= 0) {
+    if (jumpLatestSignal === previousJumpLatestSignalRef.current) {
       return;
     }
+    previousJumpLatestSignalRef.current = jumpLatestSignal;
     followLatestRef.current = true;
     virtualizer.scrollToEnd({ behavior: "auto" });
   }, [jumpLatestSignal, virtualizer]);
@@ -284,11 +304,13 @@ export const TranscriptList = memo(function TranscriptList({
     }
     const onScroll = () => {
       const atLatest = virtualizer.isAtEnd(SCROLL_END_THRESHOLD_PX);
-      if (atLatest) {
+      // A narrower/shorter transcript can clamp scrollTop backwards to its end.
+      // Only moving forward to the end resumes following latest messages.
+      if (atLatest && virtualizer.scrollDirection === "forward") {
         followLatestRef.current = true;
       }
       if (atLatest || !followLatestRef.current) {
-        setLatestState(atLatest);
+        setLatestState(atLatest && followLatestRef.current);
       }
       if (node.scrollTop < HISTORY_LOAD_SCROLL_TOP_PX) {
         historyLoader.request();
@@ -320,7 +342,7 @@ export const TranscriptList = memo(function TranscriptList({
     node.addEventListener("wheel", onWheel, { passive: true });
     node.addEventListener("pointerdown", onPointerDown, { passive: true });
     window.addEventListener("keydown", onKeyDown);
-    setLatestState(virtualizer.isAtEnd(SCROLL_END_THRESHOLD_PX));
+    setLatestState(followLatestRef.current && virtualizer.isAtEnd(SCROLL_END_THRESHOLD_PX));
     return () => {
       node.removeEventListener("scroll", onScroll);
       node.removeEventListener("wheel", onWheel);
@@ -333,6 +355,7 @@ export const TranscriptList = memo(function TranscriptList({
     if (!scrollElement || !turnReveal || revealedTurnSerialRef.current === turnReveal.serial) {
       return;
     }
+    followLatestRef.current = false;
     const turnIndex = turnIndexByID.get(turnReveal.turnID);
     if (turnIndex === undefined) {
       return;
@@ -343,8 +366,7 @@ export const TranscriptList = memo(function TranscriptList({
       return;
     }
     alignElementInViewport(scrollElement, turnElement);
-    initialScrollSessionRef.current = sessionID;
-    followLatestRef.current = false;
+    initialScrollCompleteRef.current = true;
     revealedTurnSerialRef.current = turnReveal.serial;
     setLatestState(false);
 
@@ -391,6 +413,7 @@ export const TranscriptList = memo(function TranscriptList({
     if (activeSearchTargetRef.current === targetKey) {
       return;
     }
+    followLatestRef.current = false;
     const turnIndex = turnIndexByID.get(target.turnID);
     if (turnIndex === undefined) {
       return;
@@ -405,8 +428,7 @@ export const TranscriptList = memo(function TranscriptList({
       `[data-transcript-message-id="${CSS.escape(target.messageID)}"]`,
     );
     alignElementInViewport(scrollElement, activeRange?.getBoundingClientRect() || messageElement || turnElement);
-    initialScrollSessionRef.current = sessionID;
-    followLatestRef.current = false;
+    initialScrollCompleteRef.current = true;
     activeSearchTargetRef.current = targetKey;
     setLatestState(false);
   }, [
@@ -801,12 +823,7 @@ function useHistoryLoadController({
     pendingMoreRef.current = true;
     pump();
   }, [pump]);
-  const reset = useCallback(() => {
-    pendingMoreRef.current = false;
-    stateRef.current = "idle";
-  }, []);
-
-  return useMemo(() => ({ check, request, reset }), [check, request, reset]);
+  return useMemo(() => ({ check, request }), [check, request]);
 }
 
 function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {

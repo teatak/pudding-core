@@ -405,6 +405,9 @@ func TestBlankBrowserTabDoesNotLeakAcrossSessions(t *testing.T) {
 	}
 	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_no_browser/browser/tabs", nil)
 	emptyTabs := decodeJSON[browserTabsResp](t, resp)
+	if emptyTabs.Tabs == nil {
+		t.Fatal("empty browser tabs must serialize as [], not null")
+	}
 	if resp.StatusCode != http.StatusOK || len(emptyTabs.Tabs) != 0 {
 		t.Fatalf("empty session tabs leaked status=%d tabs=%+v", resp.StatusCode, emptyTabs.Tabs)
 	}

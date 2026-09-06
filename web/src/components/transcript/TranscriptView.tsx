@@ -112,6 +112,7 @@ export function TranscriptView({
             </Alert>
           ) : null}
           <TranscriptList
+            key={`${searchSlot}:${sessionID}`}
             disclosure={disclosure}
             displaySettings={displaySettings}
             cloningMessageID={cloningMessageID}

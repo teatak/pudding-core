@@ -1,0 +1,92 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+const { ComputerUsePreview } = require("../computer-use-preview.cjs");
+
+function fixture() {
+  const children = [], revealed = [];
+  const preview = new ComputerUsePreview({binaryPath: '/signed/helper',
+    host: {async request(command, target) { revealed.push({command, target}); }},
+    spawnProcess(binary, args) {
+      assert.equal(binary, '/signed/helper'); assert.deepEqual(args, ['preview']);
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
+      child.input = ''; child.stdin.on('data', data => child.input += data);
+      child.stopped = false;
+      child.stdin.on('finish', () => { child.stopped = true; queueMicrotask(() => child.emit('exit', 0)); });
+      child.kill = () => child.emit('exit', null);
+      children.push(child); return child;
+    },
+  });
+  const owner = new EventEmitter(); owner.id = 1; owner.isDestroyed = () => false;
+  owner.messages = []; owner.send = (_channel, packet) => owner.messages.push(packet);
+  const target = {sessionID:'s1',turnID:'t1',appID:'com.example.App',windowID:42};
+  const subscribe = (visible = true, turnID = 't1') => preview.subscribe(owner, {sessionID:'s1',turnID,visible});
+  const ack = () => preview.acknowledge(owner, owner.messages.at(-1));
+  const frame = (child, text, windowID = 42, pid = 123) => child.stdout.write(JSON.stringify({type:'frame',windowID,pid,width:520,height:480,name:'Example',title:'Window',jpeg:Buffer.from(text).toString('base64')})+'\n');
+  return {preview, owner, children, target, subscribe, ack, frame, revealed};
+}
+
+test('preview only captures the subscribed turn and an engine-authorized target', t => {
+  const f = fixture(); t.after(() => f.preview.stop());
+  f.subscribe(); assert.equal(f.children.length, 0);
+  f.preview.noteActivity({...f.target,sessionID:'other'}); assert.equal(f.children.length, 0);
+  f.preview.noteActivity({...f.target,turnID:'old'}); assert.equal(f.children.length, 0);
+  f.preview.noteActivity(f.target); assert.equal(f.children.length, 1);
+  assert.deepEqual(JSON.parse(f.children[0].input), {bundleID:'com.example.App',windowID:42});
+  assert.equal(f.owner.messages[0].status, 'loading');
+  f.preview.noteActivity({...f.target,turnID:'old',windowID:99});
+  assert.equal(f.preview.entries.get('s1').target.windowID, 42, 'late activity from an old turn cannot replace the current window');
+  assert.equal(f.children[0].stdin.writableEnded, false);
+});
+
+test('slow renderers retain only the latest frame and require a matching acknowledgement', t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+  f.frame(f.children[0], 'one'); const first = f.owner.messages.at(-1);
+  f.frame(f.children[0], 'two'); f.frame(f.children[0], 'three');
+  assert.equal(f.owner.messages.length, 2);
+  f.preview.acknowledge(f.owner, {...first,turnID:'wrong'}); assert.equal(f.owner.messages.length, 2);
+  f.preview.acknowledge(f.owner, first);
+  assert.equal(f.owner.messages.length, 3);
+  assert.equal(f.owner.messages.at(-1).imageURL, 'data:image/jpeg;base64,dGhyZWU=');
+});
+
+test('hide stops capture; resume binds the same PID; stale frames cannot replace a new window', t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+  const first = f.children[0]; f.frame(first, 'one'); f.ack();
+  f.subscribe(false); assert.equal(first.stdin.writableEnded, true); assert.equal(f.preview.entries.get('s1').frame, null);
+  f.subscribe(); assert.equal(f.children.length, 2); assert.equal(JSON.parse(f.children[1].input).pid, 123);
+  f.preview.noteActivity({...f.target,windowID:43}); const current = f.children[2]; f.ack();
+  f.frame(first, 'late'); assert.equal(f.owner.messages.at(-1).windowID, 43);
+  f.frame(current, 'new', 43, 456); assert.equal(f.owner.messages.at(-1).pid, 456);
+});
+
+test('reveal only raises the exact captured window of the visible owning session', async t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+  assert.equal(await f.preview.reveal(f.owner, f.target), false);
+  f.frame(f.children[0], 'one');
+  assert.equal(await f.preview.reveal(f.owner, {...f.target,windowID:99}), false);
+  assert.equal(await f.preview.reveal(f.owner, f.target), true);
+  assert.deepEqual(f.revealed, [{command:'reveal_window',target:{bundleID:'com.example.App',windowID:42,pid:123}}]);
+  f.subscribe(false); assert.equal(await f.preview.reveal(f.owner, f.target), false);
+});
+
+test('cancel, renderer reload and destruction release their capture without affecting other sessions', t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target);
+  f.preview.subscribe(f.owner, {sessionID:'s2',turnID:'t2',visible:true});
+  f.preview.noteActivity({...f.target,sessionID:'s2',turnID:'t2'});
+  f.subscribe(false, ''); assert.equal(f.children[0].stdin.writableEnded, true); assert.equal(f.children[1].stdin.writableEnded, false);
+  f.owner.emit('did-start-navigation', {}, 'http://source', false, true);
+  assert.equal(f.children[1].stdin.writableEnded, true); assert.equal(f.preview.entries.size, 0);
+  f.subscribe(); f.preview.noteActivity(f.target); f.owner.emit('destroyed');
+  assert.equal(f.children[2].stdin.writableEnded, true); assert.equal(f.preview.clients.size, 0);
+});
+
+test('capture failure clears stale content, does not retry, and rejects a mismatched window', t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+  f.frame(f.children[0], 'wrong', 99);
+  assert.equal(f.owner.messages.at(-1).status, 'unavailable');
+  assert.equal(f.owner.messages.at(-1).imageURL, undefined);
+  f.preview.noteActivity(f.target); assert.equal(f.children.length, 1);
+});

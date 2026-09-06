@@ -264,25 +264,6 @@ export const listCanvasItemsResponse = z.object({
   items: z.array(canvasItem),
 });
 
-export const closedCanvasItem = z.object({
-  id: z.string(),
-  sessionID: z.string(),
-  sourceItemID: z.string(),
-  actorSessionID: z.string().optional(),
-  kind: z.string(),
-  title: z.string().optional(),
-  item: z.unknown(),
-  window: z.unknown().optional(),
-  closedAt: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type ClosedCanvasItem = z.infer<typeof closedCanvasItem>;
-
-export const listClosedCanvasItemsResponse = z.object({
-  items: z.array(closedCanvasItem),
-});
-
 export const savedCanvasItem = z.object({
   id: z.string(),
   sourceSessionID: z.string().optional(),
@@ -297,9 +278,40 @@ export const savedCanvasItem = z.object({
 });
 export type SavedCanvasItem = z.infer<typeof savedCanvasItem>;
 
-export const listSavedCanvasItemsResponse = z.object({
-  items: z.array(savedCanvasItem),
+export const libraryEntry = z.object({
+ id: z.string(), kind: z.enum(["canvas", "web"]), sourceSessionID: z.string(),
+ savedItemID: z.string().optional(), url: z.string().optional(),
+ title: z.string().optional(), createdAt: z.string(), updatedAt: z.string(), favoriteID: z.string().optional(),
+ canvasKind: z.string().optional(), revision: z.number().optional(), sourceSessionTitle: z.string().optional(), sourceSessionAvailable: z.boolean(),
+ sourceProjectName: z.string().optional(), available: z.boolean(),
 });
+export type LibraryEntry = z.infer<typeof libraryEntry>;
+export const listLibraryResponse = z.object({ entries: z.array(libraryEntry) });
+export const putLibraryFavoriteRequest = z.discriminatedUnion("kind", [
+ z.object({kind: z.literal("canvas"), savedItemID: z.string().min(1)}),
+ z.object({kind: z.literal("web"), url: z.string().url(), title: z.string().optional()}),
+]);
+export type LibraryFavoriteInput = z.infer<typeof putLibraryFavoriteRequest>;
+export const libraryFileOpen = z.object({sessionID:z.string(), rootPath:z.string(), relativePath:z.string()});
+
+export const libraryRecentEntry = z.object({
+ id: z.string(), kind: z.enum(["file", "canvas", "web"]), sourceSessionID: z.string(),
+ itemID: z.string().optional(), rootPath: z.string().optional(), path: z.string().optional(),
+ title: z.string().optional(), canvasKind: z.string().optional(), openedAt: z.string(),
+ url: z.string().optional(), faviconURL: z.string().optional(), available: z.boolean(),
+ sourceSessionTitle: z.string().optional(), sourceProjectName: z.string().optional(), sourceSessionAvailable: z.boolean(),
+});
+export type LibraryRecentEntry = z.infer<typeof libraryRecentEntry>;
+export const listLibraryRecentResponse = z.object({entries:z.array(libraryRecentEntry)});
+export const recordLibraryRecentRequest = z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("file"),rootID:z.string().min(1),path:z.string().min(1)}),
+ z.object({kind:z.literal("canvas"),itemID:z.string().min(1)}),
+]);
+export type LibraryRecentInput = z.infer<typeof recordLibraryRecentRequest>;
+export const libraryRecentTarget = z.discriminatedUnion("kind",[
+ libraryFileOpen.extend({kind:z.literal("file")}),
+ z.object({kind:z.literal("canvas"),sessionID:z.string(),itemID:z.string()}),
+]);
 
 export const canvasSaveResult = z.object({
   item: canvasItem,
@@ -318,16 +330,6 @@ export const putCanvasItemRequest = z.object({
 
 export const patchCanvasItemRequest = z.object({
   window: z.unknown(),
-});
-
-export const putClosedCanvasItemRequest = z.object({
-  id: z.string().optional(),
-  sourceItemID: z.string().min(1),
-  kind: z.string().min(1),
-  title: z.string().optional(),
-  item: z.unknown(),
-  window: z.unknown().optional(),
-  closedAt: z.string().optional(),
 });
 
 export const browserMCPTool = z.object({

@@ -39,6 +39,7 @@ import { Check, Globe, X } from "@/components/icons";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 import { useWorkspaceOpen } from "@/state/workspaceStore";
+import { AUTOMATION_PREVIEW_DISMISS_DELAY_MS } from "@/lib/automationPreview";
 
 type RuntimeEntry = {
   handle: ElectronWebviewRuntimeHandle;
@@ -56,7 +57,6 @@ type AutomationLease = {
   presentationFrameReady: boolean;
 };
 
-const automationPipCloseDelayMs = 30_000;
 const pipViewportPriority = 10;
 const workspaceViewportPriority = 20;
 
@@ -441,7 +441,7 @@ export function BrowserRuntimeProvider({
             return;
           }
           dismissCompletedAutomationActivity(event.sessionID);
-        }, automationPipCloseDelayMs);
+        }, AUTOMATION_PREVIEW_DISMISS_DELAY_MS);
         automationHideTimersRef.current.set(event.sessionID, timer);
       }
       const key = runtimeKey(event.sessionID, event.tabID);

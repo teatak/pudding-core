@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, File } from "@/components/icons";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   listProjectTree,
@@ -24,7 +24,12 @@ import { projectGitFileKey, projectGitStatusLabel, projectGitStatusTone } from "
 import { projectBrowserError } from "./projectErrors";
 import { projectAbsolutePath, projectParentPath } from "./projectPaths";
 import { projectTreeFolderLabelInset, projectTreeGuideInset, projectTreeNodeInset } from "./projectTreeLayout";
-import type { ProjectEntryTarget, ProjectSelection } from "./types";
+import type { ProjectEntryTarget, ProjectSelection, ProjectTreeReveal } from "./types";
+
+type TreeRevealProps = {
+  reveal?: ProjectTreeReveal;
+  onRevealed: (request: ProjectTreeReveal) => void;
+};
 
 type TreeActions = {
   canPaste: boolean;
@@ -49,6 +54,7 @@ export function ProjectTree({
   loading,
   gitStatuses,
   roots,
+  reveal,
   selected,
   sessionID,
   token,
@@ -56,8 +62,9 @@ export function ProjectTree({
   onOpenPinned,
   onOpenPreview,
   onToggle,
+  onRevealed,
   ...actions
-}: TreeActions & {
+}: TreeActions & TreeRevealProps & {
   active: boolean;
   error?: unknown;
   expandedKeys: string[];
@@ -73,6 +80,7 @@ export function ProjectTree({
 }) {
   const { t } = useI18n();
   const expandedKeySet = useMemo(() => new Set(expandedKeys), [expandedKeys]);
+  const currentReveal = active && reveal?.sessionID === sessionID ? reveal : undefined;
   return (
     <div className="h-full min-h-0 overflow-auto">
         {loading ? (
@@ -93,12 +101,14 @@ export function ProjectTree({
             label={roots[0].name}
             path="."
             root={roots[0]}
+            reveal={currentReveal}
             selected={selected}
             sessionID={sessionID}
             token={token}
             onOpenPinned={onOpenPinned}
             onOpenPreview={onOpenPreview}
             onToggle={onToggle}
+            onRevealed={onRevealed}
           />
         ) : roots.map((root) => (
           <ProjectDirectoryNode
@@ -112,12 +122,14 @@ export function ProjectTree({
             label={root.name}
             path="."
             root={root}
+            reveal={currentReveal}
             selected={selected}
             sessionID={sessionID}
             token={token}
             onOpenPinned={onOpenPinned}
             onOpenPreview={onOpenPreview}
             onToggle={onToggle}
+            onRevealed={onRevealed}
           />
         ))}
     </div>
@@ -134,14 +146,16 @@ function ProjectDirectoryNode({
   label,
   path,
   root,
+  reveal,
   selected,
   sessionID,
   token,
   onOpenPinned,
   onOpenPreview,
   onToggle,
+  onRevealed,
   ...actions
-}: TreeActions & {
+}: TreeActions & TreeRevealProps & {
   active: boolean;
   depth: number;
   expandedKeys: ReadonlySet<string>;
@@ -253,12 +267,14 @@ function ProjectDirectoryNode({
                 label={entry.name}
                 path={entry.path}
                 root={root}
+                reveal={reveal}
                 selected={selected}
                 sessionID={sessionID}
                 token={token}
                 onOpenPinned={onOpenPinned}
                 onOpenPreview={onOpenPreview}
                 onToggle={onToggle}
+                onRevealed={onRevealed}
               />
             ) : (
               <ProjectFileNode
@@ -268,10 +284,12 @@ function ProjectDirectoryNode({
                 entry={entry}
                 rootID={root.id}
                 rootPath={root.path}
+                reveal={reveal?.rootID === root.id && reveal.path === entry.path ? reveal : undefined}
                 selected={selected?.rootID === root.id && selected.path === entry.path}
                 status={gitStatuses?.get(projectGitFileKey(root.id, entry.path))}
                 onOpenPinned={() => onOpenPinned({ rootID: root.id, path: entry.path })}
                 onOpenPreview={() => onOpenPreview({ rootID: root.id, path: entry.path })}
+                onRevealed={onRevealed}
               />
             ))}
             {treeQuery.data?.truncated ? (
@@ -292,12 +310,14 @@ function ProjectFileNode({
   entry,
   rootID,
   rootPath,
+  reveal,
   selected,
   status,
   onOpenPinned,
   onOpenPreview,
+  onRevealed,
   ...actions
-}: TreeActions & {
+}: TreeActions & TreeRevealProps & {
   depth: number;
   entry: ProjectTreeEntry;
   rootID: string;
@@ -308,6 +328,14 @@ function ProjectFileNode({
   onOpenPreview: () => void;
 }) {
   const [dropActive, setDropActive] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!reveal || !buttonRef.current) return;
+    // Nested directory queries mount this row only after its ancestors load.
+    buttonRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    buttonRef.current.focus({ preventScroll: true });
+    onRevealed(reveal);
+  }, [reveal, onRevealed]);
   const disabled = entry.type !== "file";
   const target: ProjectEntryTarget = { rootID, path: entry.path, name: entry.name, type: "file" };
   const destination: ProjectEntryTarget = {
@@ -318,9 +346,10 @@ function ProjectFileNode({
   };
   const button = (
     <button
+      ref={buttonRef}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "flex h-6 w-full min-w-0 select-none items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
+        "flex h-6 w-full min-w-0 select-none items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground focus:outline-1 focus:-outline-offset-1 focus:outline-ring aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
         dropActive && "bg-info/10 text-foreground ring-1 ring-inset ring-info/40",
       )}

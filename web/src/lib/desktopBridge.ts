@@ -58,6 +58,10 @@ export type MobilePairing = {
 };
 
 type ElectronDesktopBridge = {
+  subscribeComputerPreview?: (request: { sessionID: string; turnID: string; visible: boolean }) => Promise<void>;
+  acknowledgeComputerPreview?: (request: { sessionID: string; turnID: string; version: number }) => void;
+  revealComputerPreview?: (request: { sessionID: string; turnID: string; windowID: number }) => Promise<boolean>;
+  onComputerPreview?: (listener: (preview: DesktopComputerPreview) => void) => () => void;
   getDroppedFilePath?: (file: File) => string;
   getHomeDirectory?: () => Promise<string>;
 	createMobilePairing?: () => Promise<MobilePairing>;
@@ -203,6 +207,34 @@ export async function requestDesktopPermission(permission: DesktopPermission) {
 
 export async function getComputerUsePermissionGuide() {
   return desktopBridge()?.getComputerUsePermissionGuide?.() ?? null;
+}
+
+export type DesktopComputerPreview = {
+  sessionID: string;
+  turnID: string;
+  appID: string;
+  windowID: number;
+  pid?: number;
+  version: number;
+  status: "loading" | "live" | "unavailable";
+  imageURL?: string;
+  width?: number;
+  height?: number;
+  name?: string;
+  title?: string;
+};
+
+export function subscribeComputerPreview(sessionID: string, turnID: string, visible: boolean) {
+  return desktopBridge()?.subscribeComputerPreview?.({ sessionID, turnID, visible }) ?? Promise.resolve();
+}
+export function acknowledgeComputerPreview(preview: DesktopComputerPreview) {
+  desktopBridge()?.acknowledgeComputerPreview?.({ sessionID: preview.sessionID, turnID: preview.turnID, version: preview.version });
+}
+export function revealComputerPreview(preview: DesktopComputerPreview) {
+  return desktopBridge()?.revealComputerPreview?.({ sessionID: preview.sessionID, turnID: preview.turnID, windowID: preview.windowID }) ?? Promise.resolve(false);
+}
+export function onComputerPreview(listener: (preview: DesktopComputerPreview) => void) {
+  return desktopBridge()?.onComputerPreview?.(listener) ?? (() => {});
 }
 
 export async function denyComputerUsePermissionGuide(requestID: string) {

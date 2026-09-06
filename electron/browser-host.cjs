@@ -13,8 +13,7 @@ const screenshotMaxBytes = 64 * 1024 * 1024;
 const selectionMaxCharacters = 16 * 1024;
 const selectionFrameReadTimeoutMS = 1_000;
 const selectionBindingName = "__puddingBrowserSelectionChanged";
-const maxTabsPerSession = 8;
-const maxTabsTotal = 16;
+const tabLimits = require("../internal/browser/tab_limits.json");
 const maxPopupWindowsTotal = 8;
 const credentialUserGestureTTLMS = 1_000;
 const browserZoomFactors = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
@@ -706,7 +705,7 @@ class BrowserHost {
   }
 
   assertSlotCapacity(sessionID) {
-    if (this.slots.size >= maxTabsTotal) {
+    if (this.slots.size >= tabLimits.total) {
       throw new Error("browser tab limit reached");
     }
     let sessionTabs = 0;
@@ -715,7 +714,7 @@ class BrowserHost {
         sessionTabs += 1;
       }
     }
-    if (sessionTabs >= maxTabsPerSession) {
+    if (sessionTabs >= tabLimits.perSession) {
       throw new Error("browser tab limit reached");
     }
   }

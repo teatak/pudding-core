@@ -1,11 +1,13 @@
+import { listLibraryRecentResponse, recordLibraryRecentRequest, libraryRecentTarget, type LibraryRecentInput } from "@/contracts/api";
 import {
   listBuiltinToolsResponse,
   approveApprovalResponse,
   listBrowserMCPSessionsResponse,
   listAppConnectionsResponse,
   listCanvasItemsResponse,
-  listClosedCanvasItemsResponse,
-  listSavedCanvasItemsResponse,
+  listLibraryResponse,
+ putLibraryFavoriteRequest,
+ type LibraryFavoriteInput,
   listAppsResponse,
   listSkillsResponse,
   compactResponse,
@@ -47,7 +49,6 @@ import {
   patchCanvasItemRequest,
   probeProviderModelsRequest,
   putCanvasItemRequest,
-  putClosedCanvasItemRequest,
   patchWebToolsRequest,
   providerProfile,
   project,
@@ -76,7 +77,6 @@ import {
   appMCPStatusResponse,
   canvasItem,
   canvasSaveResult,
-  closedCanvasItem,
   appSkillDetail,
   audioBindingRequest,
   audioBindingResponse,
@@ -134,8 +134,6 @@ import {
   type BackgroundProcessLog,
   type CanvasItem,
   type CanvasSaveResult,
-  type ClosedCanvasItem,
-  type SavedCanvasItem,
   type ContentPart,
   type DailyUsageStat,
   type DesktopAboutSection,
@@ -253,7 +251,6 @@ export type {
 };
 export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
 export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
-export type ClosedCanvasItemPayload = z.infer<typeof putClosedCanvasItemRequest>;
 
 function authHeaders(token: string) {
   return {
@@ -1099,8 +1096,14 @@ export async function deleteCanvasItem(token: string, sessionID: string, itemID:
   });
 }
 
-export function listSavedCanvasItems(token: string, sessionID: string): Promise<{ items: SavedCanvasItem[] }> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/saved`, listSavedCanvasItemsResponse);
+export function listLibrary(token: string, sessionID: string) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library`, listLibraryResponse);
+}
+export function putLibraryFavorite(token:string, sessionID:string, input:LibraryFavoriteInput) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/favorites`, z.null(), {method:"POST",body:JSON.stringify(putLibraryFavoriteRequest.parse(input))});
+}
+export function deleteLibraryFavorite(token:string, sessionID:string, id:string) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/favorites/${encodeURIComponent(id)}`, z.null(), {method:"DELETE"});
 }
 
 export function saveCanvasItem(token: string, sessionID: string, itemID: string): Promise<CanvasSaveResult> {
@@ -1117,41 +1120,6 @@ export function openSavedCanvasItem(token: string, sessionID: string, savedItemI
 
 export async function deleteSavedCanvasItem(token: string, sessionID: string, savedItemID: string): Promise<void> {
   await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/saved/${encodeURIComponent(savedItemID)}`, z.null(), {
-    method: "DELETE",
-  });
-}
-
-export function listClosedCanvasItems(
-  token: string,
-  sessionID: string,
-  limit = 20,
-): Promise<{ items: ClosedCanvasItem[] }> {
-  return request(
-    token,
-    `/sessions/${encodeURIComponent(sessionID)}/canvas/closed?limit=${encodeURIComponent(String(limit))}`,
-    listClosedCanvasItemsResponse,
-  );
-}
-
-export function createClosedCanvasItem(
-  token: string,
-  sessionID: string,
-  body: ClosedCanvasItemPayload,
-): Promise<ClosedCanvasItem> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed`, closedCanvasItem, {
-    method: "POST",
-    body: JSON.stringify(putClosedCanvasItemRequest.parse(body)),
-  });
-}
-
-export async function deleteClosedCanvasItem(token: string, sessionID: string, closedID: string): Promise<void> {
-  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed/${encodeURIComponent(closedID)}`, z.null(), {
-    method: "DELETE",
-  });
-}
-
-export async function clearClosedCanvasItems(token: string, sessionID: string): Promise<void> {
-  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed`, z.null(), {
     method: "DELETE",
   });
 }
@@ -1574,3 +1542,20 @@ export async function deleteProvider(token: string, name: string): Promise<void>
 
 export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, mergeProjectRequest, patchProjectRequest, patchProviderRequest };
+
+export function listLibraryRecent(token:string, sessionID:string, query:string, kind:string, signal?:AbortSignal) {
+ const params = new URLSearchParams({q:query,kind});
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent?${params}`, listLibraryRecentResponse, { signal });
+}
+export function recordLibraryRecent(token:string, sessionID:string, input:LibraryRecentInput) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent`, z.null(), {method:"POST",body:JSON.stringify(recordLibraryRecentRequest.parse(input))});
+}
+export function openLibraryRecent(token:string, sessionID:string, kind:string, id:string) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/open`, libraryRecentTarget,{method:"POST"});
+}
+export function deleteLibraryRecent(token:string, sessionID:string, kind:string, id:string) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, z.null(),{method:"DELETE"});
+}
+export function clearLibraryRecent(token:string, sessionID:string, kind:string) {
+ return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent?${new URLSearchParams({kind})}`, z.null(),{method:"DELETE"});
+}

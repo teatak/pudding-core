@@ -598,7 +598,7 @@ function MultiSelect({
                   {checked ? <Check className="size-3" data-icon-weight="strong" /> : null}
                 </span>
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{title}</span>
+                  <span className="block truncate text-sm font-normal">{title}</span>
                   {option.description ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{option.description}</span> : null}
                 </span>
               </div>
@@ -686,7 +686,7 @@ function QuickNumber({
             </Button>
           </div>
         ) : (
-          <div className="truncate text-sm font-medium">{step.customLabel || t("inputFlow.custom")}</div>
+          <div className="truncate text-sm font-normal">{step.customLabel || t("inputFlow.custom")}</div>
         ),
     },
   ];

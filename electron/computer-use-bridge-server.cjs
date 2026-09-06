@@ -7,6 +7,7 @@ class ComputerUseBridgeServer {
   constructor(host, options = {}) {
     this.host = host;
     this.permissionCoordinator = options.permissionCoordinator || null;
+    this.onActivity = options.onActivity || (() => {});
     this.server = null;
     this.startPromise = null;
     this.stopPromise = null;
@@ -136,7 +137,21 @@ class ComputerUseBridgeServer {
         return;
       }
       const body = await readJSON(request);
-      const operation = () => this.route(path, body, controller.signal);
+      const operation = () => {
+        requiredSessionID(body);
+        const turnID = request.headers["x-pudding-turn-id"];
+        if (typeof turnID === "string" && turnID.length > 0 && turnID.length <= 128
+          && typeof body.appID === "string" && body.appID.length <= 512
+          && Number.isInteger(body.windowID) && body.windowID > 0
+          && ["/computer/observe", "/computer/observe-capture", "/computer/act", "/computer/keyboard", "/computer/pointer"].includes(path)) {
+          try {
+            this.onActivity({sessionID: body.sessionID, turnID, appID: body.appID, windowID: body.windowID});
+          } catch (error) {
+            console.warn("Computer Use preview unavailable", error?.message);
+          }
+        }
+        return this.route(path, body, controller.signal);
+      };
       const requiredPermissions = permissionsForRoute(path);
       const result = this.permissionCoordinator
         ? await this.permissionCoordinator.run(requiredPermissions, operation, { signal: controller.signal })
@@ -169,6 +184,8 @@ class ComputerUseBridgeServer {
         return this.host.useApp({
           bundleID: body.appID,
           foreground: body.foreground === true,
+          ...(body.appPath ? {appPath:body.appPath} : {}),
+          ...(body.pid ? {pid:body.pid} : {}),
         }, { signal });
       case "/computer/apps/quit":
         return this.host.quitApp({ bundleID: body.appID, pid: body.pid }, { signal });
@@ -184,6 +201,7 @@ class ComputerUseBridgeServer {
           windowID: body.windowID,
           maxElements: body.maxElements,
           output: body.output,
+          includeAccessibility: body.includeAccessibility !== false,
         }, { signal });
       case "/computer/act":
         return this.host.act({
@@ -193,6 +211,9 @@ class ComputerUseBridgeServer {
           action: body.action,
           value: body.value,
         }, { signal });
+      case "/computer/keyboard":
+        return this.host.keyboard({bundleID:body.appID,windowID:body.windowID,action:body.action,
+          key:body.key,modifiers:body.modifiers,value:body.value}, {signal});
       case "/computer/pointer":
         return this.host.pointer({
           bundleID: body.appID,
@@ -290,6 +311,7 @@ function classifyComputerUseError(error) {
     case "computer_element_not_found":
       status = 404;
       break;
+    case "computer_app_ambiguous":
     case "computer_pointer_target_changed":
     case "computer_app_not_foreground":
     case "computer_element_not_actionable":
@@ -314,9 +336,10 @@ function classifyComputerUseError(error) {
 function permissionsForRoute(path) {
   switch (path) {
     case "/computer/apps/use":
+    case "/computer/observe-capture":
       return ["screenRecording"];
     case "/computer/observe":
-    case "/computer/observe-capture":
+    case "/computer/keyboard":
     case "/computer/act":
     case "/computer/pointer":
       return ["accessibility", "screenRecording"];

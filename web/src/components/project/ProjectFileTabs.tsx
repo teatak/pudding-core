@@ -1,3 +1,9 @@
+import { AppTooltip } from "@/components/AppTooltip";
+import type { ProjectBrowserRoot } from "@/api/client";
+import { OpenTabsMenu } from "@/components/workspace/OpenTabsMenu";
+import { useActiveTabVisibility } from "@/components/workspace/useActiveTabVisibility";
+import { SortableTab, SortableTabList } from "@/components/workspace/SortableTabList";
+import { filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { FileDiff, X } from "@/components/icons";
 import { useEffect, useRef, useState, type ReactNode, type UIEvent } from "react";
 
@@ -8,38 +14,44 @@ import type { FilePreview } from "@/state/filePreviewStore";
 
 import { ProjectTabContextMenu, ProjectVirtualTabContextMenu } from "./ProjectContextMenu";
 import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
-import { projectFileName, projectSelectionKey, projectTabKey } from "./projectPaths";
+import { projectAbsolutePath, projectFileName, projectSelectionKey, projectTabKey } from "./projectPaths";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
 export function ProjectFileTabs({
   active,
-  activeTurnDiffID,
+  activePreviewID,
   dirtyKeys,
   leadingAction,
   tabs,
-  turnDiffTabs,
+  roots,
+  previewTabs,
   onActivate,
-  onActivateTurnDiff,
-  onCloseTurnDiffs,
+  onActivatePreview,
+  onClosePreviews,
   onPin,
+  onMoveTab,
   onRequestClose,
   onReveal,
 }: {
   active?: ProjectTab;
-  activeTurnDiffID?: string;
+  activePreviewID?: string;
   dirtyKeys: ReadonlySet<string>;
   leadingAction?: ReactNode;
   tabs: ProjectTab[];
-  turnDiffTabs: FilePreview[];
+  roots: ProjectBrowserRoot[];
+  previewTabs: FilePreview[];
   onActivate: (selection: ProjectTab) => void;
-  onActivateTurnDiff: (previewID: string) => void;
-  onCloseTurnDiffs: (previewIDs: string[]) => void;
+  onActivatePreview: (previewID: string) => void;
+  onClosePreviews: (previewIDs: string[]) => void;
   onPin: (selection: ProjectTab) => void;
+  onMoveTab: (activeID: string, overID: string) => void;
   onRequestClose: (keys: string[]) => void;
   onReveal: (selection: ProjectSelection) => void;
 }) {
   const { t } = useI18n();
   const activeKey = active ? projectTabKey(active) : undefined;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useActiveTabVisibility(scrollRef, activePreviewID || activeKey);
   const [scrolling, setScrolling] = useState(false);
   const [scrollIndicator, setScrollIndicator] = useState({ left: 0, width: 0 });
   const hideScrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -48,7 +60,7 @@ export function ProjectFileTabs({
     if (hideScrollTimerRef.current) clearTimeout(hideScrollTimerRef.current);
   }, []);
 
-  if (tabs.length === 0 && turnDiffTabs.length === 0 && !leadingAction) return null;
+  if (tabs.length === 0 && previewTabs.length === 0 && !leadingAction) return null;
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
@@ -65,16 +77,18 @@ export function ProjectFileTabs({
   };
 
   return (
-    <div className="flex h-(--workspace-subtoolbar-h) shrink-0 bg-[var(--workspace-file-tabs-background)]">
+    <div className="pudding-workspace-tab-strip no-drag-region">
       {leadingAction ? (
-        <div className="h-full shrink-0 border-r border-[var(--workspace-border)]">
+        <div className="h-full shrink-0 pr-1">
           {leadingAction}
         </div>
       ) : null}
-      <div className="relative min-w-0 flex-1">
+      <div className="relative h-full min-w-0 flex-1">
+        <SortableTabList ids={tabs.map(projectTabKey)} onMove={onMoveTab}>
         <div
-          className="pudding-project-file-tabs flex h-full items-stretch overflow-x-auto overscroll-x-contain"
+          className="pudding-workspace-tabs-scroll flex h-full items-center gap-1 overflow-x-auto overscroll-x-contain"
           onScroll={handleScroll}
+          ref={scrollRef}
         >
         {tabs.map((tab, index) => {
           const key = projectTabKey(tab);
@@ -89,23 +103,18 @@ export function ProjectFileTabs({
               onClose={() => onRequestClose([key])}
               onCloseOthers={() => {
                 onRequestClose(tabs.filter((item) => projectTabKey(item) !== key).map(projectTabKey));
-                onCloseTurnDiffs(turnDiffTabs.map((item) => item.id));
+                onClosePreviews(previewTabs.map((item) => item.id));
               }}
               onCloseRight={() => {
                 onRequestClose(tabs.slice(index + 1).map(projectTabKey));
-                onCloseTurnDiffs(turnDiffTabs.map((item) => item.id));
+                onClosePreviews(previewTabs.map((item) => item.id));
               }}
               onReveal={onReveal}
             >
-              <div
-                className={cn(
-                  "group relative z-10 flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
-                  selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
-                )}
-              >
-                <button
+              <SortableTab id={key} selected={selected} disabled={tabs.length < 2} className="max-w-56 shrink-0">{(handleProps) => <>
+                <AppTooltip content={tab.path}><button {...handleProps}
                   aria-pressed={selected}
-                  className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-2.5 text-left"
+                  className="pudding-workspace-tab-select"
 
                   type="button"
                   onClick={() => onActivate(tab)}
@@ -114,71 +123,64 @@ export function ProjectFileTabs({
                   {gitDiff ? <FileDiff className="size-3.5 shrink-0 text-muted-foreground" /> : <ProjectFileTypeIcon path={tab.path} />}
                   <span className={cn("min-w-0 flex-1 truncate", !tab.pinned && "italic")}>{name}</span>
                   {dirty ? <span aria-label={t("project.browserUnsaved")} className="size-1.5 shrink-0 rounded-full bg-foreground/70" /> : null}
-                </button>
+                </button></AppTooltip>
                 <button
                   aria-label={`${t("project.browserCloseTab")} ${name}`}
-                  className={cn(
-                    "mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] opacity-0 hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
-                    selected && "opacity-100",
-                  )}
+                  className="pudding-workspace-tab-close"
 
                   type="button"
                   onClick={() => onRequestClose([key])}
                 >
-                  <X className="size-3.5" />
+                  <X className="size-3" />
                 </button>
-              </div>
+              </>}</SortableTab>
             </ProjectTabContextMenu>
           );
         })}
-        {turnDiffTabs.map((preview, index) => {
-          const selected = preview.id === activeTurnDiffID;
-          const label = replace(t("turnFiles.projectTab"), {
+        {previewTabs.map((preview, index) => {
+          const selected = preview.id === activePreviewID;
+          const label = preview.source !== "turn-diff" ? filePreviewTitle(preview.path) : replace(t("turnFiles.projectTab"), {
             count: String(turnFileDiffChanges(preview.fileChanges || []).length),
           });
           return (
             <ProjectVirtualTabContextMenu
               key={preview.id}
-              onClose={() => onCloseTurnDiffs([preview.id])}
+              onClose={() => onClosePreviews([preview.id])}
               onCloseOthers={() => {
                 onRequestClose(tabs.map(projectTabKey));
-                onCloseTurnDiffs(turnDiffTabs.filter((item) => item.id !== preview.id).map((item) => item.id));
+                onClosePreviews(previewTabs.filter((item) => item.id !== preview.id).map((item) => item.id));
               }}
-              onCloseRight={() => onCloseTurnDiffs(turnDiffTabs.slice(index + 1).map((item) => item.id))}
+              onCloseRight={() => onClosePreviews(previewTabs.slice(index + 1).map((item) => item.id))}
             >
               <div
-                className={cn(
-                  "group relative z-10 flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
-                  selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
-                )}
+                className="pudding-workspace-content-tab group max-w-56 shrink-0"
+                data-selected={selected}
               >
                 <button
                   aria-pressed={selected}
-                  className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-2.5 text-left"
+                  className="pudding-workspace-tab-select"
 
                   type="button"
-                  onClick={() => onActivateTurnDiff(preview.id)}
+                  onClick={() => onActivatePreview(preview.id)}
                 >
-                  <FileDiff className="size-3.5 shrink-0 text-muted-foreground" />
+                  {preview.source === "turn-diff" ? <FileDiff className="size-3.5 shrink-0 text-muted-foreground" /> : <ProjectFileTypeIcon path={preview.path} />}
                   <span className="min-w-0 flex-1 truncate">{label}</span>
                 </button>
                 <button
                   aria-label={`${t("project.browserCloseTab")} ${label}`}
-                  className={cn(
-                    "mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] opacity-0 hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
-                    selected && "opacity-100",
-                  )}
+                  className="pudding-workspace-tab-close"
 
                   type="button"
-                  onClick={() => onCloseTurnDiffs([preview.id])}
+                  onClick={() => onClosePreviews([preview.id])}
                 >
-                  <X className="size-3.5" />
+                  <X className="size-3" />
                 </button>
               </div>
             </ProjectVirtualTabContextMenu>
           );
         })}
         </div>
+        </SortableTabList>
         <span
           aria-hidden="true"
           className={cn(
@@ -188,6 +190,18 @@ export function ProjectFileTabs({
           style={{ left: scrollIndicator.left, width: scrollIndicator.width }}
         />
       </div>
+      <OpenTabsMenu activeID={activePreviewID ? `preview:${activePreviewID}` : activeKey} tabs={[
+        ...tabs.map((tab) => {
+          const root = roots.find((entry) => entry.id === tab.rootID);
+          return { id: projectTabKey(tab), title: projectFileName(tab.path), description: root ? projectAbsolutePath(root.path, tab.path) : tab.path, icon: <ProjectFileTypeIcon path={tab.path} /> };
+        }),
+        ...previewTabs.map((preview) => ({ id: `preview:${preview.id}`, title: preview.source === "turn-diff" ? t("turnFiles.tab") : filePreviewTitle(preview.path), description: preview.path, icon: preview.source === "turn-diff" ? <FileDiff className="size-3.5" /> : <ProjectFileTypeIcon path={preview.path} /> })),
+      ]} onSelect={(id) => {
+        const preview = previewTabs.find((entry) => `preview:${entry.id}` === id);
+        if (preview) { onActivatePreview(preview.id); return; }
+        const tab = tabs.find((entry) => projectTabKey(entry) === id);
+        if (tab) onActivate(tab);
+      }} />
     </div>
   );
 }

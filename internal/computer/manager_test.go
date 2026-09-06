@@ -35,7 +35,7 @@ func (f *fakeService) ListApps(_ context.Context, sessionID string) (AppList, er
 	return f.list, nil
 }
 
-func (f *fakeService) UseApp(_ context.Context, sessionID, appID string, foreground bool) (NativeUse, error) {
+func (f *fakeService) UseApp(_ context.Context, sessionID, appID string, foreground bool, selection AppSelection) (NativeUse, error) {
 	f.lastSession = sessionID
 	f.foreground = foreground
 	if f.launch.AppID == "" {
@@ -67,9 +67,9 @@ func (f *fakeService) Observe(_ context.Context, sessionID, appID string, window
 	return testObservation(appID, windowID), nil
 }
 
-func (f *fakeService) ObserveCapture(_ context.Context, _ string, appID string, windowID uint32, _ int, output string) (NativeObservationCapture, error) {
+func (f *fakeService) ObserveCapture(_ context.Context, _ string, appID string, windowID uint32, _ int, output string, includeAccessibility bool) (NativeObservationCapture, error) {
 	return NativeObservationCapture{
-		Observation: testObservation(appID, windowID),
+		Observation: observationPointer(testObservation(appID, windowID)),
 		Capture:     &Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1},
 	}, nil
 }
@@ -313,7 +313,7 @@ func TestManagerRejectsInvalidApplicationInventory(t *testing.T) {
 func TestManagerOwnsOnlyNewSessionLaunches(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", true)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestManagerDoesNotOwnAlreadyRunningApplication(t *testing.T) {
 	appID := "com.example.App"
 	service := &fakeService{launch: NativeUse{AppID: appID, Name: "Example", PID: 42, WindowStatus: WindowStatusReady, Windows: []CapturableWindow{{WindowID: 8, PID: 42, AppID: &appID, Frame: Frame{Width: 100, Height: 80}}}}}
 	manager := NewManager(service)
-	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestManagerRejectsWindowFromAnotherProcess(t *testing.T) {
 		WindowStatus: WindowStatusReady,
 		Windows:      []CapturableWindow{{WindowID: 8, PID: 99, AppID: &appID, Frame: Frame{Width: 100, Height: 80}}},
 	}}
-	_, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false)
+	_, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false, AppSelection{})
 	assertOperationCode(t, err, "computer_invalid_response")
 }
 
@@ -373,11 +373,11 @@ func TestManagerRequiresFailureDetailsForFailedWindowDiscovery(t *testing.T) {
 	service := &fakeService{launch: NativeUse{
 		AppID: appID, Name: "Example", PID: 42, WindowStatus: WindowStatusFailed,
 	}}
-	_, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false)
+	_, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false, AppSelection{})
 	assertOperationCode(t, err, "computer_invalid_response")
 
 	service.launch.WindowError = &Failure{Code: "computer_unavailable", Message: "window discovery failed", Outcome: "not_started"}
-	used, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false)
+	used, err := NewManager(service).UseApp(context.Background(), "session_a", appID, false, AppSelection{})
 	if err != nil || used.WindowError == nil || used.WindowError.Code != "computer_unavailable" {
 		t.Fatalf("unexpected failed discovery: %#v err=%v", used, err)
 	}
@@ -386,7 +386,7 @@ func TestManagerRequiresFailureDetailsForFailedWindowDiscovery(t *testing.T) {
 func TestManagerKeepsOwnershipWhenNormalQuitNeedsAttention(t *testing.T) {
 	service := &fakeService{quits: []NativeQuit{{AppID: "com.example.App", PID: 42, Closed: false}, {AppID: "com.example.App", PID: 42, Closed: true}}}
 	manager := NewManager(service)
-	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestManagerKeepsOwnershipWhenNormalQuitNeedsAttention(t *testing.T) {
 func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)
-	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 func TestManagerReturnsStatelessAtomicObserveCapture(t *testing.T) {
 	manager := NewManager(&fakeService{})
 	result, err := manager.ObserveCapture(
-		context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/window.png",
+		context.Background(), "session_a", "com.example.App", 42, 20, "/tmp/window.png", true,
 	)
 	if err != nil || result.Observation.AppID != "com.example.App" || result.Capture == nil || result.Capture.WindowID != 42 {
 		t.Fatalf("unexpected observe-capture: %#v err=%v", result, err)
@@ -580,7 +580,7 @@ func (s *serialActionService) Permissions(context.Context) (Permissions, error) 
 func (s *serialActionService) ListApps(context.Context, string) (AppList, error) {
 	return AppList{}, nil
 }
-func (s *serialActionService) UseApp(context.Context, string, string, bool) (NativeUse, error) {
+func (s *serialActionService) UseApp(context.Context, string, string, bool, AppSelection) (NativeUse, error) {
 	return NativeUse{}, nil
 }
 func (s *serialActionService) QuitApp(context.Context, string, string, int32) (NativeQuit, error) {
@@ -589,9 +589,9 @@ func (s *serialActionService) QuitApp(context.Context, string, string, int32) (N
 func (s *serialActionService) Observe(_ context.Context, _ string, appID string, windowID uint32, _ int) (Observation, error) {
 	return testObservation(appID, windowID), nil
 }
-func (s *serialActionService) ObserveCapture(_ context.Context, _ string, appID string, windowID uint32, _ int, output string) (NativeObservationCapture, error) {
+func (s *serialActionService) ObserveCapture(_ context.Context, _ string, appID string, windowID uint32, _ int, output string, includeAccessibility bool) (NativeObservationCapture, error) {
 	return NativeObservationCapture{
-		Observation: testObservation(appID, windowID),
+		Observation: observationPointer(testObservation(appID, windowID)),
 		Capture:     &Capture{WindowID: windowID, Output: output, Width: 1, Height: 1, ScaleFactor: 1},
 	}, nil
 }
@@ -625,5 +625,77 @@ func assertOperationCode(t *testing.T, err error, code string) {
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Code != code {
 		t.Fatalf("error = %#v, want code %q", err, code)
+	}
+}
+
+func observationPointer(o Observation) *Observation { return &o }
+func (f *fakeService) Keyboard(_ context.Context, sessionID, appID string, _ uint32, input ActionInput) (NativeAction, error) {
+	f.actions++
+	f.lastSession = sessionID
+	if f.actErr != nil && (f.actErrAt == 0 || f.actions == f.actErrAt) {
+		return NativeAction{}, f.actErr
+	}
+	return NativeAction{AppID: appID, Action: input.Type, Completed: true, Key: input.Key, Modifiers: input.Modifiers}, nil
+}
+func (s *serialActionService) Keyboard(context.Context, string, string, uint32, ActionInput) (NativeAction, error) {
+	return NativeAction{}, nil
+}
+
+type channelService struct {
+	fakeService
+	result NativeObservationCapture
+}
+
+func (s *channelService) ObserveCapture(context.Context, string, string, uint32, int, string, bool) (NativeObservationCapture, error) {
+	return s.result, nil
+}
+func TestObservationChannelsFailIndependently(t *testing.T) {
+	observation := testObservation("com.example.App", 42)
+	capture := &Capture{WindowID: 42, Output: "/tmp/test.png", Width: 2, Height: 2, ScaleFactor: 1}
+	failure := &Failure{Code: "computer_permission_required", Message: "AX denied", Outcome: "not_started"}
+	for _, tt := range []struct {
+		name    string
+		ax      bool
+		result  NativeObservationCapture
+		invalid bool
+	}{
+		{"image despite AX error", true, NativeObservationCapture{Capture: capture, ObservationError: failure}, false},
+		{"AX despite image error", true, NativeObservationCapture{Observation: &observation, CaptureError: failure}, false},
+		{"image only", false, NativeObservationCapture{Capture: capture}, false},
+		{"both errors", true, NativeObservationCapture{ObservationError: failure, CaptureError: failure}, false},
+		{"missing channel status", true, NativeObservationCapture{Capture: capture}, true},
+		{"unexpected AX", false, NativeObservationCapture{Capture: capture, Observation: &observation}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewManager(&channelService{result: tt.result})
+			result, err := manager.ObserveCapture(context.Background(), "session", "com.example.App", 42, 200, "/tmp/test.png", tt.ax)
+			if (err != nil) != tt.invalid {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+func TestKeyboardBatchStopsWithoutReplayingPrefix(t *testing.T) {
+	value := "你好🙂"
+	service := &fakeService{actErrAt: 2, actErr: &OperationError{Code: "computer_app_not_foreground", Message: "focus changed", Outcome: "not_started"}}
+	result, err := NewManager(service).Act(context.Background(), "session", "com.example.App", 42, []ActionInput{
+		{Type: ActionTypeText, Value: &value}, {Type: ActionPressKey, Key: "enter"}, {Type: ActionPressKey, Key: "tab"},
+	})
+	if err != nil || result.CompletedCount != 1 || result.FailedIndex == nil || *result.FailedIndex != 1 || service.actions != 2 {
+		t.Fatalf("result=%+v err=%v calls=%d", result, err, service.actions)
+	}
+}
+func TestKeyboardRejectsMixedTargetsBeforeDispatch(t *testing.T) {
+	value := "text"
+	x := 0.5
+	for _, input := range []ActionInput{
+		{Type: ActionTypeText, Value: &value, ElementID: "field"},
+		{Type: ActionPressKey, Key: "a", X: &x}, {Type: ActionPressKey, Key: "a", Value: &value},
+		{Type: ActionPressKey, Key: "a", Modifiers: []string{"command", "command"}},
+		{Type: ActionSetValue, ElementID: "field", Value: &value, Key: "a"},
+	} {
+		if _, err := NormalizeActions([]ActionInput{input}); err == nil {
+			t.Errorf("accepted %+v", input)
+		}
 	}
 }

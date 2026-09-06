@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -56,8 +57,11 @@ func (m *Manager) ListApps(ctx context.Context, sessionID string) (AppList, erro
 	return apps, nil
 }
 
-func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foreground bool) (UseResult, error) {
+func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foreground bool, selection AppSelection) (UseResult, error) {
 	if err := validateApp(sessionID, appID); err != nil {
+		return UseResult{}, err
+	}
+	if err := ValidateAppSelection(selection); err != nil {
 		return UseResult{}, err
 	}
 	if err := m.acquireWrite(ctx, "app use"); err != nil {
@@ -69,11 +73,11 @@ func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foregroun
 		return UseResult{}, err
 	}
 
-	native, err := m.service.UseApp(ctx, sessionID, appID, foreground)
+	native, err := m.service.UseApp(ctx, sessionID, appID, foreground, selection)
 	if err != nil {
 		return UseResult{}, err
 	}
-	if native.AppID != appID || native.PID <= 0 || strings.TrimSpace(native.Name) == "" {
+	if native.AppID != appID || native.PID <= 0 || selection.PID != 0 && native.PID != selection.PID || strings.TrimSpace(native.Name) == "" {
 		return UseResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use app entry returned an invalid result", Outcome: "unknown"}
 	}
 	if !validWindowDiscovery(native.WindowStatus, native.WindowError, len(native.Windows)) {
@@ -159,7 +163,7 @@ func (m *Manager) Observe(ctx context.Context, sessionID, appID string, windowID
 	return validateObservation(appID, windowID, snapshot)
 }
 
-func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string) (NativeObservationCapture, error) {
+func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, windowID uint32, maxElements int, output string, includeAccessibility bool) (NativeObservationCapture, error) {
 	if err := validateTarget(sessionID, appID, windowID); err != nil {
 		return NativeObservationCapture{}, err
 	}
@@ -172,21 +176,26 @@ func (m *Manager) ObserveCapture(ctx context.Context, sessionID, appID string, w
 	if strings.TrimSpace(output) == "" {
 		return NativeObservationCapture{}, invalid("output is required")
 	}
-	native, err := m.service.ObserveCapture(ctx, sessionID, appID, windowID, maxElements, output)
+	native, err := m.service.ObserveCapture(ctx, sessionID, appID, windowID, maxElements, output, includeAccessibility)
 	if err != nil {
 		return NativeObservationCapture{}, err
 	}
-	if native.Capture == nil {
-		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use observe-capture returned an invalid capture result", Outcome: "unknown"}
+	if (native.Capture == nil) == (native.CaptureError == nil) ||
+		includeAccessibility && ((native.Observation == nil) == (native.ObservationError == nil)) ||
+		!includeAccessibility && (native.Observation != nil || native.ObservationError != nil) {
+		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "observation channels must each return a result or an error", Outcome: "not_started"}
 	}
 	if native.Capture != nil && !validCapture(*native.Capture, windowID, output) {
-		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use capture returned an invalid result", Outcome: "unknown"}
+		return NativeObservationCapture{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use capture returned an invalid result", Outcome: "not_started"}
 	}
-	validated, err := validateObservation(appID, windowID, native.Observation)
-	if err != nil {
-		return NativeObservationCapture{}, err
+	if native.Observation != nil {
+		validated, err := validateObservation(appID, windowID, *native.Observation)
+		if err != nil {
+			return NativeObservationCapture{}, err
+		}
+		native.Observation = &validated
 	}
-	return NativeObservationCapture{Observation: validated, Capture: native.Capture}, nil
+	return native, nil
 }
 
 func validCapture(captured Capture, windowID uint32, output string) bool {
@@ -213,6 +222,8 @@ func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uin
 		var actionErr error
 		if isSemanticAction(action.Type) {
 			native, actionErr = m.service.Act(ctx, sessionID, appID, windowID, action.ElementID, action.Type, action.Value)
+		} else if isKeyboardAction(action.Type) {
+			native, actionErr = m.service.Keyboard(ctx, sessionID, appID, windowID, action)
 		} else {
 			native, actionErr = m.service.Pointer(ctx, sessionID, appID, windowID, pointerInput(action))
 		}
@@ -253,6 +264,12 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 	action.Type = strings.TrimSpace(action.Type)
 	action.ElementID = strings.TrimSpace(action.ElementID)
 	action.Button = strings.TrimSpace(action.Button)
+	if isKeyboardAction(action.Type) {
+		return normalizeKeyboard(action)
+	}
+	if action.Key != "" || len(action.Modifiers) > 0 {
+		return action, invalid("key and modifiers are only for press_key")
+	}
 	if isSemanticAction(action.Type) {
 		if action.ElementID == "" {
 			return action, invalid("elementID is required for semantic actions")
@@ -260,11 +277,11 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 		if hasPointerFields(action) {
 			return action, invalid("pointer fields are allowed only for click, drag, and scroll")
 		}
-		if action.Type == ActionSetValue && action.Value == nil {
-			return action, invalid("value is required for set_value")
+		if (action.Type == ActionSetValue || action.Type == ActionSelectText) && action.Value == nil {
+			return action, invalid("value is required for set_value/select_text")
 		}
-		if action.Type != ActionSetValue && action.Value != nil {
-			return action, invalid("value is allowed only for set_value")
+		if action.Type != ActionSetValue && action.Type != ActionSelectText && action.Value != nil {
+			return action, invalid("value is allowed only for set_value/select_text")
 		}
 		if action.Value != nil && utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters {
 			return action, invalid("value is too long")
@@ -325,7 +342,7 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 }
 
 func isSemanticAction(actionType string) bool {
-	return actionType == ActionPress || actionType == ActionSetValue || actionType == ActionSelect || actionType == ActionSubmit
+	return actionType == ActionPress || actionType == ActionSetValue || actionType == ActionSelect || actionType == ActionSubmit || actionType == ActionFocus || actionType == ActionSelectText
 }
 
 func hasPointerFields(action ActionInput) bool {
@@ -344,6 +361,9 @@ func pointerInput(action ActionInput) PointerInput {
 }
 
 func matchesActionResult(native NativeAction, appID string, action ActionInput) bool {
+	if isKeyboardAction(action.Type) {
+		return native.Completed && native.AppID == appID && native.ElementID == "" && native.Action == action.Type && native.Key == action.Key && slices.Equal(native.Modifiers, action.Modifiers)
+	}
 	if isSemanticAction(action.Type) {
 		return native.Completed && native.AppID == appID && native.ElementID == action.ElementID && native.Action == action.Type
 	}
@@ -479,7 +499,7 @@ func validateObservation(appID string, windowID uint32, snapshot Observation) (O
 
 func validAction(action string) bool {
 	switch action {
-	case ActionPress, ActionSetValue, ActionSelect, ActionSubmit:
+	case ActionPress, ActionSetValue, ActionSelect, ActionSubmit, ActionFocus, ActionSelectText:
 		return true
 	default:
 		return false
@@ -526,4 +546,40 @@ func newRandomID(prefix string) (string, error) {
 		return "", fmt.Errorf("create Computer Use id: %w", err)
 	}
 	return prefix + hex.EncodeToString(raw), nil
+}
+
+func ValidateAppSelection(selection AppSelection) error {
+	if selection.PID < 0 {
+		return invalid("pid must be positive when provided")
+	}
+	if selection.AppPath != "" && (!filepath.IsAbs(selection.AppPath) || filepath.Ext(selection.AppPath) != ".app") {
+		return invalid("appPath must be an absolute .app path")
+	}
+	return nil
+}
+
+func isKeyboardAction(kind string) bool {
+	return kind == ActionPressKey || kind == ActionTypeText || kind == ActionPaste
+}
+
+func normalizeKeyboard(action ActionInput) (ActionInput, error) {
+	if action.ElementID != "" || hasPointerFields(action) {
+		return action, invalid("keyboard actions operate the focused control; omit elementID and coordinates")
+	}
+	if action.Type == ActionPressKey {
+		action.Key = strings.ToLower(action.Key)
+		if action.Key == "" || action.Value != nil {
+			return action, invalid("press_key requires key and no value")
+		}
+		seen := map[string]bool{}
+		for _, modifier := range action.Modifiers {
+			if seen[modifier] || !slices.Contains([]string{"command", "shift", "option", "control"}, modifier) {
+				return action, invalid("modifiers must be unique command, shift, option, control")
+			}
+			seen[modifier] = true
+		}
+	} else if action.Value == nil || *action.Value == "" || utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters || action.Key != "" || len(action.Modifiers) != 0 {
+		return action, invalid("type_text/paste require 1–20000 characters and no key/modifiers")
+	}
+	return action, nil
 }

@@ -10,7 +10,7 @@ const {
 test("Computer Use routes declare their native permission requirements", () => {
   assert.deepEqual(permissionsForRoute("/computer/apps/list"), []);
   assert.deepEqual(permissionsForRoute("/computer/apps/use"), ["screenRecording"]);
-  assert.deepEqual(permissionsForRoute("/computer/observe-capture"), ["accessibility", "screenRecording"]);
+  assert.deepEqual(permissionsForRoute("/computer/observe-capture"), ["screenRecording"]);
   assert.deepEqual(permissionsForRoute("/computer/act"), ["accessibility", "screenRecording"]);
 });
 
@@ -301,3 +301,56 @@ class FakeComputerUseHost {
     return { bundleID: params.bundleID, action: params.action, completed: true, x: params.x, y: params.y };
   }
 }
+
+
+test("Computer Use routes explicit instances and keyboard without an AX screenshot prerequisite", async () => {
+  const calls=[];
+  const host={useApp:async p=>{calls.push(p);return {};},keyboard:async p=>{calls.push(p);return {};},observeCapture:async p=>{calls.push(p);return {capture:{windowID:42},observationError:{code:"computer_permission_required"}};}};
+  const bridge=new ComputerUseBridgeServer(host);const id=await bridge.start();
+  const send=async (route,body)=>{
+    const response=await fetch(id.url+route,{method:"POST",headers:authenticatedHeaders(id.token),body:JSON.stringify({sessionID:"session",appID:"com.github.Electron",...body})});
+    assert.equal(response.status,200);return response.json();
+  };
+  try {
+    await send("/computer/apps/use",{pid:123,appPath:"/tmp/Test.app"});
+    assert.equal(calls[0].pid,123);assert.equal(calls[0].appPath,"/tmp/Test.app");
+    await send("/computer/keyboard",{windowID:42,action:"press_key",key:"a",modifiers:["command"]});
+    assert.deepEqual(calls[1].modifiers,["command"]);assert.equal(calls[1].key,"a");
+    const result=await send("/computer/observe-capture",{windowID:42,includeAccessibility:false,output:"/tmp/screen.png"});
+    assert.equal(calls[2].includeAccessibility,false);assert(result.capture);assert(result.observationError);
+  }finally{await bridge.stop();}
+});
+
+test('preview target is request-scoped and emitted only after native permission approval', async () => {
+  const activities = [];
+  let allow = false;
+  const host = new FakeComputerUseHost();
+  const bridge = new ComputerUseBridgeServer(host, {
+    onActivity: target => activities.push(target),
+    permissionCoordinator: {run: async (_permissions, operation) => {
+      if (!allow) throw Object.assign(new Error('denied'), {code:'computer_permission_denied'});
+      return operation();
+    }},
+  });
+  const identity = await bridge.start();
+  const send = (route, turnID, body = {}) => fetch(identity.url + route, {
+    method:'POST', headers:{...authenticatedHeaders(identity.token), ...(turnID ? {'x-pudding-turn-id':turnID} : {})},
+    body:JSON.stringify({sessionID:'session-a',appID:'com.example.Test',windowID:42,...body}),
+  });
+  try {
+    assert.equal((await send('/computer/observe', 'turn-a')).status, 403);
+    assert.deepEqual(activities, []);
+    allow = true;
+    assert.equal((await send('/computer/observe', 'turn-a')).status, 200);
+    assert.equal((await send('/computer/observe', 'turn-b', {sessionID:'session-b',windowID:43})).status, 200);
+    await send('/computer/observe');
+    await send('/computer/apps/list', 'turn-a');
+    await send('/computer/apps/use', 'turn-a');
+    assert.deepEqual(activities, [
+      {sessionID:'session-a',turnID:'turn-a',appID:'com.example.Test',windowID:42},
+      {sessionID:'session-b',turnID:'turn-b',appID:'com.example.Test',windowID:43},
+    ]);
+    bridge.onActivity = () => { throw new Error('preview failed'); };
+    assert.equal((await send('/computer/observe', 'turn-a')).status, 200, 'preview cannot block the tool');
+  } finally { await bridge.stop(); }
+});

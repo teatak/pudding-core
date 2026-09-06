@@ -683,7 +683,7 @@ func (s *Server) recoverStoredBrowserTabs(ctx context.Context, sessionID string,
 	for _, tab := range tabs {
 		live[strings.TrimSpace(tab.ID)] = struct{}{}
 	}
-	out := append([]browser.TabSnapshot(nil), tabs...)
+	out := append([]browser.TabSnapshot{}, tabs...)
 	for _, state := range states {
 		tabID := strings.TrimSpace(state.TabID)
 		if tabID == "" {

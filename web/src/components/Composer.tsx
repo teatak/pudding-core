@@ -101,7 +101,6 @@ const draftAttachmentSessionID = "draft";
 
 type ComposerProps = {
   droppedFiles?: DroppedFilesBatch | null;
-  presentation?: "default" | "floating";
   submitError?: string | null;
   token: string;
   session: Session;
@@ -139,7 +138,6 @@ async function captureBrowserSelection(sessionID: string, context: UIContextPart
 
 export function Composer({
   droppedFiles,
-  presentation = "default",
   submitError,
   token,
   session,
@@ -147,7 +145,6 @@ export function Composer({
   onSubmitStart,
 }: ComposerProps) {
   const sessionID = session.id;
-  const floating = presentation === "floating";
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
@@ -1023,12 +1020,12 @@ export function Composer({
       <form
         className={cn(
           "pointer-events-none relative shrink-0",
-          floating ? "px-2 pb-0.5" : "pb-4",
-          !floating && showComposerTopStatus && "pt-11",
+          "pb-4",
+          showComposerTopStatus && "pt-11",
         )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
-      {!floating && showComposerTopStatus ? (
+      {showComposerTopStatus ? (
         <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9">
           <ChatColumn className="relative flex h-full items-center justify-center">
             {showTurnProgress && activeTurnPlan ? (
@@ -1041,13 +1038,11 @@ export function Composer({
         className={cn(
           "pointer-events-auto relative",
           mentionMenuOpen || slashMenuOpen ? "z-40" : "z-10",
-          floating && "w-full max-w-none",
         )}
       >
         <div
           ref={selectionGuardRef}
           className="relative"
-          data-composer-presentation={presentation}
         >
           {pendingApproval ? (
             <ComposerApprovalBar approval={pendingApproval} preview={Boolean(testPresentation?.approval)} token={token} />
@@ -1061,7 +1056,6 @@ export function Composer({
           <div
             className={cn(
               composerShellClassName,
-              floating && "pudding-composer-shell-floating",
               micActive && "is-mic-active",
             )}
           >
@@ -1087,9 +1081,7 @@ export function Composer({
               onRemoveProjectReference={removeProjectReference}
               onRevealPath={revealLocalPath}
             />
-            {floating ? null : (
-              <div className="px-3 pt-3.5 pb-2">{composerTextArea}</div>
-            )}
+            <div className="px-3 pt-3.5 pb-2">{composerTextArea}</div>
             <ComposerToolbar
               addBusy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}
               audioBindings={audioBindings}
@@ -1097,14 +1089,8 @@ export function Composer({
               cancelPending={cancelMutation.isPending}
               compacting={compactMutation.isPending}
               context={workspaceOpen ? visibleUIContext : undefined}
-              inputSlot={
-                floating ? (
-                  <div className="min-w-20 flex-1 px-1">{composerTextArea}</div>
-                ) : undefined
-              }
               mentionMenuOpen={mentionMenuOpen}
               projectID={projectID}
-              presentation={presentation}
               reasoningEffort={reasoningEffort}
               sendEnabled={sendEnabled}
               session={session}
@@ -1132,8 +1118,7 @@ export function Composer({
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>
-          {floating ? null : (
-            <>
+          <>
               <span className="pudding-composer-mascot-anchor">
                 <MascotSceneV1Adapter
                   className="size-full overflow-visible"
@@ -1153,8 +1138,7 @@ export function Composer({
                   {submitError}
                 </span>
               ) : null}
-            </>
-          )}
+          </>
         </div>
       </ChatColumn>
       </form>

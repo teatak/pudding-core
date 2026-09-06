@@ -17,13 +17,15 @@ import (
 )
 
 type computerObserveArgs struct {
-	AppID             string `json:"appID"`
-	WindowID          uint32 `json:"windowID"`
-	MaxElements       int    `json:"maxElements"`
-	IncludeScreenshot bool   `json:"includeScreenshot"`
+	IncludeAccessibility *bool  `json:"includeAccessibility"`
+	AppID                string `json:"appID"`
+	WindowID             uint32 `json:"windowID"`
+	MaxElements          int    `json:"maxElements"`
+	IncludeScreenshot    bool   `json:"includeScreenshot"`
 }
 
 type computerUseAppArgs struct {
+	computer.AppSelection
 	AppID      string `json:"appID"`
 	Foreground bool   `json:"foreground"`
 }
@@ -63,7 +65,7 @@ func (r *BuiltinRunner) computerUseApp(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	result, err := r.computer.UseApp(ctx, call.SessionID, args.AppID, args.Foreground)
+	result, err := r.computer.UseApp(ctx, call.SessionID, args.AppID, args.Foreground, args.AppSelection)
 	if err != nil {
 		return computerToolError(out, err)
 	}
@@ -101,6 +103,7 @@ func (r *BuiltinRunner) computerQuitApp(ctx context.Context, call Call) Result {
 }
 
 func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
+	ctx = computer.WithActivityTurn(ctx, call.TurnID)
 	out := Result{CallID: call.CallID, Name: call.Name}
 	if ready := r.computerReady(call, out); ready != nil {
 		return *ready
@@ -124,47 +127,46 @@ func (r *BuiltinRunner) computerObserve(ctx context.Context, call Call) Result {
 
 	tempDir, err := os.MkdirTemp("", "pudding-computer-")
 	if err != nil {
-		observed, observeErr := r.computer.Observe(ctx, call.SessionID, args.AppID, args.WindowID, args.MaxElements)
-		if observeErr != nil {
-			return computerToolError(out, observeErr)
-		}
-		payload := map[string]any{"ok": true, "observation": observed}
-		payload["screenshotError"] = computer.ErrorFailure(err)
-		out.Ok = true
-		out.Content = jsonString(payload)
-		out.SummaryKind = SummaryReturnedItems
-		out.SummaryCount = len(observed.Elements)
-		return out
+		return computerToolError(out, err)
 	}
 	defer os.RemoveAll(tempDir)
 	output := filepath.Join(tempDir, fmt.Sprintf("computer-window-%d.png", args.WindowID))
-	combined, err := r.computer.ObserveCapture(ctx, call.SessionID, args.AppID, args.WindowID, args.MaxElements, output)
+	combined, err := r.computer.ObserveCapture(ctx, call.SessionID, args.AppID, args.WindowID, args.MaxElements, output, args.IncludeAccessibility == nil || *args.IncludeAccessibility)
 	if err != nil {
 		return computerToolError(out, err)
 	}
-	payload := map[string]any{"ok": true, "observation": combined.Observation}
-	captured := *combined.Capture
-	stored, storeErr := attachment.NewService(r.homeDir).StorePath(call.SessionID, captured.Output)
-	if storeErr != nil {
-		payload["screenshotError"] = computer.ErrorFailure(storeErr)
-	} else {
-		stored.Origin = attachment.OriginTool
-		out.Attachments = []store.Attachment{stored}
-		out.ContextAttachments = []store.Attachment{stored}
-		payload["screenshot"] = map[string]any{
-			"windowID": captured.WindowID, "width": captured.Width, "height": captured.Height,
-			"scaleFactor": captured.ScaleFactor, "attachmentKey": stored.AttachmentKey, "url": stored.URL,
-			"coordinateSpace": "window_normalized_top_left",
+	payload := map[string]any{}
+	if combined.Observation != nil {
+		payload["observation"] = combined.Observation
+		out.SummaryCount = len(combined.Observation.Elements)
+	}
+	if combined.ObservationError != nil {
+		payload["observationError"] = combined.ObservationError
+	}
+	if combined.CaptureError != nil {
+		payload["screenshotError"] = combined.CaptureError
+	}
+	if captured := combined.Capture; captured != nil {
+		stored, storeErr := attachment.NewService(r.homeDir).StorePath(call.SessionID, captured.Output)
+		if storeErr != nil {
+			payload["screenshotError"] = computer.ErrorFailure(storeErr)
+		} else {
+			stored.Origin = attachment.OriginTool
+			out.Attachments = []store.Attachment{stored}
+			out.ContextAttachments = []store.Attachment{stored}
+			payload["screenshot"] = map[string]any{"windowID": captured.WindowID, "width": captured.Width, "height": captured.Height,
+				"scaleFactor": captured.ScaleFactor, "attachmentKey": stored.AttachmentKey, "url": stored.URL, "coordinateSpace": "window_normalized_top_left"}
 		}
 	}
-	out.Ok = true
+	out.Ok = combined.Observation != nil || len(out.Attachments) > 0
+	payload["ok"] = out.Ok
 	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedItems
-	out.SummaryCount = len(combined.Observation.Elements)
 	return out
 }
 
 func (r *BuiltinRunner) computerAct(ctx context.Context, call Call) Result {
+	ctx = computer.WithActivityTurn(ctx, call.TurnID)
 	out := Result{CallID: call.CallID, Name: call.Name}
 	if ready := r.computerReady(call, out); ready != nil {
 		return *ready
@@ -256,6 +258,9 @@ func decodeComputerObserveArgs(raw []byte) (computerObserveArgs, error) {
 	if args.WindowID == 0 {
 		return args, fmt.Errorf("appID and windowID are required")
 	}
+	if args.IncludeAccessibility != nil && !*args.IncludeAccessibility && !args.IncludeScreenshot {
+		return args, fmt.Errorf("at least one observation channel is required")
+	}
 	if args.MaxElements < 0 || args.MaxElements > 1000 {
 		return args, fmt.Errorf("maxElements must be between 1 and 1000 when provided")
 	}
@@ -271,7 +276,7 @@ func decodeComputerUseAppArgs(raw []byte) (computerUseAppArgs, error) {
 	if err := validateComputerToolAppID(args.AppID); err != nil {
 		return args, err
 	}
-	return args, nil
+	return args, computer.ValidateAppSelection(args.AppSelection)
 }
 
 func decodeComputerQuitAppArgs(raw []byte) (computerQuitAppArgs, error) {
@@ -336,7 +341,14 @@ func computerUseAppApprovalDetails(call Call) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"appID": args.AppID, "foreground": args.Foreground}, nil
+	details := map[string]any{"appID": args.AppID, "foreground": args.Foreground}
+	if args.AppPath != "" {
+		details["appPath"] = args.AppPath
+	}
+	if args.PID != 0 {
+		details["pid"] = args.PID
+	}
+	return details, nil
 }
 
 func computerQuitAppApprovalDetails(controller computer.Controller, call Call) (map[string]any, error) {
@@ -362,6 +374,12 @@ func computerActApprovalDetails(call Call) (map[string]any, error) {
 	actions := make([]map[string]any, 0, len(args.Actions))
 	for _, action := range args.Actions {
 		item := map[string]any{"type": action.Type}
+		if action.Key != "" {
+			item["key"] = action.Key
+		}
+		if len(action.Modifiers) > 0 {
+			item["modifiers"] = action.Modifiers
+		}
 		if action.ElementID != "" {
 			item["elementID"] = action.ElementID
 		}

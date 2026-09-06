@@ -34,10 +34,10 @@ export function WorkspaceActivityCard({
     <div
       aria-label={t("workspace.recentArtifacts")}
       className={cn(
-        "pointer-events-auto flex min-w-0 gap-0.5 border border-border/70 bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-md",
+        "pointer-events-auto flex min-h-0 min-w-0 gap-0.5 border border-border/70 bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-md",
         presentation === "dock"
           ? "max-h-full w-10 flex-col overflow-hidden rounded-xl p-1 shadow-sm"
-          : "w-full flex-col overflow-hidden rounded-xl py-1.5",
+          : "w-full flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain rounded-xl py-1.5",
       )}
       role="group"
     >

@@ -1,5 +1,7 @@
+import { LibraryFavoriteButton } from "@/components/workspace/LibraryFavoriteButton";
 import { memo, useMemo } from "react";
-import { Star } from "@/components/icons";
+import { Save, Star, Trash2 } from "@/components/icons";
+import { AppTooltip } from "@/components/AppTooltip";
 
 import {
   GalleryLayoutControls,
@@ -62,37 +64,44 @@ export function CanvasItemActions({
   saving,
   token,
   onSave,
+  onDelete,
   onGalleryLayoutChange,
 }: {
   item?: CanvasItem;
   saving: boolean;
   token: string;
   onSave: () => void;
+  onDelete: () => void;
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
 }) {
   const { t } = useI18n();
   const table = useMemo(() => item ? tableExportData(item, t) : null, [item, t]);
   const galleryLayout = item ? galleryLayoutForItem(item) : null;
   const showSave = Boolean(item && (!item.sourceSavedItemID || item.savedDirty));
-  if (!galleryLayout && !table && !showSave) return null;
+  if (!item) return null;
 
   return (
-    <div className="no-drag-region flex items-center gap-1 rounded-lg border border-border/70 bg-background/90 p-1 text-foreground shadow-sm backdrop-blur-[2px]">
+    <div className="no-drag-region flex items-center gap-1 rounded-lg border border-border/70 bg-background/90 dark:bg-[var(--workspace-content-toolbar-background)] p-1 text-foreground shadow-sm backdrop-blur-[2px]">
       {galleryLayout ? <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} /> : null}
       {table ? <TableExportMenu table={table} token={token} /> : null}
       {showSave ? (
-        <Button
+        <AppTooltip content={t(item.sourceSavedItemID ? "canvas.saveChanges" : "canvas.saveWidget")}><Button
           aria-label={item?.sourceSavedItemID ? t("canvas.saveChanges") : t("canvas.saveWidget")}
           disabled={saving}
           size="icon-sm"
-
           type="button"
           variant="ghost"
           onClick={onSave}
         >
-          {saving ? <Spinner className="size-3.5" /> : <Star className="size-3.5" />}
-        </Button>
+          {saving ? <Spinner className="size-3.5" /> : item.sourceSavedItemID ? <Save className="size-3.5" /> : <Star className="size-3.5" />}
+        </Button></AppTooltip>
       ) : null}
+      {item.sourceSavedItemID ? <LibraryFavoriteButton token={token} sessionID={item.sessionID} target={{kind:"canvas", savedItemID:item.sourceSavedItemID}} /> : null}
+      <AppTooltip content={t("canvas.delete")}>
+        <Button aria-label={t("canvas.delete")} size="icon-sm" variant="ghost" type="button" disabled={saving} onClick={onDelete}>
+          <Trash2 className="size-3.5" />
+        </Button>
+      </AppTooltip>
     </div>
   );
 }

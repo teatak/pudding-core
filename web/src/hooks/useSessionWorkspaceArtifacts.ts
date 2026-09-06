@@ -5,6 +5,7 @@ import { listBrowserTabs, listCanvasItems } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { browserQueryStaleTimeMS } from "@/browser/helpers";
 import type { WorkspaceArtifact } from "@/components/workspace/types";
+import { canvasWorkspaceTabKey, resolveCanvasTabs, useWorkspaceSessionUI } from "@/state/workspaceStore";
 
 export function useSessionWorkspaceArtifacts(
   sessionID: string,
@@ -12,6 +13,7 @@ export function useSessionWorkspaceArtifacts(
   subscribed = true,
 ) {
   const enabled = Boolean(sessionID && token);
+  const workspaceUI = useWorkspaceSessionUI(sessionID);
   const browserTabsQuery = useQuery({
     enabled,
     queryKey: queryKeys.browserTabs(sessionID),
@@ -28,6 +30,8 @@ export function useSessionWorkspaceArtifacts(
   });
 
   return useMemo(() => {
+    const canvasItems = canvasItemsQuery.data?.items || [];
+    const { closedCanvasTabs } = resolveCanvasTabs(workspaceUI, canvasItems);
     const artifacts: WorkspaceArtifact[] = [
       ...(browserTabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === sessionID).map((tab) => ({
         createdAt: tab.createdAt,
@@ -38,7 +42,7 @@ export function useSessionWorkspaceArtifacts(
         title: tab.title,
         url: tab.url,
       })),
-      ...(canvasItemsQuery.data?.items || []).map((item) => ({
+      ...canvasItems.filter((item) => !closedCanvasTabs[canvasWorkspaceTabKey(item.id)]).map((item) => ({
         createdAt: item.createdAt,
         kind: "canvas" as const,
         resourceID: item.id,
@@ -51,5 +55,5 @@ export function useSessionWorkspaceArtifacts(
       Date.parse(left.createdAt) - Date.parse(right.createdAt)
       || left.resourceID.localeCompare(right.resourceID)
     ));
-  }, [browserTabsQuery.data?.tabs, canvasItemsQuery.data?.items, sessionID]);
+  }, [browserTabsQuery.data?.tabs, canvasItemsQuery.data?.items, sessionID, workspaceUI]);
 }

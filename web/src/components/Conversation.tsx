@@ -9,10 +9,11 @@ import {
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { ConversationSearchBar } from "@/components/ConversationSearchBar";
-import { FloatingTurnConsole } from "@/components/FloatingTurnConsole";
 import { Transcript } from "@/components/Transcript";
 import type { TranscriptSearchState } from "@/components/transcript/types";
 import { WorkspaceActivityCard } from "@/components/WorkspaceActivityCard";
+import { ComputerUsePip } from "@/components/ComputerUsePip";
+import { useComputerPreview } from "@/hooks/useComputerPreview";
 import type { WorkspaceArtifact } from "@/components/workspace/types";
 import { useSessionWorkspaceArtifacts } from "@/hooks/useSessionWorkspaceArtifacts";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
@@ -36,7 +37,6 @@ export function Conversation({
   searchSlot,
   session,
   token,
-  presentation = "default",
   onSearchOpenChange,
 }: {
   searchFocusSignal: number;
@@ -44,7 +44,6 @@ export function Conversation({
   searchSlot: "primary" | "split";
   session: Session;
   token: string;
-  presentation?: "default" | "floating";
   onSearchOpenChange: (open: boolean) => void;
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -57,7 +56,6 @@ export function Conversation({
   const submitErrorTimerRef = useRef<number | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
-  const floating = presentation === "floating";
   const workspaceOpen = useWorkspaceOpen(session.id);
   const workspaceArtifacts = useSessionWorkspaceArtifacts(session.id, token, !workspaceOpen);
   const workspaceTabOrder = useWorkspaceTabOrder(session.id);
@@ -66,10 +64,10 @@ export function Conversation({
     [workspaceArtifacts, workspaceTabOrder],
   );
   const browserAutomationActivity = useBrowserAutomationActivity(session.id);
+  const { preview: computerPreview, completed: computerPreviewCompleted } = useComputerPreview(session.id);
   const hasVisibleActivities = orderedWorkspaceArtifacts.length > 0
-    || Boolean(browserAutomationActivity);
-  const showActivitySurface = !floating
-    && !workspaceOpen
+    || Boolean(browserAutomationActivity) || Boolean(computerPreview);
+  const showActivitySurface = !workspaceOpen
     && hasVisibleActivities;
   const showActivityRail = showActivitySurface && activityRailFits;
   const handleSubmitStart = useCallback(() => {
@@ -122,7 +120,7 @@ export function Conversation({
 
   useLayoutEffect(() => {
     const conversation = conversationRef.current;
-    if (!conversation || floating) {
+    if (!conversation) {
       return;
     }
     const minimumWidth = Number.parseFloat(
@@ -136,7 +134,7 @@ export function Conversation({
     const observer = new ResizeObserver(([entry]) => updateActivityRailFit(entry));
     observer.observe(conversation, { box: "border-box" });
     return () => observer.disconnect();
-  }, [floating]);
+  }, []);
 
   const resetDragState = useCallback(() => {
     setDragMode(null);
@@ -217,7 +215,7 @@ export function Conversation({
       ref={conversationRef}
       className={
         "pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden [--pudding-composer-overlay-height:0px] [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100 " +
-        (floating ? "bg-transparent" : "bg-background")
+        "bg-background"
       }
       data-file-drop-target=""
       data-activity-rail={showActivityRail ? "true" : undefined}
@@ -228,22 +226,12 @@ export function Conversation({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {floating ? null : (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
           <ChatColumn>
             <div className="h-6 bg-gradient-to-b from-background to-transparent" />
           </ChatColumn>
-        </div>
-      )}
-      {floating ? (
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-end"
-          style={{ bottom: "calc(var(--pudding-composer-overlay-height) - 1px)" }}
-        >
-          <FloatingTurnConsole session={session} submitError={submitError} token={token} />
-        </div>
-      ) : (
-        <Transcript
+      </div>
+      <Transcript
           searchSlot={searchSlot}
           searchState={searchState}
           sessionID={session.id}
@@ -251,12 +239,11 @@ export function Conversation({
           submitSignal={submitSignal}
           token={token}
         />
-      )}
       {showActivitySurface ? (
         <aside
           className={showActivityRail
-            ? "pointer-events-none absolute right-0 top-0 z-10 flex w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 py-4 pr-4 pl-8"
-            : "pointer-events-none absolute top-0 right-0 bottom-[var(--pudding-composer-overlay-height)] z-20 flex w-14 min-h-0 flex-col overflow-hidden py-4 pr-4"
+            ? "pointer-events-none absolute right-0 top-0 bottom-[var(--pudding-composer-overlay-height)] z-10 flex min-h-0 w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 overflow-hidden py-4 pr-4 pl-8"
+            : `pointer-events-none absolute top-0 right-0 bottom-[var(--pudding-composer-overlay-height)] z-20 flex min-h-0 flex-col items-end gap-3 overflow-hidden py-4 pr-4 ${computerPreview ? "w-[min(16rem,100%)]" : "w-14"}`
           }
         >
           <WorkspaceActivityCard
@@ -269,20 +256,16 @@ export function Conversation({
               : undefined}
             presentation={showActivityRail ? "rail" : "dock"}
           />
+          {computerPreview ? <ComputerUsePip preview={computerPreview} completed={computerPreviewCompleted} /> : null}
         </aside>
       ) : null}
       <div
         ref={composerOverlayRef}
-        className={
-          floating
-            ? "pointer-events-none relative z-30 mt-auto shrink-0"
-            : "pointer-events-none absolute inset-x-0 bottom-0"
-        }
+        className="pointer-events-none absolute inset-x-0 bottom-0"
       >
-        <div className={floating ? undefined : "relative z-30"}>
+        <div className="relative z-30">
           <Composer
             droppedFiles={droppedFiles}
-            presentation={floating ? "floating" : "default"}
             submitError={submitError}
             token={token}
             session={session}
@@ -291,16 +274,14 @@ export function Conversation({
           />
         </div>
       </div>
-      {floating ? null : (
-        <ConversationSearchBar
+      <ConversationSearchBar
           focusSignal={searchFocusSignal}
           open={searchOpen}
           sessionID={session.id}
           token={token}
           onOpenChange={onSearchOpenChange}
           onSearchChange={setSearchState}
-        />
-      )}
+      />
       <ChatDropOverlay mode={dragMode} />
     </div>
   );

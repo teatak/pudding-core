@@ -2096,9 +2096,6 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 }
 
 const DefaultCanvasID = "default"
-const ClosedCanvasDefaultLimit = 20
-const ClosedCanvasMaxLimit = 20
-const ClosedCanvasKeepLimit = 20
 
 type CanvasItem struct {
 	ID                 string          `json:"id"`
@@ -2139,20 +2136,6 @@ type CanvasItemWindowPatch struct {
 	Window         json.RawMessage
 }
 
-type ClosedCanvasItem struct {
-	ID             string          `json:"id"`
-	SessionID      string          `json:"sessionID"`
-	SourceItemID   string          `json:"sourceItemID"`
-	ActorSessionID string          `json:"actorSessionID,omitempty"`
-	Kind           string          `json:"kind"`
-	Title          string          `json:"title,omitempty"`
-	Item           json.RawMessage `json:"item"`
-	Window         json.RawMessage `json:"window,omitempty"`
-	ClosedAt       time.Time       `json:"closedAt"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
-}
-
 type SavedCanvasItem struct {
 	ID              string          `json:"id"`
 	SourceSessionID string          `json:"sourceSessionID,omitempty"`
@@ -2166,20 +2149,47 @@ type SavedCanvasItem struct {
 	UpdatedAt       time.Time       `json:"updatedAt"`
 }
 
+// LibraryFavorite is a durable reference. Canvas bodies remain in canvas_saved_items.
+type LibraryFavorite struct {
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	SourceSessionID string    `json:"sourceSessionID"`
+	SavedItemID     string    `json:"savedItemID,omitempty"`
+	URL             string    `json:"url,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+// LibraryRecentOpen stores references and real view times, never content snapshots.
+type LibraryRecentOpen struct {
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	SourceSessionID string    `json:"sourceSessionID"`
+	ItemID          string    `json:"itemID,omitempty"`
+	RootPath        string    `json:"rootPath,omitempty"`
+	Path            string    `json:"path,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	CanvasKind      string    `json:"canvasKind,omitempty"`
+	OpenedAt        time.Time `json:"openedAt"`
+}
+
+const LibraryRecentRetainLimit = 1000
+
+var ErrInvalidLibraryRecentOpen = errors.New("store: invalid recently opened reference")
+
+func ValidateLibraryRecentOpen(e LibraryRecentOpen) error {
+	if e.Kind == "file" && e.RootPath != "" && e.Path != "" && e.ItemID == "" {
+		return nil
+	}
+	if e.Kind == "canvas" && e.ItemID != "" && e.RootPath == "" && e.Path == "" {
+		return nil
+	}
+	return ErrInvalidLibraryRecentOpen
+}
+
 type CanvasSaveResult struct {
 	Item      *CanvasItem      `json:"item"`
 	SavedItem *SavedCanvasItem `json:"savedItem"`
-}
-
-type ClosedCanvasItemInput struct {
-	ID             string
-	SourceItemID   string
-	ActorSessionID string
-	Kind           string
-	Title          string
-	Item           json.RawMessage
-	Window         json.RawMessage
-	ClosedAt       time.Time
 }
 
 type BrowserState struct {
@@ -2258,29 +2268,6 @@ func NormalizeCanvasItemWindowPatch(patch *CanvasItemWindowPatch) error {
 		return ErrInvalidCanvas
 	}
 	patch.Window = append(json.RawMessage(nil), patch.Window...)
-	return nil
-}
-
-func NormalizeClosedCanvasItemInput(in *ClosedCanvasItemInput) error {
-	if in == nil {
-		return ErrInvalidCanvas
-	}
-	in.ID = strings.TrimSpace(in.ID)
-	in.SourceItemID = strings.TrimSpace(in.SourceItemID)
-	in.ActorSessionID = strings.TrimSpace(in.ActorSessionID)
-	in.Kind = strings.TrimSpace(in.Kind)
-	in.Title = strings.TrimSpace(in.Title)
-	if in.ID == "" || in.SourceItemID == "" || in.ActorSessionID == "" || in.Kind == "" || len(in.Item) == 0 || !json.Valid(in.Item) {
-		return ErrInvalidCanvas
-	}
-	if len(in.Window) > 0 && !json.Valid(in.Window) {
-		return ErrInvalidCanvas
-	}
-	if in.ClosedAt.IsZero() {
-		in.ClosedAt = time.Now()
-	}
-	in.Item = append(json.RawMessage(nil), in.Item...)
-	in.Window = append(json.RawMessage(nil), in.Window...)
 	return nil
 }
 
@@ -2471,14 +2458,18 @@ type Store interface {
 	PutCanvasItem(ctx context.Context, in CanvasItemInput) (*CanvasItem, error)
 	UpdateCanvasItemWindow(ctx context.Context, patch CanvasItemWindowPatch) (*CanvasItem, error)
 	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
+	ListLibraryFavorites(ctx context.Context, actorSessionID string) ([]*LibraryFavorite, error)
+	PutLibraryFavorite(ctx context.Context, actorSessionID string, favorite LibraryFavorite) error
+	DeleteLibraryFavorite(ctx context.Context, actorSessionID, id string) error
+	MoveLibraryFileReferences(ctx context.Context, actorSessionID, oldRoot, oldPath, newRoot, newPath string) error
+	ListLibraryRecentOpens(ctx context.Context, actorSessionID string) ([]*LibraryRecentOpen, error)
+	RecordLibraryRecentOpen(ctx context.Context, actorSessionID string, entry LibraryRecentOpen) error
+	DeleteLibraryRecentOpen(ctx context.Context, actorSessionID, kind, id string) error
+	ClearLibraryRecentOpens(ctx context.Context, actorSessionID, kind string) error
 	ListSavedCanvasItems(ctx context.Context, actorSessionID string) ([]*SavedCanvasItem, error)
 	SaveCanvasItem(ctx context.Context, actorSessionID, itemID, savedItemID string) (*CanvasSaveResult, error)
 	OpenSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID, itemID string) (*CanvasItem, error)
 	DeleteSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID string) error
-	ListClosedCanvasItems(ctx context.Context, actorSessionID string, limit int) ([]*ClosedCanvasItem, error)
-	PutClosedCanvasItem(ctx context.Context, in ClosedCanvasItemInput, keepLimit int) (*ClosedCanvasItem, error)
-	DeleteClosedCanvasItem(ctx context.Context, actorSessionID, id string) error
-	ClearClosedCanvasItems(ctx context.Context, actorSessionID string) error
 
 	GetBrowserState(ctx context.Context, sessionID string) (*BrowserState, error)
 	GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*BrowserState, error)

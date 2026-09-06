@@ -12,6 +12,7 @@ import { GitCommitDiffDialog, type GitCommitApproval } from "@/components/GitCom
 import { PatchDiffDialog, type PatchApproval } from "@/components/PatchDiffDialog";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useDesktopApplicationIdentity } from "@/hooks/useDesktopApplicationIdentity";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
@@ -405,22 +406,24 @@ function ComputerApprovalTarget({
   onApprove: () => void;
   onDeny: () => void;
 }) {
-  const identity = useDesktopApplicationIdentity(appID);
+  const { data: identity, isPending } = useDesktopApplicationIdentity(appID);
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
-        {identity?.iconURL ? (
+    <div aria-busy={isPending} className="flex min-w-0 items-center gap-2">
+        {isPending ? (
+          <Skeleton aria-hidden="true" className="size-8 shrink-0" />
+        ) : identity?.iconURL ? (
           <AppIcon className="shrink-0" size="md" src={identity.iconURL} />
         ) : (
           <span aria-hidden="true" className="size-8 shrink-0" />
         )}
-        <div className="min-w-0 flex-1 truncate text-sm font-medium" title={appID}>
-          {identity?.name || appID}
+        <div className="min-w-0 flex-1 truncate text-sm font-medium" title={isPending ? undefined : appID}>
+          {isPending ? <Skeleton aria-hidden="true" className="h-4 w-32 max-w-full" /> : identity?.name || appID}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
             aria-label={approveLabel}
-            disabled={pendingAction !== null}
+            disabled={isPending || pendingAction !== null}
             size="sm"
             title={approveDescription}
             type="button"
@@ -667,6 +670,11 @@ function toolCallReason(operation: string, execution: string, hostAccessReason: 
     case "computer_submit":
     case "computer_click":
     case "computer_drag":
+    case "computer_focus":
+    case "computer_select_text":
+    case "computer_press_key":
+    case "computer_type_text":
+    case "computer_paste":
     case "computer_scroll":
     case "computer_actions":
       return t(`transcript.approvalToolCall.${operation}`);

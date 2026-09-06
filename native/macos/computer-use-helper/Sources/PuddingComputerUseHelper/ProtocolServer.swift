@@ -15,6 +15,10 @@ struct ProtocolRequest: Decodable, Equatable {
     }
     let params = params ?? ProtocolParameters()
     switch command {
+    case "reveal_window":
+      let pid = try required(params.pid, "pid")
+      guard pid > 0 else { throw ArgumentError.invalidOption("pid", String(pid)) }
+      return .revealWindow(bundleID: try bundleID(params.bundleID), windowID: try positiveWindowID(params.windowID), pid: pid)
     case "permissions":
       return .permissions(
         promptAccessibility: params.promptAccessibility ?? false,
@@ -27,7 +31,7 @@ struct ProtocolRequest: Decodable, Equatable {
     case "use_app":
       return .useApp(
         bundleID: try bundleID(params.bundleID),
-        foreground: params.foreground ?? false
+        foreground: params.foreground ?? false, appPath: params.appPath, pid: params.pid
       )
     case "quit_app":
       let pid = try required(params.pid, "pid")
@@ -58,18 +62,19 @@ struct ProtocolRequest: Decodable, Equatable {
         bundleID: try bundleID(params.bundleID),
         windowID: try positiveWindowID(params.windowID),
         maxElements: maxElements,
-        output: try required(params.output, "output")
+        output: try required(params.output, "output"),
+        includeAccessibility: params.includeAccessibility ?? true
       )
     case "act":
       let rawAction = try required(params.action, "action")
       guard let action = ElementAction(rawValue: rawAction) else {
         throw ArgumentError.invalidOption("action", rawAction)
       }
-      if action == .setValue, params.value == nil {
+      if action.requiresValue, params.value == nil {
         throw ArgumentError.missingOption("value")
       }
-      if action != .setValue, params.value != nil {
-        throw ArgumentError.invalidOption("value", "allowed only for set_value")
+      if !action.requiresValue, params.value != nil {
+        throw ArgumentError.invalidOption("value", "allowed only for set_value/select_text")
       }
       if let value = params.value,
         value.unicodeScalars.count > maximumActionValueCharacters
@@ -83,6 +88,12 @@ struct ProtocolRequest: Decodable, Equatable {
         action: action,
         value: params.value
       )
+    case "keyboard":
+      return .keyboard(
+        bundleID: try bundleID(params.bundleID), windowID: try positiveWindowID(params.windowID),
+        input: try KeyboardInput.validated(
+          action: try required(params.action, "action"), key: params.key,
+          modifiers: params.modifiers, value: params.value))
     case "pointer":
       let rawAction = try required(params.action, "action")
       guard let action = PointerAction(rawValue: rawAction) else {
@@ -159,6 +170,10 @@ struct ProtocolParameters: Codable, Equatable {
   var action: String? = nil
   var value: String? = nil
   var pid: Int32? = nil
+  var includeAccessibility: Bool?
+  var appPath: String? = nil
+  var key: String? = nil
+  var modifiers: [String]? = nil
   var x: Double? = nil
   var y: Double? = nil
   var toX: Double? = nil

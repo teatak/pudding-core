@@ -197,26 +197,6 @@ CREATE TABLE IF NOT EXISTS canvas_saved_items (
 CREATE INDEX IF NOT EXISTS canvas_saved_items_updated_at
     ON canvas_saved_items(updated_at DESC);
 
--- 最近关闭的小组件。后端只保留有限历史,避免前端存储积累大列表。
-CREATE TABLE IF NOT EXISTS canvas_closed_items (
-    session_id       TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    id               TEXT    NOT NULL,
-    source_item_id   TEXT    NOT NULL,
-    actor_session_id TEXT    NOT NULL DEFAULT '',
-    kind             TEXT    NOT NULL DEFAULT '',
-    title            TEXT    NOT NULL DEFAULT '',
-    item_json        TEXT    NOT NULL,
-    window_json      TEXT    NOT NULL DEFAULT '',
-    closed_at        INTEGER NOT NULL,
-    created_at       INTEGER NOT NULL,
-    updated_at       INTEGER NOT NULL,
-    PRIMARY KEY (session_id, id),
-    UNIQUE (session_id, source_item_id)
-);
-
-CREATE INDEX IF NOT EXISTS canvas_closed_items_closed_at
-    ON canvas_closed_items(session_id, closed_at DESC);
-
 CREATE TABLE IF NOT EXISTS session_browser_tabs (
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     tab_id      TEXT NOT NULL DEFAULT '',
@@ -281,3 +261,33 @@ CREATE TABLE IF NOT EXISTS events (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (session_id, seq)
 );
+
+CREATE TABLE IF NOT EXISTS library_favorites (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('canvas','web')),
+    source_session_id TEXT NOT NULL DEFAULT '',
+    saved_item_id TEXT REFERENCES canvas_saved_items(id) ON DELETE CASCADE,
+    url TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    CHECK ((kind='canvas' AND saved_item_id IS NOT NULL AND url='')
+        OR (kind='web' AND saved_item_id IS NULL AND url<>''))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS library_favorites_canvas ON library_favorites(saved_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX IF NOT EXISTS library_favorites_web ON library_favorites(url) WHERE kind='web';
+
+CREATE TABLE IF NOT EXISTS library_recent_opens (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('file','canvas')),
+    source_session_id TEXT NOT NULL,
+    canvas_item_id TEXT,
+    root_path TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    opened_at INTEGER NOT NULL,
+    FOREIGN KEY(source_session_id,canvas_item_id) REFERENCES canvas_items(session_id,id) ON DELETE CASCADE,
+    CHECK ((kind='canvas' AND canvas_item_id IS NOT NULL AND root_path='' AND path='')
+        OR (kind='file' AND canvas_item_id IS NULL AND root_path<>'' AND path<>''))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS library_recent_canvas ON library_recent_opens(source_session_id,canvas_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX IF NOT EXISTS library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
+CREATE INDEX IF NOT EXISTS library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);

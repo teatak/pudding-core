@@ -1,11 +1,8 @@
 export type CenteredLayoutConstraints = {
   dockedMinimumWidth: number;
   railChatMinimumWidth: number;
-  railWorkspaceMinimumWidth: number;
   thirdColumnMinimumWidth: number;
 };
-
-export type CenteredLayoutDockSide = "left" | "right";
 
 export type CenteredLayoutPresentation = {
   railResponsiveCollapsed: boolean;
@@ -13,18 +10,22 @@ export type CenteredLayoutPresentation = {
 };
 
 export function resolveCenteredLayoutPresentation({
-  chatDockSide,
+  focused,
   constraints,
   layoutWidth,
   leftGroupRatio,
   workspaceDockRequested,
 }: {
-  chatDockSide: CenteredLayoutDockSide;
+  focused: boolean;
   constraints: CenteredLayoutConstraints;
   layoutWidth: number;
   leftGroupRatio: number;
   workspaceDockRequested: boolean;
 }): CenteredLayoutPresentation {
+  if (focused) {
+    return { railResponsiveCollapsed: true, workspaceOverlay: false };
+  }
+
   // The first measurement is delivered from ResizeObserver after mount. Keep the
   // preferred desktop presentation until then instead of flashing both overlays.
   if (!Number.isFinite(layoutWidth) || layoutWidth <= 0) {
@@ -37,7 +38,6 @@ export function resolveCenteredLayoutPresentation({
   const {
     dockedMinimumWidth,
     railChatMinimumWidth,
-    railWorkspaceMinimumWidth,
     thirdColumnMinimumWidth,
   } = constraints;
 
@@ -55,16 +55,11 @@ export function resolveCenteredLayoutPresentation({
     };
   }
 
-  // The divider splits [rail + left content] from the third column. Keeping
-  // that boundary as the single source prevents it from jumping when the rail
-  // yields. Which content joins the rail depends on the chat dock side.
+  // The divider separates the rail and conversation from the workspace.
   const leftGroupWidth = layoutWidth * leftGroupRatio;
-  const leftGroupMinimumWidth = chatDockSide === "left"
-    ? railChatMinimumWidth
-    : railWorkspaceMinimumWidth;
   const expandedRailFits =
-    layoutWidth >= leftGroupMinimumWidth + thirdColumnMinimumWidth &&
-    leftGroupWidth >= leftGroupMinimumWidth;
+    layoutWidth >= railChatMinimumWidth + thirdColumnMinimumWidth &&
+    leftGroupWidth >= railChatMinimumWidth;
   return {
     railResponsiveCollapsed: !expandedRailFits,
     workspaceOverlay: false,

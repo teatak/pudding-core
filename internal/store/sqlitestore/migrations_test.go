@@ -31,6 +31,8 @@ func TestSchemaReleaseContract(t *testing.T) {
 		11: "393fa5bed1711a7383d4a9d538a18a0a0322d54bdd52cae94e9a664252fe7d95",
 		12: "8f28c4af75aeafedf3fe75f9d0dd4b064acbc6040330260e74836d57469c5b80",
 		13: "19ae784ea197314f139a5836cd172a6d3c2ca2e3c0f717d69eccf595d25fb99f",
+		// 14–16 were unpublished intermediate layouts, consolidated into 17.
+		17: "f3ec9cc37e5c136e2170a13f02f13c9c4984fb9e83bba154f245ac9798dd89c3",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -40,9 +42,14 @@ func TestSchemaReleaseContract(t *testing.T) {
 	if got != want {
 		t.Fatalf("schema.sql changed without a new schema version: got %s, want %s", got, want)
 	}
-	for version := baselineSchemaVersion + 1; version <= currentSchemaVersion; version++ {
-		if schemaMigrations[version] == nil {
+	for version := range releasedFingerprints {
+		if version != baselineSchemaVersion && schemaMigrations[version] == nil {
 			t.Fatalf("schema v%d has no migration", version)
+		}
+	}
+	for version := range schemaMigrations {
+		if releasedFingerprints[version] == "" || version <= baselineSchemaVersion || version > currentSchemaVersion {
+			t.Fatalf("migration v%d has no supported destination", version)
 		}
 	}
 }
@@ -497,8 +504,9 @@ func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
 	if _, err := db.Exec(`
 		DROP TABLE IF EXISTS usage_calibrations;
 		DROP TABLE turn_file_changes;
+		DROP TABLE IF EXISTS library_recent_opens;
 		DROP TABLE canvas_items;
-		DROP TABLE canvas_closed_items;
+		DROP TABLE IF EXISTS canvas_closed_items;
 		DROP TABLE canvas_saved_items;
 		CREATE TABLE canvas_items (
 			id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL DEFAULT 'default', source_session_id TEXT NOT NULL DEFAULT '',
@@ -554,8 +562,9 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`
 		DROP TABLE IF EXISTS usage_calibrations;
+		DROP TABLE IF EXISTS library_recent_opens;
 		DROP TABLE canvas_items;
-		DROP TABLE canvas_closed_items;
+		DROP TABLE IF EXISTS canvas_closed_items;
 		DROP TABLE canvas_saved_items;
 		CREATE TABLE canvas_items (
 			id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL DEFAULT 'default', source_session_id TEXT NOT NULL DEFAULT '',
@@ -593,15 +602,8 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 1 || active[0].ID != "active_keep" {
+	if len(active) != 2 || active[0].ID != "active_keep" || active[1].ID != "old_keep" || active[1].Visible || active[1].UpdatedAt.UnixMilli() != 5 {
 		t.Fatalf("session canvas after migration = %+v", active)
-	}
-	closed, err := reopened.ListClosedCanvasItems(context.Background(), "sess_keep", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(closed) != 1 || closed[0].ID != "closed_keep" {
-		t.Fatalf("session closed canvas after migration = %+v", closed)
 	}
 	saved, err := reopened.ListSavedCanvasItems(context.Background(), "sess_keep")
 	if err != nil {

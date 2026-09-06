@@ -1,8 +1,8 @@
 # macOS Computer Use 设计与实施计划
 
-> 状态:C0–C3 已实现,C4 确定性 Fixture smoke 已通过,真实应用与发布验收待实施
+> 状态:C0–C3 已实现；Fixture、Calculator 与 Electron 产品链路已验证；签名安装包和跨版本升级验收仍待完成。
 >
-> 日期:2026-08-14
+> 更新:2026-09-06
 >
 > 范围:macOS 桌面应用观察与操作。
 >
@@ -16,10 +16,52 @@
 2. Go daemon 负责 session 路由、工具生命周期、审批和全局动作串行化。
 3. Electron main 负责 macOS 原生能力和权限界面,通过签名 Swift Helper 调用 Accessibility 与 ScreenCaptureKit。
 4. 所有操作显式携带 `sessionID`、`appID` 和 `windowID`;后端不保存 observation、“当前应用”或“当前焦点”。
-5. 原生操作优先使用 AXUIElement `press`、`set_value`、`select` 与受限 `submit`;仅当模型掌握明确的窗口归一化坐标且目标 App 保持前台时允许受限指针动作。
+5. 原生控件操作支持 `press`、`set_value`、`select`、`submit`、`focus`、`select_text`；键盘和指针操作验证指定 PID、窗口及前台状态。
 6. 写操作不自动重试。结果不确定时返回明确错误,下一步先通过 `use_app` 刷新窗口并观察当前状态。
-7. 当前能力不监听键盘或鼠标,不录制或回放操作;仅 `submit` 在 AXConfirm 不可用时向已验证的目标进程发送一次无修饰键的 Return。
+7. 当前能力不监听键盘或鼠标、不录制工作流；支持明确请求的物理按键、组合键、Unicode 文本输入及粘贴。
 8. 应用生命周期采用 session ownership:只有当前 session 新启动并取得 `launchID` 的进程才能普通退出;已运行应用永不归属,永不强杀。
+
+### 2026-09-06 第一轮能力补齐
+
+- `use_app` 保留必填 `appID`，新增 `appPath`、`pid`。原生层校验路径的 bundle ID；多个匹配实例返回 `computer_app_ambiguous`，不再按前台或最小 PID 猜选。`list_apps.instances` 返回运行实例的路径和 PID。会话授权、启动所有权仍只有原有事实源。
+- `act.actions` 新增 `focus`、`select_text`、`press_key`、`type_text`、`paste`。`select_text` 使用唯一精确子串及 UTF-16 范围，拒绝歧义；键盘输入逐次验证前台 PID、窗口和非安全控件。输入中断后若已发送部分文本，结果为 `unknown`，不重放。
+- `press_key` 发送物理按键，遵循当前输入法；`type_text` 发送已提交的 Unicode 文本。`paste` 替换系统剪贴板并发送 Cmd+V，提供的文字会留在剪贴板中。
+- `observe` 默认仍读取 AX。设置 `includeScreenshot=true, includeAccessibility=false` 可只截图；请求两种通道时独立返回结果或 `observationError` / `screenshotError`，一项失败不会丢弃另一项。
+- 按 [Electron 官方接口](https://www.electronjs.org/docs/latest/tutorial/accessibility) 启用 `AXManualAccessibility`。真实回归证明首次建树、焦点和选择范围更新均异步；只在首次启用时等待建树，写入后轮询确认状态，均不重复发送动作。
+- 保持同一 session + app 的一次授权、全局写队列及失败后停止语义；新增动作的审批说明覆盖简中、繁中和英文。
+
+回归入口：
+
+```bash
+make computer-use-helper-test
+make computer-use-product-smoke
+make computer-use-electron-smoke
+# 当前已选中 macOS 简体拼音时运行；测试不会切换系统输入法。
+make computer-use-electron-ime-smoke
+```
+
+已验证：两个同 bundle ID 的独立 Electron 实例、路径不匹配拒绝、精确 PID 操作、另一实例未改变、首次 AX 建树、图片独立读取、中文/emoji 输入和选择替换、粘贴、Tab、Cmd+A、Cmd+F 菜单、Esc 关闭对话框、非前台和密码控件输入拒绝。拼音回归走真实模型工具 → Engine → Manager → Electron bridge → Swift helper，验证 `nihao → 你好` 及原生 composition 事件；原有 AppKit Fixture 产品回归通过。
+
+尚未覆盖：其他输入法和键盘布局、更多第三方应用、大文本吞吐与长时间稳定性。下一轮再做 AX 子树查找/条件等待、观察输出体积和长任务恢复；持久脚本及后台指针属于后续范围。
+
+### 2026-09-06 Computer Use 窗口预览
+
+- 工作区收起时，在打开的产物列表下方显示独立窗口预览；没有产物时显示在右上方。长列表滚动，预览不作为产物或工作区标签。
+- 标题栏高 32px，应用图标、名称和状态指示单行排列。预览按窗口当前内容宽高比显示；读取每帧的 `contentRect` 和 Retina `scaleFactor` 裁去采集缓冲区留白，实时跟随窗口横竖比例变化。画面最大宽度 240px，高度不超过 `min(240px, 30vh)`，同时受可用宽度限制，始终等比缩小。
+- 仅用于展示。点击通过原生桥接将同一 bundle ID、PID、window ID 的窗口置前，不转发键盘、指针输入，也不自动展开工作区。
+- 执行请求从 `Call.TurnID` 透传私有请求头，原生桥接通过权限协调后发布显式 session/turn/window 活动。Electron 负责采集生命周期，前端沿用现有运行 turn 和工作区状态，不向 daemon 写入前台或工作区展开状态。
+- 签名 Helper 的独立只读进程通过 ScreenCaptureKit 采集单个窗口，最多 5 FPS、640×480、JPEG。画面仅在内存中经 preload IPC 展示，不写文件，不加入消息、附件或模型上下文；每个渲染端至多一个未确认帧，只保留最新画面。
+- 展开工作区、隐藏页面时停止采集；收起后恢复同一 PID 的窗口。取消、会话切换、页面重载、窗口关闭及 Electron 退出均释放采集；正常 turn 完成后停止采集，保留最后一帧 30 秒再移除，与浏览器预览共用停留时长。采集失败清除旧图，不自动重试原生操作。
+
+隔离桌面回归（需先构建开发 daemon、Helper 和 Fixture）：
+
+```bash
+PUDDING_SMOKE_SCENARIO=computer-preview \
+  web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
+  electron/smoke/workspace-dev-smoke.cjs
+```
+
+已验证：真实 AppKit 窗口帧、内容变化及横竖窗口实时缩放，20 个产物时列表滚动和预览布局，窄窗口与两种主题，工作区展开停止采集/收起恢复、点击精确窗口置前、跨 session/turn 隔离、取消/完成/应用退出清理。另通过会话切换、历史阅读位置、流式跟随和对话搜索回归。
 
 ### 0.1 当前 C0 落地
 
@@ -29,7 +71,7 @@
 - 列出已安装的前台 GUI App 身份与运行状态,不读取窗口标题或内容;窗口只由 `use_app` 返回。
 - 观察指定 bundle ID 的有限 AX 树,表格和 outline 优先返回可见行,普通值截断,secure text field 永不返回值。
 - 使用当前元素路径与语义特征生成指纹 ID;界面结构变化时动作拒绝匹配,不按旧遍历序号误操作。
-- 仅支持 `press`、`set_value`、`select`、受限 `submit` 与当前窗口归一化坐标的单击、左键双击、右键、左键拖拽和滚轮;不开放任意键盘或组合键。
+- 支持控件动作、键盘动作与当前窗口归一化坐标的单击、双击、右键、拖拽和滚轮。
 - 在一次原生请求中观察显式 `windowID` 并按需截取同一窗口到 PNG,不录屏、不监听用户输入、不录制或回放工作流。
 - 按 bundle ID 启动应用,并按精确 bundle ID + PID 发出普通退出请求;原生层不保存 session ownership。
 
