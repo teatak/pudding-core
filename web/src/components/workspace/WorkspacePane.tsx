@@ -1,4 +1,3 @@
-import { useRecentOpen } from "./useRecentOpen";
 import { useLibrary } from "./useLibrary";
 import { AppTooltip } from "@/components/AppTooltip";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -77,7 +76,6 @@ import {
 } from "@/state/uiContextStore";
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
 import { WorkspaceContentTabs, type WorkspaceContentTab } from "./WorkspaceContentTabs";
-import type { ClosedCanvasEntry } from "./CanvasLibraryRows";
 import { WorkspaceLibrary } from "./WorkspaceLibrary";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 
@@ -179,10 +177,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const canvasTabs = useMemo(() => resolveCanvasTabs(workspaceUI, items), [workspaceUI, items]);
   const openCanvasItems = useMemo(() => items.filter((item) => !canvasTabs.closedCanvasTabs?.[canvasWorkspaceTabKey(item.id)]), [items, canvasTabs]);
-  const closedItems = useMemo<ClosedCanvasEntry[]>(() => items.flatMap((item) => {
-    const closedAt = canvasTabs.closedCanvasTabs?.[canvasWorkspaceTabKey(item.id)];
-    return closedAt ? [{ ...item, closedAt }] : [];
-  }).sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt)), [items, canvasTabs]);
   const {
     activeBrowserTabID,
     activeBrowserSelection,
@@ -197,7 +191,7 @@ export const WorkspacePane = memo(function WorkspacePane({
     closingBrowserTabIDs,
     createNewBrowserTab,
     creatingBrowserTab,
-    openBrowserFromLibrary,
+    openBrowserLink,
   } = useWorkspaceBrowserSurface({
     enabled,
     sessionID: actorSessionID,
@@ -212,7 +206,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   ], [filePreviews, items, browserTabs]);
   const activeCanvasItemID = workspaceTabResourceID(activeTab, "canvas");
   const activeCanvasItem = items.find((item) => item.id === activeCanvasItemID);
-  useRecentOpen(token,actorSessionID,presented && activeApp === "artifacts" && activeCanvasItem ? {kind:"canvas",itemID:activeCanvasItem.id} : undefined);
   const activeFilePreviewID = workspaceTabResourceID(projectActiveTab, "file");
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
   const projectActive = activeApp === "project";
@@ -422,7 +415,6 @@ export const WorkspacePane = memo(function WorkspacePane({
   };
   const pendingCanvasItems = pendingCanvasClose?.sessionID === actorSessionID
     ? items.filter((item) => pendingCanvasClose.keys.includes(canvasWorkspaceTabKey(item.id))) : [];
-  const restoreClosedItem = (item: ClosedCanvasEntry) => openWorkspaceTab(item.sessionID, canvasWorkspaceTabKey(item.id));
 
   const openSavedMutation = useMutation({
     mutationFn: ({ entry, targetSessionID }: { entry: { id: string }; targetSessionID: string }) => openSavedCanvasItem(token, targetSessionID, entry.id),
@@ -484,7 +476,7 @@ export const WorkspacePane = memo(function WorkspacePane({
             : "!pr-(--workspace-toolbar-pr)",
         )}
         trailingAction={contentTabs.length > 0 ? <AppTooltip content={t("workspace.app.library")}>
-          <Button data-workspace-add aria-label={t("workspace.app.library")} aria-pressed={activeApp === "library"} className="size-7 shrink-0 self-center rounded-md text-muted-foreground aria-pressed:bg-muted" size="icon-sm" variant="ghost" onClick={() => { openWorkspaceView(actorSessionID, "library"); librarySearchRef.current?.focus({ preventScroll: true }); }}><Plus className="size-4" /></Button>
+          <Button data-workspace-add aria-label={t("workspace.app.library")} className="size-7 shrink-0 self-center rounded-md text-muted-foreground" size="icon-sm" variant="ghost" onClick={() => { openWorkspaceView(actorSessionID, "library"); librarySearchRef.current?.focus({ preventScroll: true }); }}><Plus className="size-4" /></Button>
         </AppTooltip> : null}
         actions={secondarySessionID && sessionQuery.data?.title ? <span className="pudding-workspace-session-label max-w-24 truncate text-[11px] text-muted-foreground">{sessionQuery.data.title}</span> : null}
       />
@@ -492,11 +484,11 @@ export const WorkspacePane = memo(function WorkspacePane({
         <WorkspaceLibrary key={actorSessionID} searchRef={librarySearchRef}
           onOpenProject={() => openWorkspaceView(actorSessionID, "project")}
           onNewBrowserTab={createNewBrowserTab} creatingBrowserTab={creatingBrowserTab}
-          active={activeApp === "library"} sessionID={actorSessionID} token={token} entries={libraryQuery.data?.entries || []} closedItems={closedItems}
-          resourceQueries={{ saved: libraryQuery, closed: itemsQuery }}
-          onOpenSaved={(entry) => openSavedMutation.mutate({ entry, targetSessionID: actorSessionID })} onRestoreClosed={restoreClosedItem}
-          onRemoveSaved={(item) => setPendingDelete({ kind: "saved", item, sessionID: actorSessionID })} onRemoveClosed={(item) => setPendingDelete({ kind: "canvas", item, sessionID: item.sessionID })}
-          onOpenBrowserURL={openBrowserFromLibrary}
+          active={activeApp === "library"} sessionID={actorSessionID} token={token} entries={libraryQuery.data?.entries || []}
+          savedQuery={libraryQuery} canvasItems={items} canvasQuery={itemsQuery}
+          onOpenSaved={(entry) => openSavedMutation.mutate({ entry, targetSessionID: actorSessionID })}
+          onRemoveSaved={(item) => setPendingDelete({ kind: "saved", item, sessionID: actorSessionID })} onRemoveCanvas={(item) => setPendingDelete({ kind: "canvas", item, sessionID: actorSessionID })}
+          onOpenBrowserURL={(url) => openBrowserLink(actorSessionID, url)}
         />
         {activeApp === "browser" && !browserSurfaceTabs.length && !browserSurfacePending && browserSurfaceError ? (
           <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm text-muted-foreground">
@@ -534,6 +526,7 @@ export const WorkspacePane = memo(function WorkspacePane({
         ) : null}
         {actorSessionID ? (
           <ProjectBrowserSurface
+            onOpenBrowserURL={openBrowserLink}
             active={projectActive && presented}
             activePreviewID={activeFilePreview?.id}
             hasProject={hasProject}

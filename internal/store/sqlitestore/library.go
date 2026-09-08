@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -55,45 +54,5 @@ func (s *Store) DeleteLibraryFavorite(ctx context.Context, actorSessionID, id st
 		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM library_favorites WHERE id=?`, id)
 		return err
-	})
-}
-func (s *Store) MoveLibraryFileReferences(ctx context.Context, actorSessionID, oldRoot, oldPath, newRoot, newPath string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
-			return err
-		}
-		rows, err := tx.QueryContext(ctx, `SELECT id,path FROM library_recent_opens WHERE kind='file' AND root_path=?`, oldRoot)
-		if err != nil {
-			return err
-		}
-		changes := map[string]string{}
-		for rows.Next() {
-			var id, path string
-			if err := rows.Scan(&id, &path); err != nil {
-				rows.Close()
-				return err
-			}
-			if path == oldPath || strings.HasPrefix(path, oldPath+"/") {
-				changes[id] = newPath + strings.TrimPrefix(path, oldPath)
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		for id, path := range changes {
-			if _, err := tx.ExecContext(ctx, `UPDATE library_recent_opens SET opened_at=MAX(opened_at,COALESCE((SELECT opened_at FROM library_recent_opens WHERE kind='file' AND root_path=? AND path=? AND id<>?),opened_at)) WHERE id=?`, newRoot, path, id, id); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM library_recent_opens WHERE kind='file' AND root_path=? AND path=? AND id<>?`, newRoot, path, id); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE library_recent_opens SET root_path=?,path=? WHERE id=?`, newRoot, path, id); err != nil {
-				return err
-			}
-		}
-
-		return nil
 	})
 }

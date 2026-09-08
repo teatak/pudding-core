@@ -30,7 +30,6 @@ type Memstore struct {
 	susage           map[string]*store.SessionUsageStat  // sessionID → session stats
 	canvas           map[string]*store.CanvasItem        // sessionID/itemID → session canvas item
 	favorites        map[string]*store.LibraryFavorite
-	recentOpens      map[string]*store.LibraryRecentOpen
 	savedCanvas      map[string]*store.SavedCanvasItem         // id → globally saved canvas item
 	browser          map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
 	browserHistory   map[string]*store.BrowserHistoryEntry     // id → global browser history
@@ -55,7 +54,6 @@ func New() *Memstore {
 		canvas:           make(map[string]*store.CanvasItem),
 		savedCanvas:      make(map[string]*store.SavedCanvasItem),
 		favorites:        make(map[string]*store.LibraryFavorite),
-		recentOpens:      make(map[string]*store.LibraryRecentOpen),
 		browser:          make(map[string]map[string]*store.BrowserState),
 		browserHistory:   make(map[string]*store.BrowserHistoryEntry),
 		computerGrants:   make(map[string]map[string]struct{}),
@@ -527,11 +525,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 			delete(m.canvas, key)
 		}
 	}
-	for key, recent := range m.recentOpens {
-		if recent.Kind == "canvas" && recent.SourceSessionID == id {
-			delete(m.recentOpens, key)
-		}
-	}
+
 	for tid, t := range m.turns {
 		if t.SessionID == id {
 			delete(m.turns, tid)
@@ -805,7 +799,7 @@ func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	input := m.findQueuedInput(in.SessionID, in.ClientMessageID)
-	if input == nil || input.Status == store.QueuedInputPromoted {
+	if input == nil || (input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing) {
 		return nil, store.ErrNotFound
 	}
 	if in.Text != nil {
@@ -816,6 +810,9 @@ func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInp
 	}
 	if !validQueuedInputStatus(input.Status) || input.Status == store.QueuedInputPromoted {
 		return nil, store.ErrNotFound
+	}
+	if in.Parts != nil {
+		input.Parts = store.NormalizeContentParts(*in.Parts)
 	}
 	input.Parts = store.ReplaceUserInputText(input.Parts, input.Text)
 	input.UpdatedAt = time.Now()
@@ -1522,11 +1519,7 @@ func (m *Memstore) DeleteCanvasItem(_ context.Context, actorSessionID, itemID st
 		return store.ErrNotFound
 	}
 	delete(m.canvas, key)
-	for id, recent := range m.recentOpens {
-		if recent.Kind == "canvas" && recent.SourceSessionID == actorSessionID && recent.ItemID == itemID {
-			delete(m.recentOpens, id)
-		}
-	}
+
 	return nil
 }
 

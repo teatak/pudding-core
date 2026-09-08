@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { flushSync } from "react-dom";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { TranscriptTurnReveal } from "@/state/transcriptRevealStore";
@@ -6,12 +7,12 @@ import { useTranscriptViewportStore } from "@/state/transcriptViewportStore";
 
 import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 import { TranscriptTurn } from "./TranscriptTurn";
-import type {
-  TranscriptDisplaySettings,
-  TranscriptSearchState,
-  TranscriptSearchTarget,
-  TranscriptTurnVM,
-  TurnDisclosureState,
+import {
+  type TranscriptDisplaySettings,
+  type TranscriptSearchState,
+  type TranscriptSearchTarget,
+  type TranscriptTurnVM,
+  type TurnDisclosureState,
 } from "./types";
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
@@ -40,10 +41,6 @@ export const TranscriptList = memo(function TranscriptList({
   onLatestChange,
   onLoadHistory,
   onTurnRevealComplete,
-  onQueuedCancel,
-  onQueuedEditStart,
-  onQueuedSteer,
-  onQueuedSave,
   scrollElement,
   searchSlot,
   searchState,
@@ -64,10 +61,6 @@ export const TranscriptList = memo(function TranscriptList({
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
   onTurnRevealComplete?: (serial: number) => void;
-  onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   scrollElement: HTMLDivElement | null;
   searchSlot: "primary" | "split";
   searchState: TranscriptSearchState;
@@ -137,7 +130,6 @@ export const TranscriptList = memo(function TranscriptList({
     count: itemKeys.length,
     estimateSize,
     followOnAppend: false,
-    gap: TURN_GAP_PX,
     getItemKey,
     getScrollElement: () => scrollElement,
     initialMeasurementsCache: savedViewport?.measurements,
@@ -285,13 +277,25 @@ export const TranscriptList = memo(function TranscriptList({
       if (nextHeight === previousHeight && nextWidth === previousWidth) {
         return;
       }
+      const widthChanged = nextWidth !== previousWidth;
       previousHeight = nextHeight;
       previousWidth = nextWidth;
-      if (!followLatestRef.current) {
-        return;
+      if (widthChanged) {
+        // Reflow and virtual offsets must commit together, both while following
+        // latest and while reading history. The virtualizer retains the anchor.
+        const measurements = Array.from(virtualizer.elementsCache.values())
+          .filter((element) => element.isConnected)
+          .map((element) => [virtualizer.indexFromElement(element), measureTranscriptItem(element)] as const);
+        flushSync(() => {
+          for (const [index, height] of measurements) {
+            virtualizer.resizeItem(index, height);
+          }
+        });
       }
-      virtualizer.scrollToEnd({ behavior: "auto" });
-      setLatestState(true);
+      if (followLatestRef.current) {
+        virtualizer.scrollToEnd({ behavior: "auto" });
+        setLatestState(true);
+      }
     });
     observer.observe(scrollElement, { box: "border-box" });
     return () => observer.disconnect();
@@ -527,7 +531,6 @@ export const TranscriptList = memo(function TranscriptList({
         <div
           className="absolute top-0 left-0 grid w-full min-w-0"
           style={{
-            gap: TURN_GAP_PX,
             transform: `translateY(${virtualItems[0].start}px)`,
           }}
         >
@@ -539,6 +542,7 @@ export const TranscriptList = memo(function TranscriptList({
                   ref={measureElement}
                   aria-hidden={!footer}
                   className="min-w-0"
+                  style={{ paddingTop: turnCount > 0 ? TURN_GAP_PX : 0 }}
                   data-index={virtualItem.index}
                   role="presentation"
                 >
@@ -564,6 +568,7 @@ export const TranscriptList = memo(function TranscriptList({
                 aria-posinset={virtualItem.index + 1}
                 aria-setsize={turns.length}
                 index={virtualItem.index}
+                leadingGap={virtualItem.index === 0 ? 0 : TURN_GAP_PX}
                 registerElement={measureElement}
                 resizeElement={resizeMountedElement}
               >
@@ -574,10 +579,6 @@ export const TranscriptList = memo(function TranscriptList({
                   sessionID={sessionID}
                   onAssistantRevealComplete={onAssistantRevealComplete}
                   onCloneMessage={onCloneMessage}
-                  onQueuedCancel={onQueuedCancel}
-                  onQueuedEditStart={onQueuedEditStart}
-                  onQueuedSteer={onQueuedSteer}
-                  onQueuedSave={onQueuedSave}
                   token={token}
                   turn={turn}
                 />
@@ -593,12 +594,14 @@ export const TranscriptList = memo(function TranscriptList({
 function MeasuredTurnItem({
   children,
   index,
+  leadingGap,
   registerElement,
   resizeElement,
   ...aria
 }: {
   children: ReactNode;
   index: number;
+  leadingGap: number;
   registerElement: (node: HTMLDivElement | null) => void;
   resizeElement: (index: number, node: HTMLDivElement) => void;
   "aria-posinset": number;
@@ -621,6 +624,8 @@ function MeasuredTurnItem({
       ref={setElement}
       {...aria}
       className="min-w-0"
+      // Include the row-specific gap in virtual measurements, not only in its visual position.
+      style={{ paddingTop: leadingGap }}
       data-index={index}
       role="listitem"
     >
@@ -633,7 +638,7 @@ function MeasuredTurnItem({
 
 function measureTranscriptItem(element: Element, entry?: ResizeObserverEntry) {
   const borderBox = entry?.borderBoxSize[0];
-  return Math.round(borderBox?.blockSize ?? element.getBoundingClientRect().height);
+  return borderBox?.blockSize ?? element.getBoundingClientRect().height;
 }
 
 function findTurnElement(root: HTMLElement, turnID: string) {

@@ -82,7 +82,7 @@ export function ProjectTree({
   const expandedKeySet = useMemo(() => new Set(expandedKeys), [expandedKeys]);
   const currentReveal = active && reveal?.sessionID === sessionID ? reveal : undefined;
   return (
-    <div className="h-full min-h-0 overflow-auto">
+    <div data-project-tree className="min-h-0 flex-1 overflow-auto">
         {loading ? (
           <ProjectTreeStatus><Spinner />{t("common.loading")}</ProjectTreeStatus>
         ) : error ? (

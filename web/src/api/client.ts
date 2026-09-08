@@ -1,4 +1,3 @@
-import { listLibraryRecentResponse, recordLibraryRecentRequest, libraryRecentTarget, type LibraryRecentInput } from "@/contracts/api";
 import {
   listBuiltinToolsResponse,
   approveApprovalResponse,
@@ -28,6 +27,7 @@ import {
   message,
   mergeProjectRequest,
   patchQueuedInputRequest,
+  reorderQueuedInputsRequest,
   patchProviderRequest,
   patchProjectRequest,
   projectBrowserRootsResponse,
@@ -1136,6 +1136,13 @@ export function updateQueuedInput(
   });
 }
 
+export function reorderQueuedInputs(token: string, sessionID: string, clientMessageIDs: string[]) {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs/reorder`, listQueuedInputsResponse, {
+    method: "POST",
+    body: JSON.stringify(reorderQueuedInputsRequest.parse({ clientMessageIDs })),
+  });
+}
+
 export function submitMessage(
   token: string,
   sessionID: string,
@@ -1542,20 +1549,3 @@ export async function deleteProvider(token: string, name: string): Promise<void>
 
 export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, mergeProjectRequest, patchProjectRequest, patchProviderRequest };
-
-export function listLibraryRecent(token:string, sessionID:string, query:string, kind:string, signal?:AbortSignal) {
- const params = new URLSearchParams({q:query,kind});
- return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent?${params}`, listLibraryRecentResponse, { signal });
-}
-export function recordLibraryRecent(token:string, sessionID:string, input:LibraryRecentInput) {
- return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent`, z.null(), {method:"POST",body:JSON.stringify(recordLibraryRecentRequest.parse(input))});
-}
-export function openLibraryRecent(token:string, sessionID:string, kind:string, id:string) {
- return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/open`, libraryRecentTarget,{method:"POST"});
-}
-export function deleteLibraryRecent(token:string, sessionID:string, kind:string, id:string) {
- return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, z.null(),{method:"DELETE"});
-}
-export function clearLibraryRecent(token:string, sessionID:string, kind:string) {
- return request(token, `/sessions/${encodeURIComponent(sessionID)}/library/recent?${new URLSearchParams({kind})}`, z.null(),{method:"DELETE"});
-}

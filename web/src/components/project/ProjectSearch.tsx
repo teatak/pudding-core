@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Search } from "@/components/icons";
+import { ChevronRight, Search, X } from "@/components/icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { searchProjectFiles, type ProjectBrowserRoot, type ProjectSearchMatch } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { AppTooltip } from "@/components/AppTooltip";
 import { Spinner } from "@/components/Spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -18,28 +19,29 @@ import { projectTreeFolderLabelInset, projectTreeNodeInset } from "./projectTree
 const searchDelayMs = 180;
 
 export function ProjectSearch({
+  active,
+  children,
+  query,
   roots,
   sessionID,
   token,
-  onClose,
+  onQueryChange,
   onOpen,
 }: {
+  active: boolean;
+  children: ReactNode;
+  query: string;
   roots: ProjectBrowserRoot[];
   sessionID: string;
   token: string;
-  onClose: () => void;
+  onQueryChange: (value: string) => void;
   onOpen: (match: ProjectSearchMatch) => void;
 }) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const normalizedQuery = query.trim();
   const rootNames = useMemo(() => new Map(roots.map((root) => [root.id, root.name])), [roots]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     const timeoutID = window.setTimeout(() => setDebouncedQuery(normalizedQuery), searchDelayMs);
@@ -47,7 +49,7 @@ export function ProjectSearch({
   }, [normalizedQuery]);
 
   const searchQuery = useQuery({
-    enabled: Boolean(token && sessionID && debouncedQuery),
+    enabled: Boolean(active && token && sessionID && debouncedQuery && normalizedQuery === debouncedQuery),
     queryKey: queryKeys.projectSearch(sessionID, debouncedQuery),
     queryFn: ({ signal }) => searchProjectFiles(token, sessionID, debouncedQuery, signal),
     retry: false,
@@ -58,10 +60,16 @@ export function ProjectSearch({
   const matchGroups = useMemo(() => groupMatchesByRoot(matches), [matches]);
   const searching = Boolean(normalizedQuery && (!settled || searchQuery.isFetching));
 
+  const clearSearch = () => {
+    onQueryChange("");
+    inputRef.current?.focus();
+  };
+
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      clearSearch();
       return;
     }
     if (event.key === "Enter" && matches[0]) {
@@ -71,55 +79,67 @@ export function ProjectSearch({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-project-search className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 p-1.5">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={inputRef}
             aria-label={t("project.browserSearch")}
-            className="h-7 rounded-md bg-transparent pl-7 text-xs"
+            className="h-7 rounded-md bg-transparent pl-7 pr-7 text-xs"
             placeholder={t("project.browserSearchPlaceholder")}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
           />
+          {query ? (
+            <AppTooltip content={t("common.clear")}>
+              <button
+                aria-label={t("common.clear")}
+                className="absolute right-0.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                type="button"
+                onClick={clearSearch}
+              >
+                <X className="size-3.5" />
+              </button>
+            </AppTooltip>
+          ) : null}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        {!normalizedQuery ? (
-          <ProjectSearchMessage>{t("project.browserSearchHint")}</ProjectSearchMessage>
-        ) : searching && matches.length === 0 ? (
-          <ProjectSearchMessage><Spinner />{t("common.loading")}</ProjectSearchMessage>
-        ) : settled && searchQuery.isError ? (
-          <ProjectSearchMessage>{projectBrowserError(searchQuery.error, t)}</ProjectSearchMessage>
-        ) : settled && matches.length === 0 ? (
-          <ProjectSearchMessage>{t("project.browserSearchNoResults")}</ProjectSearchMessage>
-        ) : (
-          <>
-            <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-muted-foreground">
-              {searching ? <Spinner className="size-3" /> : null}
-              <span>
-                {t("project.browserSearchTreeSummary")
-                  .replace("{files}", String(matchGroups.reduce((count, group) => count + group.files.length, 0)))
-                  .replace("{count}", String(matches.length))}
-              </span>
-              {searchQuery.data?.resultsCapped ? <span>· {t("project.browserSearchCapped")}</span> : null}
-            </div>
-            {matchGroups.map((rootGroup) => (
-              <SearchRootGroup
-                key={`${debouncedQuery}:${rootGroup.rootID}`}
-                caseSensitive={searchQuery.data?.caseSensitive || false}
-                group={rootGroup}
-                query={debouncedQuery}
-                rootName={rootNames.get(rootGroup.rootID) || rootGroup.rootID}
-                onOpen={onOpen}
-              />
-            ))}
-          </>
-        )}
-      </div>
+      {!normalizedQuery ? children : (
+        <div data-project-search-results className="min-h-0 flex-1 overflow-auto">
+          {searching && matches.length === 0 ? (
+            <ProjectSearchMessage><Spinner />{t("common.loading")}</ProjectSearchMessage>
+          ) : settled && searchQuery.isError ? (
+            <ProjectSearchMessage>{projectBrowserError(searchQuery.error, t)}</ProjectSearchMessage>
+          ) : settled && matches.length === 0 ? (
+            <ProjectSearchMessage>{t("project.browserSearchNoResults")}</ProjectSearchMessage>
+          ) : (
+            <>
+              <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-muted-foreground">
+                {searching ? <Spinner className="size-3" /> : null}
+                <span>
+                  {t("project.browserSearchTreeSummary")
+                    .replace("{files}", String(matchGroups.reduce((count, group) => count + group.files.length, 0)))
+                    .replace("{count}", String(matches.length))}
+                </span>
+                {searchQuery.data?.resultsCapped ? <span>· {t("project.browserSearchCapped")}</span> : null}
+              </div>
+              {matchGroups.map((rootGroup) => (
+                <SearchRootGroup
+                  key={`${debouncedQuery}:${rootGroup.rootID}`}
+                  caseSensitive={searchQuery.data?.caseSensitive || false}
+                  group={rootGroup}
+                  query={debouncedQuery}
+                  rootName={rootNames.get(rootGroup.rootID) || rootGroup.rootID}
+                  onOpen={onOpen}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

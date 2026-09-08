@@ -1,7 +1,7 @@
-import { Check, ChevronRight, TextCursorInput, X } from "@/components/icons";
+import { Check, MessageCircleQuestionMark, X } from "@/components/icons";
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
+import { ChoiceMenu, ChoiceMenuNumber, type ChoiceMenuItem } from "@/components/ChoiceMenu";
 import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -10,14 +10,12 @@ import { dismissInputFlow, type InputFlowRequest } from "@/state/inputFlowStore"
 import type { ContentPart } from "@/api/client";
 
 type FormInputFlowSchema = {
-  description?: string;
   steps: InputFlowStep[];
   title: string;
   type: "form";
 };
 type RepeatInputFlowSchema = {
   afterItem?: InputFlowAfterItem;
-  description?: string;
   maxItems?: number;
   minItems?: number;
   nextSteps: InputFlowStep[];
@@ -29,7 +27,6 @@ type RepeatInputFlowSchema = {
 type InputFlowSchema = FormInputFlowSchema | RepeatInputFlowSchema;
 type InputFlowStep = {
   customLabel?: string;
-  description?: string;
   id: string;
   max?: number;
   maxFrom?: string;
@@ -54,7 +51,6 @@ type InputFlowAfterItem = {
 };
 type InputFlowOption = {
   data?: Record<string, unknown>;
-  description?: string;
   label?: string;
   title?: string;
   value?: unknown;
@@ -190,7 +186,6 @@ function RepeatInputFlowContent({
   return (
     <FloatingUIPanel
       cancelLabel={t("common.cancel")}
-      description={schema.description}
       title={schema.title}
       onCancel={() => dismissInputFlow(request)}
     >
@@ -303,8 +298,8 @@ function FormInputFlowContent({
   return (
     <FloatingUIPanel
       cancelLabel={t("common.cancel")}
-      description={schema.description}
       title={schema.title}
+      progress={schema.steps.length > 1 ? `${stepIndex + 1} / ${schema.steps.length}` : undefined}
       onCancel={() => dismissInputFlow(request)}
     >
       <div className="space-y-3 text-sm text-foreground">
@@ -322,15 +317,11 @@ function FormInputFlowContent({
           onMultiSubmit={(selected) => commitValue(activeStep, selected, selected)}
           onNumberSelect={(value) => commitValue(activeStep, value)}
           onOptionSelect={(option) => selectOption(activeStep, option)}
+          onSkip={activeStep.required === false && activeStep.type !== "confirm" ? () => commitValue(activeStep, undefined) : undefined}
           onTextChange={setTextValue}
           onTextSubmit={(value) => commitValue(activeStep, value)}
           confirmValues={values}
         />
-        {activeStep.required === false && activeStep.type !== "confirm" ? (
-          <Button className="h-7 px-2 text-xs text-muted-foreground" size="sm" type="button" variant="ghost" onClick={() => commitValue(activeStep, undefined)}>
-            {t("inputFlow.skip")}
-          </Button>
-        ) : null}
       </div>
     </FloatingUIPanel>
   );
@@ -339,19 +330,20 @@ function FormInputFlowContent({
 function FloatingUIPanel({
   cancelLabel,
   children,
-  description,
+  progress,
   title,
   onCancel,
 }: {
   cancelLabel: string;
   children: ReactNode;
-  description?: string;
+  progress?: string;
   title: string;
   onCancel: () => void;
 }) {
   return (
     <ComposerFloatingPanel
-      className="flex flex-col gap-2 overflow-hidden"
+      className="flex max-h-[calc(100dvh-12rem)] flex-col gap-2 overflow-hidden bg-popover backdrop-blur-none"
+      data-input-flow-panel
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -359,12 +351,12 @@ function FloatingUIPanel({
         }
       }}
     >
-      <div className="flex min-w-0 shrink-0 items-start gap-2">
-        <TextCursorInput className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 shrink-0 items-start gap-2 px-1">
+        <MessageCircleQuestionMark aria-hidden="true" className="mt-1.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{title}</div>
-          {description ? <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{description}</div> : null}
+          <div className="py-0.5 text-sm leading-6 text-muted-foreground">{title}</div>
         </div>
+        {progress ? <span className="py-1 text-xs tabular-nums text-muted-foreground">{progress}</span> : null}
         <Button
           aria-label={cancelLabel}
           className="size-7 shrink-0 rounded-full"
@@ -376,7 +368,9 @@ function FloatingUIPanel({
           <X className="size-4" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div data-input-flow-body className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-1 pr-3 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]">
+        {children}
+      </div>
     </ComposerFloatingPanel>
   );
 }
@@ -411,6 +405,7 @@ function ActiveStep({
   onMultiSubmit,
   onNumberSelect,
   onOptionSelect,
+  onSkip,
   onTextChange,
   onTextSubmit,
 }: {
@@ -430,17 +425,28 @@ function ActiveStep({
   onMultiSubmit?: (values: unknown[]) => void;
   onNumberSelect: (value: number) => void;
   onOptionSelect: (option: InputFlowOption) => void;
+  onSkip?: () => void;
   onTextChange?: (value: string) => void;
   onTextSubmit?: (value: unknown) => void;
 }) {
+  const { t } = useI18n();
+  const skipAction = onSkip ? (
+    <Button className="px-2 text-xs text-muted-foreground" type="button" variant="ghost" onClick={onSkip}>
+      {t("inputFlow.skip")}
+    </Button>
+  ) : null;
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <StepTitle step={step} />
       {step.type === "single_select" ? (
-        <OptionList step={step} onSelect={onOptionSelect} />
+        <>
+          <OptionList step={step} onSelect={onOptionSelect} />
+          {skipAction}
+        </>
       ) : step.type === "multi_select" ? (
         <MultiSelect
           selectedKeys={multiSelectedKeys}
+          skipAction={skipAction}
           step={step}
           onSelectedKeys={onMultiSelectedKeys || noop}
           onSubmit={onMultiSubmit || noop}
@@ -450,13 +456,14 @@ function ActiveStep({
           customOpen={customOpen}
           customValue={customValue}
           max={max}
+          skipAction={skipAction}
           step={step}
           onCustomOpen={onCustomOpen}
           onCustomValue={onCustomValue}
           onSelect={onNumberSelect}
         />
       ) : step.type === "text_input" || step.type === "phone_input" || step.type === "number_input" || step.type === "date_input" ? (
-        <TextInputStep step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
+        <TextInputStep skipAction={skipAction} step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
       ) : step.type === "confirm" ? (
         <ConfirmStep items={confirmItems} resultKey={confirmResultKey} values={confirmValues} onConfirm={onConfirm || noop} />
       ) : null}
@@ -487,6 +494,7 @@ function AfterItemMenu({
       {schema.afterItem?.title ? <div className="text-xs font-medium text-muted-foreground">{schema.afterItem.title}</div> : null}
       <div className="px-2 py-1 text-xs text-muted-foreground">{itemSummary(current)}</div>
       <ChoiceMenu
+        variant="question"
         items={[
           ...(canAddMore
             ? [
@@ -523,12 +531,8 @@ function AfterItemMenu({
 
 function StepTitle({ step }: { step: InputFlowStep }) {
   return (
-    <div className="min-w-0">
-      <div className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{step.title}</span>
-      </div>
-      {step.description ? <div className="mt-1 text-xs text-muted-foreground">{step.description}</div> : null}
+    <div className="min-w-0 px-1">
+      <div className="whitespace-normal break-words text-sm font-medium leading-6">{step.title}</div>
     </div>
   );
 }
@@ -537,12 +541,12 @@ function OptionList({ step, onSelect }: { step: InputFlowStep; onSelect: (option
   const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
   return (
     <ChoiceMenu
+      variant="question"
       items={options.map((option, index) => {
         const title = stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
         return {
           id: `${title}:${index}`,
           label: title,
-          description: option.description,
           value: option,
         };
       })}
@@ -553,11 +557,13 @@ function OptionList({ step, onSelect }: { step: InputFlowStep; onSelect: (option
 
 function MultiSelect({
   selectedKeys,
+  skipAction,
   step,
   onSelectedKeys,
   onSubmit,
 }: {
   selectedKeys: string[];
+  skipAction: ReactNode;
   step: InputFlowStep;
   onSelectedKeys: (keys: string[]) => void;
   onSubmit: (values: unknown[]) => void;
@@ -583,23 +589,23 @@ function MultiSelect({
   return (
     <div className="space-y-2">
       <ChoiceMenu
-        items={entries.map(({ key, option }) => {
+        variant="question"
+        items={entries.map(({ key, option }, index) => {
           const title = stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
           const checked = selected.has(key);
           return {
             id: key,
             label: title,
-            description: option.description,
+            checked,
             disabled: maxReached && !checked,
             value: key,
             render: () => (
-              <div className="flex min-w-0 items-start gap-2">
-                <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border", checked ? "border-primary bg-primary text-primary-foreground" : "border-border")}>
-                  {checked ? <Check className="size-3" data-icon-weight="strong" /> : null}
+              <div className="flex min-w-0 items-start gap-2.5">
+                <span aria-hidden="true" className={cn("mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border text-xs tabular-nums", checked ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground")}>
+                  {checked ? <Check className="size-3" data-icon-weight="strong" /> : index + 1}
                 </span>
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-normal">{title}</span>
-                  {option.description ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{option.description}</span> : null}
+                  <span className="block whitespace-normal break-words text-sm font-medium leading-6">{title}</span>
                 </span>
               </div>
             ),
@@ -607,21 +613,23 @@ function MultiSelect({
         })}
         onSelect={toggle}
       />
-      <Button
-        className="h-7 px-3 text-xs"
-        size="sm"
-        type="button"
-        disabled={selected.size < min}
-        onClick={() =>
-          onSubmit(
-            entries
-              .filter(({ key }) => selected.has(key))
-              .map(({ option }) => option.value ?? option.data ?? option.title ?? option.label),
-          )
-        }
-      >
-        {t("inputFlow.confirm")}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          className="px-3 text-xs"
+          type="button"
+          disabled={selected.size < min}
+          onClick={() =>
+            onSubmit(
+              entries
+                .filter(({ key }) => selected.has(key))
+                .map(({ option }) => option.value ?? option.data ?? option.title ?? option.label),
+            )
+          }
+        >
+          {t("inputFlow.confirm")}
+        </Button>
+        {skipAction}
+      </div>
     </div>
   );
 }
@@ -630,6 +638,7 @@ function QuickNumber({
   customOpen,
   customValue,
   max,
+  skipAction,
   step,
   onCustomOpen,
   onCustomValue,
@@ -638,6 +647,7 @@ function QuickNumber({
   customOpen: boolean;
   customValue: string;
   max?: number;
+  skipAction: ReactNode;
   step: InputFlowStep;
   onCustomOpen: () => void;
   onCustomValue: (value: string) => void;
@@ -657,60 +667,65 @@ function QuickNumber({
       label: step.customLabel || t("inputFlow.custom"),
       noActiveStyle: customOpen,
       value: { type: "custom" as const },
-      render: () =>
-        customOpen ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <input
-              autoFocus
-              className={cn(
-                "h-6 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring",
-                customValue && !customValid ? "border-destructive" : "",
-              )}
-              inputMode="numeric"
-              min={min}
-              max={max}
-              placeholder={t("inputFlow.customPlaceholder")}
-              type="number"
-              value={customValue}
-              onChange={(event) => onCustomValue(event.target.value)}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === "Enter" && customValid) {
-                  event.preventDefault();
-                  onSelect(customNumber);
-                }
-              }}
-            />
-            <Button className="h-6 px-2 text-xs" size="sm" type="button" disabled={!customValid} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(customNumber)}>
-              {t("inputFlow.confirm")}
-            </Button>
-          </div>
-        ) : (
-          <div className="truncate text-sm font-normal">{step.customLabel || t("inputFlow.custom")}</div>
-        ),
+      render: customOpen
+        ? () => (
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <ChoiceMenuNumber number={options.length + 1} />
+              <input
+                autoFocus
+                className={cn(
+                  "h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring",
+                  customValue && !customValid ? "border-destructive" : "",
+                )}
+                inputMode="numeric"
+                min={min}
+                max={max}
+                placeholder={t("inputFlow.customPlaceholder")}
+                type="number"
+                value={customValue}
+                onChange={(event) => onCustomValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && customValid) {
+                    event.preventDefault();
+                    onSelect(customNumber);
+                  }
+                }}
+              />
+              <Button type="button" disabled={!customValid} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(customNumber)}>
+                {t("inputFlow.confirm")}
+              </Button>
+              {skipAction}
+            </div>
+          )
+        : undefined,
     },
   ];
   return (
-    <ChoiceMenu
-      items={menuItems}
-      maxHeightClassName="max-h-36"
-      onSelect={(item) => {
-        if (item.type === "number") {
-          onSelect(item.value);
-          return;
-        }
-        onCustomOpen();
-      }}
-    />
+    <div className="space-y-2">
+      <ChoiceMenu
+        variant="question"
+        items={menuItems}
+        onSelect={(item) => {
+          if (item.type === "number") {
+            onSelect(item.value);
+            return;
+          }
+          onCustomOpen();
+        }}
+      />
+      {customOpen ? null : skipAction}
+    </div>
   );
 }
 
 function TextInputStep({
+  skipAction,
   step,
   value,
   onChange,
   onSubmit,
 }: {
+  skipAction: ReactNode;
   step: InputFlowStep;
   value: string;
   onChange: (value: string) => void;
@@ -755,9 +770,10 @@ function TextInputStep({
           }
         }}
       />
-      <Button size="sm" type="button" disabled={!valid} onClick={handleSubmit}>
+      <Button type="button" disabled={!valid} onClick={handleSubmit}>
         {t("inputFlow.confirm")}
       </Button>
+      {skipAction}
     </div>
   );
 }
@@ -793,7 +809,7 @@ function ConfirmStep({
           </div>
         ) : null}
       </div>
-      <ChoiceMenu items={[{ id: "confirm", label: t("inputFlow.confirm"), value: true }]} onSelect={onConfirm} />
+      <ChoiceMenu variant="question" items={[{ id: "confirm", label: t("inputFlow.confirm"), value: true }]} onSelect={onConfirm} />
     </div>
   );
 }
@@ -815,7 +831,6 @@ function normalizeInputFlow(value: unknown): { raw: Record<string, unknown>; sch
     return {
       raw,
       schema: {
-        description: stringValue(raw.description),
         steps,
         title,
         type: "form",
@@ -833,7 +848,6 @@ function normalizeInputFlow(value: unknown): { raw: Record<string, unknown>; sch
     raw,
     schema: {
       afterItem: normalizeAfterItem(raw.afterItem),
-      description: stringValue(raw.description),
       maxItems: numberValue(raw.maxItems),
       minItems: numberValue(raw.minItems),
       nextSteps: Array.isArray(raw.nextSteps) ? (raw.nextSteps.map(normalizeStep).filter(Boolean) as InputFlowStep[]) : [],
@@ -868,7 +882,6 @@ function normalizeStep(value: unknown): InputFlowStep | null {
   }
   return {
     customLabel: stringValue(record.customLabel),
-    description: stringValue(record.description),
     id,
     max: numberValue(record.max),
     maxFrom: stringValue(record.maxFrom),
@@ -911,7 +924,6 @@ function normalizeOption(value: unknown): InputFlowOption | null {
   }
   return {
     data: parseRecord(record.data) || undefined,
-    description: stringValue(record.description),
     label: stringValue(record.label),
     title: stringValue(record.title),
     value: record.value,

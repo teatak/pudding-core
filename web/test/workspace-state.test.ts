@@ -125,6 +125,25 @@ test("closing an inactive resource while the library is shown does not change th
   assert.equal(workspace.getWorkspaceSessionUI("library").activeTab, "library");
 });
 
+test("the resource page never becomes a tab, including after restoring saved UI", () => {
+  const id = "resource-page";
+  const restored = workspace.migrateWorkspaceSession({
+    activeTab: "library", tabOrder: ["project", "library", "browser:one"],
+    project: { activeTab: "file:draft", tabOrder: ["file:draft"] },
+  }, false);
+  workspace.replaceWorkspaceSessionUI(id, restored);
+  workspace.openWorkspaceView(id, "library");
+  workspace.openWorkspaceView(id, "library");
+  assert.equal(workspace.getWorkspaceSessionUI(id).activeTab, "library");
+  assert.deepEqual(workspace.getWorkspaceSessionUI(id).tabOrder, ["project", "browser:one"]);
+  workspace.openWorkspaceView(id, "project");
+  assert.equal(workspace.getWorkspaceSessionUI(id).project.activeTab, "file:draft");
+  workspace.closeWorkspaceTabs(id, ["project", "browser:one"]);
+  workspace.openWorkspaceView(id, "library");
+  assert.equal(workspace.getWorkspaceSessionUI(id).activeTab, "library");
+  assert.deepEqual(workspace.getWorkspaceSessionUI(id).tabOrder, []);
+});
+
 test("legacy invisible canvas seeds closed state once; explicit reveal reopens the same item", () => {
   const items = [{ id: "legacy", visible: false, updatedAt: "2026-09-05T12:00:00Z" }];
   const reconcile = () => workspace.updateWorkspaceSessionUI("legacy-canvas", current => workspace.resolveCanvasTabs(current, items));

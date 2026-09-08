@@ -5,6 +5,7 @@ import { openWorkspaceTab } from "@/state/workspaceStore";
 
 export type ProjectFileRevealInput = {
   absolutePath?: string;
+  anchor?: string;
   column?: number;
   fallback?: FilePreviewInput;
   line?: number;

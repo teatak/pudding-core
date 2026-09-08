@@ -42,8 +42,7 @@ export function Transcript({
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const turnReveal = useTranscriptTurnReveal(sessionID);
-  const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
-  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, revealTurn, steerQueued, transcript, turnsQuery, updateQueued } =
+  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, revealTurn, transcript, turnsQuery } =
     useTranscriptData({
       sessionID,
       sessionRunning,
@@ -87,33 +86,11 @@ export function Transcript({
   const sessionIDRef = useRef(sessionID);
   const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
   sessionIDRef.current = sessionID;
-  const cancelQueued = useCallback(
-    (clientMessageID: string) => updateQueued(clientMessageID, { status: "cancelled" }),
-    [updateQueued],
-  );
-  const startQueuedEdit = useCallback(
-    (clientMessageID: string) => updateQueued(clientMessageID, { status: "editing" }),
-    [updateQueued],
-  );
-  const saveQueued = useCallback(
-    (clientMessageID: string, text: string) => updateQueued(clientMessageID, { status: "queued", text }),
-    [updateQueued],
-  );
   const moveToLatest = useCallback(() => {
     setNewMessageCount(0);
     setIsAtLatest(true);
     setJumpLatestSignal((signal) => signal + 1);
   }, []);
-  const guideQueued = useCallback(
-    (clientMessageID: string) => {
-      if (!runningTurnID) {
-        return Promise.reject(new Error("turn_not_active"));
-      }
-      moveToLatest();
-      return steerQueued(clientMessageID, runningTurnID);
-    },
-    [moveToLatest, runningTurnID, steerQueued],
-  );
   const disclosure = useMemo(
     () => ({
       hasState: (key: string) =>
@@ -210,10 +187,6 @@ export function Transcript({
       onLatestChange={handleLatestChange}
       onLoadHistory={loadHistory}
       onTurnRevealComplete={handleTurnRevealComplete}
-      onQueuedCancel={cancelQueued}
-      onQueuedEditStart={startQueuedEdit}
-      onQueuedSteer={runningTurnID ? guideQueued : undefined}
-      onQueuedSave={saveQueued}
       cloningMessageID={cloneMutation.isPending ? cloneMutation.variables : undefined}
     />
   );

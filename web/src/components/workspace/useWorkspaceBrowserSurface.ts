@@ -185,11 +185,11 @@ export function useWorkspaceBrowserSurface({
     createBrowserTabMutation.mutate({ targetSessionID: sessionID });
   }, [createBrowserTabMutation.isPending, createBrowserTabMutation.mutate, sessionID]);
 
-  const openBrowserFromLibrary = useCallback((url: string) => {
-    const existing = browserTabs.find((tab) => tab.url === url);
-    if (existing) { openWorkspaceTab(sessionID, browserWorkspaceTabKey(existing.id)); return; }
-    if (sessionID && !createBrowserTabMutation.isPending) createBrowserTabMutation.mutate({ targetSessionID: sessionID, url });
-  }, [browserTabs, sessionID, createBrowserTabMutation.isPending, createBrowserTabMutation.mutate]);
+  const openBrowserLink = useCallback((targetSessionID: string, url: string) => {
+    const existing = browserTabs.find((tab) => tab.sessionID === targetSessionID && tab.url === url);
+    if (existing) { openWorkspaceTab(targetSessionID, browserWorkspaceTabKey(existing.id)); return; }
+    if (targetSessionID && !createBrowserTabMutation.isPending) createBrowserTabMutation.mutate({ targetSessionID, url });
+  }, [browserTabs, createBrowserTabMutation.isPending, createBrowserTabMutation.mutate]);
 
   useEffect(() => {
     if (!enabled || !sessionID || !browserReveal) return;
@@ -252,7 +252,7 @@ export function useWorkspaceBrowserSurface({
       ? closeBrowserTabsMutation.variables.tabIDs
       : [],
     createNewBrowserTab,
-    openBrowserFromLibrary,
+    openBrowserLink,
     creatingBrowserTab: createBrowserTabMutation.isPending,
   };
 }

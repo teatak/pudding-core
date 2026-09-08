@@ -228,6 +228,24 @@ test("Computer Use bridge exposes foreground pointer conflicts", () => {
   });
 });
 
+test("Computer Use bridge preserves lifecycle failure stages and native diagnostics", () => {
+  for (const [code, status] of [
+    ["computer_launch_failed", 500],
+    ["computer_activation_failed", 409],
+    ["computer_window_raise_failed", 409],
+  ]) {
+    const error = classifyComputerUseError({
+      code, message: "native stage detail: AXRaise returned -25206",
+      outcome: "unknown", retryable: false,
+    });
+    assert.equal(error.status, status);
+    assert.equal(error.code, code);
+    assert.match(error.message, /-25206/);
+    assert.equal(error.outcome, "unknown");
+    assert.equal(error.retryable, false);
+  }
+});
+
 test("Computer Use bridge exposes changed pointer targets", () => {
   assert.deepEqual(classifyComputerUseError({
     code: "computer_pointer_target_changed",

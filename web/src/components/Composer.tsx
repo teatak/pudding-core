@@ -56,6 +56,10 @@ import { buildComposerMentionReferences } from "@/components/composerMentionData
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { composerShellClassName } from "@/components/composerControlStyles";
 import { ComposerTextArea, parseSlashSubmitCommand, type ComposerTextAreaHandle, type SlashCommand, type SlashSubmitCommand } from "@/components/ComposerTextArea";
+import { ComposerQueue } from "@/components/ComposerQueue";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/Spinner";
+import { useQueuedInputs } from "@/hooks/useQueuedInputs";
 import { ComposerToolbar } from "@/components/ComposerToolbar";
 import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { composerTestPresentation } from "@/dev/composerTestState";
@@ -83,7 +87,7 @@ import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
 import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
-import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
+import { useSessionDraftStore, queuedDraftKey, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
   getVisibleUIContext,
   setUIContextEnabled,
@@ -145,6 +149,14 @@ export function Composer({
   onSubmitStart,
 }: ComposerProps) {
   const sessionID = session.id;
+  const queue = useQueuedInputs(token, sessionID);
+  const editingID = useSessionDraftStore((state) => state.queueEdits[sessionID]);
+  const draftKey = editingID ? queuedDraftKey(sessionID, editingID) : sessionID;
+  const editingInput = queue.query.data?.queuedInputs.find((input) => input.clientMessageID === editingID);
+  const endQueueEdit = useSessionDraftStore((state) => state.endQueueEdit);
+  useEffect(() => {
+    if (editingID && queue.query.isSuccess && !editingInput) endQueueEdit(sessionID);
+  }, [editingID, editingInput, endQueueEdit, queue.query.isSuccess, sessionID]);
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
@@ -157,7 +169,8 @@ export function Composer({
   const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
   const clearSessionDraft = useSessionDraftStore((state) => state.clear);
   const ensureSessionDraft = useSessionDraftStore((state) => state.ensure);
-  const setSessionDraftText = useSessionDraftStore((state) => state.setText);
+  const draftTextSetter = useSessionDraftStore((state) => state.setText);
+  const setSessionDraftText = useCallback((_sessionID: string, value: Parameters<typeof draftTextSetter>[1]) => draftTextSetter(draftKey, value), [draftKey, draftTextSetter]);
   // 停止态双源:overlay 的 runningTurns(本地实时)|| session 快照的 running
   // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
   // provider 暂无 delta,overlay 不知道有 turn 在跑——session.running 兜底,
@@ -219,25 +232,29 @@ export function Composer({
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
   });
-  const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? emptyComposerAttachments);
-  const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? emptyLocalFolders);
-  const partOrder = useSessionDraftStore((state) => state.drafts[sessionID]?.partOrder ?? emptyPartOrder);
+  const attachments = useSessionDraftStore((state) => state.drafts[draftKey]?.attachments ?? emptyComposerAttachments);
+  const localFolders = useSessionDraftStore((state) => state.drafts[draftKey]?.localFolders ?? emptyLocalFolders);
+  const partOrder = useSessionDraftStore((state) => state.drafts[draftKey]?.partOrder ?? emptyPartOrder);
   const projectReferences = useSessionDraftStore(
-    (state) => state.drafts[sessionID]?.projectReferences ?? emptyProjectReferences,
+    (state) => state.drafts[draftKey]?.projectReferences ?? emptyProjectReferences,
   );
-  const setSessionDraftAttachments = useSessionDraftStore((state) => state.setAttachments);
-  const setSessionDraftLocalFolders = useSessionDraftStore((state) => state.setLocalFolders);
-  const setSessionDraftPartOrder = useSessionDraftStore((state) => state.setPartOrder);
-  const setSessionDraftProjectReferences = useSessionDraftStore((state) => state.setProjectReferences);
+  const draftAttachmentsSetter = useSessionDraftStore((state) => state.setAttachments);
+  const setSessionDraftAttachments = useCallback((_sessionID: string, value: Parameters<typeof draftAttachmentsSetter>[1]) => draftAttachmentsSetter(draftKey, value), [draftKey, draftAttachmentsSetter]);
+  const draftLocalFoldersSetter = useSessionDraftStore((state) => state.setLocalFolders);
+  const setSessionDraftLocalFolders = useCallback((_sessionID: string, value: Parameters<typeof draftLocalFoldersSetter>[1]) => draftLocalFoldersSetter(draftKey, value), [draftKey, draftLocalFoldersSetter]);
+  const draftPartOrderSetter = useSessionDraftStore((state) => state.setPartOrder);
+  const setSessionDraftPartOrder = useCallback((_sessionID: string, value: Parameters<typeof draftPartOrderSetter>[1]) => draftPartOrderSetter(draftKey, value), [draftKey, draftPartOrderSetter]);
+  const draftProjectReferencesSetter = useSessionDraftStore((state) => state.setProjectReferences);
+  const setSessionDraftProjectReferences = useCallback((_sessionID: string, value: Parameters<typeof draftProjectReferencesSetter>[1]) => draftProjectReferencesSetter(draftKey, value), [draftKey, draftProjectReferencesSetter]);
   const selectionGuardRef = useComposerSelectionGuard<HTMLDivElement>();
   useEffect(() => {
-    const draft = ensureSessionDraft(sessionID);
+    const draft = ensureSessionDraft(draftKey);
     draftIDRef.current = draft.clientMessageID;
     form.reset({ text: draft.text });
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, [ensureSessionDraft, form, sessionID]);
+  }, [draftKey, ensureSessionDraft, form]);
   const [canSend, setCanSend] = useState(false);
   const [hasInput, setHasInput] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
@@ -371,15 +388,15 @@ export function Composer({
 
   const clearSubmitError = useCallback(() => onSubmitError?.(null), [onSubmitError]);
   const resetSessionDraft = useCallback(() => {
-    const current = ensureSessionDraft(sessionID);
+    const current = ensureSessionDraft(draftKey);
     current.attachments.forEach(revokeAttachmentPreview);
-    const draft = clearSessionDraft(sessionID);
+    const draft = clearSessionDraft(draftKey);
     draftIDRef.current = draft.clientMessageID;
     form.reset({ text: draft.text });
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, [clearSessionDraft, ensureSessionDraft, form, sessionID]);
+  }, [clearSessionDraft, draftKey, ensureSessionDraft, form]);
   const addFiles = useCallback(
     (files: File[], options?: { origin?: "temp"; sourcePaths?: string[]; uploadSessionID?: string }) => {
       const nextFiles = files
@@ -604,7 +621,7 @@ export function Composer({
       addPendingUser({
         sessionID,
         clientMessageID,
-        status: guideNow ? "steering" : "submitting",
+        status: guideNow ? "steering" : running || queue.inputs.length > 0 ? "queued" : "submitting",
         text: value.text,
         parts: value.parts,
         createdAt: new Date().toISOString(),
@@ -673,11 +690,19 @@ export function Composer({
       if (!selectedModel) {
         throw new APIError(400, "no_model");
       }
-      const result = await submitMessage(token, sessionID, {
+      const payload = {
         clientMessageID,
         text: submission.text,
-        parts: [submission.formResult, { type: "text", text: submission.text }],
-      });
+        parts: [submission.formResult, { type: "text" as const, text: submission.text }],
+      };
+      // Answers belong to the active turn; ordinary submit would queue them
+      // until that turn ends and deliver the answer as another task.
+      if (runningTurnID) {
+        const result = await steerTurn(token, sessionID, runningTurnID, payload);
+        clearSubmittingTurn(sessionID, clientMessageID);
+        return result;
+      }
+      const result = await submitMessage(token, sessionID, payload);
       if (result.queued || !result.turnID) {
         clearSubmittingTurn(sessionID, clientMessageID);
       } else {
@@ -696,10 +721,11 @@ export function Composer({
       addPendingUser({
         sessionID,
         clientMessageID,
-        status: "submitting",
+        status: runningTurnID ? "steering" : "submitting",
         text: submission.text,
         parts: [submission.formResult, { type: "text", text: submission.text }],
         createdAt: new Date().toISOString(),
+        turnID: runningTurnID,
       });
     },
     onSuccess: async () => {
@@ -835,6 +861,17 @@ export function Composer({
     ) {
       return;
     }
+    if (editingID) {
+      if (queue.mutation.isPending || !editingInput) return;
+      const parts = buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder, projectReferencesToSubmit);
+      // Preserve the context captured when this queued input was created.
+      parts.push(...(editingInput.parts || []).filter((part) => part.type !== "text" && part.type !== "attachment" && part.type !== "local_folder" && part.type !== "project_reference"));
+      try {
+        await queue.mutation.mutateAsync({ type: "update", id: editingID, status: "queued", text, parts });
+        endQueueEdit(sessionID);
+      } catch { /* The queue mutation reports the error; keep the edit draft. */ }
+      return;
+    }
     const slashCommand =
       attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0 && projectReferencesToSubmit.length === 0
         ? parseSlashSubmitCommand(text)
@@ -878,7 +915,7 @@ export function Composer({
         submitPreparationRef.current = false;
         return;
       }
-      if (!running) {
+      if (!running && queue.inputs.length === 0) {
         startSubmittingTurn(sessionID, draftIDRef.current);
       }
       const inputParts = buildDraftSubmitParts(
@@ -956,7 +993,7 @@ export function Composer({
       textField={textField}
       textAreaRef={textAreaRef}
       mentionReferences={mentionReferences}
-      slashCommands={slashCommands}
+      slashCommands={editingID ? [] : slashCommands}
       placeholder={
         session.activeMode === "chat"
           ? t("composer.messagePlaceholder")
@@ -1002,7 +1039,7 @@ export function Composer({
         }
       }}
       onEnter={(info) => {
-        const hasModel = Boolean(selectedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
+        const hasModel = Boolean(editingID) || Boolean(selectedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
         const pending = submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending;
         if (info.canSend && !info.mentionMenuOpen && !info.slashMenuOpen && !pending && hasModel) {
           void form.handleSubmit((value) =>
@@ -1029,7 +1066,7 @@ export function Composer({
         <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9">
           <ChatColumn className="relative flex h-full items-center justify-center">
             {showTurnProgress && activeTurnPlan ? (
-              <ComposerTurnProgress progress={activeTurnPlan} />
+              <ComposerTurnProgress key={`${sessionID}:${activeTurnPlan.turnID}`} progress={activeTurnPlan} paused={cancelMutation.isPending} />
             ) : null}
           </ChatColumn>
         </aside>
@@ -1044,6 +1081,27 @@ export function Composer({
           ref={selectionGuardRef}
           className="relative"
         >
+          <ComposerQueue
+            inputs={queue.inputs}
+            persistedIDs={new Set(queue.query.data?.queuedInputs.map((input) => input.clientMessageID))}
+            busy={queue.mutation.isPending || submitMutation.isPending}
+            reordering={queue.mutation.isPending && queue.mutation.variables?.type === "reorder"}
+            editingID={editingID}
+            token={token}
+            turnID={runningTurnID}
+            onEdit={(id) => {
+              if (queue.mutation.isPending || editingID || hasPendingAttachments || submitMutation.isPending) return;
+              void queue.mutation.mutateAsync({ type: "update", id, status: "editing" }).then((result) => {
+                if ("clientMessageID" in result) {
+                  useSessionDraftStore.getState().beginQueueEdit(sessionID, result);
+                  requestAnimationFrame(focusTextarea);
+                }
+              }).catch(() => {});
+            }}
+            onDelete={(id) => queue.mutation.mutate({ type: "update", id, status: "cancelled" })}
+            onSteer={(input, turnID) => queue.mutation.mutate({ type: "steer", input, turnID })}
+            onReorder={(ids) => queue.mutation.mutate({ type: "reorder", ids })}
+          />
           {pendingApproval ? (
             <ComposerApprovalBar approval={pendingApproval} preview={Boolean(testPresentation?.approval)} token={token} />
           ) : pendingInputFlow ? (
@@ -1082,7 +1140,19 @@ export function Composer({
               onRevealPath={revealLocalPath}
             />
             <div className="px-3 pt-3.5 pb-2">{composerTextArea}</div>
-            <ComposerToolbar
+            {editingID ? (
+              <div className="flex items-center justify-between gap-2 px-3 pb-3" data-queue-editor>
+                <span className="text-xs text-muted-foreground">{t("composer.queueEditing")}</span>
+                <div className="flex gap-2">
+                  <Button type="button" variant="ghost" size="sm" disabled={queue.mutation.isPending || hasPendingAttachments} onClick={() => {
+                    void queue.mutation.mutateAsync({ type: "update", id: editingID, status: "queued" }).then(() => endQueueEdit(sessionID)).catch(() => {});
+                  }}>{t("common.cancel")}</Button>
+                  <Button type="submit" size="sm" disabled={!canSend || queue.mutation.isPending || !editingInput}>
+                    {queue.mutation.isPending ? <Spinner /> : null}{t("common.save")}
+                  </Button>
+                </div>
+              </div>
+            ) : <ComposerToolbar
               addBusy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}
               audioBindings={audioBindings}
               audioInputSupported={audioInputSupported}
@@ -1116,7 +1186,7 @@ export function Composer({
               onReasoningChange={setSessionReasoningEffort}
               onResolvedModelChange={handleResolvedModelChange}
               onUIContextEnabledChange={setUIContextEnabled}
-            />
+            />}
           </div>
           <>
               <span className="pudding-composer-mascot-anchor">

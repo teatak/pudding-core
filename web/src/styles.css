@@ -921,6 +921,10 @@ html[data-shell-resizing="true"] .pudding-workspace-width-transition {
     color: var(--control-accent-foreground);
 }
 
+:where(.pudding-settings-surface, .pudding-settings-control-surface) [data-slot="slider-track"] {
+    background-color: var(--input);
+}
+
 :where(.pudding-settings-surface, .pudding-settings-control-surface) :is([data-slot="slider-range"], [data-slot="progress-indicator"]) {
     background-color: var(--control-accent);
 }
@@ -2260,6 +2264,19 @@ html[data-agent-console-resizing="true"] webview {
   display: block;
   clear: both;
   content: "";
+}
+
+.pudding-plan-step-breathe {
+  animation: pudding-plan-step-breathe 2s ease-in-out infinite;
+}
+
+@keyframes pudding-plan-step-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pudding-plan-step-breathe { animation: none; }
 }
 
 .phase-dot-breathe {

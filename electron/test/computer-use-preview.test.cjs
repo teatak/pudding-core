@@ -24,7 +24,7 @@ function fixture() {
   const target = {sessionID:'s1',turnID:'t1',appID:'com.example.App',windowID:42};
   const subscribe = (visible = true, turnID = 't1') => preview.subscribe(owner, {sessionID:'s1',turnID,visible});
   const ack = () => preview.acknowledge(owner, owner.messages.at(-1));
-  const frame = (child, text, windowID = 42, pid = 123) => child.stdout.write(JSON.stringify({type:'frame',windowID,pid,width:520,height:480,name:'Example',title:'Window',jpeg:Buffer.from(text).toString('base64')})+'\n');
+  const frame = (child, text, windowID = 42, pid = 123) => child.stdout.write(JSON.stringify({type:'frame',windowID,pid,width:520,height:480,name:'Example',title:'Window',png:Buffer.from(text).toString('base64')})+'\n');
   return {preview, owner, children, target, subscribe, ack, frame, revealed};
 }
 
@@ -49,7 +49,30 @@ test('slow renderers retain only the latest frame and require a matching acknowl
   f.preview.acknowledge(f.owner, {...first,turnID:'wrong'}); assert.equal(f.owner.messages.length, 2);
   f.preview.acknowledge(f.owner, first);
   assert.equal(f.owner.messages.length, 3);
-  assert.equal(f.owner.messages.at(-1).imageURL, 'data:image/jpeg;base64,dGhyZWU=');
+  assert.equal(f.owner.messages.at(-1).imageURL, 'data:image/png;base64,dGhyZWU=');
+});
+
+test('preview transports large PNG frames without the former JPEG size limit', t => {
+  const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+  const payload = Buffer.alloc(950_000, 255);
+  assert.ok(payload.toString('base64').length > 1024 * 1024);
+  f.frame(f.children[0], payload);
+  assert.equal(f.owner.messages.at(-1).status, 'live');
+  assert.equal(f.owner.messages.at(-1).imageURL, `data:image/png;base64,${payload.toString('base64')}`);
+  assert.equal(f.children[0].stdin.writableEnded, false);
+});
+
+test('preview rejects oversized frames and the removed JPEG protocol', t => {
+  for (const data of [
+    'A'.repeat(2 * 1024 * 1024 + 1),
+    JSON.stringify({type:'frame',windowID:42,pid:123,width:520,height:480,name:'Example',title:'Window',jpeg:'b2xk'}) + '\n',
+  ]) {
+    const f = fixture(); t.after(() => f.preview.stop()); f.subscribe(); f.preview.noteActivity(f.target); f.ack();
+    f.children[0].stdout.write(data);
+    assert.equal(f.owner.messages.at(-1).status, 'unavailable');
+    assert.equal(f.owner.messages.at(-1).imageURL, undefined);
+    assert.equal(f.children[0].stdin.writableEnded, true);
+  }
 });
 
 test('hide stops capture; resume binds the same PID; stale frames cannot replace a new window', t => {

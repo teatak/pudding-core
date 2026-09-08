@@ -1,4 +1,3 @@
-import { useRecentOpen } from "@/components/workspace/useRecentOpen";
 import { AppTooltip } from "@/components/AppTooltip";
 import type { ProjectBrowserRoot } from "@/api/client";
 import { FilePreviewSurface } from "@/components/canvas/FilePreviewSurface";
@@ -15,6 +14,9 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceStartPage } from "@/components/workspace/WorkspaceStartPage";
 import { useI18n } from "@/i18n";
 import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
+import { requestProjectFileReveal } from "@/state/projectRevealStore";
+import { openExternalURL } from "@/lib/desktopBridge";
+import { resolveProjectMarkdownLink } from "./projectMarkdownLinks";
 import { languageFromPath } from "@/lib/fileLanguage";
 import type { FilePreview } from "@/state/filePreviewStore";
 
@@ -73,6 +75,7 @@ export function ProjectFileViewer({
   onClosePreviews,
   onDirtyChange,
   onOpenPreview,
+  onOpenBrowserURL,
   onPin,
   onPinInSession,
   onMoveTab,
@@ -102,6 +105,7 @@ export function ProjectFileViewer({
   onClosePreviews: (previewIDs: string[]) => void;
   onDirtyChange: (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onOpenPreview: (selection: ProjectSelection) => void;
+  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onPin: (selection: ProjectTab) => void;
   onPinInSession: (sessionID: string, selection: ProjectSelection) => void;
   onMoveTab: (activeID: string, overID: string) => void;
@@ -120,7 +124,7 @@ export function ProjectFileViewer({
     onOpenPreview(activeTurnDiffSelection);
   };
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
       <ProjectFileTabs
         active={selection}
         activePreviewID={activePreview?.id}
@@ -180,6 +184,7 @@ export function ProjectFileViewer({
             discardRequest={discardRequest}
             reveal={documentSessionID === sessionID && reveal?.key === key ? reveal : undefined}
             requestedView={requestedView?.sessionID === documentSessionID && requestedView.key === key ? requestedView : undefined}
+            onOpenBrowserURL={onOpenBrowserURL}
             onDirtyChange={onDirtyChange}
             onPin={() => onPinInSession(documentSessionID, documentSelection)}
             onReference={onReference}
@@ -190,7 +195,7 @@ export function ProjectFileViewer({
   );
 }
 
-function ProjectFileDocument({ active, visible, absolutePath, selection, sessionID, roots, token, discardRequest, reveal, requestedView, onDirtyChange, onPin, onReference }: {
+function ProjectFileDocument({ active, visible, absolutePath, selection, sessionID, roots, token, discardRequest, reveal, requestedView, onOpenBrowserURL, onDirtyChange, onPin, onReference }: {
   active: boolean;
   visible: boolean;
   absolutePath?: string;
@@ -201,6 +206,7 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
   discardRequest?: { id: number; keys: string[]; sessionID: string };
   reveal?: ProjectEditorReveal;
   requestedView?: { mode: FileViewMode };
+  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onDirtyChange: (sessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onPin: () => void;
   onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
@@ -232,8 +238,6 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
     staleTime: 0,
   });
   const file = fileQuery.data;
-  useRecentOpen(token,sessionID,active && !fileQuery.isError && (isResourcePreview || file) && roots.some((root) => root.id === selection.rootID)
-    ? {kind:"file",rootID:selection.rootID,path:selection.path} : undefined);
   const content = draft?.content ?? file?.content ?? "";
   const dirty = Boolean(draft && draft.content !== draft.baseContent);
   const externalConflict = Boolean(draft?.externalRevision);
@@ -284,6 +288,26 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
     const externalRevision = existing.baseRevision === file.revision ? undefined : file.revision;
     if (existing.externalRevision !== externalRevision) updateDraft({ ...existing, externalRevision });
   }, [file, selection, sessionID]);
+
+  const openLink = (href: string) => {
+    const target = resolveProjectMarkdownLink(href, selection, roots);
+    if (target.kind === "invalid") {
+      toast.warning(t("project.browserLinkUnavailable"));
+    } else if (target.kind === "file") {
+      const root = roots.find((item) => item.id === target.selection.rootID);
+      if (!root) return;
+      const sourceLine = target.anchor?.match(/^L([1-9]\d*)(?:-L[1-9]\d*)?$/);
+      requestProjectFileReveal({
+        sessionID, rootPath: root.path, relativePath: target.selection.path,
+        line: sourceLine ? Number(sourceLine[1]) : undefined,
+        anchor: sourceLine ? undefined : target.anchor,
+      });
+    } else if (target.kind === "web") {
+      onOpenBrowserURL(sessionID, target.url);
+    } else {
+      void openExternalURL(target.url);
+    }
+  };
 
   const saveMutation = useMutation({
     mutationFn: ({ expectedRevision, target, targetSessionID, value }: SaveDraftRequest) => {
@@ -369,6 +393,18 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
 
   if (!visited.current) return null;
 
+  const nextViewMode = fileViewMode === "preview" ? "source" : "preview";
+  const viewModeLabel = t(nextViewMode === "source"
+    ? "project.browserSource"
+    : isMarkdown ? "project.browserMarkdownEditor" : "project.browserPreview");
+  const viewModeToggle = supportsViewMode ? (
+    <AppTooltip content={viewModeLabel}>
+      <Button aria-label={viewModeLabel} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode(nextViewMode)}>
+        {nextViewMode === "source" ? <FileCode2 /> : isMarkdown ? <FilePenLine /> : <Eye />}
+      </Button>
+    </AppTooltip>
+  ) : null;
+
   return (
     <div data-project-document={`${sessionID}:${selectionKey}`} hidden={!visible} className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
       {!isImage || (isSVG && fileViewMode === "source") ? (
@@ -376,20 +412,7 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || selection.path}</code>
           {!isResourcePreview || isSVG ? (
             <div className="flex shrink-0 items-center gap-1">
-              {isSVG ? (
-                <Button aria-label={t("project.browserPreview")} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("preview")}>
-                  <Eye />
-                </Button>
-              ) : supportsViewMode ? (
-                <>
-                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("preview")}>
-                    {isMarkdown ? <FilePenLine /> : <Eye />}
-                  </Button>
-                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className={viewModeButtonClassName} size="icon-sm" type="button" variant="ghost" onClick={() => setViewMode("source")}>
-                    <FileCode2 />
-                  </Button>
-                </>
-              ) : null}
+              {viewModeToggle}
               <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm"  type="button" variant="ghost" onClick={() => save()}>
                 {saveMutation.isPending ? <Spinner /> : <Save />}
               </Button>
@@ -412,7 +435,7 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
             active={active}
             alt={selection.path}
             src={resourceURL}
-            onShowSource={isSVG ? () => setViewMode("source") : undefined}
+            viewModeToggle={viewModeToggle}
           />
         ) : isPDF ? (
           <ProjectPDFPreview key={resourceURL} src={resourceURL} title={selection.path} />
@@ -423,6 +446,7 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
         ) : previewFile && isMarkdown && fileViewMode === "preview" ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectMarkdownEditor
+              onOpenLink={openLink}
               path={previewFile.path}
               reveal={reveal?.key === selectionKey ? reveal : undefined}
               value={content}
@@ -477,7 +501,7 @@ function ProjectViewerStatus({ children, icon }: { children: ReactNode; icon?: R
   return <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">{icon}<span>{children}</span></div>;
 }
 
-function ProjectImagePreview({ active, alt, src, onShowSource }: { active: boolean; alt: string; src: string; onShowSource?: () => void }) {
+function ProjectImagePreview({ active, alt, src, viewModeToggle }: { active: boolean; alt: string; src: string; viewModeToggle?: ReactNode }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -539,18 +563,7 @@ function ProjectImagePreview({ active, alt, src, onShowSource }: { active: boole
         <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs">{alt}</code>
         {!failed ? (
           <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-            {onShowSource ? (
-              <AppTooltip content={t("project.browserSource")}><Button
-                aria-label={t("project.browserSource")}
-                className={viewModeButtonClassName}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-                onClick={onShowSource}
-              >
-                <FileCode2 />
-              </Button></AppTooltip>
-            ) : null}
+            {viewModeToggle}
             <AppTooltip content={t("project.browserZoomOut")}><Button
               aria-label={t("project.browserZoomOut")}
               disabled={scale <= 0.1}

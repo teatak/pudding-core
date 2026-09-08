@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment, ProjectReference } from "@/api/client";
+import type { Attachment, ProjectReference, QueuedInput } from "@/api/client";
 import { newClientID } from "@/lib/id";
 import type { LocalFolderPath } from "@/lib/localFolders";
 import type { DraftPartOrderItem } from "@/lib/submitParts";
@@ -26,6 +26,9 @@ type SessionDraft = {
 type DraftListUpdate<T> = T[] | ((current: T[]) => T[]);
 
 type SessionDraftState = {
+  queueEdits: Record<string, string | undefined>;
+  beginQueueEdit: (sessionID: string, input: QueuedInput) => void;
+  endQueueEdit: (sessionID: string) => void;
   drafts: Record<string, SessionDraft | undefined>;
   clear: (sessionID: string) => SessionDraft;
   ensure: (sessionID: string) => SessionDraft;
@@ -48,6 +51,37 @@ function newSessionDraft(text = ""): SessionDraft {
 }
 
 export const useSessionDraftStore = create<SessionDraftState>((set, get) => ({
+  queueEdits: {},
+  beginQueueEdit: (sessionID, input) => {
+    const key = queuedDraftKey(sessionID, input.clientMessageID);
+    const draft = newSessionDraft(input.text);
+    draft.clientMessageID = input.clientMessageID;
+    for (const part of input.parts || []) {
+      if (part.type === "attachment") {
+        draft.attachments.push({ id: part.id, name: part.name, size: part.size, status: "uploaded", attachment: part });
+        draft.partOrder.push({ type: "attachment", id: part.id });
+      } else if (part.type === "local_folder") {
+        draft.localFolders.push(part);
+        draft.partOrder.push({ type: "local_folder", id: part.id });
+      } else if (part.type === "project_reference") {
+        draft.projectReferences.push(part);
+        draft.partOrder.push({ type: "project_reference", id: part.id });
+      }
+    }
+    set((state) => ({ drafts: { ...state.drafts, [key]: draft }, queueEdits: { ...state.queueEdits, [sessionID]: input.clientMessageID } }));
+  },
+  endQueueEdit: (sessionID) => set((state) => {
+    const id = state.queueEdits[sessionID];
+    const drafts = { ...state.drafts };
+    if (id) {
+      const key = queuedDraftKey(sessionID, id);
+      for (const item of drafts[key]?.attachments || []) if (item.previewURL) URL.revokeObjectURL(item.previewURL);
+      delete drafts[key];
+    }
+    const queueEdits = { ...state.queueEdits };
+    delete queueEdits[sessionID];
+    return { drafts, queueEdits };
+  }),
   drafts: {},
   clear: (sessionID) => {
     const draft = newSessionDraft();
@@ -144,6 +178,11 @@ export const useSessionDraftStore = create<SessionDraftState>((set, get) => ({
     });
   },
 }));
+
+// Local draft key only; it must never be passed as a business sessionID.
+export function queuedDraftKey(sessionID: string, clientMessageID: string) {
+  return JSON.stringify([sessionID, clientMessageID]);
+}
 
 function applyDraftListUpdate<T>(current: T[], update: DraftListUpdate<T>) {
   return typeof update === "function" ? update(current) : update;

@@ -9,6 +9,7 @@ import {
   type BrowserTab,
   type BackgroundProcess,
   type PendingApproval,
+  type QueuedInput,
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -135,7 +136,14 @@ function openSessionEventSource({
     if (parsed.data.kind === "input.steered" && syncMessages) {
       syncTurn(queryClient, token, sessionID, parsed.data.turnID);
     }
-    if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "turn.started")) {
+    if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "input.steered" || parsed.data.kind === "turn.started")) {
+      const inputEvent = parsed.data;
+      if (inputEvent.kind === "turn.started" || inputEvent.kind === "input.steered" ||
+        (inputEvent.kind === "input.updated" && (inputEvent.status === "promoted" || inputEvent.status === "cancelled"))) {
+        queryClient.setQueryData<{ queuedInputs: QueuedInput[] }>(queryKeys.queuedInputs(sessionID), (data) => data
+          ? { queuedInputs: data.queuedInputs.filter((input) => input.clientMessageID !== inputEvent.clientMessageID) }
+          : data);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
     }
   };

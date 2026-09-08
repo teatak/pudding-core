@@ -47,10 +47,10 @@ make computer-use-electron-ime-smoke
 ### 2026-09-06 Computer Use 窗口预览
 
 - 工作区收起时，在打开的产物列表下方显示独立窗口预览；没有产物时显示在右上方。长列表滚动，预览不作为产物或工作区标签。
-- 标题栏高 32px，应用图标、名称和状态指示单行排列。预览按窗口当前内容宽高比显示；读取每帧的 `contentRect` 和 Retina `scaleFactor` 裁去采集缓冲区留白，实时跟随窗口横竖比例变化。画面最大宽度 240px，高度不超过 `min(240px, 30vh)`，同时受可用宽度限制，始终等比缩小。
+- 画中画只显示窗口画面，不附加顶部标题栏、应用图标或标题栏状态指示；应用名和状态保留在悬停提示与无障碍描述中，加载/失败占位继续保留。预览按窗口当前内容宽高比显示；读取每帧的 `contentRect` 和 Retina `scaleFactor` 裁去采集缓冲区留白，实时跟随窗口横竖比例变化。画面最大宽度 240px，高度不超过 `min(240px, 30vh)`，同时受可用宽度限制，始终等比缩小。
 - 仅用于展示。点击通过原生桥接将同一 bundle ID、PID、window ID 的窗口置前，不转发键盘、指针输入，也不自动展开工作区。
 - 执行请求从 `Call.TurnID` 透传私有请求头，原生桥接通过权限协调后发布显式 session/turn/window 活动。Electron 负责采集生命周期，前端沿用现有运行 turn 和工作区状态，不向 daemon 写入前台或工作区展开状态。
-- 签名 Helper 的独立只读进程通过 ScreenCaptureKit 采集单个窗口，最多 5 FPS、640×480、JPEG。画面仅在内存中经 preload IPC 展示，不写文件，不加入消息、附件或模型上下文；每个渲染端至多一个未确认帧，只保留最新画面。
+- 签名 Helper 的独立只读进程通过 ScreenCaptureKit 采集单个窗口，最多 5 FPS、640×480；显式使用 BGRA 采集并以 PNG 传输，保留窗口圆角和半透明边缘，避免默认 YUV 格式把透明区域变黑。单帧 JSON/base64 上限 2 MiB。画面仅在内存中经 preload IPC 展示，不写文件，不加入消息、附件或模型上下文；每个渲染端至多一个未确认帧，只保留最新画面。
 - 展开工作区、隐藏页面时停止采集；收起后恢复同一 PID 的窗口。取消、会话切换、页面重载、窗口关闭及 Electron 退出均释放采集；正常 turn 完成后停止采集，保留最后一帧 30 秒再移除，与浏览器预览共用停留时长。采集失败清除旧图，不自动重试原生操作。
 
 隔离桌面回归（需先构建开发 daemon、Helper 和 Fixture）：
@@ -338,6 +338,17 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者后续需要坐标指针动作时传 `foreground=true`；该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
 
+显式前台请求和预览窗口的显示请求共用 `ForegroundPolicy`：已经前台且目标窗口未被其他普通应用窗口遮挡时直接成功，不调用 AXRaise，也不额外要求辅助功能权限。只有窗口尚未显示到前面时才尝试一次 AXRaise；最终以实际前台及窗口顺序判断成功，而非仅凭 AX 返回值。失败保留 AX 原生错误码。过程中失去前台则停止，不循环激活争抢焦点。
+
+AX 语义操作保持后台执行能力。坐标/键盘动作的 `computer_app_not_foreground` 表示该失败项未执行，不自动重试或重新激活；模型应请用户恢复目标窗口或明确同意切回。观察不是解决前台冲突的必经步骤。后台坐标事件未通过应用实测前，不接入产品，也不自动切换到前台事件路径。
+
+2026-09-08 iPhone 镜像验证记录（不是通用兼容性结论）：
+
+- 独立诊断进程使用 `CGEvent.postToPid`，向已连接镜像的主屏幕时钟组件投递单次左键 down/up，附带目标窗口字段。后台试验中前台应用、鼠标位置未变，但时钟未打开。
+- 用户手动切到镜像前台后，同样的 PID 定向事件也未打开时钟，因此不能仅凭该结果断言是“后台状态”导致；该路径未验证有效，没有加入产品或自动 fallback。
+- 用现有 Codex Computer Use 点击同一坐标，时钟打开；随后恢复主屏幕。此对照证明目标可点击，不代表 Pudding 的 PID 事件路径已通过。
+- 当前源码编译的 Helper 在镜像已前台时执行 `use-app --foreground` 成功返回 `windowStatus=ready`。更早的一次激活未达到前台，返回独立的 `computer_activation_failed`，没有继续执行输入。没有替换或重启开发/发布应用。
+
 ### `builtin_computer_quit_app`
 
 只接受当前 session 持有的 `launchID`,并对其对应的 bundle ID + PID 发出普通退出请求。绝不 force quit。返回 `closed=false` 时保留 ownership,停止自动操作并请用户处理未保存内容或确认窗口。
@@ -441,6 +452,10 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - `computer_permission_denied`
 - `computer_app_not_found`
 - `computer_app_not_installed`
+- `computer_launch_failed`
+- `computer_activation_failed`
+- `computer_window_raise_failed`
+- `computer_use_failed`
 - `computer_launch_not_owned`
 - `computer_window_required`
 - `computer_window_not_found`
@@ -455,7 +470,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 - `computer_helper_crashed`
 - `computer_capture_failed`
 
-超时或连接断开不能统一标记 retryable。只有明确 `outcome=not_started` 才可提示重新观察后重试。
+超时或连接断开不能统一标记 retryable。`not_started` 只表示该动作未执行，不代表可以原样重试；需先解决具体前提，是否观察取决于缺少什么信息。启动、激活和置顶错误分别报告；后两者不能表述为“应用未启动”，因为应用可能已经运行。这些生命周期失败保持 `outcome=unknown` 和 `retryable=false`。
 
 ## 10. 权限与安全
 

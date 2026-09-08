@@ -106,6 +106,7 @@ export {
   LocateFixed,
   Maximize2,
   MessageCirclePlus,
+  MessageCircleQuestionMark,
   MessageSquareMore,
   MessageSquarePlus,
   MessageSquareText,

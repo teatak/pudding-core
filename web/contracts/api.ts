@@ -292,27 +292,6 @@ export const putLibraryFavoriteRequest = z.discriminatedUnion("kind", [
  z.object({kind: z.literal("web"), url: z.string().url(), title: z.string().optional()}),
 ]);
 export type LibraryFavoriteInput = z.infer<typeof putLibraryFavoriteRequest>;
-export const libraryFileOpen = z.object({sessionID:z.string(), rootPath:z.string(), relativePath:z.string()});
-
-export const libraryRecentEntry = z.object({
- id: z.string(), kind: z.enum(["file", "canvas", "web"]), sourceSessionID: z.string(),
- itemID: z.string().optional(), rootPath: z.string().optional(), path: z.string().optional(),
- title: z.string().optional(), canvasKind: z.string().optional(), openedAt: z.string(),
- url: z.string().optional(), faviconURL: z.string().optional(), available: z.boolean(),
- sourceSessionTitle: z.string().optional(), sourceProjectName: z.string().optional(), sourceSessionAvailable: z.boolean(),
-});
-export type LibraryRecentEntry = z.infer<typeof libraryRecentEntry>;
-export const listLibraryRecentResponse = z.object({entries:z.array(libraryRecentEntry)});
-export const recordLibraryRecentRequest = z.discriminatedUnion("kind",[
- z.object({kind:z.literal("file"),rootID:z.string().min(1),path:z.string().min(1)}),
- z.object({kind:z.literal("canvas"),itemID:z.string().min(1)}),
-]);
-export type LibraryRecentInput = z.infer<typeof recordLibraryRecentRequest>;
-export const libraryRecentTarget = z.discriminatedUnion("kind",[
- libraryFileOpen.extend({kind:z.literal("file")}),
- z.object({kind:z.literal("canvas"),sessionID:z.string(),itemID:z.string()}),
-]);
-
 export const canvasSaveResult = z.object({
   item: canvasItem,
   savedItem: savedCanvasItem,
@@ -1023,9 +1002,11 @@ export const listMessagesResponse = z.object({ messages: z.array(message), hasMo
 export const listTurnsResponse = z.object({ turns: z.array(conversationTurn), hasMore: z.boolean() });
 export const listQueuedInputsResponse = z.object({ queuedInputs: z.array(queuedInput) });
 export const patchQueuedInputRequest = z.object({
-  text: z.string().min(1).optional(),
+  text: z.string().optional(),
+  parts: z.array(contentPart).optional(),
   status: z.enum(["queued", "editing", "cancelled"]).optional(),
 });
+export const reorderQueuedInputsRequest = z.object({ clientMessageIDs: z.array(z.string().min(1)) });
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
 export const userPromptResponse = z.object({
   path: z.string(),

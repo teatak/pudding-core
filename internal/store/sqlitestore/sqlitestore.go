@@ -864,8 +864,9 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			UpdatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM queued_inputs WHERE session_id=?))`,
 			input.SessionID, input.ClientMessageID, input.Text, encodeParts(input.Parts), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+			input.SessionID,
 		); err != nil {
 			return err
 		}
@@ -903,7 +904,7 @@ func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*stor
 		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?)
-		ORDER BY created_at ASC, rowid ASC`,
+		ORDER BY sort_order ASC, rowid ASC`,
 		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
 	)
 	if err != nil {
@@ -939,7 +940,7 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 		if err != nil {
 			return err
 		}
-		if input.Status == store.QueuedInputPromoted {
+		if input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing {
 			return store.ErrNotFound
 		}
 		if in.Text != nil {
@@ -952,6 +953,9 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 			return store.ErrNotFound
 		}
 		input.UpdatedAt = time.Now()
+		if in.Parts != nil {
+			input.Parts = store.NormalizeContentParts(*in.Parts)
+		}
 		input.Parts = store.ReplaceUserInputText(input.Parts, input.Text)
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE queued_inputs SET text=?, parts=?, status=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
@@ -2489,7 +2493,7 @@ func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*sto
 		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?,?)
-		ORDER BY created_at ASC, rowid ASC
+		ORDER BY sort_order ASC, rowid ASC
 		LIMIT 1`,
 		sessionID, store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled,
 	)

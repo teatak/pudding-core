@@ -792,7 +792,7 @@ class BrowserHost {
           const frameTree = await withTimeout(debug.sendCommand("Page.getFrameTree"), cdpCommandTimeoutMS, "Page.getFrameTree timed out");
           slot.mainFrameID = String(frameTree?.frameTree?.frame?.id || "");
           slot.mainFrameLoaderID = String(frameTree?.frameTree?.frame?.loaderId || "");
-          const frameURL = String(frameTree?.frameTree?.frame?.url || "");
+          const frameURL = cdpFrameURL(frameTree?.frameTree?.frame);
           slot.committedURL = normalizeURL(frameURL, slot.fileRoots);
           if (frameURL && !slot.committedURL) {
             throw navigationNotAllowedError(frameURL);
@@ -1131,7 +1131,7 @@ class BrowserHost {
         return;
       }
       if (method === "Page.frameNavigated" && !params?.frame?.parentId) {
-        const nextURL = normalizeURL(params?.frame?.url, slot.fileRoots);
+        const nextURL = normalizeURL(cdpFrameURL(params?.frame), slot.fileRoots);
         if (nextURL) {
           cancelNavigationSettlement(slot);
           const commandNavigationPending = Boolean(slot.navigationWaiter);
@@ -1894,6 +1894,11 @@ function clampInt(value, fallback, max) {
     return fallback;
   }
   return Math.min(n, max);
+}
+
+// CDP Frame.url excludes the fragment, which arrives separately.
+function cdpFrameURL(frame) {
+  return String(frame?.url || "") + String(frame?.urlFragment || "");
 }
 
 function normalizeURL(rawURL, fileRoots = []) {

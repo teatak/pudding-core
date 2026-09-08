@@ -841,7 +841,7 @@ function ThoughtPart({
       {canShowContent ? (
         <div
           ref={bodyRef}
-          className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-muted/20 p-2 text-[13px] leading-6 text-muted-foreground italic"
+          className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-muted/20 p-2 text-[13px] leading-6 italic"
         >
           {text}
         </div>
@@ -871,7 +871,6 @@ function ProcessCompactPart({
   const appID = sharedProcessDesktopAppID(hiddenParts);
   return (
     <TranscriptDisclosure
-      className="text-muted-foreground/70"
       contentClassName="py-0"
       icon={<ProcessCompactActivityGlyph active={title.active && !open} appID={appID} icon={Icon} />}
       open={open}
@@ -1154,28 +1153,21 @@ function ToolUsePart({
   const showDetails = codeTool || (mediaInspectionTool && !screenshotTool) || showRawInfo;
   const active = isActiveProcessPart(part);
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
-  const failed = toolFailed(part);
   const Icon = toolPartIcon(part);
   const appID = computerToolAppID(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const activityActive = showActivitySpinner || active;
-  const toneClass = "text-muted-foreground";
-  const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
   const disclosure = !showDetails ? (
     <TranscriptDisclosure
-      className={toneClass}
       icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       summary={title.summary || undefined}
-      summaryClassName={summaryClass}
       title={title.label}
     />
   ) : (
     <TranscriptDisclosure
-      className={toneClass}
       icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       open={open}
       summary={title.summary || undefined}
-      summaryClassName={summaryClass}
       title={title.label}
       onSummaryClick={handleSummaryClick}
       onSummaryKeyDown={handleSummaryKeyDown}

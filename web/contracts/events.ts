@@ -73,7 +73,8 @@ export const inputQueuedEvent = z.object({
   seq: z.number().int().positive(),
   sessionID: z.string(),
   clientMessageID: z.string(),
-  text: z.string(),
+  // Go omits empty text for attachment-only input (Event.Text, omitempty).
+  text: z.string().default(""),
   status: z.enum(["queued", "editing", "cancelled", "promoted"]),
 });
 
@@ -82,7 +83,7 @@ export const inputUpdatedEvent = z.object({
   seq: z.number().int().positive(),
   sessionID: z.string(),
   clientMessageID: z.string(),
-  text: z.string(),
+  text: z.string().default(""),
   status: z.enum(["queued", "editing", "cancelled", "promoted"]),
 });
 
@@ -93,7 +94,7 @@ export const inputSteeredEvent = z.object({
   turnID: z.string(),
   clientMessageID: z.string(),
   userMessageID: z.string(),
-  text: z.string(),
+  text: z.string().default(""),
 });
 
 export const audioBindingsEvent = z.object({

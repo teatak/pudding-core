@@ -239,12 +239,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/browser/tabs/:tabID/scroll").POST(s.scrollBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/release").POST(s.releaseBrowserTab)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
+	app.Route("/sessions/:id/queued-inputs/reorder").POST(s.reorderQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID/steer").POST(s.steerQueuedInput)
 	app.Route("/sessions/:id/library").GET(s.listLibrary)
-	app.Route("/sessions/:id/library/recent").GET(s.listLibraryRecentOpens).POST(s.recordLibraryRecentOpen).DELETE(s.clearLibraryRecentOpens)
-	app.Route("/sessions/:id/library/recent/:kind/:recentID").DELETE(s.deleteLibraryRecentOpen)
-	app.Route("/sessions/:id/library/recent/:kind/:recentID/open").POST(s.openLibraryRecent)
 	app.Route("/sessions/:id/library/favorites").POST(s.putLibraryFavorite)
 	app.Route("/sessions/:id/library/favorites/:favoriteID").DELETE(s.deleteLibraryFavorite)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
@@ -953,8 +951,9 @@ func (s *Server) listQueuedInputs(c *cart.Context) error {
 }
 
 type patchQueuedInputReq struct {
-	Text   *string `json:"text"`
-	Status *string `json:"status"`
+	Text   *string              `json:"text"`
+	Status *string              `json:"status"`
+	Parts  *[]store.ContentPart `json:"parts"`
 }
 
 func (s *Server) patchQueuedInput(c *cart.Context) error {
@@ -967,10 +966,25 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 	var text *string
 	if req.Text != nil {
 		next := strings.TrimSpace(*req.Text)
-		if next == "" {
+		if next == "" && (req.Parts == nil || len(store.NormalizeContentParts(*req.Parts)) == 0) {
 			return badRequest(c, "text is required")
 		}
 		text = &next
+	}
+	if req.Parts != nil {
+		if text == nil {
+			return badRequest(c, "text is required with parts")
+		}
+		parts := store.UserInputParts(*text, *req.Parts)
+		attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+		if errors.Is(err, errInvalidAttachment) {
+			return badRequest(c, "invalid attachments")
+		}
+		if err != nil {
+			return s.fail(c, err)
+		}
+		parts = store.UserInputPartsWithAttachments(*text, parts, attachments)
+		req.Parts = &parts
 	}
 	var status *store.QueuedInputStatus
 	if req.Status != nil {
@@ -989,6 +1003,7 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 		SessionID:       id,
 		ClientMessageID: clientMessageID,
 		Text:            text,
+		Parts:           req.Parts,
 		Status:          status,
 	})
 	if err != nil {

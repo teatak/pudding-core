@@ -314,6 +314,8 @@ function classifyComputerUseError(error) {
     case "computer_app_ambiguous":
     case "computer_pointer_target_changed":
     case "computer_app_not_foreground":
+    case "computer_activation_failed":
+    case "computer_window_raise_failed":
     case "computer_element_not_actionable":
       status = 409;
       break;

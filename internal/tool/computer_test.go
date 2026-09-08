@@ -67,6 +67,25 @@ func TestComputerActionSchemaUsesOneActionsArrayContract(t *testing.T) {
 	t.Fatal("Computer Act definition not found")
 }
 
+func TestComputerForegroundGuidanceDoesNotFightTheUser(t *testing.T) {
+	for _, definition := range BuiltinDefinitions() {
+		switch definition.Name {
+		case ComputerAct:
+			for _, rule := range []string{"may run in the background", "computer_app_not_foreground", "do not repeat it or automatically reactivate", "ask the user to restore the target"} {
+				if !strings.Contains(definition.Description, rule) {
+					t.Fatalf("ComputerAct missing foreground rule %q", rule)
+				}
+			}
+		case ComputerUseApp:
+			for _, code := range []string{"computer_launch_failed", "computer_activation_failed", "computer_window_raise_failed"} {
+				if !strings.Contains(definition.Description, code) {
+					t.Fatalf("ComputerUseApp missing lifecycle stage %q", code)
+				}
+			}
+		}
+	}
+}
+
 func TestComputerUseAppDefaultsToBackground(t *testing.T) {
 	args, err := decodeComputerUseAppArgs([]byte(`{"appID":"com.example.App"}`))
 	if err != nil {

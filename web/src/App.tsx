@@ -712,7 +712,7 @@ export function App() {
       key="agent-console"
       className={cn(
         "pudding-agent-console min-h-0 min-w-0",
-        docked && "pudding-workspace-width-transition",
+        docked && workspaceTransition !== "idle" && "pudding-workspace-width-transition",
         "overflow-hidden",
       )}
       style={{

@@ -393,6 +393,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     set((state) => {
       const current = overlayWithDefaults(state.assistants[turnID], turnID, sessionID);
       return {
+        pendingUsers: markPendingStarted(state.pendingUsers, sessionID, clientMessageID, turnID),
         assistants: {
           ...state.assistants,
           [turnID]: { ...current, clientMessageID },
@@ -520,7 +521,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
           activeTurnPlans: { ...state.activeTurnPlans, [event.sessionID]: undefined },
           assistants: { ...assistants, [event.turnID]: { ...current, clientMessageID: event.clientMessageID } },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
-          pendingUsers,
+          pendingUsers: markPendingStarted(pendingUsers, event.sessionID, event.clientMessageID, event.turnID),
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
           turnPhases: {
             ...state.turnPhases,
@@ -787,4 +788,10 @@ function sameActiveTurnPlan(previous: ActiveTurnPlan | undefined, next: ActiveTu
   return previous.plan.every(
     (step, index) => step.step === next.plan[index]?.step && step.status === next.plan[index]?.status,
   );
+}
+
+function markPendingStarted(pendingUsers: Record<string, PendingUserMessage[]>, sessionID: string, clientMessageID: string, turnID: string) {
+  const inputs = pendingUsers[sessionID];
+  if (!inputs?.some((input) => input.clientMessageID === clientMessageID)) return pendingUsers;
+  return { ...pendingUsers, [sessionID]: inputs.map((input) => input.clientMessageID === clientMessageID ? { ...input, status: "submitting" as const, turnID } : input) };
 }

@@ -5,6 +5,7 @@ import type { UIContextPart } from "@/state/uiContextStore";
 
 export type { TranscriptDisplaySettings };
 
+
 export type UserInputVM = {
   clientMessageID?: string;
   createdAt?: string;

@@ -1,10 +1,9 @@
-import { Captions, Check, ChevronDown, ChevronUp, Clock3, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "@/components/icons";
+import { Captions, ChevronDown, ChevronUp, FileText, FolderOpen, Mic, Pause, Play } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { revealDesktopPath } from "@/api/client";
@@ -21,27 +20,16 @@ const COLLAPSED_USER_TEXT_HEIGHT = 240;
 export const UserInput = memo(function UserInput({
   disclosure,
   disclosureKey,
-  onQueuedCancel,
-  onQueuedEditStart,
-  onQueuedSteer,
-  onQueuedSave,
   token,
   user,
 }: {
   disclosure?: TurnDisclosureState;
   disclosureKey: string;
-  onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   token: string;
   user: UserInputVM;
 }) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState(user.text);
-  const [editing, setEditing] = useState(false);
   const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
   const clientMessageID = user.clientMessageID;
   const attachments = user.attachments || [];
   const voiceAudioAttachments = attachments.filter((attachment) => isAudioAttachment(attachment.mime, attachment.name) && isVoiceAudioAttachment(attachment));
@@ -65,93 +53,14 @@ export const UserInput = memo(function UserInput({
       .map((attachment) => attachment.name)
       .concat(localFolders.map((folder) => folder.path), projectReferences.map((reference) => reference.path))
       .join("\n");
-  const canManageQueued =
-    Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
-    Boolean(onQueuedEditStart && onQueuedSave && onQueuedCancel);
-  const voiceAudioAttachment = !editing ? voiceAudioAttachments[0] : undefined;
+  const voiceAudioAttachment = voiceAudioAttachments[0];
   const rawInput = isRawVoiceClientMessageID(clientMessageID) || voiceAudioAttachment?.origin === VOICE_AUDIO_ORIGIN;
   const asrInput = isASRClientMessageID(clientMessageID) || rawInput;
-  const canEditQueued = canManageQueued && !rawInput && !formResult;
-  const canSteerQueued = Boolean(clientMessageID && user.pending && user.status === "queued" && onQueuedSteer);
-
-  useEffect(() => {
-    if (!editing) {
-      setDraft(user.text);
-    }
-  }, [editing, user.text]);
   useEffect(() => {
     if (imagePreviewIndex !== null && imagePreviewIndex >= imagePreviewItems.length) {
       setImagePreviewIndex(null);
     }
   }, [imagePreviewIndex, imagePreviewItems.length]);
-
-  async function startEdit() {
-    if (!clientMessageID || !onQueuedEditStart) {
-      return;
-    }
-    setDraft(user.text);
-    setEditing(true);
-    setSaving(true);
-    try {
-      await onQueuedEditStart(clientMessageID);
-    } catch {
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveEdit(text: string) {
-    const next = text.trim();
-    if (!clientMessageID || !onQueuedSave || !next) {
-      return;
-    }
-    setSaving(true);
-    try {
-      await onQueuedSave(clientMessageID, next);
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function discardEdit() {
-    if (!clientMessageID || !onQueuedSave) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onQueuedSave(clientMessageID, user.text);
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function cancelQueued() {
-    if (!clientMessageID || !onQueuedCancel) {
-      return;
-    }
-    setSaving(true);
-    try {
-      await onQueuedCancel(clientMessageID);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function steerQueued() {
-    if (!clientMessageID || !onQueuedSteer) {
-      return;
-    }
-    setSaving(true);
-    try {
-      await onQueuedSteer(clientMessageID);
-    } finally {
-      setSaving(false);
-    }
-  }
 
   function revealLocalPath(path: string) {
     if (!path.trim()) {
@@ -160,114 +69,84 @@ export const UserInput = memo(function UserInput({
     void revealDesktopPath(token, path).catch(() => {});
   }
 
-  const actions = !editing ? (
-    <>
-      {voiceAudioAttachment ? <VoiceAudioPlaybackButton attachment={voiceAudioAttachment} token={token} /> : null}
-      {canManageQueued ? (
-        <>
-          {canSteerQueued ? (
-            <MetaIconButton label={t("transcript.guideQueued")} disabled={saving} onClick={steerQueued}>
-              {saving ? <Spinner /> : <CornerDownLeft />}
-            </MetaIconButton>
-          ) : null}
-          {canEditQueued ? (
-            <MetaIconButton label={t("transcript.editQueued")} disabled={saving} onClick={startEdit}>
-              <Pencil />
-            </MetaIconButton>
-          ) : null}
-          <MetaIconButton label={t("transcript.cancelQueued")} disabled={saving} onClick={cancelQueued}>
-            {saving ? <Spinner /> : <Trash2 />}
-          </MetaIconButton>
-        </>
-      ) : null}
-    </>
-  ) : null;
-  const queuedStatus =
-    user.pending && (user.status === "queued" || user.status === "editing") ? (
-      <span className="inline-flex shrink-0 items-center gap-1">
-        <Clock3 className="size-3.5" aria-hidden="true" />
-        <span>{t("transcript.queued")}</span>
-      </span>
-    ) : null;
+  const actions = voiceAudioAttachment ? <VoiceAudioPlaybackButton attachment={voiceAudioAttachment} token={token} /> : null;
   const showASRIndicator = asrInput || Boolean(voiceAudioAttachment);
-  const userInputItemCards = editing
-    ? []
-    : orderedItems.map((item) => {
-        if (item.type === "local_folder") {
-          return (
-            <LocalFolderCard
-              key={`folder:${item.item.id}`}
-              label={t("composer.folderLabel")}
-              name={item.item.name}
-              path={item.item.path}
-              onReveal={() => revealLocalPath(item.item.path)}
-            />
-          );
-        }
-        if (item.type === "project_reference") {
-          return (
-            <ProjectReferenceCard
-              key={`project-reference:${item.item.id}`}
-              reference={item.item}
-              fileLabel={t("composer.projectFileLabel")}
-              folderLabel={t("composer.projectFolderLabel")}
-            />
-          );
-        }
-        const attachment = item.item;
-        if (isImageAttachment(attachment.mime, attachment.name)) {
-          const imageIndex = imagePreviewIndexByID.get(attachment.id);
-          if (imageIndex === undefined) {
-            return null;
-          }
-          const image = imagePreviewItems[imageIndex];
-          return image ? (
-            <ImageAttachmentButton
-              key={`attachment:${attachment.id}`}
-              image={image}
-              onOpen={() => setImagePreviewIndex(imageIndex)}
-            />
-          ) : null;
-        }
-        if (isAudioAttachment(attachment.mime, attachment.name)) {
-          return <AudioAttachmentCard key={`attachment:${attachment.id}`} attachment={attachment} token={token} />;
-        }
-        const content = (
-          <>
-            <FileText className="size-3 shrink-0" />
-            <span className="min-w-0 truncate">{attachment.name}</span>
-            {attachment.size > 0 ? (
-              <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span>
-            ) : null}
-          </>
-        );
-        const className =
-          "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
-        if (attachment.sourcePath) {
-          return (
-            <button
-              key={`attachment:${attachment.id}`}
-              className={className}
-              type="button"
-              onClick={() => revealLocalPath(attachment.sourcePath || "")}
-            >
-              {content}
-            </button>
-          );
-        }
-        return (
-          <a
-            key={`attachment:${attachment.id}`}
-            className={className}
-            href={attachmentResourceURL(attachment, token)}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {content}
-          </a>
-        );
-      });
-  const showUserBubble = editing || Boolean(formResult || user.text || showASRIndicator || user.interrupted);
+  const userInputItemCards = orderedItems.map((item) => {
+    if (item.type === "local_folder") {
+      return (
+        <LocalFolderCard
+          key={`folder:${item.item.id}`}
+          label={t("composer.folderLabel")}
+          name={item.item.name}
+          path={item.item.path}
+          onReveal={() => revealLocalPath(item.item.path)}
+        />
+      );
+    }
+    if (item.type === "project_reference") {
+      return (
+        <ProjectReferenceCard
+          key={`project-reference:${item.item.id}`}
+          reference={item.item}
+          fileLabel={t("composer.projectFileLabel")}
+          folderLabel={t("composer.projectFolderLabel")}
+        />
+      );
+    }
+    const attachment = item.item;
+    if (isImageAttachment(attachment.mime, attachment.name)) {
+      const imageIndex = imagePreviewIndexByID.get(attachment.id);
+      if (imageIndex === undefined) {
+        return null;
+      }
+      const image = imagePreviewItems[imageIndex];
+      return image ? (
+        <ImageAttachmentButton
+          key={`attachment:${attachment.id}`}
+          image={image}
+          onOpen={() => setImagePreviewIndex(imageIndex)}
+        />
+      ) : null;
+    }
+    if (isAudioAttachment(attachment.mime, attachment.name)) {
+      return <AudioAttachmentCard key={`attachment:${attachment.id}`} attachment={attachment} token={token} />;
+    }
+    const content = (
+      <>
+        <FileText className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">{attachment.name}</span>
+        {attachment.size > 0 ? (
+          <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span>
+        ) : null}
+      </>
+    );
+    const className =
+      "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
+    if (attachment.sourcePath) {
+      return (
+        <button
+          key={`attachment:${attachment.id}`}
+          className={className}
+          type="button"
+          onClick={() => revealLocalPath(attachment.sourcePath || "")}
+        >
+          {content}
+        </button>
+      );
+    }
+    return (
+      <a
+        key={`attachment:${attachment.id}`}
+        className={className}
+        href={attachmentResourceURL(attachment, token)}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {content}
+      </a>
+    );
+  });
+  const showUserBubble = Boolean(formResult || user.text || showASRIndicator || user.interrupted);
 
   return (
     <>
@@ -283,39 +162,21 @@ export const UserInput = memo(function UserInput({
                 formResult ? "w-[min(82%,42rem)]" : "max-w-[min(82%,42rem)]",
               )}
             >
-              {editing ? (
-                <div className="grid gap-2">
-                  <Textarea
-                    className="min-h-20 resize-y border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                  />
-                  <div className="flex justify-end gap-1">
-                    <MetaIconButton label={t("common.cancel")} disabled={saving} onClick={discardEdit}>
-                      <X />
-                    </MetaIconButton>
-                    <MetaIconButton label={t("common.save")} disabled={saving || !draft.trim()} onClick={() => saveEdit(draft)}>
-                      {saving ? <Spinner /> : <Check className="text-success" />}
-                    </MetaIconButton>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid min-w-0 max-w-full gap-2">
-                  {formResult ? <FormResultCard part={formResult} /> : null}
-                  {(!formResult && user.text) || showASRIndicator ? (
-                    <CollapsibleUserText
-                      key={disclosureKey}
-                      disclosure={disclosure}
-                      disclosureKey={disclosureKey}
-                      messageID={user.messageID}
-                    >
-                      {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
-                      {!formResult ? user.text : null}
-                    </CollapsibleUserText>
-                  ) : null}
-                  {user.interrupted ? <InterruptedBadge /> : null}
-                </div>
-              )}
+              <div className="grid min-w-0 max-w-full gap-2">
+                {formResult ? <FormResultCard part={formResult} /> : null}
+                {(!formResult && user.text) || showASRIndicator ? (
+                  <CollapsibleUserText
+                    key={disclosureKey}
+                    disclosure={disclosure}
+                    disclosureKey={disclosureKey}
+                    messageID={user.messageID}
+                  >
+                    {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
+                    {!formResult ? user.text : null}
+                  </CollapsibleUserText>
+                ) : null}
+                {user.interrupted ? <InterruptedBadge /> : null}
+              </div>
             </div>
           </div>
         ) : null}
@@ -325,8 +186,6 @@ export const UserInput = memo(function UserInput({
               actions={actions}
               align="end"
               createdAt={user.createdAt}
-              hideStandardDetails={Boolean(queuedStatus)}
-              persistentStatus={queuedStatus}
               text={metaText}
               uiContext={uiContext}
             />

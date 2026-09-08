@@ -298,6 +298,31 @@ test("keeps a managed tab while Electron replaces its webview guest", async () =
   host.closeAll();
 });
 
+test("preserves CDP frame fragments when attaching and navigating a webview", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-fragment", tabID: "tab-fragment", url: "https://example.com/docs#intro" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const guest = new FakeWebContents(149);
+  guest.url = request.url;
+  const sendCommand = guest.debugger.sendCommand.bind(guest.debugger);
+  guest.debugger.sendCommand = async (method, params) => method === "Page.getFrameTree"
+    ? { frameTree: { frame: { id: "main", url: "https://example.com/docs", urlFragment: "#intro" } } }
+    : sendCommand(method, params);
+  try {
+    await host.registerWebContents(required[0], guest);
+    await opening;
+    assert.equal(host.listTabs({ sessionID: request.sessionID }).tabs[0].url, request.url);
+    guest.debugger.emit("message", {}, "Page.frameNavigated", {
+      frame: { id: "main", loaderId: "next", url: "https://example.com/guide?q=1", urlFragment: "#install" },
+    });
+    assert.equal(host.listTabs({ sessionID: request.sessionID }).tabs[0].url, "https://example.com/guide?q=1#install");
+  } finally {
+    host.closeAll();
+  }
+});
+
 test("recognizes only URLs owned by a managed browser tab", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));

@@ -72,13 +72,12 @@ export function useTranscriptViewModel({
     const canonicalTurnCache = canonicalTurnCacheRef.current;
     const liveByTurnID = new Map(visibleAssistantOverlays.map((overlay) => [overlay.turnID, overlay]));
     const pendingByClientID = new Map(pendingUsers.map((pending) => [pending.clientMessageID, pending]));
-    const waitingGuidesByTurnID = new Map<string, PendingUserMessage[]>();
     const appliedGuidesByTurnID = new Map<string, PendingUserMessage[]>();
     for (const pending of pendingUsers) {
-      if (!pending.turnID || (pending.status !== "steering" && pending.status !== "steered")) {
+      if (!pending.turnID || pending.status !== "steered") {
         continue;
       }
-      const guidesByTurnID = pending.status === "steering" ? waitingGuidesByTurnID : appliedGuidesByTurnID;
+      const guidesByTurnID = appliedGuidesByTurnID;
       guidesByTurnID.set(pending.turnID, [
         ...(guidesByTurnID.get(pending.turnID) || []),
         pending,
@@ -106,8 +105,7 @@ export function useTranscriptViewModel({
       const appliedGuides = (appliedGuidesByTurnID.get(turn.id) || []).filter(
         (pending) => !canonicalClientIDs.has(pending.clientMessageID),
       );
-      const waitingGuides = waitingGuidesByTurnID.get(turn.id) || [];
-      if (messageSegments.length > 1 || appliedGuides.length > 0 || waitingGuides.length > 0) {
+      if (messageSegments.length > 1 || appliedGuides.length > 0) {
         canonicalTurnCache.delete(turn.id);
         seenCanonicalTurnIDs.add(turn.id);
         for (const segment of messageSegments) {
@@ -186,14 +184,6 @@ export function useTranscriptViewModel({
             kind: "assistant",
           });
         }
-        waitingGuides.forEach((pending) => {
-          usedPendingClientIDs.add(pending.clientMessageID);
-          sequence.push({
-            key: `guide:waiting:${pending.clientMessageID}`,
-            kind: "guide",
-            user: userFromPending(pending, { pending: false }),
-          });
-        });
         items.push({
           anchorID: turn.id,
           clientMessageID: turn.clientMessageID,
@@ -295,9 +285,6 @@ export function useTranscriptViewModel({
       const appliedGuides = (appliedGuidesByTurnID.get(overlay.turnID) || []).filter(
         (guide) => guide.clientMessageID !== pendingClientID,
       );
-      const waitingGuides = (waitingGuidesByTurnID.get(overlay.turnID) || []).filter(
-        (guide) => guide.clientMessageID !== pendingClientID,
-      );
       const assistant = {
         canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
         kind: "live" as const,
@@ -313,21 +300,13 @@ export function useTranscriptViewModel({
           user: userFromPending(guide, { pending: false }),
         });
       });
-      if (appliedGuides.length > 0 || waitingGuides.length > 0) {
+      if (appliedGuides.length > 0) {
         sequence.push({
           assistant,
           key: liveAssistantSegmentKey(overlay),
           kind: "assistant",
         });
       }
-      waitingGuides.forEach((guide) => {
-        usedPendingClientIDs.add(guide.clientMessageID);
-        sequence.push({
-          key: `guide:waiting:${guide.clientMessageID}`,
-          kind: "guide",
-          user: userFromPending(guide, { pending: false }),
-        });
-      });
       items.push({
         assistant: sequence.length > 0 ? undefined : assistant,
         clientMessageID: pendingClientID,
@@ -371,7 +350,7 @@ export function useTranscriptViewModel({
     }
 
     for (const pending of pendingUsers) {
-      if (usedPendingClientIDs.has(pending.clientMessageID)) {
+      if (pending.status === "queued" || pending.status === "editing" || pending.status === "steering" || usedPendingClientIDs.has(pending.clientMessageID)) {
         continue;
       }
       items.push({

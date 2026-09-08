@@ -179,6 +179,9 @@ enum HelperError: Error, LocalizedError {
   case appNotForeground(String, String)
   case responseTooLarge
   case applicationNotInstalled(String)
+  case launchFailed(String)
+  case activationFailed(String)
+  case windowRaiseFailed(String)
   case useFailed(String)
 
   var code: String {
@@ -211,6 +214,12 @@ enum HelperError: Error, LocalizedError {
       return "computer_invalid_response"
     case .applicationNotInstalled:
       return "computer_app_not_installed"
+    case .launchFailed:
+      return "computer_launch_failed"
+    case .activationFailed:
+      return "computer_activation_failed"
+    case .windowRaiseFailed:
+      return "computer_window_raise_failed"
     case .useFailed:
       return "computer_use_failed"
     }
@@ -249,19 +258,25 @@ enum HelperError: Error, LocalizedError {
       return "pointer target changed: \(reason)"
     case .appNotForeground(let bundleID, let foregroundApplication):
       return
-        "application must be foreground for keyboard or pointer input: \(bundleID); current foreground app: \(foregroundApplication)"
+        "input was not sent because the target app is not foreground: \(bundleID); current foreground app: \(foregroundApplication). Do not repeat the input or reactivate automatically; ask the user to restore the target before continuing."
     case .responseTooLarge:
       return "Computer Use response is too large"
     case .applicationNotInstalled(let bundleID):
       return "application is not installed: \(bundleID)"
-    case .useFailed(let reason):
+    case .launchFailed(let reason):
       return "application launch failed: \(reason)"
+    case .activationFailed(let reason):
+      return "application activation failed: \(reason)"
+    case .windowRaiseFailed(let reason):
+      return "application window raise failed: \(reason)"
+    case .useFailed(let reason):
+      return "application use failed: \(reason)"
     }
   }
 
   var outcome: ActionOutcome {
     switch self {
-    case .actionFailed, .useFailed:
+    case .actionFailed, .useFailed, .launchFailed, .activationFailed, .windowRaiseFailed:
       return .unknown
     default:
       return .notStarted

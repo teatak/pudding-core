@@ -1,6 +1,7 @@
 const { spawn } = require("node:child_process");
 
-const maximumFrameBytes = 1024 * 1024;
+// A 640×480 RGBA PNG can exceed 1 MiB after base64 encoding (~1.6 MiB).
+const maximumFrameBytes = 2 * 1024 * 1024;
 
 // Native capture is owned here. Renderers only subscribe to engine-authorized targets.
 class ComputerUsePreview {
@@ -93,10 +94,10 @@ class ComputerUsePreview {
           || frame.windowID !== entry.target.windowID || (entry.target.pid && frame.pid !== entry.target.pid)
           || !Number.isInteger(frame.width) || frame.width < 1 || frame.width > 640
           || !Number.isInteger(frame.height) || frame.height < 1 || frame.height > 480
-          || typeof frame.jpeg !== "string" || !frame.jpeg || !/^[A-Za-z0-9+/=]+$/.test(frame.jpeg)
+          || typeof frame.png !== "string" || !frame.png || !/^[A-Za-z0-9+/=]+$/.test(frame.png)
           || typeof frame.name !== "string" || typeof frame.title !== "string") { fail(); return; }
         entry.target.pid = frame.pid;
-        entry.frame = { imageURL: `data:image/jpeg;base64,${frame.jpeg}`, name: frame.name, title: frame.title, width: frame.width, height: frame.height };
+        entry.frame = { imageURL: `data:image/png;base64,${frame.png}`, name: frame.name, title: frame.title, width: frame.width, height: frame.height };
         entry.version = ++this.version;
         this.publish(entry);
       }

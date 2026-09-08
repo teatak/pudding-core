@@ -17,7 +17,7 @@ private struct WindowPreviewFrame: Encodable {
   let title: String
   let width: Int
   let height: Int
-  let jpeg: String
+  let png: String
 }
 
 // A separate read-only process keeps continuous capture out of the action queue.
@@ -45,15 +45,7 @@ final class WindowPreview: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
       throw HelperError.appNotAllowed(target.bundleID)
     }
     self.window = window
-    let scale = min(1, 640 / max(1, window.frame.width), 480 / max(1, window.frame.height))
-    let configuration = SCStreamConfiguration()
-    configuration.width = max(1, Int(window.frame.width * scale))
-    configuration.height = max(1, Int(window.frame.height * scale))
-    configuration.minimumFrameInterval = CMTime(value: 1, timescale: 5)
-    configuration.queueDepth = 3
-    configuration.showsCursor = true
-    configuration.capturesAudio = false
-    configuration.ignoreShadowsSingleWindow = true
+    let configuration = Self.streamConfiguration(windowSize: window.frame.size)
     let stream = SCStream(filter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration, delegate: self)
     try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: frames)
     try await stream.startCapture()
@@ -81,11 +73,30 @@ final class WindowPreview: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
       // fixed capture buffer. Convert surface points/top-left to Core Image pixels.
       let crop = Self.cropRect(contentRect: contentRect, scaleFactor: scaleFactor, extent: image.extent)
       guard !crop.isEmpty, let cgImage = context.createCGImage(image, from: crop),
-        let jpeg = NSBitmapImageRep(cgImage: cgImage).representation(using: .jpeg, properties: [.compressionFactor: 0.65]) else { return }
+        let png = Self.pngData(cgImage) else { return }
       try? writeJSON(WindowPreviewFrame(pid: owner.processID, windowID: window.windowID,
         name: owner.applicationName, title: window.title ?? "", width: cgImage.width, height: cgImage.height,
-        jpeg: jpeg.base64EncodedString()))
+        png: png.base64EncodedString()))
     }
+  }
+
+  static func streamConfiguration(windowSize: CGSize) -> SCStreamConfiguration {
+    let scale = min(1, 640 / max(1, windowSize.width), 480 / max(1, windowSize.height))
+    let configuration = SCStreamConfiguration()
+    configuration.width = max(1, Int(windowSize.width * scale))
+    configuration.height = max(1, Int(windowSize.height * scale))
+    // The default 420v format drops alpha and turns transparent window corners black.
+    configuration.pixelFormat = kCVPixelFormatType_32BGRA
+    configuration.minimumFrameInterval = CMTime(value: 1, timescale: 5)
+    configuration.queueDepth = 3
+    configuration.showsCursor = true
+    configuration.capturesAudio = false
+    configuration.ignoreShadowsSingleWindow = true
+    return configuration
+  }
+
+  static func pngData(_ image: CGImage) -> Data? {
+    NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
   }
 
   static func cropRect(contentRect: CGRect, scaleFactor: CGFloat, extent: CGRect) -> CGRect {

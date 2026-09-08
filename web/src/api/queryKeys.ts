@@ -26,7 +26,6 @@ export const queryKeys = {
   browserHistory: (query?: string) => (query === undefined ? (["browser", "history"] as const) : (["browser", "history", query] as const)),
   browserHistoryRecent: (limit: number) => ["browser", "history", "recent", limit] as const,
   canvasItems: (sessionID: string) => ["session", sessionID, "canvas", "items"] as const,
-  libraryRecent: (sessionID: string, query = "", kind = "") => ["library-recent", sessionID, query, kind] as const,
   library: (sessionID: string) => ["library", sessionID] as const,
   settings: () => ["settings"] as const,
   audioConfig: () => ["settings", "audio"] as const,

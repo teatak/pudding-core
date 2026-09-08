@@ -24,6 +24,7 @@ var (
 	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
+	ErrQueueChanged             = errors.New("store: queued inputs changed")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
@@ -1703,12 +1704,18 @@ type UpdateQueuedInputInput struct {
 	SessionID       string
 	ClientMessageID string
 	Text            *string
+	Parts           *[]ContentPart
 	Status          *QueuedInputStatus
 }
 
 type UpdateQueuedInputResult struct {
 	Input *QueuedInput
 	Event *event.Event
+}
+
+type ReorderQueuedInputsResult struct {
+	Inputs []*QueuedInput
+	Events []event.Event
 }
 
 type PromoteQueuedInputInput struct {
@@ -2160,33 +2167,6 @@ type LibraryFavorite struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
-// LibraryRecentOpen stores references and real view times, never content snapshots.
-type LibraryRecentOpen struct {
-	ID              string    `json:"id"`
-	Kind            string    `json:"kind"`
-	SourceSessionID string    `json:"sourceSessionID"`
-	ItemID          string    `json:"itemID,omitempty"`
-	RootPath        string    `json:"rootPath,omitempty"`
-	Path            string    `json:"path,omitempty"`
-	Title           string    `json:"title,omitempty"`
-	CanvasKind      string    `json:"canvasKind,omitempty"`
-	OpenedAt        time.Time `json:"openedAt"`
-}
-
-const LibraryRecentRetainLimit = 1000
-
-var ErrInvalidLibraryRecentOpen = errors.New("store: invalid recently opened reference")
-
-func ValidateLibraryRecentOpen(e LibraryRecentOpen) error {
-	if e.Kind == "file" && e.RootPath != "" && e.Path != "" && e.ItemID == "" {
-		return nil
-	}
-	if e.Kind == "canvas" && e.ItemID != "" && e.RootPath == "" && e.Path == "" {
-		return nil
-	}
-	return ErrInvalidLibraryRecentOpen
-}
-
 type CanvasSaveResult struct {
 	Item      *CanvasItem      `json:"item"`
 	SavedItem *SavedCanvasItem `json:"savedItem"`
@@ -2214,7 +2194,7 @@ type BrowserStateInput struct {
 
 const (
 	BrowserHistoryDefaultLimit = 20
-	BrowserHistoryMaxLimit     = 100
+	BrowserHistoryMaxLimit     = 1000
 	BrowserHistoryRetainLimit  = 1000
 )
 
@@ -2389,6 +2369,7 @@ type Store interface {
 	// clientMessageID 已存在于 queued_inputs 或 turns,不重复写入。
 	QueueInput(ctx context.Context, in QueueInputInput) (*QueueInputResult, error)
 	ListQueuedInputs(ctx context.Context, sessionID string) ([]*QueuedInput, error)
+	ReorderQueuedInputs(ctx context.Context, sessionID string, clientMessageIDs []string) (*ReorderQueuedInputsResult, error)
 	HasQueuedInputs(ctx context.Context, sessionID string) (bool, error)
 	UpdateQueuedInput(ctx context.Context, in UpdateQueuedInputInput) (*UpdateQueuedInputResult, error)
 	PromoteNextQueuedInput(ctx context.Context, in PromoteQueuedInputInput) (*PromoteQueuedInputResult, error)
@@ -2461,11 +2442,6 @@ type Store interface {
 	ListLibraryFavorites(ctx context.Context, actorSessionID string) ([]*LibraryFavorite, error)
 	PutLibraryFavorite(ctx context.Context, actorSessionID string, favorite LibraryFavorite) error
 	DeleteLibraryFavorite(ctx context.Context, actorSessionID, id string) error
-	MoveLibraryFileReferences(ctx context.Context, actorSessionID, oldRoot, oldPath, newRoot, newPath string) error
-	ListLibraryRecentOpens(ctx context.Context, actorSessionID string) ([]*LibraryRecentOpen, error)
-	RecordLibraryRecentOpen(ctx context.Context, actorSessionID string, entry LibraryRecentOpen) error
-	DeleteLibraryRecentOpen(ctx context.Context, actorSessionID, kind, id string) error
-	ClearLibraryRecentOpens(ctx context.Context, actorSessionID, kind string) error
 	ListSavedCanvasItems(ctx context.Context, actorSessionID string) ([]*SavedCanvasItem, error)
 	SaveCanvasItem(ctx context.Context, actorSessionID, itemID, savedItemID string) (*CanvasSaveResult, error)
 	OpenSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID, itemID string) (*CanvasItem, error)

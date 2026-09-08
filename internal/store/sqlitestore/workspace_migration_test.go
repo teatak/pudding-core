@@ -67,7 +67,7 @@ func TestWorkspaceMigrationFromPublishedV13(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, check := range [][2]string{
-			{"PRAGMA user_version", "17"},
+			{"PRAGMA user_version", fmt.Sprint(currentSchemaVersion)},
 			{"SELECT name FROM projects WHERE id='p'", "Keep project"},
 			{"SELECT title FROM sessions WHERE id='s'", "Keep session"},
 			{"SELECT status FROM turns WHERE id='t'", "completed"},
@@ -134,7 +134,7 @@ func TestWorkspaceMigrationFailureRollsBackWholeUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "17")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_items WHERE id='closed-item'", "1")
 }
 

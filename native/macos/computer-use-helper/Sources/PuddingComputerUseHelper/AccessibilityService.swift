@@ -23,21 +23,6 @@ enum SubmitPolicy {
 }
 
 final class AccessibilityService {
-  func revealWindow(_ target: CapturableWindowSnapshot) throws {
-    guard let bundleID = target.bundleID, AppPolicy.allows(bundleID: bundleID, pid: target.pid),
-      let application = NSRunningApplication(processIdentifier: target.pid), application.bundleIdentifier == bundleID else {
-      throw HelperError.windowNotFound(target.windowID)
-    }
-    guard AXIsProcessTrusted() else { throw HelperError.permissionRequired("accessibility") }
-    let app = AXUIElementCreateApplication(target.pid)
-    let matches = windows(of: app).filter { matchesWindow($0, target: target) }
-    guard matches.count == 1 else { throw HelperError.windowNotFound(target.windowID) }
-    guard application.activate(options: []),
-      AXUIElementPerformAction(matches[0], kAXRaiseAction as CFString) == .success else {
-      throw HelperError.useFailed("application rejected window reveal")
-    }
-  }
-
   @discardableResult
   static func enableElectronAccessibility(pid: pid_t, application: AXUIElement) throws -> Bool {
     guard let url = NSRunningApplication(processIdentifier: pid)?.bundleURL,

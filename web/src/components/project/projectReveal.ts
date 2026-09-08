@@ -4,6 +4,7 @@ import type { ProjectFileReveal } from "@/state/projectRevealStore";
 import type { ProjectSelection } from "./types";
 
 export type ProjectEditorReveal = {
+  anchor?: string;
   column?: number;
   key: string;
   line: number;

@@ -34,21 +34,24 @@ const (
 
 // Event 的字段按 Kind 选填:
 //
-//	turn.started   seq, turnID, clientMessageID, userMessageID, text
+//	turn.started   seq, turnID, clientMessageID, userMessageID, text?
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
 //	turn.tool      turnID, callID, name, phase, argsDelta/stream/content/ok/summaryKind/summaryCount/attachments (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
-//	input.queued   seq, clientMessageID, text, status
-//	input.updated  seq, clientMessageID, text, status
-//	input.steered  seq, turnID, clientMessageID, userMessageID, text
+//	input.queued   seq, clientMessageID, text?, status
+//	input.updated  seq, clientMessageID, text?, status
+//	input.steered  seq, turnID, clientMessageID, userMessageID, text?
 //	audio.bindings inputOwner, inputMode, inputLevel
 //	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload
 //	approval.resolved  turnID, callID, approvalID, approvalKind, status
 //	process.*         turnID, callID, payload(background process snapshot)
 //	ping           —                        (心跳,不落库,无 seq)
+//
+// 纯附件输入的 text 为空时省略;接收方将缺省 text 解释为空字符串,
+// 附件仍以 canonical message.parts 为事实源。
 type Event struct {
 	// Seq 是 per-session 单调递增序号,仅落库的 lifecycle 事件持有(>0),
 	// 同时作为 SSE 的 id 字段承载 Last-Event-ID 续传。

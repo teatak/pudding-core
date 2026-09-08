@@ -171,9 +171,11 @@ func TestCurrentWorkspaceSchemaReopenPreservesContentAndHistory(t *testing.T) {
 	if _, err := st.SaveCanvasItem(ctx, "source", "c", "s"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordLibraryRecentOpen(ctx, "source", store.LibraryRecentOpen{Kind: "file", RootPath: root, Path: "keep.md"}); err != nil {
+	// Historical records remain on disk, but are no longer read or written by the product.
+	if _, err := st.db.Exec(`INSERT INTO library_recent_opens(id,kind,source_session_id,root_path,path,opened_at) VALUES('old','file','source',?,'keep.md',101)`, root); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := st.db.Exec(`INSERT INTO library_favorites(id,kind,url,title,created_at) VALUES('w','web','https://example.com/','Keep web',101)`); err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +195,8 @@ func TestCurrentWorkspaceSchemaReopenPreservesContentAndHistory(t *testing.T) {
 	if backups := migrationBackupFiles(t, dbPath); len(backups) != 0 {
 		t.Fatalf("v17 database was migrated again: %v", backups)
 	}
-	recent, err := st.ListLibraryRecentOpens(ctx, "source")
-	if err != nil || len(recent) != 1 || recent[0].Path != "keep.md" {
-		t.Fatalf("lost history: %v %+v", err, recent)
-	}
+	assertWorkspaceMigrationValue(t, st.db, "SELECT path FROM library_recent_opens WHERE id='old'", "keep.md")
+
 	saved, err := st.ListSavedCanvasItems(ctx, "source")
 	if err != nil || len(saved) != 1 || saved[0].Revision != 1 || string(saved[0].Item) != `{"markdown":"keep canvas"}` {
 		t.Fatalf("changed saved canvas: %v %+v", err, saved)

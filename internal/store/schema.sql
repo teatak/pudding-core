@@ -115,11 +115,12 @@ CREATE TABLE IF NOT EXISTS queued_inputs (
     turn_id           TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, client_message_id)
 );
 
 CREATE INDEX IF NOT EXISTS queued_inputs_session_active
-    ON queued_inputs(session_id, created_at)
+    ON queued_inputs(session_id, sort_order)
     WHERE status IN ('queued','editing','cancelled');
 
 CREATE TABLE IF NOT EXISTS usage (

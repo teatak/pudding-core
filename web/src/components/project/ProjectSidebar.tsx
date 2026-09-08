@@ -1,24 +1,22 @@
-import { Files, GitBranch, Search } from "@/components/icons";
+import { Files, GitBranch } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export type ProjectSidebarView = "files" | "git" | "search";
+export type ProjectSidebarView = "files" | "git";
 
 export function ProjectSidebar({
   activeView,
   files,
   git,
   gitChangeCount,
-  search,
   onViewChange,
 }: {
   activeView: ProjectSidebarView;
   files: ReactNode;
   git?: ReactNode;
   gitChangeCount: number;
-  search: ReactNode;
   onViewChange: (view: ProjectSidebarView) => void;
 }) {
   const { t } = useI18n();
@@ -35,12 +33,6 @@ export function ProjectSidebar({
       id: "files",
       label: t("project.browserFiles"),
       shortLabel: t("project.browserFilesShort"),
-    },
-    {
-      icon: <Search />,
-      id: "search",
-      label: t("project.browserSearch"),
-      shortLabel: t("project.browserSearchShort"),
     },
     ...(git
       ? [{
@@ -86,7 +78,7 @@ export function ProjectSidebar({
         </div>
       </nav>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        {visibleView === "search" ? search : visibleView === "git" ? git : files}
+        {visibleView === "git" ? git : files}
       </div>
     </div>
   );

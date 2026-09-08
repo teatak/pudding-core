@@ -67,6 +67,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   token,
   previewTabs,
   onActivatePreview,
+  onOpenBrowserURL,
   onClosePreviews,
   onDeactivatePreview,
   onVisibleContextChange,
@@ -79,6 +80,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   token: string;
   previewTabs: FilePreview[];
   onActivatePreview: (previewID: string) => void;
+  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onClosePreviews: (previewIDs: string[]) => void;
   onDeactivatePreview: () => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
@@ -99,6 +101,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const [sidebarView, setSidebarView] = useState<ProjectSidebarView>("files");
+  const [searchQuery, setSearchQuery] = useState("");
   const [surfaceMode, setSurfaceMode] = useState<ProjectSurfaceMode>("wide");
   const [narrowPane, setNarrowPane] = useState<"tree" | "viewer">("tree");
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -245,6 +248,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     setResourceClipboard((current) => current?.sessionID === sessionID ? current : undefined);
     setDragMoveRequest(undefined);
     setSidebarView("files");
+    setSearchQuery("");
     setTreeReveal(undefined);
   }, [sessionID]);
   useEffect(() => {
@@ -295,10 +299,11 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       onDeactivatePreview();
       workspace.openPreview(selection);
       setNarrowPane("viewer");
-      setEditorReveal(fileReveal.line && fileReveal.line > 0 ? {
+      setEditorReveal(fileReveal.anchor !== undefined || (fileReveal.line && fileReveal.line > 0) ? {
+        anchor: fileReveal.anchor,
         column: fileReveal.column,
         key: projectSelectionKey(selection),
-        line: fileReveal.line,
+        line: fileReveal.line || 1,
         serial: fileReveal.serial,
       } : undefined);
     } else if (fileReveal.fallback) {
@@ -309,11 +314,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     consumeProjectFileReveal(sessionID, fileReveal.serial);
   }, [fileReveal?.serial, projectStateReady, rootWatchSignature, rootsQuery.isError, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
-  const invalidateProject = (targetSessionID: string) => Promise.all([
- queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] }),
- queryClient.invalidateQueries({ queryKey: ["library"] }),
- queryClient.invalidateQueries({ queryKey: ["library-recent"] }),
- ]);
+  const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
   const refreshGitRoots = async (targetSessionID: string, rootIDs: string[]) => {
     const gitRootIDs = new Set(gitRoots.map((root) => root.id));
     const uniqueRootIDs = Array.from(new Set(rootIDs)).filter((rootID) => gitRootIDs.has(rootID));
@@ -578,6 +579,7 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
 
   const revealInTree = (selection: ProjectSelection) => {
     workspace.expandTo(selection);
+    setSearchQuery("");
     setSidebarView("files");
     setNarrowPane("tree");
     setTreeReveal({ ...selection, sessionID });
@@ -591,44 +593,55 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     <ProjectSidebar
       activeView={sidebarView}
       files={(
-        <ProjectTree
+        <ProjectSearch
+          key={sessionID}
           active={active && (!narrow || narrowPane === "tree")}
-          canPaste={resourceClipboard?.sessionID === sessionID}
-          error={rootsQuery.error}
-          expandedKeys={workspace.expandedKeys}
-          gitStatuses={gitStatuses}
-          loading={rootsQuery.isLoading}
+          query={searchQuery}
           roots={roots}
-          reveal={treeReveal}
-          selected={activePreview ? activeTurnDiffSelection : workspace.selected}
           sessionID={sessionID}
           token={token}
-          onCopyAbsolutePath={copyAbsolutePath}
-          onCopyEntry={copyEntry}
-          onCopyPath={copyPath}
-          onCreate={(target, type) => setNameRequest({ mode: type === "dir" ? "newFolder" : "newFile", target })}
-          onCutEntry={cutEntry}
-          onDelete={setDeleteTarget}
-          onDuplicate={duplicateEntry}
-          onMove={moveEntry}
-          onOpenPinned={(selection) => {
-            onDeactivatePreview();
-            workspace.openPinned(selection);
-            setNarrowPane("viewer");
-          }}
-          onOpenPreview={(selection) => {
-            onDeactivatePreview();
-            workspace.openPreview(selection);
-            setNarrowPane("viewer");
-          }}
-          onOpenTerminal={openEntryTerminal}
-          onPaste={pasteEntry}
-          onReference={referenceEntry}
-          onRename={requestRename}
-          onRevealInFinder={revealEntry}
-          onRevealed={(request) => setTreeReveal(current => current === request ? undefined : current)}
-          onToggle={workspace.toggleDirectory}
-        />
+          onQueryChange={setSearchQuery}
+          onOpen={openSearchMatch}
+        >
+          <ProjectTree
+            active={active && (!narrow || narrowPane === "tree")}
+            canPaste={resourceClipboard?.sessionID === sessionID}
+            error={rootsQuery.error}
+            expandedKeys={workspace.expandedKeys}
+            gitStatuses={gitStatuses}
+            loading={rootsQuery.isLoading}
+            roots={roots}
+            reveal={treeReveal}
+            selected={activePreview ? activeTurnDiffSelection : workspace.selected}
+            sessionID={sessionID}
+            token={token}
+            onCopyAbsolutePath={copyAbsolutePath}
+            onCopyEntry={copyEntry}
+            onCopyPath={copyPath}
+            onCreate={(target, type) => setNameRequest({ mode: type === "dir" ? "newFolder" : "newFile", target })}
+            onCutEntry={cutEntry}
+            onDelete={setDeleteTarget}
+            onDuplicate={duplicateEntry}
+            onMove={moveEntry}
+            onOpenPinned={(selection) => {
+              onDeactivatePreview();
+              workspace.openPinned(selection);
+              setNarrowPane("viewer");
+            }}
+            onOpenPreview={(selection) => {
+              onDeactivatePreview();
+              workspace.openPreview(selection);
+              setNarrowPane("viewer");
+            }}
+            onOpenTerminal={openEntryTerminal}
+            onPaste={pasteEntry}
+            onReference={referenceEntry}
+            onRename={requestRename}
+            onRevealInFinder={revealEntry}
+            onRevealed={(request) => setTreeReveal(current => current === request ? undefined : current)}
+            onToggle={workspace.toggleDirectory}
+          />
+        </ProjectSearch>
       )}
       git={hasProject ? (
         <ProjectGitSection
@@ -644,20 +657,12 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
         />
       ) : undefined}
       gitChangeCount={gitChangeCount}
-      search={(
-        <ProjectSearch
-          roots={roots}
-          sessionID={sessionID}
-          token={token}
-          onClose={() => setSidebarView("files")}
-          onOpen={openSearchMatch}
-        />
-      )}
       onViewChange={setSidebarView}
     />
   );
   const projectViewer = (
     <ProjectFileViewer
+      onOpenBrowserURL={onOpenBrowserURL}
       active={active && (!narrow || narrowPane === "viewer")}
       activePreview={activePreview}
       activeTurnDiff={activeTurnDiff}

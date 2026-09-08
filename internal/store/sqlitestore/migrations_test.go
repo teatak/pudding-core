@@ -33,6 +33,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		13: "19ae784ea197314f139a5836cd172a6d3c2ca2e3c0f717d69eccf595d25fb99f",
 		// 14–16 were unpublished intermediate layouts, consolidated into 17.
 		17: "f3ec9cc37e5c136e2170a13f02f13c9c4984fb9e83bba154f245ac9798dd89c3",
+		18: "ebf8a68ae4799a117f114a3c86e3471c64eb5b2fe1096efbadb6771592c004af",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {

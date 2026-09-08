@@ -5,13 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/projectpath"
-	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -115,47 +112,6 @@ func (s *Server) deleteLibraryFavorite(c *cart.Context) error {
 	return nil
 }
 
-type libraryFileOpen struct {
-	SessionID    string `json:"sessionID"`
-	RootPath     string `json:"rootPath"`
-	RelativePath string `json:"relativePath"`
-}
-
-// A file opens in the actor's workspace when its root is present there;
-// otherwise it returns to its explicit source session. Never attach a root.
-func (s *Server) libraryFileTarget(ctx context.Context, actor, sourceSessionID, rootPath, path string) (*libraryFileOpen, error) {
-	for _, id := range []string{actor, sourceSessionID} {
-		if id == "" {
-			continue
-		}
-		workspace, err := sessionworkspace.Resolve(ctx, s.store, s.home, id, sessionworkspace.ScratchExisting)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, root := range workspace.RootDirs {
-			if root != rootPath {
-				continue
-			}
-			_, target, rel, err := projectpath.Resolve([]string{root}, path, false, false)
-			if err != nil {
-				return nil, err
-			}
-			info, err := os.Stat(target)
-			if err != nil {
-				return nil, err
-			}
-			if !info.Mode().IsRegular() {
-				return nil, store.ErrNotFound
-			}
-			return &libraryFileOpen{SessionID: id, RootPath: root, RelativePath: rel}, nil
-		}
-	}
-	return nil, store.ErrNotFound
-}
-
 type librarySource struct {
 	SourceSessionAvailable bool   `json:"sourceSessionAvailable"`
 	SourceSessionTitle     string `json:"sourceSessionTitle,omitempty"`
@@ -199,32 +155,4 @@ func (s *Server) librarySources(ctx context.Context, ids []string) (map[string]l
 		out[id] = info
 	}
 	return out, nil
-}
-
-func (s *Server) libraryFileReference(c *cart.Context, rootID, path string) (string, string, bool) {
-	_, roots, ok := s.sessionWorkspace(c)
-	if !ok {
-		return "", "", false
-	}
-	root, ok := projectRootByID(roots, rootID)
-	if !ok {
-		badRequest(c, "invalid project root")
-		return "", "", false
-	}
-	rel, err := cleanProjectRelativePath(path, false)
-	if err != nil {
-		projectResolveError(c, err)
-		return "", "", false
-	}
-	_, target, resolved, err := projectpath.Resolve([]string{root.Path}, rel, false, false)
-	if err != nil {
-		projectResolveError(c, err)
-		return "", "", false
-	}
-	info, err := os.Stat(target)
-	if err != nil || !info.Mode().IsRegular() {
-		projectFileError(c, http.StatusNotFound, "project_file_unavailable")
-		return "", "", false
-	}
-	return root.Path, resolved, true
 }

@@ -77,6 +77,30 @@ func TestElectronBridgePreservesActionOutcome(t *testing.T) {
 	}
 }
 
+func TestElectronBridgePreservesLifecycleFailureStages(t *testing.T) {
+	for _, code := range []string{"computer_launch_failed", "computer_activation_failed", "computer_window_raise_failed"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/computer/apps/use" {
+					t.Errorf("unexpected route: %s", r.URL.Path)
+				}
+				w.WriteHeader(http.StatusConflict)
+				writeJSON(w, map[string]any{"code": code, "error": "AXRaise returned -25206", "retryable": false, "outcome": "unknown"})
+			}))
+			defer server.Close()
+			service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+			failure := ErrorFailure(err)
+			if failure.Code != code || failure.Message != "AXRaise returned -25206" || failure.Retryable || failure.Outcome != "unknown" {
+				t.Fatalf("lost lifecycle failure: %#v", failure)
+			}
+		})
+	}
+}
+
 func TestElectronBridgePreservesStructuredPermissionFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

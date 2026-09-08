@@ -36,10 +36,6 @@ export function TranscriptView({
   onLatestChange,
   onLoadHistory,
   onTurnRevealComplete,
-  onQueuedCancel,
-  onQueuedEditStart,
-  onQueuedSteer,
-  onQueuedSave,
   searchSlot,
   searchState,
   sessionID,
@@ -66,10 +62,6 @@ export function TranscriptView({
   onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
   onTurnRevealComplete?: (serial: number) => void;
-  onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   searchSlot: "primary" | "split";
   searchState: TranscriptSearchState;
   sessionID: string;
@@ -124,10 +116,6 @@ export function TranscriptView({
             onLatestChange={onLatestChange}
             onLoadHistory={onLoadHistory}
             onTurnRevealComplete={onTurnRevealComplete}
-            onQueuedCancel={onQueuedCancel}
-            onQueuedEditStart={onQueuedEditStart}
-            onQueuedSteer={onQueuedSteer}
-            onQueuedSave={onQueuedSave}
             scrollElement={viewportNode}
             searchSlot={searchSlot}
             searchState={searchState}

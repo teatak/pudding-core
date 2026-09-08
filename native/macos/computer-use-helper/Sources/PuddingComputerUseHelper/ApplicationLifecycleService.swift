@@ -132,10 +132,14 @@ final class ApplicationLifecycleService {
         configuration.activates = false
         configuration.addsToRecentItems = false
         configuration.createsNewApplicationInstance = requestedURL != nil && selected == nil
-        application = try await NSWorkspace.shared.openApplication(
-          at: url,
-          configuration: configuration
-        )
+        do {
+          application = try await NSWorkspace.shared.openApplication(
+            at: url,
+            configuration: configuration
+          )
+        } catch {
+          throw HelperError.launchFailed(error.localizedDescription)
+        }
         newlyLaunched = !runningPIDs.contains(application.processIdentifier)
       }
       guard AppPolicy.allows(bundleID: bundleID, pid: application.processIdentifier) else {
@@ -167,11 +171,7 @@ final class ApplicationLifecycleService {
         discovery = (.failed, errorDetail(for: error), [])
       }
       if foreground {
-        try await activate(
-          pid: application.processIdentifier,
-          bundleID: bundleID
-        )
-        try await raiseWindows(
+        try await ensureForeground(
           pid: application.processIdentifier,
           bundleID: bundleID,
           targetWindows: discovery.windows
@@ -231,47 +231,54 @@ final class ApplicationLifecycleService {
     }
   }
 
-  private func activate(pid: pid_t, bundleID: String) async throws {
-    guard let application = NSRunningApplication(processIdentifier: pid),
-      application.activate(options: [.activateAllWindows])
-    else {
-      throw HelperError.useFailed("application rejected foreground activation: \(bundleID)")
-    }
-    for _ in 0..<200 {
-      if NSRunningApplication(processIdentifier: pid)?.isActive == true { return }
-      try await Task.sleep(for: .milliseconds(25))
-    }
-    throw HelperError.useFailed("application did not become foreground: \(bundleID)")
+  func revealWindow(_ target: CapturableWindowSnapshot) async throws {
+    guard let bundleID = target.bundleID,
+      let application = NSRunningApplication(processIdentifier: target.pid),
+      !application.isTerminated, application.bundleIdentifier == bundleID,
+      AppPolicy.allows(bundleID: bundleID, pid: target.pid)
+    else { throw HelperError.windowNotFound(target.windowID) }
+    try await ensureForeground(pid: target.pid, bundleID: bundleID, targetWindows: [target])
   }
 
-  private func raiseWindows(
+  private func ensureForeground(
     pid: pid_t,
     bundleID: String,
     targetWindows: [CapturableWindowSnapshot]
   ) async throws {
+    try await ForegroundPolicy.ensure(
+      bundleID: bundleID,
+      isActive: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid },
+      activate: {
+        NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+          ?? false
+      },
+      windowsReady: { self.windowsAreAboveOtherApplications(pid: pid, targetWindows: targetWindows) },
+      raiseWindows: { try self.raiseWindows(pid: pid, targetWindows: targetWindows) }
+    )
+  }
+
+  private func raiseWindows(pid: pid_t, targetWindows: [CapturableWindowSnapshot]) throws -> [String] {
+    guard AXIsProcessTrusted() else { throw HelperError.permissionRequired("accessibility") }
     let application = AXUIElementCreateApplication(pid)
     var rawWindows: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        application, kAXWindowsAttribute as CFString, &rawWindows
-      ) == .success, let windows = rawWindows as? [AXUIElement]
-    else {
-      throw HelperError.useFailed("application windows could not be raised: \(bundleID)")
+    let readError = AXUIElementCopyAttributeValue(
+      application, kAXWindowsAttribute as CFString, &rawWindows)
+    guard readError == .success, let windows = rawWindows as? [AXUIElement] else {
+      return ["AXWindows returned \(readError.rawValue)"]
     }
-    var raised = false
-    for window in windows.reversed() {
-      if AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success {
-        raised = true
+    let accessibility = AccessibilityService()
+    let targets = windows.filter { window in
+      targetWindows.contains { accessibility.matchesWindow(window, target: $0) }
+    }
+    guard !targets.isEmpty else { return ["no AX window matches the requested window IDs"] }
+    var errors: [String] = []
+    for (index, window) in targets.reversed().enumerated() {
+      let error = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+      if error != .success {
+        errors.append("AXRaise window[\(index)] returned \(error.rawValue)")
       }
     }
-    guard windows.isEmpty || raised else {
-      throw HelperError.useFailed("application rejected window raise: \(bundleID)")
-    }
-    for _ in 0..<40 {
-      if windowsAreAboveOtherApplications(pid: pid, targetWindows: targetWindows) { return }
-      try await Task.sleep(for: .milliseconds(25))
-    }
-    throw HelperError.useFailed("application windows did not become foreground: \(bundleID)")
+    return errors
   }
 
   private func windowsAreAboveOtherApplications(
@@ -290,14 +297,13 @@ final class ApplicationLifecycleService {
       guard
         let targetIndex = ordered.firstIndex(where: {
           ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == target.windowID
-        })
+            && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+        }),
+        let targetBounds = ordered[targetIndex][kCGWindowBounds as String] as? NSDictionary,
+        let targetFrame = CGRect(dictionaryRepresentation: targetBounds as CFDictionary)
       else {
         return false
       }
-      let targetFrame = CGRect(
-        x: target.frame.x, y: target.frame.y,
-        width: target.frame.width, height: target.frame.height
-      )
       for candidate in ordered[..<targetIndex] {
         guard
           (candidate[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,

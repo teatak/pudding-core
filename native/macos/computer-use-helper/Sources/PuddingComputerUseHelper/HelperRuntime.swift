@@ -12,7 +12,7 @@ final class HelperRuntime {
     case .revealWindow(let bundleID, let windowID, let pid):
       let target = try await screenCapture.window(bundleID: bundleID, windowID: windowID)
       guard target.pid == pid else { throw HelperError.windowNotFound(windowID) }
-      try accessibility.revealWindow(target)
+      try await applicationLifecycle.revealWindow(target)
       return AnyEncodable(["ok": true])
     case .serve:
       throw ArgumentError.unknownCommand("serve")

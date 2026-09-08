@@ -1,4 +1,5 @@
 import { Check, Copy } from "@/components/icons";
+import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { useEffect, useRef, useState } from "react";
 import Vditor from "vditor";
@@ -199,7 +200,9 @@ export function ProjectMarkdownEditor({
   onChange,
   onSave,
   onReferenceSelection,
+  onOpenLink,
 }: {
+  onOpenLink: (href: string) => void;
   path: string;
   reveal?: ProjectEditorReveal;
   value: string;
@@ -215,6 +218,7 @@ export function ProjectMarkdownEditor({
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  const onOpenLinkRef = useRef(onOpenLink);
   const onReferenceSelectionRef = useRef(onReferenceSelection);
   const revealRef = useRef(reveal);
   const syncingRef = useRef(false);
@@ -227,6 +231,7 @@ export function ProjectMarkdownEditor({
 
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  onOpenLinkRef.current = onOpenLink;
   onReferenceSelectionRef.current = onReferenceSelection;
   revealRef.current = reveal;
 
@@ -259,6 +264,10 @@ export function ProjectMarkdownEditor({
           i18n: window.VditorI18n,
           lang: locale === "zh-TW" ? "zh_TW" : locale === "en" ? "en_US" : "zh_CN",
           mode: "ir",
+          link: {
+            isOpen: false,
+            click: (element) => onOpenLinkRef.current(element.getAttribute("href") ?? element.textContent ?? ""),
+          },
           placeholder: t("project.browserMarkdownEditor"),
           preview: {
             hljs: {
@@ -306,7 +315,7 @@ export function ProjectMarkdownEditor({
             }
             scheduleTableLayout(nextEditor);
             scheduleCodeCopyLayout(nextEditor);
-            revealEditorPosition(nextEditor, revealRef.current);
+            revealEditorPosition(nextEditor, revealRef.current, () => toast.warning(t("project.browserAnchorNotFound")));
           },
           input: (markdown) => {
             valueRef.current = markdown;
@@ -348,7 +357,7 @@ export function ProjectMarkdownEditor({
 
   useEffect(() => {
     const editor = vditorRef.current;
-    if (editor) revealEditorPosition(editor, reveal);
+    if (editor) revealEditorPosition(editor, reveal, () => toast.warning(t("project.browserAnchorNotFound")));
   }, [reveal?.serial]);
 
   useEffect(() => {
@@ -380,6 +389,18 @@ export function ProjectMarkdownEditor({
           event.preventDefault();
           onSaveRef.current();
         }
+      }}
+      onMouseDownCapture={(event) => {
+        if ((event.metaKey || event.ctrlKey) && markdownLinkAt(event.target)) event.preventDefault();
+      }}
+      onClickCapture={(event) => {
+        const link = markdownLinkAt(event.target);
+        if (!link) return;
+        const reference = link.dataset.type === "link-ref";
+        if (!(event.metaKey || event.ctrlKey) && link.tagName !== "A" && (!reference || link.classList.contains("vditor-ir__node--expand"))) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenLinkRef.current(markdownLinkHref(vditorRef.current, link));
       }}
       onKeyUpCapture={updateSelectionAction}
       onMouseUpCapture={(event) => {
@@ -640,10 +661,49 @@ function scheduleTableLayout(editor: Vditor) {
   });
 }
 
-function revealEditorPosition(editor: Vditor, reveal: ProjectEditorReveal | undefined) {
+function markdownLinkAt(target: EventTarget) {
+  return target instanceof Element ? target.closest<HTMLElement>('[data-type="a"], [data-type="link-ref"]:not(img), a[href]') : null;
+}
+
+function markdownLinkHref(editor: Vditor | null, link: HTMLElement) {
+  const editorRoot = editor?.vditor.ir?.element;
+  if (link.dataset.type === "link-ref" && editor && editorRoot) {
+    const definitions = Array.from(editorRoot.querySelectorAll('[data-type="link-ref-defs-block"]')).map((element) => element.outerHTML).join("");
+    const markdown = editor.vditor.lute.VditorIRDOM2Md(`<p data-block="0">${link.outerHTML}</p>${definitions}`);
+    const rendered = document.createElement("div");
+    rendered.innerHTML = editor.vditor.lute.Md2HTML(markdown);
+    return rendered.querySelector("a")?.getAttribute("href") || "";
+  }
+  return link.getAttribute("href") ?? link.querySelector(":scope > .vditor-ir__marker--link")?.textContent ?? "";
+}
+
+function revealEditorPosition(editor: Vditor, reveal: ProjectEditorReveal | undefined, onAnchorNotFound: () => void) {
   const editorRoot = editor.vditor.ir?.element;
   if (!reveal || !editor.vditor?.lute || !editorRoot) return;
   const markdown = editor.getValue();
+  if (reveal.anchor !== undefined) {
+    if (!reveal.anchor) {
+      editorRoot.closest(".pudding-vditor-editor")?.scrollTo({ top: 0 });
+      return;
+    }
+    // Read rendered heading text without IR editing markers or link destinations.
+    const rendered = document.createElement("div");
+    rendered.innerHTML = editor.vditor.lute.Md2HTML(markdown);
+    const selector = "h1,h2,h3,h4,h5,h6";
+    const headings = Array.from(rendered.querySelectorAll(selector));
+    const used = new Set<string>();
+    const index = headings.findIndex((heading) => {
+      const base = (heading.textContent || "").trim().toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "").replace(/\s/g, "-");
+      let slug = base;
+      for (let count = 1; used.has(slug); count++) slug = `${base}-${count}`;
+      used.add(slug);
+      return slug === reveal.anchor || heading.id === reveal.anchor;
+    });
+    const target = index < 0 ? undefined : editorRoot.querySelectorAll<HTMLElement>(selector)[index];
+    if (target) target.scrollIntoView({ block: "start" });
+    else onAnchorNotFound();
+    return;
+  }
   const offset = markdownOffset(markdown, reveal.line, reveal.column || 1);
   const marker = `PUDDINGREVEAL${Date.now()}X`;
   const markedHTML = editor.vditor.lute.Md2VditorIRDOM(

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
+import { ArrowRight } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 export type ChoiceMenuItem<T> = {
+  checked?: boolean;
   description?: string;
   disabled?: boolean;
   id: string;
@@ -20,6 +22,7 @@ export function ChoiceMenu<T>({
   focusMode = "always",
   items,
   maxHeightClassName = "max-h-56",
+  variant = "default",
   onEscape,
   onSelect,
 }: {
@@ -28,36 +31,58 @@ export function ChoiceMenu<T>({
   focusMode?: ChoiceMenuFocusMode;
   items: Array<ChoiceMenuItem<T>>;
   maxHeightClassName?: string;
+  variant?: "default" | "question";
   onEscape?: () => void;
   onSelect: (value: T) => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const selectedRef = useRef<HTMLElement | null>(null);
   const signature = items.map((item) => `${item.id}:${item.disabled ? "0" : "1"}`).join("|");
   const [selectedIndex, setSelectedIndex] = useState(() => firstEnabledIndex(items));
 
   useEffect(() => {
-    setSelectedIndex(firstEnabledIndex(items));
-  }, [signature]);
+    selectIndex(firstEnabledIndex(items));
+  }, [signature, variant]);
 
   useEffect(() => {
     if (focusMode === "none" || (focusMode === "when-idle" && isTextEntryInUse(document.activeElement))) {
       return;
     }
-    listRef.current?.focus();
-  }, [focusMode, signature]);
+    listRef.current?.focus({ preventScroll: variant === "question" });
+  }, [focusMode, signature, variant]);
 
-  useEffect(() => {
-    scrollActiveIntoList(selectedRef.current, listRef.current);
-  }, [selectedIndex, signature]);
+  function selectIndex(index: number) {
+    setSelectedIndex(index);
+    const list = listRef.current;
+    const viewport = variant === "question" ? list?.closest<HTMLElement>("[data-input-flow-body]") ?? null : list;
+    if (variant === "question" && index === 0 && viewport) {
+      viewport.scrollTop = 0;
+    } else {
+      scrollActiveIntoList((list?.children[index] as HTMLElement | undefined) ?? null, viewport);
+    }
+  }
 
   function move(delta: number) {
-    setSelectedIndex((current) => nextEnabledIndex(items, current, delta));
+    selectIndex(nextEnabledIndex(items, selectedIndex, delta));
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (busy) {
+    if (busy || event.nativeEvent.isComposing) {
       return;
+    }
+    if (variant === "question") {
+      // Embedded custom inputs own their keystrokes, including number shortcuts.
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, button:not([role="option"]), [contenteditable="true"], [role="textbox"]')) {
+        return;
+      }
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-9]$/.test(event.key)) {
+        const index = Number(event.key) - 1;
+        const item = items[index];
+        if (item && !item.disabled) {
+          event.preventDefault();
+          onSelect(item.value);
+        }
+        return;
+      }
     }
     switch (event.key) {
       case "ArrowDown":
@@ -70,11 +95,11 @@ export function ChoiceMenu<T>({
         return;
       case "Home":
         event.preventDefault();
-        setSelectedIndex(firstEnabledIndex(items));
+        selectIndex(firstEnabledIndex(items));
         return;
       case "End":
         event.preventDefault();
-        setSelectedIndex(lastEnabledIndex(items));
+        selectIndex(lastEnabledIndex(items));
         return;
       case "Enter":
       case " ":
@@ -98,7 +123,9 @@ export function ChoiceMenu<T>({
     <div
       ref={listRef}
       aria-busy={busy || undefined}
-      className={cn("grid gap-0.5 overflow-y-auto pr-1 outline-none", maxHeightClassName, className)}
+      aria-multiselectable={items.some((item) => item.checked !== undefined) || undefined}
+      className={cn("grid outline-none", variant === "question" ? "gap-1" : cn("gap-0.5 overflow-y-auto pr-1", maxHeightClassName), className)}
+      data-variant={variant}
       role="listbox"
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -106,16 +133,18 @@ export function ChoiceMenu<T>({
       {items.map((item, index) => {
         const disabled = busy || item.disabled;
         const itemClassName = cn(
-          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition-opacity disabled:opacity-50",
+          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition-opacity",
+          disabled && "opacity-50",
+          variant === "question" && "flex min-h-11 items-center rounded-lg",
           !item.noActiveStyle &&
             "hover:bg-interactive-hover active:bg-interactive-pressed",
           index === selectedIndex &&
             !item.noActiveStyle &&
             "bg-interactive-selected text-foreground hover:bg-interactive-selected",
-          item.noActiveStyle && "px-0 py-0.5",
         );
         const commonProps = {
-          "aria-selected": index === selectedIndex,
+          "aria-selected": item.checked ?? index === selectedIndex,
+          "aria-keyshortcuts": variant === "question" && index < 9 ? String(index + 1) : undefined,
           className: itemClassName,
           onMouseEnter: () => {
             if (!disabled) {
@@ -123,8 +152,16 @@ export function ChoiceMenu<T>({
             }
           },
           onMouseDown: (event: MouseEvent) => {
+            if (variant === "question" && item.noActiveStyle) {
+              return;
+            }
             event.preventDefault();
-            if (!disabled && !item.noActiveStyle) {
+            if (variant === "default" && !disabled && !item.noActiveStyle) {
+              onSelect(item.value);
+            }
+          },
+          onClick: () => {
+            if (variant === "question" && !disabled && !item.noActiveStyle) {
               onSelect(item.value);
             }
           },
@@ -135,11 +172,6 @@ export function ChoiceMenu<T>({
           return (
             <div
               key={item.id}
-              ref={(node) => {
-                if (index === selectedIndex) {
-                  selectedRef.current = node;
-                }
-              }}
               aria-disabled={disabled || undefined}
               {...commonProps}
             >
@@ -150,21 +182,31 @@ export function ChoiceMenu<T>({
         return (
           <button
             key={item.id}
-            ref={(node) => {
-              if (index === selectedIndex) {
-                selectedRef.current = node;
-              }
-            }}
             {...commonProps}
+            className={cn(itemClassName, variant === "question" && "gap-2.5")}
             disabled={disabled}
             type="button"
           >
-            <div className="truncate text-sm font-normal">{item.label}</div>
-            {item.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div> : null}
+            {variant === "question" ? (
+              <ChoiceMenuNumber number={index + 1} />
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <div className={cn("text-sm", variant === "question" ? "whitespace-normal break-words font-medium leading-6" : "truncate font-normal")}>{item.label}</div>
+              {item.description ? <div className={cn("mt-0.5 text-xs text-muted-foreground", variant === "question" ? "whitespace-normal break-words leading-5" : "truncate")}>{item.description}</div> : null}
+            </div>
+            {variant === "question" ? <ArrowRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> : null}
           </button>
         );
       })}
     </div>
+  );
+}
+
+export function ChoiceMenuNumber({ number }: { number: number }) {
+  return (
+    <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full border border-foreground/10 bg-foreground/5 text-sm tabular-nums text-muted-foreground">
+      {number}
+    </span>
   );
 }
 

@@ -15,8 +15,8 @@ const reportDir = process.env.PUDDING_SMOKE_OUTPUT || path.join(os.tmpdir(), "pu
 fs.mkdirSync(reportDir, { recursive: true });
 process.env.PUDDING_HOME = home;
 process.env.PUDDING_ELECTRON_USER_DATA_DIR = path.join(home, "user-data");
-process.env.PUDDING_DAEMON_BIN = path.join(repo, "bin/puddingd");
-if (["conversation-restore", "native-ime", "computer-preview"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
+process.env.PUDDING_DAEMON_BIN ||= path.join(repo, "bin/puddingd");
+if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
   const wrapper = path.join(home, "mock-daemon");
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
   fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(process.env.PUDDING_DAEMON_BIN)} -mock "$@"\n`, { mode: 0o755 });
@@ -105,7 +105,7 @@ async function verifyNativeIme(primaryID, secondaryID) {
       window.__nativeIme.push({type, key:event.key, code:event.keyCode, data:event.data, trusted:event.isTrusted, composing:event.isComposing, target:event.target.tagName, value:event.target.value});
     }, true);`);
   const requests = [];
-  window.webContents.session.webRequest.onBeforeRequest({urls:[`${apiBase}/sessions/*/submit`, `${apiBase}/sessions/*/library/recent*`, `${apiBase}/sessions/*/browser/*`]}, (details, callback) => {
+  window.webContents.session.webRequest.onBeforeRequest({urls:[`${apiBase}/sessions/*/submit`, `${apiBase}/sessions/*/browser/*`]}, (details, callback) => {
     requests.push({url:details.url, method:details.method});
     callback({});
   });
@@ -156,7 +156,7 @@ async function verifyNativeIme(primaryID, secondaryID) {
     check('native composition survives workspace focus changes and remains isolated across sessions');
 
     await selectSurface('资源库');
-    const recentSearches = () => requests.filter(r => r.method==='GET' && r.url.includes('/library/recent') && new URL(r.url).searchParams.get('q'));
+    const recentSearches = () => requests.filter(r => r.method==='GET' && r.url.includes('/browser/history') && new URL(r.url).searchParams.get('q'));
     const previous = recentSearches().length;
     await pinyin();
     await waitFor(()=>js('window.__nativeComposing'),'library real composition starts');
@@ -164,7 +164,7 @@ async function verifyNativeIme(primaryID, secondaryID) {
     assert.equal(recentSearches().length, previous, 'library waits for real candidate commit');
     await nativeInput('key',36);
     await waitFor(()=>js('!window.__nativeComposing'),'library candidate Return');
-    assert.equal(await js(`document.querySelector('[data-workspace-add]').getAttribute('aria-pressed')`), 'true', 'candidate Return does not open a resource');
+    assert.ok(await js(`document.querySelector('[data-workspace-library]')?.getAttribute('aria-hidden') === 'false'`), 'candidate Return does not open a resource');
     await waitFor(()=>recentSearches().length > previous,'committed search requested');
     check('resource search waits for native Chinese composition; candidate Return does not open a result');
 
@@ -246,7 +246,7 @@ async function verifyNativeWindowChrome(sessionID) {
     await selectTopTab('project');
     await selectTopTab('canvas:smoke-01');
     await click('[data-workspace-add]');
-    await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden') !== 'true' && document.querySelector('[data-workspace-add]').getAttribute('aria-pressed') === 'true'`), 'add opens resources');
+    await waitFor(() => js(`document.querySelector('[data-workspace-library]')?.getAttribute('aria-hidden') === 'false'`), 'add opens resource page');
     check(`${mode}: native tab reordering, tab activation and add button remain interactive`);
   }
   await click('button[aria-label="退出专注"]');
@@ -426,6 +426,40 @@ async function verifyWorkspaceToggle() {
   check('workspace toggle stays fixed, focus stays icon-only and session Apps align right, wide and narrow');
 }
 
+async function verifyRailDivider() {
+  phase = "rail divider stability";
+  assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+  const measure = `(() => {
+    const divider = document.querySelector('.pudding-shell-divider');
+    const stage = document.querySelector('.pudding-session-stage');
+    const chat = document.querySelector('.pudding-agent-console');
+    return { x: divider.getBoundingClientRect().x, stageX: stage.getBoundingClientRect().x, chatWidth: chat.getBoundingClientRect().width };
+  })()`;
+  for (const width of [1440, 1800]) {
+    window.setContentSize(width, 920);
+    await delay(300);
+    await waitFor(() => js(`Boolean(document.querySelector('button[aria-label="收起边栏"]'))`), "expanded sidebar");
+    const ratio = await js(`localStorage.getItem('pudding.agentConsoleDockSplitRatio')`);
+    for (const label of ["收起边栏", "展开边栏"]) {
+      const before = await js(measure);
+      await js(`window.__railFrames = []; (function frame() { window.__railFrames.push(${measure}); window.__railFrameID = requestAnimationFrame(frame); })()`);
+      await click(`button[aria-label="${label}"]`);
+      await delay(400);
+      const samples = await js(`cancelAnimationFrame(window.__railFrameID); window.__railFrames`);
+      const after = await js(measure);
+      const drift = Math.max(...samples.map(frame => Math.abs(frame.x - before.x)));
+      fs.writeFileSync(path.join(reportDir, `rail-${width}-${label === "收起边栏" ? "collapse" : "expand"}.json`), JSON.stringify({before, after, drift, samples}, null, 2));
+      console.info('[rail-divider]', JSON.stringify({width, label, before, after, drift, frames:samples.length}));
+      assert.ok(samples.length > 5, "recorded sidebar transition frames");
+      assert.ok(Math.abs(before.x - after.x) < 1, "sidebar toggle retains final divider position");
+      assert.ok(drift < 1, "sidebar toggle must not move the divider in intermediate frames");
+      assert.equal(await js(`localStorage.getItem('pudding.agentConsoleDockSplitRatio')`), ratio, "sidebar toggle preserves split preference");
+    }
+    check(`sidebar collapse/expand keeps the divider fixed in every frame at ${width}px`);
+  }
+  await verifyWorkspaceToggle();
+}
+
 async function verifyProjectTabShape(sessionID, browserKey, canvasKey) {
   const original = await js(`import('/src/state/workspaceStore.ts').then(m => m.getWorkspaceSessionUI(${JSON.stringify(sessionID)}))`);
   await js(`import('/src/state/workspaceStore.ts').then(m => {
@@ -576,15 +610,83 @@ async function verifyEmptyWorkspace(projectID) {
   assert.equal(await js(`Boolean(document.querySelector('[data-workspace-add]'))`), false, "no add button without tabs");
   assert.equal(await js(`getComputedStyle(document.querySelector('.pudding-workspace-topbar')).boxShadow`), 'none', "no landing header divider");
   assert.equal(await js(`getComputedStyle(document.querySelector('[data-workspace-library]')).backgroundColor === getComputedStyle(document.querySelector('.pudding-workspace-pane')).backgroundColor`), true, "landing uses workspace background");
+  await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-busy') === 'false'`), "empty landing loaded");
+  assert.ok(await js(`(() => { const page=document.querySelector('[data-workspace-library]'), header=page.querySelector('header').getBoundingClientRect(), area=page.getBoundingClientRect();return Math.abs(header.top - area.top + page.scrollTop - 64) < 1 && !page.querySelector('h1'); })()`), "empty start actions retain fixed top spacing without a page title");
   await screenshot("workspace-empty");
   await click('[data-workspace-library] button[aria-label="新建浏览器标签页"]');
   await waitFor(() => js(`Boolean(document.querySelector('[data-workspace-tab-key^="browser:"][data-selected="true"]'))`), "landing creates a browser tab");
   await click('[data-workspace-add]');
   await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden') === 'false'`), "add button opens resource landing");
+  await click('[data-workspace-add]');
+  assert.equal(await js(`document.querySelectorAll('[data-workspace-tab-key]').length`), 1, "repeated plus does not add a tab");
+  assert.equal(await js(`Boolean(document.querySelector('[data-workspace-tab-key="library"]'))`), false, "resource page is not a tab");
+  assert.equal(await js(`document.querySelector('[data-workspace-add]').getAttribute('aria-pressed')`), null, "plus is an action, not the selected page");
+  window.webContents.sendInputEvent({ type: "mouseMove", x: 1, y: 1 });
+  await waitFor(() => js(`getComputedStyle(document.querySelector('[data-workspace-add]')).backgroundColor === 'rgba(0, 0, 0, 0)'`), "plus has no active background after the pointer leaves");
+  await selectSurface('浏览器');
+  await waitFor(() => js(`Boolean(document.querySelector('[data-workspace-tab-key^="browser:"][data-selected="true"]'))`), "browser selection leaves resource page");
+  await click('[data-workspace-add]');
   assert.equal((await api(`/sessions/${emptySession.id}/browser/tabs`)).tabs.length, 1, "plus does not create another browser");
+  await click('[data-workspace-library] button[aria-label="新建浏览器标签页"]');
+  await waitFor(() => js(`!document.querySelector('[data-workspace-tab-key="library"]') && document.querySelectorAll('[data-workspace-tab-key^="browser:"]').length === 2`), "resource page creates another browser");
+  await click('[data-workspace-add]');
   await click('[data-workspace-library] button[aria-label="打开项目"]');
   await waitFor(() => js(`Boolean(document.querySelector('[data-workspace-tab-key="project"][data-selected="true"]'))`), "landing reopens project");
+  assert.equal(await js(`Boolean(document.querySelector('[data-workspace-tab-key="library"]'))`), false, "opening project does not add a resource page tab");
+  await click('[data-workspace-add]');
+  await click('[data-workspace-library] button[aria-label="打开项目"]');
+  assert.equal(await js(`document.querySelectorAll('[data-workspace-tab-key="project"]').length`), 1, "existing project is reused");
   check("zero-tab landing: matching background, no divider/add/popup; explicit project/browser actions; plus opens resources");
+}
+
+async function verifyProjectEmpty(sessionID, projectRoot) {
+  phase = "project empty viewer";
+  assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+  window.setContentSize(1440, 920);
+  await selectSurface("项目");
+  await js(`import('/src/state/projectRevealStore.ts').then(({requestProjectFileReveal}) => requestProjectFileReveal({sessionID:${JSON.stringify(sessionID)},rootPath:${JSON.stringify(projectRoot)},relativePath:'file-01.md'}))`);
+  await waitFor(async () => (await tabs()).some(tab => tab.title === "file-01.md" && tab.selected), "open last file fixture");
+  const fileSource = `Array.from(document.querySelector('[data-project-workspace] nav').nextElementSibling.querySelectorAll('button')).find(el => el.textContent.trim() === 'file-01.md')`;
+  const verifyTree = async (label) => {
+    await waitFor(() => js(`Boolean(${fileSource}) && Boolean(document.querySelector('[data-project-workspace] section[aria-label="从文件开始"]'))`), "empty viewer with mounted tree");
+    await screenshot(`project-empty-${label}`);
+    const bounds = await js(`(() => {
+      const empty = document.querySelector('[data-project-workspace] section[aria-label="从文件开始"]');
+      const viewer = empty.closest('[data-panel]');
+      const file = ${fileSource};
+      const e = empty.getBoundingClientRect(), v = viewer.getBoundingClientRect(), f = file.getBoundingClientRect();
+      return {
+        empty: e.toJSON(), viewer: v.toJSON(),
+        contained: e.left >= v.left - 1 && e.right <= v.right + 1 && e.top >= v.top - 1 && e.bottom <= v.bottom + 1,
+        treeClickable: file.contains(document.elementFromPoint(f.x + f.width / 2, f.y + f.height / 2)),
+      };
+    })()`);
+    console.info('[project-empty]', label, JSON.stringify(bounds));
+    assert.ok(bounds.contained, `${label}: empty state must stay inside the file viewer`);
+    assert.ok(bounds.treeClickable, `${label}: tree remains visible and clickable`);
+    assert.equal(await js(`document.querySelector('[data-workspace-tab-key="project"]')?.dataset.selected`), "true");
+  };
+  for (const label of ["standard", "focused"]) {
+    if (label === "focused") {
+      await click('button[aria-label="专注"]');
+      await waitFor(() => js(`Boolean(document.querySelector('button[aria-label="退出专注"]'))`), "focus mode");
+      await waitFor(() => js(`!document.querySelector('.pudding-workspace-stage[data-transition="opening"]')`), "focus transition settled");
+    }
+    await click('[data-project-workspace] button[aria-label="关闭文件标签 file-01.md"]');
+    await waitFor(async () => (await tabs()).length === 0, "last file closed");
+    await verifyTree(label);
+    await clickElement(fileSource);
+    await waitFor(async () => (await tabs()).some(tab => tab.title === "file-01.md" && tab.selected), "reopen from tree");
+    check(`${label}: closing the last file preserves the project tree and reopening from it works`);
+  }
+  await click('[data-project-workspace] button[aria-label="关闭文件标签 file-01.md"]');
+  await waitFor(async () => (await tabs()).length === 0, "close before reload");
+  await reloadRenderer();
+  await selectSurface("项目");
+  await verifyTree("reloaded");
+  await clickElement(fileSource);
+  await waitFor(async () => (await tabs()).some(tab => tab.title === "file-01.md" && tab.selected), "reopen after reload");
+  check("zero-file project keeps its tree after reload");
 }
 
 async function verifyProjectTreeReveal(sessionID, projectRoot) {
@@ -595,7 +697,7 @@ async function verifyProjectTreeReveal(sessionID, projectRoot) {
     await waitFor(async () => (await tabs()).some(tab=>tab.title===path.basename(file)&&tab.selected), 'open '+file);
     await js(`Array.from(document.querySelectorAll('[data-project-workspace] .pudding-workspace-tab-select')).find(el=>el.textContent==='${path.basename(file)}').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))`);
   }
-  const treeSource=`document.querySelector('[data-project-workspace] nav').nextElementSibling.firstElementChild`;
+  const treeSource=`document.querySelector('[data-project-workspace] [data-project-tree]')`;
   const targetSource=`Array.from((${treeSource}).querySelectorAll('button')).find(el=>el.textContent.trim()==='target.md')`;
   await waitFor(()=>js(`Boolean(${targetSource})`),'nested target loaded');
   const measure=`(() => {const tree=${treeSource},file=${targetSource}; const t=tree?.getBoundingClientRect(),r=file?.getBoundingClientRect();return {scroll:tree?.scrollTop,visible:Boolean(r&&t&&r.top>=t.top&&r.bottom<=t.bottom),focused:document.activeElement===file,active:Array.from(document.querySelectorAll('[data-project-workspace] .pudding-workspace-tab-select')).find(el=>el.getAttribute('aria-pressed')==='true')?.textContent,filesTab:document.querySelector('[data-project-workspace] nav button[aria-pressed="true"]')?.textContent};})()`;
@@ -629,7 +731,8 @@ async function verifyProjectTreeReveal(sessionID, projectRoot) {
   await waitFor(()=>js(`!(${targetSource})`),'root collapsed');
   await js(`import('/src/main.tsx').then(({router})=>router.options.context.queryClient.removeQueries({queryKey:['session',${JSON.stringify(sessionID)},'project','tree'],type:'inactive'}))`);
   await revealMenu(); await assertRevealed('collapsed');
-  await click('[data-project-workspace] nav button[aria-label="搜索项目内容"]');
+  await input('[data-project-search] input', "Long project document");
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-project-search-results]'))`),"search replaces tree");
   await revealMenu(); await assertRevealed('from-search');
   await click('[data-project-workspace] nav button[aria-label="源代码管理"]');
   await revealMenu(); await assertRevealed('from-git');
@@ -671,96 +774,250 @@ async function verifyProjectDraftLayout(sessionID, projectRoot) {
 }
 
 async function verifyLibrarySearch(sessionID, projectRoot, otherSessionID) {
-  phase = 'library search';
-  window.setContentSize(1440,920);
-  for (const itemID of ['smoke-01','smoke-02']) await api(`/sessions/${sessionID}/library/recent`, 'POST', {kind:'canvas',itemID});
-  const roots=await api(`/sessions/${sessionID}/project/tree`);
-  await api(`/sessions/${sessionID}/library/recent`, 'POST', {kind:'file',rootID:roots.roots[0].id,path:'file-01.md'});
-  fs.unlinkSync(path.join(projectRoot, 'file-01.md'));
-  await selectSurface('资源库');
-  const search='[data-workspace-library] input';
-  const settled=()=>js(`document.querySelector('[data-workspace-library]').getAttribute('aria-busy')==='false'`);
-  const rows=()=>js(`Array.from(document.querySelectorAll('[data-library-results] [data-library-open]')).map(el=>el.textContent)`);
-  const key=async(keyCode)=>{
-    app.focus({steal:true});window.focus();await waitFor(()=>window.isFocused(),'keyboard focus');
-    window.webContents.sendInputEvent({type:'keyDown',keyCode});
-    if (keyCode === 'Return') window.webContents.sendInputEvent({type:'char',keyCode:'\r'});
-    window.webContents.sendInputEvent({type:'keyUp',keyCode});
-    await delay(50);
+  const click = async selector => {
+    const source = `document.querySelector(${JSON.stringify(selector)})`;
+    await js(`${source}.scrollIntoView({block:'center',inline:'nearest'})`);
+    await clickElement(source);
   };
-  await waitFor(settled,'initial results');
-  assert.ok(await js(`document.activeElement===document.querySelector('${search}')`),'plus focuses search');
-  assert.ok(await js(`Boolean(document.querySelector('[data-library-results] [data-library-open]:disabled'))`),'unavailable source fixture');
-  await key('Down');
-  assert.ok(await js(`document.activeElement===document.querySelector('[data-library-results] [data-library-open]:not(:disabled)')`),'down skips unavailable result');
-  await key('Down');
-  assert.ok(await js(`document.activeElement===document.querySelectorAll('[data-library-results] [data-library-open]:not(:disabled)')[1]`),'down selects next result');
-  await key('Up');
-  await key('Escape');
-  assert.ok(await js(`document.activeElement===document.querySelector('${search}')`),'escape restores search focus');
-  await clickText('打开项目','[data-workspace-library] button');
+  const clickText = async (text, selector) => {
+    const source = `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(el=>el.getClientRects().length&&el.textContent.trim()===${JSON.stringify(text)})`;
+    await js(`${source}.scrollIntoView({block:'center',inline:'nearest'})`);
+    await clickElement(source);
+  };
+  phase = 'resource library';
+  window.setContentSize(1440,920);
+  // Canonical fixtures are isolated from the user's database. Seed dates to
+  // exercise real history grouping without visiting external websites.
+  const seedHistory = async (count=25) => runFile('python3',['-c',`import sqlite3,sys,time
+db=sqlite3.connect(sys.argv[1]);now=int(time.time()*1000)
+for i in range(int(sys.argv[3])):
+ db.execute("INSERT OR REPLACE INTO browser_history(id,url,title,favicon_url,visited_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",('library-'+str(i),sys.argv[2]+'/__workspace_smoke?history='+str(i),'Visit '+str(i),'',now-i*86400000,now,now))
+db.commit();db.close()`,path.join(home,'data/pudding.db'),process.env.PUDDING_DEV_URL,String(count)]);
+  await seedHistory();
+  const bookmarkURL = `${process.env.PUDDING_DEV_URL}/__workspace_smoke?bookmark=global`;
+  await api(`/sessions/${otherSessionID}/library/favorites`,'POST',{kind:'web',url:bookmarkURL,title:'Global bookmark'});
+  const savedCanvas = await api(`/sessions/${sessionID}/canvas/items/smoke-01/save`,'POST');
+  const requests=[];
+  window.webContents.session.webRequest.onBeforeRequest({urls:[`${apiBase}/sessions/*/library/recent*`,`${apiBase}/sessions/*/browser/history*`]},(details,callback)=>{requests.push(details.url);callback({});});
+  const refresh=()=>js(`import('/src/main.tsx').then(({router})=>Promise.all([router.options.context.queryClient.invalidateQueries({queryKey:['library']}),router.options.context.queryClient.invalidateQueries({predicate:q=>q.queryKey[0]==='session'&&q.queryKey[2]==='canvas'})]))`);
+  const navigate=async id=>{
+    await js(`import('/src/main.tsx').then(({router})=>router.navigate({to:'/',search:{session:${JSON.stringify(id)}}}))`);
+    await waitFor(()=>js(`new URLSearchParams(location.search).get('session')===${JSON.stringify(id)}`),'session navigation');
+    await waitFor(()=>js(`Boolean(document.querySelector('.pudding-conversation[data-session-id="${id}"]'))`),'selected conversation mounted');
+    if(await js(`Boolean(document.querySelector('button[aria-label="打开工作区"]'))`))await click('button[aria-label="打开工作区"]');
+    await waitFor(()=>js(`!Array.from(document.querySelectorAll('.pudding-workspace-stage')).some(el=>['opening','closing'].includes(el.dataset.transition))`),'workspace transition settled');
+    await selectSurface('资源库');
+  };
   await selectSurface('资源库');
-  assert.ok(await js(`document.activeElement===document.querySelector('${search}')`),'returning plus focuses search');
-  await click('[data-workspace-add]');
-  assert.ok(await js(`document.activeElement===document.querySelector('${search}')`),'plus refocuses already open library');
-  check('resource entry focuses search; arrows skip disabled results; Escape returns to search');
+  await refresh();
+  const search='[data-workspace-library] input';
+  const settled=()=>js(`document.querySelector('[data-workspace-library]')?.getAttribute('aria-busy')==='false'`);
+  const rows=region=>js(`Array.from(document.querySelectorAll('${region} [data-library-open]')).map(el=>el.textContent)`);
+  const key=async keyCode=>{
+    await focusSmokeWindow();
+    window.webContents.sendInputEvent({type:'keyDown',keyCode});
+    if(keyCode==='Return')window.webContents.sendInputEvent({type:'char',keyCode:'\r'});
+    window.webContents.sendInputEvent({type:'keyUp',keyCode});await delay(50);
+  };
+  const searchFor=async value=>{await input(search,value);await waitFor(settled,'settled search');};
+  await waitFor(settled,'library loaded');
+  assert.equal((await rows('[data-library-canvases]')).length,6,'six canvas cards initially');
+  await waitFor(()=>js(`Array.from(document.querySelectorAll('[data-library-shortcuts] [data-library-row]')).filter(el=>el.textContent.includes('Global bookmark')).every(el=>{const img=el.querySelector('img');return img?.complete&&img.naturalWidth>0&&img.src.startsWith('data:image/');})`),'URL-only bookmark favicon resolves through native browser cache');
+  assert.equal(await js(`document.querySelector('[data-library-browser]').innerText.includes('全局共享')`),false,'no global badge in recent visits');
+  assert.ok(await js(`(() => {const header=document.querySelector('[data-workspace-library] header');return !header.querySelector('h1') && Array.from(header.querySelectorAll('button[aria-label]')).slice(0,2).every(el=>el.getBoundingClientRect().height===42) && header.querySelector('input').getBoundingClientRect().height===44;})()`),'compact start actions above search without a page title');
+  assert.ok(await js(`(()=>{const rects=Array.from(document.querySelectorAll('[data-library-shortcuts] [data-library-row]')).map(el=>el.getBoundingClientRect());return Math.abs(rects[0].width-rects[1].width)<1})()`),'favorite cards share a column width');
+  check('bookmark favicon loads from page URL; compact aligned header and favorites; no global badge');
+  for(const section of ['[data-library-shortcuts]','[data-library-canvases]','[data-library-browser]']){
+    const row=`${section} [data-library-row]`;
+    const trigger=`${row} [aria-haspopup="menu"]`;
+    const readState=()=>js(`(()=>{const row=document.querySelector(${JSON.stringify(row)}), trigger=row.querySelector('[aria-haspopup="menu"]');return {hover:row.matches(':hover'),focusWithin:row.matches(':focus-within'),focusVisible:Boolean(row.querySelector(':focus-visible')),background:getComputedStyle(row).backgroundColor,opacity:getComputedStyle(trigger).opacity,time:row.querySelector('time')?getComputedStyle(row.querySelector('time')).visibility:null};})()`);
+    await js(`document.querySelector(${JSON.stringify(row)}).scrollIntoView({block:'center'});document.querySelector('${search}').focus({preventScroll:true})`);
+    window.webContents.sendInputEvent({type:'mouseMove',x:1,y:1});
+    await js(`new Promise(resolve=>requestAnimationFrame(resolve))`);
+    const idle=await readState();
+    await click(trigger);
+    await waitFor(()=>js(`Boolean(document.querySelector('[role="menu"]'))`),'resource menu opens');
+    window.webContents.sendInputEvent({type:'mouseMove',x:1,y:1});
+    await js(`new Promise(resolve=>requestAnimationFrame(resolve))`);
+    assert.equal((await readState()).opacity,'1','open menu keeps resource actions visible');
+    const outside=await js(`(()=>{const r=document.querySelector('[data-workspace-library]').getBoundingClientRect();return {x:r.left+12,y:r.top+12};})()`);
+    const zoom=window.webContents.getZoomFactor();
+    const point={x:Math.round(outside.x*zoom),y:Math.round(outside.y*zoom)};
+    window.webContents.sendInputEvent({type:'mouseMove',...point});
+    window.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});
+    window.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
+    await waitFor(()=>js(`!document.querySelector('[role="menu"]') && document.activeElement===document.querySelector(${JSON.stringify(trigger)})`),'pointer dismissal restores trigger focus');
+    const dismissed=await readState();
+    assert.equal(dismissed.hover,false,'pointer is outside the resource row');
+    assert.equal(dismissed.focusVisible,false,'pointer-restored focus is not keyboard focus');
+    assert.equal(dismissed.opacity,'0',`${section}: mouse dismissal must hide actions; ${JSON.stringify(dismissed)}`);
+    assert.equal(dismissed.background,idle.background,'pointer dismissal restores the idle background');
+    if(dismissed.time)assert.equal(dismissed.time,'visible','history time returns after pointer dismissal');
+    await key('Return');await waitFor(()=>js(`Boolean(document.querySelector('[role="menu"]'))`),'keyboard opens resource menu');
+    await key('Escape');await waitFor(()=>js(`!document.querySelector('[role="menu"]')`),'keyboard closes resource menu');
+    const keyboard=await readState();
+    assert.equal(keyboard.focusVisible,true,'keyboard dismissal retains visible focus');
+    assert.equal(keyboard.opacity,'1','keyboard focus keeps resource actions discoverable');
+  }
+  check('resource menus clear pointer highlight on dismissal while preserving keyboard focus and open-menu visibility');
+  assert.ok((await rows('[data-library-canvases]'))[0].includes('Canvas 01'),'favorite first');
+  assert.equal((await rows('[data-library-browser]')).filter(x=>x.includes('Visit')).length,5,'five recent global visits');
+  assert.ok((await rows('[data-library-shortcuts]')).includes('Global bookmark'),'bookmark from another conversation');
+  assert.equal(await js(`document.querySelector('${search}').placeholder`),'搜索画布和网页');
+  await clickText('查看更多画布 · 20','[data-library-canvases] button');
+  assert.equal((await rows('[data-library-canvases]')).length,12,'inline canvas expansion');
+  await clickText('历史记录','[data-library-browser] button');
+  await waitFor(settled,'full history loaded');
+  assert.equal((await rows('[data-library-browser]')).filter(x=>x.includes('Visit')).length,20);
+  assert.ok(await js(`document.querySelectorAll('[data-library-browser] h3').length>=20`),'history grouped by date');
+  await clickText('查看更多记录','[data-library-browser] button');
+  assert.equal((await rows('[data-library-browser]')).filter(x=>x.includes('Visit')).length,25);
+  await clickText('返回最近访问','[data-library-browser] button');
+  await waitFor(settled,'recent view');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('[data-workspace-library] h2')).map(el=>el.textContent)`),['收藏','画布','最近访问']);
+  assert.ok((await rows('[data-library-shortcuts]')).some(x=>x.includes('Canvas 01')),'global collection includes saved canvases');
+  check('global canvas and web favorites; six current canvases; five recent visits; dated history expands 20 to 25');
 
-  await waitFor(settled,'results settled before delayed search');
-  const oldRows=await rows(), requests=[];
-  window.webContents.session.webRequest.onBeforeRequest({urls:[`${apiBase}/sessions/*/library/recent*`]}, (details, callback)=>{
-    if(details.method!=='GET') {callback({});return;}
-    const query=new URL(details.url).searchParams.get('q');requests.push(query);
-    setTimeout(()=>callback({}),600);
-  });
-  for(const value of ['C','Ca','Can','Canvas 01']) {await input(search,value);await delay(25);}
-  await waitFor(()=>requests.includes('Canvas 01'),'debounced request');
-  assert.deepEqual(requests,['Canvas 01'],'rapid typing issues only one request');
-  assert.deepEqual(await rows(),oldRows,'previous rows remain visible while loading');
-  await key('Return');
-  assert.ok(await js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden')==='false'`),'pending Enter does not open stale result');
-  await waitFor(settled,'search completed');
-  assert.ok((await rows()).every(row=>row.includes('Canvas 01')),'completed search replaces old rows');
-  check('search debounces rapid typing, preserves previous rows and blocks stale Enter');
+  await searchFor('Canvas 20');
+  assert.equal((await rows('[data-library-canvases]')).length,1,'all inventory is searchable beyond initial six');
+  await key('Down');await key('Return');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:smoke-20"][data-selected="true"]'))`),'keyboard opens canvas');
+  await click('button[aria-label="关闭标签 Canvas 20"]');
+  await selectSurface('资源库');await waitFor(settled,'closed item discoverable');
+  assert.equal((await rows('[data-library-canvases]')).length,1);
+  await click('[data-library-canvases] [data-library-open]');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:smoke-20"][data-selected="true"]'))`),'closed canvas reopens');
+  assert.equal((await api(`/sessions/${sessionID}/canvas/items`)).items.filter(x=>x.id==='smoke-20').length,1,'no copy created');
+  await selectSurface('资源库');
+  await searchFor('file-01.md');
+  assert.equal((await rows('[data-library-results]')).length,0,'no recent file results');
+  await js(`import('/src/state/projectRevealStore.ts').then(m=>m.requestProjectFileReveal({sessionID:${JSON.stringify(sessionID)},rootPath:${JSON.stringify(projectRoot)},relativePath:'file-01.md'}))`);
+  await waitFor(async()=>(await tabs()).some(t=>t.title==='file-01.md'&&t.selected),'project file opens normally');
+  assert.ok(!await js(`document.querySelector('[data-project-workspace]').innerText.includes('最近打开')`),'project has no recent files feature');
+  await selectSurface('资源库');await waitFor(settled,'return from project');
+  assert.equal((await rows('[data-library-results]')).length,0);
+  assert.equal(requests.filter(url=>url.includes('/library/recent')).length,0,'opening files writes no recent records');
+  check('closed canvases reopen with original identity; files remain in project without recent-file reads or writes');
 
-  const count=requests.length;
-  await js(`document.querySelector('${search}').dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:'hua'}))`);
+  await searchFor('Canvas 01');
+  await js(`document.querySelector('${search}').dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}))`);
+  const before=requests.length;
   await input(search,'画');await delay(300);
   await js(`document.querySelector('${search}').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,isComposing:true}))`);
-  assert.equal(requests.length,count,'composition does not request incomplete text');
-  assert.ok(await js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden')==='false'`),'IME Enter does not open a result');
+  assert.equal(requests.length,before,'composition has no incomplete search request');
+  assert.equal(await js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden')`),'false');
   await js(`document.querySelector('${search}').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'画'}))`);
-  await waitFor(()=>requests.includes('画'),'committed composition queried');
-  await input(search,'Canvas 02');
-  await waitFor(settled,'replacement query settled');
-  assert.equal((await rows()).length,1,'one matching canvas result');
-  assert.ok((await rows()).every(row=>row.includes('Canvas 02')),'outdated response never replaces newest search');
-  window.webContents.session.webRequest.onBeforeRequest(null);
-  check('composition events wait for commit; latest search wins after an in-flight request');
-  await key('Down');
-  assert.ok(await js(`document.activeElement.matches('[data-library-open]')`),'result focused before Enter');
+  await waitFor(settled,'composition committed');
+  await searchFor('Canvas 02');
+  await input(search,'no-result');
   await key('Return');
-  await waitFor(()=>js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:smoke-02"][data-selected="true"]'))`),'Enter opens selected canvas');
-  await selectSurface('资源库');
-  await click('button[aria-label="清除搜索"]');
-  await waitFor(settled,'clear search restores recents');
-  assert.ok(await js(`document.activeElement===document.querySelector('${search}')&&document.querySelector('${search}').value===''`),'clear keeps focus');
-  assert.ok((await rows()).some(row=>row.includes('Canvas 01')),'clear restores full recent list');
-  await screenshot('library-keyboard-search');
-  check('keyboard opens the selected canvas; clearing restores recents and input focus');
+  assert.equal(await js(`document.querySelector('[data-workspace-library]').getAttribute('aria-hidden')`),'false','pending Enter cannot open stale result');
+  await waitFor(settled,'pending query settled');
+  await click('button[aria-label="清除搜索"]');await waitFor(settled,'clear');
+  assert.ok(await js(`document.activeElement===document.querySelector('${search}')`));
+  check('search handles IME composition, keyboard open and stale Enter protection');
 
-  for (const [id, title] of [[sessionID, 'Shared reference current'], [otherSessionID, 'Shared reference other']]) {
-    await api(`/sessions/${id}/canvas/items`, 'POST', {id:'shared-library-id',kind:'markdown',title,item:{markdown:`# ${title}`}});
-  }
-  await js(`import('/src/main.tsx').then(({router}) => router.options.context.queryClient.invalidateQueries({queryKey:['session',${JSON.stringify(sessionID)},'canvas','items']}))`);
-  await waitFor(() => js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:shared-library-id"]'))`), 'new canvas available');
-  await js(`import('/src/state/workspaceStore.ts').then(m => m.closeWorkspaceTabs(${JSON.stringify(sessionID)}, ['canvas:shared-library-id']))`);
-  await api(`/sessions/${otherSessionID}/library/recent`, 'POST', {kind:'canvas',itemID:'shared-library-id'});
-  await input(search, 'Shared reference');
-  await waitFor(settled, 'cross-session search completed');
-  const sharedRows = await rows();
-  assert.ok(sharedRows.some(row => row.includes('Shared reference other')), 'other session recent canvas is searchable');
-  assert.ok(sharedRows.some(row => row.includes('Shared reference current')), 'same ID in another session must not hide the current closed canvas');
-  check('search deduplicates canvases by session and item identity');
+  for(const [id,title] of [[sessionID,'Shared current'],[otherSessionID,'Shared other']])await api(`/sessions/${id}/canvas/items`,'POST',{id:'shared-library-id',kind:'markdown',title,item:{markdown:'# Shared'}});
+  await refresh();await searchFor('Shared');
+  assert.deepEqual((await rows('[data-library-canvases]')).map(x=>x.includes('Shared current')),[true],'default current scope');
+  assert.equal(await js(`document.querySelector('[data-library-canvases]').innerText.includes('全部对话')||document.querySelector('[data-library-canvases]').innerText.includes('当前对话')`),false,'no redundant conversation scope labels');
+  await navigate(otherSessionID);await searchFor('Shared');
+  assert.equal((await rows('[data-library-canvases]')).length,1,'switching conversation changes canvas inventory');
+  assert.ok((await rows('[data-library-canvases]'))[0].includes('Shared other'));
+  await click('[data-library-canvases] [data-library-open]');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:shared-library-id"][data-selected="true"]'))`),'canvas opens in its own conversation');
+  await selectSurface('资源库');await searchFor('');
+  assert.ok((await rows('[data-library-shortcuts]')).some(x=>x.includes('Global bookmark')),'global bookmark survives session switch');
+  await searchFor('Canvas 01');
+  await click('[data-library-shortcuts] [data-library-open]');
+  await waitFor(async()=>(await api(`/sessions/${otherSessionID}/canvas/items`)).items.some(x=>x.sourceSavedItemID===savedCanvas.savedItem.id),'global favorite opens a working copy in current conversation');
+  assert.equal(await js(`new URLSearchParams(location.search).get('session')`),otherSessionID,'favorite does not jump to source conversation');
+  const openedCopy=(await api(`/sessions/${otherSessionID}/canvas/items`)).items.find(x=>x.sourceSavedItemID===savedCanvas.savedItem.id);
+  await selectSurface('资源库');await searchFor('Canvas 01');await click('[data-library-shortcuts] [data-library-open]');
+  assert.equal((await api(`/sessions/${otherSessionID}/canvas/items`)).items.filter(x=>x.sourceSavedItemID===savedCanvas.savedItem.id).length,1,'reopening favorite reuses current copy');
+  await api(`/sessions/${otherSessionID}/canvas/items`,'POST',{id:openedCopy.id,kind:openedCopy.kind,title:'支付状态码表',item:openedCopy.item,window:openedCopy.window});
+  await refresh();await selectSurface('资源库');await searchFor('支付');
+  assert.equal((await rows('[data-library-canvases]')).length,1,'renamed working copy remains searchable while its saved version is favorited');
+  assert.equal((await rows('[data-library-shortcuts]')).length,0,'unmatched saved title is absent from favorites search');
+  await click('[data-library-canvases] [data-library-open]');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-workspace-tab-key="canvas:${openedCopy.id}"][data-selected="true"]'))`),'search opens the renamed working copy');
+  await selectSurface('资源库');await searchFor('Canvas 01');
+  assert.equal((await rows('[data-library-results]')).length,1,'search by saved title keeps one result for the same opening target');
+  await click('[data-library-shortcuts] button[aria-label="更多操作 Canvas 01"]');await clickText('取消收藏','[role="menuitem"]');
+  await waitFor(async()=>!(await api(`/sessions/${otherSessionID}/library`)).entries.find(x=>x.savedItemID===savedCanvas.savedItem.id)?.favoriteID,'unfavorite updates global collection');
+  await waitFor(settled,'unfavorite rendered');
+  assert.ok((await api(`/sessions/${otherSessionID}/canvas/items`)).items.some(x=>x.id===openedCopy.id),'unfavorite retains current working copy');
+  assert.ok((await api(`/sessions/${sessionID}/library`)).entries.some(x=>x.savedItemID===savedCanvas.savedItem.id),'unfavorite retains global saved content');
+  assert.equal((await rows('[data-library-canvases]')).length,1,'saved title remains searchable after unfavorite even when its working copy has a different title');
+  await click('[data-library-canvases] button[aria-label="更多操作 Canvas 01"]');await clickText('收藏','[role="menuitem"]');await waitFor(settled,'refavorite rendered');
+  await searchFor('支付');
+  assert.equal((await rows('[data-library-canvases]')).length,1,'refavoriting does not hide the renamed working copy');
+  const renamedCopies=(await api(`/sessions/${otherSessionID}/canvas/items`)).items.filter(x=>x.sourceSavedItemID===savedCanvas.savedItem.id);
+  assert.equal(renamedCopies.length,1,'search never creates another working copy');
+  assert.equal(renamedCopies[0].title,'支付状态码表');
+  assert.equal(renamedCopies[0].savedDirty,true,'search preserves unsaved changes');
+  assert.equal((await api(`/sessions/${otherSessionID}/library`)).entries.find(x=>x.savedItemID===savedCanvas.savedItem.id).title,'Canvas 01','search does not overwrite the saved title');
+  check('renamed working copies and unfavorited saved titles remain searchable without losing edits or creating copies');
+  check('canvas favorites work globally, open in current conversation, reuse existing copy; unfavorite preserves both versions');
+  await navigate(sessionID);await searchFor('Shared current');
+  await click('button[aria-label="更多操作 Shared current"]');await clickText('删除画布项','[role="menuitem"]');
+  await clickText('删除','[role="alertdialog"] button');
+  await waitFor(()=>js(`!document.querySelector('[role="alertdialog"]')`),'canvas deletion confirmed');
+  await waitFor(settled,'inventory refreshed');
+  assert.equal((await rows('[data-library-canvases]')).length,0,'deleted working item disappears immediately');
+  assert.ok((await api(`/sessions/${otherSessionID}/canvas/items`)).items.some(x=>x.id==='shared-library-id'),'same-ID other canvas intact');
+  check('canvas inventory follows conversation; no scope switcher; identical IDs and deletion remain isolated');
+
+  const origin=await api('/sessions','POST',{title:'Temporary saved source',provider:'mock',model:'mock'});
+  await api(`/sessions/${origin.id}/canvas/items`,'POST',{id:'orphan',kind:'markdown',title:'Preserved saved canvas',item:{markdown:'# Keep this content'}});
+  const orphan=await api(`/sessions/${origin.id}/canvas/items/orphan/save`,'POST');
+  await api(`/sessions/${origin.id}`,'DELETE');
+  await refresh();await searchFor('Preserved saved canvas');
+  assert.equal((await rows('[data-library-shortcuts]')).length,1,'favorite survives source conversation deletion');
+  await click('[data-library-shortcuts] button[aria-label="更多操作 Preserved saved canvas"]');await clickText('取消收藏','[role="menuitem"]');
+  await waitFor(async()=>!(await api(`/sessions/${sessionID}/library`)).entries.find(x=>x.savedItemID===orphan.savedItem.id)?.favoriteID,'orphan unfavorited');
+  await waitFor(()=>js(`document.querySelector('[data-library-canvases]').innerText.includes('保存版本')`),'unfavorited saved version remains searchable');
+  await click('[data-library-canvases] [data-library-open]');
+  await waitFor(async()=>(await api(`/sessions/${sessionID}/canvas/items`)).items.some(x=>x.sourceSavedItemID===orphan.savedItem.id),'saved version opens after source deletion');
+  await selectSurface('资源库');
+  check('saved content survives source deletion and remains searchable after unfavoriting');
+  await searchFor('Global bookmark');await click('[data-library-shortcuts] [data-library-open]');
+  await waitFor(async()=>(await api(`/sessions/${sessionID}/browser/tabs`)).tabs.some(t=>t.url===bookmarkURL),'global bookmark opens in current workspace');
+  await selectSurface('资源库');await searchFor('');
+  if(await js(`Boolean(Array.from(document.querySelectorAll('[data-library-browser] button')).find(el=>el.textContent==='历史记录'))`))await clickText('历史记录','[data-library-browser] button');
+  await waitFor(settled,'history view');
+  const canvasBefore=(await api(`/sessions/${sessionID}/canvas/items`)).items.length;
+  const bookmarksBefore=(await api(`/sessions/${sessionID}/library`)).entries.length;
+  await click('button[aria-label="清空历史记录"]');await clickText('清空历史记录','[role="alertdialog"] button');
+  await waitFor(()=>js(`!document.querySelector('[role="alertdialog"]')`),'clear history confirmed');
+  await waitFor(settled,'cleared history');
+  assert.equal((await api(`/sessions/${otherSessionID}/browser/history`)).history.length,0,'history clears globally');
+  assert.equal((await api(`/sessions/${sessionID}/canvas/items`)).items.length,canvasBefore);
+  assert.equal((await api(`/sessions/${sessionID}/library`)).entries.length,bookmarksBefore);
+  check('bookmarks open in current workspace; clearing global history preserves all canvases and favorites');
+  await clickText('返回最近访问','[data-library-browser] button');await waitFor(settled,'back to recent');
+  for(const theme of ['light','dark']){await js(`window.puddingElectronTheme.setTheme(${JSON.stringify(theme)})`);await delay(120);await screenshot(`library-${theme}`);}
+  window.setContentSize(780,760);await delay(200);
+  assert.equal(await js(`(()=>{const el=document.querySelector('[data-workspace-library]');return el.scrollWidth<=el.clientWidth+1})()`),true,'narrow library no horizontal overflow');
+  await screenshot('library-narrow');
+  window.setContentSize(1440,920);
+  window.webContents.session.webRequest.onBeforeRequest(null);
+  check('library light/dark and narrow-window layout captured');
+  const empty=await api('/sessions','POST',{title:'Library without canvases',provider:'mock',model:'mock',projectID:(await api(`/sessions/${sessionID}`)).projectID});
+  await js(`import('/src/main.tsx').then(({router})=>router.options.context.queryClient.invalidateQueries({queryKey:['sessions']}))`);
+  await navigate(empty.id);await searchFor('');
+  await waitFor(settled,'empty canvas library');
+  assert.equal(await js(`Boolean(document.querySelector('[data-library-canvases]'))`),false,'empty canvas section is absent');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('[data-workspace-library] h2')).map(el=>el.textContent)`),['收藏','最近访问']);
+  await waitFor(()=>js(`Array.from(document.querySelectorAll('[data-library-shortcuts] img')).some(img=>img.complete&&img.naturalWidth>0&&img.src.startsWith('data:image/'))`),'bookmark favicon survives clearing history and switching session');
+  await seedHistory(5);
+  await js(`import('/src/main.tsx').then(({router})=>router.options.context.queryClient.invalidateQueries({queryKey:['browser','history']}))`);
+  await waitFor(settled,'history fixture refreshed');
+  for(const theme of ['light','dark']){await js(`window.puddingElectronTheme.setTheme(${JSON.stringify(theme)})`);await delay(120);await screenshot(`library-empty-${theme}`);}
+  window.setContentSize(780,760);await delay(200);
+  assert.ok(await js(`(()=>{const el=document.querySelector('[data-workspace-library]');return el.scrollWidth<=el.clientWidth+1})()`),'empty layout fits narrow window');
+  await screenshot('library-empty-narrow');
+  check('empty canvas section hidden; favicon survives history clear; empty layout verified in light/dark and narrow window');
 }
 
 async function seedConversation(sessionID) {
@@ -772,6 +1029,99 @@ async function seedConversation(sessionID) {
     await waitFor(async () => (await api(`/sessions/${sessionID}/turns?limit=1`)).turns.some(turn => turn.id === response.turnID && turn.status === 'completed'), 'mock turn completed');
   }
 }
+async function verifyConversationResize(sessionID) {
+  phase = "conversation resize anchors";
+  window.setContentSize(1440, 920);
+  await focusSmokeWindow();
+  await js(`window.__resizeErrors = []; window.addEventListener('error', event => window.__resizeErrors.push(event.message));`);
+  const viewport = `document.querySelector('.pudding-conversation[data-session-id="${sessionID}"] [data-transcript-viewport]')`;
+  const measure = `(() => {
+    const v = ${viewport}, list = v.querySelector('[role="list"]');
+    const grid = list?.firstElementChild, tail = grid?.lastElementChild;
+    return {width:v.clientWidth, top:v.scrollTop, gap:v.scrollHeight-v.clientHeight-v.scrollTop,
+      tailGap:tail ? v.getBoundingClientRect().bottom-tail.getBoundingClientRect().bottom : null,
+      readingOffset: window.__readingTurnID ? v.querySelector('[data-transcript-turn-id="'+window.__readingTurnID+'"]')?.getBoundingClientRect().top-v.getBoundingClientRect().top : null,
+      listHeight:list?.getBoundingClientRect().height, gridHeight:grid?.getBoundingClientRect().height};
+  })()`;
+  await waitFor(() => js(`Boolean(${viewport}?.querySelector('[data-transcript-turn-id]'))`), "long conversation rendered");
+  if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-markdown-resize") {
+    assert.ok(await js(`${viewport}.querySelectorAll('.pudding-markdown table').length > 0`), "real Markdown tables rendered");
+    assert.ok(await js(`${viewport}.querySelectorAll('.pudding-markdown ul ul').length > 0`), "nested Markdown lists rendered");
+  }
+  await delay(500);
+  const bottomButton = `.pudding-conversation[data-session-id="${sessionID}"] .pudding-conversation-bottom-dock button`;
+  if (await js(`Boolean(document.querySelector('${bottomButton}'))`)) await click(bottomButton);
+  await waitFor(() => js(`${measure}.gap < 2`), "conversation initially pinned");
+  const record = async (name, action) => {
+    const before = await js(measure);
+    await js(`window.__resizeFrames = []; (function frame() {
+      window.__resizeTimer = setTimeout(() => window.__resizeFrames.push(${measure}), 0);
+      window.__resizeFrame = requestAnimationFrame(frame);
+    })()`);
+    await action();
+    await delay(400);
+    const samples = await js(`cancelAnimationFrame(window.__resizeFrame); clearTimeout(window.__resizeTimer); window.__resizeFrames`);
+    const gap = Math.max(...samples.map(row => Math.abs(row.gap)));
+    const tailDrift = Math.max(...samples.map(row => Math.abs(row.tailGap)));
+    fs.writeFileSync(path.join(reportDir, `${name}.json`), JSON.stringify({before, gap, tailDrift, samples}, null, 2));
+    console.info("[conversation-resize]", JSON.stringify({name, gap, tailDrift, frames:samples.length}));
+    assert.ok(samples.length > 10, "captured resize frames");
+    assert.ok(Math.max(...samples.map(row => row.width))-Math.min(...samples.map(row => row.width)) > 20, `${name}: transcript actually changes width`);
+    if (before.readingOffset !== null) {
+      const drift = Math.max(...samples.map(row => Math.abs(row.readingOffset-before.readingOffset)));
+      console.info("[conversation-resize] READING", JSON.stringify({name, drift}));
+      assert.ok(drift < 2, `${name}: reading turn stays anchored in every painted frame`);
+      assert.ok(samples.every(row => row.gap > 100), "history resize never pulls the reader to latest");
+    } else {
+      assert.ok(gap < 2 && tailDrift < 2, `${name}: latest content stays pinned in every painted frame`);
+    }
+    check(name);
+  };
+  const dragDivider = async (distance, steps, interval) => {
+    const point = await js(`(() => {const r=document.querySelector('.pudding-shell-divider').getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y+r.height/2)}})()`);
+    window.webContents.sendInputEvent({type:"mouseMove", ...point});
+    window.webContents.sendInputEvent({type:"mouseDown", ...point, button:"left", clickCount:1});
+    for (let step = 1; step <= steps; step++) {
+      window.webContents.sendInputEvent({type:"mouseMove", x:point.x+Math.round(Math.sin(step / steps * Math.PI * 2)*distance), y:point.y, button:"left"});
+      await delay(interval);
+    }
+    window.webContents.sendInputEvent({type:"mouseUp", ...point, button:"left", clickCount:1});
+  };
+  await record("divider-resize", () => dragDivider(140, 80, 20));
+  const point = await js(`(() => { const r=${viewport}.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+100)}; })()`);
+  window.webContents.sendInputEvent({type:"mouseMove", ...point});
+  window.webContents.sendInputEvent({type:"mouseWheel", ...point, deltaX:0, deltaY:1600});
+  await delay(600);
+  await js(`(() => { const v=${viewport}, top=v.getBoundingClientRect().top;
+    window.__readingTurnID=Array.from(v.querySelectorAll('[data-transcript-turn-id]')).find(el => el.getBoundingClientRect().bottom > top+1).dataset.transcriptTurnId;
+  })()`);
+  await record("history-divider-resize", () => dragDivider(140, 80, 20));
+  await js(`delete window.__readingTurnID`);
+  await click(bottomButton);
+  await delay(400);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-markdown-resize") {
+    for (const width of [1100, 1800, 2300]) {
+      window.setContentSize(width, 920);
+      await delay(400);
+      await record(`markdown-divider-${width}`, () => dragDivider(420, 320, 4));
+    }
+    window.setContentSize(1440, 920);
+    await delay(400);
+  }
+  for (const label of ["收起边栏", "展开边栏", "专注", "退出专注", "收起工作区", "打开工作区"]) {
+    await record(`resize-${label}`, () => click(`button[aria-label="${label}"]`));
+  }
+  await input(`.pudding-conversation[data-session-id="${sessionID}"] textarea`, "改变宽度时，输入框换行也不能让消息跳动。".repeat(6));
+  await delay(400);
+  await record("window-resize-with-draft", async () => {
+    for (const width of [1560, 1680, 1560, 1440, 1320, 1440]) {
+      window.setContentSize(width, 920);
+      await delay(120);
+    }
+  });
+  assert.deepEqual(await js(`window.__resizeErrors`), [], "no resize observer loops or window errors");
+}
+
 async function verifyConversationRestore(primaryID, secondaryID) {
   phase = 'conversation restoration';
   window.setContentSize(1440, 920);
@@ -1096,6 +1446,25 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await click('button[aria-label="收起工作区"]'); await settle();
     const turnID = await startTurn(sessionID, 'preview-running');
     await operation(first, turnID); await live(first);
+    await waitFor(() => js(`(() => {
+      const img = document.querySelector('[data-computer-preview] img[draggable="false"]');
+      return img?.complete && img.naturalWidth > 0 && img.src.startsWith('data:image/png;base64,');
+    })()`), 'native PNG frame decodes in the renderer');
+    const frameAlpha = await js(`(() => {
+      const img = document.querySelector('[data-computer-preview] img[draggable="false"]');
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d'); context.drawImage(img, 0, 0);
+      const alpha = (x, y) => context.getImageData(x, y, 1, 1).data[3];
+      return {
+        corners: [[0, 0], [canvas.width - 1, 0], [0, canvas.height - 1], [canvas.width - 1, canvas.height - 1]].map(([x, y]) => alpha(x, y)),
+        center: alpha(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)),
+      };
+    })()`);
+    // Downscaling can leave a few alpha levels at the antialiased bottom corners.
+    assert.ok(frameAlpha.corners.every(alpha => alpha < 16), `all four native corners stay nearly transparent, not opaque black: ${frameAlpha.corners}`);
+    assert.equal(frameAlpha.center, 255, 'window content remains opaque');
+    check('BGRA capture and PNG IPC preserve native window corner transparency in the renderer');
     const captured = entry().child;
     assert.equal(await js(`import('/src/state/workspaceStore.ts').then(m => m.getWorkspaceSessionUI(${JSON.stringify(sessionID)}).presentation)`), 'hidden');
     const geometry = await js(`(() => { const card=document.querySelector('[data-computer-preview]'), artifacts=document.querySelector('[aria-label="临时工作区内容"]'); const c=card.getBoundingClientRect(),a=artifacts.getBoundingClientRect();return {top:c.top,bottom:c.bottom,artifactBottom:a.bottom,height:innerHeight}})()`);
@@ -1115,7 +1484,7 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     check('real ScreenCaptureKit frames below artifacts, live window changes, no workspace expansion or repeated model screenshots');
     const assertAspect = async ratio => {
       await waitFor(() => entry()?.frame && Math.abs(entry().frame.width / entry().frame.height - ratio) < 0.01, 'native frame follows current window aspect');
-      await waitFor(() => js(`(() => {const card=document.querySelector('[data-computer-preview]'), img=card?.querySelector('img[draggable="false"]');if(!img?.complete)return false; const r=img.getBoundingClientRect(),box=img.parentElement.getBoundingClientRect();return Math.abs(r.width/r.height-${ratio})<0.01 && Math.abs(box.width-r.width)<1 && Math.abs(box.height-r.height)<=2 && card.firstElementChild.getBoundingClientRect().height===32;})()`), 'single-line title and image fit without letterboxing');
+      await waitFor(() => js(`(() => {const card=document.querySelector('[data-computer-preview]'), img=card?.querySelector('img[draggable="false"]');if(!img?.complete)return false; const r=img.getBoundingClientRect(),box=img.parentElement.getBoundingClientRect(),c=card.getBoundingClientRect();return Math.abs(r.width/r.height-${ratio})<0.01 && Math.abs(box.width-r.width)<1 && Math.abs(box.height-r.height)<1 && Math.abs(c.height-r.height-2)<1 && Math.abs(r.top-c.top-1)<1 && card.querySelectorAll('img').length===1 && Boolean(card.getAttribute('aria-label'));})()`), 'titleless preview fits its image without header space or letterboxing');
     };
     await assertAspect(first.frame.width / first.frame.height);
     for (const [label, ratio] of [['wide',960/532],['portrait',360/672],['restored',520/532]]) {
@@ -1124,7 +1493,7 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
       assert.equal(entry().child, captured, 'resizing reuses the same stream');
       await screenshot(`computer-preview-${label}`);
     }
-    check('native window aspect follows wide and portrait resizing, without borders or restarting capture; title stays one line');
+    check('titleless preview follows wide and portrait resizing without header space, letterboxing or restarting capture');
 
 
     await click('button[aria-label="打开工作区"]'); await settle();
@@ -1167,6 +1536,28 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await waitFor(() => js(`!document.querySelector('[data-computer-preview]')`), 'completed preview disappears after thirty seconds', 35_000);
     assert.ok(Date.now() - finishedAt >= 29_000, 'completed preview retains the final result for thirty seconds');
     check('real SSE cancel stops immediately; completion stops capture but retains the last frame for thirty seconds');
+
+    for (const status of ['completed', 'cancelled']) {
+      const previewTurn = await startTurn(sessionID, `preview-before-${status}`, 100);
+      await operation(first, previewTurn); await live(first);
+      const previousCapture = entry().child;
+      await waitFor(() => js(`document.querySelector('[data-computer-preview]')?.dataset.status === 'complete'`), 'previous turn retains its final frame');
+      await waitFor(() => previousCapture.exitCode !== null && !entry(), 'previous capture released');
+
+      // Start inside the 30-second retention window. This turn has no native
+      // activity: subscribing and receiving ordinary SSE must not revive PiP.
+      const chatTurn = await startTurn(sessionID, `chat-without-computer-${status}`, status === 'completed' ? 100 : 2000);
+      assert.equal(await image(), undefined, 'new turn hides the previous final frame');
+      assert.equal(entry(), undefined, 'ordinary chat never starts native capture');
+      if (status === 'cancelled') await api(`/sessions/${sessionID}/cancel`, 'POST');
+      await waitFor(() => js(`import('/src/state/overlayStore.ts').then(m => !m.useOverlayStore.getState().runningTurns[${JSON.stringify(sessionID)}])`), `ordinary chat ${status}`);
+      assert.equal((await api(`/sessions/${sessionID}/turns/${chatTurn}`)).status, status, 'canonical turn confirms the outcome after the overlay is reconciled');
+      await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      assert.equal(await js(`Boolean(document.querySelector('[data-computer-preview]'))`), false, `${status} ordinary chat must not resurrect the previous turn's preview`);
+      assert.equal(entry(), undefined, 'no native activity was needed to exercise retained renderer state');
+      await screenshot(`computer-preview-no-resurrection-${status}`);
+      check(`ordinary chat ${status} inside the retention window cannot resurrect the previous Computer Use preview`);
+    }
 
     const closeTurn = await startTurn(sessionID, 'preview-window-close');
     await operation(second, closeTurn); await live(second);
@@ -1334,6 +1725,172 @@ async function verifyAutomationPresentation(sessionID, otherSessionID) {
   check("user new-tab action still creates and displays the browser");
 }
 
+async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
+  phase = 'project Markdown links';
+  const q = JSON.stringify;
+  const webURL = process.env.PUDDING_DEV_URL + '/__workspace_smoke?from=markdown#intro';
+  const source = '# Link fixture\n\n[中文文档](docs/%E4%B8%AD%E6%96%87%20Guide.md#%E5%AE%89%E8%A3%85)\n\n[Web](' + webURL + ')\n\n[Missing](gone.md)\n\n[Code](main.ts#L12)\n\n[Missing heading](#unknown-heading)\n\n[Outside](../outside.md)\n\n[Local](#local-section)\n\n[Reference][guide]\n\n[guide]: docs/%E4%B8%AD%E6%96%87%20Guide.md\n\n' + 'Spacing paragraph.\n\n'.repeat(70) + '## Local section\n\nEnd\n';
+  const target = '# 中文文档\n\n[Back](../README.md)\n\n' + 'Spacing.\n\n'.repeat(65) + '## 安装\n\nInstall here.\n\n' + 'Tail.\n\n'.repeat(30);
+  fs.mkdirSync(path.join(projectRoot,'docs'));
+  fs.writeFileSync(path.join(projectRoot,'README.md'),source);
+  fs.writeFileSync(path.join(projectRoot,'docs','中文 Guide.md'),target);
+  fs.writeFileSync(path.join(projectRoot,'main.ts'), Array.from({length:40},(_,i)=>`export const value${i}= ${i};`).join('\n'));
+  const existingURLs = [process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=1', process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=2'];
+  for (const url of existingURLs) {
+    const tab = await api(`/sessions/${sessionID}/browser/tabs`, 'POST', {});
+    await api(`/sessions/${sessionID}/browser/tabs/${tab.id}/open`, 'POST', {url});
+  }
+  const initialURL = window.webContents.getURL();
+  const doc = () => js(`Array.from(document.querySelectorAll('[data-project-document]')).filter(el=>!el.hidden).map(el=>el.dataset.projectDocument)`);
+  const open = async name => {
+    await js(`import('/src/state/projectRevealStore.ts').then(m=>m.requestProjectFileReveal({sessionID:${q(sessionID)},rootPath:${q(projectRoot)},relativePath:${q(name)}}))`);
+    await waitFor(()=>js(`Boolean(document.querySelector('[data-project-document]:not([hidden]) .vditor-ir [data-type="a"]'))`),'Markdown links mounted');
+    await delay(150);
+  };
+  const link = raw => `Array.from(document.querySelectorAll('[data-project-document]:not([hidden]) [data-type="a"]')).find(el=>el.querySelector(':scope > .vditor-ir__marker--link')?.textContent===${q(raw)})`;
+  const activate = async (raw, modifier=false) => {
+    const expression=link(raw);
+    await waitFor(()=>js(`Boolean(${expression})`),'link target mounted');
+    await js(`(${expression}).scrollIntoView({block:'center'})`);
+    await delay(150);
+    if (!modifier) { await clickElement(expression); return; }
+    await focusSmokeWindow();
+    const rect=await js(`(${expression}).getBoundingClientRect().toJSON()`);
+    const zoom=window.webContents.getZoomFactor(), point={x:Math.round((rect.x+rect.width/2)*zoom),y:Math.round((rect.y+rect.height/2)*zoom)};
+    window.webContents.sendInputEvent({type:'mouseMove',...point});
+    window.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1,modifiers:['meta']});
+    window.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1,modifiers:['meta']});
+    await delay(150);
+  };
+  await open('README.md');
+  await activate('docs/%E4%B8%AD%E6%96%87%20Guide.md#%E5%AE%89%E8%A3%85');
+  await waitFor(async()=> (await doc()).some(x=>x.endsWith(':docs/中文 Guide.md')),'relative Chinese link opens project document');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-project-document]:not([hidden]) .vditor-ir h2'))`),'destination heading');
+  await waitFor(()=>js(`(()=>{const d=document.querySelector('[data-project-document]:not([hidden])'),h=d.querySelector('h2'),r=d.querySelector('.pudding-vditor-editor').getBoundingClientRect();return h.getBoundingClientRect().top>=r.top-2&&h.getBoundingClientRect().top<r.bottom})()`),'cross-file Chinese anchor scrolled');
+  check('single-click relative Chinese path resolves from README and opens its heading');
+  await activate('../README.md');
+  await waitFor(async()=>(await doc()).some(x=>x.endsWith(':README.md')),'parent relative link returns');
+  await activate('#local-section');
+  await waitFor(()=>js(`document.querySelector('[data-project-document]:not([hidden]) .pudding-vditor-editor').scrollTop>500`),'same document heading scrolled');
+  assert.equal(window.webContents.getURL(),initialURL);
+  check('parent relative links and same-document fragments stay inside project without navigating shell');
+
+  await open('README.md');
+  const refLink = `document.querySelector('[data-project-document]:not([hidden]) [data-type="link-ref"]')`;
+  await js(`(${refLink}).scrollIntoView({block:'center'})`);
+  await clickElement(refLink);
+  await waitFor(async()=>(await doc()).some(x=>x.endsWith(':docs/中文 Guide.md')),'reference-style link resolved');
+  check('reference-style Markdown link uses its definition destination');
+  await open('README.md');
+  await activate('../outside.md',true);
+  await waitFor(()=>js(`document.body.innerText.includes('路径不在项目内')`),'out-of-root link feedback');
+  assert.ok((await doc()).some(x=>x.endsWith(':README.md')));
+  await activate('#unknown-heading',true);
+  await waitFor(()=>js(`document.body.innerText.includes('文档中未找到此锚点')`),'missing anchor feedback');
+  await activate('main.ts#L12',true);
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-project-document]:not([hidden]) .monaco-editor'))`),'linked source editor');
+  await waitFor(()=>js(`import('/__workspace_editor.js').then(({editor})=>editor.getEditors().some(e=>e.getDomNode()?.getBoundingClientRect().width>0&&e.getSelection()?.startLineNumber===12))`),'source line fragment revealed');
+  check('code links reveal line numbers and missing Markdown anchors report failure');
+  await open('README.md');
+  await activate('gone.md',true);
+  await waitFor(()=>js(`document.body.innerText.includes('文件不存在，或不在可访问')`),'missing file feedback');
+  check('invalid and missing local links show feedback instead of opening a web page');
+
+  await open('README.md');
+  await click('[data-project-document]:not([hidden]) button[aria-label="查看源码"]');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-project-document]:not([hidden]) .monaco-editor'))`),'source editor');
+  await js(`(async()=>{const {editor}=await import('/__workspace_editor.js');const e=editor.getEditors().find(e=>e.getDomNode()?.getBoundingClientRect().width>0),m=e.getModel();e.executeEdits('markdown-link-test',[{range:{startLineNumber:1,startColumn:1,endLineNumber:1,endColumn:1},text:${q('DRAFT_UNSAVED\n\n')}}]);})()`);
+  await click('[data-project-document]:not([hidden]) button[aria-label="实时编辑 Markdown"]');
+  await waitFor(()=>js(`Boolean(document.querySelector('[data-project-document]:not([hidden]) .vditor-ir [data-type="a"]'))`),'Markdown returns');
+  await js(`(()=>{const link=${link(webURL)},range=document.createRange();link.closest('[contenteditable]').focus();range.selectNodeContents(link.querySelector('.vditor-ir__link'));range.collapse(false);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);})()`);
+  window.webContents.sendInputEvent({type:'keyDown',keyCode:'Left'});
+  window.webContents.sendInputEvent({type:'keyUp',keyCode:'Left'});
+  await waitFor(()=>js(`(${link(webURL)}).classList.contains('vditor-ir__node--expand')`),'link expanded for text editing');
+  await activate(webURL,true);
+  await waitFor(async()=> (await api(`/sessions/${sessionID}/browser/tabs`)).tabs.some(t=>t.url===webURL),'web URL opened in correct session');
+  const tabsResult=await api(`/sessions/${sessionID}/browser/tabs`);
+  const tab=tabsResult.tabs.find(t=>t.url===webURL);
+  assert.equal(tabsResult.tabs.length,3);
+  assert.ok(existingURLs.every(url=>tabsResult.tabs.some(tab=>tab.url===url)), 'existing browser pages preserved');
+  await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:')}+${q(tab.id)})`),'browser workspace selected');
+  assert.equal((await api(`/sessions/${secondaryID}/browser/tabs`)).tabs.length,0);
+  assert.equal(window.webContents.getURL(),initialURL);
+  await open('README.md');
+  assert.ok(await js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir').textContent.includes('DRAFT_UNSAVED')`));
+  assert.equal(fs.readFileSync(path.join(projectRoot,'README.md'),'utf8'),source);
+  await activate(webURL,true);
+  await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:')}+${q(tab.id)})`),'existing web tab selected');
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,3);
+  await open('README.md');
+  check('web link opens session-scoped workspace browser, preserves existing pages, reuses its tab and retains unsaved draft');
+  await screenshot('markdown-links');
+}
+
+async function verifyIntegratedProjectSearch(sessionID, secondaryID, projectRoot) {
+  phase = 'integrated project content search';
+  const field = '[data-project-search] input';
+  const tree = '[data-project-tree]';
+  const results = '[data-project-search-results]';
+  const needle = 'PuddingSearchNeedle';
+  await js(`import('/src/state/projectRevealStore.ts').then(m=>m.requestProjectFileReveal({sessionID:${JSON.stringify(sessionID)},rootPath:${JSON.stringify(projectRoot)},relativePath:'nested/match.ts'}))`);
+  await waitFor(()=>js(`Boolean(document.querySelector('${field}')&&document.querySelector('${tree}'))`),'file search and tree mounted');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('[data-project-workspace] nav button')).map(el=>el.getAttribute('aria-label'))`), ['项目文件','源代码管理']);
+  assert.equal(await js(`document.activeElement===document.querySelector('${field}')`),false,'opening project does not steal editor focus');
+  await waitFor(()=>js(`document.querySelector('${tree}').innerText.includes('match.ts')`),'nested directory expanded');
+  const searchY=await js(`document.querySelector('${field}').getBoundingClientRect().y`);
+  await screenshot('files-with-search');
+  await input(field,needle);
+  await waitFor(()=>js(`Boolean(document.querySelector('${results} mark'))`),'file content matches');
+  assert.equal(await js(`Boolean(document.querySelector('${tree}'))`),false);
+  assert.ok(await js(`document.querySelector('${results}').innerText.includes('1 个文件中有 1 个结果')`));
+  assert.equal(await js(`document.querySelector('${field}').getBoundingClientRect().y`),searchY);
+  await screenshot('file-content-results');
+  await clickElement(`document.querySelector('${results} mark').closest('button')`);
+  await waitFor(()=>js(`import('/__workspace_editor.js').then(({editor})=>editor.getEditors().some(e=>e.getDomNode()?.getBoundingClientRect().width>0&&e.getSelection()?.startLineNumber===3))`),'match reveals source line');
+  assert.equal(await js(`document.querySelector('${field}').value`),needle);
+  check('one file search input replaces the tree with grouped content matches and opens the matching source line');
+
+  await click('[data-project-workspace] nav button[aria-label="源代码管理"]');
+  await click('[data-project-workspace] nav button[aria-label="项目文件"]');
+  assert.equal(await js(`document.querySelector('${field}').value`),needle);
+  await waitFor(()=>js(`Boolean(document.querySelector('${results} mark'))`),'query survives version switch');
+  await click('[data-project-search] button[aria-label="清除"]');
+  assert.equal(await js(`document.querySelector('${field}').value`),'');
+  await waitFor(()=>js(`document.querySelector('${tree}')?.innerText.includes('match.ts')`),'clear restores expanded tree');
+  assert.equal(await js(`document.activeElement===document.querySelector('${field}')`),true);
+  await input(field,'definitely-no-match');
+  await waitFor(()=>js(`document.querySelector('${results}')?.textContent.includes('未找到匹配内容')`),'empty result');
+  await js(`document.querySelector('${field}').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true}))`);
+  assert.equal(await js(`document.querySelector('${field}').value`),'definitely-no-match','composition Escape does not clear');
+  await click(field);
+  window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+  window.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+  await waitFor(()=>js(`Boolean(document.querySelector('${tree}'))`),'Escape restores tree');
+  check('version switching retains search; clear and Escape restore directory expansion and respect composition');
+
+  await input(field,needle);
+  await waitFor(()=>js(`Boolean(document.querySelector('${results} mark'))`),'results return');
+  window.setContentSize(780,760);
+  await delay(350);
+  await click('[data-project-workspace] button[aria-label="项目文件"]');
+  await waitFor(()=>js(`document.querySelector('${field}').getBoundingClientRect().width>0`),'narrow files visible');
+  assert.equal(await js(`document.querySelector('${field}').value`),needle);
+  await js(`document.documentElement.classList.add('dark')`);
+  await screenshot('file-search-narrow-dark');
+  assert.ok(await js(`(()=>{const p=document.querySelector('[data-project-search]');return p.scrollWidth<=p.clientWidth+1})()`),'narrow search has no horizontal overflow');
+  await clickElement(`document.querySelector('${results} mark').closest('button')`);
+  await waitFor(()=>js(`document.querySelector('[data-project-document]:not([hidden]) .monaco-editor')?.getBoundingClientRect().width>0`),'narrow match opens viewer');
+  await click('[data-project-workspace] button[aria-label="项目文件"]');
+  assert.equal(await js(`document.querySelector('${field}').value`),needle);
+  check('narrow files/results/viewer navigation preserves the query and layout in dark mode');
+  window.setContentSize(1440,920);
+  await js(`document.documentElement.classList.remove('dark');`);
+  await js(`(async()=>{const {router}=await import('/src/main.tsx');await router.navigate({to:'/',search:{session:${JSON.stringify(secondaryID)}}});const m=await import('/src/state/workspaceStore.ts');m.openWorkspaceTab(${JSON.stringify(secondaryID)},'project');})()`);
+  await waitFor(()=>js(`document.querySelector('${field}')?.value===''&&Boolean(document.querySelector('${tree}'))`),'another session starts with tree');
+  assert.equal(await js(`Boolean(document.querySelector('${results}'))`),false);
+  check('changing session resets the query and cannot display the previous session results');
+}
+
 async function run() {
   assert.ok(fs.existsSync(process.env.PUDDING_DAEMON_BIN), "Build bin/puddingd before running the smoke");
   const reservation = http.createServer();
@@ -1350,6 +1907,10 @@ async function run() {
       resolveId(id) { if (id === '/__workspace_editor.js') return '\0workspace-editor-smoke'; },
       load(id) { if (id === '\0workspace-editor-smoke') return 'export { editor } from "monaco-editor/editor";'; },
       configureServer(server) {
+      server.middlewares.use("/favicon.ico", (_req, res) => {
+        res.setHeader("Content-Type", "image/png");
+        res.end(fs.readFileSync(path.join(repo, "assets/macos/TrayTemplate.png")));
+      });
       server.middlewares.use("/__workspace_smoke", (_req, res) => {
         res.setHeader("Content-Type", "text/html");
         res.end(`<!doctype html><title>Workspace fixture</title><style>html{background:white;color:#222}body{font:16px sans-serif;margin:24px}article{padding:8px;border-bottom:1px solid #ddd}</style><input aria-label="Draft" value="unchanged">${"<article>Browser workspace fixture content</article>".repeat(300)}`);
@@ -1369,6 +1930,10 @@ async function run() {
   phase = "fixtures";
   const projectRoot = path.join(home, "project");
   fs.mkdirSync(projectRoot);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "project-search") {
+    fs.mkdirSync(path.join(projectRoot, "nested"));
+    fs.writeFileSync(path.join(projectRoot, "nested", "match.ts"), "export const first = 1;\n// lead\nexport const PuddingSearchNeedle = 42;\n");
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "editor-continuity") {
     for (const name of ['continuity-a.ts', 'continuity-b.ts']) fs.writeFileSync(path.join(projectRoot, name), 'function sample() {\n  return 42;\n}\n' + 'const example = 1;\n'.repeat(200));
   }
@@ -1385,6 +1950,23 @@ async function run() {
   const secondary = await api("/sessions", "POST", { title: "Conflict source", provider: "mock", model: "mock", projectID: project.id });
   if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-restore") {
     await Promise.all([seedConversation(primary.id), seedConversation(secondary.id)]);
+  }
+  if (["conversation-resize", "conversation-markdown-resize"].includes(process.env.PUDDING_SMOKE_SCENARIO)) await seedConversation(primary.id);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-markdown-resize") {
+    // The echo provider flattens newlines. Seed canonical Markdown in this
+    // disposable database before the renderer fetches its messages.
+    const markdown = "下面是项目状态，拖动宽度时表格和正文都应该保持贴底。".repeat(12) + "\n\n" +
+      "| 项目 | 状态 | 备注 |\n| --- | --- | --- |\n" +
+      Array.from({length:6}, (_, i) => `| 项目 ${i + 1} | 进行中 | 需要继续跟进验证 |`).join("\n") + "\n\n" +
+      "这里是表格后的长段落，宽度改变后会重新换行。".repeat(12) + "\n\n" +
+      "| 商品 | 价格 | 详细说明 | 配送区域 |\n| --- | --- | --- | --- |\n" +
+      Array.from({length:6}, (_, i) => `| 新鲜蔬菜 ${i + 1} | ¥9.99/份 | 每日新鲜配送，具体库存以门店页面为准 | 中国上海市浦东新区 |`).join("\n") + "\n\n" +
+      Array.from({length:5}, (_, i) => `- **项目 ${i + 1}**：列表内容需要随着宽度变化重新换行，阅读位置应保持稳定。\n  - 子项：继续检查段落、列表与表格混合排列的情况。`).join("\n");
+    await runFile("python3", ["-c", `import sqlite3,json,sys
+db=sqlite3.connect(sys.argv[1])
+db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assistant'",(sys.argv[3],json.dumps([{"type":"text","text":sys.argv[3]}]),sys.argv[2]))
+db.commit()
+db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
   }
   const canvasCount = process.env.PUDDING_SMOKE_SCENARIO === "automation-presentation" ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
   for (let i = 1; i <= canvasCount; i++) await api(`/sessions/${primary.id}/canvas/items`, "POST", {
@@ -1417,6 +1999,16 @@ async function run() {
     await selectSurface(label);
   }
   check(`isolated source Electron/Vite/daemon; ${canvasCount} canonical canvas tabs`);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "project-search") {
+    await verifyIntegratedProjectSearch(primary.id, secondary.id, projectRoot);
+    assert.deepEqual(rendererErrors, [], "integrated project search renderer errors");
+    return;
+  }
+  if (process.env.PUDDING_SMOKE_SCENARIO === "markdown-links") {
+    await verifyMarkdownLinks(primary.id, secondary.id, projectRoot);
+    assert.deepEqual(rendererErrors, [], "Markdown link renderer errors");
+    return;
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "computer-preview") {
     await verifyComputerPreview(primary.id, secondary.id);
     assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
@@ -1444,6 +2036,11 @@ async function run() {
   }
   if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-restore") {
     await verifyConversationRestore(primary.id, secondary.id);
+    assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
+    return;
+  }
+  if (["conversation-resize", "conversation-markdown-resize"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
+    await verifyConversationResize(primary.id);
     assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
     return;
   }
@@ -1479,6 +2076,16 @@ async function run() {
   }
   if (process.env.PUDDING_SMOKE_SCENARIO === "tree-reveal") {
     await verifyProjectTreeReveal(primary.id, projectRoot);
+    assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
+    return;
+  }
+  if (process.env.PUDDING_SMOKE_SCENARIO === "project-empty") {
+    await verifyProjectEmpty(primary.id, projectRoot);
+    assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
+    return;
+  }
+  if (process.env.PUDDING_SMOKE_SCENARIO === "rail-divider") {
+    await verifyRailDivider();
     assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
     return;
   }
@@ -1702,76 +2309,7 @@ async function run() {
   await api(`/sessions/${primary.id}/browser/tabs/${replacement.id}/release`, "POST");
   assert.equal(baseline.guestCount, 0);
   check("all 20 guests destroyed on release; capacity reusable");
-  phase = "resource library";
-  await api(`/sessions/${primary.id}/library/favorites`, "POST", { kind: "canvas", savedItemID: base.savedItem.id });
-  await api(`/sessions/${primary.id}/library/favorites`, "POST", { kind: "web", url: `${process.env.PUDDING_DEV_URL}/__workspace_smoke?library=favorite-only`, title: "Library favorite only" });
-  for (let i = 1; i <= 2; i++) await api(`/sessions/${primary.id}/library/favorites`, "POST", { kind: "web", url: `${process.env.PUDDING_DEV_URL}/__workspace_smoke?extra=${i}`, title: `Extra favorite ${i}` });
-  await selectSurface("资源库");
-  await waitFor(() => js(`document.querySelectorAll('[data-library-shortcuts] [data-library-row]').length === 3`), "three real favorite shortcuts");
-  assert.equal(await js(`Boolean(document.querySelector('button[aria-label="资源库分类"]'))`), false, "no hidden classification menu");
-  assert.equal((await api(`/sessions/${primary.id}/library`)).entries.some(e => e.kind === "file"), false, "no file favorites");
-  assert.equal(await js(`Array.from(document.querySelectorAll('[data-workspace-library] h2')).at(-1)?.textContent`), "最近打开");
-  assert.equal(await js(`document.querySelector('[data-workspace-library]').innerText.includes(${JSON.stringify(projectRoot)})`), false, "absolute file paths stay out of compact rows");
-  assert.equal(await js(`Array.from(document.querySelectorAll('[data-library-results] [data-library-row]')).every(el => el.getBoundingClientRect().height < 75)`), true, "two-line resource rows");
-  for (const theme of ["light", "dark"]) {
-    await js(`window.puddingElectronTheme.setTheme(${JSON.stringify(theme)})`);
-    await delay(150);
-    await screenshot(`library-${theme}`);
-  }
-  await clickText("网页", '[data-workspace-library] button');
-  await waitFor(() => js(`Array.from(document.querySelectorAll('[data-library-results] [data-library-row]')).every(el => !/file-\d+\.md|Canvas/.test(el.textContent))`), "web filter excludes files and canvas");
-  await input('[data-workspace-library] input', "Library favorite only");
-  await waitFor(() => js(`document.querySelectorAll('[data-library-row]').length === 1 && document.querySelector('[data-library-row]').textContent.includes('Library favorite only')`), "global search includes unvisited favorites");
-  await clickText("全部", '[data-workspace-library] button');
-  await input('[data-workspace-library] input', "file-01.md");
-  await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-busy') === 'false' && document.querySelectorAll('[data-library-row]').length === 1 && document.querySelector('[data-library-row]').textContent.includes('file-01.md')`), "file remains searchable through recent opens");
-  await click('button[aria-label="更多操作 file-01.md"]');
-  await clickText("查看详情", '[role="menuitem"]');
-  await waitFor(() => js(`document.querySelector('[role="dialog"]')?.textContent.includes(${JSON.stringify(projectRoot)})`), "full path appears in resource details");
-  await screenshot("library-details");
-  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
-  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
-  await waitFor(() => js(`!document.querySelector('[data-slot="dialog-overlay"]')`), "resource details close");
-  await click('[data-library-row] > button');
-  await waitFor(async () => (await tabs()).some(t => t.title === "file-01.md" && t.selected), "library opens original project file");
-  assert.equal(await js(`Array.from(document.querySelectorAll('button[aria-label="收藏"], button[aria-label="取消收藏"]')).some(el => el.getBoundingClientRect().width > 0)`), false, "project file has no favorite button");
-  await selectSurface("资源库");
-  assert.equal(await js(`document.querySelector('[data-workspace-library] input').value`), "file-01.md", "search survives opening and returning");
-  await input('[data-workspace-library] input', "");
-  await clickText("展开全部", '[data-workspace-library] button');
-  await waitFor(() => js(`document.querySelectorAll('[data-library-shortcuts] [data-library-row]').length === 4`), "favorites expand in place");
-  assert.equal(await js(`document.querySelector('[data-library-results] h2').textContent`), "最近打开", "expanding keeps recent opens visible");
-  const savedEntry = (await api(`/sessions/${primary.id}/library`)).entries.find(e => e.savedItemID === base.savedItem.id);
-  await clickElement(`Array.from(document.querySelectorAll('[data-library-shortcuts] button[aria-label]')).find(el => el.getAttribute('aria-label') === ${JSON.stringify(`更多操作 ${savedEntry.title}`)})`);
-  await clickText("取消收藏", '[role="menuitem"]');
-  await waitFor(() => js(`document.querySelectorAll('[data-library-shortcuts] [data-library-row]').length === 3`), "unfavorite refreshes permanent collection");
-  const preserved = (await api(`/sessions/${primary.id}/library`)).entries.find(e => e.savedItemID === base.savedItem.id);
-  assert.ok(preserved && !preserved.favoriteID && preserved.revision === savedEntry.revision, "unfavorite retains saved version");
-  await input('[data-workspace-library] input', savedEntry.title);
-  await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-busy') === 'false' && document.querySelector('[data-library-results]').textContent.includes('保存版本')`), "unstarred canvas remains searchable");
-  await clickElement(`Array.from(document.querySelectorAll('[data-library-results] [data-library-row]')).find(el => el.textContent.includes('保存版本')).querySelector('button[aria-label]')`);
-  await clickText("收藏", '[role="menuitem"]');
-  await waitFor(async () => Boolean((await api(`/sessions/${primary.id}/library`)).entries.find(e => e.savedItemID === base.savedItem.id)?.favoriteID), "saved content can be favorited again");
-  // History is not the inventory: closed canvas remains searchable even after
-  // its visit record is removed, without a separate recently-closed view.
-  await api(`/sessions/${primary.id}/library/recent?kind=canvas`, "DELETE");
-  await input('[data-workspace-library] input', "Canvas 20");
-  await waitFor(() => js(`document.querySelector('[data-workspace-library]').getAttribute('aria-busy') === 'false' && document.querySelectorAll('[data-library-row]').length === 1 && document.querySelector('[data-library-row]').textContent.includes('Canvas 20')`), "closed canvas searchable without history");
-  await clickElement(`Array.from(document.querySelectorAll('[data-library-row] > button')).find(el => el.textContent.includes('Canvas 20'))`);
-  await waitFor(async () => (await tabs()).some(t => t.title === "Canvas 20" && t.selected), "closed canvas restores its original item");
-  assert.equal((await api(`/sessions/${primary.id}/canvas/items`)).items.filter(item => item.id === "smoke-20").length, 1);
-  await selectSurface("资源库");
-  await input('[data-workspace-library] input', "");
-  await click('button[aria-label="清除记录"]');
-  await waitFor(() => js(`Boolean(document.querySelector('[role="alertdialog"]'))`), "history clear retains confirmation");
-  await clickText("取消", '[role="alertdialog"] button');
-  await waitFor(() => js(`!document.querySelector('[data-slot="alert-dialog-overlay"]')`), "clear confirmation closes");
-  window.setContentSize(780, 760);
-  await delay(150);
-  assert.equal(await js(`(() => { const el = document.querySelector('[data-workspace-library]'); return el.scrollWidth <= el.clientWidth + 1; })()`), true, "resource library fits a narrow desktop pane");
-  await screenshot("library-narrow");
-  window.setContentSize(1440, 920);
-  check("resource library: permanent favorites, inline expansion, no file favorites, unstarred/closed search, source routing and clear confirmation");
+  await verifyLibrarySearch(primary.id, projectRoot, secondary.id);
   await verifyEmptyWorkspace(project.id);
   assert.deepEqual(rendererErrors, [], "renderer identity/layout errors");
   check("unified content and library retain distinct component identities");

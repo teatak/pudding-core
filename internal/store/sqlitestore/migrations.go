@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 17
+	currentSchemaVersion       = 18
 )
 
 var (
@@ -364,6 +364,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS library_recent_canvas ON library_recent_opens(
 CREATE UNIQUE INDEX IF NOT EXISTS library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
 CREATE INDEX IF NOT EXISTS library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);
 `)
+		return err
+	},
+	18: func(tx *sql.Tx) error {
+		exists, err := tableColumnExists(tx, "queued_inputs", "sort_order")
+		if err != nil || exists {
+			return err
+		}
+		_, err = tx.Exec(`ALTER TABLE queued_inputs ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+WITH ranked AS (
+ SELECT rowid AS rid, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at,rowid) AS position FROM queued_inputs
+)
+UPDATE queued_inputs SET sort_order=(SELECT position FROM ranked WHERE rid=queued_inputs.rowid);
+DROP INDEX queued_inputs_session_active;
+CREATE INDEX queued_inputs_session_active ON queued_inputs(session_id,sort_order) WHERE status IN ('queued','editing','cancelled');`)
 		return err
 	},
 }
@@ -769,6 +783,7 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
+	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
 	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
 	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}

@@ -99,3 +99,51 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 		t.Fatal("could not re-favorite saved content")
 	}
 }
+
+func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	for _, id := range []string{"source", "reader"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Title: id, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "source", ID: "canvas", Kind: "markdown", Title: "Reusable", Item: []byte(`{"markdown":"keep"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveCanvasItem(ctx, "source", "canvas", "saved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSession(ctx, "source"); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := srv.URL + "/sessions/reader"
+	view := decodeJSON[struct {
+		Entries []libraryEntry `json:"entries"`
+	}](t, req(t, "GET", endpoint+"/library", nil))
+	if len(view.Entries) != 1 || view.Entries[0].FavoriteID == "" || !view.Entries[0].Available || view.Entries[0].SourceSessionAvailable {
+		t.Fatalf("global favorite lost: %+v", view)
+	}
+	first := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvas/saved/saved/open", nil))
+	second := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvas/saved/saved/open", nil))
+	if first.SessionID != "reader" || second.ID != first.ID || string(first.Item) != `{"markdown":"keep"}` {
+		t.Fatal("opening favorite must reuse reader's working copy")
+	}
+	r := req(t, "DELETE", endpoint+"/library/favorites/canvas:saved", nil)
+	r.Body.Close()
+	view = decodeJSON[struct {
+		Entries []libraryEntry `json:"entries"`
+	}](t, req(t, "GET", endpoint+"/library", nil))
+	if len(view.Entries) != 1 || view.Entries[0].FavoriteID != "" {
+		t.Fatal("unfavorite must retain searchable saved version")
+	}
+	items, err := st.ListCanvasItems(ctx, "reader")
+	if err != nil || len(items) != 1 {
+		t.Fatal("unfavorite must preserve reader's canvas")
+	}
+	r = req(t, "GET", endpoint+"/library/recent", nil)
+	r.Body.Close()
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatal("retired recent-file API still available")
+	}
+}

@@ -22,7 +22,6 @@ type TranscriptDisclosureProps = {
   iconClassName?: string;
   open?: boolean;
   summary?: ReactNode;
-  summaryClassName?: string;
   title: ReactNode;
   onSummaryClick?: MouseEventHandler<HTMLElement>;
   onSummaryKeyDown?: KeyboardEventHandler<HTMLElement>;
@@ -31,7 +30,7 @@ type TranscriptDisclosureProps = {
 
 export function TranscriptActivityIcon({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("relative z-[1] inline-flex h-6 w-[18px] shrink-0 items-center justify-center text-muted-foreground/65 [&_svg]:size-3.5! [&_[data-slot=identity-icon]]:size-4! [&_[data-slot=spinner]]:size-3!", className)}>
+    <span className={cn("relative z-[1] inline-flex h-6 w-[18px] shrink-0 items-center justify-center [&_svg]:size-3.5! [&_[data-slot=identity-icon]]:size-4! [&_[data-slot=spinner]]:size-3!", className)}>
       {children}
     </span>
   );
@@ -45,7 +44,6 @@ export function TranscriptDisclosure({
   iconClassName,
   open,
   summary,
-  summaryClassName,
   title,
   onSummaryClick,
   onSummaryKeyDown,
@@ -75,10 +73,10 @@ export function TranscriptDisclosure({
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="shrink-0 truncate">{title}</span>
         {summary != null ? (
-          <span className={cn("min-w-0 truncate text-muted-foreground/50", summaryClassName)}>{summary}</span>
+          <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
         ) : null}
         {expandable ? (
-          <span className="shrink-0 text-muted-foreground/50">
+          <span className="shrink-0">
             {resolvedOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </span>
         ) : null}
@@ -88,7 +86,7 @@ export function TranscriptDisclosure({
 
   if (!expandable) {
     return (
-      <div className={cn("grid h-6 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5] text-muted-foreground", className)}>
+      <div className={cn("grid h-6 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5] text-foreground/70", className)}>
         {row}
       </div>
     );
@@ -96,20 +94,29 @@ export function TranscriptDisclosure({
 
   return (
     <details
-      className={cn("min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground", className)}
+      className={cn("min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-foreground/70", className)}
       open={resolvedOpen}
-      onToggle={(event) => {
-        if (open === undefined) {
-          setLocalOpen(event.currentTarget.open);
-        }
-        onToggle?.(event);
-      }}
+      onToggle={onToggle}
     >
       <summary
         className="grid h-6 w-fit max-w-full cursor-default list-none grid-cols-[18px_minmax(0,1fr)] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
         tabIndex={-1}
-        onClick={onSummaryClick}
-        onKeyDown={onSummaryKeyDown}
+        onClick={(event) => {
+          onSummaryClick?.(event);
+          if (open === undefined && !event.defaultPrevented) {
+            // Native <details> toggles before its asynchronous toggle event.
+            // Commit local state first so layout measurement runs before paint.
+            event.preventDefault();
+            setLocalOpen((current) => !current);
+          }
+        }}
+        onKeyDown={(event) => {
+          onSummaryKeyDown?.(event);
+          if (open === undefined && !event.defaultPrevented && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            setLocalOpen((current) => !current);
+          }
+        }}
       >
         {row}
       </summary>

@@ -19,6 +19,9 @@ export function useComputerPreview(sessionID: string) {
     return () => document.removeEventListener("visibilitychange", changed);
   }, []);
   useEffect(() => {
+    // A new turn/session invalidates the retained result, even without new
+    // Computer Use activity. Merely hiding it would revive it when chat ends.
+    setPreview(current => current?.sessionID === sessionID && (!turnID || current.turnID === turnID) ? current : null);
     let frame = 0;
     const stop = onComputerPreview(next => {
       if (next.sessionID !== sessionID || next.turnID !== turnID) return;

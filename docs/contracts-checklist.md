@@ -8,8 +8,9 @@
 
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
-| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text` |
-| `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text`;输入已被当前 turn 接收并将在下一采样边界生效 |
+| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text?` |
+| `input.queued` / `input.updated` | ✓ | ✓ | `clientMessageID`, `text?`, `status`;纯附件输入省略空 `text` |
+| `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text?`;在安全采样边界应用引导后发布，后续输出位于该引导之后 |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
 | `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `stream?`, `content?`, `ok?`, `summaryKind?`, `summaryCount?`, `attachments?`;`phase=output` 的 stdout/stderr 只进前端 overlay,最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
@@ -24,6 +25,8 @@
 | `ping` | — | — | — |
 
 公共字段:`sessionID`(全部)、`turnID`(turn / approval 事件)。
+
+输入事件的 `text` 遵循 Go `omitempty`：纯附件消息可以没有该字段，Web 契约将缺省值规范化为空字符串，不能因此丢弃事件。附件内容与引导顺序从 canonical `message.parts` / `turnIndex` 对账，运行中的 pending overlay 只承载暂态。
 
 SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
 续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。
@@ -60,6 +63,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |
 | `POST /sessions/{id}/queued-inputs/{clientMessageID}/steer` | `{turnID}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` / `queued_input_editing` |
+| `GET /sessions/{id}/queued-inputs` | — | `{queuedInputs: []}`，按持久化出队顺序 | 404 |
+| `PATCH /sessions/{id}/queued-inputs/{clientMessageID}` | `{text?, parts?, status?: queued/editing/cancelled}`；修改 parts 同时传 text | 更新后的队列项；不改变位置或 clientMessageID | 400 / 404 |
+| `POST /sessions/{id}/queued-inputs/reorder` | `{clientMessageIDs: []}`，完整活动队列，包含 editing 项 | `{queuedInputs: []}`；原子保存顺序并发布 `input.updated` | 400 / 404 / 409 `queued_inputs_changed` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
 | `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, inputLevel}}` | 404 / 503 |
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |

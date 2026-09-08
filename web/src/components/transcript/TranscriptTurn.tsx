@@ -1,11 +1,10 @@
-import { CornerDownLeft } from "@/components/icons";
 import { memo } from "react";
 
 import { useI18n } from "@/i18n";
 
 import { AssistantOutput, AssistantOutputMeta, CompactPendingMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
-import { assistantDisclosureKey, type AssistantOutputVM, type TranscriptDisplaySettings, type TranscriptTurnVM, type TurnDisclosureState, type UserInputVM } from "./types";
+import { assistantDisclosureKey, type AssistantOutputVM, type TranscriptDisplaySettings, type TranscriptTurnVM, type TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
 
 function TranscriptTurnView({
@@ -15,10 +14,6 @@ function TranscriptTurnView({
   onAssistantContentGrow,
   onAssistantRevealComplete,
   onCloneMessage,
-  onQueuedCancel,
-  onQueuedEditStart,
-  onQueuedSteer,
-  onQueuedSave,
   sessionID,
   token,
   turn,
@@ -29,10 +24,6 @@ function TranscriptTurnView({
   onAssistantContentGrow?: () => void;
   onAssistantRevealComplete?: (turnID: string) => void;
   onCloneMessage?: (messageID: string) => void;
-  onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
-  onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   sessionID: string;
   token: string;
   turn: TranscriptTurnVM;
@@ -55,10 +46,6 @@ function TranscriptTurnView({
             disclosureKey={`${turn.key}:user`}
             token={token}
             user={turn.user}
-            onQueuedCancel={onQueuedCancel}
-            onQueuedEditStart={onQueuedEditStart}
-            onQueuedSteer={onQueuedSteer}
-            onQueuedSave={onQueuedSave}
           />
         </div>
       ) : null}
@@ -80,15 +67,14 @@ function TranscriptTurnView({
           ) : null}
           {turn.sequence?.map((item) =>
             item.kind === "guide" ? (
-              <TurnGuide
-                key={item.key}
-                attachmentLabel={t("transcript.guidedAttachments").replace(
-                  "{count}",
-                  String(item.user.attachments?.length || 0),
-                )}
-                label={t("transcript.guided")}
-                user={item.user}
-              />
+              <div key={item.key} className="min-w-0" aria-label={t("transcript.guided")}>
+                <UserInput
+                  disclosure={disclosure}
+                  disclosureKey={`${turn.key}:${item.key}:user`}
+                  token={token}
+                  user={item.user}
+                />
+              </div>
             ) : (
               <div key={item.key} className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
                 <AssistantOutput
@@ -133,24 +119,6 @@ function TranscriptTurnView({
   );
 }
 
-function TurnGuide({ attachmentLabel, label, user }: { attachmentLabel: string; label: string; user: UserInputVM }) {
-  const attachmentCount = user.attachments?.length || 0;
-  const text = user.text.trim();
-  return (
-    <div
-      aria-label={label}
-      className="pudding-user-message ml-auto flex max-w-[min(82%,42rem)] min-w-0 items-start gap-2 overflow-hidden rounded-[14px] rounded-br-[5px] border-0 px-3.5 py-2 text-left text-sm leading-6 shadow-none"
-      data-transcript-message-role="user"
-    >
-      <CornerDownLeft className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <div className="min-w-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
-        {text ? <div className="selectable-text">{text}</div> : null}
-        {attachmentCount > 0 ? <div className="text-xs text-muted-foreground">{attachmentLabel}</div> : null}
-      </div>
-    </div>
-  );
-}
-
 export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
   return (
     previous.cloningMessageID === next.cloningMessageID &&
@@ -159,10 +127,6 @@ export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
     previous.onAssistantContentGrow === next.onAssistantContentGrow &&
     previous.onAssistantRevealComplete === next.onAssistantRevealComplete &&
     previous.onCloneMessage === next.onCloneMessage &&
-    previous.onQueuedCancel === next.onQueuedCancel &&
-    previous.onQueuedEditStart === next.onQueuedEditStart &&
-    previous.onQueuedSteer === next.onQueuedSteer &&
-    previous.onQueuedSave === next.onQueuedSave &&
     previous.sessionID === next.sessionID &&
     previous.token === next.token &&
     transcriptTurnEqual(previous.turn, next.turn)

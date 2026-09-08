@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -57,33 +56,5 @@ func (m *Memstore) DeleteLibraryFavorite(_ context.Context, actor, id string) er
 		return store.ErrNotFound
 	}
 	delete(m.favorites, id)
-	return nil
-}
-func (m *Memstore) MoveLibraryFileReferences(_ context.Context, actor, oldRoot, oldPath, newRoot, newPath string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.sessions[actor] == nil {
-		return store.ErrNotFound
-	}
-	recentChanges := map[string]string{}
-	for id, e := range m.recentOpens {
-		if e.Kind == "file" && e.RootPath == oldRoot && (e.Path == oldPath || strings.HasPrefix(e.Path, oldPath+"/")) {
-			recentChanges[id] = newPath + strings.TrimPrefix(e.Path, oldPath)
-		}
-	}
-	for id, path := range recentChanges {
-		e := m.recentOpens[id]
-		for other, f := range m.recentOpens {
-			if other != id && f.Kind == "file" && f.RootPath == newRoot && f.Path == path {
-				if f.OpenedAt.After(e.OpenedAt) {
-					e.OpenedAt = f.OpenedAt
-				}
-				delete(m.recentOpens, other)
-			}
-		}
-		e.RootPath = newRoot
-		e.Path = path
-	}
-
 	return nil
 }

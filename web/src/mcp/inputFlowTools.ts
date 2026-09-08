@@ -6,13 +6,12 @@ export function createInputFlowTools(): ToolDefinition[] {
     {
       name: "builtin_request_user_input",
       description:
-        "Show an interactive UI that collects structured non-secret information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Never use this tool for passwords, tokens, API keys, private keys, or other credentials because submitted values become part of the conversation. Use the dedicated App connection or settings flow for credentials. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Do not continue work that depends on those answers in the current turn.",
+        "Show an interactive UI that collects structured non-secret information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Never use this tool for passwords, tokens, API keys, private keys, or other credentials because submitted values become part of the conversation. Use the dedicated App connection or settings flow for credentials. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. Keep each question and option brief and self-contained. Do not repeat chat history, status reports, or instructions in the form. Prefer 2–3 choices per question. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Continue independent work, but wait for the user's reply before doing anything that depends on those answers.",
       capability: "chat",
       inputSchema: {
         type: "object",
         properties: {
           title: { type: "string", description: "Short, user-facing title." },
-          description: { type: "string", description: "Optional concise context for the user." },
           type: {
             type: "string",
             enum: ["form", "repeat"],
@@ -122,7 +121,7 @@ function assertNoSensitiveInputSteps(record: Record<string, unknown>) {
       if (!step) {
         continue;
       }
-      const searchable = [step.id, step.title, step.description, step.placeholder]
+      const searchable = [step.id, step.title, step.placeholder]
         .filter((item): item is string => typeof item === "string")
         .join(" ");
       if (sensitiveInputPattern.test(searchable)) {
@@ -142,8 +141,7 @@ function inputStepSchema(types: string[]) {
         enum: types,
         description: "Non-secret input control shown to the user.",
       },
-      title: { type: "string", description: "Short question or field label." },
-      description: { type: "string", description: "Optional concise help text." },
+      title: { type: "string", description: "One concise, self-contained question or field label. Include only essential context." },
       placeholder: { type: "string", description: "Optional input placeholder." },
       required: { type: "boolean", description: "Defaults to true. Set false to allow skipping." },
       options: {
@@ -159,10 +157,9 @@ function inputStepSchema(types: string[]) {
                 value: {},
                 title: { type: "string" },
                 label: { type: "string" },
-                description: { type: "string" },
                 data: { type: "object", additionalProperties: true },
               },
-              additionalProperties: true,
+              additionalProperties: false,
             },
           ],
         },
