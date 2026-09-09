@@ -122,6 +122,8 @@ PUDDING_SMOKE_SCENARIO=computer-preview \
 
 2026-09-09 此轮前端 33 项、Electron 预览 11 项、构建及隔离桌面 15 项断言通过；任务完成后展开／收起也保留原图片节点，不重启采集，沿用原截止时间。桌面证据位于 `/private/tmp/pudding-preview-workspace-v6V28x/result.json`。该轮另出现测试 App 的 `computer_window_raise_failed` 日志（AXRaise 返回成功但目标仍被判定遮挡），原因未定位，不能将断言通过解释为原生置前链路无异常；本次未修改该链路，也未打包发布。
 
+0.3.1 候选收尾补强：旧 smoke 只等目标 App active，没有等待整个 reveal 请求；现在逐次等待原生请求最终成功，并将全部请求/失败记录入结果，拒绝额外请求。隔离诊断轮一次、严格回归四次点击成功；后者覆盖同一 bundle 的两个进程及第二个 App，16 项断言通过（`/private/tmp/pudding-release-preview-strict-BACtYF/result.json`）。没有复现历史错误，也没有据此增加重试或降低可见性判定；历史异常仍列入[最新签名包验收](release-report-0.3.1.md)。
+
 ### 0.1 当前 C0 落地
 
 已实现 `native/macos/computer-use-helper`:

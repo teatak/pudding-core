@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
-  archiveSession,
   getAudioBindings,
   listProjects,
   listSessions,
@@ -19,6 +18,7 @@ import { RailPanel } from "@/components/session-rail/RailPanel";
 import { SessionSearchDialog, type SessionSearchSelection } from "@/components/SessionSearchDialog";
 import { ShellActionButton } from "@/components/ShellActionButton";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
+import { useArchiveSession } from "@/hooks/useArchiveSession";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
@@ -56,7 +56,6 @@ export function SessionRail({
   const navigate = useNavigate({ from: "/" });
   const { project: draftProjectID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
-  const clearSession = useOverlayStore((state) => state.clearSession);
   const clearSessionCompletion = useOverlayStore((state) => state.clearSessionCompletion);
   const completedSessions = useOverlayStore((state) => state.completedSessions);
   const runningTurns = useOverlayStore((state) => state.runningTurns);
@@ -232,41 +231,7 @@ export function SessionRail({
     );
   }
 
-  const archiveMutation = useMutation({
-    mutationFn: (sessionID: string) => archiveSession(token, sessionID),
-    onSuccess: async (_, sessionID) => {
-      const previous = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
-      const remaining = previous?.sessions.filter((session) => session.id !== sessionID) || [];
-      if (previous) {
-        queryClient.setQueryData(queryKeys.sessions(), { sessions: remaining });
-      }
-      clearSession(sessionID);
-      // 被删会话占用的路由槽位(主 pane / 分屏)就地清理
-      await navigate({
-        to: "/",
-        search: (prev) => {
-          const next = { ...(prev as AppSearch) };
-          if (next.split === sessionID) {
-            delete next.split;
-          }
-          if (next.session === sessionID) {
-            const fallback = remaining.find((session) => session.id !== next.split)?.id || remaining[0]?.id;
-            if (fallback) {
-              next.session = fallback;
-              delete next.draft;
-            } else {
-              delete next.session;
-              next.draft = "1";
-            }
-          }
-          return next;
-        },
-        replace: true,
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    },
-    onError: () => toast.error(t("session.archiveFailed")),
-  });
+  const archiveMutation = useArchiveSession(token);
 
   const sessionPlacementMutation = useMutation({
     mutationFn: ({

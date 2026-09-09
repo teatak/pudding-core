@@ -2,10 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Archive, Ellipsis, FolderClosed, X } from "@/components/icons";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 
 import {
-  archiveSession,
   listProjects,
   listSessions,
   updateSession,
@@ -35,11 +33,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useArchiveSession, useIsSessionArchiving } from "@/hooks/useArchiveSession";
 import { useI18n } from "@/i18n";
 import { onDesktopMenuCommand } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
-import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
 type ChatPaneRole = "primary" | "split";
@@ -71,7 +69,7 @@ export function ChatPane({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
-  const clearSession = useOverlayStore((state) => state.clearSession);
+  const sessionArchiving = useIsSessionArchiving(sessionID);
   const [conversationSearchOpen, setConversationSearchOpen] = useState(false);
   const [conversationSearchFocusSignal, setConversationSearchFocusSignal] = useState(0);
   const sessionsQuery = useQuery({
@@ -98,44 +96,12 @@ export function ChatPane({
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
   });
-  const archiveMutation = useMutation({
-    mutationFn: (id: string) => archiveSession(token, id),
-    onSuccess: async (_, deletedSessionID) => {
-      const previous = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
-      const remaining = previous?.sessions.filter((session) => session.id !== deletedSessionID) || [];
-      if (previous) {
-        queryClient.setQueryData(queryKeys.sessions(), { sessions: remaining });
-      }
-      clearSession(deletedSessionID);
-      await navigate({
-        to: "/",
-        search: (prev) => {
-          const next = { ...(prev as AppSearch) };
-          if (next.split === deletedSessionID) {
-            delete next.split;
-          }
-          if (next.session === deletedSessionID) {
-            const fallback = remaining.find((session) => session.id !== next.split)?.id || remaining[0]?.id;
-            if (fallback) {
-              next.session = fallback;
-              delete next.project;
-            } else {
-              delete next.session;
-            }
-          }
-          return next;
-        },
-        replace: true,
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    },
-    onError: () => toast.error(t("session.archiveFailed")),
-  });
+  const archiveMutation = useArchiveSession(token);
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
   const isPrimary = role === "primary";
   const showDraft = isPrimary && !sessionID;
-  const sessionsPending = sessionsQuery.isPending;
+  const sessionsPending = sessionsQuery.isPending || sessionArchiving;
   const headerProjectID = showDraft ? draftProjectID : selectedSession?.projectID;
   const projectsQuery = useQuery({
     queryKey: queryKeys.projects(),
@@ -246,7 +212,8 @@ export function ChatPane({
   }, [openConversationSearch, role, selectedSession]);
 
   useEffect(() => {
-    if (!sessionsQuery.isSuccess) {
+    // 列表可能先于归档响应刷新；此时由归档 mutation 完成路由清理。
+    if (!sessionsQuery.isSuccess || sessionArchiving) {
       return;
     }
     if (!isPrimary) {
@@ -296,7 +263,7 @@ export function ChatPane({
         replace: true,
       });
     }
-  }, [draftActive, isPrimary, navigate, selectedSession, sessionID, sessions, sessionsQuery.isSuccess]);
+  }, [draftActive, isPrimary, navigate, selectedSession, sessionArchiving, sessionID, sessions, sessionsQuery.isSuccess]);
 
   return (
     <section
@@ -320,7 +287,7 @@ export function ChatPane({
           {selectedSession ? (
             <HeaderSessionTitle
               key={selectedSession.id}
-              archivePending={archiveMutation.isPending}
+              archivePending={sessionArchiving}
               projectName={headerProjectName}
               renamePending={renameMutation.isPending}
               session={selectedSession}

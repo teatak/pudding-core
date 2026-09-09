@@ -9,6 +9,29 @@ export type AppSearch = {
   view?: "apps" | "projects";
 };
 
+export function routeAfterSessionArchive(
+  search: AppSearch,
+  archived: { id: string; projectID?: string },
+): AppSearch {
+  const next = { ...search };
+  if (next.split === archived.id) {
+    delete next.split;
+  }
+  if (next.session !== archived.id) {
+    return next;
+  }
+  delete next.session;
+  delete next.split;
+  delete next.view;
+  next.draft = "1";
+  if (archived.projectID) {
+    next.project = archived.projectID;
+  } else {
+    delete next.project;
+  }
+  return next;
+}
+
 const lastRouteStorageKey = "pudding.lastRoute.v1";
 const appRouteKeys = ["session", "draft", "project", "split", "view"] as const;
 

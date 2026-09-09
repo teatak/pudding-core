@@ -26,6 +26,7 @@ process.env.PUDDING_LOCALE = "zh-CN";
 delete process.env.PUDDING_API_BASE;
 let vite, window, apiBase, token, phase = "startup", finished = false, exitCode = 0;
 let computerBridgeIdentity, computerPreviewManager;
+const previewReveals = [];
 if (process.env.PUDDING_SMOKE_SCENARIO === "computer-preview") {
   // Observe the real native managers without exposing production testing IPC.
   const { ComputerUseBridgeServer } = require('../computer-use-bridge-server.cjs');
@@ -36,6 +37,14 @@ if (process.env.PUDDING_SMOKE_SCENARIO === "computer-preview") {
   const { ComputerUsePreview } = require('../computer-use-preview.cjs');
   const subscribe = ComputerUsePreview.prototype.subscribe;
   ComputerUsePreview.prototype.subscribe = function (...args) { computerPreviewManager = this; return subscribe.apply(this, args); };
+  const reveal = ComputerUsePreview.prototype.reveal;
+  ComputerUsePreview.prototype.reveal = async function (owner, request) {
+    const record = { phase, request, startedAt: Date.now() };
+    previewReveals.push(record);
+    try { record.result = await reveal.call(this, owner, request); return record.result; }
+    catch (error) { record.error = {code:error.code,message:error.message}; throw error; }
+    finally { record.finishedAt = Date.now(); console.info('[workspace-smoke] preview reveal', JSON.stringify(record)); }
+  };
 }
 const checks = [], memory = [], rendererErrors = [];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1455,6 +1464,23 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
   const chatGeometry = () => js(`Array.from(document.querySelectorAll('.pudding-conversation .pudding-chat-column')).map(el => {
     const r = el.getBoundingClientRect(); return {left:r.left,width:r.width};
   })`);
+  let expectedReveals = 0;
+  const clickPreview = async target => {
+    assert.equal(previewReveals.length, expectedReveals, 'no unsolicited preview reveal');
+    phase = `preview reveal ${target.appID} PID ${target.pid}`;
+    await click(`[data-computer-preview][data-app-id="${target.appID}"]`);
+    const index = expectedReveals++;
+    // Activation happens before AXRaise/readiness completes. Checking active PID
+    // alone allowed a failed reveal to pass and race the next test's focus change.
+    await waitFor(() => previewReveals[index]?.finishedAt, 'native reveal settles');
+    const record = previewReveals[index];
+    assert.equal(record.request.windowID, target.windowID);
+    assert.equal(record.error, undefined, JSON.stringify(record));
+    assert.equal(record.result, true, 'native window readiness confirmed');
+    const apps = (await native.listApps()).apps;
+    assert.ok(apps.find(a => a.bundleID === target.appID)?.instances.some(i => i.pid === target.pid && i.active), 'exact preview instance is foreground');
+    phase = 'native computer preview';
+  };
   try {
     const permissions = await native.permissions(); assert.ok(permissions.accessibility && permissions.screenRecording);
     // A separate, disposable bundle exercises real two-App capture and stacking.
@@ -1592,14 +1618,14 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     assert.notEqual(entry().child, captured, 'page visibility resumes capture after the previous process exited');
     assert.equal(entry().expiresAt, workspaceDeadline, 'page visibility never renews activity');
     const resumed = entry().child;
-    await click('[data-computer-preview]');
-    await waitFor(async () => (await native.listApps()).apps.find(a => a.bundleID === fixtureBundleID)?.instances.some(i => i.pid === first.pid && i.active), 'click raises exact native instance');
+    await clickPreview(first);
     const nativeState = await native.observe({bundleID:fixtureBundleID,windowID:first.windowID,maxElements:100});
     assert.equal(nativeState.elements.find(e => e.role === 'AXTextField' && !e.secure)?.value, 'Workspace preview still live', 'preview click never types into the app');
     check('page hide still pauses capture; visibility resumes the same target; preview click raises the exact application');
 
     await operation(second, turnID); await live(second);
     await waitFor(() => exited(resumed), 'window switch releases old stream');
+    await clickPreview(second);
     const expected = entry().target.windowID;
     await operation(first, turnID, otherSessionID);
     assert.equal(entry().target.windowID, expected, 'another session cannot replace this preview');
@@ -1712,9 +1738,11 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await operation(first, stackTurn); await live(first);
     await operation(stacked, stackTurn); await live(stacked);
     await assertStack(stackedID);
+    await clickPreview(stacked);
     const secondDeadline = entry(stackedID).expiresAt;
     await delay(1_000);
     await operation(first, stackTurn); await assertStack(fixtureBundleID);
+    await clickPreview(first);
     assert.equal(entry(stackedID).expiresAt, secondDeadline, 'operating A does not renew B');
     await screenshot('computer-preview-stack');
     await delay(5_000);
@@ -1730,6 +1758,10 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await waitFor(async () => JSON.stringify(await cards()) === JSON.stringify([fixtureBundleID]), 'failed App leaves the other preview intact');
     check('two real App previews overlap; activity alone reorders; each expires after its own 30 seconds; failure removes only its card');
     await api(`/sessions/${sessionID}/cancel`, 'POST');
+    assert.equal(expectedReveals, 4, 'cover both instances and both Apps');
+    assert.equal(previewReveals.length, expectedReveals, 'only the four explicit clicks can request reveal');
+    assert.ok(previewReveals.every(record => record.result === true && !record.error && record.finishedAt), 'no hidden reveal failure or in-flight request');
+    check('four explicit preview clicks await native success across two same-bundle processes and two Apps; no unsolicited reveals');
   } finally {
     if (stacked?.pid) await native.quitApp({bundleID:stacked.appID,pid:stacked.pid});
     for (const child of children) if (!exited(child)) await native.quitApp({bundleID:fixtureBundleID,pid:child.pid}).catch(() => child.kill());
@@ -2056,6 +2088,118 @@ async function verifyIntegratedProjectSearch(sessionID, secondaryID, projectRoot
   check('changing session resets the query and cannot display the previous session results');
 }
 
+async function verifyArchiveNavigation(projectSessionID, projectID) {
+  phase = "archive navigation";
+  await click('.pudding-chat-pane-header button[aria-label="操作"]');
+  await clickText("归档", '[role="menuitem"]');
+  await waitFor(() => js(`import('/src/main.tsx').then(({router})=>{
+    const search=router.state.location.search;
+    return search.draft==='1'&&search.project===${JSON.stringify(projectID)}&&!search.session&&!search.split;
+  })`), "project session archives to its project draft");
+  assert.equal((await api("/sessions")).sessions.some(session => session.id === projectSessionID), false);
+  check("archiving the current project session opens a new draft in that project");
+
+  const globalSession = await api("/sessions", "POST", { title: "Global archive", provider: "mock", model: "mock" });
+  await js(`import('/src/main.tsx').then(async({router})=>{
+    await router.options.context.queryClient.invalidateQueries({queryKey:['sessions']});
+    await router.navigate({to:'/',search:{session:${JSON.stringify(globalSession.id)}}});
+  })`);
+  await waitFor(() => js(`document.body.textContent.includes('Global archive')`), "global session selected");
+  await click('.pudding-chat-pane-header button[aria-label="操作"]');
+  await clickText("归档", '[role="menuitem"]');
+  await waitFor(() => js(`import('/src/main.tsx').then(({router})=>{
+    const search=router.state.location.search;
+    return search.draft==='1'&&!search.project&&!search.session&&!search.split;
+  })`), "projectless session archives to global draft");
+  assert.equal((await api("/sessions")).sessions.some(session => session.id === globalSession.id), false);
+  check("archiving the current projectless session opens a global new draft");
+  await verifyArchiveRefreshRace(projectID);
+}
+
+async function verifyArchiveRefreshRace(projectID) {
+  const retained = await api("/sessions", "POST", { title: "Retained session", provider: "mock", model: "mock" });
+  const readSearch = () => js(`import('/src/main.tsx').then(({router}) => router.state.location.search)`);
+  const settleRenderer = () => js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  const cases = [
+    { entry: "header", projectID },
+    { entry: "rail", projectID },
+    { entry: "header" },
+    { entry: "rail", projectID, switchAway: true },
+    { entry: "header", projectID, split: true },
+    { entry: "header", projectID, reject: true },
+  ];
+  for (const testCase of cases) {
+    phase = `archive refresh race ${JSON.stringify(testCase)}`;
+    const session = await api("/sessions", "POST", {
+      title: "Archive race", provider: "mock", model: "mock", projectID: testCase.projectID,
+    });
+    const initialSearch = testCase.split ? { session: retained.id, split: session.id } : { session: session.id };
+    await js(`import('/src/main.tsx').then(async ({router}) => {
+      await router.options.context.queryClient.invalidateQueries({queryKey:['sessions']});
+      const rail = await import('/src/state/railStore.ts');
+      rail.setRailCollapsed(false);
+      await router.navigate({to:'/', search:${JSON.stringify(initialSearch)}});
+    })`);
+    const pane = `[data-chat-pane-role="${testCase.split ? "split" : "primary"}"]`;
+    await waitFor(() => js(`document.querySelector(${JSON.stringify(pane)})?.textContent.includes('Archive race')`), "race session selected");
+    // Hold only the archive response. The real sessions refetch can observe the
+    // committed archive first, as it can during backend resource cleanup.
+    await js(`(() => {
+      const originalFetch = window.fetch;
+      const gate = new Promise(resolve => {
+        window.__archiveRace = { ready:false, release:resolve, restore:() => { window.fetch=originalFetch; } };
+      });
+      window.fetch = async (...args) => {
+        if (!String(args[0]).endsWith(${JSON.stringify(`/sessions/${session.id}/archive`)})) return originalFetch(...args);
+        const response = ${Boolean(testCase.reject)}
+          ? new Response(JSON.stringify({error:'archive rejected'}), {status:503,headers:{'Content-Type':'application/json'}})
+          : await originalFetch(...args);
+        window.__archiveRace.ready = true;
+        await gate;
+        return response;
+      };
+    })()`);
+    try {
+      if (testCase.entry === "rail") {
+        const selector = `[data-sidebar="menu-item"]:has([data-session-item-id="${session.id}"]) button[aria-label="归档"]`;
+        await waitFor(() => js(`Boolean(document.querySelector(${JSON.stringify(selector)}))`), "rail archive button");
+        await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'})`);
+        await click(selector);
+      } else {
+        await click(`${pane} .pudding-chat-pane-header button[aria-label="操作"]`);
+        await clickText("归档", '[role="menuitem"]');
+      }
+      await waitFor(() => js(`window.__archiveRace.ready`), "archive response held");
+      await js(`import('/src/main.tsx').then(({router}) => router.options.context.queryClient.invalidateQueries({queryKey:['sessions']}))`);
+      await settleRenderer();
+      assert.deepEqual(await readSearch(), initialSearch, "sessions refetch must not navigate while this session is archiving");
+      if (!testCase.reject) {
+        assert.equal((await api("/sessions")).sessions.some(item => item.id === session.id), false);
+        assert.equal(await js(`Boolean(document.querySelector(${JSON.stringify(`${pane} textarea`)}))`), false, "missing pending session must not expose a global draft composer");
+      }
+      if (testCase.switchAway) {
+        await js(`import('/src/main.tsx').then(({router}) => router.navigate({to:'/',search:{view:'projects'}}))`);
+      }
+      await js(`window.__archiveRace.release()`);
+      await waitFor(() => js(`import('/src/main.tsx').then(({router}) => router.options.context.queryClient.getMutationCache().getAll().every(m => m.state.status !== 'pending'))`), "archive mutation settled");
+      await settleRenderer();
+      const expected = testCase.reject ? initialSearch
+        : testCase.switchAway ? { view: "projects" }
+        : testCase.split ? { session: retained.id }
+        : testCase.projectID ? { draft: "1", project: testCase.projectID }
+        : { draft: "1" };
+      assert.deepEqual(await readSearch(), expected, "archive completion preserves the correct route");
+      if (testCase.reject) {
+        assert.equal((await api("/sessions")).sessions.some(item => item.id === session.id), true);
+        assert.equal(await js(`Boolean(document.querySelector(${JSON.stringify(`${pane} textarea`)}))`), true, "failed archive restores the original session composer");
+      }
+      check(`${testCase.entry} archive survives sessions refresh (${testCase.reject ? "failure" : testCase.switchAway ? "user navigated away" : testCase.split ? "split" : testCase.projectID ? "project draft" : "global draft"})`);
+    } finally {
+      await js(`window.__archiveRace.release(); window.__archiveRace.restore(); delete window.__archiveRace;`);
+    }
+  }
+}
+
 async function run() {
   assert.ok(fs.existsSync(process.env.PUDDING_DAEMON_BIN), "Build bin/puddingd before running the smoke");
   const reservation = http.createServer();
@@ -2133,7 +2277,7 @@ db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assi
 db.commit()
 db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
   }
-  const canvasCount = process.env.PUDDING_SMOKE_SCENARIO === "automation-presentation" ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
+  const canvasCount = ["archive-navigation", "automation-presentation"].includes(process.env.PUDDING_SMOKE_SCENARIO) ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
   for (let i = 1; i <= canvasCount; i++) await api(`/sessions/${primary.id}/canvas/items`, "POST", {
     id: `smoke-${String(i).padStart(2, "0")}`, kind: "markdown", title: `Canvas ${String(i).padStart(2, "0")}`, item: { markdown: `# Canvas ${i}\n\n${"Persistent content.\n".repeat(100)}` },
   });
@@ -2156,6 +2300,11 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     await router.navigate({ to: '/', search: { session: ${JSON.stringify(primary.id)} } });
   })()`);
   await waitFor(() => js(`Boolean(document.querySelector('button[aria-label="打开工作区"]'))`), "closed workspace ready");
+  if (process.env.PUDDING_SMOKE_SCENARIO === "archive-navigation") {
+    await verifyArchiveNavigation(primary.id, project.id);
+    assert.deepEqual(rendererErrors, [], "archive navigation renderer errors");
+    return;
+  }
   await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await click('button[aria-label="打开工作区"]');
   await waitFor(async () => (await tabs()).length === canvasCount, `${canvasCount} canonical canvas tabs`);
@@ -2493,7 +2642,7 @@ async function finish(error) {
     }
   }
   fs.writeFileSync(path.join(reportDir, "result.json"), JSON.stringify({
-    passed: !error, phase, checks, memory, rendererErrors, error: error?.stack,
+    passed: !error, phase, checks, memory, rendererErrors, previewReveals, error: error?.stack,
     environment: { platform: process.platform, arch: process.arch, electron: process.versions.electron, ramGiB: Math.round(os.totalmem() / 2 ** 30) },
     fixture: process.env.PUDDING_SMOKE_SCENARIO
       ? `Workspace ${process.env.PUDDING_SMOKE_SCENARIO} regression; source Electron/Vite/daemon; disposable home`
