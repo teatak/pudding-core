@@ -7,12 +7,12 @@
 - 公开发布基线：`v0.2.11`，源码 `9e9efd87a653e50872faa96c144215bb8a7a4e31`。
 - 2026-09-09 GitHub 只读核对：0.3.0 是未发布草稿；其源码标签固定在 `afbb3a7c2fc6b1f4cd62a8e4acfbf724cb5014d7`，不包含当前主线。
 - 用户已确认当前候选使用 **0.3.1**。`package.json`、lockfile 及 lockfile 根包同步；不移动 `v0.3.0`，不复用旧草稿资产。
-- 候选包括基线至 `2f035169` 的完整主线，以及归档导航修复、画中画回归补强和本报告，由包含本报告的本地 0.3.1 准备提交冻结。用户只授权本地提交，未推送、创建 `v0.3.1` 标签或上传。
+- 候选包括基线至 `2f035169` 的完整主线，以及归档导航修复、画中画回归补强和本报告，由 `95549c42bc62ea9a295ade7ab7fb8685e69aad1e` 冻结。准备阶段只授权本地提交；后续用户明确授权 Apple 公证、源码标签、GitHub `teatak/pudding` 上传及验收后的公开发布，执行状态见下方补记。
 - [0.3.0 报告](release-report-0.3.0.md)和 `dist/verified-0.3.0-20260909/` 仅作为历史证据，不能证明本候选已签名或完成安装包验收。
 
 ## 当前结论
 
-源码阶段收尾及补强回归通过，可进入签名候选包准备，尚未达到公开发布条件。本轮不打包、公证、上传、更新已安装应用或修改系统授权。
+源码收尾、双架构签名公证和安装包静态验收通过，GitHub 0.3.1 草稿九资产已齐，尚未公开发布。临时路径升级后出现 root 所有权，未通过当前用户可写的安装验收；不能把签名、数据和功能通过写成整体验收通过。没有移动 `v0.3.0` 或 `v0.3.1` 标签。
 
 画中画历史 `computer_window_raise_failed` 不能凭 App 已激活就判定成功：原测试没有等待原生置前请求完成。补强测试逐次等待最终结果，记录目标和失败，检查额外请求；不增加产品重试、不降低窗口可见性校验。诊断轮一次点击、严格回归四次点击均成功，未复现历史错误，因而不声称已定位或修复历史产品故障，也不把“激活即成功”的旧断言继续作为依据。历史异常保留为签名包复验项。
 
@@ -62,6 +62,20 @@
 4. 隔离数据验证 0.2.11 → 0.3.1 的更新与数据库迁移；已有本地 0.3.0 安装也需检查到 0.3.1 的版本增长。安装路径/TCC 与数据迁移验证分别记录。
 
 已知适用边界：飞书历史自行激活问题、镜像输入兼容、多屏、持续真人并行和 Intel 真机覆盖尚未全部验收；后台路径显式选择，不自动替换前台路径。目标 App 自行激活时停止后续输入且不反向抢焦点，不保证任意 App 均可后台操作。
+
+## 2026-09-09 公证与安装包验收补记
+
+- 用户明确批准后执行 `make desktop-publish`。`make test`、Electron 216 项、Web 生产构建、双架构打包通过；arm64/x64 App、ZIP、DMG 均通过 Developer ID、公证票据和 Gatekeeper 验证。源码标签 `v0.3.1` 固定在 `95549c42`，已推送。
+- 首轮上传最后阶段报告 `fetch failed`，远端实际已有九资产。通过 `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-upload-resume` 再次完整验包并恢复草稿成功，没有重建或更换资产。草稿 ID `385378285`；未执行 `desktop-release-finalize`。日志：`/private/tmp/pudding-031-publish.log`、`/private/tmp/pudding-031-upload-resume.log`。
+- 验收目录：`/private/tmp/pudding-031-acceptance-1JB0tX/`。从 GitHub 下载公开 0.2.11 到临时路径，用独立 home、userData、端口及 mock provider 建立消息/画布夹具，经真实 Squirrel.Mac 更新为 0.3.1；没有覆盖 `/Applications/Pudding.app`（仍为 0.3.0）。本地简易 feed 不支持 multipart ranges，旧 updater 回退为完整 ZIP 下载成功；不将其记为生产增量下载通过。
+- **安装门槛仍失败**：用户通过系统触控 ID 确认后，ShipIt 以提权进程将临时 App 替换为 `root:wheel`，目录 0755、`app.asar` 0644；`verifyInstalledApp` 的当前用户可写检查失败。保留原失败，未使用 chown/chmod 消除证据或降低断言。单独检查更新包 codesign、stapler、Gatekeeper 及 Helper 身份均通过（`installed-signature.json`）。重新解压的原版 0.2.11 本身可写；原版和新版 Squirrel 的 Mach-O UUID 相同。尚不能据此确定为何本轮选择提权，也不能宣称正常安装路径已通过，需要正常安装位置复测。
+- **测试隔离偏差**：自动重启未继承 `PUDDING_HOME`、`PUDDING_DAEMON_ADDR`、`PUDDING_ELECTRON_USER_DATA_DIR`。17:26 自动重启的临时 App 曾按默认配置启动正式目录/9669；发现后关闭 PID 93287，17:28 用显式隔离配置重新启动。没有在正式会话提交测试操作，也没有恢复/覆盖正式数据库；不能把这轮声称为从未访问正式目录的全隔离自动重启测试。
+- 显式隔离重启后，数据库 v13 → v18 的 13 项检查通过：canonical 消息、项目/会话、保存/关闭画布、收藏、浏览历史、应用授权、队列排序字段及完整性符合预期，并生成 v13 备份。`upgrade-result.json` 同时保留 `installationVerificationPassed=false` 和所有权错误。
+- 从**升级后的真实签名 Pudding 主进程**经正式 bridge/Helper 测试 AppKit、Electron 两种隔离接收窗口：五种手势各一次，共 10/10，通过 1518 次监测，鼠标最大位移 0，前台/遮挡顺序稳定，guard 无误收输入。证据 `signed-native-results.json`；不再仅以独立启动 Helper 的结果替代签名主进程验收。
+- 该签名主进程可读取已有辅助功能、录屏权限；Helper 的 bundle ID、Team ID、完整 designated requirement 与公开 0.2.11、本机 0.3.0 一致。未清理或重新申请系统授权；本轮验证已有授权延续，不新增“首次申请后恢复”实测结论。
+- 签名版画中画：真实帧、展开工作区保持卡片和图片节点、完整原生 reveal 返回 true、取消后卡片清除，补测通过（`signed-preview-results.json`、`signed-preview.png`）。临时 CDP 脚本先后遇到 DOM 返回值序列化及选择器引号错误，均修正测试脚本后仅补测画中画；没有改动产品代码、跳过原生返回值断言或把脚本失败算成产品通过。
+
+结论：公证/上传完成，保留草稿；公开发布仍等待正常安装位置的升级可写性验收。Intel 真机、持续真人并行、多屏及特定 App 兼容边界仍同上，不扩大发布承诺。
 
 ## Release Notes 草案
 

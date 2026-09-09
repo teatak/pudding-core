@@ -26,7 +26,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [release-report-0.3.1.md](release-report-0.3.1.md) | 当前发布候选、schema v18、源码验证与尚待签名包验收的门槛；0.3.0 旧标签/草稿不复用 |
+| [release-report-0.3.1.md](release-report-0.3.1.md) | 双架构公证及九资产草稿完成；签名版输入/画中画、迁移通过，临时路径升级所有权异常仍阻断公开发布 |
 | [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区统一内容标签、项目内部文件、资源库与专注改造；保留分阶段验收记录 |
 | [computer-use-design.md](computer-use-design.md) | macOS Computer Use 已实现，含输入/实例定位/独立截图及真实 Electron 回归 |
 | [computer-use-background-input-probe.md](computer-use-background-input-probe.md) | 后台定向输入实验、五种鼠标手势接入及异常恢复；通用兼容与本次扩展的正式签名包验收未完成 |
