@@ -164,6 +164,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
       object: nil, queue: .main) { [weak self] note in
         if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
           self?.activations.append(app.processIdentifier)
+          if self?.monitor != nil { emit(["kind": "workspace-activation", "targetPID": app.processIdentifier]) }
         }
       }
     FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -320,6 +321,7 @@ struct Request: Decodable {
   let action: String
   var end: PointRecord? = nil
   var scrollY: Int32? = nil
+  var realApp: RealApp? = nil // Explicit manual smoke; never inferred from an arbitrary PID.
 }
 
 // Explicit diagnostic metadata, not part of the normal/mirror action contract.
@@ -353,14 +355,14 @@ func isFixture(_ app: NSRunningApplication, executable: String) -> Bool {
       && executable.hasSuffix("/web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"))
 }
 
-func windowInfo(_ pid: pid_t, _ windowID: UInt32? = nil, mirror: Bool = false) -> [String: Any]? {
+func windowInfo(_ pid: pid_t, _ windowID: UInt32? = nil, external: Bool = false) -> [String: Any]? {
   let options: CGWindowListOption = windowID == nil ? .optionOnScreenOnly : .optionIncludingWindow
   let windows = CGWindowListCopyWindowInfo(options, windowID ?? 0) as? [[String: Any]] ?? []
   return windows.first {
     ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
       && ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
       && (windowID == nil || ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID)
-      && (mirror || ["Pudding Background Probe — target", "Pudding Background Probe — electron"].contains($0[kCGWindowName as String] as? String ?? ""))
+      && (external || ["Pudding Background Probe — target", "Pudding Background Probe — electron"].contains($0[kCGWindowName as String] as? String ?? ""))
   }
 }
 
@@ -429,14 +431,18 @@ func focusNotification(activated: Bool) throws -> CGEvent {
 }
 
 func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, probeClicks: [ProbeClick]? = nil,
-          syntheticActivation: Bool = false, focusLease: FocusLease? = nil, requireOwner: () throws -> Void = {}) throws {
+          syntheticActivation: Bool = false, focusLease: FocusLease? = nil, notifyOnly: Bool = false,
+          requireOwner: () throws -> Void = {}) throws {
   let variant = try validate(request)
   try require(!mirror || !calculator, "ambiguous probe target")
+  try require(request.realApp == nil || (syntheticActivation && !mirror && !calculator && probeClicks == nil),
+    "real-app smoke requires the shared ordinary-click route")
   if syntheticActivation {
     try require(!mirror && !calculator && probeClicks == nil && variant == .windowLocal && request.action == "click",
-      "synthetic activation probe only permits one ordinary fixture click")
+      "synthetic activation probe only permits one ordinary click")
   }
   try require(syntheticActivation == (focusLease != nil), "synthetic input requires shared ownership")
+  try require(!notifyOnly || (syntheticActivation && request.realApp != nil), "notification isolation is real-app smoke only")
   if let probeClicks {
     try require(!mirror && !calculator && variant == .windowLocal && request.action == "click", "click factor probe is fixture-only")
     try validateProbeClicks(probeClicks)
@@ -459,7 +465,7 @@ func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, pr
     guard let app = NSRunningApplication(processIdentifier: request.target.pid),
       let originalApp, !originalApp.isTerminated,
       (calculator ? isCalculator(app, executable: request.target.executable)
-        : mirror ? isMirror(app, executable: request.target.executable) : isFixture(app, executable: request.target.executable))
+        : mirror ? isMirror(app, executable: request.target.executable) : isFocusTarget(app, request: request))
     else { throw ProbeError("probe target identity changed") }
     try require(try ProcessStamp.read(request.target.pid) == originalStamp, "probe target process instance changed")
   }
@@ -474,7 +480,7 @@ func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, pr
       foreground.processIdentifier == request.guardPID,
       (calculator || foreground.bundleIdentifier == "com.teatak.pudding.background-probe.guard")
     else { throw ProbeError("foreground guard changed") }
-    guard let info = windowInfo(request.target.pid, request.target.windowID, mirror: mirror || calculator),
+    guard let info = windowInfo(request.target.pid, request.target.windowID, external: mirror || calculator || request.realApp != nil),
       let bounds = info[kCGWindowBounds as String] as? NSDictionary,
       let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame == request.target.frame.rect
     else { throw ProbeError("target window changed") }
@@ -544,7 +550,7 @@ func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, pr
     }
     // Other diagnostic variants retain their existing local mouse pairing.
     if let release, (try? checkIdentity()) != nil,
-      windowInfo(request.target.pid, request.target.windowID, mirror: mirror || calculator) != nil {
+      windowInfo(request.target.pid, request.target.windowID, external: mirror || calculator || request.realApp != nil) != nil {
       release.postToPid(request.target.pid)
       emit(["kind": "cleanup", "event": "button-up", "sentBeforeFailure": sent])
     }
@@ -556,7 +562,7 @@ func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, pr
     emit(["kind": "focus-notification", "activated": true, "targetPID": request.target.pid])
     waitForReceiver(100_000) // Allow the receiver to process the notification; never retry the click.
   }
-  for (index, event) in events.enumerated() {
+  for (index, event) in (notifyOnly ? [] : events).enumerated() {
     try check()
     if event.type == .leftMouseDown { try focusLease?.set(.pressed) }
     event.postToPid(request.target.pid)
@@ -571,6 +577,7 @@ func send(_ request: Request, mirror: Bool = false, calculator: Bool = false, pr
     }
     waitForReceiver(50_000)
   }
+  if notifyOnly { waitForReceiver(100_000) } // Match the two omitted per-event waits in the no-click control.
   emit(["kind": "sent", "count": sent, "variant": variant.rawValue,
         "privateAPI": variant.usesPrivateAPI, "command": variant == .command])
 }
@@ -622,16 +629,17 @@ func mirrorState() throws -> [String: Any] {
 }
 
 @available(macOS 14.2, *)
-func captureMirror(_ target: Target, output: String) async throws {
+func captureWindow(_ target: Target, output: String, realApp: RealApp? = nil) async throws {
   try require(CGPreflightScreenCaptureAccess(), "screen permission missing; no request issued")
-  guard let app = NSRunningApplication(processIdentifier: target.pid), isMirror(app, executable: target.executable) else {
-    throw ProbeError("system mirror identity changed")
+  guard let app = NSRunningApplication(processIdentifier: target.pid),
+    realApp?.matches(app, executable: target.executable) ?? isMirror(app, executable: target.executable) else {
+    throw ProbeError("capture target identity changed")
   }
   let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
   guard let window = content.windows.first(where: {
     $0.windowID == target.windowID && $0.owningApplication?.processID == target.pid
-      && $0.owningApplication?.bundleIdentifier == "com.apple.ScreenContinuity"
-  }), window.frame == target.frame.rect else { throw ProbeError("mirror window changed before capture") }
+      && $0.owningApplication?.bundleIdentifier == (realApp?.bundleID ?? "com.apple.ScreenContinuity")
+  }), window.frame == target.frame.rect else { throw ProbeError("target window changed before capture") }
   let config = SCStreamConfiguration()
   config.width = Int(window.frame.width); config.height = Int(window.frame.height)
   config.showsCursor = false; config.capturesAudio = false; config.ignoreShadowsSingleWindow = true
@@ -744,11 +752,12 @@ func selfTest() throws {
     do { try send(Request(target: target, guardPID: 200, variant: variant, action: action),
       mirror: mirror, calculator: calculator, syntheticActivation: true) }
     catch let error as ProbeError {
-      try require(error.description == "synthetic activation probe only permits one ordinary fixture click", error.description)
+      try require(error.description == "synthetic activation probe only permits one ordinary click", error.description)
       rejectedFocusRequests += 1
     }
   }
   try require(rejectedFocusRequests == 4, "unsafe synthetic focus test action accepted")
+  try realAppSelfTest(target: target)
   do {
     _ = try buildEvent(variant: .windowLocal, type: .leftMouseDown, target: target,
       point: CGPoint(x: -200, y: 100), count: 1, setter: nil)
@@ -774,8 +783,8 @@ if mode == "target" || mode == "guard" {
     let input = try JSONDecoder().decode(Input.self, from: FileHandle.standardInput.readDataToEndOfFile())
     try send(input.request, probeClicks: input.clicks)
   } catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
-} else if mode == "focus-probe-send" {
-  do { try sendWithFocusLease(FileHandle.standardInput.readDataToEndOfFile()) }
+} else if mode == "focus-probe-send" || mode == "real-app-notify" {
+  do { try sendWithFocusLease(FileHandle.standardInput.readDataToEndOfFile(), notifyOnly: mode == "real-app-notify") }
   catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
 } else if mode == "focus-lease-descriptor-test" {
   do { try focusLeaseDescriptorTest() }
@@ -784,14 +793,14 @@ if mode == "target" || mode == "guard" {
   // Control-pipe EOF cancels input. Diagnostics EPIPE is not permission to skip cleanup.
   signal(SIGPIPE, SIG_IGN)
   do {
-    struct Identity: Decodable { let processStart: ProcessStamp }
+    struct Identity: Decodable { let processStart: ProcessStamp; let notifyOnly: Bool }
     let data = try readFocusRequest()
     let request = try JSONDecoder().decode(Request.self, from: data)
     let identity = try JSONDecoder().decode(Identity.self, from: data)
     let lease = try FocusLease.inherited()
     try require(try ProcessStamp.read(request.target.pid) == identity.processStart,
       "target identity changed before worker started")
-    try send(request, syntheticActivation: true, focusLease: lease,
+    try send(request, syntheticActivation: true, focusLease: lease, notifyOnly: identity.notifyOnly,
       requireOwner: { try requireInputOwner(STDIN_FILENO) })
   } catch {
     emit(["kind": "error", "error": String(describing: error), "outcome": "inspect_receiver_log"])
@@ -811,17 +820,24 @@ if mode == "target" || mode == "guard" {
   do { emit(try calculatorState()) } catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
 } else if mode == "calculator-listen" {
   do { try listenToCalculator() } catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
-} else if mode == "mirror-capture" {
+} else if mode == "real-app-windows" {
+  do {
+    struct Input: Decodable { let realApp: RealApp }
+    let input = try JSONDecoder().decode(Input.self, from: FileHandle.standardInput.readDataToEndOfFile())
+    emit(try input.realApp.windows())
+  } catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
+} else if mode == "mirror-capture" || mode == "real-app-capture" {
   if #available(macOS 14.2, *) {
     // ScreenCaptureKit needs an initialized WindowServer/AppKit connection even
     // in this short-lived CLI; remain prohibited from activating any window.
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
-    struct CaptureRequest: Decodable { let target: Target; let output: String }
+    struct CaptureRequest: Decodable { let target: Target; let output: String; var realApp: RealApp? = nil }
     do {
       let input = try JSONDecoder().decode(CaptureRequest.self, from: FileHandle.standardInput.readDataToEndOfFile())
+      try require((mode == "real-app-capture") == (input.realApp != nil), "capture mode/target mismatch")
       Task { @MainActor in
-        do { try await captureMirror(input.target, output: input.output); exit(0) }
+        do { try await captureWindow(input.target, output: input.output, realApp: input.realApp); exit(0) }
         catch { emit(["kind": "error", "error": String(describing: error)]); exit(1) }
       }
       RunLoop.main.run()

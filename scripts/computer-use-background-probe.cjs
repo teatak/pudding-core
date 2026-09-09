@@ -76,6 +76,7 @@ function createProbe() {
   run('swiftc', ['-module-cache-path', path.join(dir, 'modules'),
     path.join(root, 'native/macos/background-input-probe/main.swift'),
     path.join(root, 'native/macos/background-input-probe/FocusLease.swift'),
+    path.join(root, 'native/macos/background-input-probe/RealAppProbe.swift'),
     path.join(root, 'native/macos/background-input-probe/CalculatorProbe.swift'), '-o', binary]);
   console.log(run(binary, ['self-test']));
   const status = JSON.parse(run(binary, ['status']));

@@ -81,9 +81,9 @@ func restoreFocus(_ request: Request, lease: FocusLease, originalApp: NSRunningA
   let phase = try lease.phase()
   if phase == .idle { return }
   if let app = NSRunningApplication(processIdentifier: request.target.pid), let originalApp,
-    !originalApp.isTerminated, isFixture(app, executable: request.target.executable),
+    !originalApp.isTerminated, isFocusTarget(app, request: request),
     try ProcessStamp.read(request.target.pid) == stamp {
-    if phase == .pressed, windowInfo(request.target.pid, request.target.windowID) != nil {
+    if phase == .pressed, windowInfo(request.target.pid, request.target.windowID, external: request.realApp != nil) != nil {
       guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGEventSetWindowLocation"),
         let point = request.target.points["click"]?.point
       else { throw ProbeError("could not construct pending mouse release") }
@@ -127,14 +127,15 @@ func readFocusRequest() throws -> Data {
   throw ProbeError("focus request is too large")
 }
 
-func sendWithFocusLease(_ data: Data) throws {
+func sendWithFocusLease(_ data: Data, notifyOnly: Bool = false) throws {
   signal(SIGPIPE, SIG_IGN) // Diagnostics must not kill the remaining recovery owner.
   let request = try JSONDecoder().decode(Request.self, from: data)
   _ = try validate(request)
-  try require(request.variant == "appkit-window-local" && request.action == "click", "focus lease is fixture-click only")
+  try require(request.variant == "appkit-window-local" && request.action == "click", "focus lease is ordinary-click only")
+  try require(!notifyOnly || request.realApp != nil, "notification isolation is real-app smoke only")
   guard let originalApp = NSRunningApplication(processIdentifier: request.target.pid)
   else { throw ProbeError("owned target process missing") }
-  try require(isFixture(originalApp, executable: request.target.executable), "owned target executable/bundle identity missing")
+  try require(isFocusTarget(originalApp, request: request), "owned target executable/bundle identity missing")
   let stamp = try ProcessStamp.read(request.target.pid)
   let directory = Bundle.main.executableURL!.deletingLastPathComponent()
   let journal = directory.appendingPathComponent("focus-\(request.target.pid)-\(stamp.seconds)-\(stamp.microseconds).state")
@@ -143,6 +144,7 @@ func sendWithFocusLease(_ data: Data) throws {
     "target changed while waiting for input ownership")
   var envelope = try JSONSerialization.jsonObject(with: data) as! [String: Any]
   envelope["processStart"] = ["seconds": stamp.seconds, "microseconds": stamp.microseconds]
+  envelope["notifyOnly"] = notifyOnly // CLI-owned diagnostic mode, never accepted from caller JSON.
   let header = try JSONSerialization.data(withJSONObject: envelope)
   try require(header.count < 65_536, "focus request is too large")
   var control: [Int32] = [0, 0]
