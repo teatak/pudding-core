@@ -1,6 +1,5 @@
+// Source Electron + production Composer/TurnParts, isolated HTTP fixtures.
 // Run: web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron electron/smoke/input-flow-delivery-smoke.cjs
-// Production Composer -> API payload -> SSE overlay -> canonical transcript.
-// HTTP responses/events are fixtures; no daemon, provider, or real session data.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -23,10 +22,15 @@ async function waitFor(source, label) {
   }
   throw new Error('Timed out: ' + label);
 }
-async function answer() {
-  await waitFor('!!document.querySelector("[data-input-flow-panel] [role=option]")', 'question');
-  const point = await js(`(()=>{const r=document.querySelector('[data-input-flow-panel] [role=option]').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
+async function click(selector) {
+  await waitFor('!!document.querySelector('+JSON.stringify(selector)+')', selector);
+  const point = await js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
   for(const type of ['mouseMove','mouseDown','mouseUp']) window.webContents.sendInputEvent({type,...point,button:'left',clickCount:1});
+}
+async function answer(value) {
+  await click('[data-input-flow-panel] input');
+  await window.webContents.insertText(value);
+  for(const type of ['keyDown','keyUp']) window.webContents.sendInputEvent({type,keyCode:'Return'});
 }
 async function run() {
   assert.equal(process.execPath,path.join(repo,'web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'));
@@ -43,85 +47,63 @@ async function run() {
         import {createRootRoute,createRoute,createRouter,createMemoryHistory,RouterProvider} from '@tanstack/react-router';
         import '/src/styles.css';
         import {Composer} from '/src/components/Composer.tsx';
-        import {TranscriptTurn} from '/src/components/transcript/TranscriptTurn.tsx';
-        import {useTranscriptData} from '/src/components/transcript/useTranscriptData.ts';
+        import {TurnParts} from '/src/components/transcript/TurnParts.tsx';
         import {TooltipProvider} from '/src/components/ui/tooltip.tsx';
         import {useOverlayStore} from '/src/state/overlayStore.ts';
         import {useInputFlowStore} from '/src/state/inputFlowStore.ts';
         import {createInputFlowTools} from '/src/mcp/inputFlowTools.ts';
         import {queryKeys} from '/src/api/queryKeys.ts';
-        import {sessionEvent} from '/contracts/events.ts';
         import {setLocale} from '/src/i18n/index.ts';
         setLocale('zh-CN');
-        const h=React.createElement,sessionID='form-delivery-current',turnID='original-turn',createdAt='2026-09-08T10:00:00Z';
-        const active=location.search!=='?idle';
+        const h=React.createElement,sessionID='form-delivery',turnID='original-turn',requestID=turnID+':question';
+        const scenario=location.search.slice(1),waitSeconds=scenario==='async'?0:scenario==='long'?300:10;
+        const args={type:'form',title:'反馈确认',waitSeconds,steps:[{id:'reply',type:'text_input',title:'你有什么建议？'}]};
         const client=new QueryClient({defaultOptions:{queries:{enabled:false,retry:false},mutations:{retry:false}}});
-        const store=useOverlayStore.getState();
-        let seq=0,resolveResponse;
-        const event=value=>store.applyEvent(sessionEvent.parse({sessionID,seq:++seq,...value}));
-        const message=(id,role,parts,clientMessageID)=>({id,role,parts,clientMessageID,sessionID,turnID,createdAt});
-        const text=value=>({type:'text',text:value});
-        const original=message('original','user',[text('请询问我的选择。')],'original');
-        const before=message('before','assistant',[text('等待你的选择。')]);
-        let turns=[{id:turnID,sessionID,clientMessageID:'original',createdAt,updatedAt:createdAt,status:active?'running':'completed',messages:[original,before]}];
-        const canonical=()=>client.setQueryData(queryKeys.turns(sessionID),{pages:[{turns,hasMore:false}],pageParams:[undefined]});
-        canonical();
+        const realNow=Date.now;let offset=0,resolveResponse;
+        Date.now=()=>realNow()+offset;
+        let request={id:requestID,sessionID,turnID,title:args.title,args,status:waitSeconds?'waiting':'awaiting_user',...(waitSeconds?{deadline:new Date(Date.now()+waitSeconds*1000).toISOString()}:{})};
+        function snapshot(){if(request.status==='waiting'&&Date.parse(request.deadline)<=Date.now())request={...request,status:'timeout',deadline:undefined};return request;}
         client.setQueryData(queryKeys.queuedInputs(sessionID),{queuedInputs:[]});
-        if(active) {
-          event({kind:'turn.started',turnID,clientMessageID:'original',userMessageID:'original'});
-          event({kind:'turn.delta',turnID,part:'text',delta:'等待你的选择。'});
-        }
-        store.applyEvent(sessionEvent.parse({kind:'turn.started',sessionID:'other-session',turnID:'other-turn',seq:1,clientMessageID:'other-input',userMessageID:'other-message'}));
         const originalFetch=window.fetch;
         window.fetch=(url,options)=>{
-          if(String(url).startsWith('/sessions/')) {
-            if(options?.method!=='POST')throw new Error('Unexpected fixture request: '+url);
-            window.fixture.calls.push({path:String(url),body:JSON.parse(options.body)});
-            return new Promise(resolve=>{resolveResponse=resolve;});
-          }
-          return originalFetch(url,options);
-        };
-        window.fixture={calls:[],
-          respond(error) {
-            const call=this.calls.at(-1),newTurnID=call.path.endsWith('/steer')?turnID:'answer-turn';
-            resolveResponse(new Response(JSON.stringify(error?{error}:{turnID:newTurnID,userMessageID:'answer'}),{status:error?409:200,headers:{'Content-Type':'application/json'}}));
-          },
-          apply() {
-            const call=this.calls.at(-1),body=call.body;
-            const answer=message('answer','user',body.parts,body.clientMessageID);
-            if(call.path.endsWith('/steer')) {
-              event({kind:'input.steered',turnID,clientMessageID:body.clientMessageID,userMessageID:'answer',text:body.text});
-              turns=[{...turns[0],messages:[original,before,answer]}];
-            } else {
-              answer.turnID='answer-turn';
-              turns=[turns[0],{...turns[0],id:'answer-turn',clientMessageID:body.clientMessageID,status:'running',messages:[answer]}];
-              event({kind:'turn.started',turnID:'answer-turn',clientMessageID:body.clientMessageID,userMessageID:'answer',text:body.text});
+          if(!String(url).startsWith('/sessions/'))return originalFetch(url,options);
+          if(String(url)!=='/sessions/'+sessionID+'/input-requests/'+encodeURIComponent(requestID))throw new Error('Unexpected route: '+url);
+          snapshot();
+          if(options?.method==='POST'){
+            const body=JSON.parse(options.body);
+            if(body.action==='answer'){
+              window.fixture.calls.push({path:String(url),body});
+              return new Promise(resolve=>{resolveResponse=resolve;});
             }
-            canonical();
-            event({kind:'turn.delta',turnID:turns.at(-1).id,part:'text',delta:'已按你的选择继续。'});
-          },
-          finish() {
-            const current=turns.at(-1),final={...message('final','assistant',[text('已按你的选择继续。')]),turnID:current.id};
-            event({kind:'turn.completed',turnID:current.id,assistantMessageID:'final'});
-            turns=[...turns.slice(0,-1),{...current,status:'completed',messages:[...current.messages,final]}];
-            canonical();
-          },
-          canonicalOnly() {store.clearSession(sessionID);},
-          pending() {return useOverlayStore.getState().pendingUsers[sessionID]||[];},
+            if(request.status==='waiting'){
+              if(body.action==='touch'){window.fixture.touches++;request={...request,deadline:new Date(Date.now()+waitSeconds*1000).toISOString()};}
+              if(body.action==='dismiss')request={...request,status:'dismissed',deadline:undefined};
+            }
+            return Promise.resolve(Response.json({request}));
+          }
+          return Promise.resolve(Response.json(request));
         };
-        function Fixture() {
-          const running=useOverlayStore(state=>!!state.runningTurns[sessionID]);
-          const {transcript}=useTranscriptData({token:'',sessionID,sessionRunning:running});
-          window.fixture.vm=transcript.turnVMs;
+        window.fixture={calls:[],touches:0,
+          respond(error){
+            this.delivery=snapshot().status==='waiting'?'tool':'message';
+            if(!error)request={...request,status:'answered',deadline:undefined};
+            resolveResponse(Response.json(error?{error}:{delivery:this.delivery,request},{status:error?409:200}));
+          },
+          shift(ms){offset+=ms;client.invalidateQueries({queryKey:queryKeys.inputRequest(sessionID,requestID)});},
+          restartUI(){useInputFlowStore.setState({requests:[],drafts:{}});client.removeQueries({queryKey:queryKeys.inputRequest(sessionID,requestID)});},
+          pending(){return useOverlayStore.getState().pendingUsers[sessionID]||[];},
+          status(){return snapshot().status;},
+        };
+        function Fixture(){
           return h('main',{style:{padding:24}},
-            h('div',{id:'transcript',style:{height:370,overflow:'auto'}},transcript.turnVMs.map(turn=>h(TranscriptTurn,{key:turn.key,turn,sessionID,token:''}))),
-            h(Composer,{session:{id:sessionID,title:'答复投递测试',provider:'fixture',model:'fixture-model',mode:'chat',running},token:'',onSubmitError:error=>window.fixture.submitError=error}));
+            h('div',{id:'transcript',style:{height:370,overflow:'auto'}},h(TurnParts,{token:'',sessionID,disclosureRootKey:'fixture',parts:[{type:'tool_use',id:'question',turnID,name:'builtin_request_user_input',args,phase:'running'}]})),
+            h(Composer,{session:{id:sessionID,title:'答复投递测试',provider:'fixture',model:'fixture-model',activeMode:'chat',running:true},token:'',onSubmitError:error=>window.fixture.submitError=error}));
         }
         const rootRoute=createRootRoute();
         const indexRoute=createRoute({getParentRoute:()=>rootRoute,path:'/',component:Fixture});
         const router=createRouter({routeTree:rootRoute.addChildren([indexRoute]),history:createMemoryHistory({initialEntries:['/']})});
         createRoot(document.getElementById('root')).render(h(QueryClientProvider,{client},h(TooltipProvider,null,h(RouterProvider,{router}))));
-        createInputFlowTools()[0].handler({_pudding_session_id:sessionID,type:'form',title:'选购确认',steps:[{id:'action',type:'single_select',title:'原有商品怎么处理？',options:[{title:'删掉，只买这次清单',value:'remove'},{title:'保留',value:'keep'}]}]});
+        createInputFlowTools()[0].handler({...args,_pudding_session_id:sessionID,_pudding_request_id:requestID});
       `;
     },
     configureServer(server) {server.middlewares.use('/__fixture',async(_req,res,next)=>{
@@ -129,50 +111,64 @@ async function run() {
     });},
   }]});
   await vite.listen();
-  // Hidden source Electron window avoids interrupting the user's foreground app.
-  window=new BrowserWindow({width:900,height:900,show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
+  window=new BrowserWindow({width:900,height:850,show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
   window.webContents.on('console-message',details=>{if(details.level==='error')errors.push(details.message);});
   const url='http://127.0.0.1:'+vite.httpServer.address().port+'/__fixture';
-  for(const scenario of ['active','idle','reject']) {
+  for(const scenario of ['sync','timeout','async','long','reject','restart','dismiss']) {
     await window.loadURL(url+'?'+scenario);
     assert.equal(window.webContents.getURL(),url+'?'+scenario);
-    await answer();
-    await waitFor('window.fixture.calls.length===1','one API request');
+    await waitFor('!!document.querySelector("[data-input-flow-panel] input")','panel');
+    assert.equal(await js('!!document.querySelector("[data-input-wait-countdown], [data-input-panel-countdown]")'),false,'no upfront countdown');
+    if(scenario==='timeout'){
+      await js('window.fixture.shift(5500)');
+      await waitFor('!!document.querySelector("[data-input-wait-countdown]")','delayed model countdown');
+      await click('[data-input-flow-panel] input');
+      await window.webContents.insertText('保留草稿');
+      await waitFor('window.fixture.touches>0 && !document.querySelector("[data-input-wait-countdown]")','interaction renews model wait');
+      await js('window.fixture.shift(11000)');
+      await waitFor('window.fixture.status()==="timeout" && !document.querySelector("[data-input-wait-countdown]")','model timeout');
+      assert.equal(await js('!!document.querySelector("[data-input-flow-panel]")'),true,'model timeout does not close panel');
+      await js('window.fixture.shift(41000)');
+      await waitFor('!!document.querySelector("[data-input-panel-countdown]")','independent panel countdown');
+      fs.writeFileSync(path.join(output,'countdown.png'),(await window.webContents.capturePage()).toPNG());
+      await js('window.fixture.shift(10000)');
+    }else if(scenario==='long'){
+      await js('window.fixture.shift(61000)');
+    }else if(scenario==='restart'){
+      await js('window.fixture.restartUI()');
+    }else if(scenario==='dismiss'){
+      await click('[data-input-flow-header] button');
+      await waitFor('window.fixture.status()==="dismissed"','explicit dismiss ends model wait');
+    }
+    if(['timeout','long','restart','dismiss'].includes(scenario)){
+      await waitFor('!document.querySelector("[data-input-flow-panel]")','panel collapsed');
+      await waitFor('document.getElementById("transcript").textContent.includes("回答问题")','reopen in original tool row');
+      await js(`Array.from(document.querySelectorAll('#transcript button')).find(b=>b.textContent.includes('回答问题')).click()`);
+      await waitFor('!!document.querySelector("[data-input-flow-panel] input")','reopened');
+      if(scenario==='timeout')assert.equal(await js('document.querySelector("[data-input-flow-panel] input").value'),'保留草稿','draft retained');
+      if(scenario==='long')assert.equal(await js('window.fixture.status()'),'waiting','panel does not end long model wait');
+    }
+    await answer(scenario==='timeout'?'，补充':'测试答复');
+    await waitFor('window.fixture.calls.length===1','one answer request');
     const call=await js('window.fixture.calls[0]');
-    assert.equal(call.path,scenario==='idle'?'/sessions/form-delivery-current/submit':'/sessions/form-delivery-current/turns/original-turn/steer',scenario+': answer uses correct delivery route');
+    assert.equal(call.path,'/sessions/form-delivery/input-requests/original-turn%3Aquestion');
+    assert.equal(call.body.action,'answer');
     assert.equal(call.body.parts[0].type,'form_result');
-    assert.equal(call.body.parts[0].result.action,'remove');
-    assert.match(call.body.text,/删掉，只买这次清单/);
-    assert.equal((await js('window.fixture.pending()'))[0].status,scenario==='idle'?'submitting':'steering');
-    assert.equal(await js('document.getElementById("transcript").textContent.includes("待发送")'),false);
-    if(scenario==='reject') {
-      await js('window.fixture.respond("turn_not_active")');
-      await waitFor('!!document.querySelector("[data-input-flow-panel]") && !!window.fixture.submitError','failed answer restored');
-      assert.equal(await js('window.fixture.pending().length'),0);
-      assert.equal(await js('window.fixture.calls.length'),1,'no implicit queued resend');
-      await js('window.fixture.canonicalOnly()');
-      await answer();
+    assert.equal(await js('window.fixture.pending().length'),0,'no duplicate user overlay for synchronous answer');
+    if(scenario==='reject'){
+      await js('window.fixture.respond("temporary_failure")');
+      await waitFor('!!document.querySelector("[data-input-flow-panel]") && !!window.fixture.submitError','failure restores form');
+      assert.equal(await js('window.fixture.calls.length'),1,'no implicit resend');
+      await answer('重试答复');
       await waitFor('window.fixture.calls.length===2','explicit retry');
-      const retry=await js('window.fixture.calls[1]');
-      assert.equal(retry.path,'/sessions/form-delivery-current/submit');
-      assert.equal(retry.body.clientMessageID,call.body.clientMessageID,'retry retains idempotency key');
+      assert.equal(await js('window.fixture.calls[1].path'),call.path,'same idempotent question');
     }
     await js('window.fixture.respond()');
-    await delay(100);
-    await js('window.fixture.apply()');
-    await waitFor('window.fixture.pending().length===0','canonical answer replaces overlay');
-    assert.equal(await js('document.querySelectorAll("#transcript [data-transcript-message-role=user]").length'),2,'one original input and one form answer');
-    assert.equal(await js('document.getElementById("transcript").textContent.includes("待发送")'),false);
-    assert.equal(await js('window.fixture.vm.length'),scenario==='active'?1:2,'answer belongs to current turn while running');
-    await js('window.fixture.finish()');
-    await delay(200);
-    await js('window.fixture.canonicalOnly()');
-    await delay(100);
-    assert.equal(await js('window.fixture.pending().length'),0);
-    assert.equal(await js('document.querySelectorAll("#transcript [data-transcript-message-role=user]").length'),2);
-    assert.equal(await js('window.fixture.calls.length'),scenario==='reject'?2:1,'turn completion does not send again');
+    await waitFor('!document.querySelector("[data-input-flow-panel]") && document.getElementById("transcript").textContent.includes("已完成")','answered status');
+    assert.equal(await js('window.fixture.delivery'),['timeout','async','dismiss'].includes(scenario)?'message':'tool');
+    assert.equal(await js('window.fixture.calls.length'),scenario==='reject'?2:1,'no second delivery');
     fs.writeFileSync(path.join(output,scenario+'.png'),(await window.webContents.capturePage()).toPNG());
-    console.log('PASS '+scenario+' routing, canonical reconciliation and no resend');
+    console.log('PASS '+scenario+' lifecycle, request routing and no duplicate delivery');
   }
   assert.deepEqual(errors,[]);
   console.log('REPORT '+output);

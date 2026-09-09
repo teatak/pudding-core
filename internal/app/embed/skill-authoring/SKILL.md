@@ -32,6 +32,8 @@ This authoring guide belongs to the built-in Skill Authoring App. Do not edit or
 
 At runtime Pudding injects only the skills index (`name`, `description`, path/source metadata) into the system prompt. The full `SKILL.md` body is loaded on demand with `builtin_skill_read(skill_id="<name>")` when the user's intent matches the description.
 
+The read records a registered skill reference, not a frozen copy of the body. Each model request resolves that reference to the current `SKILL.md`, including in existing or compacted sessions. Do not reread merely to refresh it. Missing references report unavailable rather than replaying an older body.
+
 ## Standard Flow
 
 1. Align on intent: confirm what problem the skill solves and what the user would normally say that should trigger it.

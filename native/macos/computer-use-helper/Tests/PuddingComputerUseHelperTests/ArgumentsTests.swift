@@ -137,6 +137,6 @@ import Testing
       windowID: 42,
       input: PointerInput(
         action: .click, x: 0.12, y: 0.34, toX: nil, toY: nil,
-        button: .left, clickCount: 2, deltaX: nil, deltaY: nil)
+        button: .left, clickCount: 2, deltaX: nil, deltaY: nil, delivery: "background")
     ))
 }

@@ -98,7 +98,8 @@ func TestComputerUseAppDefaultsToBackground(t *testing.T) {
 	for _, definition := range BuiltinDefinitions() {
 		if definition.Name == ComputerUseApp {
 			if !strings.Contains(definition.Description, "background by default") ||
-				!strings.Contains(definition.Description, "before necessary foreground pointer input") {
+				!strings.Contains(definition.Description, "Ask before switching focus unless already authorized") ||
+				!strings.Contains(definition.Description, "session/app approval alone is not that authorization") {
 				t.Fatalf("unexpected Computer Use App guidance: %s", definition.Description)
 			}
 			return
@@ -118,6 +119,19 @@ func TestComputerBackgroundDeliverySchemaAndGuidance(t *testing.T) {
 		if strings.Contains(definition.Description, "limited preview") || strings.Contains(string(definition.InputSchema), "Calculator/Mail/Calendar") {
 			t.Fatal("obsolete compatibility allowlist in tool contract")
 		}
+		for _, guidance := range []string{
+			"Pointer delivery defaults to background", "Explicit delivery=foreground",
+			"Ask before switching focus unless already authorized",
+			"A failed or uncertain delivery is not evidence that foreground is required",
+			"Do not choose keyboard input merely to justify activating the app",
+		} {
+			if !strings.Contains(definition.Description, guidance) {
+				t.Fatalf("missing background-first guidance %q", guidance)
+			}
+		}
+		if !strings.Contains(string(definition.InputSchema), "defaults background") || strings.Contains(definition.Description, "default delivery (foreground)") {
+			t.Fatal("schema and description must use the runtime background default")
+		}
 		args, err := decodeComputerActArgs([]byte(`{"appID":"com.example.Custom","windowID":7,"actions":[{"type":"click","x":0.5,"y":0.4,"delivery":"background"},{"type":"click","x":0.5,"y":0.4,"clickCount":2,"delivery":"background"},{"type":"click","x":0.5,"y":0.4,"button":"right","delivery":"background"},{"type":"drag","x":0.5,"y":0.4,"toX":0.7,"toY":0.6,"delivery":"background"},{"type":"scroll","x":0.5,"y":0.4,"deltaY":120,"delivery":"background"}]}`))
 		if err != nil || len(args.Actions) != 5 || args.Actions[0].Delivery != "background" {
 			t.Fatalf("args=%+v err=%v", args, err)
@@ -125,6 +139,18 @@ func TestComputerBackgroundDeliverySchemaAndGuidance(t *testing.T) {
 		return
 	}
 	t.Fatal("missing ComputerAct")
+}
+
+func TestComputerActionsDecodePointerDefaultsWithoutAffectingSemanticOrKeyboardActions(t *testing.T) {
+	args, err := decodeComputerActArgs([]byte(`{"appID":"com.example.App","windowID":7,"actions":[{"type":"click","x":0.5,"y":0.4},{"type":"click","x":0.5,"y":0.4,"delivery":"foreground"},{"type":"press","elementID":"e_button"},{"type":"type_text","value":"hello"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"background", "foreground", "", ""} {
+		if args.Actions[i].Delivery != want {
+			t.Fatalf("actions[%d].delivery=%q, want %q", i, args.Actions[i].Delivery, want)
+		}
+	}
 }
 
 func TestComputerPermissionFailuresRemainStructured(t *testing.T) {

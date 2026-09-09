@@ -65,6 +65,7 @@ struct PointerInput: Codable, Equatable {
     guard delivery == nil || delivery == "foreground" || delivery == "background" else {
       throw ArgumentError.invalidOption("delivery", "must be foreground or background")
     }
+    let delivery = delivery ?? "background"
     guard normalized(x), normalized(y) else {
       throw ArgumentError.invalidOption(
         "coordinates", "must be between 0 inclusive and 1 exclusive")

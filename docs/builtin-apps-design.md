@@ -46,7 +46,7 @@ Pudding 使用统一的 **App** 概念承载需要说明、工具、界面和运
 
 session 级技术状态，表示模型已经显式加载该 App，可以在后续 turn 复用其工具。
 
-- `builtin_app_load` 成功返回 Skill 并完成状态写入后加入 `loadedAppIDs`。
+- `builtin_app_load` 校验选中的 Skill 并完成状态写入后加入 `loadedAppIDs`；工具结果持久化 Skill 引用，不保存正文副本。
 - 它不是 UI 激活状态，不打开窗口，也不授予权限。
 - 它不把工具写入系统提示词，只控制 `provider.Request.Tools`。
 - 降级模式不清除该状态；工具因模式不足而暂时隐藏。
@@ -134,11 +134,20 @@ Skill，加载结果会明确返回 `instructionsLoaded: false`。常驻内置 A
 
 1. Chat 看到 `Browser (requires Work)`，需要浏览器时先请求 Work。
 2. 模式批准后调用 `builtin_app_load(app_id="browser")`。
-3. App Load 返回默认 Skill，并将 `browser` 写入当前 session 的 `loadedAppIDs`。
-4. 下一次 provider request 加入 Browser 工具 schema。
+3. App Load 返回默认 Skill 的引用，并将 `browser` 写入当前 session 的 `loadedAppIDs`。
+4. 下一次 provider request 加入 Browser 工具 schema，并在对应工具结果位置解析引用、提供当前 Skill 正文。
 5. 后续 turn 直接复用，不再要求重复加载。
 
 `builtin_skill_read` 只读取 Available Skills，不接受 `app_id`，也不修改 App 状态。不支持“模型直接调用未加载工具时由引擎暗中加载”；未加载调用必须返回明确的 `app_not_loaded`。
+
+### 引用型技能结果
+
+- `builtin_app_load` 的默认/指定 Skill 与 `builtin_skill_read` 的全局 Skill 统一返回 `reference`（`kind`、`appID`（仅 App）、`skillID`）。标识只通过注册的 App/Skill service 解析，不能指定任意文件。
+- canonical `tool_result.content` 只保存引用和加载元数据。请求发送前，由 contextbuilder 对已经合并历史和本轮工具结果的请求解析当前正文；不放进系统提示词，不写入 provider 内存或其他独立事实源。
+- 同一 App 最新一次成功的技能加载是当前选择；全局 Skill 按 ID 保留最新引用。旧引用只保留记录，标为 `superseded`。App 卸载后不解析其正文；禁用、runtime 缺失、能力不足或读取失败均不回退旧正文。
+- 老会话已有的结构化加载结果，在请求投影时根据其注册标识解析；原始记录不改写。压缩不固化技能正文，后续请求从 canonical messages 找回被压缩的最新引用，只保留原调用/结果对，不恢复周边旧对话。
+- `instructionStatus=current` 表示当前解析结果；`unavailable` 附带读取错误；`unloaded`、`capability_required`、`superseded` 不携带正文。历史摘要中的旧操作规则不覆盖当前引用正文。
+- 引用存放在已有 JSON 工具结果内，不新增 session 选择副本或 SQLite 列。技能内容不变时请求投影保持一致；正文更新会影响该工具结果位置及后续上下文的前缀缓存。
 
 ## 权限与资源生命周期
 

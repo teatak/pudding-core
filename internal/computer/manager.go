@@ -298,6 +298,9 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 	if action.Delivery != "" && action.Delivery != "foreground" && action.Delivery != "background" {
 		return action, invalid("delivery must be foreground or background")
 	}
+	if action.Delivery == "" {
+		action.Delivery = "background"
+	}
 	if action.ElementID != "" || action.Value != nil {
 		return action, invalid("elementID and value must be omitted for pointer actions")
 	}

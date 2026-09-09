@@ -1,6 +1,6 @@
 # macOS Computer Use 设计与实施计划
 
-> 状态:C0–C3 已实现；源码已扩展后台单击/双击/右键/拖拽/滚轮并移除兼容 App 白名单；新改动尚未打包发布。此前 0.3.0 候选包的签名、公证结果不覆盖本次扩展。
+> 状态:C0–C3 已实现；源码支持后台单击/双击/右键/拖拽/滚轮，无兼容 App 白名单。本次后台默认值和提示词调整尚未打包发布；历史候选包验收不覆盖本次修改。
 >
 > 更新:2026-09-09
 >
@@ -16,8 +16,8 @@
 2. Go daemon 负责 session 路由、工具生命周期、审批和全局动作串行化。
 3. Electron main 负责 macOS 原生能力和权限界面,通过签名 Swift Helper 调用 Accessibility 与 ScreenCaptureKit。
 4. 所有操作显式携带 `sessionID`、`appID` 和 `windowID`;后端不保存 observation、“当前应用”或“当前焦点”。
-5. 原生控件操作支持 `press`、`set_value`、`select`、`submit`、`focus`、`select_text`；键盘和默认指针操作验证指定 PID、窗口及前台状态。显式后台指针的范围和恢复边界见下节。
-6. 写操作不自动重试。结果不确定时返回明确错误,下一步先通过 `use_app` 刷新窗口并观察当前状态。
+5. 原生控件操作支持 `press`、`set_value`、`select`、`submit`、`focus`、`select_text`；键盘和显式前台指针操作验证指定 PID、窗口及前台状态；指针默认后台投递，范围和恢复边界见下节。
+6. 写操作不自动重试。结果不确定时先检查当前状态，不重放；只有窗口失效时才通过 `use_app` 重新获取窗口。
 7. 当前能力不监听键盘或鼠标、不录制工作流；支持明确请求的物理按键、组合键、Unicode 文本输入及粘贴。
 8. 应用生命周期采用 session ownership:只有当前 session 新启动并取得 `launchID` 的进程才能普通退出;已运行应用永不归属,永不强杀。
 
@@ -25,7 +25,7 @@
 
 已接入当前源码的 `builtin_computer_act.actions[] → Go Manager → Electron bridge/权限协调 → Swift Helper → 同一可执行文件的短生命周期 worker`。这是现有生产代码路径的接入，不是已安装 release 的发布验收；没有替换或重启正在运行的开发/发布应用。
 
-- 每项 pointer 可显式传 `delivery: "background"`；省略或传 `foreground` 保持前台 HID 行为。后台支持左/右键单击、左键双击、左键拖拽和双轴像素滚动。已删除原系统计算器/邮件/日历兼容白名单；仍保留 session/App 审批、既有受保护 App 策略、真实 PID 启动标记及 bundle/可执行文件身份校验。没有自动前台 fallback；移除白名单不代表所有 App 都兼容。
+- 每项 pointer 省略 `delivery` 或传 `delivery: "background"` 均走后台路径；只有显式 `delivery: "foreground"` 才走前台 HID 路径。Go action 规范化和原生 CLI/protocol 校验均落实此默认值，Electron 只透传、不引入另一套默认策略。后台支持左/右键单击、左键双击、左键拖拽和双轴像素滚动。已删除原系统计算器/邮件/日历兼容白名单；仍保留 session/App 审批、既有受保护 App 策略、真实 PID 启动标记及 bundle/可执行文件身份校验。没有自动前台 fallback；移除白名单不代表所有 App 都兼容。后台失败本身不证明必须前台：窗口失效先重新获取窗口，权限失败交由权限引导，效果未知先检查而非重放。键盘目前仍要求前台；可用后台 `set_value` 或其他后台动作完成时，不应为方便而切到键盘/前台。只有真正需要前台或用户明确要求时才使用前台路径，切换焦点需事先获准。这是工具默认值与模型行为约束，不新增第二套运行时授权状态。
 - 复用原有 session/App 审批、全局动作队列、`completedCount` / `failedIndex` / `outcome`，不增加工具名称、observationID、过期时间、单次消费或强制观察。观察仍由模型决定。结果中的 `delivery` 必须与请求匹配，不能把前台投递冒充后台成功。
 - 事件使用窗口内坐标及 PID 定向投递，围绕确定的手势事件计划发送合成 AppKit 激活/去激活通知；不调用实际 activate/raise、全局鼠标移动或全局 HID。目标 App 仍可能自行激活；检测到系统前台变化后停止后续事件并返回不确定结果，不能承诺任意 App 都不置顶。它会临时影响目标内部 active/key 状态，不能表述为“内部焦点完全不变”。用户真正激活目标后，不反向去激活。
 - 每步检查进程启动标记、窗口身份/几何、权限及系统前台是否变化。检查的是执行时事实，不要求模型刷新快照。窗口内坐标依赖非公开 `CGEventSetWindowLocation`，符号缺失直接失败，不推断其他 macOS 版本兼容。
@@ -37,10 +37,10 @@
 最小示例（窗口和坐标须替换成实际已知目标）：
 
 ```json
-{"appID":"com.apple.iCal","windowID":42,"actions":[{"type":"click","delivery":"background","x":0.5,"y":0.4}]}
+{"appID":"com.apple.iCal","windowID":42,"actions":[{"type":"click","x":0.5,"y":0.4}]}
 ```
 
-后台双击使用 `type:"click", clickCount:2`；右键使用 `type:"click", button:"right"`。拖拽使用 `type:"drag", x, y, toX, toY`，滚动使用 `type:"scroll", x, y, deltaX, deltaY`。每项都显式带 `delivery:"background"`，与单击共用原 `actions[]`；无需 observationID 或每步重新观察。
+后台双击使用 `type:"click", clickCount:2`；右键使用 `type:"click", button:"right"`。拖拽使用 `type:"drag", x, y, toX, toY`，滚动使用 `type:"scroll", x, y, deltaX, deltaY`。每项均可省略 `delivery`，与单击共用原 `actions[]`；无需 observationID 或每步重新观察。
 
 通用手势的隔离真实回归（实际源码 Helper 投递，原型只作接收/监测）：
 
@@ -50,6 +50,8 @@ node scripts/computer-use-background-pointer-smoke.cjs /absolute/current/Helper 
 node scripts/computer-use-background-pointer-recovery.cjs /absolute/current/Helper
 node scripts/computer-use-background-window-lifecycle.cjs /absolute/current/Helper
 ```
+
+本次默认值回归（2026-09-09）：`make test`、216 项 Electron 测试、102 项原生测试通过；Go 与原生 CLI/protocol 覆盖省略、显式后台、显式前台三种输入，参数错误和后台失败不自动观察、重试或激活。临时开发签名 Helper 通过上面两个 pointer smoke，在 AppKit/Electron 独立接收窗口各执行 5 种省略 `delivery` 的手势，10/10 实际效果通过；共 1228 次采样，鼠标最大位移 0，前台和窗口遮挡顺序不变，前台守卫无误输入。未替换或重启现有 Pudding；这不是已安装 release 或真实 LLM 的验收。
 
 以下日历和候选包记录属于本次扩展之前的有限单击阶段，不是本次新增手势的 release 验收。
 
@@ -344,9 +346,9 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 | `press` | AX `AXPress` | action 返回成功且目标仍属于指定 app/window |
 | `set_value` | AX set value | 重新读取值与期望一致 |
 | `select` | AX `AXSelected=true` 或父容器 `AXSelectedRows` | 重新读取 selection 包含目标元素 |
-| `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | App 必须活跃,元素必须已聚焦、启用、非安全且为可编辑单行文本控件 |
-| `click` / `drag` / `scroll`，默认或 `delivery=foreground` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 接受当前窗口左上角为 `0,0`、右下角趋近 `1,1` 的归一化坐标;执行前实时校验目标 App 前台且目标窗口在坐标处最上层;成功只代表事件已投递 |
-| `click` / `drag` / `scroll`，显式 `delivery=background` | 同 Helper worker 向指定 PID/窗口投递，无兼容 App 白名单 | 左/右单击、左双击、左拖拽、双轴滚动；允许遮挡；校验真实应用身份、进程启动标记、窗口几何和权限；无前台 fallback，成功仅代表投递 |
+| `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | 元素必须已聚焦、启用、非安全且为可编辑单行文本控件，不额外激活 App |
+| `click` / `drag` / `scroll`，显式 `delivery=foreground` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 接受当前窗口左上角为 `0,0`、右下角趋近 `1,1` 的归一化坐标;执行前实时校验目标 App 前台且目标窗口在坐标处最上层;成功只代表事件已投递 |
+| `click` / `drag` / `scroll`，默认或 `delivery=background` | 同 Helper worker 向指定 PID/窗口投递，无兼容 App 白名单 | 左/右单击、左双击、左拖拽、双轴滚动；允许遮挡；校验真实应用身份、进程启动标记、窗口几何和权限；无前台 fallback，成功仅代表投递 |
 
 规则:
 
@@ -387,7 +389,7 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 - `elementID` 由元素的稳定 Accessibility 身份生成;模型可在同一 App 窗口仍存在时复用已知 ID。
 - Helper 在每次语义动作前重新遍历指定窗口并按稳定身份解析元素;找不到、不唯一、不再支持该动作或属于 secure 控件时拒绝执行。
 - 模型自主决定观察时机：仅在目标未知、必须检查 UI 变化或结果不确定时 observe。已知稳定目标可直接放入一次 `actions` 调用。
-- pointer 不依赖 observation token;坐标使用当前窗口归一化空间。默认前台投递验证前台 App 和最上层目标窗口；显式后台投递采用上节的进程、窗口、权限及前台变化校验。
+- pointer 不依赖 observation token;坐标使用当前窗口归一化空间。默认后台投递采用上节的进程、窗口、权限及前台变化校验；显式前台投递验证前台 App 和最上层目标窗口。
 - daemon 不保存 observation registry 或过期时间;当前 AX 树和当前窗口几何是唯一事实源。
 
 ## 7. 模型工具
@@ -400,7 +402,7 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 ### `builtin_computer_use_app`
 
-按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者后续需要前台指针/键盘动作时传 `foreground=true`；后台指针操作不需要此步骤。该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
+按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者操作确实不能在后台完成且已获准切换焦点时，才传 `foreground=true`；未获准时先询问。session/App 审批不等同于切换焦点授权。后台语义动作、指针和观察不需要激活，目标已在前台也不重复激活。该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
 
 显式前台请求和预览窗口的显示请求共用 `ForegroundPolicy`：已经前台且目标窗口未被其他普通应用窗口遮挡时直接成功，不调用 AXRaise，也不额外要求辅助功能权限。只有窗口尚未显示到前面时才尝试一次 AXRaise；最终以实际前台及窗口顺序判断成功，而非仅凭 AX 返回值。失败保留 AX 原生错误码。过程中失去前台则停止，不循环激活争抢焦点。
 
@@ -445,7 +447,7 @@ AX 语义操作保持后台执行能力。前台坐标/键盘动作的 `computer
 }
 ```
 
-`actions` 必须包含 1–32 项,每项用 `type` 指定动作。不存在顶层单动作字段或特殊 sequence 类型。`set_value` 的 `value` 与语义动作的 `elementID` 均放在对应项中。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。默认指针要求目标 App 已在前台；显式 `delivery=background` 支持相同的点击、拖拽、滚动参数。两者均只确认事件投递,不宣称 App 状态已改变。`delivery` 不能用于语义或键盘动作。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一数组协议让审批、串行化和 transcript 展示共用一个入口。
+`actions` 必须包含 1–32 项,每项用 `type` 指定动作。不存在顶层单动作字段或特殊 sequence 类型。`set_value` 的 `value` 与语义动作的 `elementID` 均放在对应项中。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。默认指针在后台投递；显式 `delivery=foreground` 支持相同的点击、拖拽、滚动参数，但要求目标 App 已在前台且目标位置无遮挡。两者均只确认事件投递,不宣称 App 状态已改变。`delivery` 不能用于语义或键盘动作。`submit` 只会出现在已聚焦、启用、非安全、可编辑的单行文本控件上。单一数组协议让审批、串行化和 transcript 展示共用一个入口。
 
 连续动作使用完全相同的数组协议:
 
@@ -497,7 +499,7 @@ daemon 与 Electron 使用独立 `ComputerBridgeServer`,不复用 Browser CDP �
 | 路由 | 用途 |
 | --- | --- |
 | `POST /computer/apps/list` | 列已安装应用身份与运行状态,不读窗口内容 |
-| `POST /computer/apps/use` | 默认后台启动或复用一个明确 bundle ID；显式 `foreground=true` 时激活或重新打开，为必要的前台输入建立目标，并返回当前可发现窗口及 window ID |
+| `POST /computer/apps/use` | 默认后台启动或复用一个明确 bundle ID；经用户请求显示/聚焦或允许必要的焦点切换后，显式 `foreground=true` 激活或重新打开，并返回当前可发现窗口及 window ID |
 | `POST /computer/apps/quit` | 普通退出一个明确 bundle ID + PID |
 | `POST /computer/observe` | AX observation |
 | `POST /computer/observe-capture` | 同一次 Helper 请求内完成 AX observation 与窗口截图 |

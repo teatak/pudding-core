@@ -155,7 +155,10 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Every builtin_computer_act call uses an actions array") ||
 		!strings.Contains(computerSkill.Content, "one item in it for a single action") ||
 		!strings.Contains(computerSkill.Content, "Do not narrate routine Computer Use progress") ||
-		!strings.Contains(computerSkill.Content, "only when necessary foreground input is intended") ||
+		!strings.Contains(computerSkill.Content, "Pointer delivery defaults to background") ||
+		!strings.Contains(computerSkill.Content, "Ask before switching focus unless already authorized") ||
+		!strings.Contains(computerSkill.Content, "session/app approval alone is not permission to switch focus") ||
+		!strings.Contains(computerSkill.Content, "A background failure does not establish a need for foreground") ||
 		!strings.Contains(computerSkill.Content, "only when visual information is missing or stale") ||
 		!strings.Contains(computerSkill.Content, "Never replay that prefix") ||
 		!strings.Contains(computerSkill.Content, "Semantic actions may run in the background") ||

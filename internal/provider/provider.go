@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -126,19 +127,22 @@ func ContinuationFor(msg Message, kind string) *Continuation {
 
 // SplitMessage separates one mixed current-turn message into the assistant and
 // tool-result messages required by provider wire protocols. Continuations are
-// assigned to assistant segments in model-call order.
+// assigned to assistant segments in model-call order. Tool attachments follow
+// their entire result batch, before the next assistant segment: a user media
+// message must not interrupt the pairing of parallel tool calls and results.
 func SplitMessage(msg Message) []Message {
-	if len(msg.Continuations) == 0 || len(msg.Parts) == 0 {
+	if len(msg.Parts) == 0 {
 		return []Message{msg}
 	}
 	hasToolResult := false
+	hasToolAttachment := false
 	for _, part := range msg.Parts {
 		if part.Type == PartToolResult {
 			hasToolResult = true
-			break
 		}
+		hasToolAttachment = hasToolAttachment || part.isToolAttachment()
 	}
-	if !hasToolResult {
+	if !hasToolAttachment && (!hasToolResult || len(msg.Continuations) == 0) {
 		return []Message{msg}
 	}
 
@@ -151,8 +155,15 @@ func SplitMessage(msg Message) []Message {
 			return
 		}
 		segment := Message{
-			Role:  role,
-			Parts: append([]Part(nil), current...),
+			Role: role,
+		}
+		var attachments []Part
+		for _, part := range current {
+			if part.isToolAttachment() {
+				attachments = append(attachments, part)
+			} else {
+				segment.Parts = append(segment.Parts, part)
+			}
 		}
 		if role == RoleAssistant && assistantIndex < len(msg.Continuations) {
 			continuation := msg.Continuations[assistantIndex]
@@ -162,12 +173,18 @@ func SplitMessage(msg Message) []Message {
 		if role == RoleAssistant {
 			assistantIndex++
 		}
-		out = append(out, segment)
+		if len(segment.Parts) > 0 {
+			segment.Text = partText(segment.Parts)
+			out = append(out, segment)
+		}
+		if len(attachments) > 0 {
+			out = append(out, Message{Role: RoleUser, Text: partText(attachments), Parts: attachments})
+		}
 		current = current[:0]
 	}
 	for _, part := range msg.Parts {
 		partRole := RoleAssistant
-		if part.Type == PartToolResult {
+		if part.Type == PartToolResult || part.isToolAttachment() {
 			partRole = RoleUser
 		}
 		if partRole != role {
@@ -228,6 +245,40 @@ type Part struct {
 	Data    []byte          `json:"-"`
 	Width   int             `json:"-"`
 	Height  int             `json:"-"`
+}
+
+// On attachment text/media parts, CallID identifies the source tool result,
+// not the attachment ID. This is request-local attribution derived from the
+// canonical result/attachment order, not a new persisted source of truth.
+func (p Part) isToolAttachment() bool {
+	return p.CallID != "" && (p.Type == PartText || p.Type == PartImage || p.Type == PartAudio)
+}
+
+// AttributeToolAttachments associates freshly built attachment parts with the
+// preceding tool result. CreatedAt is the attachment creation time, not an
+// inferred screenshot capture time or a freshness/permission gate.
+func AttributeToolAttachments(parts []Part, callID, name, createdAt string) []Part {
+	out := append([]Part(nil), parts...)
+	for i := range out {
+		out[i].CallID = callID
+		if out[i].Type == PartText {
+			out[i].Text += "\nSource tool call: " + callID + "\nSource tool: " + name
+			if createdAt != "" {
+				out[i].Text += "\nAttachment created at: " + createdAt
+			}
+		}
+	}
+	return out
+}
+
+func partText(parts []Part) string {
+	var text strings.Builder
+	for _, part := range parts {
+		if part.Type == PartText {
+			text.WriteString(part.Text)
+		}
+	}
+	return text.String()
 }
 
 func ImageDataURL(mime string, data []byte) string {

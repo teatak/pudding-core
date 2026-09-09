@@ -43,6 +43,7 @@ import { useElapsedDuration } from "./time";
 import { TranscriptDisclosure } from "./TranscriptDisclosure";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
 import { toolDisplayName, toolIcon } from "./turnActivitySummary";
+import {InputFlowToolAction} from "./InputFlowToolAction";
 
 type CompactProcessPart = {
   hiddenParts: TurnPartVM[];
@@ -399,7 +400,7 @@ export function partsFromMessages(messages: Message[]): TurnPartVM[] {
             }
             return viewPart.type === "text"
               ? [{ ...viewPart, messageID: message.id }]
-              : [viewPart];
+              : [viewPart.type === "tool_use" ? {...viewPart, turnID: message.turnID} : viewPart];
           }),
         ),
       ),
@@ -464,6 +465,7 @@ export function partsFromOverlay(
             argsText: part.argsText,
             dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
             id: part.callID,
+            turnID: overlay.turnID,
             liveStderr: part.liveStderr,
             liveStdout: part.liveStdout,
             name: part.name,
@@ -1200,6 +1202,14 @@ function ToolUsePart({
       </div>
     </TranscriptDisclosure>
   );
+  if (toolName === "builtin_request_user_input" && sessionID && part.phase !== "streaming_args" && !toolFailed(part)) {
+    const value = (result?.value && typeof result.value === "object" ? result.value : {}) as Record<string, unknown>;
+    const requestID = typeof value.requestID === "string" ? value.requestID : part.turnID && part.id ? `${part.turnID}:${part.id}` : undefined;
+    if (requestID) return <div className="flex min-w-0 items-start gap-2">
+      <div className="min-w-0">{disclosure}</div>
+      <InputFlowToolAction token={token} sessionID={sessionID} requestID={requestID} status={String(value.status ?? "waiting")} />
+    </div>;
+  }
   if (!screenshotTool) {
     return disclosure;
   }
@@ -1857,9 +1867,10 @@ function toolTitle(
     const codeSummary = codeToolSummary(part.name || part.resultName || "", part.argsText || part.args, result?.value, t);
     return { label: baseTitle, summary: capabilitySummary || codeSummary || t("transcript.toolFailed") };
   }
-  const inputSummary = inputFlowToolSummary(part, result, t);
-  if (inputSummary) {
-    return { label: baseTitle, summary: inputSummary };
+  if ((part.name || part.resultName) === "builtin_request_user_input") {
+    // Answer state comes from the question resource, not the immutable
+    // historical awaiting_user result (a late answer can follow that result).
+    return { label: baseTitle, summary: "" };
   }
   const capabilitySummary = capabilityToolSummary(part, result, t);
   if (capabilitySummary) {
@@ -1878,21 +1889,6 @@ function toolTitle(
     return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
-}
-
-function inputFlowToolSummary(
-  part: Extract<TurnPartVM, { type: "tool_use" }>,
-  result: ReturnType<typeof formatToolResult>,
-  t: (key: string) => string,
-) {
-  if ((part.name || part.resultName) !== "builtin_request_user_input") {
-    return "";
-  }
-  const value = result?.value;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  return (value as Record<string, unknown>).status === "awaiting_user" ? t("transcript.toolAwaitingInput") : "";
 }
 
 function unknownToolName(part: Extract<TurnPartVM, { type: "tool_use" }>, result: ReturnType<typeof formatToolResult>) {

@@ -195,6 +195,19 @@ import Testing
   }
 }
 
+@Test func foregroundPointerPathRejectsImplicitOrBackgroundDelivery() throws {
+  let service = pointerService { _ in Issue.record("event must not be posted") }
+  for delivery: String? in [nil, "background"] {
+    var input = try pointerInput(action: .click)
+    input.delivery = delivery
+    #expect(throws: HelperError.self) {
+      try service.perform(
+        bundleID: "com.example.App", pid: 42, windowID: 7, input: input,
+        start: CGPoint(x: 10, y: 20), end: nil)
+    }
+  }
+}
+
 private func pointerService(postEvent: @escaping (CGEvent) -> Void) -> PointerService {
   PointerService(
     isTrusted: { true },
@@ -216,5 +229,5 @@ private func pointerInput(
 ) throws -> PointerInput {
   try PointerInput.validated(
     action: action, x: 0.1, y: 0.2, toX: toX, toY: toY,
-    button: button, clickCount: clickCount, deltaX: deltaX, deltaY: deltaY)
+    button: button, clickCount: clickCount, deltaX: deltaX, deltaY: deltaY, delivery: "foreground")
 }

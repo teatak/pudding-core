@@ -57,7 +57,7 @@ func (r *BuiltinRunner) skillRead(ctx context.Context, call Call) Result {
 		"scope":       doc.Scope,
 		"source":      doc.Source,
 		"path":        doc.Path,
-		"content":     doc.Content,
+		"reference":   SkillReference{Kind: GlobalSkillReference, SkillID: doc.ID},
 	})
 	if err != nil {
 		out.Ok = false

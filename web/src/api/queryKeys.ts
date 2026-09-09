@@ -12,6 +12,7 @@ export const queryKeys = {
   projectGitBranches: (sessionID: string, rootID: string) => ["session", sessionID, "project", "git", "branches", rootID] as const,
   projectGitDiff: (sessionID: string, rootID: string, path: string, staged: boolean) => ["session", sessionID, "project", "git", "diff", rootID, path, staged] as const,
   session: (sessionID: string) => ["session", sessionID] as const,
+  inputRequest: (sessionID: string, requestID: string) => ["session", sessionID, "input-request", requestID] as const,
   conversationSearch: (sessionID: string, query: string) => ["session", sessionID, "search", query] as const,
   sessionUsage: (sessionID: string) => ["session", sessionID, "usage"] as const,
   backgroundProcesses: (sessionID: string) => ["session", sessionID, "processes"] as const,

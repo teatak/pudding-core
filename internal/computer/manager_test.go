@@ -12,9 +12,11 @@ import (
 type fakeService struct {
 	mu           sync.Mutex
 	observes     int
+	uses         int
 	actions      int
 	pointers     int
 	lastPointer  PointerInput
+	pointerErr   error
 	observeErr   error
 	actErr       error
 	actErrAt     int
@@ -36,6 +38,7 @@ func (f *fakeService) ListApps(_ context.Context, sessionID string) (AppList, er
 }
 
 func (f *fakeService) UseApp(_ context.Context, sessionID, appID string, foreground bool, selection AppSelection) (NativeUse, error) {
+	f.uses++
 	f.lastSession = sessionID
 	f.foreground = foreground
 	if f.launch.AppID == "" {
@@ -91,6 +94,9 @@ func (f *fakeService) Pointer(_ context.Context, sessionID, appID string, _ uint
 	f.pointers++
 	f.lastPointer = pointer
 	f.lastSession = sessionID
+	if f.pointerErr != nil {
+		return NativeAction{}, f.pointerErr
+	}
 	return NativeAction{
 		Delivery: pointer.Delivery,
 		AppID:    appID, Action: pointer.Action, Completed: true, X: &pointer.X, Y: &pointer.Y,

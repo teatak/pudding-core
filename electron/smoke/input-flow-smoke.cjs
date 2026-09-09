@@ -185,7 +185,7 @@ async function run() {
             showInputFlow({args,sessionID:'input-flow-smoke',title:args.title});
           },showTool(args) {
             this.submissions=[];
-            return createInputFlowTools()[0].handler({...args,_pudding_session_id:'input-flow-smoke'});
+            return createInputFlowTools()[0].handler({...args,_pudding_session_id:'input-flow-smoke',_pudding_request_id:crypto.randomUUID()});
           },showComposerTest() {
             sessionStorage.setItem('pudding.composerTestState','interaction');
             initComposerTestState();
@@ -203,7 +203,7 @@ async function run() {
                 h('div',{style:{height:120,border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:16,color:'var(--muted-foreground)'}},'输入消息')));
           }
           const root=createRoot(document.getElementById('root'));
-          root.render(h(Fixture));
+          root.render(h(QueryClientProvider,{client:new QueryClient()},h(Fixture)));
           window.fixture.showApproval=()=>{
             sessionStorage.setItem('pudding.composerTestState','approval');
             initComposerTestState();

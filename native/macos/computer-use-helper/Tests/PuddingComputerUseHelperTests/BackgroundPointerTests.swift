@@ -52,10 +52,19 @@ private func withJournal(_ body: (BackgroundInputJournal, URL) throws -> Void) t
     (#""action":"scroll","deltaX":-40,"deltaY":120"#, ["--action", "scroll", "--delta-x", "-40", "--delta-y", "120"]),
   ]
   for (fields, arguments) in cases {
-    let raw = #"{"id":"one","command":"pointer","params":{"bundleID":"com.example.Custom","windowID":7,"x":0.5,"y":0.25,"delivery":"background","# + fields + "}}"
-    let command = try JSONDecoder().decode(ProtocolRequest.self, from: Data(raw.utf8)).helperCommand()
-    let cli = try ArgumentParser.parse(["pointer", "--bundle-id", "com.example.Custom", "--window-id", "7", "--x", "0.5", "--y", "0.25", "--delivery", "background"] + arguments)
-    #expect(cli == command)
+    for delivery: String? in [nil, "background", "foreground"] {
+      let field = delivery.map { "\"delivery\":\"\($0)\"," } ?? ""
+      let options = delivery.map { ["--delivery", $0] } ?? []
+      let raw = #"{"id":"one","command":"pointer","params":{"bundleID":"com.example.Custom","windowID":7,"x":0.5,"y":0.25,"# + field + fields + "}}"
+      let command = try JSONDecoder().decode(ProtocolRequest.self, from: Data(raw.utf8)).helperCommand()
+      let cli = try ArgumentParser.parse(["pointer", "--bundle-id", "com.example.Custom", "--window-id", "7", "--x", "0.5", "--y", "0.25"] + options + arguments)
+      #expect(cli == command)
+      guard case .pointer(_, _, let input) = command else {
+        Issue.record("expected pointer command")
+        continue
+      }
+      #expect(input.delivery == (delivery ?? "background"))
+    }
   }
   for fields in [#""action":"drag""#, #""action":"scroll","deltaY":0"#,
     #""action":"click","clickCount":3"#, #""action":"click","button":"right","clickCount":2"#] {

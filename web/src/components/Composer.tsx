@@ -24,6 +24,7 @@ import { z } from "zod";
 
 import {
   APIError,
+  actOnUserInput,
   cancelTurn,
   captureDesktopPhoto,
   captureDesktopScreenshot,
@@ -686,56 +687,27 @@ export function Composer({
   });
   const inputFlowSubmitMutation = useMutation({
     mutationFn: async (submission: InputFlowSubmission) => {
-      const clientMessageID = `input-flow-${submission.request.id}`;
-      if (!selectedModel) {
-        throw new APIError(400, "no_model");
-      }
-      const payload = {
-        clientMessageID,
+      return actOnUserInput(token, submission.request.sessionID, submission.request.id, "answer", {
         text: submission.text,
         parts: [submission.formResult, { type: "text" as const, text: submission.text }],
-      };
-      // Answers belong to the active turn; ordinary submit would queue them
-      // until that turn ends and deliver the answer as another task.
-      if (runningTurnID) {
-        const result = await steerTurn(token, sessionID, runningTurnID, payload);
-        clearSubmittingTurn(sessionID, clientMessageID);
-        return result;
-      }
-      const result = await submitMessage(token, sessionID, payload);
-      if (result.queued || !result.turnID) {
-        clearSubmittingTurn(sessionID, clientMessageID);
-      } else {
-        acceptSubmittingTurn(sessionID, clientMessageID, result.turnID);
-      }
-      return result;
+      });
     },
-    onMutate: (submission) => {
-      const clientMessageID = `input-flow-${submission.request.id}`;
+    onMutate: () => {
       onSubmitStart?.();
       clearSubmitError();
       onSubmitError?.(null);
-      if (!running) {
-        startSubmittingTurn(sessionID, clientMessageID);
-      }
-      addPendingUser({
-        sessionID,
-        clientMessageID,
-        status: runningTurnID ? "steering" : "submitting",
-        text: submission.text,
-        parts: [submission.formResult, { type: "text", text: submission.text }],
-        createdAt: new Date().toISOString(),
-        turnID: runningTurnID,
-      });
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    onSuccess: async (result, submission) => {
+      const targetSessionID = submission.request.sessionID;
+      useInputFlowStore.getState().clearDraft(submission.request);
+      queryClient.setQueryData(queryKeys.inputRequest(targetSessionID, submission.request.id), result.request);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(targetSessionID) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.turns(targetSessionID) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+      ]);
     },
     onError: (error, submission) => {
-      const clientMessageID = `input-flow-${submission.request.id}`;
-      clearSubmittingTurn(sessionID, clientMessageID);
-      removePendingUser(sessionID, clientMessageID);
       useInputFlowStore.getState().addRequest(submission.request);
       const failure = getSubmitFailure(error, {
         noModel: t("composer.noModel"),
@@ -1106,8 +1078,9 @@ export function Composer({
             <ComposerApprovalBar approval={pendingApproval} preview={Boolean(testPresentation?.approval)} token={token} />
           ) : pendingInputFlow ? (
             <InputFlowPanel
-              key={pendingInputFlow.id}
+              key={`${pendingInputFlow.sessionID}:${pendingInputFlow.id}`}
               request={pendingInputFlow}
+              token={testPresentation?.inputFlow ? undefined : token}
               onSubmit={testPresentation?.inputFlow ? () => undefined : (submission) => inputFlowSubmitMutation.mutate(submission)}
             />
           ) : null}

@@ -54,7 +54,7 @@ func TestBuiltinSkillRead(t *testing.T) {
 		t.Fatalf("unexpected summary: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["ok"] != true || payload["id"] != "skill-creator" || payload["content"] != "# Skill Creator\n" {
+	if payload["ok"] != true || payload["id"] != "skill-creator" || payload["content"] != nil || payload["reference"] == nil {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }

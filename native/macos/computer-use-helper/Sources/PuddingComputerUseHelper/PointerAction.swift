@@ -127,8 +127,8 @@ final class PointerService {
     start: CGPoint,
     end: CGPoint?
   ) throws -> PointerSnapshot {
-    guard input.delivery != "background" else {
-      throw HelperError.invalidPointerInput("background input must not use the foreground event path")
+    guard input.delivery == "foreground" else {
+      throw HelperError.invalidPointerInput("the foreground event path requires explicit delivery=foreground")
     }
     guard isTrusted() else {
       throw HelperError.permissionRequired("accessibility")

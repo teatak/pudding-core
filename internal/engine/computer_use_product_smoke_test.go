@@ -516,7 +516,7 @@ func smokePointerClickArgs(observation computer.Observation, windowID uint32) (m
 	}
 	return map[string]any{
 		"type": computer.ActionClick, "x": x, "y": y,
-		"button": computer.PointerButtonLeft, "clickCount": 1,
+		"button": computer.PointerButtonLeft, "clickCount": 1, "delivery": "foreground",
 	}, nil
 }
 

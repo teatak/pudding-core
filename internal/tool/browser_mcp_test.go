@@ -142,14 +142,19 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 func TestBrowserToolArgsInjectsSessionForUITools(t *testing.T) {
 	args, err := browserToolArgs(Call{
 		SessionID: "sess_b",
+		TurnID:    "turn_b",
+		CallID:    "question",
 		Name:      RequestUserInput,
-		Args:      json.RawMessage(`{"title":"New order"}`),
+		Args:      json.RawMessage(`{"title":"New order","_pudding_request_id":"invented"}`),
 	})
 	if err != nil {
 		t.Fatalf("browserToolArgs: %v", err)
 	}
 	if args["_pudding_session_id"] != "sess_b" {
 		t.Fatalf("missing session injection: %+v", args)
+	}
+	if args["_pudding_request_id"] != "turn_b:question" {
+		t.Fatalf("question identity must come from engine: %+v", args)
 	}
 
 	args, err = browserToolArgs(Call{

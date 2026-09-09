@@ -62,6 +62,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |
+| `GET /sessions/{id}/input-requests/{requestID}` | — | 200 `{id,sessionID,turnID,title,args,status,deadline?}`，由当前等待或 canonical messages 恢复 | 404 |
+| `POST /sessions/{id}/input-requests/{requestID}` | `{action:touch\|dismiss\|answer,text?,parts?}`；answer 必须带 text 和 text/form_result parts | 200 `{request,delivery?:tool\|message,turnID?,userMessageID?,queued?,duplicate?}`；以 request.status 判断是否已回答 | 400 / 404 |
 | `POST /sessions/{id}/queued-inputs/{clientMessageID}/steer` | `{turnID}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` / `queued_input_editing` |
 | `GET /sessions/{id}/queued-inputs` | — | `{queuedInputs: []}`，按持久化出队顺序 | 404 |
 | `PATCH /sessions/{id}/queued-inputs/{clientMessageID}` | `{text?, parts?, status?: queued/editing/cancelled}`；修改 parts 同时传 text | 更新后的队列项；不改变位置或 clientMessageID | 400 / 404 |
@@ -107,6 +109,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | tool | capability | args | result |
 | --- | --- | --- | --- |
+| `builtin_request_user_input` | `chat` | `{title,type:form\|repeat,steps?,repeatSteps?,waitSeconds?}`；waitSeconds 为 0–300 整数，默认 60 | `{ok,requestID,turnID,title,status,answer?:{text,parts}}`；等待与面板计时独立，详见 [user-input-flow.md](user-input-flow.md) |
 | `builtin_app_load` | `chat` | `{app_id, skill_id?}` | `{ok, appID, skillID, content, newlyLoaded, alreadyLoaded}`;显式加载 App，失败不修改 session |
 | `builtin_app_save` | `code` | `{operation:create|update,app_id,version,files[]}` | 完整文本包经隔离校验后替换已安装 App；失败保留旧版本；不接受凭据 |
 | `builtin_command_run` | `code` | `{scope:"project", command:string, cwd?, env?, timeout_ms?, background?, tty?}` | 前台返回 `{ok, command, shell, cwd, exitCode, stdout, stderr, ...}`;`background:true` 返回 `{ok, processID, status, running, command, tty, ...}` |

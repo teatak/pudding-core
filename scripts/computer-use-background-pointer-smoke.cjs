@@ -41,7 +41,7 @@ async function main() {
       assert.equal((await guard.request('state')).foregroundPID, guard.child.pid, 'Guard must already be foreground');
       const point = state.points[action], frame = state.frame;
       const params = {action:action === 'double' || action === 'right' ? 'click' : action,
-        x:(point.x-frame.x)/frame.width, y:(point.y-frame.y)/frame.height, delivery:'background'};
+        x:(point.x-frame.x)/frame.width, y:(point.y-frame.y)/frame.height};
       if (action === 'double') params.clickCount = 2;
       if (action === 'right') params.button = 'right';
       if (action === 'drag') Object.assign(params, {toX:params.x+70/frame.width, toY:params.y});
@@ -52,6 +52,7 @@ async function main() {
         headers:{Authorization:`Bearer ${identity.token}`, 'Content-Type':'application/json'},
         body:JSON.stringify({sessionID:'pointer-smoke',appID,windowID:state.windowID,...params})});
       const body = await response.json();
+      assert.equal(body.delivery, 'background', 'Omitted delivery must resolve to background');
       await pause(250);
       const monitor = await guard.request('stop-monitor');
       const received = target.events.slice(start), guardReceived = guard.events.slice(guardStart);

@@ -32,6 +32,32 @@ func backgroundGestures() []PointerInput {
 	}
 }
 
+func TestPointerDeliveryDefaultsToBackgroundForEveryGesture(t *testing.T) {
+	for _, delivery := range []string{"", "background", "foreground"} {
+		t.Run("delivery="+delivery, func(t *testing.T) {
+			service := &fakeService{}
+			var actions []ActionInput
+			for _, pointer := range backgroundGestures() {
+				pointer.Delivery = delivery
+				actions = append(actions, pointerActions(pointer)...)
+			}
+			want := delivery
+			if want == "" {
+				want = "background"
+			}
+			result, err := NewManager(service).Act(context.Background(), "session_background", "com.example.Custom", 7, actions)
+			if err != nil || result.Failure != nil || result.CompletedCount != len(actions) || service.observes != 0 || service.uses != 0 {
+				t.Fatalf("result=%+v err=%v service=%+v", result, err, service)
+			}
+			for _, action := range result.Actions {
+				if action.Delivery != want {
+					t.Fatalf("delivery=%q, want %q", action.Delivery, want)
+				}
+			}
+		})
+	}
+}
+
 func TestBackgroundDeliveryRejectsUnsupportedActionShapesBeforeExecution(t *testing.T) {
 	for _, raw := range []string{
 		`[{"type":"click","x":0.5,"y":0.5,"delivery":"auto"}]`,
@@ -50,6 +76,26 @@ func TestBackgroundDeliveryRejectsUnsupportedActionShapesBeforeExecution(t *test
 		if _, err := NormalizeActions(actions); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
+	}
+}
+
+func TestDefaultBackgroundFailureDoesNotRetryObserveOrActivate(t *testing.T) {
+	for _, outcome := range []string{"not_started", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			service := &fakeService{pointerErr: &OperationError{
+				Code: "computer_action_failed", Message: "test failure", Outcome: outcome,
+			}}
+			pointer := backgroundGestures()[0]
+			pointer.Delivery = ""
+			actions := pointerActions(pointer)
+			result, err := NewManager(service).Act(context.Background(), "session_background", "com.example.Custom", 7, append(actions, actions...))
+			if err != nil || result.Failure == nil || result.Failure.Outcome != outcome || result.CompletedCount != 0 || result.FailedIndex == nil || *result.FailedIndex != 0 {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if service.pointers != 1 || service.lastPointer.Delivery != "background" || service.observes != 0 || service.uses != 0 || service.actions != 0 {
+				t.Fatalf("unexpected fallback or retry: %+v", service)
+			}
+		})
 	}
 }
 
@@ -80,5 +126,14 @@ func TestBackgroundDeliveryRoundTripsAcrossElectronBridge(t *testing.T) {
 		if matchesPointerResult(result, "com.example.Custom", pointer) {
 			t.Fatal("accepted a silent foreground fallback")
 		}
+	}
+	var actions []ActionInput
+	for _, pointer := range backgroundGestures() {
+		pointer.Delivery = ""
+		actions = append(actions, pointerActions(pointer)...)
+	}
+	result, err := NewManager(service).Act(context.Background(), "session_background", "com.example.Custom", 7, actions)
+	if err != nil || result.Failure != nil || result.CompletedCount != 5 {
+		t.Fatalf("implicit background did not round-trip: result=%+v err=%v", result, err)
 	}
 }

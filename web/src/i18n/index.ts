@@ -1433,7 +1433,6 @@ const zh: Messages = {
   "transcript.toolReturnedResults": "获得 {count} 条结果",
   "transcript.toolRunning": "处理中",
   "transcript.toolRunningName": "正在{name}",
-  "transcript.toolAwaitingInput": "等待用户回答",
   "transcript.toolCanvasChart": "生成图表",
   "transcript.toolCanvasDocRead": "查看画布内容",
   "transcript.toolCanvasGallery": "生成图册",
@@ -1663,6 +1662,10 @@ const zh: Messages = {
   "inputFlow.showValue": "显示内容",
   "inputFlow.hideValue": "隐藏内容",
   "inputFlow.skip": "跳过",
+  "inputFlow.answerLater": "回答问题",
+  "inputFlow.reopenFailed": "打开失败，请重试",
+  "inputFlow.waitCountdown": "模型等待 {seconds} 秒",
+  "inputFlow.panelCountdown": "{seconds} 秒后收起",
 };
 
 const zhTW: Messages = {
@@ -3089,7 +3092,6 @@ const zhTW: Messages = {
   "transcript.toolReturnedResults": "獲得 {count} 筆結果",
   "transcript.toolRunning": "處理中",
   "transcript.toolRunningName": "正在{name}",
-  "transcript.toolAwaitingInput": "等待使用者回答",
   "transcript.toolCanvasChart": "生成圖表",
   "transcript.toolCanvasDocRead": "查看畫布內容",
   "transcript.toolCanvasGallery": "生成圖冊",
@@ -3319,6 +3321,10 @@ const zhTW: Messages = {
   "inputFlow.showValue": "顯示內容",
   "inputFlow.hideValue": "隱藏內容",
   "inputFlow.skip": "略過",
+  "inputFlow.answerLater": "回答問題",
+  "inputFlow.reopenFailed": "開啟失敗，請重試",
+  "inputFlow.waitCountdown": "模型等待 {seconds} 秒",
+  "inputFlow.panelCountdown": "{seconds} 秒後收起",
 };
 
 const en: Messages = {
@@ -4745,7 +4751,6 @@ const en: Messages = {
   "transcript.toolReturnedResults": "Got {count} results",
   "transcript.toolRunning": "Processing",
   "transcript.toolRunningName": "Working on {name}",
-  "transcript.toolAwaitingInput": "Waiting for user response",
   "transcript.toolCanvasChart": "Create chart",
   "transcript.toolCanvasDocRead": "View canvas content",
   "transcript.toolCanvasGallery": "Create gallery",
@@ -4975,6 +4980,10 @@ const en: Messages = {
   "inputFlow.showValue": "Show value",
   "inputFlow.hideValue": "Hide value",
   "inputFlow.skip": "Skip",
+  "inputFlow.answerLater": "Answer question",
+  "inputFlow.reopenFailed": "Could not open. Try again.",
+  "inputFlow.waitCountdown": "Model waiting: {seconds}s",
+  "inputFlow.panelCountdown": "Collapses in {seconds}s",
 };
 
 const dictionaries: Record<Locale, Messages> = { "zh-CN": zh, "zh-TW": zhTW, en };

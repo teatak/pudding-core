@@ -13,6 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 const (
@@ -271,6 +272,8 @@ Accuracy is more important than brevity. Preserve user preferences, key facts, d
 
 Use the dominant language of the conversation. Cite important source messages with @message(message_id). You may omit greetings, repeated text, and bulky tool output.
 
+Do not copy or summarize App/Skill instruction bodies into the summary. Their registered references are retained separately and resolved from current sources on future requests. Summarize task facts and user decisions, not historical tool operating rules.
+
 Return markdown with these sections:
 ## User Context
 ## Key Decisions
@@ -295,6 +298,22 @@ func compactHistoryDump(msgs []*store.Message) string {
 	var b strings.Builder
 	for _, msg := range msgs {
 		text := strings.TrimSpace(msg.Text)
+		var referenceParts []store.ContentPart
+		for i, part := range msg.Parts {
+			if part.Type != store.ContentPartToolResult {
+				continue
+			}
+			content := tool.SkillReferenceOnly(part.Name, part.Ok, part.Content)
+			if content != part.Content {
+				if referenceParts == nil {
+					referenceParts = append([]store.ContentPart(nil), msg.Parts...)
+				}
+				referenceParts[i].Content = content
+			}
+		}
+		if referenceParts != nil {
+			text = strings.TrimSpace(store.MessageTextFromParts(referenceParts))
+		}
 		if text == "" {
 			text = strings.TrimSpace(store.MessageTextFromParts(msg.Parts))
 		}

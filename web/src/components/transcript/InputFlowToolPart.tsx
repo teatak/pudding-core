@@ -8,6 +8,7 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { dismissInputFlow, type InputFlowRequest } from "@/state/inputFlowStore";
 import type { ContentPart } from "@/api/client";
+import {InputFlowLifecycle, useInputFlowDraft, useInputFlowLifecycle} from "./InputFlowLifecycle";
 
 type FormInputFlowSchema = {
   steps: InputFlowStep[];
@@ -65,8 +66,8 @@ export type InputFlowSubmission = {
 
 function noop() {}
 
-export function InputFlowPanel({ request, onSubmit }: { request: InputFlowRequest; onSubmit: (submission: InputFlowSubmission) => void }) {
-  return <InputFlowContent request={request} onSubmit={onSubmit} />;
+export function InputFlowPanel({ request, onSubmit, token }: { request: InputFlowRequest; onSubmit: (submission: InputFlowSubmission) => void; token?: string }) {
+  return <InputFlowLifecycle request={request} token={token}><InputFlowContent request={request} onSubmit={onSubmit} /></InputFlowLifecycle>;
 }
 
 function InputFlowContent({ request, onSubmit }: { request: InputFlowRequest; onSubmit: (submission: InputFlowSubmission) => void }) {
@@ -91,15 +92,16 @@ function RepeatInputFlowContent({
   onSubmit: (submission: InputFlowSubmission) => void;
 }) {
   const { t } = useI18n();
-  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [current, setCurrent] = useState<Record<string, unknown>>({});
-  const [rawSelections, setRawSelections] = useState<Record<string, unknown>>({});
-  const [collectingNext, setCollectingNext] = useState(false);
-  const [nextStepIndex, setNextStepIndex] = useState(0);
-  const [nextValues, setNextValues] = useState<Record<string, unknown>>({});
-  const [textValue, setTextValue] = useState("");
-  const [multiSelectedKeys, setMultiSelectedKeys] = useState<string[]>([]);
+  const lifecycle = useInputFlowLifecycle();
+  const [items, setItems] = useInputFlowDraft<Array<Record<string, unknown>>>(request, "items", []);
+  const [stepIndex, setStepIndex] = useInputFlowDraft(request, "stepIndex", 0);
+  const [current, setCurrent] = useInputFlowDraft<Record<string, unknown>>(request, "current", {});
+  const [rawSelections, setRawSelections] = useInputFlowDraft<Record<string, unknown>>(request, "rawSelections", {});
+  const [collectingNext, setCollectingNext] = useInputFlowDraft(request, "collectingNext", false);
+  const [nextStepIndex, setNextStepIndex] = useInputFlowDraft(request, "nextStepIndex", 0);
+  const [nextValues, setNextValues] = useInputFlowDraft<Record<string, unknown>>(request, "nextValues", {});
+  const [textValue, setTextValue] = useInputFlowDraft(request, "textValue", "");
+  const [multiSelectedKeys, setMultiSelectedKeys] = useInputFlowDraft<string[]>(request, "multiSelectedKeys", []);
 
   const steps = schema.repeatSteps;
   const activeStep = steps[stepIndex];
@@ -182,7 +184,6 @@ function RepeatInputFlowContent({
     <FloatingUIPanel
       cancelLabel={t("common.cancel")}
       title={schema.title}
-      onCancel={() => dismissInputFlow(request)}
     >
       <div className="space-y-3 text-sm text-foreground">
         {items.length > 0 ? <SelectedItems items={items} /> : null}
@@ -223,7 +224,7 @@ function RepeatInputFlowContent({
             current={current}
             doneDisabled={doneDisabled}
             schema={schema}
-            onCancel={() => dismissInputFlow(request)}
+            onCancel={lifecycle.dismiss}
             onContinue={commitCurrent}
             onDone={() => {
               const finalItems = commitCurrent();
@@ -246,11 +247,11 @@ function FormInputFlowContent({
   onSubmit: (submission: InputFlowSubmission) => void;
 }) {
   const { t } = useI18n();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [rawSelections, setRawSelections] = useState<Record<string, unknown>>({});
-  const [textValue, setTextValue] = useState("");
-  const [multiSelectedKeys, setMultiSelectedKeys] = useState<string[]>([]);
+  const [stepIndex, setStepIndex] = useInputFlowDraft(request, "stepIndex", 0);
+  const [values, setValues] = useInputFlowDraft<Record<string, unknown>>(request, "values", {});
+  const [rawSelections, setRawSelections] = useInputFlowDraft<Record<string, unknown>>(request, "rawSelections", {});
+  const [textValue, setTextValue] = useInputFlowDraft(request, "textValue", "");
+  const [multiSelectedKeys, setMultiSelectedKeys] = useInputFlowDraft<string[]>(request, "multiSelectedKeys", []);
   const activeStep = schema.steps[stepIndex];
 
   function resetStepState() {
@@ -287,7 +288,6 @@ function FormInputFlowContent({
       cancelLabel={t("common.cancel")}
       title={schema.title}
       progress={schema.steps.length > 1 ? `${stepIndex + 1} / ${schema.steps.length}` : undefined}
-      onCancel={() => dismissInputFlow(request)}
     >
       <div className="space-y-3 text-sm text-foreground">
         <ActiveStep
@@ -315,14 +315,14 @@ function FloatingUIPanel({
   children,
   progress,
   title,
-  onCancel,
 }: {
   cancelLabel: string;
   children: ReactNode;
   progress?: string;
   title: string;
-  onCancel: () => void;
 }) {
+  const lifecycle = useInputFlowLifecycle();
+  const { dismiss } = lifecycle;
   return (
     <ComposerFloatingPanel
       className="flex max-h-[calc(100dvh-12rem)] flex-col gap-2 overflow-hidden bg-popover pb-1 backdrop-blur-none"
@@ -330,7 +330,7 @@ function FloatingUIPanel({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          onCancel();
+          dismiss();
         }
       }}
     >
@@ -340,13 +340,14 @@ function FloatingUIPanel({
           <div className="py-0.5 text-sm leading-6 text-muted-foreground">{title}</div>
         </div>
         {progress ? <span className="py-1 text-xs tabular-nums text-muted-foreground">{progress}</span> : null}
+        {lifecycle.countdown}
         <Button
           aria-label={cancelLabel}
           className="size-7 shrink-0 rounded-full"
           size="icon-sm"
           type="button"
           variant="ghost"
-          onClick={onCancel}
+          onClick={dismiss}
         >
           <X className="size-4" />
         </Button>

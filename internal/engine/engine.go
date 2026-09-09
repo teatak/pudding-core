@@ -92,6 +92,7 @@ type Engine struct {
 	turnFiles *turnfiles.Tracker
 
 	promptSource   contextbuilder.PromptSource
+	skills         contextbuilder.SkillSource
 	attachmentHome string
 
 	// auxCtx 是辅助 goroutine(自动标题,将来工具相关后台任务)的基 ctx;
@@ -104,6 +105,7 @@ type Engine struct {
 	mu                sync.Mutex
 	running           map[string]*activeTurn // sessionID → 当前 turn
 	approvals         map[string]*pendingApproval
+	inputRequests     map[string]*pendingUserInput
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
 	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
 	wg                sync.WaitGroup
@@ -169,6 +171,14 @@ func WithTools(runner tool.Runner) Option {
 func WithApps(source AppSource) Option {
 	return func(e *Engine) {
 		e.apps = source
+		e.rebuildBuilder()
+	}
+}
+
+func WithSkills(source contextbuilder.SkillSource) Option {
+	return func(e *Engine) {
+		e.skills = source
+		e.rebuildBuilder()
 	}
 }
 
@@ -187,7 +197,7 @@ func WithAttachmentHome(home string) Option {
 }
 
 func (e *Engine) rebuildBuilder() {
-	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome))
+	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.apps, e.skills))
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
@@ -532,6 +542,10 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	}
 	req.Config = resolved.config
 	req.Tools = defs
+	req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(mode), req)
+	if err != nil {
+		return nil, err
+	}
 	estimate := contextbuilder.EstimateRequest(req)
 	stat, err := e.store.SessionUsage(ctx, sessionID)
 	if err != nil {
@@ -1189,6 +1203,11 @@ func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
 	if active := e.running[sessionID]; active != nil && active.turnID == turnID {
 		delete(e.running, sessionID)
+		for id, request := range e.inputRequests {
+			if request.SessionID == sessionID && request.TurnID == turnID {
+				delete(e.inputRequests, id)
+			}
+		}
 	}
 	delete(e.turnProjectAccess, turnID)
 	e.mu.Unlock()
@@ -1276,6 +1295,10 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		providerCallIndex++
 		req := baseReq
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, e.attachmentHome, resolved.config)
+		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(currentMode), req)
+		if err != nil {
+			return store.TurnFailed, fmt.Sprintf("resolve skill references: %v", err), currentMode
+		}
 		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
@@ -2119,7 +2142,7 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 		payload["name"] = detail.Name
 		payload["description"] = detail.Description
 		payload["path"] = detail.Path
-		payload["content"] = detail.Content
+		payload["reference"] = tool.SkillReference{Kind: tool.AppSkillReference, AppID: request.AppID, SkillID: resolvedSkillID}
 		summaryKind = tool.SummaryReadChars
 		summaryCount = len(detail.Content)
 	}
@@ -2218,6 +2241,9 @@ func appLoadFailure(call tool.Call, reason, message string, extra map[string]any
 }
 
 func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
+	if call.Name == tool.RequestUserInput {
+		return e.requestUserInput(ctx, call)
+	}
 	toolCtx, cancel, timed := toolContext(ctx, call.Name)
 	toolCtx = tool.WithProgressSink(toolCtx, func(progress tool.Progress) {
 		e.hub.Publish(event.Event{
@@ -2740,23 +2766,14 @@ func requestMessagesWithTurnParts(
 	cfg provider.ModelConfig,
 ) []provider.Message {
 	out := cloneProviderMessages(base)
-	assistantStoreParts := nonAttachmentParts(parts)
-	if currentTurn := currentTurnProviderMessage(assistantStoreParts, continuations); currentTurn != nil {
-		out = append(out, *currentTurn)
-	}
-	attachmentProviderParts := providerAttachmentPartsFromStore(sessionID, parts, attachmentHome, cfg)
-	if len(attachmentProviderParts) > 0 {
-		out = append(out, provider.Message{
-			Role:  provider.RoleUser,
-			Text:  textFromProviderParts(attachmentProviderParts),
-			Parts: attachmentProviderParts,
-		})
+	if currentTurn := currentTurnProviderMessage(parts, continuations, sessionID, attachmentHome, cfg); currentTurn != nil {
+		out = append(out, provider.SplitMessage(*currentTurn)...)
 	}
 	return out
 }
 
-func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation) *provider.Message {
-	providerParts := providerPartsFromCurrentTurn(parts)
+func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, attachmentHome string, cfg provider.ModelConfig) *provider.Message {
+	providerParts := providerPartsFromCurrentTurn(parts, sessionID, attachmentHome, cfg)
 	if len(providerParts) == 0 {
 		return nil
 	}
@@ -2775,49 +2792,9 @@ func currentTurnProviderMessage(parts []store.ContentPart, continuations []provi
 	return message
 }
 
-func nonAttachmentParts(parts []store.ContentPart) []store.ContentPart {
-	out := make([]store.ContentPart, 0, len(parts))
-	for _, part := range parts {
-		if part.Type == store.ContentPartAttachment {
-			continue
-		}
-		out = append(out, part)
-	}
-	return out
-}
-
-func providerPartsFromStore(parts []store.ContentPart) []provider.Part {
+func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
-	for _, part := range parts {
-		switch part.Type {
-		case store.ContentPartText:
-			if part.Text != "" {
-				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
-			}
-		case store.ContentPartThought:
-			continue
-		case store.ContentPartToolUse:
-			out = append(out, provider.Part{
-				Type:   provider.PartToolUse,
-				CallID: part.CallID,
-				Name:   part.Name,
-				Args:   append(json.RawMessage(nil), part.Args...),
-			})
-		case store.ContentPartToolResult:
-			out = append(out, provider.Part{
-				Type:    provider.PartToolResult,
-				CallID:  part.CallID,
-				Name:    part.Name,
-				Ok:      part.Ok,
-				Content: part.Content,
-			})
-		}
-	}
-	return out
-}
-
-func providerPartsFromCurrentTurn(parts []store.ContentPart) []provider.Part {
-	out := make([]provider.Part, 0, len(parts))
+	var sourceCallID, sourceTool string
 	for _, part := range parts {
 		switch part.Type {
 		case store.ContentPartText:
@@ -2836,39 +2813,33 @@ func providerPartsFromCurrentTurn(parts []store.ContentPart) []provider.Part {
 				Args:   append(json.RawMessage(nil), part.Args...),
 			})
 		case store.ContentPartToolResult:
+			sourceCallID, sourceTool = part.CallID, part.Name
 			out = append(out, provider.Part{
 				Type:    provider.PartToolResult,
 				CallID:  part.CallID,
 				Name:    part.Name,
 				Ok:      part.Ok,
-				Content: part.Content,
+				Content: tool.SkillReferenceOnly(part.Name, part.Ok, part.Content),
 			})
+		case store.ContentPartAttachment:
+			attachmentParts := providerAttachmentParts(sessionID, part, attachmentHome, cfg)
+			out = append(out, provider.AttributeToolAttachments(attachmentParts, sourceCallID, sourceTool, part.AttachmentCreatedAt)...)
 		}
 	}
 	return out
 }
 
-func providerAttachmentPartsFromStore(sessionID string, parts []store.ContentPart, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
-	out := make([]provider.Part, 0, len(parts))
-	for _, part := range parts {
-		if part.Type != store.ContentPartAttachment {
-			continue
-		}
-		if part.Origin == attachment.OriginASRAudio {
-			continue
-		}
-		if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
-			if text := providerAttachmentFallbackText(part, "image"); text != "" {
-				out = append(out, provider.Part{Type: provider.PartText, Text: text})
-			}
-			out = append(out, imagePart)
-			continue
-		}
-		if text := providerAttachmentFallbackText(part, ""); text != "" {
-			out = append(out, provider.Part{Type: provider.PartText, Text: text})
+func providerAttachmentParts(sessionID string, part store.ContentPart, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
+	if part.Origin == attachment.OriginASRAudio {
+		return nil
+	}
+	if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
+		return []provider.Part{
+			{Type: provider.PartText, Text: providerAttachmentFallbackText(part, "image")},
+			imagePart,
 		}
 	}
-	return out
+	return []provider.Part{{Type: provider.PartText, Text: providerAttachmentFallbackText(part, "")}}
 }
 
 func providerImagePartFromAttachment(sessionID, attachmentHome string, part store.ContentPart, cfg provider.ModelConfig) (provider.Part, bool) {

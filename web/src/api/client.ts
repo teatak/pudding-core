@@ -1,4 +1,6 @@
 import {
+	userInputRequest,
+	userInputReply,
   listBuiltinToolsResponse,
   approveApprovalResponse,
   listBrowserMCPSessionsResponse,
@@ -1140,6 +1142,16 @@ export function reorderQueuedInputs(token: string, sessionID: string, clientMess
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs/reorder`, listQueuedInputsResponse, {
     method: "POST",
     body: JSON.stringify(reorderQueuedInputsRequest.parse({ clientMessageIDs })),
+  });
+}
+
+export function getUserInputRequest(token: string, sessionID: string, requestID: string) {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/input-requests/${encodeURIComponent(requestID)}`, userInputRequest);
+}
+
+export function actOnUserInput(token: string, sessionID: string, requestID: string, action: "touch" | "dismiss" | "answer", answer?: {text: string; parts: ContentPart[]}) {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/input-requests/${encodeURIComponent(requestID)}`, userInputReply, {
+    method: "POST", body: JSON.stringify({action, ...answer}),
   });
 }
 

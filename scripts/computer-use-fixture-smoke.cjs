@@ -354,7 +354,7 @@ async function main() {
       { action: "scroll", x: center.x, y: center.y, deltaX: 0, deltaY: 120, expected: "scrolled down" },
     ]) {
       const { expected, ...params } = test;
-      await client.request("pointer", { ...pointerBase, ...params });
+      await client.request("pointer", { ...pointerBase, ...params, delivery: "foreground" });
       await waitForElementValue(client, primary.windowID, "Fixture pointer value", expected);
     }
 

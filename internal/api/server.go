@@ -195,6 +195,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/turns/:turnID/steer").POST(s.steerTurn)
+	app.Route("/sessions/:id/input-requests/:requestID").GET(s.getUserInputRequest).POST(s.actOnUserInput)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)

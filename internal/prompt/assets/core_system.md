@@ -21,6 +21,11 @@ Runtime Injection:
 - Treat the inner text as instructions or factual context.
 - Text outside those tags is the user's actual intent source.
 
+Skill References:
+
+- `builtin_app_load` and `builtin_skill_read` results with `instructionStatus=current` contain instructions resolved from the current registered skill, even if the original call is historical. Use that current body rather than older instructions quoted in conversation summaries or history lookups.
+- Results marked `superseded`, `unloaded`, `capability_required`, or `unavailable` do not provide active instructions. Do not reconstruct missing instructions from an old body or treat a failed reference as permission to use unavailable tools. Repeating a read is not necessary to refresh current instructions.
+
 History Tools:
 
 - Use `builtin_history_search` only when the current context is insufficient and the user asks about prior discussion, or relevant details may have been compacted out of context.

@@ -943,13 +943,16 @@ doneDrain:
 	if !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) {
 		t.Fatalf("tool definitions not injected: %+v", client.requests[0].Tools)
 	}
-	last := client.requests[1].Messages[len(client.requests[1].Messages)-1]
-	if !hasProviderPart(last.Parts, provider.PartToolUse) || !hasProviderPart(last.Parts, provider.PartToolResult) {
-		t.Fatalf("second provider call missing tool history: %+v", last.Parts)
+	secondMessages := client.requests[1].Messages
+	assistant := secondMessages[len(secondMessages)-2]
+	result := secondMessages[len(secondMessages)-1]
+	if assistant.Role != provider.RoleAssistant || result.Role != provider.RoleUser ||
+		!hasProviderPart(assistant.Parts, provider.PartToolUse) || !hasProviderPart(result.Parts, provider.PartToolResult) {
+		t.Fatalf("second provider call missing paired tool history: %+v", secondMessages)
 	}
-	continuation := provider.ContinuationFor(last, provider.ContinuationGoogle)
+	continuation := provider.ContinuationFor(assistant, provider.ContinuationGoogle)
 	if continuation == nil || string(continuation.Data) != `[{"thoughtSignature":"signed-state"}]` {
-		t.Fatalf("second provider call missing native continuation: %+v", last.Continuations)
+		t.Fatalf("second provider call missing native continuation: %+v", assistant.Continuations)
 	}
 	if len(runner.calls) != 1 || runner.calls[0].Name != tool.TimeGetCurrent || string(runner.calls[0].Args) != `{"timezone":"Asia/Singapore"}` {
 		t.Fatalf("tool call not executed correctly: %+v", runner.calls)

@@ -23,6 +23,8 @@ type Builder struct {
 	store          store.Store
 	prompts        PromptSource
 	attachmentHome string
+	apps           AppSkillSource
+	skills         SkillSource
 }
 
 const noImageComputerUseGuidance = "The current model cannot receive image inputs. Do not request Computer Use screenshots for your own visual inspection because the screenshot bytes will not be visible to you. Capture one only when the user explicitly asks to receive a screenshot."
@@ -109,7 +111,7 @@ func (b *Builder) build(
 	if err != nil {
 		return provider.Request{}, err
 	}
-	msgs = EffectiveMessages(msgs)
+	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedAppIDs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
@@ -146,20 +148,22 @@ func (b *Builder) build(
 	}
 	var assistantParts []provider.Part
 	var assistantContinuations []provider.Continuation
+	var sourceCallID, sourceTool string
 	assistantContinuationsAllowed := true
 	flushAssistant := func() {
+		sourceCallID, sourceTool = "", ""
 		if len(assistantParts) == 0 && len(assistantContinuations) == 0 {
 			return
 		}
 		if !assistantContinuationsAllowed {
 			assistantContinuations = nil
 		}
-		req.Messages = append(req.Messages, provider.Message{
+		req.Messages = append(req.Messages, provider.SplitMessage(provider.Message{
 			Role:          provider.RoleAssistant,
 			Text:          textFromProviderParts(assistantParts),
 			Parts:         cloneProviderParts(assistantParts),
 			Continuations: cloneContinuations(assistantContinuations),
-		})
+		})...)
 		assistantParts = nil
 		assistantContinuations = nil
 		assistantContinuationsAllowed = true
@@ -182,12 +186,20 @@ func (b *Builder) build(
 			}
 		case store.RoleAssistant, store.RoleTool:
 			if isToolAttachmentMessage(m) {
-				flushAssistant()
 				parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
-				if len(parts) > 0 {
+				if sourceCallID != "" {
+					assistantParts = append(assistantParts, provider.AttributeToolAttachments(parts, sourceCallID, sourceTool, m.Parts[0].AttachmentCreatedAt)...)
+				} else if len(parts) > 0 {
+					flushAssistant()
 					req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 				}
 				continue
+			}
+			sourceCallID, sourceTool = "", ""
+			for _, part := range m.Parts {
+				if part.Type == store.ContentPartToolResult {
+					sourceCallID, sourceTool = part.CallID, part.Name
+				}
 			}
 			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)...)
 			if !providerStateAllowedForTools(m, currentMode, allowedTools) {
@@ -490,7 +502,7 @@ func (b *Builder) providerParts(
 				CallID:  part.CallID,
 				Name:    part.Name,
 				Ok:      part.Ok,
-				Content: part.Content,
+				Content: tool.SkillReferenceOnly(part.Name, part.Ok, part.Content),
 			})
 		case store.ContentPartAttachment:
 			if part.Origin == attachment.OriginASRAudio {

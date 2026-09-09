@@ -5,12 +5,17 @@ export function createInputFlowTools(): ToolDefinition[] {
   return [
     {
       name: "builtin_request_user_input",
-      description:
-        "Collect structured non-secret answers through a sequential UI. Each step asks one question and shows at most one input box; put separate fields in separate steps, never nested fields or inputs. Use type='form' with steps for ordinary questions, and type='repeat' only for multiple same-shaped records, such as room types and quantities. Answers are accumulated across steps and sent together only when the flow is completed; skipping omits only the current optional field. Keep questions and options brief and self-contained; do not repeat chat history, status reports, or instructions. Prefer 2–3 choices per question. Fetch live data before constructing dependent options. Never request passwords, tokens, API keys, private keys, or other credentials: submitted values enter the conversation. Use dedicated App connection or settings flows for credentials. This tool returns immediately after showing the UI; completed answers arrive later as a new user message. Continue independent work, but wait for answers before dependent actions.",
+      description: [
+        "Collect structured non-secret answers through a sequential UI. Each step asks one question and shows at most one input box; put separate fields in separate steps, never nested fields or inputs. Use type='form' with steps for ordinary questions, and type='repeat' only for multiple same-shaped records. Answers are sent together when completed; skipping omits only the current optional field. Keep questions and options brief and self-contained; prefer 2–3 choices. Fetch live data before constructing dependent options. Never request passwords, tokens, API keys, private keys, or credentials; use dedicated App connection/settings flows.",
+        "waitSeconds controls ONLY how long this tool waits for the user (default 60, integer 0–300): positive values pause this turn until answered, timed out, dismissed, or cancelled; 0 returns awaiting_user immediately so you can continue independent work. User interactions renew an unexpired wait by waitSeconds; they never restart a wait that already ended. An in-time answer returns status=answered with answer.text and answer.parts directly in this tool result, not a second user message. After timeout or an asynchronous return, answers can still arrive later as a user message linked to the original question.",
+        "The panel has a separate 60-second inactivity auto-collapse timer, reset by user interaction; waitSeconds=10 does NOT close the panel after 10 seconds. Neither countdown is shown upfront: the panel shows its final 10 seconds; the model wait shows only its final min(10, waitSeconds/2) seconds. Interaction resets the panel timer and any still-active model wait. Users can reopen unanswered questions from the original tool row, even after the turn finishes; reopening does not restart an ended model wait.",
+        "timeout, dismissed, or cancelled means no answer, never consent/refusal or permission to guess; perform dependent actions only after receiving the needed answer. Do not re-ask merely because the wait timed out.",
+      ].join(" "),
       capability: "chat",
       inputSchema: {
         type: "object",
         properties: {
+          waitSeconds: {type: "integer", minimum: 0, maximum: 300, default: 60, description: "LLM wait only, NOT panel lifetime. 0 is asynchronous; 1–300 waits for an answer. Interaction renews an active wait. The panel separately collapses after 60 seconds of inactivity."},
           title: { type: "string", description: "Short, user-facing title." },
           type: {
             type: "string",
@@ -78,6 +83,10 @@ export function createInputFlowTools(): ToolDefinition[] {
         const record = requiredRecord(args);
         const sessionID = requiredString(record._pudding_session_id, "_pudding_session_id");
         const title = requiredString(record.title, "title");
+        const id = requiredString(record._pudding_request_id, "_pudding_request_id");
+        if (record.waitSeconds !== undefined && (!Number.isInteger(record.waitSeconds) || Number(record.waitSeconds) < 0 || Number(record.waitSeconds) > 300)) {
+          throw new Error("waitSeconds must be an integer from 0 to 300");
+        }
         if (record.type === "form") {
           if (!Array.isArray(record.steps) || record.steps.length === 0) {
             throw new Error("steps is required when type=form");
@@ -91,6 +100,7 @@ export function createInputFlowTools(): ToolDefinition[] {
         }
         assertNoSensitiveInputSteps(record);
         const request = showInputFlow({
+          id,
           args: record,
           sessionID,
           title,

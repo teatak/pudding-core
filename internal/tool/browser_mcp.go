@@ -532,6 +532,9 @@ func browserToolArgs(call Call) (map[string]any, error) {
 			args["_pudding_session_id"] = sessionID
 		}
 	}
+	if call.Name == RequestUserInput {
+		args["_pudding_request_id"] = call.TurnID + ":" + call.CallID
+	}
 	return args, nil
 }
 

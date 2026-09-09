@@ -520,6 +520,18 @@ export const contentPart = z.discriminatedUnion("type", [
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
 
+export const userInputRequest = z.object({
+  id: z.string(), sessionID: z.string(), turnID: z.string(), title: z.string(),
+  args: z.record(z.string(), z.unknown()),
+  status: z.enum(["waiting", "awaiting_user", "answered", "timeout", "dismissed", "cancelled", "failed"]),
+  deadline: z.string().optional(),
+});
+export const userInputReply = z.object({
+  delivery: z.enum(["tool", "message"]).optional(), request: userInputRequest,
+  turnID: z.string().optional(), userMessageID: z.string().optional(),
+  queued: z.boolean().optional(), duplicate: z.boolean().optional(),
+});
+
 export const message = z
   .object({
     id: z.string(),
