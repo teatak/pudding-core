@@ -1,4 +1,4 @@
-# Pudding 0.3.1 发布候选报告
+# Pudding 0.3.1 发布报告
 
 日期：2026-09-09。
 
@@ -12,7 +12,7 @@
 
 ## 当前结论
 
-源码收尾、双架构签名公证、签名版功能和正常安装位置的升级验收通过，GitHub 0.3.1 草稿九资产已齐。公开发布命令在执行前被审批拒绝，要求用户重新明确确认目标仓库与公开范围，尚未公开。`/Applications/Pudding.app` 已从 0.3.0 正常升级为 0.3.1，当前用户可写、签名/公证/Helper 身份及数据延续通过。临时路径升级的 root 所有权失败保留为历史测试异常，不将其改写为通过，也不声称已定位该临时路径问题的根因。没有移动 `v0.3.0` 或 `v0.3.1` 标签。
+**0.3.1 已于 2026-09-09 18:17:13（UTC+8）公开发布，并设为最新稳定版**：[GitHub Release](https://github.com/teatak/pudding/releases/tag/v0.3.1)。双架构九资产可公开访问，大小及 SHA-256 与已公证本地产物和公开版本清单一致，更新元数据为 0.3.1。`/Applications/Pudding.app` 已从 0.3.0 正常升级为 0.3.1，当前用户可写、签名/公证/Helper 身份及数据延续通过。临时路径升级的 root 所有权失败保留为历史测试异常，不将其改写为通过，也不声称已定位该临时路径问题的根因。没有移动 `v0.3.0` 或 `v0.3.1` 标签。
 
 画中画历史 `computer_window_raise_failed` 不能凭 App 已激活就判定成功：原测试没有等待原生置前请求完成。补强测试逐次等待最终结果，记录目标和失败，检查额外请求；不增加产品重试、不降低窗口可见性校验。诊断轮一次点击、严格回归四次点击均成功，未复现历史错误，因而不声称已定位或修复历史产品故障，也不把“激活即成功”的旧断言继续作为依据。历史异常保留为签名包复验项。
 
@@ -87,9 +87,17 @@
 - 升级后的在线 SQLite 备份与升级前静态备份比较：10 个业务表逐行规范化散列一致，包含 canonical 消息、会话、项目、turns、队列、App 授权、画布、保存版本、收藏和历史；两份快照均为 v18、`quick_check=ok`、无外键错误。具体计数/散列只保存在本地验收文件，不上传用户数据库。
 - 本轮证据：`/private/tmp/pudding-031-installed-upgrade-3teHA3/update.log`（授权前拒绝）、`update-authorized.log`（正常升级通过）、`data-comparison.json`（数据核对）及升级前后数据库快照。开发 daemon 未重启；没有使用 chmod/chown、移除扩展属性或绕过签名/可写性断言。
 
-结论：正常安装位置的升级阻断已解除。随后尝试 `make desktop-release-finalize RELEASE_TAG=v0.3.1`，执行审批认为当前授权尚未明确具体公开仓库，因此在命令启动前拒绝。未绕过审批或改用其他发布接口；只读核对草稿仍为 `draft=true`、九资产完整。待用户明确确认将 GitHub `teatak/pudding` 的 `v0.3.1` 公开并设为最新稳定版后继续。临时路径升级异常与未覆盖的兼容边界仍保留，不能推断任意路径、任意 App 或 Intel 真机都已通过。
+本阶段结论：正常安装位置的升级阻断已解除。随后尝试 `make desktop-release-finalize RELEASE_TAG=v0.3.1`，执行审批认为当前授权尚未明确具体公开仓库，因此在命令启动前拒绝。未绕过审批或改用其他发布接口；当时只读核对草稿仍为 `draft=true`、九资产完整，等待用户确认后继续。临时路径升级异常与未覆盖的兼容边界仍保留，不能推断任意路径、任意 App 或 Intel 真机都已通过。
 
-## Release Notes 草案
+## 2026-09-09 公开发布确认
+
+- 用户明确确认将 GitHub `teatak/pudding` 的 `v0.3.1` 公开并设为最新稳定版后，重新执行官方 `make desktop-release-finalize RELEASE_TAG=v0.3.1`，退出码 0；未重建、更换资产或移动源码标签。
+- GitHub 发布 ID `385378285`，`published_at=2026-09-09T10:17:13Z`，`draft=false`、`prerelease=false`；`releases/latest` 返回 `v0.3.1`。
+- 九个资产均为 `uploaded`，无认证公开下载 HEAD 均为 HTTP 200、长度一致。GitHub 资产 SHA-256、公开 `releases/v0.3.1.json` 清单及本地已验收文件逐项一致；公开 `latest-mac.yml` 下载内容散列一致，声明版本 0.3.1。没有再次下载完整 DMG/ZIP，不将 HEAD 检查描述为重新安装测试。
+- 公开清单的源码提交与源码仓库远端 `v0.3.1^{}` 均为 `95549c42bc62ea9a295ade7ab7fb8685e69aad1e`。发布说明与该不可变源码标签内的 Release Notes 相同。旧 0.3.0 草稿保持原状，不补发、不删除。
+- 本地核验文件：`/private/tmp/pudding-031-installed-upgrade-3teHA3/published-release.json`、`published-manifest.json`、`published-verification.json`。报告收尾仅更新文档，不改变已发布源码或安装包；未重复无关功能测试。
+
+## Release Notes
 
 ### Workspace and Library
 
