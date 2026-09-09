@@ -1,6 +1,6 @@
 # macOS Computer Use 设计与实施计划
 
-> 状态:C0–C3 已实现；后台普通单击已接入有限预览；签名安装包和跨版本升级验收仍待完成。
+> 状态:C0–C3 已实现；源码已扩展后台单击/双击/右键/拖拽/滚轮并移除兼容 App 白名单；新改动尚未打包发布。此前 0.3.0 候选包的签名、公证结果不覆盖本次扩展。
 >
 > 更新:2026-09-09
 >
@@ -16,27 +16,42 @@
 2. Go daemon 负责 session 路由、工具生命周期、审批和全局动作串行化。
 3. Electron main 负责 macOS 原生能力和权限界面,通过签名 Swift Helper 调用 Accessibility 与 ScreenCaptureKit。
 4. 所有操作显式携带 `sessionID`、`appID` 和 `windowID`;后端不保存 observation、“当前应用”或“当前焦点”。
-5. 原生控件操作支持 `press`、`set_value`、`select`、`submit`、`focus`、`select_text`；键盘和默认指针操作验证指定 PID、窗口及前台状态。显式后台普通单击的范围和恢复边界见下节。
+5. 原生控件操作支持 `press`、`set_value`、`select`、`submit`、`focus`、`select_text`；键盘和默认指针操作验证指定 PID、窗口及前台状态。显式后台指针的范围和恢复边界见下节。
 6. 写操作不自动重试。结果不确定时返回明确错误,下一步先通过 `use_app` 刷新窗口并观察当前状态。
 7. 当前能力不监听键盘或鼠标、不录制工作流；支持明确请求的物理按键、组合键、Unicode 文本输入及粘贴。
 8. 应用生命周期采用 session ownership:只有当前 session 新启动并取得 `launchID` 的进程才能普通退出;已运行应用永不归属,永不强杀。
 
-### 2026-09-09 后台普通单击有限预览
+### 2026-09-09 后台指针投递
 
 已接入当前源码的 `builtin_computer_act.actions[] → Go Manager → Electron bridge/权限协调 → Swift Helper → 同一可执行文件的短生命周期 worker`。这是现有生产代码路径的接入，不是已安装 release 的发布验收；没有替换或重启正在运行的开发/发布应用。
 
-- 每项 pointer 可显式传 `delivery: "background"`；省略或传 `foreground` 保持前台 HID 行为。后台仅接受普通左键单击，白名单由原生 `BackgroundClickPolicy` 校验系统计算器、邮件和日历的 bundle ID、安装路径及可执行文件路径。后台右键、双击、拖拽、滚轮及其他 App 明确拒绝，没有自动前台 fallback。
+- 每项 pointer 可显式传 `delivery: "background"`；省略或传 `foreground` 保持前台 HID 行为。后台支持左/右键单击、左键双击、左键拖拽和双轴像素滚动。已删除原系统计算器/邮件/日历兼容白名单；仍保留 session/App 审批、既有受保护 App 策略、真实 PID 启动标记及 bundle/可执行文件身份校验。没有自动前台 fallback；移除白名单不代表所有 App 都兼容。
 - 复用原有 session/App 审批、全局动作队列、`completedCount` / `failedIndex` / `outcome`，不增加工具名称、observationID、过期时间、单次消费或强制观察。观察仍由模型决定。结果中的 `delivery` 必须与请求匹配，不能把前台投递冒充后台成功。
-- 事件使用窗口内坐标及 PID 定向投递，围绕一对普通 down/up 发送合成 AppKit 激活/去激活通知；不调用实际 activate/raise、鼠标移动或全局 HID。它会临时影响目标内部 active/key 状态，不能表述为“内部焦点完全不变”。用户真正激活目标后，不反向去激活。
+- 事件使用窗口内坐标及 PID 定向投递，围绕确定的手势事件计划发送合成 AppKit 激活/去激活通知；不调用实际 activate/raise、全局鼠标移动或全局 HID。目标 App 仍可能自行激活；检测到系统前台变化后停止后续事件并返回不确定结果，不能承诺任意 App 都不置顶。它会临时影响目标内部 active/key 状态，不能表述为“内部焦点完全不变”。用户真正激活目标后，不反向去激活。
 - 每步检查进程启动标记、窗口身份/几何、权限及系统前台是否变化。检查的是执行时事实，不要求模型刷新快照。窗口内坐标依赖非公开 `CGEventSetWindowLocation`，符号缺失直接失败，不推断其他 macOS 版本兼容。
-- Helper 和 worker 共用每用户临时目录中的单字节恢复 journal；以 PID + 进程启动标记加独占锁，记录激活/按下/释放阶段。AX、键盘和前台指针也取得同一目标输入锁，防止 Helper 重启后与尚在恢复的 worker 重叠。它不是第二套权限或会话状态。
-- 调用方退出后，worker 通过控制管道 EOF 停止后续事件并恢复；worker 退出后，调用方必须先确认其已退出才接管恢复。取消仍沿用 Host 的有界 drain，已投递单击可能完成，不保证瞬时撤销。中断后可能由清理的 mouseUp 完成点击，返回 `unknown`，不重放。双方同时强制退出不能保证立即恢复；遗留非 idle journal 会拒绝继续输入，须重启目标应用。进程退出与事件投递之间不提供指令级恰好一次保证。
+- 操作开始时绑定 App 和真实窗口；执行及恢复中由 `proc_pidinfo` 启动标记和 `proc_pidpath` 可执行路径确认进程身份，不反复依赖 `NSRunningApplication` 的瞬时 App 元数据。身份读取失败不等于目标已退出，不能因此清空 journal；已确认 PID 消失或身份改变才跳过对旧目标的恢复。worker 向已退出父进程写回结果使用可抛 Swift I/O，不再因 broken pipe 触发未捕获的 Objective-C 异常。
+- 窗口身份和可见性共用 WindowServer 全窗口查询。新输入仍要求正常可见窗口及原几何；恢复允许同一 PID/window ID 的隐藏、最小化窗口收到一次对应 mouseUp。窗口不可见不等于已销毁；查询不可用或元数据不完整时抛错并保留未解决 journal，不将查询失败当作空列表。`NSWindow.close` 与系统窗口销毁不是同一时刻，窗口仍存在时允许清理，确认不存在后不再向旧窗口投递。
+- Helper 和 worker 共用每用户临时目录中的单字节恢复 journal；以 PID + 进程启动标记加独占锁，记录激活/按下/释放阶段；低两位为阶段，高六位为当前按下/拖拽事件索引。父子进程共享同一确定性事件计划，异常释放使用对应按钮、点击次数和最后 journaled 坐标。双击按 `1/1/2/2` 发送，拖拽发送 down、8 个中间位置和 up；滚动没有按住按钮。AX、键盘和前台指针也取得同一目标输入锁，防止 Helper 重启后与尚在恢复的 worker 重叠。它不是第二套权限或会话状态。
+- 调用方退出后，worker 通过控制管道 EOF 停止后续事件并恢复；worker 退出后，调用方必须先确认其已退出才接管恢复。取消仍沿用 Host 的有界 drain，已在途手势可能完成，不保证瞬时撤销。中断后可能由清理的 mouseUp 完成点击或拖放，返回 `unknown`，不重放。双方同时强制退出不能保证立即恢复；遗留非 idle journal 会拒绝继续输入，须重启目标应用。进程退出与事件投递之间不提供指令级恰好一次保证。
 
 最小示例（窗口和坐标须替换成实际已知目标）：
 
 ```json
 {"appID":"com.apple.iCal","windowID":42,"actions":[{"type":"click","delivery":"background","x":0.5,"y":0.4}]}
 ```
+
+后台双击使用 `type:"click", clickCount:2`；右键使用 `type:"click", button:"right"`。拖拽使用 `type:"drag", x, y, toX, toY`，滚动使用 `type:"scroll", x, y, deltaX, deltaY`。每项都显式带 `delivery:"background"`，与单击共用原 `actions[]`；无需 observationID 或每步重新观察。
+
+通用手势的隔离真实回归（实际源码 Helper 投递，原型只作接收/监测）：
+
+```sh
+node scripts/computer-use-background-pointer-smoke.cjs /absolute/current/Helper appkit
+node scripts/computer-use-background-pointer-smoke.cjs /absolute/current/Helper electron
+node scripts/computer-use-background-pointer-recovery.cjs /absolute/current/Helper
+node scripts/computer-use-background-window-lifecycle.cjs /absolute/current/Helper
+```
+
+以下日历和候选包记录属于本次扩展之前的有限单击阶段，不是本次新增手势的 release 验收。
 
 真实链路回归入口：
 
@@ -46,7 +61,17 @@ node scripts/computer-use-background-integration.cjs /absolute/path/to/current-s
 
 该手动测试要求已有权限、中文系统日历月视图及唯一窗口；只切换下一月/上一月，以独立前台窗口遮挡目标并采样。Go 测试默认跳过，runner 才显式启用。新 Helper 的日历回归确认 `2026年9月 → 10月 → 9月`，575 次采样前台不变、鼠标位移 0、guard 无误输入。首轮鼠标位移约 399 pt 的失败记录保留，没有覆盖或当成通过，详见[第十一轮记录](computer-use-background-input-probe.md#第十一轮有限后台单击接入现有产品链路)。
 
-仍待完成：Developer ID 正式安装包的父/子进程 TCC 归属和升级、权限撤销、多屏缩放、此新链路的真实崩溃/取消及持续并行回归。隔离原型的旧生命周期结果不算新链路全部通过；三款应用也仅证明指定控件场景，不代表所有控件。暂不作为通用默认后台能力发布。
+随后使用当前源码 Helper 完成 [9 项真实进程回归](computer-use-background-input-probe.md#第十二轮新-helper-真实崩溃取消和竞争回归)：正常单击；Helper/worker 在三个 journal 阶段被 SIGKILL；Host signal 取消；两个独立 Host 同目标竞争。9/9 通过，恢复 journal 均为 idle，日历恢复原月份，3006 次采样前台不变、鼠标位移 0。取消时已在途单击仍可能完成，正确返回 `unknown`，不是回滚保证。此测试不经过完整 Engine 会话，也没有接收端内部 active/key 探针。
+
+Engine 取消链路补充：工具已经返回的实际结果必须先进入 canonical messages 并发布，再结束取消 turn；不能丢失完成前缀或未知效果。Manager 每个批内动作派发前检查现有 context，停止未开始项，保留在取消 drain 期间完成的项。5 个确定性 Engine/审批/Manager 场景及 20 轮竞态回归通过；重新构造 Engine 后可从 canonical 历史读到原部分结果，不自动重放。见[第十三轮](computer-use-background-input-probe.md#第十三轮engine-会话链路与取消记录)。
+
+上述 runner 加 `engine` 参数的完整日历往返已通过：脚本模型经过 App 加载、一次 session/App 审批、访问已有窗口和一次观察，以单个 `actions[]` 完成 `9月 → 10月 → 9月`；canonical 工具结果包含两项后台成功投递。真实 Engine/Manager/Electron bridge/Helper/worker 链路测试用时 3.20 秒，799 次采样前台不变、鼠标位移 0、遮挡窗口无误输入，临时进程已清理。使用隔离 store，未操作当前 daemon 或安装包 UI；不等于真实 LLM 或 release 验收。
+
+随后 runner 的 `engine-sessions` 模式（Go `-race`）完成[原生多会话/取消三项回归](computer-use-background-input-probe.md#第十四轮原生-engine-多会话与取消)：两个会话串行、取消排队会话不派发、第二步按下时取消在途批次。3/3 通过，2228 次采样前台不变、鼠标位移 0。已在途第二次点击仍完成，但第三步未派发，canonical 保留第一项完成和第二项 unknown；测试观察实际月份后另发反向导航恢复原月份。仍使用脚本模型和隔离 store，不承诺取消回滚或任意瞬间恰好一次。
+
+当前源码 0.3.0 的 arm64/x64 Developer ID 签名、Apple 公证及完整包校验已通过；两架构 Helper 与已安装 0.2.11 的签名身份一致。产物与证据见[第十五轮](computer-use-background-input-probe.md#第十五轮签名候选包准备与公证边界)，未安装或公开发布。
+
+仍待完成：新签名包交互、父/子进程 TCC 归属和升级、权限撤销、多屏缩放、目标关闭/重启及持续真人并行回归。签名身份一致不能代替实际权限与升级验收。双方同时强制退出及投递原子性限制仍在；三款应用也仅证明指定控件场景，不代表所有控件。这些是原有限单击候选包的验收边界；本次扩展仍需独立签名包验收，不作为通用兼容承诺。
 
 ### 2026-09-06 第一轮能力补齐
 
@@ -73,12 +98,13 @@ make computer-use-electron-ime-smoke
 
 ### 2026-09-06 Computer Use 窗口预览
 
-- 工作区收起时，在打开的产物列表下方显示独立窗口预览；没有产物时显示在右上方。长列表滚动，预览不作为产物或工作区标签。
-- 画中画只显示窗口画面，不附加顶部标题栏、应用图标或标题栏状态指示；应用名和状态保留在悬停提示与无障碍描述中，加载/失败占位继续保留。预览按窗口当前内容宽高比显示；读取每帧的 `contentRect` 和 Retina `scaleFactor` 裁去采集缓冲区留白，实时跟随窗口横竖比例变化。画面最大宽度 240px，高度不超过 `min(240px, 30vh)`，同时受可用宽度限制，始终等比缩小。
+- 工作区收起且有产物时，在产物卡片下方独立悬浮窗口预览；没有产物或工作区展开时，预览悬浮在聊天区域右上角，不为预览预留侧栏宽度，不改变正文和输入框布局。工作区展开仅收起外部产物卡片，画中画复用原画面节点和采集进程，不重置活动截止时间。长产物列表滚动，预览不作为产物或工作区标签；多个预览向会话区域内侧叠放，避免越过边界。
+- 画中画只显示有效窗口画面，不附加顶部标题栏、应用图标或标题栏状态指示；应用名和状态保留在悬停提示与无障碍描述中。加载期间不创建卡片；窗口失效或采集失败立即移除卡片，不显示“窗口预览已停止”或保留旧图，工具错误仍由对话展示。预览按窗口当前内容宽高比显示；读取每帧的 `contentRect` 和 Retina `scaleFactor` 裁去采集缓冲区留白，实时跟随窗口横竖比例变化。画面最大宽度 240px，高度不超过 `min(240px, 30vh)`，同时受可用宽度限制，始终等比缩小。
+- 同一 session/turn 按 App 保留各自最近操作的窗口，多个 App 预览以每层 12px 偏移相互遮挡，最近操作的 App 在最上层；同一 App 换窗口替换自己的卡片，不影响其他 App。每个 App 从自己最后一次 Computer Use 活动起独立计时 30 秒，超时关闭自己的采集并移除卡片；普通截图帧不续期、不改变层叠顺序。活动顺序和到期时间均由 Electron 维护，通过 IPC 传给前端，前端不另设续期事实源。
 - 仅用于展示。点击通过原生桥接将同一 bundle ID、PID、window ID 的窗口置前，不转发键盘、指针输入，也不自动展开工作区。
 - 执行请求从 `Call.TurnID` 透传私有请求头，原生桥接通过权限协调后发布显式 session/turn/window 活动。Electron 负责采集生命周期，前端沿用现有运行 turn 和工作区状态，不向 daemon 写入前台或工作区展开状态。
 - 签名 Helper 的独立只读进程通过 ScreenCaptureKit 采集单个窗口，最多 5 FPS、640×480；显式使用 BGRA 采集并以 PNG 传输，保留窗口圆角和半透明边缘，避免默认 YUV 格式把透明区域变黑。单帧 JSON/base64 上限 2 MiB。画面仅在内存中经 preload IPC 展示，不写文件，不加入消息、附件或模型上下文；每个渲染端至多一个未确认帧，只保留最新画面。
-- 展开工作区、隐藏页面时停止采集；收起后恢复同一 PID 的窗口。取消、会话切换、页面重载、窗口关闭及 Electron 退出均释放采集；正常 turn 完成后停止采集，保留最后一帧 30 秒再移除，与浏览器预览共用停留时长。采集失败清除旧图，不自动重试原生操作。
+- 页面不可见时停止采集；恢复可见后恢复尚未超时的同一 PID 窗口。工作区展开、专注、收起只改变布局，不改变采集订阅。取消、会话切换、页面重载、窗口关闭及 Electron 退出均释放采集；正常 turn 完成后停止采集，最后一帧只保留到各 App 原有的活动截止时间，不重新计时。新的 turn 清除上一轮保留画面，普通聊天不会重新创建预览。采集失败不自动重试原生操作。
 
 隔离桌面回归（需先构建开发 daemon、Helper 和 Fixture）：
 
@@ -88,7 +114,13 @@ PUDDING_SMOKE_SCENARIO=computer-preview \
   electron/smoke/workspace-dev-smoke.cjs
 ```
 
-已验证：真实 AppKit 窗口帧、内容变化及横竖窗口实时缩放，20 个产物时列表滚动和预览布局，窄窗口与两种主题，工作区展开停止采集/收起恢复、点击精确窗口置前、跨 session/turn 隔离、取消/完成/应用退出清理。另通过会话切换、历史阅读位置、流式跟随和对话搜索回归。
+已验证：真实 AppKit 窗口帧、内容变化及横竖窗口实时缩放，20 个产物时列表滚动和预览布局，窄窗口与两种主题，点击精确窗口置前、跨 session/turn 隔离、取消/完成/应用退出清理。2026-09-09 隔离源码桌面回归另覆盖：失效目标从未创建预览 DOM、两个不同 bundle ID 的真实 App 卡片层叠及操作置前、独立 30 秒到期释放、单 App 失效不影响另一个、普通聊天不复活历史预览。另通过会话切换、历史阅读位置、流式跟随和对话搜索回归。
+
+布局补充回归：1440px / 720px 窗口下关闭全部产物后，预览距会话区域顶部、右侧各 16px，`data-activity-rail` 不再因预览单独启用；预览移除前后正文及输入框列的位置和宽度完全一致。有产物时，预览在卡片下方且不属于卡片内容，出现预览也不改变聊天列布局。该检查运行于临时数据的源码 Electron/Vite/daemon，不代表安装包已更新。
+
+工作区连续性回归：展开、进入／退出专注、收起时，卡片及图片 DOM 节点、原生采集子进程、活动截止时间保持一致；展开后修改测试 App 内容仍收到新帧。预览在聊天右上角可见，不进入工作区或外部产物卡片。实际隐藏测试窗口会停止采集，重新显示后恢复同一目标且不续期。此可见性检查临时恢复 Electron 默认后台节流：关闭节流会让隐藏窗口的 `document.visibilityState` 仍为 `visible`，不能用于验证页面隐藏逻辑。
+
+2026-09-09 此轮前端 33 项、Electron 预览 11 项、构建及隔离桌面 15 项断言通过；任务完成后展开／收起也保留原图片节点，不重启采集，沿用原截止时间。桌面证据位于 `/private/tmp/pudding-preview-workspace-v6V28x/result.json`。该轮另出现测试 App 的 `computer_window_raise_failed` 日志（AXRaise 返回成功但目标仍被判定遮挡），原因未定位，不能将断言通过解释为原生置前链路无异常；本次未修改该链路，也未打包发布。
 
 ### 0.1 当前 C0 落地
 
@@ -110,6 +142,8 @@ make computer-use-helper-dev
 ./bin/Pudding\ Computer\ Use.app/Contents/MacOS/PuddingComputerUseHelper permissions
 ./bin/Pudding\ Computer\ Use.app/Contents/MacOS/PuddingComputerUseHelper list-apps
 ```
+
+`computer-use-helper-test` 同时运行 debug 和 release 两种配置。Swift 包将实现模块与薄 CLI 入口分离，测试只链接实现模块，避免 release 测试包同时包含 Helper 与测试 Runner 的入口；对外产品仍是同名 `PuddingComputerUseHelper`，Bundle ID、协议和 worker 的同可执行文件行为不变。问题复现及验证见[第十五轮](computer-use-background-input-probe.md#第十五轮签名候选包准备与公证边界)。
 
 开发构建默认使用本机 `Pudding Dev Local` 代码签名证书保持 TCC 身份稳定;可通过 `PUDDING_COMPUTER_USE_DEV_IDENTITY` 指定其它开发证书。缺少该证书时回退到 ad-hoc 签名,辅助功能权限需要手动添加且重新构建后可能失效。
 
@@ -310,7 +344,7 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 | `select` | AX `AXSelected=true` 或父容器 `AXSelectedRows` | 重新读取 selection 包含目标元素 |
 | `submit` | 优先 AX `AXConfirm`;否则仅向目标 PID 发送一次 Return key-down/key-up | App 必须活跃,元素必须已聚焦、启用、非安全且为可编辑单行文本控件 |
 | `click` / `drag` / `scroll`，默认或 `delivery=foreground` | 目标 App 已前台时，通过系统 HID 发送受限指针事件 | 接受当前窗口左上角为 `0,0`、右下角趋近 `1,1` 的归一化坐标;执行前实时校验目标 App 前台且目标窗口在坐标处最上层;成功只代表事件已投递 |
-| 普通左键 `click`，显式 `delivery=background` | 有限预览：系统计算器/邮件/日历；同 Helper worker 向指定 PID/窗口投递 | 允许遮挡；实时校验固定应用身份、进程启动标记、窗口几何和权限；无前台 fallback，成功只代表投递，不代替实际 UI 效果检查 |
+| `click` / `drag` / `scroll`，显式 `delivery=background` | 同 Helper worker 向指定 PID/窗口投递，无兼容 App 白名单 | 左/右单击、左双击、左拖拽、双轴滚动；允许遮挡；校验真实应用身份、进程启动标记、窗口几何和权限；无前台 fallback，成功仅代表投递 |
 
 规则:
 
@@ -351,7 +385,7 @@ Helper 在观察、截图和操作目标窗口期间保持一个只针对该 `wi
 - `elementID` 由元素的稳定 Accessibility 身份生成;模型可在同一 App 窗口仍存在时复用已知 ID。
 - Helper 在每次语义动作前重新遍历指定窗口并按稳定身份解析元素;找不到、不唯一、不再支持该动作或属于 secure 控件时拒绝执行。
 - 模型自主决定观察时机：仅在目标未知、必须检查 UI 变化或结果不确定时 observe。已知稳定目标可直接放入一次 `actions` 调用。
-- pointer 不依赖 observation token;坐标使用当前窗口归一化空间。默认前台投递验证前台 App 和最上层目标窗口；显式后台普通单击采用上节有限预览的实时校验。
+- pointer 不依赖 observation token;坐标使用当前窗口归一化空间。默认前台投递验证前台 App 和最上层目标窗口；显式后台投递采用上节的进程、窗口、权限及前台变化校验。
 - daemon 不保存 observation registry 或过期时间;当前 AX 树和当前窗口几何是唯一事实源。
 
 ## 7. 模型工具
@@ -364,11 +398,11 @@ Computer Use 作为 `computer-use` 内置 App,在 Work 模式按需加载。当�
 
 ### `builtin_computer_use_app`
 
-按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者后续需要前台指针/键盘动作时传 `foreground=true`；后台单击不需要此步骤。该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
+按 `appID` 使用应用：默认在后台启动或复用现有进程，不激活、不抬升已运行 App，并返回 `windowStatus` 与 PID 绑定的当前窗口。用户明确要求显示、聚焦或切换到该 App，或者后续需要前台指针/键盘动作时传 `foreground=true`；后台指针操作不需要此步骤。该模式可激活或重新打开窗口。只有 `windowStatus=ready` 时才能继续观察。仅当当前 session 确实新启动该进程时返回 `launchID + PID`;应用原本已运行时不返回 `launchID`,不获得关闭权。
 
 显式前台请求和预览窗口的显示请求共用 `ForegroundPolicy`：已经前台且目标窗口未被其他普通应用窗口遮挡时直接成功，不调用 AXRaise，也不额外要求辅助功能权限。只有窗口尚未显示到前面时才尝试一次 AXRaise；最终以实际前台及窗口顺序判断成功，而非仅凭 AX 返回值。失败保留 AX 原生错误码。过程中失去前台则停止，不循环激活争抢焦点。
 
-AX 语义操作保持后台执行能力。前台坐标/键盘动作的 `computer_app_not_foreground` 表示该失败项未执行，不自动重试或重新激活；模型应请用户恢复目标窗口或明确同意切回。观察不是解决前台冲突的必经步骤。后台普通单击只开放上节已验证的有限预览；其他后台坐标动作仍未接入，不自动切换到前台事件路径。
+AX 语义操作保持后台执行能力。前台坐标/键盘动作的 `computer_app_not_foreground` 表示该失败项未执行，不自动重试或重新激活；模型应请用户恢复目标窗口或明确同意切回。观察不是解决前台冲突的必经步骤。后台点击、拖拽和滚动复用同一个指针接口，不自动切换到前台事件路径。
 
 2026-09-08 iPhone 镜像验证记录（不是通用兼容性结论）：
 
@@ -409,7 +443,7 @@ AX 语义操作保持后台执行能力。前台坐标/键盘动作的 `computer
 }
 ```
 
-`actions` 必须包含 1–32 项,每项用 `type` 指定动作。不存在顶层单动作字段或特殊 sequence 类型。`set_value` 的 `value` 与语义动作的 `elementID` 均放在对应项中。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。默认指针要求目标 App 已在前台；显式 `delivery=background` 仅开放上节有限的普通左键单击。两者均只确认事件投递,不宣称 App 状态已改变。`delivery` 不能用于语义或键盘动作。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一数组协议让审批、串行化和 transcript 展示共用一个入口。
+`actions` 必须包含 1–32 项,每项用 `type` 指定动作。不存在顶层单动作字段或特殊 sequence 类型。`set_value` 的 `value` 与语义动作的 `elementID` 均放在对应项中。指针动作禁止 `elementID`/`value`,使用当前窗口归一化坐标,原点为窗口左上角,右下角趋近 `1,1`。`click` 支持单次左/右键和左键双击；`drag` 使用左键起止坐标；`scroll` 使用正数向下/向右的像素 delta。默认指针要求目标 App 已在前台；显式 `delivery=background` 支持相同的点击、拖拽、滚动参数。两者均只确认事件投递,不宣称 App 状态已改变。`delivery` 不能用于语义或键盘动作。`submit` 只会出现在活跃 App 内已聚焦、启用、非安全、可编辑的单行文本控件上。单一数组协议让审批、串行化和 transcript 展示共用一个入口。
 
 连续动作使用完全相同的数组协议:
 
@@ -437,6 +471,20 @@ AX 语义操作保持后台执行能力。前台坐标/键盘动作的 `computer
 - transcript 工具显示名和图标。
 - 简体中文、繁体中文、英文 i18n。
 - turn activity summary。
+
+### 本机应用显示名
+
+审批卡片和 transcript 应用图标提示共用 `useDesktopApplicationIdentity`。请求显式携带 Pudding 当前语言，查询缓存按 `appID + locale` 隔离；切换语言无需重新授权，旧语言请求晚返回不会覆盖当前名称。
+
+Electron 将语言传给 Helper 的 `app_identity`；Helper 从目标应用的 `InfoPlist.loctable` 或语言目录下的 `InfoPlist.strings` 读取名称，按系统语言匹配规则处理简繁体。没有本地化名称时保留应用原名，不维护应用翻译表。显示名不写回应用清单缓存，不参与 App ID 或 session/App 审批判断。
+
+原生测试覆盖本地化资源和真实计算器的简体、繁体、英文名称；Web/Electron 测试覆盖缓存键和语言传递。桌面回归使用当前源码 Electron、实际 preload/IPC/Helper 和审批组件，检查语言切换及旧请求晚返回：
+
+```sh
+web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron electron/smoke/application-identity-smoke.cjs
+```
+
+运行前需构建当前开发 daemon 和 Helper（`bin/puddingd`、`bin/computer-use-helper-build/debug/PuddingComputerUseHelper`）。脚本使用临时数据目录和独立 Vite 服务，仅读应用元数据，不申请权限、不提交审批、不操作已安装 Pudding 的会话；截图和报告写入脚本输出的临时目录。
 
 ## 8. Bridge 契约
 

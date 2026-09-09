@@ -65,7 +65,7 @@ type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
   getHomeDirectory?: () => Promise<string>;
 	createMobilePairing?: () => Promise<MobilePairing>;
-	getApplicationIdentity?: (appID: string) => Promise<DesktopApplicationIdentity | null>;
+	getApplicationIdentity?: (appID: string, locale: string) => Promise<DesktopApplicationIdentity | null>;
 	getDesktopPermissions?: () => Promise<DesktopPermissionState>;
 	requestDesktopPermission?: (permission: DesktopPermission) => Promise<DesktopPermissionState>;
 	openDesktopPermissionSettings?: (permission: DesktopPermission) => Promise<boolean>;
@@ -168,14 +168,14 @@ export async function createDesktopMobilePairing() {
   return bridge.createMobilePairing();
 }
 
-export async function getDesktopApplicationIdentity(appID: string) {
+export async function getDesktopApplicationIdentity(appID: string, locale: string) {
 	const clean = appID.trim();
 	const bridge = desktopBridge();
 	if (!clean || !bridge?.getApplicationIdentity) {
 		return null;
 	}
 	try {
-		return await bridge.getApplicationIdentity(clean);
+		return await bridge.getApplicationIdentity(clean, locale);
 	} catch {
 		return null;
 	}
@@ -216,13 +216,15 @@ export type DesktopComputerPreview = {
   windowID: number;
   pid?: number;
   version: number;
-  status: "loading" | "live" | "unavailable";
-  imageURL?: string;
+  activityVersion: number;
+  expiresAt: number;
   width?: number;
   height?: number;
   name?: string;
   title?: string;
-};
+} & ({ status: "live"; imageURL: string } | { status: "loading" | "unavailable"; imageURL?: never });
+
+export type DesktopComputerPreviewFrame = Extract<DesktopComputerPreview, { status: "live" }>;
 
 export function subscribeComputerPreview(sessionID: string, turnID: string, visible: boolean) {
   return desktopBridge()?.subscribeComputerPreview?.({ sessionID, turnID, visible }) ?? Promise.resolve();

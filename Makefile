@@ -58,6 +58,7 @@ computer-use-helper-dev:
 
 computer-use-helper-test:
 	@swift test --package-path native/macos/computer-use-helper --scratch-path bin/computer-use-helper-build
+	@swift test --package-path native/macos/computer-use-helper --scratch-path bin/computer-use-helper-build --configuration release
 
 # 确定性 macOS GUI fixture,只用于 Computer Use 开发和真实 TCC smoke。
 computer-use-fixture-dev: computer-use-helper-dev

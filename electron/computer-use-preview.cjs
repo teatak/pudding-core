@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 
 // A 640×480 RGBA PNG can exceed 1 MiB after base64 encoding (~1.6 MiB).
 const maximumFrameBytes = 2 * 1024 * 1024;
+const idleTimeoutMs = 30_000;
 
 // Native capture is owned here. Renderers only subscribe to engine-authorized targets.
 class ComputerUsePreview {
@@ -29,34 +30,41 @@ class ComputerUsePreview {
     if (!turnID) {
       this.clients.delete(key);
     } else {
-      this.clients.set(key, { owner, sessionID, turnID, visible: visible === true, waiting: false, sent: 0 });
+      this.clients.set(key, { owner, sessionID, turnID, visible: visible === true, waiting: 0, sent: new Map() });
     }
-    const entry = this.entries.get(sessionID);
-    if (!entry) return;
-    this.reconcile(entry);
-    if (!turnID && previous?.turnID === entry.target.turnID
-      && ![...this.clients.values()].some(client => client.sessionID === sessionID)) {
-      this.entries.delete(sessionID);
+    for (const [entryKey, entry] of this.entries) {
+      if (entry.target.sessionID !== sessionID) continue;
+      this.reconcile(entry);
+      if (!turnID && previous?.turnID === entry.target.turnID
+        && ![...this.clients.values()].some(client => client.sessionID === sessionID)) {
+        this.remove(entryKey, entry);
+      }
     }
     const client = this.clients.get(key);
-    if (client) this.deliver(entry, client);
+    if (client) this.deliverNext(client);
   }
 
   noteActivity(target) {
     if (!validID(target.sessionID) || !validID(target.turnID)
       || ![...this.clients.values()].some(client => client.sessionID === target.sessionID && client.turnID === target.turnID)) return;
-    let entry = this.entries.get(target.sessionID);
-    if (!entry || entry.target.turnID !== target.turnID || entry.target.appID !== target.appID
-      || entry.target.windowID !== target.windowID) {
-      if (entry) this.stopCapture(entry);
-      entry = { target: { ...target }, version: ++this.version, child: null, frame: null, error: false };
-      this.entries.set(target.sessionID, entry);
-      for (const client of this.clients.values()) {
-        if (client.sessionID === target.sessionID) client.waiting = false;
-      }
+    for (const [key, old] of this.entries) {
+      if (old.target.sessionID === target.sessionID && old.target.turnID !== target.turnID) this.remove(key, old);
     }
+    const key = JSON.stringify([target.sessionID, target.appID]);
+    let entry = this.entries.get(key);
+    if (!entry || entry.target.windowID !== target.windowID || entry.expiresAt <= Date.now()) {
+      if (entry) this.remove(key, entry);
+      entry = { target: { ...target }, child: null, frame: null, error: false, timer: null };
+      this.entries.set(key, entry);
+    }
+    entry.version = ++this.version;
+    entry.activityVersion = entry.version;
+    entry.expiresAt = Date.now() + idleTimeoutMs;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => this.invalidate(entry), idleTimeoutMs);
+    entry.timer.unref();
     this.reconcile(entry);
-    this.publish(entry);
+    this.publish();
   }
 
   reconcile(entry) {
@@ -73,11 +81,7 @@ class ComputerUsePreview {
     let buffer = "";
     const fail = () => {
       if (entry.child !== child) return;
-      entry.error = true;
-      entry.frame = null;
-      this.stopCapture(entry);
-      entry.version = ++this.version;
-      this.publish(entry);
+      this.invalidate(entry);
     };
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", chunk => {
@@ -99,7 +103,7 @@ class ComputerUsePreview {
         entry.target.pid = frame.pid;
         entry.frame = { imageURL: `data:image/png;base64,${frame.png}`, name: frame.name, title: frame.title, width: frame.width, height: frame.height };
         entry.version = ++this.version;
-        this.publish(entry);
+        this.publish();
       }
     });
     child.on("error", fail);
@@ -109,33 +113,52 @@ class ComputerUsePreview {
     child.stdin.write(JSON.stringify({ bundleID: entry.target.appID, windowID: entry.target.windowID, pid: entry.target.pid }) + "\n");
   }
 
-  publish(entry) {
-    for (const client of this.clients.values()) this.deliver(entry, client);
+  publish() {
+    for (const client of this.clients.values()) this.deliverNext(client);
+  }
+
+  invalidate(entry) {
+    // Retain a frameless tombstone until release so a backpressured renderer
+    // still receives the removal after acknowledging its outstanding frame.
+    clearTimeout(entry.timer);
+    entry.timer = null;
+    entry.error = true;
+    entry.frame = null;
+    this.stopCapture(entry);
+    entry.version = ++this.version;
+    this.publish();
+  }
+
+  deliverNext(client) {
+    // One outstanding packet per renderer, including when several apps produce
+    // frames. Send the oldest pending version first so no app starves another.
+    for (const entry of [...this.entries.values()].sort((a, b) => a.version - b.version)) this.deliver(entry, client);
   }
 
   deliver(entry, client) {
     if (client.sessionID !== entry.target.sessionID || client.turnID !== entry.target.turnID
-      || !client.visible || client.waiting || client.sent === entry.version || client.owner.isDestroyed()) return;
-    client.waiting = true;
-    client.sent = entry.version;
+      || !client.visible || client.waiting || client.sent.get(entry.target.appID) === entry.version || client.owner.isDestroyed()) return;
+    client.waiting = entry.version;
+    client.sent.set(entry.target.appID, entry.version);
     client.owner.send("pudding:desktop:computer-preview", {
       ...entry.target, ...entry.frame, version: entry.version, status: entry.error ? "unavailable" : entry.frame ? "live" : "loading",
+      activityVersion: entry.activityVersion, expiresAt: entry.expiresAt,
     });
   }
 
   acknowledge(owner, { sessionID, turnID, version } = {}) {
     const client = this.clients.get(`${owner.id}:${sessionID}`);
-    if (!client || client.turnID !== turnID || client.sent !== version) return;
-    client.waiting = false;
-    const entry = this.entries.get(sessionID);
-    if (entry) this.deliver(entry, client);
+    if (!client || client.turnID !== turnID || client.waiting !== version) return;
+    client.waiting = 0;
+    this.deliverNext(client);
   }
 
   async reveal(owner, { sessionID, turnID, windowID } = {}) {
     const client = this.clients.get(`${owner.id}:${sessionID}`);
-    const entry = this.entries.get(sessionID);
+    const entry = [...this.entries.values()].find(entry => entry.target.sessionID === sessionID
+      && entry.target.turnID === turnID && entry.target.windowID === windowID);
     if (!client?.visible || client.turnID !== turnID || entry?.target.turnID !== turnID
-      || entry.target.windowID !== windowID || !entry.target.pid) return false;
+      || entry.error || !entry.frame || !entry.target.pid || entry.expiresAt <= Date.now()) return false;
     await this.host.request("reveal_window", {
       bundleID: entry.target.appID, windowID, pid: entry.target.pid,
     });
@@ -156,15 +179,20 @@ class ComputerUsePreview {
     for (const [key, client] of this.clients) {
       if (client.owner === owner) this.clients.delete(key);
     }
-    for (const [sessionID, entry] of this.entries) {
+    for (const [key, entry] of this.entries) {
       this.reconcile(entry);
-      if (![...this.clients.values()].some(client => client.sessionID === sessionID)) this.entries.delete(sessionID);
+      if (![...this.clients.values()].some(client => client.sessionID === entry.target.sessionID)) this.remove(key, entry);
     }
   }
 
+  remove(key, entry) {
+    clearTimeout(entry.timer);
+    this.stopCapture(entry);
+    this.entries.delete(key);
+  }
+
   stop() {
-    for (const entry of this.entries.values()) this.stopCapture(entry);
-    this.entries.clear();
+    for (const [key, entry] of this.entries) this.remove(key, entry);
     this.clients.clear();
   }
 }

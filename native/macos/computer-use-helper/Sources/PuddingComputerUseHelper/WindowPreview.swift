@@ -89,7 +89,7 @@ final class WindowPreview: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     configuration.pixelFormat = kCVPixelFormatType_32BGRA
     configuration.minimumFrameInterval = CMTime(value: 1, timescale: 5)
     configuration.queueDepth = 3
-    configuration.showsCursor = true
+    configuration.showsCursor = false
     configuration.capturesAudio = false
     configuration.ignoreShadowsSingleWindow = true
     return configuration
@@ -106,7 +106,7 @@ final class WindowPreview: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
   }
 
   func stream(_ stream: SCStream, didStopWithError error: Error) {
-    // The parent drops the stale image and reports a stopped preview; no capture retry.
+    // The parent removes the failed preview and its stale image; no capture retry.
     exit(1)
   }
 }

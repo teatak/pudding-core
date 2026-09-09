@@ -1199,14 +1199,14 @@ ipcMain.handle("pudding:desktop:create-mobile-pairing", async (event) => {
   return mobileAccessBridge.createPairing(token);
 });
 
-ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID) => {
+ipcMain.handle("pudding:desktop:application-identity", async (event, rawAppID, rawLocale) => {
   assertTrustedSender(event);
   const appID = String(rawAppID || "").trim();
-  if (!isValidBundleID(appID)) {
+  if (!isValidBundleID(appID) || typeof rawLocale !== "string" || !rawLocale.trim()) {
     return null;
   }
   try {
-    const identity = await computerUseHost.applicationIdentity({ bundleID: appID });
+    const identity = await computerUseHost.applicationIdentity({ bundleID: appID, locale: normalizeNativeLocale(rawLocale) });
     const iconPNGBase64 = String(identity?.iconPNGBase64 || "").trim();
     return {
       appID,

@@ -24,8 +24,8 @@ final class HelperRuntime {
         ))
     case .listApps:
       return AnyEncodable(ListAppsOutput(apps: applicationLifecycle.listApplications()))
-    case .applicationIdentity(let bundleID):
-      return AnyEncodable(try applicationLifecycle.identity(bundleID: bundleID))
+    case .applicationIdentity(let bundleID, let locale):
+      return AnyEncodable(try applicationLifecycle.identity(bundleID: bundleID, locale: locale))
     case .useApp(let bundleID, let foreground, let appPath, let pid):
       return AnyEncodable(
         try await applicationLifecycle.use(
@@ -114,7 +114,7 @@ final class HelperRuntime {
             windowID: windowID
           )
           if input.delivery == "background" {
-            return try await BackgroundClickService.perform(bundleID: bundleID, target: targetWindow, input: input)
+            return try await BackgroundPointerService.perform(bundleID: bundleID, target: targetWindow, input: input)
           }
           let ownership = try BackgroundInputJournal.acquire(pid: targetWindow.pid)
           defer { withExtendedLifetime(ownership) {} }

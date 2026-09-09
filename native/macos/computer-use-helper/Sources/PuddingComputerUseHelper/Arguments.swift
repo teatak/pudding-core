@@ -5,7 +5,7 @@ enum HelperCommand: Equatable {
   case revealWindow(bundleID: String, windowID: UInt32, pid: Int32)
   case permissions(promptAccessibility: Bool, promptScreenRecording: Bool)
   case listApps
-  case applicationIdentity(bundleID: String)
+  case applicationIdentity(bundleID: String, locale: String)
   case observe(bundleID: String, windowID: UInt32, maxElements: Int)
   case observeCapture(
     bundleID: String, windowID: UInt32, maxElements: Int, output: String,
@@ -38,7 +38,7 @@ enum PointerButton: String, Codable, Equatable {
   case right
 }
 
-struct PointerInput: Equatable {
+struct PointerInput: Codable, Equatable {
   let action: PointerAction
   let x: Double
   let y: Double
@@ -64,9 +64,6 @@ struct PointerInput: Equatable {
   ) throws -> PointerInput {
     guard delivery == nil || delivery == "foreground" || delivery == "background" else {
       throw ArgumentError.invalidOption("delivery", "must be foreground or background")
-    }
-    guard delivery != "background" || (action == .click && (button ?? .left) == .left && (clickCount ?? 1) == 1) else {
-      throw ArgumentError.invalidOption("delivery", "background supports only a single left click")
     }
     guard normalized(x), normalized(y) else {
       throw ArgumentError.invalidOption(
@@ -187,15 +184,19 @@ struct ArgumentParser {
       return .listApps
     case "app-identity":
       var bundleID: String?
+      var locale: String?
       while let option = cursor.next() {
         switch option {
         case "--bundle-id":
           bundleID = try cursor.requireValue(option)
+        case "--locale":
+          locale = try cursor.requireValue(option)
         default:
           throw ArgumentError.unknownOption(option)
         }
       }
-      return .applicationIdentity(bundleID: try require(bundleID, "--bundle-id"))
+      return .applicationIdentity(
+        bundleID: try require(bundleID, "--bundle-id"), locale: try require(locale, "--locale"))
     case "observe":
       var bundleID: String?
       var windowID: UInt32?

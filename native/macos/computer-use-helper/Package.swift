@@ -10,7 +10,7 @@ let package = Package(
   products: [
     .executable(
       name: "PuddingComputerUseHelper",
-      targets: ["PuddingComputerUseHelper"]
+      targets: ["PuddingComputerUseHelperCLI"]
     ),
     .executable(
       name: "PuddingComputerUseFixture",
@@ -18,9 +18,14 @@ let package = Package(
     )
   ],
   targets: [
-    .executableTarget(
+    // Tests link the implementation without the product's @main entry point.
+    .target(
       name: "PuddingComputerUseHelper",
       exclude: ["Info.plist"]
+    ),
+    .executableTarget(
+      name: "PuddingComputerUseHelperCLI",
+      dependencies: ["PuddingComputerUseHelper"]
     ),
     .executableTarget(
       name: "PuddingComputerUseFixture",

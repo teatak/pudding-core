@@ -75,6 +75,8 @@ final class ProbeApplication: NSApplication {
 
 final class GestureView: NSView {
   private var start: NSPoint?
+  var afterDrag: (() -> Void)?
+  var holdingPointer: Bool { start != nil }
   override var isFlipped: Bool { true }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func draw(_ dirtyRect: NSRect) {
@@ -89,7 +91,7 @@ final class GestureView: NSView {
   override func rightMouseDown(with event: NSEvent) {
     emit(["kind": "effect", "effect": "right", "command": event.modifierFlags.contains(.command)])
   }
-  override func mouseDragged(with event: NSEvent) { }
+  override func mouseDragged(with event: NSEvent) { afterDrag?() }
   override func mouseUp(with event: NSEvent) {
     if let start, event.locationInWindow.x - start.x > 30 {
       emit(["kind": "effect", "effect": "drag", "command": event.modifierFlags.contains(.command)])
@@ -123,15 +125,20 @@ final class Fixture: NSObject, NSApplicationDelegate {
   var cursorOrigin = NSEvent.mouseLocation
   var maxCursorDistance = 0.0
   var activations: [pid_t] = []
+  var monitoredTargetPID: pid_t?
+  var windowOrders = Set<String>()
   var count = 0
   var testInput: NSTextField?
   var humanStatus: NSTextField?
   var controls: [String: NSView] = [:]
+  var pendingWindowMutation: String?
+  var lifecycleDragSteps = 0
   init(role: String) { self.role = role }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     window = NSWindow(contentRect: NSRect(x: 80, y: 140, width: 400, height: 400),
-      styleMask: [.titled, .closable], backing: .buffered, defer: false)
+      styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
     window.title = "Pudding Background Probe — \(role)"
     let content = window.contentView!
     let button = ProbeButton(title: "Increment (test data only)", target: self, action: #selector(increment))
@@ -140,6 +147,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     button.frame = NSRect(x: 30, y: 320, width: 330, height: 40)
     content.addSubview(button)
     let canvas = GestureView(frame: NSRect(x: 30, y: 210, width: 330, height: 80))
+    canvas.afterDrag = { [weak self] in self?.applyWindowMutationAfterDrag() }
     content.addSubview(canvas)
     let scroll = ProbeScrollView(frame: NSRect(x: 30, y: 20, width: 330, height: 160))
     let document = FlippedView(frame: NSRect(x: 0, y: 0, width: 310, height: 3000))
@@ -201,8 +209,35 @@ final class Fixture: NSObject, NSApplicationDelegate {
     emit(["kind": "human-start"])
   }
 
+  func applyWindowMutationAfterDrag() {
+    guard let mutation = pendingWindowMutation, let window else { return }
+    lifecycleDragSteps += 1
+    guard lifecycleDragSteps == 4 else { return }
+    pendingWindowMutation = nil // Exactly once, after the receiver saw a held drag.
+    let windowID = window.windowNumber
+    switch mutation {
+    case "hide": window.orderOut(nil)
+    case "minimize": window.miniaturize(nil)
+    case "move": window.setFrameOrigin(NSPoint(x: window.frame.minX + 20, y: window.frame.minY))
+    case "close":
+      window.close()
+      controls.removeAll()
+      self.window = nil
+    default: return
+    }
+    emit(["kind": "window-mutation", "mutation": mutation, "windowID": windowID,
+      "afterDragStep": lifecycleDragSteps, "visible": window.isVisible, "minimized": window.isMiniaturized])
+  }
+
   func command(_ command: [String: Any]) {
     switch command["op"] as? String {
+    case "arm-window-mutation":
+      guard role == "target", let mutation = command["mutation"] as? String,
+        ["hide", "minimize", "move", "close"].contains(mutation), window != nil else {
+        emit(["kind": "error", "error": "only an owned fixture window may be changed"]); return
+      }
+      pendingWindowMutation = mutation
+      lifecycleDragSteps = 0
     case "position":
       let covered = command["covered"] as? Bool == true
       window.setFrameOrigin(NSPoint(x: covered || role == "target" ? 80 : 540, y: 140))
@@ -262,11 +297,23 @@ final class Fixture: NSObject, NSApplicationDelegate {
     case "monitor":
       monitor?.invalidate()
       samples = 0; foregroundPIDs = []; activations = []
+      monitoredTargetPID = command["targetPID"] as? Int32
+      windowOrders = []
       cursorOrigin = NSEvent.mouseLocation; maxCursorDistance = 0
       monitor = Timer.scheduledTimer(withTimeInterval: 0.005, repeats: true) { [weak self] _ in
         guard let self else { return }
         self.samples += 1
         self.foregroundPIDs.insert(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        if let targetPID = self.monitoredTargetPID {
+          let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], 0)
+            as? [[String: Any]] ?? []
+          let order = windows.filter {
+            let pid = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            return (pid == targetPID || pid == getpid()) &&
+              ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+          }.compactMap { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.stringValue }
+          self.windowOrders.insert(order.joined(separator: ","))
+        }
         let point = NSEvent.mouseLocation
         self.maxCursorDistance = max(self.maxCursorDistance,
           hypot(point.x - self.cursorOrigin.x, point.y - self.cursorOrigin.y))
@@ -274,6 +321,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
     case "stop-monitor": monitor?.invalidate(); monitor = nil
     case "quit": NSApp.terminate(nil); return
     default: break
+    }
+    guard let window else {
+      emit(["kind": "reply", "id": command["id"] ?? 0, "pid": getpid(), "windowID": 0,
+        "visible": false, "minimized": false, "holdingPointer": false,
+        "active": NSApp.isActive, "foregroundPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0])
+      return
     }
     let top = CGDisplayBounds(CGMainDisplayID()).height
     let frame = window.frame
@@ -287,9 +340,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
       "windowID": window.windowNumber, "executable": Bundle.main.executableURL!.path,
       "frame": ["x": frame.minX, "y": top - frame.maxY, "width": frame.width, "height": frame.height],
       "points": points, "active": NSApp.isActive, "keyWindow": window.isKeyWindow, "count": count,
+      "visible": window.isVisible, "minimized": window.isMiniaturized,
+      "holdingPointer": (controls["drag"] as? GestureView)?.holdingPointer ?? false,
       "inputText": testInput?.stringValue ?? "",
       "foregroundPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,
       "samples": samples, "foregroundPIDs": foregroundPIDs.sorted(), "activations": activations,
+      "windowOrders": windowOrders.sorted(),
       "maxCursorDistance": maxCursorDistance])
   }
 }

@@ -1,12 +1,13 @@
 import Darwin
 import Foundation
 
-@main
-struct PuddingComputerUseHelper {
-  static func main() async {
+// Keep the executable @main out of the module linked into the test bundle.
+@MainActor
+public enum HelperEntryPoint {
+  public static func run() async {
     do {
-      if Array(CommandLine.arguments.dropFirst()) == [BackgroundClickWorker.command] {
-        BackgroundClickWorker.run()
+      if Array(CommandLine.arguments.dropFirst()) == [BackgroundPointerWorker.command] {
+        BackgroundPointerWorker.run()
         return
       }
       if Array(CommandLine.arguments.dropFirst()) == ["preview"] {

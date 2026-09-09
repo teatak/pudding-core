@@ -220,7 +220,11 @@ func (m *Manager) Act(ctx context.Context, sessionID, appID string, windowID uin
 	for index, action := range validated {
 		var native NativeAction
 		var actionErr error
-		if isSemanticAction(action.Type) {
+		if err := ctx.Err(); err != nil {
+			// A dispatched native action can finish while cancellation drains it.
+			// Keep that result, but do not dispatch another item in the batch.
+			actionErr = &OperationError{Code: "computer_action_cancelled", Message: "Computer Use actions cancelled", Outcome: "not_started", Cause: err}
+		} else if isSemanticAction(action.Type) {
 			native, actionErr = m.service.Act(ctx, sessionID, appID, windowID, action.ElementID, action.Type, action.Value)
 		} else if isKeyboardAction(action.Type) {
 			native, actionErr = m.service.Keyboard(ctx, sessionID, appID, windowID, action)
@@ -293,9 +297,6 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 	}
 	if action.Delivery != "" && action.Delivery != "foreground" && action.Delivery != "background" {
 		return action, invalid("delivery must be foreground or background")
-	}
-	if action.Delivery == "background" && (action.Type != ActionClick || (action.Button != "" && action.Button != PointerButtonLeft) || (action.ClickCount != nil && *action.ClickCount != 1)) {
-		return action, invalid("background delivery supports only a single left click")
 	}
 	if action.ElementID != "" || action.Value != nil {
 		return action, invalid("elementID and value must be omitted for pointer actions")

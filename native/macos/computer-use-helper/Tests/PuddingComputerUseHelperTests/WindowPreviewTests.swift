@@ -8,6 +8,7 @@ import Testing
   #expect(configuration.pixelFormat == kCVPixelFormatType_32BGRA)
   #expect(!configuration.shouldBeOpaque)
   #expect(configuration.ignoreShadowsSingleWindow)
+  #expect(!configuration.showsCursor)
   #expect(configuration.width == 640)
   #expect(configuration.height == 480)
 }

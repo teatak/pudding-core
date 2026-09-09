@@ -1930,9 +1930,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else {
 			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 		}
-		if ctx.Err() != nil {
-			return store.TurnCancelled, "", nextMode, modeChanged
-		}
+		// Cancellation stops subsequent work, but must not discard the result of
+		// an already dispatched tool (including completed prefixes/unknown effects).
+		// Persist and publish that result before the cancellation check below.
 		if result.CallID == "" {
 			result.CallID = call.CallID
 		}

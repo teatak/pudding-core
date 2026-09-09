@@ -1,6 +1,6 @@
 # Pudding 0.3.0 发版报告
 
-日期：2026-09-06
+日期：2026-09-06；2026-09-09 增补 Computer Use 验收
 
 对比基线：`v0.2.11`（`9e9efd87`）
 
@@ -64,6 +64,18 @@
 - 公开发布前，用隔离的 0.2.11 签名包和临时数据验证候选升级，并比较 Helper 签名身份。
 - TCC 已授权状态的延续需在相同安装路径、相同用户环境下验证；签名身份比较本身不等于用户环境的授权验收。
 
+### 2026-09-09 本地候选包增补
+
+用户确认 0.3.0 尚未发布，授权继续构建 0.3.0 并上传 Apple 公证。本轮不创建 Git tag、不上传 GitHub Release、不替换已安装的 0.2.11；之前 9 月 6 日的本地打包产物保留。
+
+- 新增显式 `delivery=background` 的有限普通左键单击，仅开放系统 Calculator、Mail、Calendar；不自动切前台、不回退到全局输入。飞书抢前台场景未解决，未开放。
+- 真实原生链路已通过日历单会话批量往返、双会话串行、排队取消及在途取消。取消保留已完成前缀与未知效果，不派发剩余步骤、不重放；这不承诺撤销已在途动作。
+- 修复 release Swift 测试包的 Helper/Runner 双入口冲突，独立薄 CLI target，保持产品名、Bundle ID、参数协议和点击实现不变；debug/release 各 92 项通过，零输入 CLI smoke 4 项通过。
+- 本轮 Electron 213 项、schema release contract、Web 生产构建及双架构 release runtime 编译通过；此前本任务 Go 全量及 Engine 竞态回归记录见[后台输入验收文档](computer-use-background-input-probe.md#第十三轮engine-会话链路与取消记录)。本次新增改动不改变 SQLite schema 或迁移。
+- 官方 `make desktop-bundle` 已退出 0：arm64/x64 Developer ID 签名、Apple 公证、stapled ticket、Gatekeeper、DMG 校验和、ZIP/DMG 解包内容及嵌套原生代码检查通过。9 个发布资产齐全，更新元数据 SHA-512/大小匹配。两架构 Helper 与安装版 0.2.11 的 Bundle ID、Team ID 和 designated requirement 一致。
+- 新产物位于 `dist/verified-0.3.0-20260909/`，包含完整 `bundle-0.3.0.log` 和 `SHA256SUMS`；详见[第十五轮产物记录](computer-use-background-input-probe.md#第十五轮签名候选包准备与公证边界)。原 `dist/release` 未覆盖。
+- 仍需当前签名包的 TCC 归属、真实升级及持续真人并行回归，不能把签名通过直接当作通用后台操作或公开发布验收完成；本轮未验证 Intel 真机运行。
+
 ## Release Notes
 
 ### Redesigned Workspace
@@ -85,6 +97,7 @@
 - Show session-scoped picture-in-picture previews of native app and browser automation.
 - Improve native window capture, application lifecycle handling, accessibility element traversal, and keyboard input.
 - Keep automation previews aligned with the active operation and stop capture when the operation ends or is cancelled.
+- Add opt-in background single-click delivery for system Calculator, Mail, and Calendar, preserving partial results when a batch is cancelled.
 
 ### Interface and Tools
 

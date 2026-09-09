@@ -169,14 +169,17 @@ import Testing
       == .useApp(bundleID: "com.apple.calculator", foreground: true))
 }
 
-@Test func protocolApplicationIdentityRoutesBundleID() throws {
+@Test func protocolApplicationIdentityRoutesBundleIDAndLocale() throws {
   let request = ProtocolRequest(
     id: "req-identity",
     command: "app_identity",
-    params: ProtocolParameters(bundleID: "com.apple.Notes")
+    params: ProtocolParameters(locale: "zh-TW", bundleID: "com.apple.Notes")
   )
 
-  #expect(try request.helperCommand() == .applicationIdentity(bundleID: "com.apple.Notes"))
+  #expect(try request.helperCommand() == .applicationIdentity(bundleID: "com.apple.Notes", locale: "zh-TW"))
+  let missing = ProtocolRequest(id: "missing-locale", command: "app_identity",
+    params: ProtocolParameters(bundleID: "com.apple.Notes"))
+  #expect(throws: ArgumentError.missingOption("locale")) { try missing.helperCommand() }
 }
 
 @Test func protocolPointerRoutesNormalizedWindowCoordinates() throws {

@@ -64,12 +64,12 @@ export function Conversation({
     [workspaceArtifacts, workspaceTabOrder],
   );
   const browserAutomationActivity = useBrowserAutomationActivity(session.id);
-  const { preview: computerPreview, completed: computerPreviewCompleted } = useComputerPreview(session.id);
-  const hasVisibleActivities = orderedWorkspaceArtifacts.length > 0
-    || Boolean(browserAutomationActivity) || Boolean(computerPreview);
-  const showActivitySurface = !workspaceOpen
-    && hasVisibleActivities;
-  const showActivityRail = showActivitySurface && activityRailFits;
+  const { previews: computerPreviews, completed: computerPreviewCompleted } = useComputerPreview(session.id);
+  const showArtifacts = !workspaceOpen && orderedWorkspaceArtifacts.length > 0;
+  const showActivitySurface = showArtifacts || computerPreviews.length > 0;
+  // Only artifacts reserve chat space. A standalone preview is an overlay,
+  // so starting/stopping Computer Use cannot move the transcript or composer.
+  const showActivityRail = showArtifacts && activityRailFits;
   const handleSubmitStart = useCallback(() => {
     setSubmitSignal((signal) => signal + 1);
   }, []);
@@ -243,10 +243,10 @@ export function Conversation({
         <aside
           className={showActivityRail
             ? "pointer-events-none absolute right-0 top-0 bottom-[var(--pudding-composer-overlay-height)] z-10 flex min-h-0 w-[var(--pudding-activity-rail-reserve)] flex-col gap-3 overflow-hidden py-4 pr-4 pl-8"
-            : `pointer-events-none absolute top-0 right-0 bottom-[var(--pudding-composer-overlay-height)] z-20 flex min-h-0 flex-col items-end gap-3 overflow-hidden py-4 pr-4 ${computerPreview ? "w-[min(16rem,100%)]" : "w-14"}`
+            : `pointer-events-none absolute top-0 right-0 bottom-[var(--pudding-composer-overlay-height)] z-20 flex min-h-0 flex-col items-end gap-3 overflow-hidden py-4 pr-4 ${computerPreviews.length ? "w-[min(16rem,100%)]" : "w-14"}`
           }
         >
-          <WorkspaceActivityCard
+          {showArtifacts ? <WorkspaceActivityCard
             artifacts={orderedWorkspaceArtifacts}
             browserPreview={browserAutomationActivity
               ? {
@@ -255,8 +255,8 @@ export function Conversation({
                 }
               : undefined}
             presentation={showActivityRail ? "rail" : "dock"}
-          />
-          {computerPreview ? <ComputerUsePip preview={computerPreview} completed={computerPreviewCompleted} /> : null}
+          /> : null}
+          {computerPreviews.length ? <ComputerUsePip previews={computerPreviews} completed={computerPreviewCompleted} /> : null}
         </aside>
       ) : null}
       <div

@@ -1413,16 +1413,24 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
   const {ComputerUseHost} = require('../computer-use-host.cjs');
   const native = new ComputerUseHost({binaryPath:path.join(repo, 'bin/Pudding Computer Use.app/Contents/MacOS/PuddingComputerUseHelper')});
   const children = [];
+  let stacked;
   const fixtureBundleID = 'com.teatak.pudding.computer-use-fixture';
   const fixtureApp = path.join(repo, 'bin/Pudding Computer Use Fixture.app');
   const fixture = async () => {
     const child = spawn(path.join(fixtureApp, 'Contents/MacOS/PuddingComputerUseFixture'), [], {stdio:'ignore'});
     children.push(child);
-    await waitFor(async () => (await native.listApps()).apps.some(a => a.bundleID === fixtureBundleID && a.instances.some(i => i.pid === child.pid)), 'native fixture starts');
+    await waitFor(async () => {
+      assert.ok(!exited(child), `fixture exited: ${child.exitCode}/${child.signalCode}`);
+      const apps = (await native.listApps()).apps;
+      const own = apps.find(a => a.instances.some(i => i.pid === child.pid));
+      if (own) assert.equal(own.bundleID, fixtureBundleID, 'fixture reports its own bundle ID');
+      return own?.bundleID === fixtureBundleID;
+    }, 'native fixture starts');
     const used = await native.useApp({bundleID:fixtureBundleID,appPath:fixtureApp,pid:child.pid,foreground:false});
-    const target = used.windows.find(w => w.title === 'Computer Use Fixture'); assert.ok(target); return target;
+    const target = used.windows.find(w => w.title === 'Computer Use Fixture'); assert.ok(target); return {...target,appID:fixtureBundleID};
   };
-  const entry = () => computerPreviewManager.entries.get(sessionID);
+  const exited = child => child.exitCode !== null || child.signalCode !== null;
+  const entry = (appID = fixtureBundleID) => computerPreviewManager.entries.get(JSON.stringify([sessionID, appID]));
   const image = () => js(`document.querySelector('[data-computer-preview] img[draggable="false"]')?.src`);
   const startTurn = async (id, key, words = 2000) => {
     const result = await api(`/sessions/${id}/submit`, 'POST', {clientMessageID:key,parts:[{type:'text',text:'preview '.repeat(words)}]});
@@ -1430,21 +1438,57 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await waitFor(() => [...computerPreviewManager.clients.values()].some(c => c.sessionID === id && c.turnID === result.turnID), 'preview turn subscription');
     return result.turnID;
   };
-  const operation = async (target, turnID, id = sessionID) => {
+  const operation = async (target, turnID, id = sessionID, expectedError) => {
     const response = await fetch(`${computerBridgeIdentity.url}/computer/observe`, {
       method:'POST',headers:{authorization:`Bearer ${computerBridgeIdentity.token}`,'content-type':'application/json','x-pudding-turn-id':turnID},
-      body:JSON.stringify({sessionID:id,appID:fixtureBundleID,windowID:target.windowID,maxElements:30}),
+      body:JSON.stringify({sessionID:id,appID:target.appID,windowID:target.windowID,maxElements:30}),
     });
-    assert.ok(response.ok, await response.text());
+    const result = await response.json();
+    if (expectedError) {
+      assert.equal(response.ok, false);
+      assert.equal(result.code, expectedError);
+    } else assert.ok(response.ok, JSON.stringify(result));
   };
-  const live = target => waitFor(async () => Boolean(await image()) && entry()?.target.pid === target.pid, 'real live preview frame');
+  const live = target => waitFor(async () => entry(target.appID)?.target.pid === target.pid
+    && Boolean(await js(`document.querySelector('[data-computer-preview][data-app-id="${target.appID}"] img')?.src`)), 'real live preview frame');
   const settle = () => waitFor(() => js(`!Array.from(document.querySelectorAll('.pudding-workspace-stage')).some(el => ['opening','closing'].includes(el.dataset.transition))`), 'workspace transition settles');
+  const chatGeometry = () => js(`Array.from(document.querySelectorAll('.pudding-conversation .pudding-chat-column')).map(el => {
+    const r = el.getBoundingClientRect(); return {left:r.left,width:r.width};
+  })`);
   try {
     const permissions = await native.permissions(); assert.ok(permissions.accessibility && permissions.screenRecording);
+    // A separate, disposable bundle exercises real two-App capture and stacking.
+    const stackedApp = path.join(home, 'Stack Fixture.app');
+    const stackedID = 'com.teatak.pudding.preview-stack-fixture';
+    fs.cpSync(fixtureApp, stackedApp, {recursive:true});
+    await runFile('/usr/libexec/PlistBuddy', ['-c', `Set :CFBundleIdentifier ${stackedID}`, path.join(stackedApp, 'Contents/Info.plist')]);
+    await runFile('xcrun', ['clang', '-fobjc-arc', '-framework', 'AppKit', path.join(__dirname, 'macos-preview-fixture.m'), '-o', path.join(stackedApp, 'Contents/MacOS/PuddingComputerUseFixture')]);
+    await runFile('/usr/bin/codesign', ['--force', '--sign', '-', stackedApp]);
+    // Launch this new bundle through LaunchServices, as a normal new App.
+    const stackedUsed = await native.useApp({bundleID:stackedID,appPath:stackedApp,foreground:false});
+    stacked = {...stackedUsed.windows.find(w => w.title === 'Computer Use Fixture'),appID:stackedID};
+    assert.ok(stacked.windowID && stacked.pid, 'second App exposes its native window');
     const first = await fixture(), second = await fixture();
     window.setContentSize(1440, 920);
     await click('button[aria-label="收起工作区"]'); await settle();
     const turnID = await startTurn(sessionID, 'preview-running');
+    const artifactChatGeometry = await chatGeometry();
+    // A stale window must never mount a loading/stopped card, even briefly.
+    const expired = await fixture();
+    await native.quitApp({bundleID:fixtureBundleID,pid:expired.pid});
+    await js(`window.__invalidPreviewMounts = 0; window.__invalidPreviewObserver = new MutationObserver(records => {
+      for (const record of records) for (const node of record.addedNodes)
+        if (node.nodeType === 1 && (node.matches('[data-computer-preview]') || node.querySelector('[data-computer-preview]'))) window.__invalidPreviewMounts++;
+    }); window.__invalidPreviewObserver.observe(document.body, {childList:true,subtree:true});`);
+    await operation(expired, turnID, sessionID, 'computer_window_not_found');
+    await waitFor(() => entry()?.error === true && !entry()?.child, 'invalid window capture stops');
+    await waitFor(() => [...computerPreviewManager.clients.values()].some(c => c.sessionID === sessionID
+      && c.sent.get(fixtureBundleID) === entry()?.version && !c.waiting), 'renderer acknowledges invalid preview');
+    await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    assert.equal(await js(`window.__invalidPreviewMounts`), 0, 'invalid target never mounts picture-in-picture');
+    assert.equal(await js(`Boolean(document.querySelector('[data-computer-preview]'))`), false);
+    await js(`window.__invalidPreviewObserver.disconnect()`);
+    check('invalid window preserves the tool error but never mounts a loading or stopped preview');
     await operation(first, turnID); await live(first);
     await waitFor(() => js(`(() => {
       const img = document.querySelector('[data-computer-preview] img[draggable="false"]');
@@ -1469,6 +1513,8 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     assert.equal(await js(`import('/src/state/workspaceStore.ts').then(m => m.getWorkspaceSessionUI(${JSON.stringify(sessionID)}).presentation)`), 'hidden');
     const geometry = await js(`(() => { const card=document.querySelector('[data-computer-preview]'), artifacts=document.querySelector('[aria-label="临时工作区内容"]'); const c=card.getBoundingClientRect(),a=artifacts.getBoundingClientRect();return {top:c.top,bottom:c.bottom,artifactBottom:a.bottom,height:innerHeight}})()`);
     assert.ok(geometry.top >= geometry.artifactBottom && geometry.bottom <= geometry.height, JSON.stringify(geometry));
+    assert.equal(await js(`Boolean(document.querySelector('[aria-label="临时工作区内容"] [data-computer-preview]'))`), false, 'preview is not artifact content');
+    assert.deepEqual(await chatGeometry(), artifactChatGeometry, 'preview does not change the artifact rail chat layout');
     const before = await image();
     const observed = await native.observe({bundleID:fixtureBundleID,windowID:first.windowID,maxElements:100});
     const editor = observed.elements.find(e => e.role === 'AXTextField' && !e.secure); assert.ok(editor);
@@ -1496,21 +1542,64 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     check('titleless preview follows wide and portrait resizing without header space, letterboxing or restarting capture');
 
 
-    await click('button[aria-label="打开工作区"]'); await settle();
-    await waitFor(() => !entry()?.child && captured.exitCode !== null, 'workspace expansion releases capture process');
-    assert.equal(await js(`document.querySelectorAll('[data-computer-preview]').length`), 0);
-    assert.ok((await api(`/sessions/${sessionID}`)).running, 'hiding preview does not cancel the turn');
-    await click('button[aria-label="收起工作区"]'); await settle(); await live(first);
-    assert.notEqual(entry().child, captured);
+    const workspaceDeadline = entry().expiresAt;
+    await js(`window.__previewNode = document.querySelector('[data-computer-preview]');
+      window.__previewImage = window.__previewNode.querySelector('img');`);
+    const assertContinuousPreview = async () => {
+      assert.equal(entry().child, captured, 'workspace layout reuses the original capture process');
+      assert.ok(!exited(captured), 'workspace layout never stops the stream');
+      assert.equal(entry().expiresAt, workspaceDeadline, 'workspace changes do not renew activity');
+      assert.ok(await js(`window.__previewNode === document.querySelector('[data-computer-preview]')
+        && window.__previewImage === document.querySelector('[data-computer-preview] img')`), 'workspace changes reuse both card and image DOM nodes');
+    };
+    const assertExpandedPosition = async () => {
+      const position = await js(`(() => {
+        const conversation=document.querySelector('.pudding-conversation'), card=document.querySelector('[data-computer-preview]');
+        const c=conversation.getBoundingClientRect(), p=card.getBoundingClientRect();
+        return {rail:conversation.dataset.activityRail,artifacts:!!conversation.querySelector('[aria-label="临时工作区内容"]'),
+          right:c.right-p.right,top:p.top-c.top,within:p.left>=c.left && p.bottom<=c.bottom,
+          visible:document.elementFromPoint(p.left+p.width/2,p.top+p.height/2)?.closest('[data-computer-preview]')===card};
+      })()`);
+      assert.deepEqual(position, {rail:undefined,artifacts:false,right:16,top:16,within:true,visible:true}, 'expanded workspace keeps preview above the chat, not in the workspace or an artifact rail');
+    };
+    await click('button[aria-label="打开工作区"]'); await settle(); await live(first);
+    await assertContinuousPreview(); await assertExpandedPosition();
+    const expandedFrame = await image();
+    await native.act({bundleID:fixtureBundleID,windowID:first.windowID,elementID:editor.elementID,action:'set_value',value:'Workspace preview still live'});
+    await waitFor(async () => (await image()) !== expandedFrame, 'expanded workspace still receives updated native frames');
+    await screenshot('computer-preview-workspace-open');
+    await click('button[aria-label="专注"]'); await settle();
+    await assertContinuousPreview(); await assertExpandedPosition();
+    await screenshot('computer-preview-workspace-focused');
+    await click('button[aria-label="退出专注"]'); await settle();
+    await assertContinuousPreview(); await assertExpandedPosition();
+    await click('button[aria-label="收起工作区"]'); await settle();
+    await assertContinuousPreview();
+    assert.ok((await api(`/sessions/${sessionID}`)).running, 'workspace changes do not cancel the turn');
+    check('workspace expansion/focus/collapse reuse image DOM and capture process, preserve expiry, and receive live frames at chat top-right');
+
+    // The smoke disables throttling globally for deterministic frame checks.
+    // Electron also keeps visibilityState="visible" in that mode, even when
+    // the native window is hidden. Restore normal visibility for this check.
+    window.webContents.setBackgroundThrottling(true);
+    window.hide();
+    await waitFor(() => js(`document.visibilityState === 'hidden' && !document.querySelector('[data-computer-preview]')`), 'hidden page removes preview');
+    await waitFor(() => !entry()?.child && exited(captured), 'hidden page still releases capture');
+    window.show();
+    await waitFor(() => js(`document.visibilityState === 'visible'`), 'page becomes visible again');
+    window.webContents.setBackgroundThrottling(false);
+    await live(first);
+    assert.notEqual(entry().child, captured, 'page visibility resumes capture after the previous process exited');
+    assert.equal(entry().expiresAt, workspaceDeadline, 'page visibility never renews activity');
     const resumed = entry().child;
     await click('[data-computer-preview]');
     await waitFor(async () => (await native.listApps()).apps.find(a => a.bundleID === fixtureBundleID)?.instances.some(i => i.pid === first.pid && i.active), 'click raises exact native instance');
     const nativeState = await native.observe({bundleID:fixtureBundleID,windowID:first.windowID,maxElements:100});
-    assert.equal(nativeState.elements.find(e => e.role === 'AXTextField' && !e.secure)?.value, 'Live preview changed', 'preview click never types into the app');
-    check('workspace open pauses capture without stopping operations; collapse resumes; preview click raises the exact application');
+    assert.equal(nativeState.elements.find(e => e.role === 'AXTextField' && !e.secure)?.value, 'Workspace preview still live', 'preview click never types into the app');
+    check('page hide still pauses capture; visibility resumes the same target; preview click raises the exact application');
 
     await operation(second, turnID); await live(second);
-    await waitFor(() => resumed.exitCode !== null, 'window switch releases old stream');
+    await waitFor(() => exited(resumed), 'window switch releases old stream');
     const expected = entry().target.windowID;
     await operation(first, turnID, otherSessionID);
     assert.equal(entry().target.windowID, expected, 'another session cannot replace this preview');
@@ -1519,30 +1608,62 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await screenshot('computer-preview-narrow');
     await js(`import('/src/state/workspaceStore.ts').then(m => m.closeWorkspaceTabs(${JSON.stringify(sessionID)}, m.getWorkspaceSessionUI(${JSON.stringify(sessionID)}).tabOrder))`);
     await waitFor(() => js(`!document.querySelector('[aria-label="临时工作区内容"]') && Boolean(document.querySelector('[data-computer-preview]'))`), 'preview remains independent when all artifacts close');
-    check('window switching drops old frames; session isolation; narrow layout and no-artifact preview');
+    const standaloneGeometry = new Map();
+    for (const width of [720, 1440]) {
+      window.setContentSize(width, 920);
+      await waitFor(() => js(`innerWidth === ${width}`), 'standalone preview viewport resize');
+      await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      const position = await js(`(() => {
+        const conversation=document.querySelector('.pudding-conversation'), card=document.querySelector('[data-computer-preview]');
+        const c=conversation.getBoundingClientRect(), p=card.getBoundingClientRect();
+        return {rail:conversation.dataset.activityRail,left:p.left-c.left,top:p.top-c.top,right:c.right-p.right};
+      })()`);
+      assert.equal(position.rail, undefined, 'preview alone never reserves an artifact rail');
+      assert.equal(position.right, 16, 'standalone preview floats at the conversation right edge');
+      assert.equal(position.top, 16, 'standalone preview floats at the conversation top edge');
+      assert.ok(position.left >= 0, JSON.stringify(position));
+      standaloneGeometry.set(width, await chatGeometry());
+      await screenshot(`computer-preview-standalone-${width}`);
+    }
+    check('window switching drops old frames; session isolation; wide/narrow standalone preview floats at top-right without an artifact rail');
 
     const cancelled = entry().child;
     await api(`/sessions/${sessionID}/cancel`, 'POST');
-    await waitFor(() => cancelled.exitCode !== null && !entry(), 'turn cancellation stops and releases capture');
+    await waitFor(() => exited(cancelled) && !entry(), 'turn cancellation stops and releases capture');
     await waitFor(() => js(`!document.querySelector('[data-computer-preview]')`), 'cancelled preview removed');
+    for (const width of [720, 1440]) {
+      window.setContentSize(width, 920);
+      await waitFor(() => js(`innerWidth === ${width}`), 'no-preview viewport resize');
+      await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      assert.deepEqual(await chatGeometry(), standaloneGeometry.get(width), 'preview removal does not move or resize transcript/composer columns');
+    }
+    check('standalone preview appearance/removal leaves transcript and composer geometry unchanged');
     const completedTurnID = await startTurn(sessionID, 'preview-complete', 100);
     await operation(first, completedTurnID); await live(first);
     const completed = entry().child;
+    const completedExpiry = entry().expiresAt;
     await waitFor(() => js(`document.querySelector('[data-computer-preview]')?.dataset.status === 'complete'`), 'real turn completion shows finished preview');
-    await waitFor(() => completed.exitCode !== null, 'completion stops capture');
-    const finishedAt = Date.now();
+    await waitFor(() => exited(completed), 'completion stops capture');
+    await js(`window.__completedPreviewImage = document.querySelector('[data-computer-preview] img')`);
+    await click('button[aria-label="打开工作区"]'); await settle();
+    await assertExpandedPosition();
+    assert.ok(await js(`window.__completedPreviewImage === document.querySelector('[data-computer-preview] img')`), 'expansion preserves the completed turn last frame');
+    assert.equal(entry(), undefined, 'showing a completed preview never restarts capture');
+    await screenshot('computer-preview-completed-workspace-open');
+    await click('button[aria-label="收起工作区"]'); await settle();
+    assert.ok(await js(`window.__completedPreviewImage === document.querySelector('[data-computer-preview] img')`), 'collapse preserves the completed turn last frame');
     await delay(5_000);
     assert.equal(await js(`document.querySelector('[data-computer-preview]')?.dataset.status`), 'complete', 'last frame remains after the old three-second expiry');
     await waitFor(() => js(`!document.querySelector('[data-computer-preview]')`), 'completed preview disappears after thirty seconds', 35_000);
-    assert.ok(Date.now() - finishedAt >= 29_000, 'completed preview retains the final result for thirty seconds');
-    check('real SSE cancel stops immediately; completion stops capture but retains the last frame for thirty seconds');
+    assert.ok(Date.now() >= completedExpiry - 100, 'completion keeps the original activity deadline');
+    check('real SSE cancel stops immediately; completion stops capture and keeps the per-app activity deadline');
 
     for (const status of ['completed', 'cancelled']) {
       const previewTurn = await startTurn(sessionID, `preview-before-${status}`, 100);
       await operation(first, previewTurn); await live(first);
       const previousCapture = entry().child;
       await waitFor(() => js(`document.querySelector('[data-computer-preview]')?.dataset.status === 'complete'`), 'previous turn retains its final frame');
-      await waitFor(() => previousCapture.exitCode !== null && !entry(), 'previous capture released');
+      await waitFor(() => exited(previousCapture) && !entry(), 'previous capture released');
 
       // Start inside the 30-second retention window. This turn has no native
       // activity: subscribing and receiving ordinary SSE must not revive PiP.
@@ -1564,10 +1685,54 @@ async function verifyComputerPreview(sessionID, otherSessionID) {
     await native.quitApp({bundleID:fixtureBundleID,pid:second.pid});
     await waitFor(() => !entry()?.child, 'closing target application stops capture');
     assert.equal(entry().frame, null, 'closed window cannot display stale image');
+    await waitFor(() => js(`!document.querySelector('[data-computer-preview]')`), 'closed window unmounts picture-in-picture');
+    assert.equal(await js(`document.body.innerText.includes('窗口预览已停止')`), false);
+    await screenshot('computer-preview-invalid-window');
+    await operation(first, closeTurn); await live(first);
+    check('invalid preview is removed; another valid target in the same turn can show a new preview');
     await api(`/sessions/${sessionID}/cancel`, 'POST');
     check('native application exit stops capture and clears stale content');
+
+    const stackTurn = await startTurn(sessionID, 'preview-stack');
+    const cards = () => js(`Array.from(document.querySelectorAll('[data-computer-preview]')).map(el=>el.dataset.appId)`);
+    const assertStack = async appID => {
+      await waitFor(async () => (await cards())[0] === appID, 'latest operated app leads the stack');
+      const geometry = await js(`(() => {
+        const cards=Array.from(document.querySelectorAll('[data-computer-preview]'));
+        const [a,b]=cards.map(el=>el.getBoundingClientRect());
+        const x=(Math.max(a.left,b.left)+Math.min(a.right,b.right))/2;
+        const y=(Math.max(a.top,b.top)+Math.min(a.bottom,b.bottom))/2;
+        return {overlap:Math.min(a.right,b.right)>Math.max(a.left,b.left)&&Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top),
+          front:document.elementFromPoint(x,y)?.closest('[data-computer-preview]')?.dataset.appId,
+          within:cards.every(el=>{const r=el.getBoundingClientRect();return r.x>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})};
+      })()`);
+      assert.ok(geometry.overlap && geometry.within, JSON.stringify(geometry));
+      assert.equal(geometry.front, appID, 'cards really occlude one another in activity order');
+    };
+    await operation(first, stackTurn); await live(first);
+    await operation(stacked, stackTurn); await live(stacked);
+    await assertStack(stackedID);
+    const secondDeadline = entry(stackedID).expiresAt;
+    await delay(1_000);
+    await operation(first, stackTurn); await assertStack(fixtureBundleID);
+    assert.equal(entry(stackedID).expiresAt, secondDeadline, 'operating A does not renew B');
+    await screenshot('computer-preview-stack');
+    await delay(5_000);
+    await operation(first, stackTurn); await assertStack(fixtureBundleID);
+    const firstStream = entry().child, secondStream = entry(stackedID).child;
+    await waitFor(() => exited(secondStream), 'idle App stops its capture independently', 31_000);
+    await waitFor(async () => JSON.stringify(await cards()) === JSON.stringify([fixtureBundleID]), 'only idle App leaves the stack');
+    assert.equal(entry().child, firstStream); assert.ok(!exited(firstStream));
+    await screenshot('computer-preview-stack-expired');
+    await operation(stacked, stackTurn); await live(stacked); await assertStack(stackedID);
+    await native.quitApp({bundleID:stackedID,pid:stacked.pid});
+    stacked = undefined;
+    await waitFor(async () => JSON.stringify(await cards()) === JSON.stringify([fixtureBundleID]), 'failed App leaves the other preview intact');
+    check('two real App previews overlap; activity alone reorders; each expires after its own 30 seconds; failure removes only its card');
+    await api(`/sessions/${sessionID}/cancel`, 'POST');
   } finally {
-    for (const child of children) if (child.exitCode === null) await native.quitApp({bundleID:fixtureBundleID,pid:child.pid}).catch(() => child.kill());
+    if (stacked?.pid) await native.quitApp({bundleID:stacked.appID,pid:stacked.pid});
+    for (const child of children) if (!exited(child)) await native.quitApp({bundleID:fixtureBundleID,pid:child.pid}).catch(() => child.kill());
     await native.stop();
   }
 }

@@ -30,7 +30,8 @@ struct ProtocolRequest: Decodable, Equatable {
     case "list_apps":
       return .listApps
     case "app_identity":
-      return .applicationIdentity(bundleID: try bundleID(params.bundleID))
+      return .applicationIdentity(
+        bundleID: try bundleID(params.bundleID), locale: try required(params.locale, "locale"))
     case "use_app":
       return .useApp(
         bundleID: try bundleID(params.bundleID),
@@ -163,6 +164,7 @@ struct ProtocolRequest: Decodable, Equatable {
 }
 
 struct ProtocolParameters: Codable, Equatable {
+  var locale: String? = nil
   var delivery: String? = nil
   var promptAccessibility: Bool? = nil
   var promptScreenRecording: Bool? = nil

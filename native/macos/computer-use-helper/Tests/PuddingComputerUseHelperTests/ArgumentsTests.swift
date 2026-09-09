@@ -112,8 +112,11 @@ import Testing
 @Test func parsesApplicationIdentity() throws {
   #expect(
     try ArgumentParser.parse([
-      "app-identity", "--bundle-id", "com.apple.Notes",
-    ]) == .applicationIdentity(bundleID: "com.apple.Notes"))
+      "app-identity", "--bundle-id", "com.apple.Notes", "--locale", "zh-CN",
+    ]) == .applicationIdentity(bundleID: "com.apple.Notes", locale: "zh-CN"))
+  #expect(throws: ArgumentError.missingOption("--locale")) {
+    try ArgumentParser.parse(["app-identity", "--bundle-id", "com.apple.Notes"])
+  }
 }
 
 @Test func parsesQuitApplication() throws {

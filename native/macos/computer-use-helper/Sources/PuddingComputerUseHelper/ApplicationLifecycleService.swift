@@ -52,18 +52,14 @@ final class ApplicationLifecycleService {
     }
   }
 
-  func identity(bundleID: String) throws -> ApplicationIdentitySnapshot {
+  func identity(bundleID: String, locale: String) throws -> ApplicationIdentitySnapshot {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
       throw HelperError.applicationNotInstalled(bundleID)
     }
     let bundle = Bundle(url: url)
-    let name =
-      ValueSanitizer.bounded(
-        (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-          ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
-          ?? url.deletingPathExtension().lastPathComponent
-      ) ?? bundleID
-    knownApplications[bundleID] = name
+    let name = ValueSanitizer.bounded(
+      ApplicationDisplayName.resolve(bundle: bundle, url: url, preferredLanguages: [locale])
+    ) ?? bundleID
     return ApplicationIdentitySnapshot(
       bundleID: bundleID,
       name: name,
@@ -353,9 +349,7 @@ final class ApplicationLifecycleService {
   }
 
   private func applicationName(bundle: Bundle, url: URL) -> String {
-    (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-      ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
-      ?? url.deletingPathExtension().lastPathComponent
+    ApplicationDisplayName.resolve(bundle: bundle, url: url, preferredLanguages: Locale.preferredLanguages)
   }
 
   private func applicationIconPNGBase64(bundle: Bundle?) -> String? {

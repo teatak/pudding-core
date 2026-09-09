@@ -157,19 +157,27 @@ test("Computer Use bridge routes normalized-window pointer actions", async () =>
   }
 });
 
-test("background single-click delivery crosses the existing session-scoped pointer route", async () => {
+test("all background gestures cross the existing session-scoped pointer route without changing delivery", async () => {
   const host = new FakeComputerUseHost();
   const bridge = new ComputerUseBridgeServer(host);
   const identity = await bridge.start();
   try {
-    const response = await fetch(`${identity.url}/computer/pointer`, {
-      method: "POST", headers: authenticatedHeaders(identity.token),
-      body: JSON.stringify({sessionID:"background-test", appID:"com.apple.iCal", windowID:42,
-        action:"click", x:0.5, y:0.4, delivery:"background"}),
-    });
-    assert.equal(response.status, 200);
-    assert.equal(host.pointerAction.delivery, "background");
-    assert.equal(host.pointerAction.action, "click");
+    for (const gesture of [
+      {action:"click", button:"left", clickCount:1},
+      {action:"click", button:"left", clickCount:2},
+      {action:"click", button:"right", clickCount:1},
+      {action:"drag", toX:0.7, toY:0.6},
+      {action:"scroll", deltaX:-40, deltaY:120},
+    ]) {
+      const response = await fetch(`${identity.url}/computer/pointer`, {
+        method: "POST", headers: authenticatedHeaders(identity.token),
+        body: JSON.stringify({sessionID:"background-test", appID:"com.example.Custom", windowID:42,
+          ...gesture, x:0.5, y:0.4, delivery:"background"}),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(host.pointerAction.delivery, "background");
+      for (const [key, value] of Object.entries(gesture)) assert.equal(host.pointerAction[key], value);
+    }
   } finally { await bridge.stop(); }
 });
 

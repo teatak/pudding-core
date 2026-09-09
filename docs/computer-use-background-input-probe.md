@@ -4,7 +4,9 @@
 
 这是 [Codex 对比报告](computer-use-codex-comparison-2026-09-08.md) 之后的实施记录。第一至十轮仅做隔离实验；第十一轮开始接入现有工具和 Helper，保留默认前台模式的保护、权限与 session 授权。未操作京东或修改业务数据。
 
-**最新进展（第十一轮）：系统计算器、邮件和日历的后台普通单击已显式接入 `actions[].delivery=background`；当前源码的 Manager → Electron bridge → 新 Helper/worker 日历月份往返回归通过。** 第十轮真实邮件 3 项、日历 4 项的原型结果保留；飞书点击后成为系统前台的已知失败仍未解决，因此不开放飞书。旧生命周期、真人并行样本不能代替新产品链路验收。前面各轮保留当时的失败证据，不应当作最新机制结论。
+**原生交互最新进展（第十四轮）：完整原生日历链路的双会话串行、取消排队会话和取消在途批次三项通过，启用 Go 竞态检测；2228 次采样前台不变、鼠标位移 0。** 取消保留实际完成前缀与未知效果，不发后续步骤，不重放；三个场景均恢复原月份。实测为脚本模型、隔离 store、真实 Engine/Manager/Electron bridge/Helper/worker，不是已安装 release 或真实 LLM 验收。第十二、十三轮结果保留。当前源码签名包的交互、TCC 与升级仍未验收，飞书切到系统前台的已知失败未解决，仍不开放飞书。
+
+第十五轮修复 release 测试入口冲突，并完成 **0.3.0 arm64/x64 Developer ID 签名、Apple 公证及完整产物校验**。用户明确授权公证并要求沿用未发布的 0.3.0；产物及证据见该节，未公开发布或替换安装版。
 
 ## 隔离原型行为边界
 
@@ -594,7 +596,7 @@ node scripts/computer-use-real-app-probe.cjs calendar
 
 - [工具定义](../internal/tool/builtin.go)和内置 Computer Use 指引增加可选 `delivery`。保持单个 `actions[]` 接口，后台模式必须显式选择；不增加 observationID、快照时限或强制观察。
 - [Go Manager](../internal/computer/manager.go)校验动作形状，透传模式并校验结果一致；沿用 session 路由、授权和串行化。Electron 使用原 `/computer/pointer`，后台不可用/输入仍被占用时保留具体错误和 `outcome`，不自动切换前台。
-- [BackgroundClick.swift](../native/macos/computer-use-helper/Sources/PuddingComputerUseHelper/BackgroundClick.swift)提供固定系统应用身份策略、PID/窗口内单击、同一 Helper 可执行文件的 worker、共享恢复 journal 及独占输入锁。原型留作历史实验，不是产品备用投递路径。详细边界见[设计文档](computer-use-design.md#2026-09-09-后台普通单击有限预览)。
+- 当时的 `BackgroundClick.swift` 提供固定系统应用身份策略、PID/窗口内单击、同一 Helper 可执行文件的 worker、共享恢复 journal 及独占输入锁；现已由 [BackgroundPointer.swift](../native/macos/computer-use-helper/Sources/PuddingComputerUseHelper/BackgroundPointer.swift) 替代并扩展手势。原型留作历史实验，不是产品备用投递路径。当前边界见[设计文档](computer-use-design.md#2026-09-09-后台指针投递)。
 - worker 和 Helper 同路径执行以保持签名来源一致；这不是正式 TCC 归属已验证的结论。双方同时强制结束、事件与 journal 更新不能原子化等边界明确保留；不把“清理可能完成一次 mouseUp”当成可安全重放。
 
 ### 当前源码真实链路回归
@@ -615,14 +617,227 @@ node scripts/computer-use-real-app-probe.cjs calendar
 - `make test` 全部通过；有链接器重复库 warning，无测试失败。
 - `npm run test:electron`：213/213 通过，覆盖新模式路由、错误映射及已有取消/权限恢复契约。
 - Swift Helper：3 项 XCTest + 89 项 Swift Testing 通过。新增覆盖模式/固定身份拒绝、正常单击配对、中断阶段、恢复失败、真实用户激活保护、独占/遗留 journal 和事件构造。这里的崩溃恢复是状态注入单测，不冒充新 worker 的真实 SIGKILL 回归。
-- 当前源码日历实测通过，但尚未完成正式 Developer ID 安装包的 TCC 身份/升级、权限撤销、多屏缩放，以及新链路真实崩溃、取消和持续并行操作验收。后台双击/右键/拖拽/滚轮和其他 App 未开放。
+- 本轮当前源码日历实测通过；随后第十二轮补齐指定的新链路真实崩溃、取消和同目标竞争样本。正式 Developer ID 安装包的 TCC 身份/升级、权限撤销、多屏缩放和持续真人并行操作仍未验收。后台双击/右键/拖拽/滚轮和其他 App 未开放。
+
+## 第十二轮：新 Helper 真实崩溃、取消和竞争回归
+
+新增 [产品生命周期 runner](../scripts/computer-use-background-lifecycle.cjs) 和[判定测试](../scripts/computer-use-background-lifecycle.test.cjs)。5 项判定测试通过后，用户确认暂不移动鼠标/切换应用，实际执行全部 9 个场景，**9/9 通过**。这轮没有修改生产投递逻辑、权限或白名单。
+
+逐项执行：正常单击；worker 在激活/按下/释放三个 journal 阶段被 SIGKILL；Helper 在同样三个阶段被 SIGKILL；Host signal 取消；两个独立 Host 同时向同一目标投递，验证后一个明确返回 `computer_input_busy/not_started`。故障只作用于本轮创建并核验父 PID/可执行路径的 Helper 和 worker；未关闭日历，未修改或清空恢复 journal。
+
+| 场景 | 故障/竞争动作的实际月份效果 | 返回结果 | 恢复与隔离 |
+| --- | --- | --- | --- |
+| 正常单击 | 前进 1 月 | `completed=true, delivery=background` | 通过 |
+| worker 激活/按下/释放阶段 SIGKILL，3 项 | 分别前进 0/1/1 月 | 均 `computer_background_unavailable, outcome=unknown` | 3/3 通过 |
+| Helper 激活/按下/释放阶段 SIGKILL，3 项 | 分别前进 0/1/1 月 | 均 `computer_helper_crashed, outcome=unknown` | 3/3 通过 |
+| 按下阶段取消 Host signal | 已在途单击仍前进 1 月 | `computer_action_cancelled, outcome=unknown` | 通过，不当作回滚或未执行 |
+| worker 暂停期间，第二 Host 请求同一目标 | 仅首个动作前进 1 月 | 第二个返回 `computer_input_busy/not_started, retryable=false` | 恢复 worker 后首个正常完成 |
+
+每项最终 journal 均为 idle，日历均恢复到初始的 **2026 年 9 月**。每项 143–446 次、合计 3006 次采样的前台均为 guard PID `81491`，无激活通知、鼠标位移 0、guard 无误输入。需要逆向导航时，在观察已前进 1 月后执行新的上一月动作，而非重试原失败动作。
+
+原始证据在本机临时目录 `pudding-background-probe-Sco411/production-lifecycle-<scenario>.json`，包含故障进程 PID/阶段、结果、月份变化、恢复记录和 guard 采样。退出后只读进程核对确认本轮 Helper、worker 和 guard 均已退出，临时证据保留。没有重启开发/发布 Pudding，没有操作日程或重置 TCC。
+
+大多数动作走实际 session-scoped Electron bridge/权限协调器；取消场景直接调用真实 Host signal 以检查其结构化结果，不冒充 Engine 取消的端到端验收。日历只切下一月，观察已发生的效果后才决定是否执行新的上一月导航；不重放失败单击。任一场景失败即停止，不连续尝试失败目标。测试使用当前源码 Helper，不放宽应用白名单、不添加原生测试开关。
+
+判定同时检查实际月份、返回 outcome、恢复 journal、故障阶段、前台/鼠标采样以及 guard 误输入。journal 阶段是发送端恢复记录，不等于接收应用已处理该事件；日历没有内部 active/key 或控件回调探针，因此此 runner 不能证明任意指令边界的精确配对、内部焦点完整恢复或排除任意短的瞬态。
+
+```sh
+node --test scripts/computer-use-background-lifecycle.test.cjs
+node scripts/computer-use-background-lifecycle.cjs /absolute/current/PuddingComputerUseHelper all
+# 单项复测：normal、worker-1/2/3、helper-1/2/3、cancel、concurrent。
+```
+
+## 第十三轮：Engine 会话链路与取消记录
+
+本轮确定性测试使用真实 Engine、App 按需加载、session/App 审批、BuiltinRunner 参数解析及共享 Manager，原生服务用可控 barrier 替代；随后另做真实日历完整链路，见下节。没有操作当前开发/发布 daemon，也没有更改观察要求或应用白名单。
+
+### 先复现，再修复
+
+1. Engine 在工具返回后先检查 `ctx.Err()`，直接结束取消 turn，尚未追加工具结果。测试中的第 1 步成功、第 2 步取消后，canonical Computer Use 结果数量为 **0**。修复为保存并发布实际返回结果，再停止后续模型/工具工作；不合成成功，也不重放动作。
+2. 原生动作可能在取消 drain 期间完成并返回成功。原 Manager 无批内取消检查，测试中的第 2 步这样完成后，第 3 步仍被派发（实际 native service 调用数 **3**，应为 **2**）。修复为每项派发前检查现有 context；保留已完成两项，把尚未派发项记为 `not_started`，整个批次为 `partial`。不承诺撤销已经在途的动作。
+
+### 验证结果
+
+- [Engine 回归测试](../internal/engine/computer_background_test.go)覆盖 5 个确定性场景：取消时失败项为 unknown、not_started、在取消期间完成；两个会话串行；取消排队会话不影响执行中的会话。
+- 校验 `completedCount`、零基 `failedIndex`、失败项与整个批次的 outcome，以及不可重放标记；保存的结果只出现一次，实时工具结果也只发布一次。重新构造 Engine 后，脚本模型从同一测试 store 的 canonical messages 读取原结果，不产生新动作。这不是实际 LLM 不会主动误重试的保证，也不是进程/数据库重启验收。
+- 两个会话各有一次 session/App 审批；A 的两步结束后 B 才进入原生服务，取消排队 B 时只有 A 收到输入。此处验证实际 Engine + Manager 排队，不把此前的两个 Host 争锁混为一谈。
+- `go test -race -tags 'sqlite_fts5 webrtcaec' ./internal/engine -run '^TestBackgroundEngine' -count=20 -timeout=120s` 通过。
+- `make test` 通过。首次沙箱运行因 httptest 无法绑定 loopback 端口失败；允许测试端口后重跑通过，链接器仍有既有重复库 warning。
+
+### 完整原生链路实测（已通过）
+
+复用现有 runner，增加显式 `engine` 模式：
+
+```sh
+node scripts/computer-use-background-integration.cjs /absolute/path/to/current-source/PuddingComputerUseHelper engine
+```
+
+[日历 Engine smoke](../internal/engine/computer_background_native_test.go)以脚本模型在隔离会话中加载 Computer Use、访问已有日历、观察一次，然后一次 `actions[]` 提交下一月/上一月。测试接收每个原生回复后检查月份实际效果；这些观察只用于验收，不是产品的隐式自动观察或快照校验。runner 继续使用真实 Electron 权限协调器、Helper/worker 和遮挡监测窗口；输出 `production-engine-chain.json`。
+
+用户确认继续后执行上述 `engine` 模式，`TestBackgroundCalendarEngineIntegration` 用时 **3.20 秒并通过**：
+
+- 从 App 加载开始，经一次 session/App 审批、`use_app(foreground=false)`、一次模型观察，在一个 `actions[]` 中提交两次普通后台单击。脚本模型共 5 次调用，没有逐步追加模型观察或重放动作。
+- 实际月份为 `2026年9月 → 10月 → 9月`；返回两项 `delivery=background`、`completed=true`，canonical 工具结果 `completedCount=2`。
+- guard 遮挡日历，**799 次采样**前台均为 guard PID `90630`，激活事件为空，最大鼠标位移 **0**；guard 无输入事件或按钮效果。
+- 证据：本机临时目录 `pudding-background-probe-i3uaXE/production-engine-chain.json`，包含完整测试输出及采样结果。退出后只读核对确认本轮临时 Helper/worker/guard 已退出，日历与已安装 Pudding 仍在运行；未修改日程、重启 Pudding 或重置权限。
+
+该结果证明本机当前源码的单会话正常执行链路；脚本模型不是实际 LLM，临时 store 不是正式数据库，也没有经过安装包 UI。原生多会话取消随后由第十四轮补充；Developer ID 签名安装包/TCC、持续真人并行和更广泛窗口/系统场景仍待验证，不把正常往返通过扩展为这些边界已通过。
+
+## 第十四轮：原生 Engine 多会话与取消
+
+新增 [多会话原生测试](../internal/engine/computer_background_sessions_native_test.go)，复用第十三轮的隔离 Engine harness 和真实 bridge，未修改产品输入路径。runner 增加显式 `engine-sessions` 模式，编译时启用 `-race`：
+
+```sh
+node scripts/computer-use-background-integration.cjs /absolute/path/to/current-source/PuddingComputerUseHelper engine-sessions
+```
+
+测试先观察已有日历的唯一窗口及下一月/上一月位置，再把坐标交给两个脚本模型；每个会话实际加载 Computer Use、经过一次 session/App 审批并提交 `actions[]`。正常原生回复后由测试检查实际月份，不给产品增加隐式观察或 observationID 校验。测试失败即停止矩阵，不自动重试输入。
+
+为确定性覆盖排队，测试在 A 第一次真实点击完成后暂缓交付回复，直到 B 进入实际 Manager；没有暂停 Helper/worker 或使用原生测试开关。在途取消则只读目标 PID 的恢复 journal，在第二步 `pressed` 阶段调用真实 `Engine.Cancel("a")`，不改写 journal、不重置 TCC。
+
+### 实测结果
+
+三项共 **9.48 秒，3/3 通过，无 Go race 报告**：
+
+| 场景 | 原生派发顺序及实际效果 | 结果 |
+| --- | --- | --- |
+| 双会话串行 | A 下一月两次，B 上一月两次；顺序 `A A B B`，月份 `9 → 10 → 11 → 10 → 9` | 两会话完成，各审批一次 |
+| 取消排队会话 | A 下一月/上一月；B 在排队时取消，没有任何原生输入 | B 为 `computer_action_cancelled/not_started`；A 正常完成，恢复 9 月 |
+| 取消在途批次 | A 第二步按下时取消；实际第二次点击仍完成到 11 月，但第三步未派发 | canonical 保留 `completedCount=1`、零基 `failedIndex=1`、`outcome=unknown`、`retryable=false`；观察实际月份后由 B 新执行两次上一月，恢复 9 月 |
+
+在途取消实际经过 HTTP context 中止，保存的错误码为 `computer_unavailable`，Engine turn 状态为 cancelled；不是排队取消的 `not_started`，也不把已发生但未收到确认的第二次效果伪装成成功或未执行。视图恢复是测试依据新观察发起的反向导航，不是产品自动回滚或重放。
+
+- guard 遮挡日历，**2228 次采样**前台均为 guard PID `92685`，激活事件为空，最大鼠标位移 **0**，guard 无误输入或按钮效果。采样不证明任意短瞬态均不存在。
+- 三项结束 journal 均为 idle，日历均恢复 `2026年9月`；只读进程检查确认本轮临时 Helper/worker/guard 已退出，未关闭日历或 Pudding，未修改日程。
+- 证据：本机临时目录 `pudding-background-probe-FgRQar/production-engine-sessions.json`，包含逐项 Go 输出和监测结果。
+- 另复核已安装 `/Applications/Pudding.app`：主程序及嵌入 Helper 的严格签名校验通过；仓库 release verifier 检查的 Helper bundle ID、Team ID、版本、架构和依赖通过。Team ID 为 `7K47HJ79JA`，Helper ID 为 `com.teatak.pudding.computer-use-helper`。安装版为 **0.2.11，签名日期 2026-09-04**，不是包含本轮源码的候选包；这只能证明该旧包签名与身份一致，不能证明当前链路 TCC 归属、升级免重复授权或发布验收完成。
+
+本轮仍为本机当前源码、脚本模型和隔离 store；未测试安装包 UI、真实 LLM 或持续真人并行输入。此前原型的真人样本不替代新生产链路的并行回归。
+
+## 第十五轮：签名候选包准备与公证边界
+
+为避免覆盖工作区现有 `dist/release`（9 月 6 日的 0.3.0 产物）、开发 runtime 或运行中 Pudding，复制当前源码及未提交改动至 `/private/tmp/pudding-signed-background-SzOBji`，在该副本通过 Make 入口检查。仓库版本仍为 0.3.0，没有改版本、提交、打标签或上传 GitHub。
+
+### 已完成
+
+- 只读确认现有 Developer ID Application 证书可用，`make desktop-notary-check` 验证已配置的 `pudding-notary` 凭据通过；未读取或输出私钥/密码。
+- 临时副本 `make desktop-runtimes` 通过：数据库结构 release contract、Web TypeScript/Vite 构建、arm64/x64 release daemon、Swift Helper 和固定版本语言服务均完成；Mach-O 架构分别确认为 arm64/x86_64。
+- `npm run test:electron` **213/213 通过**。首次沙箱执行因禁止监听 `127.0.0.1` 返回 EPERM；允许临时 loopback 测试端口后重跑通过，不是产品逻辑修复。
+- 补测发现 `swift test --configuration release` 在 3 项 XCTest 通过后退出 1：Helper 收到 `--test-bundle-path`，89 项 Swift Testing 未启动。该测试包的 `__swift5_entry` 有两条记录，首项指向 `PuddingComputerUseHelper_main`，次项才是测试 Runner。临时副本拆分后测试通过，且测试包只剩 Runner 一条入口，随后同步源码：实现保留为同名普通 target，独立 CLI target 只调用 `HelperEntryPoint.run()`；删除实现模块里的旧 `@main`。未加测试参数特判或改变原生输入逻辑。
+- `make computer-use-helper-test` 已加入 release 配置；修复后 debug、release **各 92 项通过**（3 XCTest + 89 Swift Testing）。另做 4 项零输入 CLI smoke：权限预检、serve 权限预检、空请求 worker 拒绝、未知命令拒绝，均通过。产品文件名、Bundle ID、参数协议和 worker 的同可执行文件路径不变。
+- 已有构建 warning 保留：Web 大 chunk、链接器重复库，以及 x64 构建目标 12.0 链接 ONNX 最低 15.5。打包配置本来就声明 x64 最低 macOS 15.5；本轮未修改该边界，也未把交叉编译通过当作 Intel 真机运行通过。
+
+副本来源为 HEAD `a16d146bb4814e9d465a704559d70a95173b4eaf` 加当前工作区改动。以下 SHA-256 在副本与原工作区一致，保留后续签名验收的关键源码依据：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `internal/engine/engine.go` | `8a850d3a9869058034e9bd64ac3f87e5193c92f2f55b9afc74bc79ec3e8bb4ca` |
+| `internal/computer/manager.go` | `cb9c993c42d0281b5c4851a52e9537d181890d9d7ac2cebf1afecf0c1f8b848a` |
+| `native/macos/computer-use-helper/Sources/PuddingComputerUseHelper/BackgroundClick.swift` | `ea949a5f4487c608f71470921177311785aadbd08ab7eed12f3011934b7b680e` |
+| `native/macos/computer-use-helper/Package.swift`（入口修复后） | `327130dd9f9a07cd274513fdde3d9b941c1382e054d540520318795238f43286` |
+| `native/macos/computer-use-helper/Sources/PuddingComputerUseHelper/HelperEntryPoint.swift` | `8fd02a504b36bdacbfff6e65122e52c9f134ed25b456230cf2f21b035e68ea30` |
+| `native/macos/computer-use-helper/Sources/PuddingComputerUseHelperCLI/Main.swift` | `799fc2d36968c120312335b9608da721cd63c09eac69c57499c767b1974a5f4d` |
+
+### 公证授权与产物结果
+
+最初计划以临时版本覆盖进行 preview 测试；打包命令在执行前被自动安全审核拒绝，理由是公证会将含项目代码的应用二进制提交给 Apple，需要用户明确授权此出站目的地。没有绕过管线、禁用公证或手工生成假签名包；随后只单独执行了与上传无关的 `desktop-runtimes`。
+
+用户随后明确要求“打包上传公证”，并说明 **0.3.0 尚未发布**。因此取消临时版本覆盖，改为临时副本的官方 `make desktop-bundle`，沿用仓库 0.3.0，只生成本地产物并提交 Apple 公证；没有 GitHub 发布授权。
+
+官方管线退出 **0**，最终输出 `Verified desktop release: version=0.3.0 channel=stable architectures=arm64,x64 mode=automatic`：
+
+- 两架构均显示 `notarization successful`。staged app、ZIP 解包及 DMG 挂载内的 App 均通过严格签名、stapled ticket 与 Gatekeeper 检查（`accepted / Notarized Developer ID`）；DMG 校验和通过。
+- 版本、架构、最低系统版本、Helper 与嵌套原生代码、依赖可移植性、权限声明及法律文件通过现有 release verifier。保留 9 个发布资产；额外复核更新元数据的 4 个文件及主 ZIP 的 SHA-512/大小均匹配。
+- arm64/x64 Helper 与已安装 0.2.11 的 Bundle ID、Team ID 和 designated requirement 完全一致：`com.teatak.pudding.computer-use-helper` / `7K47HJ79JA`。比较只读执行，未启动安装包；身份一致不等于 TCC 升级已验证。
+- 验证完成后将本轮完整产物移至工作区 `dist/verified-0.3.0-20260909/`，保留 `bundle-0.3.0.log` 和 `SHA256SUMS`。原 `dist/release` 的 9 月 6 日产物不变。
+
+| 安装包 | 字节数 | SHA-256 |
+| --- | --- | --- |
+| `Pudding-0.3.0-arm64.dmg` | 183276646 | `94155b75ad7b470f0c780bc1bf9929e04d9e135b1124a27dd58999b01fde412f` |
+| `Pudding-0.3.0-x64.dmg` | 183585222 | `225dfb39da08dbb3aeb051ec7793580d1d16331cd134f0a96b38c88daf90c7da` |
+
+### 仍未完成
+
+新包 TCC 归属、跨版本升级和持续真人并行仍未验证。本轮没有发布 GitHub、创建 tag、安装或替换 Pudding；当前安装版、用户数据和权限状态未更改。arm64 本机交叉构建及包校验不等于 Intel 真机运行通过。
+
+## 第十六轮：移除兼容白名单，统一后台鼠标手势（2026-09-09）
+
+### 变更与恢复边界
+
+- 删除 `BackgroundClickPolicy` 及 Go/Swift 的“后台仅单次左键”校验，旧 `BackgroundClick` 实现由 `BackgroundPointer` 替代。现有 `actions[]` 支持后台左/右单击、左双击、左拖拽及双轴滚动；session/App 审批和既有受保护 App 策略不变。没有新工具、observationID、TTL、强制观察或自动前台 fallback。
+- 所有事件在按下前构造。单字节 journal 记录阶段及按下/拖拽步骤，异常释放使用该步骤的按钮、点击次数和坐标，不重新执行前缀。取消仍有界 drain，已在途手势可能完成；结果保持 `unknown`，不是回滚或恰好一次保证。
+- 连续异常测试发现旧恢复路径有时未发送释放/去激活，却已清空 journal。诊断记录到同一存活目标、相同窗口 frame 下 `sameProcess()` 短暂返回 false，下一次读取又为 true；具体哪项 App 元数据发生瞬时变化未单独归因。旧代码把这种 false 直接当作退出。现改为内核 `proc_pidinfo` 启动标记 + `proc_pidpath` 可执行路径，身份读取失败不清空 journal，不增加重试或重新激活。
+- Helper 被终止后，worker 写结果曾触发 `NSFileHandleOperationException: Broken pipe`。改用可抛的 Swift `write(contentsOf:)`，清理完成后父进程已经离开时安静结束；真实测试同时检查 stderr 不再出现该异常。
+
+### 最终源码验证
+
+使用 `bin/computer-use-helper-build/release/PuddingComputerUseHelper`，SHA-256：
+
+```text
+3f97530c44e23b609dc574dcc0e979a5b6b02531f27e63e957730b3a30e1a4c3
+```
+
+不是原型发送器：正常动作经过真实 Electron bridge/权限协调器和源码 Helper；异常测试经过真实 Host signal、Helper 和 worker。接收端、遮挡窗口和状态记录都来自隔离测试 App，不访问已安装 Pudding、真实消息、订单或用户数据库，不重置 TCC。
+
+| 最终测试 | 结果 | 监测样本 |
+| --- | --- | --- |
+| AppKit 默认控件：单击、双击、右键、拖拽、实际滚动 | 5/5 | 833 |
+| 默认 Electron（未启用 click-through）：同五种动作 | 5/5，DOM 事件 trusted | 746 |
+| 右键、双击第二次按下、拖拽第 4 个位置 × worker SIGKILL / Helper SIGKILL / Host 取消 | 9/9，释放按钮/次数/位置正确、journal idle、内部 active 恢复 | 1000 |
+
+以上 2579 次采样中系统前台不变、全局鼠标位移 0、guard 无误输入，窗口列表中 guard 始终遮挡目标。取消拖拽可能继续完成当前手势的其余步骤，但没有重放/额外点击。这些不是真人并行输入或任意 App 兼容证明。
+
+证据位于本机临时目录 `/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/`：
+
+- `pudding-background-probe-krKLW9/production-pointer.json`：最终 AppKit。
+- `pudding-background-probe-vw0BbJ/production-pointer.json`：最终 Electron。
+- `pudding-background-probe-J6eks1/pointer-recovery.json`：最终 9 项异常测试，诊断 stderr 为空。
+- 初次将额外目标辅助窗口误判为层级变化的 `MNmKeu`、意图写入但 down 尚未送达的 `o4wm2J`、连续拖拽恢复失败的 `Fg4mVz` / `kQrYrP`、暴露身份及 broken-pipe 问题的 `k3Qn5x` 均保留，不作为通过样本。
+- `SGhhyZ` / `lYQDG4` 因前台切换或鼠标移动未通过隔离检查，保留排除，不用重跑结果覆盖原记录。
+
+自动检查：原生 release 测试 98 项（95 Swift Testing + 3 XCTest），Electron 216 项，Go computer/tool/app 包及 Engine 后台取消/多会话定向测试通过。原生测试还覆盖负坐标、非法参数、每一步中断、PID/可执行文件改变、身份不可用、用户激活和未解决 journal。测试脚本为 `computer-use-background-pointer-smoke.cjs` 和 `computer-use-background-pointer-recovery.cjs`，旧 probe 仅提供接收/监测。
+
+本轮没有打包、签名、公证或发布；已安装版不会自动获得这些源码改动。飞书历史的自行激活问题、镜像兼容、正式包 TCC/升级、多屏和持续真人并行仍是后续验收，不能宣称已解决。
+
+## 第十七轮：隐藏/最小化窗口的鼠标释放恢复（2026-09-09）
+
+### 根因与修改
+
+复查发现 `recover.windowExists` 使用仅可见窗口查询；当鼠标已按下但窗口隐藏/最小化时，它会跳过 mouseUp，随后把 journal 清为 idle。先加入真实隐藏 NSWindow、事件记录器的回归用例，修复前实际结果仅有 `deactivate`，缺少预期的 `release(4)`；此用例不显示窗口、不发送系统输入。
+
+- 使用单一全窗口查询确认 PID/window ID，正常输入再检查可见性、层级与几何；恢复允许同一隐藏/最小化窗口接收对应步骤的释放。不增加观察 token、重试或前台 fallback。
+- WindowServer 对隐藏窗口可省略 `kCGWindowIsOnscreen`，因此仅明确为 true 才允许继续输入。查询返回 nil 或必要元数据不可读时抛错，恢复保留原 pressed/step；不再把读取失败当作空窗口列表。已确认目标窗口消失或换了 owner 则不向旧窗口发送释放。
+- 增加隔离 Fixture 的一次性窗口生命周期注入：接收第 4 个拖拽位置后隐藏、最小化、移动或关闭自己的窗口。该测试入口不进入产品 Helper、LLM schema 或用户 App。
+
+### 验证
+
+最终源码 release Helper SHA-256：`8225596fded044134a77d40ec4bd3ca28eff401018fcc56f5a919641db1b30f4`。
+
+| 检查 | 结果 |
+| --- | --- |
+| 原生 release 完整测试 | 101 项通过（98 Swift Testing + 3 XCTest），包含修复前失败的隐藏窗口回归、查询失败、元数据不完整、错误 owner、释放权限失败后保留 journal |
+| 真实拖拽中隐藏/最小化/移动/关闭 | 4/4；均报告 unknown，释放指向原窗口及最后接收到的拖拽坐标，无额外 down，恢复 journal idle |
+| 右键/双击/拖拽 × worker 退出/Helper 退出/Host 取消 | 9/9；匹配释放、内部 active 恢复，无事件重放 |
+| 正常 AppKit、默认 Electron 的五种手势 | 10/10；效果和隔离检查通过 |
+
+四组真实测试共 3165 次监测采样，前台保持 guard、鼠标位移 0、guard 无误输入且持续遮挡目标。窗口变化到停止之间可能已有事件在途；本轮隐藏/最小化/移动接收到 4 或 5 个拖拽位置，不承诺原子撤回已投递事件。实际权限撤销只做错误注入回归，没有重置用户 TCC。
+
+本机证据目录前缀 `/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/`：
+
+- `pudding-background-probe-HM3y7z/window-lifecycle.json`：4 项窗口生命周期，714 样本。
+- `pudding-background-probe-7cEROr/pointer-recovery.json`：9 项真实异常恢复，957 样本。
+- `pudding-background-probe-KMcMle/production-pointer.json`：AppKit 5 项，778 样本。
+- `pudding-background-probe-tjfNeX/production-pointer.json`：默认 Electron 5 项，716 样本。
+- 首轮 `pudding-background-probe-iyssGB/window-lifecycle.json` 保留失败断言：误将 `NSWindow.close` 等同于 WindowServer 已销毁，要求 up 数为零。实际唯一 up 仍指向原 window ID/最后位置，是窗口销毁前的合法清理。修正断言为不额外按下、至多一次原窗口原位置释放；未放宽产品恢复规则。
+
+所有测试进程与窗口已结束，原有 dev/release Helper 未重启。此轮没有打包、签名、公证、发布或更改用户权限。真实权限撤销、目标缩放/重启、多屏与正式签名包仍需各自验收。
 
 ## 尚未通过的通用默认后台发布门槛
 
 1. 不依赖第三方应用开启首次点击，仍能正确执行普通单击/拖拽。普通单击已在两个受控接收端及邮件、日历本轮场景通过；飞书点击后成为系统前台的问题未解决。第八轮通过一次真人打字和移动鼠标并行样本，合成激活下的拖拽、IME 及完整人工并行输入仍未验收，不能直接推广。
 2. 对非公开窗口内坐标接口做系统版本、符号缺失、发布签名与维护边界评估。当前只证明一个 macOS 版本可用，符号缺失明确失败，无 fallback。
 3. 镜像真实手机界面验收：双击已分别通过后台可见、遮挡样本；普通单击未通过，滚轮只在部分页面生效，边缘拖拽未看到效果，右键未测。不能以局部通过代替完整验收。
-4. 第八轮复现的执行进程崩溃与同 App 并发已在第九轮修复并通过隔离复测；双方同时退出和事件投递原子性边界见上文。权限撤销、目标缩放/关闭/重启、多屏缩放及跨应用持续前台输入仍需验证；不能由现有样本声称所有异常场景均已验证。
-5. 第十一轮已把有限普通单击接入现有 `actions[]`、session/App 授权及结构化部分失败链路；正式签名、完整生命周期和并行验收未完成，不能由源码接入直接认定可通用发布。批末可选观察、镜像文本输入优化仍未实施。
+4. 第十二轮已验证当前新 Helper 的六个 SIGKILL 场景、Host 取消和两个 Host 的同目标竞争；第十七轮补齐拖拽中隐藏、最小化、移动、关闭及九项真实异常恢复。双方同时退出和事件投递原子性边界见上文。真实权限撤销、目标缩放/重启、多屏缩放及跨应用持续前台输入仍需验证；不能由现有样本声称所有异常场景均已验证。
+5. 第十一轮已把有限普通单击接入现有 `actions[]`、session/App 授权及结构化部分失败链路；第十三轮补齐 Engine 确定性回归及原生单会话往返，第十四轮补齐原生双会话串行、排队取消和在途批次取消，第十五轮完成双架构签名、公证和产物校验。签名包的交互、TCC/升级、剩余生命周期和持续真人并行验收未完成，不能由包校验直接认定可通用发布。批末可选观察、镜像文本输入优化仍未实施。
 
-因此当前结论是：**有限后台普通单击已接入，且新链路日历往返通过；飞书仍有切到系统前台的已知失败。尚不是能替换现有前台指针后端的通用实现，也不是正式签名版本已完成发布验收。**
+因此当前结论是：**源码已移除兼容 App 白名单并扩展五种后台手势，最终隔离接收端及异常测试通过；飞书仍有自行切到系统前台的历史失败。没有替换默认前台后端，也未完成本次扩展的正式签名包验收。**

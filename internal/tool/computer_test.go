@@ -112,11 +112,14 @@ func TestComputerBackgroundDeliverySchemaAndGuidance(t *testing.T) {
 		if definition.Name != ComputerAct {
 			continue
 		}
-		if !strings.Contains(definition.Description, "delivery=background") || !strings.Contains(definition.Description, "No automatic foreground fallback") || !strings.Contains(string(definition.InputSchema), `"delivery":{"type":"string","enum":["foreground","background"]`) {
-			t.Fatalf("missing explicit background preview contract: %+v", definition)
+		if !strings.Contains(definition.Description, "delivery=background") || !strings.Contains(definition.Description, "do not replay or switch to foreground automatically") || !strings.Contains(definition.Description, "left double-click, left drag and scroll in an approved app") || !strings.Contains(string(definition.InputSchema), `"delivery":{"type":"string","enum":["foreground","background"]`) {
+			t.Fatalf("missing explicit background pointer contract: %s", definition.Description)
 		}
-		args, err := decodeComputerActArgs([]byte(`{"appID":"com.apple.iCal","windowID":7,"actions":[{"type":"click","x":0.5,"y":0.4,"delivery":"background"}]}`))
-		if err != nil || args.Actions[0].Delivery != "background" {
+		if strings.Contains(definition.Description, "limited preview") || strings.Contains(string(definition.InputSchema), "Calculator/Mail/Calendar") {
+			t.Fatal("obsolete compatibility allowlist in tool contract")
+		}
+		args, err := decodeComputerActArgs([]byte(`{"appID":"com.example.Custom","windowID":7,"actions":[{"type":"click","x":0.5,"y":0.4,"delivery":"background"},{"type":"click","x":0.5,"y":0.4,"clickCount":2,"delivery":"background"},{"type":"click","x":0.5,"y":0.4,"button":"right","delivery":"background"},{"type":"drag","x":0.5,"y":0.4,"toX":0.7,"toY":0.6,"delivery":"background"},{"type":"scroll","x":0.5,"y":0.4,"deltaY":120,"delivery":"background"}]}`))
+		if err != nil || len(args.Actions) != 5 || args.Actions[0].Delivery != "background" {
 			t.Fatalf("args=%+v err=%v", args, err)
 		}
 		return
@@ -217,8 +220,8 @@ func TestComputerActionExamplesMatchTheRuntimeContract(t *testing.T) {
 			}
 			sizes = append(sizes, len(args.Actions))
 		}
-		if len(sizes) != 2 || sizes[0] != 1 || sizes[1] != 2 {
-			t.Fatalf("missing single-action and batch examples: %v", sizes)
+		if len(sizes) != 3 || sizes[0] != 1 || sizes[1] != 2 || sizes[2] != 1 {
+			t.Fatalf("missing single-action, batch, and background-pointer examples: %v", sizes)
 		}
 		for _, rule := range []string{"outcome=partial", "result.failure.outcome", "zero-based", "Never replay the completed prefix"} {
 			if !strings.Contains(definition.Description, rule) {
