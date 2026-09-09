@@ -48,6 +48,7 @@ struct PointerInput: Equatable {
   let clickCount: Int?
   let deltaX: Int?
   let deltaY: Int?
+  var delivery: String? = nil
 
   static func validated(
     action: PointerAction,
@@ -58,8 +59,15 @@ struct PointerInput: Equatable {
     button: PointerButton?,
     clickCount: Int?,
     deltaX: Int?,
-    deltaY: Int?
+    deltaY: Int?,
+    delivery: String? = nil
   ) throws -> PointerInput {
+    guard delivery == nil || delivery == "foreground" || delivery == "background" else {
+      throw ArgumentError.invalidOption("delivery", "must be foreground or background")
+    }
+    guard delivery != "background" || (action == .click && (button ?? .left) == .left && (clickCount ?? 1) == 1) else {
+      throw ArgumentError.invalidOption("delivery", "background supports only a single left click")
+    }
     guard normalized(x), normalized(y) else {
       throw ArgumentError.invalidOption(
         "coordinates", "must be between 0 inclusive and 1 exclusive")
@@ -76,7 +84,7 @@ struct PointerInput: Equatable {
       }
       return PointerInput(
         action: action, x: x, y: y, toX: nil, toY: nil,
-        button: resolvedButton, clickCount: resolvedCount, deltaX: nil, deltaY: nil)
+        button: resolvedButton, clickCount: resolvedCount, deltaX: nil, deltaY: nil, delivery: delivery)
     case .drag:
       guard let toX, let toY, normalized(toX), normalized(toY) else {
         throw ArgumentError.invalidOption(
@@ -87,7 +95,7 @@ struct PointerInput: Equatable {
       }
       return PointerInput(
         action: action, x: x, y: y, toX: toX, toY: toY,
-        button: nil, clickCount: nil, deltaX: nil, deltaY: nil)
+        button: nil, clickCount: nil, deltaX: nil, deltaY: nil, delivery: delivery)
     case .scroll:
       let resolvedX = deltaX ?? 0
       let resolvedY = deltaY ?? 0
@@ -104,7 +112,7 @@ struct PointerInput: Equatable {
       }
       return PointerInput(
         action: action, x: x, y: y, toX: nil, toY: nil,
-        button: nil, clickCount: nil, deltaX: resolvedX, deltaY: resolvedY)
+        button: nil, clickCount: nil, deltaX: resolvedX, deltaY: resolvedY, delivery: delivery)
     }
   }
 
@@ -374,6 +382,7 @@ struct ArgumentParser {
         value: value
       )
     case "pointer":
+      var delivery: String?
       var bundleID: String?
       var windowID: UInt32?
       var action: PointerAction?
@@ -388,6 +397,8 @@ struct ArgumentParser {
       while let option = cursor.next() {
         let raw: String
         switch option {
+        case "--delivery":
+          delivery = try cursor.requireValue(option)
         case "--bundle-id":
           bundleID = try cursor.requireValue(option)
           continue
@@ -445,7 +456,8 @@ struct ArgumentParser {
         button: button,
         clickCount: clickCount,
         deltaX: deltaX,
-        deltaY: deltaY
+        deltaY: deltaY,
+        delivery: delivery
       )
       return .pointer(
         bundleID: try require(bundleID, "--bundle-id"),

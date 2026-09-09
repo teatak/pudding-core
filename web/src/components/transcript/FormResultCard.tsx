@@ -184,7 +184,7 @@ function formatStepValue(step: FormStep, value: unknown, confirmed: string): str
     return confirmed;
   }
   if (step.type === "single_select" || step.type === "multi_select") {
-    const values = Array.isArray(value) ? value : [value];
+    const values = step.type === "multi_select" && Array.isArray(value) ? value : [value];
     return values.map((item) => optionLabel(step.options, item) || formatValue(item)).join("、");
   }
   return formatValue(value);
@@ -203,7 +203,7 @@ function optionLabel(options: unknown[] | undefined, value: unknown) {
     if (!record) {
       continue;
     }
-    const optionValue = record.value ?? record.data ?? record.title ?? record.label;
+    const optionValue = record.value !== undefined ? record.value : record.data ?? record.title ?? record.label;
     if (comparableValue(optionValue) === target) {
       return stringValue(record.title) || stringValue(record.label) || formatValue(optionValue);
     }

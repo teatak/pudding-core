@@ -216,6 +216,7 @@ class ComputerUseBridgeServer {
           key:body.key,modifiers:body.modifiers,value:body.value}, {signal});
       case "/computer/pointer":
         return this.host.pointer({
+          delivery: body.delivery,
           bundleID: body.appID,
           windowID: body.windowID,
           action: body.action,
@@ -312,6 +313,8 @@ function classifyComputerUseError(error) {
       status = 404;
       break;
     case "computer_app_ambiguous":
+    case "computer_input_busy":
+    case "computer_background_unavailable":
     case "computer_pointer_target_changed":
     case "computer_app_not_foreground":
     case "computer_activation_failed":

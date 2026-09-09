@@ -291,6 +291,12 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 	if action.Type != ActionClick && action.Type != ActionDrag && action.Type != ActionScroll {
 		return action, invalid("type must be press, set_value, select, submit, click, drag, or scroll")
 	}
+	if action.Delivery != "" && action.Delivery != "foreground" && action.Delivery != "background" {
+		return action, invalid("delivery must be foreground or background")
+	}
+	if action.Delivery == "background" && (action.Type != ActionClick || (action.Button != "" && action.Button != PointerButtonLeft) || (action.ClickCount != nil && *action.ClickCount != 1)) {
+		return action, invalid("background delivery supports only a single left click")
+	}
 	if action.ElementID != "" || action.Value != nil {
 		return action, invalid("elementID and value must be omitted for pointer actions")
 	}
@@ -346,12 +352,13 @@ func isSemanticAction(actionType string) bool {
 }
 
 func hasPointerFields(action ActionInput) bool {
-	return action.X != nil || action.Y != nil || action.ToX != nil || action.ToY != nil || action.Button != "" || action.ClickCount != nil || action.DeltaX != nil || action.DeltaY != nil
+	return action.Delivery != "" || action.X != nil || action.Y != nil || action.ToX != nil || action.ToY != nil || action.Button != "" || action.ClickCount != nil || action.DeltaX != nil || action.DeltaY != nil
 }
 
 func pointerInput(action ActionInput) PointerInput {
 	pointer := PointerInput{
-		Action: action.Type, X: *action.X, Y: *action.Y, ToX: action.ToX, ToY: action.ToY,
+		Delivery: action.Delivery,
+		Action:   action.Type, X: *action.X, Y: *action.Y, ToX: action.ToX, ToY: action.ToY,
 		Button: action.Button, DeltaX: action.DeltaX, DeltaY: action.DeltaY,
 	}
 	if action.ClickCount != nil {
@@ -375,6 +382,9 @@ func normalizedCoordinate(value float64) bool {
 }
 
 func matchesPointerResult(native NativeAction, appID string, pointer PointerInput) bool {
+	if native.Delivery != pointer.Delivery {
+		return false
+	}
 	if !native.Completed || native.AppID != appID || native.ElementID != "" || native.Action != pointer.Action ||
 		native.X == nil || native.Y == nil || *native.X != pointer.X || *native.Y != pointer.Y {
 		return false

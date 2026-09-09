@@ -91,6 +91,19 @@ export function composerTestPresentation(sessionID: string): ComposerTestPresent
               ],
             },
             {
+              id: "validation",
+              type: "single_select",
+              title: "希望如何验证？选择一种方式，或输入自定义要求。",
+              options: [
+                { value: "focused", title: "仅验证本次改动" },
+                { value: "full", title: "运行完整回归" },
+                { value: "manual", title: "由我手动验证" },
+              ],
+              allowCustom: true,
+              customLabel: "自定义验证方式",
+              required: false,
+            },
+            {
               id: "note",
               type: "text_input",
               title: "补充说明",

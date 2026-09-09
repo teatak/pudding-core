@@ -1,7 +1,7 @@
-import { Check, MessageCircleQuestionMark, X } from "@/components/icons";
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Check, MessageCircleQuestionMark, Pencil, X } from "@/components/icons";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { ChoiceMenu, ChoiceMenuNumber, type ChoiceMenuItem } from "@/components/ChoiceMenu";
+import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
 import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -26,6 +26,7 @@ type RepeatInputFlowSchema = {
 };
 type InputFlowSchema = FormInputFlowSchema | RepeatInputFlowSchema;
 type InputFlowStep = {
+  allowCustom?: boolean;
   customLabel?: string;
   id: string;
   max?: number;
@@ -38,7 +39,6 @@ type InputFlowStep = {
   type:
     | "single_select"
     | "multi_select"
-    | "quick_number"
     | "number_input"
     | "text_input"
     | "phone_input"
@@ -95,8 +95,6 @@ function RepeatInputFlowContent({
   const [stepIndex, setStepIndex] = useState(0);
   const [current, setCurrent] = useState<Record<string, unknown>>({});
   const [rawSelections, setRawSelections] = useState<Record<string, unknown>>({});
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState("");
   const [collectingNext, setCollectingNext] = useState(false);
   const [nextStepIndex, setNextStepIndex] = useState(0);
   const [nextValues, setNextValues] = useState<Record<string, unknown>>({});
@@ -109,22 +107,22 @@ function RepeatInputFlowContent({
   const currentReady = !collectingNext && stepIndex >= steps.length;
   const minItems = Math.max(1, Math.floor(schema.minItems || 1));
   const maxItems = schema.maxItems && schema.maxItems > 0 ? Math.floor(schema.maxItems) : undefined;
-  const canAddMore = !maxItems || items.length + 1 < maxItems;
-  const doneDisabled = items.length + (currentReady ? 1 : 0) < minItems;
+  const completedItemCount = items.length + (currentReady && Object.keys(compactRecord(current)).length > 0 ? 1 : 0);
+  const canAddMore = !maxItems || completedItemCount < maxItems;
+  const doneDisabled = completedItemCount < minItems;
 
   function advance() {
-    setCustomOpen(false);
-    setCustomValue("");
+    setTextValue("");
     setStepIndex((index) => Math.min(index + 1, steps.length));
   }
 
   function selectOption(step: InputFlowStep, option: InputFlowOption) {
     const next = { ...current };
     const label = stringValue(option.title) || stringValue(option.label);
-    if (option.data && typeof option.data === "object") {
+    if (option.value === undefined && option.data && typeof option.data === "object") {
       Object.assign(next, option.data);
     } else {
-      next[step.id] = option.value ?? label;
+      next[step.id] = option.value !== undefined ? option.value : label;
     }
     if (label) {
       next[`${step.id}Label`] = label;
@@ -134,7 +132,7 @@ function RepeatInputFlowContent({
     advance();
   }
 
-  function selectNumber(step: InputFlowStep, value: number) {
+  function commitCurrentValue(step: InputFlowStep, value: unknown) {
     setCurrent((previous) => ({ ...previous, [step.id]: value }));
     setRawSelections((previous) => ({ ...previous, [step.id]: value }));
     advance();
@@ -142,10 +140,7 @@ function RepeatInputFlowContent({
 
   function commitCurrent() {
     const nextItem = compactRecord(current);
-    if (Object.keys(nextItem).length === 0) {
-      return items;
-    }
-    const nextItems = [...items, nextItem];
+    const nextItems = Object.keys(nextItem).length > 0 ? [...items, nextItem] : items;
     setItems(nextItems);
     setCurrent({});
     setRawSelections({});
@@ -165,7 +160,7 @@ function RepeatInputFlowContent({
   }
 
   function commitNextValue(step: InputFlowStep, value: unknown) {
-    const values = { ...nextValues, [step.id]: value };
+    const values = value === undefined ? nextValues : { ...nextValues, [step.id]: value };
     setNextValues(values);
     setTextValue("");
     setMultiSelectedKeys([]);
@@ -193,33 +188,30 @@ function RepeatInputFlowContent({
         {items.length > 0 ? <SelectedItems items={items} /> : null}
         {!collectingNext && activeStep ? (
           <ActiveStep
-            customOpen={customOpen}
-            customValue={customValue}
+            key={activeStep.id}
             max={numberLimit(activeStep, rawSelections)}
             step={activeStep}
-            onCustomOpen={() => setCustomOpen(true)}
-            onCustomValue={setCustomValue}
+            textValue={textValue}
+            onTextChange={setTextValue}
+            onTextSubmit={(value) => commitCurrentValue(activeStep, value)}
             onOptionSelect={(option) => selectOption(activeStep, option)}
-            onNumberSelect={(value) => selectNumber(activeStep, value)}
+            onSkip={activeStep.required === false ? advance : undefined}
           />
         ) : null}
         {collectingNext && nextStep ? (
           <ActiveStep
-            customOpen={customOpen}
-            customValue={customValue}
+            key={nextStep.id}
             max={numberLimit(nextStep, nextValues)}
             multiSelectedKeys={multiSelectedKeys}
             step={nextStep}
             textValue={textValue}
-            onCustomOpen={() => setCustomOpen(true)}
-            onCustomValue={setCustomValue}
             onMultiSelectedKeys={setMultiSelectedKeys}
             onMultiSubmit={(value) => commitNextValue(nextStep, value)}
-            onOptionSelect={(option) => commitNextValue(nextStep, option.value ?? option.title ?? option.label)}
+            onOptionSelect={(option) => commitNextValue(nextStep, optionValue(option))}
             onTextChange={setTextValue}
             onTextSubmit={(value) => commitNextValue(nextStep, value)}
-            onNumberSelect={(value) => commitNextValue(nextStep, value)}
             onConfirm={() => commitNextValue(nextStep, true)}
+            onSkip={nextStep.required === false && nextStep.type !== "confirm" ? () => commitNextValue(nextStep, undefined) : undefined}
             confirmItems={items}
             confirmResultKey={schema.resultKey || "items"}
             confirmValues={nextValues}
@@ -257,15 +249,11 @@ function FormInputFlowContent({
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [rawSelections, setRawSelections] = useState<Record<string, unknown>>({});
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState("");
   const [textValue, setTextValue] = useState("");
   const [multiSelectedKeys, setMultiSelectedKeys] = useState<string[]>([]);
   const activeStep = schema.steps[stepIndex];
 
   function resetStepState() {
-    setCustomOpen(false);
-    setCustomValue("");
     setTextValue("");
     setMultiSelectedKeys([]);
   }
@@ -287,8 +275,7 @@ function FormInputFlowContent({
   }
 
   function selectOption(step: InputFlowStep, option: InputFlowOption) {
-    const label = stringValue(option.title) || stringValue(option.label);
-    commitValue(step, option.value ?? option.data ?? label, option);
+    commitValue(step, optionValue(option), option);
   }
 
   if (!activeStep) {
@@ -304,18 +291,14 @@ function FormInputFlowContent({
     >
       <div className="space-y-3 text-sm text-foreground">
         <ActiveStep
-          customOpen={customOpen}
-          customValue={customValue}
+          key={activeStep.id}
           max={numberLimit(activeStep, rawSelections)}
           multiSelectedKeys={multiSelectedKeys}
           step={activeStep}
           textValue={textValue}
           onConfirm={() => commitValue(activeStep, true)}
-          onCustomOpen={() => setCustomOpen(true)}
-          onCustomValue={setCustomValue}
           onMultiSelectedKeys={setMultiSelectedKeys}
           onMultiSubmit={(selected) => commitValue(activeStep, selected, selected)}
-          onNumberSelect={(value) => commitValue(activeStep, value)}
           onOptionSelect={(option) => selectOption(activeStep, option)}
           onSkip={activeStep.required === false && activeStep.type !== "confirm" ? () => commitValue(activeStep, undefined) : undefined}
           onTextChange={setTextValue}
@@ -342,7 +325,7 @@ function FloatingUIPanel({
 }) {
   return (
     <ComposerFloatingPanel
-      className="flex max-h-[calc(100dvh-12rem)] flex-col gap-2 overflow-hidden bg-popover backdrop-blur-none"
+      className="flex max-h-[calc(100dvh-12rem)] flex-col gap-2 overflow-hidden bg-popover pb-1 backdrop-blur-none"
       data-input-flow-panel
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -351,7 +334,7 @@ function FloatingUIPanel({
         }
       }}
     >
-      <div className="flex min-w-0 shrink-0 items-start gap-2 px-1">
+      <div data-input-flow-header className="flex min-w-0 shrink-0 items-start gap-2">
         <MessageCircleQuestionMark aria-hidden="true" className="mt-1.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="py-0.5 text-sm leading-6 text-muted-foreground">{title}</div>
@@ -368,7 +351,7 @@ function FloatingUIPanel({
           <X className="size-4" />
         </Button>
       </div>
-      <div data-input-flow-body className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-1 pr-3 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]">
+      <div data-input-flow-body className="-mx-2 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]">
         {children}
       </div>
     </ComposerFloatingPanel>
@@ -392,18 +375,13 @@ function ActiveStep({
   confirmItems = [],
   confirmResultKey = "items",
   confirmValues = {},
-  customOpen,
-  customValue,
   max,
   multiSelectedKeys = [],
   step,
   textValue = "",
   onConfirm,
-  onCustomOpen,
-  onCustomValue,
   onMultiSelectedKeys,
   onMultiSubmit,
-  onNumberSelect,
   onOptionSelect,
   onSkip,
   onTextChange,
@@ -412,18 +390,13 @@ function ActiveStep({
   confirmItems?: Array<Record<string, unknown>>;
   confirmResultKey?: string;
   confirmValues?: Record<string, unknown>;
-  customOpen: boolean;
-  customValue: string;
   max?: number;
   multiSelectedKeys?: string[];
   step: InputFlowStep;
   textValue?: string;
   onConfirm?: () => void;
-  onCustomOpen: () => void;
-  onCustomValue: (value: string) => void;
   onMultiSelectedKeys?: (keys: string[]) => void;
   onMultiSubmit?: (values: unknown[]) => void;
-  onNumberSelect: (value: number) => void;
   onOptionSelect: (option: InputFlowOption) => void;
   onSkip?: () => void;
   onTextChange?: (value: string) => void;
@@ -436,13 +409,10 @@ function ActiveStep({
     </Button>
   ) : null;
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <StepTitle step={step} />
       {step.type === "single_select" ? (
-        <>
-          <OptionList step={step} onSelect={onOptionSelect} />
-          {skipAction}
-        </>
+        <OptionList step={step} value={textValue} skipAction={skipAction} onChange={onTextChange || noop} onCustomSubmit={onTextSubmit || noop} onSelect={onOptionSelect} />
       ) : step.type === "multi_select" ? (
         <MultiSelect
           selectedKeys={multiSelectedKeys}
@@ -451,19 +421,8 @@ function ActiveStep({
           onSelectedKeys={onMultiSelectedKeys || noop}
           onSubmit={onMultiSubmit || noop}
         />
-      ) : step.type === "quick_number" ? (
-        <QuickNumber
-          customOpen={customOpen}
-          customValue={customValue}
-          max={max}
-          skipAction={skipAction}
-          step={step}
-          onCustomOpen={onCustomOpen}
-          onCustomValue={onCustomValue}
-          onSelect={onNumberSelect}
-        />
       ) : step.type === "text_input" || step.type === "phone_input" || step.type === "number_input" || step.type === "date_input" ? (
-        <TextInputStep skipAction={skipAction} step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
+        <TextInputStep max={max} skipAction={skipAction} step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
       ) : step.type === "confirm" ? (
         <ConfirmStep items={confirmItems} resultKey={confirmResultKey} values={confirmValues} onConfirm={onConfirm || noop} />
       ) : null}
@@ -531,27 +490,9 @@ function AfterItemMenu({
 
 function StepTitle({ step }: { step: InputFlowStep }) {
   return (
-    <div className="min-w-0 px-1">
+    <div data-input-flow-step-title className="min-w-0 px-2">
       <div className="whitespace-normal break-words text-sm font-medium leading-6">{step.title}</div>
     </div>
-  );
-}
-
-function OptionList({ step, onSelect }: { step: InputFlowStep; onSelect: (option: InputFlowOption) => void }) {
-  const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
-  return (
-    <ChoiceMenu
-      variant="question"
-      items={options.map((option, index) => {
-        const title = stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
-        return {
-          id: `${title}:${index}`,
-          label: title,
-          value: option,
-        };
-      })}
-      onSelect={onSelect}
-    />
   );
 }
 
@@ -614,6 +555,7 @@ function MultiSelect({
         onSelect={toggle}
       />
       <div className="flex items-center gap-2">
+        {skipAction}
         <Button
           className="px-3 text-xs"
           type="button"
@@ -622,109 +564,113 @@ function MultiSelect({
             onSubmit(
               entries
                 .filter(({ key }) => selected.has(key))
-                .map(({ option }) => option.value ?? option.data ?? option.title ?? option.label),
+                .map(({ option }) => optionValue(option)),
             )
           }
         >
           {t("inputFlow.confirm")}
         </Button>
-        {skipAction}
       </div>
     </div>
   );
 }
 
-function QuickNumber({
-  customOpen,
-  customValue,
-  max,
+function OptionList({
+  value,
   skipAction,
   step,
-  onCustomOpen,
-  onCustomValue,
+  onChange,
+  onCustomSubmit,
   onSelect,
 }: {
-  customOpen: boolean;
-  customValue: string;
-  max?: number;
+  value: string;
   skipAction: ReactNode;
   step: InputFlowStep;
-  onCustomOpen: () => void;
-  onCustomValue: (value: string) => void;
-  onSelect: (value: number) => void;
+  onChange: (value: string) => void;
+  onCustomSubmit: (value: string) => void;
+  onSelect: (option: InputFlowOption) => void;
 }) {
   const { t } = useI18n();
-  const min = typeof step.min === "number" ? Math.max(0, Math.floor(step.min)) : 1;
-  const options = (step.options || [1, 2])
-    .map((value) => (typeof value === "number" ? value : Number(value)))
-    .filter((value) => Number.isFinite(value) && value >= min && (!max || value <= max));
-  const customNumber = Number(customValue);
-  const customValid = Number.isInteger(customNumber) && customNumber >= min && (!max || customNumber <= max);
-  const menuItems: Array<ChoiceMenuItem<{ type: "number"; value: number } | { type: "custom" }>> = [
-    ...options.map((value) => ({ id: String(value), label: String(value), value: { type: "number" as const, value } })),
-    {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
+  const answer = value.trim();
+  const menuItems: Array<ChoiceMenuItem<{ type: "option"; option: InputFlowOption } | { type: "custom" }>> = options.map((option, index) => ({
+    id: String(index),
+    label: stringValue(option.title) || stringValue(option.label) || String(optionValue(option)),
+    value: { type: "option", option },
+  }));
+  if (step.allowCustom) {
+    menuItems.push({
       id: "custom",
       label: step.customLabel || t("inputFlow.custom"),
-      noActiveStyle: customOpen,
+      noActiveStyle: true,
+      className: "hover:bg-interactive-hover focus-within:bg-interactive-hover",
       value: { type: "custom" as const },
-      render: customOpen
-        ? () => (
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-              <ChoiceMenuNumber number={options.length + 1} />
-              <input
-                autoFocus
-                className={cn(
-                  "h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring",
-                  customValue && !customValid ? "border-destructive" : "",
-                )}
-                inputMode="numeric"
-                min={min}
-                max={max}
-                placeholder={t("inputFlow.customPlaceholder")}
-                type="number"
-                value={customValue}
-                onChange={(event) => onCustomValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && customValid) {
-                    event.preventDefault();
-                    onSelect(customNumber);
-                  }
-                }}
-              />
-              <Button type="button" disabled={!customValid} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(customNumber)}>
-                {t("inputFlow.confirm")}
-              </Button>
-              {skipAction}
-            </div>
-          )
-        : undefined,
-    },
-  ];
+      render: () => (
+        <InputEntryRow embedded>
+          <input
+            ref={inputRef}
+            aria-label={step.title}
+            className={entryInputClassName}
+            placeholder={step.placeholder || step.customLabel || t("inputFlow.customPlaceholder")}
+            type="text"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing && answer) {
+                event.preventDefault();
+                onCustomSubmit(answer);
+              }
+            }}
+          />
+          {skipAction}
+          <Button type="button" disabled={!answer} onMouseDown={(event) => event.preventDefault()} onClick={() => onCustomSubmit(answer)}>
+            {t("composer.send")}
+          </Button>
+        </InputEntryRow>
+      ),
+    });
+  }
   return (
-    <div className="space-y-2">
+    <>
       <ChoiceMenu
         variant="question"
         items={menuItems}
         onSelect={(item) => {
-          if (item.type === "number") {
-            onSelect(item.value);
-            return;
+          if (item.type === "option") {
+            onSelect(item.option);
+          } else {
+            inputRef.current?.focus();
           }
-          onCustomOpen();
         }}
       />
-      {customOpen ? null : skipAction}
+      {!step.allowCustom && skipAction}
+    </>
+  );
+}
+
+const entryInputClassName = "h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground/60 aria-invalid:text-destructive";
+
+function InputEntryRow({ children, embedded = false }: { children: ReactNode; embedded?: boolean }) {
+  return (
+    <div data-input-flow-entry className={cn("group/entry flex min-w-0 flex-1 items-center gap-2.5", !embedded && "min-h-11 rounded-md px-2 py-1.5 hover:bg-interactive-hover focus-within:bg-interactive-hover")}>
+      <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-md border border-foreground/10 bg-foreground/5 text-muted-foreground group-focus-within/entry:text-foreground">
+        <Pencil className="size-3.5" />
+      </span>
+      {children}
     </div>
   );
 }
 
 function TextInputStep({
+  max,
   skipAction,
   step,
   value,
   onChange,
   onSubmit,
 }: {
+  max?: number;
   skipAction: ReactNode;
   step: InputFlowStep;
   value: string;
@@ -733,15 +679,14 @@ function TextInputStep({
 }) {
   const { t } = useI18n();
   const text = value.trim();
-  const required = step.required !== false;
   const numericValue = Number(text);
   const numberValid =
     step.type !== "number_input" ||
     (text.length > 0 &&
       Number.isFinite(numericValue) &&
       (typeof step.min !== "number" || numericValue >= step.min) &&
-      (typeof step.max !== "number" || numericValue <= step.max));
-  const valid = (!required || text.length > 0) && (text.length === 0 || numberValid);
+      (typeof max !== "number" || numericValue <= max));
+  const valid = text.length > 0 && numberValid;
   function handleSubmit() {
     if (valid) {
       onSubmit(step.type === "number_input" && text ? numericValue : text);
@@ -749,32 +694,31 @@ function TextInputStep({
   }
   const inputType = step.type === "phone_input" ? "tel" : step.type === "number_input" ? "number" : step.type === "date_input" ? "date" : "text";
   return (
-    <div className="flex items-center gap-2">
+    <InputEntryRow>
       <input
         autoFocus
-        className={cn(
-          "h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus-visible:border-ring",
-          value && !valid ? "border-destructive" : "",
-        )}
+        aria-label={step.title}
+        aria-invalid={Boolean(value && !valid)}
+        className={entryInputClassName}
         inputMode={step.type === "phone_input" ? "tel" : step.type === "number_input" ? "decimal" : "text"}
         min={step.type === "number_input" ? step.min : undefined}
-        max={step.type === "number_input" ? step.max : undefined}
+        max={step.type === "number_input" ? max : undefined}
         placeholder={step.placeholder || step.title}
         type={inputType}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-          if (event.key === "Enter") {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
             event.preventDefault();
             handleSubmit();
           }
         }}
       />
-      <Button type="button" disabled={!valid} onClick={handleSubmit}>
-        {t("inputFlow.confirm")}
-      </Button>
       {skipAction}
-    </div>
+      <Button type="button" disabled={!valid} onClick={handleSubmit}>
+        {t("composer.send")}
+      </Button>
+    </InputEntryRow>
   );
 }
 
@@ -867,7 +811,6 @@ function normalizeStep(value: unknown): InputFlowStep | null {
   const type =
     record.type === "single_select" ||
     record.type === "multi_select" ||
-    record.type === "quick_number" ||
     record.type === "number_input" ||
     record.type === "text_input" ||
     record.type === "phone_input" ||
@@ -881,6 +824,7 @@ function normalizeStep(value: unknown): InputFlowStep | null {
     return null;
   }
   return {
+    allowCustom: record.allowCustom === true,
     customLabel: stringValue(record.customLabel),
     id,
     max: numberValue(record.max),
@@ -931,12 +875,16 @@ function normalizeOption(value: unknown): InputFlowOption | null {
 }
 
 function optionKey(option: InputFlowOption, index: number) {
-  const value = option.value ?? option.title ?? option.label ?? option.data;
+  const value = optionValue(option);
   try {
     return `${index}:${JSON.stringify(value)}`;
   } catch {
     return `${index}:${String(value ?? "")}`;
   }
+}
+
+function optionValue(option: InputFlowOption): unknown {
+  return option.value !== undefined ? option.value : option.data ?? option.title ?? option.label;
 }
 
 function numberLimit(step: InputFlowStep, selections: Record<string, unknown>) {
@@ -1022,7 +970,7 @@ function formatStepSubmissionValue(step: InputFlowStep, value: unknown, t: Trans
     return t("inputFlow.confirmed");
   }
   if (step.type === "single_select" || step.type === "multi_select") {
-    const values = Array.isArray(value) ? value : [value];
+    const values = step.type === "multi_select" && Array.isArray(value) ? value : [value];
     return values
       .map((item) => {
         const raw = formatSubmissionValue(item);
@@ -1038,8 +986,7 @@ function selectedOptionLabel(step: InputFlowStep, value: unknown) {
   const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
   const target = comparableValue(value);
   for (const option of options) {
-    const optionValue = option.value ?? option.data ?? option.title ?? option.label;
-    if (comparableValue(optionValue) === target) {
+    if (comparableValue(optionValue(option)) === target) {
       return stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
     }
   }
@@ -1117,7 +1064,7 @@ function technicalSummaryKey(key: string) {
 }
 
 function compactRecord(record: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== ""));
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
 
 function parseRecord(value: unknown): Record<string, unknown> | null {

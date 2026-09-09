@@ -127,6 +127,9 @@ final class PointerService {
     start: CGPoint,
     end: CGPoint?
   ) throws -> PointerSnapshot {
+    guard input.delivery != "background" else {
+      throw HelperError.invalidPointerInput("background input must not use the foreground event path")
+    }
     guard isTrusted() else {
       throw HelperError.permissionRequired("accessibility")
     }
@@ -185,7 +188,8 @@ final class PointerService {
       button: input.button?.rawValue,
       clickCount: input.clickCount,
       deltaX: input.deltaX,
-      deltaY: input.deltaY
+      deltaY: input.deltaY,
+      delivery: input.delivery
     )
   }
 

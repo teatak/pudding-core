@@ -162,6 +162,7 @@ type NativeObservationCapture struct {
 }
 
 type NativeAction struct {
+	Delivery   string   `json:"delivery,omitempty"`
 	Key        string   `json:"key,omitempty"`
 	Modifiers  []string `json:"modifiers,omitempty"`
 	AppID      string   `json:"appID"`
@@ -179,6 +180,7 @@ type NativeAction struct {
 }
 
 type PointerInput struct {
+	Delivery   string
 	Action     string
 	X          float64
 	Y          float64
@@ -200,6 +202,7 @@ type Failure struct {
 }
 
 type ActionInput struct {
+	Delivery   string   `json:"delivery,omitempty"`
 	Key        string   `json:"key,omitempty"`
 	Modifiers  []string `json:"modifiers,omitempty"`
 	Type       string   `json:"type"`

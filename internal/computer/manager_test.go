@@ -92,7 +92,8 @@ func (f *fakeService) Pointer(_ context.Context, sessionID, appID string, _ uint
 	f.lastPointer = pointer
 	f.lastSession = sessionID
 	return NativeAction{
-		AppID: appID, Action: pointer.Action, Completed: true, X: &pointer.X, Y: &pointer.Y,
+		Delivery: pointer.Delivery,
+		AppID:    appID, Action: pointer.Action, Completed: true, X: &pointer.X, Y: &pointer.Y,
 		ToX: pointer.ToX, ToY: pointer.ToY, Button: pointer.Button,
 		ClickCount: pointer.ClickCount, DeltaX: pointer.DeltaX, DeltaY: pointer.DeltaY,
 	}, nil
@@ -110,7 +111,8 @@ func semanticActions(elementID, actionType string, value *string) []ActionInput 
 func pointerActions(pointer PointerInput) []ActionInput {
 	x, y := pointer.X, pointer.Y
 	action := ActionInput{
-		Type: pointer.Action, X: &x, Y: &y, ToX: pointer.ToX, ToY: pointer.ToY,
+		Delivery: pointer.Delivery,
+		Type:     pointer.Action, X: &x, Y: &y, ToX: pointer.ToX, ToY: pointer.ToY,
 		Button: pointer.Button, DeltaX: pointer.DeltaX, DeltaY: pointer.DeltaY,
 	}
 	if pointer.ClickCount != 0 {

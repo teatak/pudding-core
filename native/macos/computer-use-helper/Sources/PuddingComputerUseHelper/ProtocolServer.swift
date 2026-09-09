@@ -14,6 +14,9 @@ struct ProtocolRequest: Decodable, Equatable {
       throw ArgumentError.invalidOption("id", id)
     }
     let params = params ?? ProtocolParameters()
+    if params.delivery != nil, command != "pointer" {
+      throw ArgumentError.invalidOption("delivery", "allowed only for pointer actions")
+    }
     switch command {
     case "reveal_window":
       let pid = try required(params.pid, "pid")
@@ -119,7 +122,8 @@ struct ProtocolRequest: Decodable, Equatable {
         button: button,
         clickCount: params.clickCount,
         deltaX: params.deltaX,
-        deltaY: params.deltaY
+        deltaY: params.deltaY,
+        delivery: params.delivery
       )
       return .pointer(
         bundleID: try bundleID(params.bundleID),
@@ -159,6 +163,7 @@ struct ProtocolRequest: Decodable, Equatable {
 }
 
 struct ProtocolParameters: Codable, Equatable {
+  var delivery: String? = nil
   var promptAccessibility: Bool? = nil
   var promptScreenRecording: Bool? = nil
   var bundleID: String? = nil

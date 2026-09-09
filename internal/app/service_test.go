@@ -144,7 +144,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Quit is always normal, never forced") ||
 		!strings.Contains(computerSkill.Content, "only with builtin_computer_use_app") ||
 		!strings.Contains(computerSkill.Content, "without activating or raising the app by default") ||
-		!strings.Contains(computerSkill.Content, "before necessary pointer input") ||
+		!strings.Contains(computerSkill.Content, "delivery=background") ||
 		!strings.Contains(computerSkill.Content, "Success confirms event delivery") ||
 		!strings.Contains(computerSkill.Content, "never call builtin_computer_list_apps to refresh windows") ||
 		!strings.Contains(computerSkill.Content, "Observations are state snapshots") ||
@@ -155,7 +155,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Every builtin_computer_act call uses an actions array") ||
 		!strings.Contains(computerSkill.Content, "one item in it for a single action") ||
 		!strings.Contains(computerSkill.Content, "Do not narrate routine Computer Use progress") ||
-		!strings.Contains(computerSkill.Content, "only if it must be brought forward") ||
+		!strings.Contains(computerSkill.Content, "only when necessary foreground input is intended") ||
 		!strings.Contains(computerSkill.Content, "only when visual information is missing or stale") ||
 		!strings.Contains(computerSkill.Content, "Never replay that prefix") ||
 		!strings.Contains(computerSkill.Content, "Semantic actions may run in the background") ||

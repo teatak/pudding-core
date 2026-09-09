@@ -84,7 +84,9 @@ final class HelperRuntime {
         bundleID: bundleID,
         windowID: windowID,
         operation: {
-          try await accessibility.act(
+          let ownership = try BackgroundInputJournal.acquire(pid: targetWindow.pid)
+          defer { withExtendedLifetime(ownership) {} }
+          return try await accessibility.act(
             bundleID: bundleID,
             windowID: windowID,
             targetWindow: targetWindow,
@@ -98,7 +100,9 @@ final class HelperRuntime {
       return try await withWindowActivity(
         bundleID: bundleID, windowID: windowID,
         operation: {
-          try keyboard.perform(bundleID: bundleID, target: target, input: input)
+          let ownership = try BackgroundInputJournal.acquire(pid: target.pid)
+          defer { withExtendedLifetime(ownership) {} }
+          return try keyboard.perform(bundleID: bundleID, target: target, input: input)
         })
     case .pointer(let bundleID, let windowID, let input):
       return try await withWindowActivity(
@@ -109,6 +113,11 @@ final class HelperRuntime {
             bundleID: bundleID,
             windowID: windowID
           )
+          if input.delivery == "background" {
+            return try await BackgroundClickService.perform(bundleID: bundleID, target: targetWindow, input: input)
+          }
+          let ownership = try BackgroundInputJournal.acquire(pid: targetWindow.pid)
+          defer { withExtendedLifetime(ownership) {} }
           let start = try PointerCoordinatePolicy.globalPoint(
             frame: targetWindow.frame,
             x: input.x,

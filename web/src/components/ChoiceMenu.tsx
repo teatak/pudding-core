@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 export type ChoiceMenuItem<T> = {
   checked?: boolean;
+  className?: string;
   description?: string;
   disabled?: boolean;
   id: string;
@@ -135,12 +136,13 @@ export function ChoiceMenu<T>({
         const itemClassName = cn(
           "min-w-0 rounded-md px-2.5 py-1.5 text-left transition-opacity",
           disabled && "opacity-50",
-          variant === "question" && "flex min-h-11 items-center rounded-lg",
+          variant === "question" && "flex min-h-11 items-center px-2",
           !item.noActiveStyle &&
             "hover:bg-interactive-hover active:bg-interactive-pressed",
           index === selectedIndex &&
             !item.noActiveStyle &&
             "bg-interactive-selected text-foreground hover:bg-interactive-selected",
+          item.className,
         );
         const commonProps = {
           "aria-selected": item.checked ?? index === selectedIndex,
@@ -204,7 +206,7 @@ export function ChoiceMenu<T>({
 
 export function ChoiceMenuNumber({ number }: { number: number }) {
   return (
-    <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full border border-foreground/10 bg-foreground/5 text-sm tabular-nums text-muted-foreground">
+    <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-md border border-foreground/10 bg-foreground/5 text-sm tabular-nums text-muted-foreground">
       {number}
     </span>
   );

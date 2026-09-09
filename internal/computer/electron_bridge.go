@@ -68,6 +68,7 @@ type bridgeObservationCapture struct {
 }
 
 type bridgeNativeAction struct {
+	Delivery   string   `json:"delivery,omitempty"`
 	Key        string   `json:"key,omitempty"`
 	Modifiers  []string `json:"modifiers,omitempty"`
 	BundleID   string   `json:"bundleID"`
@@ -229,6 +230,9 @@ func (s *ElectronBridgeService) Pointer(ctx context.Context, sessionID, appID st
 		"sessionID": sessionID, "appID": appID, "windowID": windowID,
 		"action": pointer.Action, "x": pointer.X, "y": pointer.Y,
 	}
+	if pointer.Delivery != "" {
+		body["delivery"] = pointer.Delivery
+	}
 	if pointer.ToX != nil {
 		body["toX"], body["toY"] = *pointer.ToX, *pointer.ToY
 	}
@@ -243,7 +247,8 @@ func (s *ElectronBridgeService) Pointer(ctx context.Context, sessionID, appID st
 		return NativeAction{}, err
 	}
 	return NativeAction{
-		AppID: raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed,
+		Delivery: raw.Delivery,
+		AppID:    raw.BundleID, ElementID: raw.ElementID, Action: raw.Action, Completed: raw.Completed,
 		X: raw.X, Y: raw.Y, ToX: raw.ToX, ToY: raw.ToY, Button: raw.Button,
 		ClickCount: raw.ClickCount, DeltaX: raw.DeltaX, DeltaY: raw.DeltaY,
 	}, nil

@@ -195,6 +195,9 @@ export function ComposerApprovalBar({
       ),
     });
   }
+  for (const item of approvalMenuItems) {
+    item.className = "min-h-11 px-2 py-2";
+  }
 
   function selectApprovalAction(action: ApprovalMenuAction) {
     switch (action) {
@@ -223,9 +226,12 @@ export function ComposerApprovalBar({
   return (
     <ComposerFloatingPanel
       className={cn(
-        "overflow-y-auto text-xs",
-        !isComputerAppApproval && "grid gap-1",
+        "text-xs",
+        isComputerAppApproval
+          ? "overflow-y-auto"
+          : "flex max-h-[calc(100dvh-12rem)] flex-col gap-2 overflow-hidden bg-popover pb-1 backdrop-blur-none",
       )}
+      data-approval-panel
       onKeyDown={(event) => {
         if (isComputerAppApproval && event.key === "Escape") {
           event.preventDefault();
@@ -245,104 +251,107 @@ export function ComposerApprovalBar({
           onDeny={() => void deny()}
         />
       ) : (
-        <>
-          <div className="flex min-w-0 items-center gap-1.5">
-            <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 truncate font-medium">{title}</span>
-          </div>
-          {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
-        </>
+        <div data-approval-header className="flex min-w-0 shrink-0 items-start gap-2 text-muted-foreground">
+          <ShieldCheck aria-hidden="true" className="mt-1.5 size-4 shrink-0" />
+          <span className="min-w-0 py-0.5 text-sm leading-6">{title}</span>
+        </div>
       )}
-      {isToolCallApproval && toolCallApproval.command ? (
-        <div className="max-h-28 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
-          <pre className="whitespace-pre-wrap break-words"><span className="select-none text-muted-foreground">$ </span>{toolCallApproval.command}</pre>
-        </div>
-      ) : null}
-      {isToolCallApproval && toolCallApproval.paths.length > 0 && !isComputerAppApproval && !patchApproval && !gitCommitApproval ? (
-        <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
-          {toolCallApproval.paths.map((path) => (
-            <div key={path} className="truncate" >
-              {path}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {isToolCallApproval && !isComputerAppApproval && toolCallApproval.valuePreview !== undefined ? (
-        <div className="max-h-20 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
-          <pre className="whitespace-pre-wrap break-words">{toolCallApproval.valuePreview}</pre>
-        </div>
-      ) : null}
-      {isToolCallApproval && patchApproval ? (
-        <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
-          <span>{t("transcript.approvalPatchFiles").replace("{count}", String(patchApproval.fileCount))}</span>
-          <span className="font-mono text-git-added">+{patchApproval.additions}</span>
-          <span className="font-mono text-git-deleted">-{patchApproval.deletions}</span>
-        </div>
-      ) : null}
-      {isToolCallApproval && gitCommitApproval ? (
-        <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
-          <span>{t("transcript.approvalPatchFiles").replace("{count}", String(gitCommitApproval.fileCount))}</span>
-          <span className="font-mono text-git-added">+{gitCommitApproval.additions}</span>
-          <span className="font-mono text-git-deleted">-{gitCommitApproval.deletions}</span>
-          <span className="min-w-0 truncate">{gitCommitApproval.commitMessage}</span>
-        </div>
-      ) : null}
-      {isCodeApproval ? (
-        <div className="grid gap-1">
-          <div className="text-[11px] font-medium text-muted-foreground">
-            {t("transcript.approvalProjectDirs")}
+      <div
+        className={cn(!isComputerAppApproval && "-mx-2 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-2 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]")}
+        data-approval-body
+      >
+        {!isComputerAppApproval && approvalReason ? <div className="text-sm leading-5 text-muted-foreground">{approvalReason}</div> : null}
+        {isToolCallApproval && toolCallApproval.command ? (
+          <div className="max-h-28 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+            <pre className="whitespace-pre-wrap break-words"><span className="select-none text-muted-foreground">$ </span>{toolCallApproval.command}</pre>
           </div>
-          {projectDirs.length > 0 ? (
-            <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
-              {projectDirs.map((dir) => (
-                <div key={dir} className="flex min-w-0 items-center gap-1" >
-                  <span className="min-w-0 flex-1 truncate">{dir}</span>
-                  {!hasPayloadProjectDirs ? (
-                    <button
-                      aria-label={t("common.delete")}
-                      className="grid size-4 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
-                      type="button"
-                      onClick={() => removeProjectDir(dir)}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  ) : null}
-                </div>
-              ))}
+        ) : null}
+        {isToolCallApproval && toolCallApproval.paths.length > 0 && !isComputerAppApproval && !patchApproval && !gitCommitApproval ? (
+          <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+            {toolCallApproval.paths.map((path) => (
+              <div key={path} className="truncate" >
+                {path}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {isToolCallApproval && !isComputerAppApproval && toolCallApproval.valuePreview !== undefined ? (
+          <div className="max-h-20 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+            <pre className="whitespace-pre-wrap break-words">{toolCallApproval.valuePreview}</pre>
+          </div>
+        ) : null}
+        {isToolCallApproval && patchApproval ? (
+          <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
+            <span>{t("transcript.approvalPatchFiles").replace("{count}", String(patchApproval.fileCount))}</span>
+            <span className="font-mono text-git-added">+{patchApproval.additions}</span>
+            <span className="font-mono text-git-deleted">-{patchApproval.deletions}</span>
+          </div>
+        ) : null}
+        {isToolCallApproval && gitCommitApproval ? (
+          <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
+            <span>{t("transcript.approvalPatchFiles").replace("{count}", String(gitCommitApproval.fileCount))}</span>
+            <span className="font-mono text-git-added">+{gitCommitApproval.additions}</span>
+            <span className="font-mono text-git-deleted">-{gitCommitApproval.deletions}</span>
+            <span className="min-w-0 truncate">{gitCommitApproval.commitMessage}</span>
+          </div>
+        ) : null}
+        {isCodeApproval ? (
+          <div className="grid gap-1">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              {t("transcript.approvalProjectDirs")}
             </div>
-          ) : null}
-          {projectDirs.length === 0 ? (
-            <div className="text-[11px] leading-4 text-muted-foreground">{t("transcript.approvalProjectDirsOptional")}</div>
-          ) : null}
-          {!hasPayloadProjectDirs ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                className="h-6 gap-1 rounded-full px-2 text-[11px]"
-                disabled={pending || pickingProjectDir}
-                size="sm"
-                type="button"
-                variant="secondary"
-                onClick={() => void pickProjectDirs()}
-              >
-                {pickingProjectDir ? <Spinner className="size-3" /> : <FolderOpen className="size-3" />}
-                {t("transcript.approvalProjectDirChoose")}
-              </Button>
-              {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalProjectDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {!isComputerAppApproval ? (
-        <ChoiceMenu
-          busy={pending}
-          className="mt-0.5 border-t border-border/60 pt-1"
-          focusMode="when-idle"
-          items={approvalMenuItems}
-          maxHeightClassName="max-h-44"
-          onEscape={() => void deny()}
-          onSelect={selectApprovalAction}
-        />
-      ) : null}
+            {projectDirs.length > 0 ? (
+              <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+                {projectDirs.map((dir) => (
+                  <div key={dir} className="flex min-w-0 items-center gap-1" >
+                    <span className="min-w-0 flex-1 truncate">{dir}</span>
+                    {!hasPayloadProjectDirs ? (
+                      <button
+                        aria-label={t("common.delete")}
+                        className="grid size-4 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
+                        type="button"
+                        onClick={() => removeProjectDir(dir)}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {projectDirs.length === 0 ? (
+              <div className="text-[11px] leading-4 text-muted-foreground">{t("transcript.approvalProjectDirsOptional")}</div>
+            ) : null}
+            {!hasPayloadProjectDirs ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  className="h-6 gap-1 rounded-full px-2 text-[11px]"
+                  disabled={pending || pickingProjectDir}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void pickProjectDirs()}
+                >
+                  {pickingProjectDir ? <Spinner className="size-3" /> : <FolderOpen className="size-3" />}
+                  {t("transcript.approvalProjectDirChoose")}
+                </Button>
+                {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalProjectDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {!isComputerAppApproval ? (
+          <ChoiceMenu
+            busy={pending}
+            className="-mx-2 gap-1 pr-0"
+            focusMode="when-idle"
+            items={approvalMenuItems}
+            maxHeightClassName="max-h-44"
+            onEscape={() => void deny()}
+            onSelect={selectApprovalAction}
+          />
+        ) : null}
+      </div>
       <PatchDiffDialog
         applying={pendingAction === "turn"}
         approval={viewingPatchApproval}
@@ -375,13 +384,13 @@ function ApprovalMenuOption({
   loading?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2 py-0.5">
-      <span className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground">
+    <div className="flex min-w-0 items-start gap-2.5">
+      <span aria-hidden="true" className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground">
         {loading ? <Spinner className="size-3.5" /> : <Icon className="size-3.5" />}
       </span>
-      <span className="min-w-0">
-        <span className="block truncate text-xs font-medium text-foreground">{label}</span>
-        <span className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground">{description}</span>
+      <span className="min-w-0 flex-1 break-words">
+        <span className="block text-sm font-medium leading-5 text-foreground">{label}</span>
+        <span className="block text-xs leading-5 text-muted-foreground">{description}</span>
       </span>
     </div>
   );

@@ -6,7 +6,7 @@ export function createInputFlowTools(): ToolDefinition[] {
     {
       name: "builtin_request_user_input",
       description:
-        "Show an interactive UI that collects structured non-secret information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Never use this tool for passwords, tokens, API keys, private keys, or other credentials because submitted values become part of the conversation. Use the dedicated App connection or settings flow for credentials. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. Keep each question and option brief and self-contained. Do not repeat chat history, status reports, or instructions in the form. Prefer 2–3 choices per question. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Continue independent work, but wait for the user's reply before doing anything that depends on those answers.",
+        "Collect structured non-secret answers through a sequential UI. Each step asks one question and shows at most one input box; put separate fields in separate steps, never nested fields or inputs. Use type='form' with steps for ordinary questions, and type='repeat' only for multiple same-shaped records, such as room types and quantities. Answers are accumulated across steps and sent together only when the flow is completed; skipping omits only the current optional field. Keep questions and options brief and self-contained; do not repeat chat history, status reports, or instructions. Prefer 2–3 choices per question. Fetch live data before constructing dependent options. Never request passwords, tokens, API keys, private keys, or other credentials: submitted values enter the conversation. Use dedicated App connection or settings flows for credentials. This tool returns immediately after showing the UI; completed answers arrive later as a new user message. Continue independent work, but wait for answers before dependent actions.",
       capability: "chat",
       inputSchema: {
         type: "object",
@@ -19,11 +19,10 @@ export function createInputFlowTools(): ToolDefinition[] {
           },
           steps: {
             type: "array",
-            description: "Fields shown once. Required when type='form'.",
+            description: "Ordered steps shown one at a time, one field per step. Required when type='form'.",
             items: inputStepSchema([
               "single_select",
               "multi_select",
-              "quick_number",
               "number_input",
               "text_input",
               "phone_input",
@@ -32,20 +31,19 @@ export function createInputFlowTools(): ToolDefinition[] {
             ]),
           },
           resultKey: { type: "string", description: "Result key for repeated records. Defaults to items." },
-          minItems: { type: "number", description: "Minimum items the user should select. Defaults to 1." },
+          minItems: { type: "number", description: "Minimum non-empty records, at least 1. Defaults to 1; entirely skipped records do not count." },
           maxItems: { type: "number", description: "Optional maximum item count." },
           repeatSteps: {
             type: "array",
-            description: "Fields repeated for every record. Required when type='repeat'.",
-            items: inputStepSchema(["single_select", "quick_number"]),
+            description: "Ordered steps repeated for each record, one field at a time. Required when type='repeat'.",
+            items: inputStepSchema(["single_select", "number_input"]),
           },
           nextSteps: {
             type: "array",
-            description: "Optional fields shown once after all repeated records are collected.",
+            description: "Optional list of ordered steps shown one at a time after record collection. Each field is required unless required=false.",
             items: inputStepSchema([
               "single_select",
               "multi_select",
-              "quick_number",
               "number_input",
               "text_input",
               "phone_input",
@@ -135,18 +133,18 @@ function inputStepSchema(types: string[]) {
   return {
     type: "object",
     properties: {
-      id: { type: "string", description: "Stable key used in the returned result." },
+      id: { type: "string", description: "Stable result key, unique within this step list." },
       type: {
         type: "string",
         enum: types,
-        description: "Non-secret input control shown to the user.",
+        description: "One field: single_select chooses one supplied value, optionally with custom text; multi_select chooses several supplied values; text/phone/number/date show one input; confirm asks for confirmation. Use number_input only when the answer must be numeric.",
       },
       title: { type: "string", description: "One concise, self-contained question or field label. Include only essential context." },
       placeholder: { type: "string", description: "Optional input placeholder." },
-      required: { type: "boolean", description: "Defaults to true. Set false to allow skipping." },
+      required: { type: "boolean", description: "Defaults to true. Set false to allow skipping only this field, omitting its answer. Applies to form, repeatSteps and nextSteps. A confirm step cannot be skipped." },
       options: {
         type: "array",
-        description: "Required for select fields; suggested values for quick_number.",
+        description: "Choices for single_select or multi_select. Supply meaningful values; they are returned as provided, without numeric conversion.",
         items: {
           anyOf: [
             { type: "number" },
@@ -154,7 +152,7 @@ function inputStepSchema(types: string[]) {
             {
               type: "object",
               properties: {
-                value: {},
+                value: { description: "Model-defined answer returned when this option is chosen. Any JSON value is allowed; it need not be numeric." },
                 title: { type: "string" },
                 label: { type: "string" },
                 data: { type: "object", additionalProperties: true },
@@ -167,7 +165,8 @@ function inputStepSchema(types: string[]) {
       min: { type: "number", description: "Minimum number, or minimum selections for multi_select." },
       max: { type: "number", description: "Maximum number, or maximum selections for multi_select." },
       maxFrom: { type: "string", description: "Path from prior selected step, such as room.data.availNum." },
-      customLabel: { type: "string", description: "Label for custom numeric input." },
+      allowCustom: { type: "boolean", description: "For single_select only: show one always-visible custom text input alongside the options. Defaults to false. Custom text is returned as a string under this step's id." },
+      customLabel: { type: "string", description: "Label for the single_select custom input when allowCustom=true." },
     },
     required: ["id", "type", "title"],
     additionalProperties: false,

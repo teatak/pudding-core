@@ -14,6 +14,16 @@ test("Computer Use routes declare their native permission requirements", () => {
   assert.deepEqual(permissionsForRoute("/computer/act"), ["accessibility", "screenRecording"]);
 });
 
+test("background preview conflicts preserve outcome without asking for foreground", () => {
+  for (const code of ["computer_input_busy", "computer_background_unavailable"]) {
+    const result = classifyComputerUseError({code, message:"background delivery stopped", outcome:"unknown"});
+    assert.equal(result.status, 409);
+    assert.equal(result.code, code);
+    assert.equal(result.outcome, "unknown");
+    assert.equal(result.retryable, false);
+  }
+});
+
 test("Computer Use bridge requires authentication and explicit session routing", async () => {
   const host = new FakeComputerUseHost();
   const bridge = new ComputerUseBridgeServer(host);
@@ -137,6 +147,7 @@ test("Computer Use bridge routes normalized-window pointer actions", async () =>
     });
     assert.equal(response.status, 200);
     assert.deepEqual(host.pointerAction, {
+      delivery: undefined,
       bundleID: "com.example.App", windowID: 42,
       action: "drag", x: 0.12, y: 0.34, toX: 0.56, toY: 0.78,
       button: undefined, clickCount: undefined, deltaX: undefined, deltaY: undefined,
@@ -144,6 +155,22 @@ test("Computer Use bridge routes normalized-window pointer actions", async () =>
   } finally {
     await bridge.stop();
   }
+});
+
+test("background single-click delivery crosses the existing session-scoped pointer route", async () => {
+  const host = new FakeComputerUseHost();
+  const bridge = new ComputerUseBridgeServer(host);
+  const identity = await bridge.start();
+  try {
+    const response = await fetch(`${identity.url}/computer/pointer`, {
+      method: "POST", headers: authenticatedHeaders(identity.token),
+      body: JSON.stringify({sessionID:"background-test", appID:"com.apple.iCal", windowID:42,
+        action:"click", x:0.5, y:0.4, delivery:"background"}),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(host.pointerAction.delivery, "background");
+    assert.equal(host.pointerAction.action, "click");
+  } finally { await bridge.stop(); }
 });
 
 test("Computer Use bridge propagates a disconnected action request to the Helper signal", async () => {

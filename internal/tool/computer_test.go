@@ -98,13 +98,30 @@ func TestComputerUseAppDefaultsToBackground(t *testing.T) {
 	for _, definition := range BuiltinDefinitions() {
 		if definition.Name == ComputerUseApp {
 			if !strings.Contains(definition.Description, "background by default") ||
-				!strings.Contains(definition.Description, "before necessary pointer input") {
+				!strings.Contains(definition.Description, "before necessary foreground pointer input") {
 				t.Fatalf("unexpected Computer Use App guidance: %s", definition.Description)
 			}
 			return
 		}
 	}
 	t.Fatal("Computer Use App definition not found")
+}
+
+func TestComputerBackgroundDeliverySchemaAndGuidance(t *testing.T) {
+	for _, definition := range BuiltinDefinitions() {
+		if definition.Name != ComputerAct {
+			continue
+		}
+		if !strings.Contains(definition.Description, "delivery=background") || !strings.Contains(definition.Description, "No automatic foreground fallback") || !strings.Contains(string(definition.InputSchema), `"delivery":{"type":"string","enum":["foreground","background"]`) {
+			t.Fatalf("missing explicit background preview contract: %+v", definition)
+		}
+		args, err := decodeComputerActArgs([]byte(`{"appID":"com.apple.iCal","windowID":7,"actions":[{"type":"click","x":0.5,"y":0.4,"delivery":"background"}]}`))
+		if err != nil || args.Actions[0].Delivery != "background" {
+			t.Fatalf("args=%+v err=%v", args, err)
+		}
+		return
+	}
+	t.Fatal("missing ComputerAct")
 }
 
 func TestComputerPermissionFailuresRemainStructured(t *testing.T) {

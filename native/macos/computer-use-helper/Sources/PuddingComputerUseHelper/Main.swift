@@ -5,6 +5,10 @@ import Foundation
 struct PuddingComputerUseHelper {
   static func main() async {
     do {
+      if Array(CommandLine.arguments.dropFirst()) == [BackgroundClickWorker.command] {
+        BackgroundClickWorker.run()
+        return
+      }
       if Array(CommandLine.arguments.dropFirst()) == ["preview"] {
         try await WindowPreview().run()
         return

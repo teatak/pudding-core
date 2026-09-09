@@ -28,7 +28,7 @@ export function ComposerTurnProgress({ progress, paused = false }: { progress: A
           <button
             type="button"
             aria-label={t("composer.planProgressAria").replace("{progress}", label)}
-            className="group pointer-events-auto flex h-9 w-fit max-w-[min(28rem,calc(100%-2rem))] cursor-pointer items-center gap-2 rounded-lg border border-border/70 bg-popover/95 px-3 text-xs text-popover-foreground shadow-sm backdrop-blur outline-none hover:border-muted-foreground/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="group pointer-events-auto flex h-9 w-fit max-w-[min(28rem,calc(100%-2rem))] cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-popover/95 px-3 text-xs text-popover-foreground shadow-xs backdrop-blur outline-none hover:bg-interactive-hover data-[state=open]:bg-interactive-hover focus-visible:ring-1 focus-visible:ring-ring/30"
           >
             <ProgressSegments steps={progress.plan} paused={paused} />
             <span className="shrink-0 font-medium tabular-nums text-muted-foreground">
@@ -70,7 +70,7 @@ function ProgressSegments({ steps, paused }: { steps: TurnPlanStep[]; paused: bo
           className={cn(
             "h-1.5 min-w-0 flex-1 rounded-[2px]",
             step.status === "completed" && "bg-success",
-            step.status === "in_progress" && "bg-success ring-1 ring-success/50 ring-offset-1 ring-offset-popover",
+            step.status === "in_progress" && "bg-success",
             step.status === "in_progress" && !paused && "pudding-plan-step-breathe",
             step.status === "pending" && "bg-muted-foreground/20",
           )}
@@ -87,7 +87,7 @@ function PlanStep({ active, index, step, paused }: { active: boolean; index: num
         {step.status === "completed" ? (
           <CircleCheckBig className="size-4 text-muted-foreground" data-icon-weight="subtle" />
         ) : step.status === "in_progress" && !paused ? (
-          <Spinner className="size-3.5 text-success motion-reduce:animate-none" />
+          <Spinner className="size-3.5 text-muted-foreground motion-reduce:animate-none" />
         ) : (
           <Circle className="size-3.5 text-muted-foreground" data-icon-weight="subtle" />
         )}

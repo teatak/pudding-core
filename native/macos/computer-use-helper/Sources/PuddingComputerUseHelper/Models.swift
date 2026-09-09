@@ -139,6 +139,7 @@ struct PointerSnapshot: Codable, Equatable {
   let clickCount: Int?
   let deltaX: Int?
   let deltaY: Int?
+  var delivery: String? = nil
 }
 
 enum ActionOutcome: String, Codable, Equatable {
@@ -285,6 +286,7 @@ enum HelperError: Error, LocalizedError {
 }
 
 func errorDetail(for error: Error) -> ErrorDetail {
+  if let background = error as? BackgroundInputError { return background.detail }
   let helperError = error as? HelperError
   return ErrorDetail(
     code: helperError?.code ?? "computer_invalid_request",

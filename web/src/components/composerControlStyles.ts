@@ -4,7 +4,7 @@ export const composerShellClassName =
 export const composerSendButtonClassName =
   "rounded-full !bg-foreground !text-background hover:!bg-foreground/85 disabled:!bg-control-disabled disabled:!text-background disabled:opacity-100 disabled:shadow-none";
 
-export const composerMenuShadowClassName = "shadow-none";
+export const composerMenuShadowClassName = "shadow-[var(--menu-shadow)]";
 
 export const composerSuggestionPanelClassName =
   `pudding-composer-suggestion left-4 mb-1 rounded-lg border bg-card text-card-foreground ${composerMenuShadowClassName}`;
