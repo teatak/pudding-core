@@ -57,6 +57,22 @@
 
 本报告准备时尚未打包、签名、公证、上传或执行新版本升级；完成情况在后续补记，不提前记为通过。
 
+## 发布结果
+
+- 2026-09-10 03:12:39 UTC，官方 `make desktop-release-finalize RELEASE_TAG=v0.3.2` 已发布 [v0.3.2](https://github.com/teatak/pudding/releases/tag/v0.3.2)，标题为 `v0.3.2`，非草稿、非预发布，Latest 指向该版本；远端仅一份同版本 Release。
+- 源码标签 `v0.3.2` 固定指向 `46e3814c750cacde9912ae3f48087642ca0eb8a4`。公开仓库已提交 [版本清单](https://github.com/teatak/pudding/blob/v0.3.2/releases/v0.3.2.json)，记录源码提交、英文功能清单和九资产大小及 SHA-256；本节属于发版后的文档补记，不移动标签或重新构建。
+- 官方发布流程完成 Go 全量测试、Electron 216 项测试、Web TypeScript/构建及 schema 检查；arm64/x64 安装包均完成 Developer ID 签名和 Apple 公证。完整成品验证通过，包括 ZIP/DMG 解包后的签名、公证票据、Gatekeeper、权限配置、嵌套二进制及自动更新元数据。
+- 成品 Helper 与本机 0.3.1 的 bundle ID、Team ID 及 designated requirement 一致；双架构验证通过。本轮未启动 `dist/release` 中的 App，避免影响正常安装路径的注册与权限归属。
+- 两份成品 asar 均确认没有 Worker、sharp、Wrangler 或 Miniflare。Dependabot #14 仍开放，Worker 开发依赖修复不在本次发布范围内。
+- 上传末尾发生一次网络 `fetch failed`；使用既有 `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-upload-resume` 恢复成功，未修改脚本、重新打包、重复公证或移动标签。
+- 九资产严格为双架构 DMG/ZIP、各自 blockmap 和 `latest-mac.yml`，无额外附件。本地 SHA-256、GitHub asset digest 与公开版本清单逐项一致；公开下载 HEAD 全部 HTTP 200，长度一致。公开 `latest-mac.yml` 实际下载内容与已验证的本地文件完全一致，版本 0.3.2，包含两个架构；SHA-256 为 `993a0b0ee34279ecdbc1ede3f8e82214baec53ba60b211840dacec0e1738fe54`。未将 HEAD 校验表述为全量重新下载安装包。
+
+### 未执行的验收
+
+用户明确要求“本机暂不升级”。已安装的 `/Applications/Pudding.app` 只读确认仍为 0.3.1，未替换、重启或向正式数据写入测试内容。正常安装位置的 0.3.1 → 0.3.2 自动更新、新签名包问答键盘行为、默认后台操作以及 Intel 真机交互均未在本轮执行，不记为通过。上述源码回归、Helper 身份及成品静态检查不替代这些交互验收；发布门槛第 3 项的相关检查保留为未完成事项。
+
+发布证据：`/tmp/pudding-032-publish.log`、`/tmp/pudding-032-upload-resume.log`、`/tmp/pudding-032-public-verify.log`。
+
 ## Release Notes
 
 ### Questions and Answers
