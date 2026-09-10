@@ -42,6 +42,12 @@
 
 证据：`/tmp/pudding-032-assessment-{go,race,electron,swift,web-test,web-build,delivery,input-ui,input-ui-repeat,secrets}.log`。
 
+## 依赖告警范围
+
+推送时 GitHub 提示开放的 Dependabot #14：`workers/oauth/pnpm-lock.yaml` 中 Wrangler/Miniflare 的开发依赖 `sharp@0.35.2`。上游 [GHSA-rgj7-g3m4-5g8c](https://github.com/lovell/sharp/security/advisories/GHSA-rgj7-g3m4-5g8c) 要求升级至 0.35.4 或以上，处理不可信图片的相关环境有高风险。
+
+根目录及 Web lockfile 不包含 sharp；桌面打包白名单不包含 workers，正式发布链路不调用 Worker/Wrangler。该告警不进入本次 macOS 安装包，也不是本次功能改动引入，故不阻断桌面发版。Worker 开发依赖仍需单独修复；本轮没有忽略、关闭告警或宣称仓库零漏洞，成品仍需核对未包含该依赖。
+
 ## 发布门槛
 
 1. 提交并推送版本和报告，工作树干净且与上游一致。
