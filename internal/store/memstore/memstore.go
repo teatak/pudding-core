@@ -799,7 +799,11 @@ func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	input := m.findQueuedInput(in.SessionID, in.ClientMessageID)
-	if input == nil || (input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing) {
+	if input == nil {
+		return nil, store.ErrNotFound
+	}
+	requeue := in.RequeueCancelled && input.Status == store.QueuedInputCancelled && in.Status != nil && *in.Status == store.QueuedInputQueued
+	if input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing && !requeue {
 		return nil, store.ErrNotFound
 	}
 	if in.Text != nil {
@@ -918,11 +922,9 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 	}
 	for _, input := range m.queued[in.SessionID] {
 		switch input.Status {
-		case store.QueuedInputPromoted:
-			continue
-		case store.QueuedInputCancelled:
-			input.Status = store.QueuedInputPromoted
-			input.UpdatedAt = time.Now()
+		case store.QueuedInputPromoted, store.QueuedInputCancelled:
+			// Skipping a withdrawn input is not delivery. Keep its cancellation
+			// so an explicit new answer can reuse this question's identity.
 			continue
 		case store.QueuedInputEditing:
 			return nil, store.ErrQueueBlocked

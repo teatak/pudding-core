@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -40,6 +43,10 @@ func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
 			e, st, _, sid := newTestEngine(t)
 			e.tools = &recordingToolRunner{result: tool.Result{Ok: true, Content: `{"status":"awaiting_user"}`}}
 			t.Cleanup(e.Stop)
+			if _, err := st.BeginTurn(context.Background(), store.BeginTurnInput{SessionID: sid, TurnID: "turn", UserMessageID: "initial", ClientMessageID: "initial", UserText: "ask"}); err != nil {
+				t.Fatal(err)
+			}
+			e.running[sid] = newActiveTurn("turn", func() {})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			wait := 1
@@ -65,11 +72,11 @@ func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
 				default:
 				}
 				answered, err := e.ActOnUserInput(ctx, sid, initial.ID, inputAnswer())
-				if err != nil || answered.Delivery != "tool" {
+				if err != nil || answered.SubmitResult == nil || answered.UserMessageID == "" {
 					t.Fatalf("answer delivery: %+v %v", answered, err)
 				}
 				duplicate, err := e.ActOnUserInput(ctx, sid, initial.ID, inputAnswer())
-				if err != nil || duplicate.Delivery != "tool" {
+				if err != nil || duplicate.Request.Status != "answered" {
 					t.Fatal("answer retry must not submit another message")
 				}
 			} else if scenario == "cancel" {
@@ -87,16 +94,20 @@ func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
 			if !got.Ok || !strings.Contains(got.Content, `"status":"`+expected+`"`) {
 				t.Fatalf("wrong result: %+v", got)
 			}
-			if scenario == "answer" && !strings.Contains(got.Content, "已填写测试") {
-				t.Fatal("missing actual answer")
+			if strings.Contains(got.Content, "已填写测试") || strings.Contains(got.Content, `"answer":`) {
+				t.Fatal("answer must only exist in the user message, not the tool result")
 			}
 			req, err := e.ActOnUserInput(context.Background(), sid, initial.ID, UserInputAction{Action: "touch"})
 			if err != nil || req.Request.Deadline != nil || req.Request.Status != expected {
 				t.Fatalf("ended wait revived: %+v %v", req, err)
 			}
 			messages, _ := st.ListMessages(context.Background(), sid, 0)
-			if len(messages) != 0 {
-				t.Fatal("synchronous answer was also submitted as user message")
+			wantMessages := 1
+			if scenario == "answer" {
+				wantMessages++
+			}
+			if len(messages) != wantMessages {
+				t.Fatalf("messages=%d, want %d", len(messages), wantMessages)
 			}
 		})
 	}
@@ -160,12 +171,17 @@ func TestUserInputModelLoopAndCanonicalRecovery(t *testing.T) {
 		next <- req
 		return smokeTextStream("done"), nil
 	}}
-	st := memstore.New()
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "input.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	config := memstore.New()
 	runner := &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.RequestUserInput, Capability: store.ModeChat}}, result: tool.Result{Ok: true}, callFunc: func(call tool.Call) { shown <- call }}
-	e := New(st, event.NewHub(), registry.Static(client), st, WithTools(runner))
-	t.Cleanup(e.Stop)
+	e := New(st, event.NewHub(), registry.Static(client), config, WithTools(runner))
+	t.Cleanup(func() { e.Wait(); e.Stop() })
 	_ = st.CreateSession(ctx, &store.Session{ID: "s", Title: "Question test", Provider: "mock", Model: "mock"})
-	_ = st.PutProviderProfile(ctx, &store.ProviderProfile{DisplayName: "mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "mock"}}})
+	_ = config.PutProviderProfile(ctx, &store.ProviderProfile{DisplayName: "mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "mock"}}})
 	if _, err := e.Submit(ctx, SubmitInput{SessionID: "s", ClientMessageID: "start", Text: "ask"}); err != nil {
 		t.Fatal(err)
 	}
@@ -186,15 +202,28 @@ func TestUserInputModelLoopAndCanonicalRecovery(t *testing.T) {
 	}
 	select {
 	case req := <-next:
-		raw, _ := json.Marshal(req)
-		if !strings.Contains(string(raw), "已填写测试") {
-			t.Fatal("model did not receive answer")
+		answers := 0
+		for i, message := range req.Messages {
+			for _, part := range message.Parts {
+				if part.Type == provider.PartToolResult && strings.Contains(part.Content, "已填写测试") {
+					t.Fatal("tool result contains user answer")
+				}
+			}
+			if message.Role == provider.RoleUser && strings.Contains(message.Text, "已填写测试") {
+				answers++
+				if i == 0 || len(req.Messages[i-1].Parts) == 0 || req.Messages[i-1].Parts[len(req.Messages[i-1].Parts)-1].Type != provider.PartToolResult {
+					t.Fatalf("answer must immediately follow tool result: %+v", req.Messages)
+				}
+			}
+		}
+		if answers != 1 {
+			t.Fatalf("model must receive one user answer, got %d: %+v", answers, req.Messages)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("model did not resume")
 	}
 	waitTurnDone(t, st, "s")
-	e2 := New(st, event.NewHub(), registry.Static(client), st)
+	e2 := New(st, event.NewHub(), registry.Static(client), config)
 	t.Cleanup(e2.Stop)
 	recovered, err := e2.UserInputRequest(ctx, "s", id)
 	if err != nil || recovered.Status != "answered" || !strings.Contains(string(recovered.Args), "Choice") {
@@ -205,19 +234,45 @@ func TestUserInputModelLoopAndCanonicalRecovery(t *testing.T) {
 	}
 	messages, _ := st.ListMessages(ctx, "s", 0)
 	users := 0
-	for _, m := range messages {
+	for i, m := range messages {
 		if m.Role == store.RoleUser {
 			users++
+			if m.ClientMessageID == "input-flow-"+id {
+				if i == 0 || messages[i-1].Role != store.RoleTool || messages[i-1].Parts[0].CallID != call.CallID {
+					t.Fatalf("canonical user bubble must follow the tool result: %+v", messages)
+				}
+			}
 		}
 	}
-	if users != 1 {
+	if users != 2 {
 		t.Fatalf("synchronous/retried answer duplicated user input: %d", users)
 	}
 }
 
 func TestLateUserInputRestoresCanonicalAndQueuesBehindOtherTurn(t *testing.T) {
+	for _, sqlite := range []bool{false, true} {
+		for _, drainCancelled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("sqlite=%v/drained=%v", sqlite, drainCancelled), func(t *testing.T) { testLateUserInputQueue(t, sqlite, drainCancelled) })
+		}
+	}
+}
+
+func testLateUserInputQueue(t *testing.T, sqlite, drainCancelled bool) {
 	ctx := context.Background()
-	e, st, _, sid := newTestEngine(t)
+	e, mem, _, sid := newTestEngine(t)
+	var st store.Store = mem
+	if sqlite {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "queue.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		session, _ := mem.GetSession(ctx, sid)
+		if err := db.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		st, e.store = db, db
+	}
 	t.Cleanup(e.Stop)
 	_, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "original", UserMessageID: "u", ClientMessageID: "initial", UserText: "ask"})
 	if err != nil {
@@ -240,7 +295,7 @@ func TestLateUserInputRestoresCanonicalAndQueuesBehindOtherTurn(t *testing.T) {
 	}
 	e.running[sid] = newActiveTurn("other", func() {})
 	answer, err := e.ActOnUserInput(ctx, sid, "original:q", inputAnswer())
-	if err != nil || !answer.Queued || answer.Delivery != "message" {
+	if err != nil || !answer.Queued {
 		t.Fatalf("late answer should queue, not steer unrelated turn: %+v %v", answer, err)
 	}
 	snapshot, err := e.UserInputRequest(ctx, sid, "original:q")
@@ -257,5 +312,202 @@ func TestLateUserInputRestoresCanonicalAndQueuesBehindOtherTurn(t *testing.T) {
 	}
 	if len(e.running[sid].consumeSteers()) != 0 {
 		t.Fatal("late answer steered unrelated task")
+	}
+	if drainCancelled {
+		if next, err := e.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "next-task", Text: "next ordinary task"}); err != nil || !next.Queued {
+			t.Fatalf("queue next task: %+v %v", next, err)
+		}
+	}
+	cancelled := store.QueuedInputCancelled
+	if _, err := st.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{SessionID: sid, ClientMessageID: "input-flow-original:q", Status: &cancelled}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = e.UserInputRequest(ctx, sid, "original:q")
+	if err != nil || snapshot.Status == "answered" {
+		t.Fatalf("cancelled queue answer cannot be reopened: %+v %v", snapshot, err)
+	}
+	activeTurn := "other"
+	if drainCancelled {
+		if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: activeTurn, Status: store.TurnCompleted}); err != nil {
+			t.Fatal(err)
+		}
+		next, err := st.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{SessionID: sid, TurnID: "next-task-turn", UserMessageID: "next-task-message"})
+		if err != nil || next.Input.ClientMessageID != "next-task" {
+			t.Fatalf("withdrawn answer must be skipped: %+v %v", next, err)
+		}
+		activeTurn = next.Turn.ID
+		e.running[sid] = newActiveTurn(activeTurn, func() {})
+		snapshot, err = e.UserInputRequest(ctx, sid, "original:q")
+		if err != nil || snapshot.Status == "answered" {
+			t.Fatalf("skipped answer was never delivered: %+v %v", snapshot, err)
+		}
+	}
+	newAnswer := UserInputAction{Action: "answer", Text: "updated answer", Parts: store.TextPart("updated answer")}
+	answer, err = e.ActOnUserInput(ctx, sid, "original:q", newAnswer)
+	if err != nil || !answer.Queued || answer.Duplicate || answer.Request.Status != "answered" {
+		t.Fatalf("explicit new answer must reactivate cancelled queue item: %+v %v", answer, err)
+	}
+	queued, err = st.ListQueuedInputs(ctx, sid)
+	if err != nil || len(queued) != 1 || queued[0].Text != newAnswer.Text || queued[0].Status != store.QueuedInputQueued {
+		t.Fatalf("acknowledged re-answer must really be queued: %+v %v", queued, err)
+	}
+	if queued[0].ClientMessageID != "input-flow-original:q" {
+		t.Fatal("re-answer changed the question's idempotent identity")
+	}
+	if _, err := e.ActOnUserInput(ctx, sid, "original:q", newAnswer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: activeTurn, Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := st.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{SessionID: sid, TurnID: "answer-turn", UserMessageID: "answer-message"})
+	if err != nil || delivered.UserMessage.Text != newAnswer.Text || delivered.UserMessage.ClientMessageID != "input-flow-original:q" {
+		t.Fatalf("new answer must be delivered, not the withdrawn body: %+v %v", delivered, err)
+	}
+	e.running[sid] = newActiveTurn(delivered.Turn.ID, func() {})
+	if _, err := e.ActOnUserInput(ctx, sid, "original:q", newAnswer); err != nil {
+		t.Fatal(err)
+	}
+	queued, err = st.ListQueuedInputs(ctx, sid)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("delivered answer retry must not requeue: %+v %v", queued, err)
+	}
+	messages, err := st.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers := 0
+	for _, message := range messages {
+		if message.ClientMessageID == "input-flow-original:q" {
+			answers++
+		}
+	}
+	if answers != 1 {
+		t.Fatalf("expected one canonical answer, got %d", answers)
+	}
+}
+
+func TestUserInputAcknowledgedAnswerSurvivesDisplayFailureAndCancellation(t *testing.T) {
+	for _, cancelAfterAnswer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%v", cancelAfterAnswer), func(t *testing.T) {
+			e, st, _, sid := newTestEngine(t)
+			t.Cleanup(e.Stop)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "turn", UserMessageID: "u", ClientMessageID: "initial", UserText: "ask"}); err != nil {
+				t.Fatal(err)
+			}
+			e.running[sid] = newActiveTurn("turn", cancel)
+			shown, release := make(chan struct{}), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			e.tools = &recordingToolRunner{result: tool.Result{Ok: false, Content: "display acknowledgement lost"}, callFunc: func(tool.Call) { close(shown); <-release }}
+			done := make(chan tool.Result, 1)
+			go func() {
+				defer close(done)
+				done <- e.requestUserInput(ctx, tool.Call{SessionID: sid, TurnID: "turn", CallID: "q", Name: tool.RequestUserInput, Args: json.RawMessage(`{"title":"question","waitSeconds":60}`)})
+			}()
+			<-shown
+			t.Cleanup(func() { unblock(); <-done })
+			reply, err := e.ActOnUserInput(ctx, sid, "turn:q", inputAnswer())
+			if err != nil || reply.SubmitResult == nil || reply.UserMessageID == "" {
+				t.Fatalf("answer not accepted as a user message: %+v %v", reply, err)
+			}
+			if cancelAfterAnswer {
+				cancel()
+			}
+			messages, err := st.ListMessages(context.Background(), sid, 0)
+			if err != nil || len(messages) != 2 || messages[1].Text != inputAnswer().Text {
+				t.Fatalf("acknowledged answer must already be durable: %+v %v", messages, err)
+			}
+			// Allow the failed UI acknowledgement to arrive after the answer.
+			unblock()
+			result := <-done
+			if !result.Ok || strings.Contains(result.Content, `"answer":`) || !strings.Contains(result.Content, `"status":"answered"`) {
+				t.Fatalf("acknowledgement failure overwrote accepted answer status: %+v", result)
+			}
+		})
+	}
+}
+
+type inputSnapshotBarrierKey struct{}
+
+type inputSnapshotBarrierStore struct {
+	store.Store
+	ready, release chan struct{}
+}
+
+func (s *inputSnapshotBarrierStore) ListQueuedInputs(ctx context.Context, sessionID string) ([]*store.QueuedInput, error) {
+	inputs, err := s.Store.ListQueuedInputs(ctx, sessionID)
+	if ctx.Value(inputSnapshotBarrierKey{}) != nil {
+		close(s.ready)
+		<-s.release
+	}
+	return inputs, err
+}
+
+func TestLateUserInputConcurrentRetryAcrossTurnEnd(t *testing.T) {
+	e, st, _, sid := newTestEngine(t)
+	t.Cleanup(e.Stop)
+	ctx := context.Background()
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "original", UserMessageID: "u", ClientMessageID: "initial", UserText: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "original", Parts: []store.ContentPart{
+		{Type: store.ContentPartToolUse, CallID: "q", Name: tool.RequestUserInput, Args: json.RawMessage(`{"title":"question","waitSeconds":0}`)},
+		{Type: store.ContentPartToolResult, CallID: "q", Name: tool.RequestUserInput, Ok: true, Content: `{"requestID":"original:q","status":"awaiting_user"}`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	e.running[sid] = newActiveTurn("original", func() {})
+	barrier := &inputSnapshotBarrierStore{Store: st, ready: make(chan struct{}), release: make(chan struct{})}
+	e.store = barrier
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, err := e.ActOnUserInput(context.WithValue(ctx, inputSnapshotBarrierKey{}, true), sid, "original:q", inputAnswer())
+		first <- err
+	}()
+	<-barrier.ready
+	go func() {
+		_, err := e.ActOnUserInput(ctx, sid, "original:q", inputAnswer())
+		second <- err
+	}()
+	finish := func() {
+		t.Helper()
+		if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "original", Status: store.TurnCompleted}); err != nil {
+			t.Fatal(err)
+		}
+		e.clearRunning(sid, "original")
+	}
+	secondFinished := false
+	select {
+	case err := <-second:
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Without serialized routing the second answer can finish the original
+		// turn while the first still holds an unanswered snapshot.
+		secondFinished = true
+		finish()
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(barrier.release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if !secondFinished {
+		finish()
+		if err := <-second; err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, _ := st.ListMessages(ctx, sid, 0)
+	count := 0
+	for _, message := range messages {
+		if message.ClientMessageID == "input-flow-original:q" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("concurrent answers duplicated across steer/submit boundary: %d", count)
 	}
 }

@@ -1907,6 +1907,45 @@ func TestAppendTurnSteerPersistsUserMessageAndEvent(t *testing.T) {
 	}
 }
 
+func TestFastOutputAfterAppliedSteerPreservesMessageOrder(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "s")
+	beginTestTurn(t, st, "s", "turn", "initial", "initial")
+	answer, err := st.AppendTurnSteer(ctx, store.AppendTurnSteerInput{SessionID: "s", TurnID: "turn", UserMessageID: "answer", ClientMessageID: "answer", UserText: "my answer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "turn", Parts: []store.ContentPart{{Type: store.ContentPartToolResult, CallID: "q", Name: "builtin_request_user_input", Ok: true, Content: `{"status":"answered"}`}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Make the millisecond edge deterministic: ApplyTurnSteers moves the
+	// answer to 1ms after this result. New output must not jump ahead of it
+	// even if wall time hasn't caught up yet.
+	if _, err := st.db.ExecContext(ctx, `UPDATE messages SET created_at=? WHERE id=?`, time.Now().Add(time.Second).UnixMilli(), result.Messages[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ApplyTurnSteers(ctx, store.ApplyTurnSteersInput{TurnID: "turn", MessageIDs: []string{"answer"}, Events: []*event.Event{answer.Event}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "turn", Status: store.TurnCompleted, AssistantParts: store.TextPart("continued")}); err != nil {
+		t.Fatal(err)
+	}
+	beginTestTurn(t, st, "s", "next", "next-user", "next")
+	messages, err := st.ListMessages(ctx, "s", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 5 || messages[1].Role != store.RoleTool || messages[2].ID != "answer" || messages[3].Text != "continued" || messages[4].ID != "next-user" {
+		t.Fatalf("wrong canonical order: %v", messageLabels(messages))
+	}
+	page, err := st.ListMessagesPage(ctx, "s", "next-user", 2)
+	if err != nil || len(page.Messages) != 2 || page.Messages[0].ID != "answer" || page.Messages[1].Text != "continued" {
+		t.Fatalf("wrong paginated order: %+v %v", page, err)
+	}
+}
+
 func TestSteerQueuedInputPromotesIntoRunningTurnAtomically(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")

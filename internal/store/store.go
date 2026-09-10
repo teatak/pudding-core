@@ -1706,6 +1706,9 @@ type UpdateQueuedInputInput struct {
 	Text            *string
 	Parts           *[]ContentPart
 	Status          *QueuedInputStatus
+	// RequeueCancelled is only for an explicit new answer to a cancelled
+	// question reply, never an automatic retry of the old submission.
+	RequeueCancelled bool
 }
 
 type UpdateQueuedInputResult struct {

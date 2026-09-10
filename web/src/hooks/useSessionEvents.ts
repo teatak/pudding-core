@@ -23,6 +23,7 @@ import type { BrowserTabsData } from "@/browser/types";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
+import { refreshInputRequestForQueuedInput } from "@/lib/inputFlowQueries";
 import { apiURL } from "@/state/apiBase";
 import { requestBrowserReveal } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -117,6 +118,9 @@ function openSessionEventSource({
     syncBackgroundProcessFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     syncApprovalStateFromEvent(queryClient, token, parsed.data);
+    if (parsed.data.kind === "input.queued" || parsed.data.kind === "input.updated" || parsed.data.kind === "input.steered" || parsed.data.kind === "turn.started") {
+      void refreshInputRequestForQueuedInput(queryClient, parsed.data.sessionID, parsed.data.clientMessageID);
+    }
     if (
       parsed.data.kind === "turn.tool" &&
       (parsed.data.name === "builtin_app_load" || parsed.data.name === "builtin_app_unload") &&

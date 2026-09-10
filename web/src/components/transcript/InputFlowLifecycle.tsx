@@ -59,7 +59,8 @@ export function InputFlowLifecycle({request, token, children}: {request: InputFl
   }
   function interact() {
     lastInteraction.current = Date.now();
-    setNow(lastInteraction.current);
+    // Let the existing timer refresh countdowns. Rendering during input capture
+    // can restore a controlled number input before its onChange saves the value.
     if (status === undefined || status === "waiting") send("touch");
   }
   const panelSeconds = inputPanelCountdown(lastInteraction.current, now);

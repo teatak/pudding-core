@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 
 type TranscriptDisclosureProps = {
+  action?: ReactNode;
   children?: ReactNode;
   className?: string;
   contentClassName?: string;
@@ -37,6 +38,7 @@ export function TranscriptActivityIcon({ children, className }: { children: Reac
 }
 
 export function TranscriptDisclosure({
+  action,
   children,
   className,
   contentClassName,
@@ -78,6 +80,11 @@ export function TranscriptDisclosure({
         {expandable ? (
           <span className="shrink-0">
             {resolvedOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          </span>
+        ) : null}
+        {action != null ? (
+          <span className="inline-flex shrink-0 items-center" data-transcript-header-action onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+            {action}
           </span>
         ) : null}
       </span>

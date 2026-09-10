@@ -697,11 +697,13 @@ export function Composer({
       clearSubmitError();
       onSubmitError?.(null);
     },
-    onSuccess: async (result, submission) => {
+    onSuccess: async (_result, submission) => {
       const targetSessionID = submission.request.sessionID;
       useInputFlowStore.getState().clearDraft(submission.request);
-      queryClient.setQueryData(queryKeys.inputRequest(targetSessionID, submission.request.id), result.request);
       await Promise.all([
+        // A queued reply may already have been withdrawn elsewhere by the time
+        // its submit response arrives. Re-read the authority, not that old ack.
+        queryClient.invalidateQueries({ queryKey: queryKeys.inputRequest(targetSessionID, submission.request.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(targetSessionID) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.turns(targetSessionID) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),

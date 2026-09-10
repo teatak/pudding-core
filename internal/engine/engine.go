@@ -106,6 +106,7 @@ type Engine struct {
 	running           map[string]*activeTurn // sessionID → 当前 turn
 	approvals         map[string]*pendingApproval
 	inputRequests     map[string]*pendingUserInput
+	inputAnswerMu     sync.Mutex                    // serialize answer deduplication across steer/submit boundaries
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
 	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
 	wg                sync.WaitGroup

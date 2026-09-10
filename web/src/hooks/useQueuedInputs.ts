@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { listQueuedInputs, reorderQueuedInputs, steerQueuedInput, updateQueuedInput, type ContentPart } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { useI18n } from "@/i18n";
+import { refreshInputRequestForQueuedInput } from "@/lib/inputFlowQueries";
 import { useOverlayStore, type PendingUserMessage } from "@/state/overlayStore";
 
 const EMPTY: PendingUserMessage[] = [];
@@ -68,7 +69,12 @@ export function useQueuedInputs(token: string, sessionID: string) {
       }
     },
     onError: () => toast.error(t("transcript.queuedUpdateFailed")),
-    onSettled: async () => { await refresh(); },
+    onSettled: async (_data, _error, action) => {
+      await Promise.all([
+        refresh(),
+        action.type === "reorder" ? undefined : refreshInputRequestForQueuedInput(queryClient, sessionID, action.type === "update" ? action.id : action.input.clientMessageID),
+      ]);
+    },
   });
   return { inputs, query, mutation };
 }

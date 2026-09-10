@@ -527,7 +527,7 @@ export const userInputRequest = z.object({
   deadline: z.string().optional(),
 });
 export const userInputReply = z.object({
-  delivery: z.enum(["tool", "message"]).optional(), request: userInputRequest,
+  request: userInputRequest,
   turnID: z.string().optional(), userMessageID: z.string().optional(),
   queued: z.boolean().optional(), duplicate: z.boolean().optional(),
 });

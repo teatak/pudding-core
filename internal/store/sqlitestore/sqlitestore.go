@@ -940,7 +940,8 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 		if err != nil {
 			return err
 		}
-		if input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing {
+		requeue := in.RequeueCancelled && input.Status == store.QueuedInputCancelled && in.Status != nil && *in.Status == store.QueuedInputQueued
+		if input.Status != store.QueuedInputQueued && input.Status != store.QueuedInputEditing && !requeue {
 			return store.ErrNotFound
 		}
 		if in.Text != nil {
@@ -1092,86 +1093,75 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 			return err
 		}
 
-		for {
-			input, err := firstQueuedInputTx(ctx, tx, in.SessionID)
-			if err != nil {
+		input, err := firstQueuedInputTx(ctx, tx, in.SessionID)
+		if err != nil {
+			return err
+		}
+		switch input.Status {
+		case store.QueuedInputEditing:
+			return store.ErrQueueBlocked
+		case store.QueuedInputQueued:
+			now := time.Now()
+			turn := &store.Turn{
+				ID:              in.TurnID,
+				SessionID:       input.SessionID,
+				ClientMessageID: input.ClientMessageID,
+				Status:          store.TurnRunning,
+				Provider:        input.Provider,
+				Model:           input.Model,
+				Mode:            input.Mode,
+				ModelConfig:     normalizeJSON(input.ModelConfig),
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			msg := &store.Message{
+				ID:              in.UserMessageID,
+				SessionID:       input.SessionID,
+				TurnID:          turn.ID,
+				Role:            store.RoleUser,
+				Kind:            store.MessageKindText,
+				Text:            input.Text,
+				Parts:           store.UserInputParts(input.Text, input.Parts),
+				TurnIndex:       0,
+				ClientMessageID: input.ClientMessageID,
+				CreatedAt:       now,
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+				turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+			); err != nil {
 				return err
 			}
-			switch input.Status {
-			case store.QueuedInputCancelled:
-				now := time.Now()
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE queued_inputs SET status=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
-					store.QueuedInputPromoted, unixMS(now), input.SessionID, input.ClientMessageID,
-				); err != nil {
-					return err
-				}
-				continue
-			case store.QueuedInputEditing:
-				return store.ErrQueueBlocked
-			case store.QueuedInputQueued:
-				now := time.Now()
-				turn := &store.Turn{
-					ID:              in.TurnID,
-					SessionID:       input.SessionID,
-					ClientMessageID: input.ClientMessageID,
-					Status:          store.TurnRunning,
-					Provider:        input.Provider,
-					Model:           input.Model,
-					Mode:            input.Mode,
-					ModelConfig:     normalizeJSON(input.ModelConfig),
-					CreatedAt:       now,
-					UpdatedAt:       now,
-				}
-				msg := &store.Message{
-					ID:              in.UserMessageID,
-					SessionID:       input.SessionID,
-					TurnID:          turn.ID,
-					Role:            store.RoleUser,
-					Kind:            store.MessageKindText,
-					Text:            input.Text,
-					Parts:           store.UserInputParts(input.Text, input.Parts),
-					TurnIndex:       0,
-					ClientMessageID: input.ClientMessageID,
-					CreatedAt:       now,
-				}
-				if _, err := tx.ExecContext(ctx,
-					`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-					turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
-				); err != nil {
-					return err
-				}
-				if err := insertMessageTx(ctx, tx, msg); err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE queued_inputs SET status=?, turn_id=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
-					store.QueuedInputPromoted, turn.ID, unixMS(now), input.SessionID, input.ClientMessageID,
-				); err != nil {
-					return err
-				}
-				input.Status = store.QueuedInputPromoted
-				input.TurnID = turn.ID
-				input.UpdatedAt = now
-				ev := event.Event{
-					SessionID:       turn.SessionID,
-					Kind:            event.TurnStarted,
-					TurnID:          turn.ID,
-					ClientMessageID: turn.ClientMessageID,
-					UserMessageID:   msg.ID,
-					Text:            input.Text,
-				}
-				if err := insertEventTx(ctx, tx, &ev); err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
-					return err
-				}
-				out = &store.PromoteQueuedInputResult{Input: input, Turn: turn, UserMessage: msg, StartedEvent: &ev}
-				return nil
-			default:
-				return store.ErrNotFound
+			if err := insertMessageTx(ctx, tx, msg); err != nil {
+				return err
 			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE queued_inputs SET status=?, turn_id=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
+				store.QueuedInputPromoted, turn.ID, unixMS(now), input.SessionID, input.ClientMessageID,
+			); err != nil {
+				return err
+			}
+			input.Status = store.QueuedInputPromoted
+			input.TurnID = turn.ID
+			input.UpdatedAt = now
+			ev := event.Event{
+				SessionID:       turn.SessionID,
+				Kind:            event.TurnStarted,
+				TurnID:          turn.ID,
+				ClientMessageID: turn.ClientMessageID,
+				UserMessageID:   msg.ID,
+				Text:            input.Text,
+			}
+			if err := insertEventTx(ctx, tx, &ev); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+				return err
+			}
+			out = &store.PromoteQueuedInputResult{Input: input, Turn: turn, UserMessage: msg, StartedEvent: &ev}
+			return nil
+		default:
+			return store.ErrNotFound
 		}
 	})
 	return out, err
@@ -2489,13 +2479,15 @@ func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageI
 }
 
 func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
+	// Only active queue entries participate; cancelled entries remain cancelled
+	// instead of being marked promoted without a canonical user message.
 	row := tx.QueryRowContext(ctx,
 		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
-		WHERE session_id=? AND status IN (?,?,?)
+		WHERE session_id=? AND status IN (?,?)
 		ORDER BY sort_order ASC, rowid ASC
 		LIMIT 1`,
-		sessionID, store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled,
+		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
 	)
 	input, err := scanQueuedInput(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2912,6 +2904,17 @@ func encodeParts(parts []store.ContentPart) string {
 }
 
 func insertMessageTx(ctx context.Context, tx *sql.Tx, msg *store.Message) error {
+	// ApplyTurnSteers may move an answer to max(created_at)+1ms so it follows
+	// the tool result. A fast continuation can arrive in that same millisecond:
+	// keep subsequent inserts at least as new, using rowid for ties, rather than
+	// letting model/history pagination put the continuation before the answer.
+	var latest int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at),0) FROM messages WHERE session_id=?`, msg.SessionID).Scan(&latest); err != nil {
+		return err
+	}
+	if unixMS(msg.CreatedAt) < latest {
+		msg.CreatedAt = timeFromMS(latest)
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO messages(id,session_id,turn_id,role,kind,text,search_tokens,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		msg.ID,

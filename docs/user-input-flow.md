@@ -19,16 +19,20 @@
 
 ## 结果与补答
 
-- 等待期间完整提交：返回 `status=answered`，`answer.text` / `answer.parts` 直接进入工具结果；不额外生成 user message。
-- 异步返回或等待结束后提交：后端以原问题身份投递 user message。只有原 turn 仍接受引导时才 steer；原 turn 已结束则 submit，若别的 turn 在运行则进入其后续队列，不引导无关 turn。
+- 所有完整答复统一写为 canonical user message，显示普通用户/表单结果气泡。tool 只返回请求元信息与状态，不包含答案正文，也不由 UI 从 tool 中投影出另一份答案。
+- 等待期间完整提交：答复先通过现有 steer 链路持久化，再唤醒等待。tool 返回 `status=answered`，在工具批次结果落库后应用用户消息，模型续跑前从 canonical 历史重建输入；顺序为工具结果 → 用户答复 → 助手继续。
+- 异步返回或等待结束后提交：同样以原问题身份投递 user message。只有原 turn 仍接受引导时才 steer；原 turn 已结束则 submit，若别的 turn 在运行则进入其后续队列，不引导无关 turn。
 - 补答幂等键固定为 `input-flow-{requestID}`；重复提交不得生成第二份答复。已经回答的工具行显示“已完成”。
+- 用户撤回排队答复后，可重新打开问题并主动提交新答案；复用原队列身份重新排队，不把已撤回的记录当作投递成功，也不自动恢复撤回的旧答案。
+- 队列推进跳过撤回项时保留 `cancelled`，只有实际生成 canonical user message 才标记 `promoted`。即使后续普通任务已开始，重新回答仍复用原幂等身份并投递新的答案内容。
+- 本地队列更新及 session SSE 输入事件刷新对应问题的后端快照；撤回后原工具行直接恢复“回答问题”，无需切换页面。答复提交回包也重新读取快照，避免延迟的“已回答”回包覆盖之后发生的撤回。
 - `timeout` / `dismissed` / `cancelled` 都是**没有收到回答**，不表示同意或拒绝。工具说明要求 LLM 不猜测依赖答案的决定，也不因超时重复提问。
 - 请求失败只恢复表单供用户重试，不自动改道或重发。
 
 ## 状态与恢复
 
 `requestID = turnID + ":" + callID`，REST 全部显式携带 sessionID。
-等待中的上下文、截止时间和答复暂存于 engine，turn 收尾后释放。
+等待中的上下文、截止时间和状态暂存于 engine，turn 收尾后释放；答案只保存在 canonical user message / queued input，不在等待状态中保存第二份。
 跨 turn / 重启恢复只读取 canonical tool_use、tool_result，以及具有同一答复幂等键的 user message / queued input；不增加问题历史表。
 
 前端 TanStack Query 缓存上述权威快照；Zustand 只保存当前可见面板和未提交的 UI 草稿。
@@ -39,4 +43,4 @@
 
 - Go：`go test -tags 'sqlite_fts5 webrtcaec' ./internal/engine ./internal/api -run 'Test(UserInput|LateUserInput)'`。
 - Web：`npm --prefix web test`、`npm --prefix web run build`。
-- 隔离桌面：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、续期、补答、长等待下重开、草稿恢复、失败重试与无重复投递。HTTP 为模拟数据，不接真实 provider。
+- 隔离桌面：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、续期、补答、长等待下重开、草稿恢复、失败重试与无重复投递、本地/SSE 撤回后直接重开补答，以及 form/repeat 数字字段的真实按键、小数、退格、文本插入和输入续时。数字输入必须通过原生按键验证，不能仅用 `insertText` 代替。HTTP 为模拟数据，不接真实 provider。

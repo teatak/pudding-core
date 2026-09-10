@@ -1159,14 +1159,22 @@ function ToolUsePart({
   const appID = computerToolAppID(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const activityActive = showActivitySpinner || active;
+  let inputAction: ReactNode;
+  if (toolName === "builtin_request_user_input" && sessionID && part.phase !== "streaming_args" && !toolFailed(part)) {
+    const value = (result?.value && typeof result.value === "object" ? result.value : {}) as Record<string, unknown>;
+    const requestID = typeof value.requestID === "string" ? value.requestID : part.turnID && part.id ? `${part.turnID}:${part.id}` : undefined;
+    if (requestID) inputAction = <InputFlowToolAction token={token} sessionID={sessionID} requestID={requestID} status={String(value.status ?? "waiting")} />;
+  }
   const disclosure = !showDetails ? (
     <TranscriptDisclosure
+      action={inputAction}
       icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       summary={title.summary || undefined}
       title={title.label}
     />
   ) : (
     <TranscriptDisclosure
+      action={inputAction}
       icon={<ToolActivityGlyph active={activityActive} appID={appID} icon={Icon} />}
       open={open}
       summary={title.summary || undefined}
@@ -1202,14 +1210,6 @@ function ToolUsePart({
       </div>
     </TranscriptDisclosure>
   );
-  if (toolName === "builtin_request_user_input" && sessionID && part.phase !== "streaming_args" && !toolFailed(part)) {
-    const value = (result?.value && typeof result.value === "object" ? result.value : {}) as Record<string, unknown>;
-    const requestID = typeof value.requestID === "string" ? value.requestID : part.turnID && part.id ? `${part.turnID}:${part.id}` : undefined;
-    if (requestID) return <div className="flex min-w-0 items-start gap-2">
-      <div className="min-w-0">{disclosure}</div>
-      <InputFlowToolAction token={token} sessionID={sessionID} requestID={requestID} status={String(value.status ?? "waiting")} />
-    </div>;
-  }
   if (!screenshotTool) {
     return disclosure;
   }

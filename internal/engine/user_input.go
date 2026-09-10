@@ -26,10 +26,9 @@ type UserInputRequest struct {
 
 type pendingUserInput struct {
 	UserInputRequest
-	ctx    context.Context
-	wait   time.Duration
-	wake   chan struct{}
-	answer json.RawMessage
+	ctx  context.Context
+	wait time.Duration
+	wake chan struct{}
 }
 
 type UserInputAction struct {
@@ -39,8 +38,7 @@ type UserInputAction struct {
 }
 
 type UserInputReply struct {
-	Delivery string           `json:"delivery,omitempty"`
-	Request  UserInputRequest `json:"request"`
+	Request UserInputRequest `json:"request"`
 	*SubmitResult
 }
 
@@ -80,18 +78,20 @@ func (e *Engine) requestUserInput(ctx context.Context, call tool.Call) tool.Resu
 	cancel()
 	if !result.Ok {
 		e.mu.Lock()
-		p.Status, p.Deadline = "failed", nil
+		answered := p.Status == "answered"
+		if !answered {
+			p.Status, p.Deadline = "failed", nil
+		}
 		e.mu.Unlock()
-		return result
+		if !answered {
+			return result
+		}
 	}
 	for {
 		e.mu.Lock()
 		settleUserInputWait(p, time.Now())
 		if p.Status != "waiting" {
 			payload := map[string]any{"ok": true, "requestID": p.ID, "turnID": p.TurnID, "title": p.Title, "status": p.Status}
-			if p.answer != nil {
-				payload["answer"] = p.answer
-			}
 			raw, _ := json.Marshal(payload)
 			e.mu.Unlock()
 			return tool.Result{CallID: call.CallID, Name: call.Name, Ok: true, Content: string(raw)}
@@ -221,6 +221,7 @@ func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string
 				return nil, ErrEmptyInput
 			}
 		}
+		return e.answerUserInput(ctx, sessionID, requestID, in)
 	}
 	e.mu.Lock()
 	p := e.inputRequests[sessionID+":"+requestID]
@@ -233,23 +234,17 @@ func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string
 				p.Deadline = &deadline
 			case "dismiss":
 				p.Status, p.Deadline = "dismissed", nil
-			case "answer":
-				p.answer, _ = json.Marshal(map[string]any{"text": in.Text, "parts": in.Parts})
-				p.Status, p.Deadline = "answered", nil
 			}
 			select {
 			case p.wake <- struct{}{}:
 			default:
 			}
 			out := &UserInputReply{Request: p.UserInputRequest}
-			if in.Action == "answer" {
-				out.Delivery = "tool"
-			}
 			e.mu.Unlock()
 			return out, nil
 		}
 		if p.Status == "answered" {
-			out := &UserInputReply{Request: p.UserInputRequest, Delivery: "tool"}
+			out := &UserInputReply{Request: p.UserInputRequest}
 			e.mu.Unlock()
 			return out, nil
 		}
@@ -259,12 +254,26 @@ func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string
 	if err != nil {
 		return nil, err
 	}
+	return &UserInputReply{Request: *req}, nil
+}
+
+func (e *Engine) answerUserInput(ctx context.Context, sessionID, requestID string, in UserInputAction) (*UserInputReply, error) {
+	// All answers are canonical user messages. Serialize the snapshot and route
+	// choice so concurrent retries cannot steer once, then submit again when the
+	// original turn ends. No answer body is retained in the waiting/tool state.
+	e.inputAnswerMu.Lock()
+	defer e.inputAnswerMu.Unlock()
+	req, err := e.UserInputRequest(ctx, sessionID, requestID)
+	if err != nil {
+		return nil, err
+	}
 	out := &UserInputReply{Request: *req}
-	if in.Action != "answer" || req.Status == "answered" {
+	if req.Status == "answered" {
 		return out, nil
 	}
-	// Late answers keep the original identity. Steer only that original turn,
-	// never an unrelated running turn; Submit queues safely if another is active.
+	// A synchronous answer uses the same steer path as a late answer. The turn
+	// loop persists the tool result before applying steers and sampling again.
+	// Never steer an unrelated running turn; Submit queues behind it instead.
 	clientID := "input-flow-" + requestID
 	steer, err := e.Steer(ctx, SteerInput{SessionID: sessionID, TurnID: req.TurnID, ClientMessageID: clientID, Text: in.Text, Parts: in.Parts})
 	if err == nil {
@@ -275,6 +284,36 @@ func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string
 	if err != nil {
 		return nil, err
 	}
-	out.Delivery, out.Request.Status = "message", "answered"
+	if out.Queued && out.Status == string(store.QueuedInputCancelled) {
+		// The user explicitly reopened and submitted the question again. Reuse
+		// the original queue identity with this answer, not a cancelled duplicate
+		// that would be acknowledged but never delivered.
+		queued := store.QueuedInputQueued
+		parts := store.UserInputParts(in.Text, in.Parts)
+		updated, err := e.store.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{
+			SessionID: sessionID, ClientMessageID: clientID, Text: &in.Text, Parts: &parts,
+			Status: &queued, RequeueCancelled: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		e.hub.Publish(*updated.Event)
+		out.Status, out.Duplicate = string(queued), false
+		e.TryDrainQueued(sessionID)
+	}
+	out.Request.Status, out.Request.Deadline = "answered", nil
+	if !out.Queued {
+		e.mu.Lock()
+		if p := e.inputRequests[sessionID+":"+requestID]; p != nil {
+			// Wake only after the message is durably accepted. An RPC failure or
+			// cancellation cannot then discard an acknowledged user answer.
+			p.Status, p.Deadline = "answered", nil
+			select {
+			case p.wake <- struct{}{}:
+			default:
+			}
+		}
+		e.mu.Unlock()
+	}
 	return out, nil
 }
