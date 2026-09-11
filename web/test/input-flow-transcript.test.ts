@@ -14,6 +14,8 @@ after(() => server.close());
 const { useOverlayStore } = await server.ssrLoadModule("/src/state/overlayStore.ts");
 const { useTranscriptViewModel } = await server.ssrLoadModule("/src/components/transcript/useTranscriptViewModel.ts");
 const { sessionEvent } = await server.ssrLoadModule("/contracts/events.ts");
+const { UserInput } = await server.ssrLoadModule("/src/components/transcript/UserInput.tsx");
+const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
 const sessionID = "flow", turnID = "turn", clientMessageID = "input-flow-turn:question";
 const form = { type: "form_result", title: "测试提问", schema: { type: "form", steps: [{ id: "dinner", type: "text_input", title: "晚饭？" }] }, result: { dinner: "肉饼" } };
 const message = (id, role, parts, clientID = undefined) => ({ id, role, parts, sessionID, turnID, clientMessageID: clientID, createdAt: "2026-09-10T00:00:00Z" });
@@ -38,6 +40,24 @@ function view(messages, status = "running") {
   renderToString(React.createElement(Probe));
   return result.turnVMs[0];
 }
+function bubbleHTML(user) {
+  return renderToString(React.createElement(TooltipProvider, null, React.createElement(UserInput, { disclosureKey: "k", token: "", user })));
+}
+test("an answer without structured parts never renders the summary text as a bubble", () => {
+  begin();
+  assert.ok(bubbleHTML(view([initial, tool]).sequence[1].user).includes("肉饼"), "structured pending answer renders the card");
+  useOverlayStore.getState().clearSession(sessionID);
+  apply({ kind: "turn.started", seq: 1, userMessageID: "initial", clientMessageID: "initial", text: "测试提问" });
+  apply({ kind: "turn.tool", callID: "question", name: "builtin_request_user_input", phase: "ok", ok: true, content: "{}" });
+  // 事件没有 canonical user parts 时(快照尚未到达),overlay 只剩摘要文本:
+  // 摘要气泡与 canonical 卡片形状不同,换成卡片时会跳变,所以不渲染这个临时气泡。
+  apply({ kind: "input.steered", seq: 2, clientMessageID, userMessageID: "answer", text: "已填写：肉饼" });
+  const pendingHTML = bubbleHTML(view([initial, tool]).sequence[1].user);
+  assert.ok(!pendingHTML.includes("已填写"), "summary text must not become a temporary answer bubble");
+  assert.ok(!pendingHTML.includes("pudding-user-message"), "no answer bubble until the structured result exists");
+  const canonicalHTML = bubbleHTML(view([initial, tool, answer]).sequence[1].user);
+  assert.ok(canonicalHTML.includes("肉饼"), "canonical answer keeps rendering");
+});
 test("an accepted form answer keeps the tool and structured bubble before the REST snapshot arrives", () => {
   begin();
   const vm = view([initial]);

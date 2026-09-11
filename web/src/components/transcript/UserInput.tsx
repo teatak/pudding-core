@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import { revealDesktopPath } from "@/api/client";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
+import { inputFlowRequestID } from "@/lib/inputFlowQueries";
 import { projectReferenceRangeLabel } from "@/lib/projectReferences";
 import { cn } from "@/lib/utils";
 
@@ -146,7 +147,12 @@ export const UserInput = memo(function UserInput({
       </a>
     );
   });
-  const showUserBubble = Boolean(formResult || user.text || showASRIndicator || user.interrupted);
+  // 表单答复的权威气泡是 canonical user message 里的 form_result 卡片。
+  // overlay 里取不到结构化结果时不得把摘要文本当成临时答复气泡:
+  // 它与卡片形状不同,canonical 快照到达后会整体跳变。
+  // 已有 messageID 的 canonical 答复仍按文本渲染,不隐藏历史。
+  const pendingSummaryAnswer = !formResult && !user.messageID && Boolean(inputFlowRequestID(clientMessageID));
+  const showUserBubble = Boolean(formResult || (user.text && !pendingSummaryAnswer) || showASRIndicator || user.interrupted);
 
   return (
     <>
@@ -164,7 +170,7 @@ export const UserInput = memo(function UserInput({
             >
               <div className="grid min-w-0 max-w-full gap-2">
                 {formResult ? <FormResultCard part={formResult} /> : null}
-                {(!formResult && user.text) || showASRIndicator ? (
+                {((!formResult && user.text) || showASRIndicator) && !pendingSummaryAnswer ? (
                   <CollapsibleUserText
                     key={disclosureKey}
                     disclosure={disclosure}
