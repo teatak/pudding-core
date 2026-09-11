@@ -498,10 +498,30 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
     --pudding-composer-mask-height: calc(
         var(--pudding-composer-mascot-overhang) + var(--pudding-composer-bottom-dock-gap)
     );
+    --pudding-composer-status-bar-height: 2.25rem;
+    --pudding-composer-status-stack: calc(
+        var(--pudding-composer-status-bar-height) + var(--pudding-composer-bottom-dock-gap)
+    );
 }
 
 .pudding-composer-floating-panel {
     bottom: calc(100% + var(--pudding-composer-bottom-dock-gap, 0.5rem));
+}
+
+/* 步骤条常驻输入框上方;审批/交互浮层同样贴着输入框上沿,需要整体上移一个
+   步骤条高度,叠在步骤条之上,避免两者互斥导致步骤被隐藏。 */
+.pudding-composer-status-bar {
+    height: var(--pudding-composer-status-bar-height, 2.25rem);
+}
+
+.pudding-composer-status-stack {
+    padding-top: var(--pudding-composer-status-stack, 2.75rem);
+}
+
+.pudding-composer-status-stack .pudding-composer-floating-panel {
+    bottom: calc(
+        100% + var(--pudding-composer-bottom-dock-gap, 0.5rem) + var(--pudding-composer-status-stack, 2.75rem)
+    );
 }
 
 .pudding-composer-mascot-anchor {

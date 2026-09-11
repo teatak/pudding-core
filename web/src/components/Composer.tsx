@@ -260,14 +260,8 @@ export function Composer({
   const [hasInput, setHasInput] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const showApprovalPanel = Boolean(pendingApproval);
-  const showInputFlowPanel = !showApprovalPanel && Boolean(pendingInputFlow);
-  const showTurnProgress = Boolean(
-    !showApprovalPanel
-      && !showInputFlowPanel
-      && running
-      && activeTurnPlan,
-  );
+  // 步骤条与审批/交互浮层可以并存:浮层整体上移叠在步骤条之上,不再互斥隐藏步骤。
+  const showTurnProgress = Boolean(running && activeTurnPlan);
   const showComposerTopStatus = showTurnProgress;
   const [draftSlashCommand, setDraftSlashCommand] = useState<SlashSubmitCommand | null>(null);
   const textAreaHandleRef = useRef<ComposerTextAreaHandle | null>(null);
@@ -1032,12 +1026,12 @@ export function Composer({
         className={cn(
           "pointer-events-none relative shrink-0",
           "pb-4",
-          showComposerTopStatus && "pt-11",
+          showComposerTopStatus && "pudding-composer-status-stack",
         )}
         onSubmit={form.handleSubmit(submitDraft)}
       >
       {showComposerTopStatus ? (
-        <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 h-9">
+        <aside className="pointer-events-none absolute inset-x-0 top-0 z-30 pudding-composer-status-bar">
           <ChatColumn className="relative flex h-full items-center justify-center">
             {showTurnProgress && activeTurnPlan ? (
               <ComposerTurnProgress key={`${sessionID}:${activeTurnPlan.turnID}`} progress={activeTurnPlan} paused={cancelMutation.isPending} />
