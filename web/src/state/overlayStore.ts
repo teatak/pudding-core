@@ -31,6 +31,9 @@ export type AssistantOverlay = {
   interrupted?: boolean;
   error?: string;
   revealed?: boolean;
+  // Already streamed segments awaiting the canonical snapshot of their input
+  // boundary. Discarded on reconciliation; never used to restore history.
+  previousSegments?: { beforeClientMessageID: string; overlay: Omit<AssistantOverlay, "previousSegments"> }[];
 };
 
 export type AssistantOverlayPart =
@@ -205,10 +208,6 @@ function upsertPendingUser(
       next,
     ],
   };
-}
-
-function hasPendingUser(pendingUsers: Record<string, PendingUserMessage[]>, sessionID: string, clientMessageID: string) {
-  return (pendingUsers[sessionID] || []).some((message) => message.clientMessageID === clientMessageID);
 }
 
 function appendThoughtPart(parts: AssistantOverlayPart[], delta: string): AssistantOverlayPart[] {
@@ -472,10 +471,19 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         };
       }
       if (event.kind === "input.steered") {
+        const current = state.assistants[event.turnID];
+        const { previousSegments = [], ...previous } = current || emptyAssistantOverlay(event.turnID, event.sessionID);
         return {
           assistants: {
             ...state.assistants,
-            [event.turnID]: emptyAssistantOverlay(event.turnID, event.sessionID),
+            [event.turnID]: {
+              ...emptyAssistantOverlay(event.turnID, event.sessionID),
+              clientMessageID: event.clientMessageID,
+              previousSegments: current ? [...previousSegments, {
+                beforeClientMessageID: event.clientMessageID,
+                overlay: { ...previous, status: "completed", revealed: true },
+              }] : [],
+            },
           },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
           pendingUsers: upsertPendingUser(state.pendingUsers, {
@@ -484,6 +492,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             sessionID: event.sessionID,
             status: "steered",
             text: event.text,
+            parts: event.parts,
             turnID: event.turnID,
           }),
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
@@ -491,7 +500,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             ...state.turnPhases,
             [event.sessionID]: makePhase({
               clientMessageID: event.clientMessageID,
-              activity: "steering",
+              activity: event.parts?.some((part) => part.type === "form_result") ? undefined : "steering",
               phase: "awaiting_model",
               sessionID: event.sessionID,
               turnID: event.turnID,
@@ -509,12 +518,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         );
         const current = overlayWithDefaults(assistants[event.turnID], event.turnID, event.sessionID);
         const pendingUsers =
-          event.text && !hasPendingUser(state.pendingUsers, event.sessionID, event.clientMessageID)
+          (event.text || event.parts?.length)
             ? upsertPendingUser(state.pendingUsers, {
                 clientMessageID: event.clientMessageID,
                 createdAt: new Date().toISOString(),
                 sessionID: event.sessionID,
-                text: event.text,
+                text: event.text || "",
+                parts: event.parts,
               })
             : state.pendingUsers;
         return {
@@ -713,7 +723,6 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   reconcileMessages: (sessionID, messages) =>
     set((state) => {
       const canonicalClientIDs = new Set(messages.map((message) => message.clientMessageID).filter(Boolean));
-      const canonicalMessageIDs = new Set(messages.map((message) => message.id));
       const currentPending = state.pendingUsers[sessionID] || [];
       const nextPending = currentPending.filter(
         (message) =>
@@ -726,11 +735,12 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       const assistants = { ...state.assistants };
       let assistantsChanged = false;
       for (const overlay of Object.values(assistants)) {
-        if (overlay.sessionID !== sessionID || overlay.status === "streaming") {
+        if (overlay.sessionID !== sessionID || !overlay.previousSegments?.length) {
           continue;
         }
-        if (overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)) {
-          delete assistants[overlay.turnID];
+        const remaining = overlay.previousSegments.filter((segment) => !canonicalClientIDs.has(segment.beforeClientMessageID));
+        if (remaining.length !== overlay.previousSegments.length) {
+          assistants[overlay.turnID] = { ...overlay, previousSegments: remaining };
           assistantsChanged = true;
         }
       }

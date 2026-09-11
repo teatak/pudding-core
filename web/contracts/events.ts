@@ -3,7 +3,7 @@
 // 本目录在轨道 E 脚手架落地后由前端直接 import。
 import { z } from "zod";
 
-import { attachment, backgroundProcess } from "./api";
+import { attachment, backgroundProcess, contentPart } from "./api";
 
 export const turnStartedEvent = z.object({
   kind: z.literal("turn.started"),
@@ -13,6 +13,7 @@ export const turnStartedEvent = z.object({
   clientMessageID: z.string(),
   userMessageID: z.string(),
   text: z.string().optional(),
+  parts: z.array(contentPart).optional(),
 });
 
 // turn.delta 不落库、无 seq;丢失由 turn.completed 后 refetch 兜底
@@ -95,6 +96,7 @@ export const inputSteeredEvent = z.object({
   clientMessageID: z.string(),
   userMessageID: z.string(),
   text: z.string().default(""),
+  parts: z.array(contentPart).optional(),
 });
 
 export const audioBindingsEvent = z.object({

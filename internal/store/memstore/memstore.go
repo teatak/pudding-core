@@ -627,6 +627,10 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
 	}
+	userParts, err := json.Marshal(msg.Parts)
+	if err != nil {
+		return nil, err
+	}
 	ev := event.Event{
 		Seq:             m.nextSeq(in.SessionID),
 		SessionID:       in.SessionID,
@@ -635,6 +639,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		ClientMessageID: in.ClientMessageID,
 		UserMessageID:   in.UserMessageID,
 		Text:            in.UserText,
+		Parts:           userParts,
 	}
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
@@ -878,6 +883,10 @@ func (m *Memstore) SteerQueuedInput(_ context.Context, in store.SteerQueuedInput
 		ClientMessageID: input.ClientMessageID,
 		CreatedAt:       now,
 	}
+	userParts, err := json.Marshal(message.Parts)
+	if err != nil {
+		return nil, err
+	}
 	input.Status = store.QueuedInputPromoted
 	input.TurnID = in.TurnID
 	input.UpdatedAt = now
@@ -896,6 +905,7 @@ func (m *Memstore) SteerQueuedInput(_ context.Context, in store.SteerQueuedInput
 		ClientMessageID: input.ClientMessageID,
 		UserMessageID:   message.ID,
 		Text:            message.Text,
+		Parts:           userParts,
 	}
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
 	turn.UpdatedAt = now
@@ -954,6 +964,10 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				ClientMessageID: input.ClientMessageID,
 				CreatedAt:       now,
 			}
+			userParts, err := json.Marshal(msg.Parts)
+			if err != nil {
+				return nil, err
+			}
 			ev := event.Event{
 				Seq:             m.nextSeq(input.SessionID),
 				SessionID:       input.SessionID,
@@ -962,6 +976,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				ClientMessageID: input.ClientMessageID,
 				UserMessageID:   msg.ID,
 				Text:            input.Text,
+				Parts:           userParts,
 			}
 			m.turns[turn.ID] = turn
 			m.messages[input.SessionID] = append(m.messages[input.SessionID], msg)
@@ -1178,6 +1193,10 @@ func (m *Memstore) AppendTurnSteer(_ context.Context, in store.AppendTurnSteerIn
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
 	}
+	userParts, err := json.Marshal(message.Parts)
+	if err != nil {
+		return nil, err
+	}
 	ev := event.Event{
 		SessionID:       in.SessionID,
 		Kind:            event.InputSteered,
@@ -1185,6 +1204,7 @@ func (m *Memstore) AppendTurnSteer(_ context.Context, in store.AppendTurnSteerIn
 		ClientMessageID: in.ClientMessageID,
 		UserMessageID:   in.UserMessageID,
 		Text:            message.Text,
+		Parts:           userParts,
 	}
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
 	turn.UpdatedAt = now

@@ -50,6 +50,9 @@ export function useTranscriptViewModel({
   const canonicalTurnCacheRef = useRef(new Map<string, CanonicalTurnCacheEntry>());
   const messages = useMemo(() => turns.flatMap((turn) => turn.messages), [turns]);
   const canonicalMessageIDs = useMemo(() => new Set(messages.map((message) => message.id)), [messages]);
+  // FinishTurn reports the first output ID, which can already be cached before
+  // a question is answered. Only a terminal turn snapshot contains ALL output.
+  const completedCanonicalTurnIDs = useMemo(() => new Set(turns.filter((turn) => turn.status !== "running").map((turn) => turn.id)), [turns]);
   const displayPhase = useMemo<TurnPhaseState | undefined>(() => {
     if (isTurnPhaseActive(turnPhase)) {
       return turnPhase;
@@ -63,9 +66,9 @@ export function useTranscriptViewModel({
   const visibleAssistantOverlays = useMemo(
     () =>
       assistantOverlays.filter(
-        (overlay) => !overlay.assistantMessageID || !canonicalMessageIDs.has(overlay.assistantMessageID) || !overlay.revealed,
+        (overlay) => !completedCanonicalTurnIDs.has(overlay.turnID) || !overlay.revealed,
       ),
-    [assistantOverlays, canonicalMessageIDs],
+    [assistantOverlays, completedCanonicalTurnIDs],
   );
 
   const turnVMs = useMemo(() => {
@@ -135,7 +138,7 @@ export function useTranscriptViewModel({
         messageSegments.forEach((segment, index) => {
           if (index > 0) {
             sequence.push({
-              key: `guide:${segment.user.id}`,
+              key: `guide:${segment.user.clientMessageID || segment.user.id}`,
               kind: "guide",
               user: userFromMessage(segment.user),
             });
@@ -143,8 +146,9 @@ export function useTranscriptViewModel({
           // The live overlay is the current assistant segment after the latest
           // guide. A turn refetch can already contain that segment's committed
           // parts, so rendering both briefly duplicates thought/tool rows.
-          const currentLiveSegment = Boolean(overlay) && index === messageSegments.length - 1;
-          if (segment.outputs.length > 0 && !currentLiveSegment) {
+          const currentLiveSegment = Boolean(overlay) && appliedGuides.length === 0 && index === messageSegments.length - 1;
+          const awaitingBoundary = index === messageSegments.length - 1 && overlay?.previousSegments?.some((segment) => segment.beforeClientMessageID === appliedGuides[0]?.clientMessageID);
+          if (segment.outputs.length > 0 && !currentLiveSegment && !awaitingBoundary) {
             sequence.push({
               assistant: {
                 duration: index === messageSegments.length - 1 ? duration : undefined,
@@ -159,8 +163,9 @@ export function useTranscriptViewModel({
         });
         appliedGuides.forEach((pending) => {
           usedPendingClientIDs.add(pending.clientMessageID);
+          appendPreviousSegment(sequence, overlay, pending.clientMessageID, messageSegments.at(-1)?.user);
           sequence.push({
-            key: `guide:pending:${pending.clientMessageID}`,
+            key: `guide:${pending.clientMessageID}`,
             kind: "guide",
             user: userFromPending(pending, { pending: false }),
           });
@@ -169,7 +174,7 @@ export function useTranscriptViewModel({
           usedLiveTurnIDs.add(overlay.turnID);
           sequence.push({
             assistant: {
-              canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
+              canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
               kind: "live",
               overlay,
               phase: phaseForTurn,
@@ -210,7 +215,7 @@ export function useTranscriptViewModel({
         usedLiveTurnIDs.add(overlay.turnID);
         items.push({
           assistant: {
-            canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
+            canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
             kind: "live",
             overlay,
             phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
@@ -277,7 +282,7 @@ export function useTranscriptViewModel({
         continue;
       }
       const pendingClientID =
-        overlay.clientMessageID || (displayPhase?.turnID === overlay.turnID ? displayPhase.clientMessageID : undefined);
+        overlay.previousSegments?.[0]?.overlay.clientMessageID || overlay.clientMessageID || (displayPhase?.turnID === overlay.turnID ? displayPhase.clientMessageID : undefined);
       const pending = pendingClientID ? pendingByClientID.get(pendingClientID) : undefined;
       if (pendingClientID) {
         usedPendingClientIDs.add(pendingClientID);
@@ -286,7 +291,7 @@ export function useTranscriptViewModel({
         (guide) => guide.clientMessageID !== pendingClientID,
       );
       const assistant = {
-        canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
+        canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
         kind: "live" as const,
         overlay,
         phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
@@ -294,8 +299,9 @@ export function useTranscriptViewModel({
       const sequence: NonNullable<TranscriptTurnVM["sequence"]> = [];
       appliedGuides.forEach((guide) => {
         usedPendingClientIDs.add(guide.clientMessageID);
+        appendPreviousSegment(sequence, overlay, guide.clientMessageID);
         sequence.push({
-          key: `guide:pending:${guide.clientMessageID}`,
+          key: `guide:${guide.clientMessageID}`,
           kind: "guide",
           user: userFromPending(guide, { pending: false }),
         });
@@ -379,7 +385,7 @@ export function useTranscriptViewModel({
     }
 
     return items.filter((item) => item.user || item.assistant || item.sequence?.length || item.compact);
-  }, [canonicalMessageIDs, compactRun, displayPhase, pendingUsers, sessionID, turnDurationByID, turns, visibleAssistantOverlays]);
+  }, [completedCanonicalTurnIDs, compactRun, displayPhase, pendingUsers, sessionID, turnDurationByID, turns, visibleAssistantOverlays]);
 
   const itemKeys = useMemo(() => turnVMs.map((item) => item.key), [turnVMs]);
 
@@ -452,6 +458,22 @@ function liveAssistantSegmentKey(overlay: AssistantOverlay, user?: Pick<Message,
   return user
     ? assistantSegmentKey(user, overlay.turnID)
     : assistantDisclosureKey({ turnID: overlay.turnID });
+}
+
+function appendPreviousSegment(
+  sequence: NonNullable<TranscriptTurnVM["sequence"]>,
+  current: AssistantOverlay | undefined,
+  beforeClientMessageID: string,
+  user?: Pick<Message, "clientMessageID" | "id">,
+) {
+  const previous = current?.previousSegments?.find((segment) => segment.beforeClientMessageID === beforeClientMessageID)?.overlay;
+  if (previous?.parts.length) {
+    sequence.push({
+      key: liveAssistantSegmentKey(previous, user),
+      kind: "assistant",
+      assistant: { kind: "live", canonicalReady: false, overlay: previous },
+    });
+  }
 }
 
 function userFromPending(message: PendingUserMessage, options: { pending?: boolean } = {}): UserInputVM {

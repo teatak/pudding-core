@@ -719,6 +719,10 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return err
 		}
+		userParts, err := json.Marshal(msg.Parts)
+		if err != nil {
+			return err
+		}
 		ev := event.Event{
 			Seq:             0,
 			SessionID:       in.SessionID,
@@ -727,6 +731,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			ClientMessageID: in.ClientMessageID,
 			UserMessageID:   in.UserMessageID,
 			Text:            in.UserText,
+			Parts:           userParts,
 		}
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
@@ -1056,6 +1061,10 @@ func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputI
 		if err := insertEventTx(ctx, tx, &updatedEvent); err != nil {
 			return err
 		}
+		userParts, err := json.Marshal(message.Parts)
+		if err != nil {
+			return err
+		}
 		steeredEvent := event.Event{
 			SessionID:       in.SessionID,
 			Kind:            event.InputSteered,
@@ -1063,6 +1072,7 @@ func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputI
 			ClientMessageID: input.ClientMessageID,
 			UserMessageID:   message.ID,
 			Text:            message.Text,
+			Parts:           userParts,
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err
@@ -1144,6 +1154,10 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 			input.Status = store.QueuedInputPromoted
 			input.TurnID = turn.ID
 			input.UpdatedAt = now
+			userParts, err := json.Marshal(msg.Parts)
+			if err != nil {
+				return err
+			}
 			ev := event.Event{
 				SessionID:       turn.SessionID,
 				Kind:            event.TurnStarted,
@@ -1151,6 +1165,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 				ClientMessageID: turn.ClientMessageID,
 				UserMessageID:   msg.ID,
 				Text:            input.Text,
+				Parts:           userParts,
 			}
 			if err := insertEventTx(ctx, tx, &ev); err != nil {
 				return err
@@ -1375,6 +1390,10 @@ func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInp
 		if err := insertMessageTx(ctx, tx, message); err != nil {
 			return err
 		}
+		userParts, err := json.Marshal(message.Parts)
+		if err != nil {
+			return err
+		}
 		ev := event.Event{
 			SessionID:       in.SessionID,
 			Kind:            event.InputSteered,
@@ -1382,6 +1401,7 @@ func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInp
 			ClientMessageID: in.ClientMessageID,
 			UserMessageID:   in.UserMessageID,
 			Text:            message.Text,
+			Parts:           userParts,
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err

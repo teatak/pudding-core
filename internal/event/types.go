@@ -42,7 +42,7 @@ const (
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
 //	input.queued   seq, clientMessageID, text?, status
 //	input.updated  seq, clientMessageID, text?, status
-//	input.steered  seq, turnID, clientMessageID, userMessageID, text?
+//	input.steered  seq, turnID, clientMessageID, userMessageID, text?, parts?
 //	audio.bindings inputOwner, inputMode, inputLevel
 //	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload
@@ -64,6 +64,7 @@ type Event struct {
 	Part               string          `json:"part,omitempty"` // turn.delta:text|thought
 	Delta              string          `json:"delta,omitempty"`
 	Text               string          `json:"text,omitempty"`
+	Parts              json.RawMessage `json:"parts,omitempty"` // canonical user parts at input/turn boundary
 	Status             string          `json:"status,omitempty"`
 	InputOwner         string          `json:"inputOwner,omitempty"`
 	InputMode          string          `json:"inputMode,omitempty"`
