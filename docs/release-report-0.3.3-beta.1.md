@@ -54,6 +54,15 @@
 
 本报告准备时尚未打包、签名、公证或上传。
 
+## 已知问题（beta 通道期间）
+
+- 版本号为预发布形态 `x.y.z-beta.n` 期间，裸 `npm test`（即 `node --test electron/test/*.test.cjs`）会在 `electron/test/update-test-runner.test.cjs` 抛 `stable release version must match x.y.z`；`.github/workflows/ci.yml` 的 `npm test` 步骤同样失败。
+- 实测：不设 `PUDDING_RELEASE_CHANNEL` 时该测试文件 `fail 1`，设为 `preview` 时 `pass 3`。
+- 原因：`scripts/run-update-test.cjs` 在模块加载时调用 `resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, version)`，未设环境变量时按 `stable` 校验版本；该测试文件顶层 `require` 了此模块。
+- 影响范围：仅 CI 与本地裸跑测试的信号。发布链路为每个步骤注入 `PUDDING_RELEASE_CHANNEL=preview`，因此打包、签名、公证、九资产校验及本轮 Draft 均不受影响。该组合在 `v0.2.1-beta.1` 时期已存在，非本次改动引入。
+- 消除条件：版本提升为 `0.3.3`（stable）后自然恢复，无需改动代码。
+- 本条属于发版后的文档补记；不移动标签 `v0.3.3-beta.1`，不重新打包。
+
 ## Release Notes 草案
 
 ### Conversation steering
