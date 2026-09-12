@@ -1070,7 +1070,8 @@ func (s *Server) cancel(c *cart.Context) error {
 }
 
 type compactReq struct {
-	Hint string `json:"hint"`
+	Hint            string `json:"hint"`
+	ClientMessageID string `json:"clientMessageID"`
 }
 
 func (s *Server) compactSession(c *cart.Context) error {
@@ -1080,8 +1081,9 @@ func (s *Server) compactSession(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	res, err := s.engine.Compact(c.Request.Context(), engine.CompactInput{
-		SessionID: id,
-		Hint:      req.Hint,
+		SessionID:       id,
+		Hint:            req.Hint,
+		ClientMessageID: req.ClientMessageID,
 	})
 	switch {
 	case errors.Is(err, engine.ErrTurnRunning):

@@ -1253,7 +1253,7 @@ export async function cancelTurn(token: string, sessionID: string): Promise<void
   });
 }
 
-export function compactSession(token: string, sessionID: string, body: { hint?: string } = {}): Promise<CompactResult> {
+export function compactSession(token: string, sessionID: string, body: { hint?: string; clientMessageID?: string } = {}): Promise<CompactResult> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/compact`, compactResponse, {
     method: "POST",
     body: JSON.stringify(body),

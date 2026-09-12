@@ -263,7 +263,7 @@ func (m *Memstore) CloneSession(_ context.Context, in store.CloneSessionInput) (
 		if turn.Status == store.TurnRunning {
 			turn.Status = store.TurnCancelled
 		}
-		if turn.ClientMessageID == "compact:"+message.TurnID {
+		if strings.HasPrefix(turn.ClientMessageID, "compact:") {
 			turn.ClientMessageID = "compact:" + newTurnID
 		}
 		m.turns[newTurnID] = turn

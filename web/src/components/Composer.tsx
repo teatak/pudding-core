@@ -718,11 +718,12 @@ export function Composer({
     mutationFn: () => cancelTurn(token, sessionID),
   });
   const compactMutation = useMutation({
-    mutationFn: ({ hint }: { hint: string }) => compactSession(token, sessionID, { hint }),
-    onMutate: () => {
+    mutationFn: ({ hint, clientMessageID }: { hint: string; clientMessageID: string }) =>
+      compactSession(token, sessionID, { hint, clientMessageID }),
+    onMutate: ({ clientMessageID }) => {
       clearSubmitError();
       onSubmitError?.(null);
-      startCompactRun(sessionID);
+      startCompactRun(sessionID, clientMessageID);
       resetSessionDraft();
     },
     onSuccess: async () => {
@@ -849,7 +850,7 @@ export function Composer({
       return;
     }
     if (slashCommand?.id === "compact") {
-      compactMutation.mutate({ hint: slashCommand.hint });
+      compactMutation.mutate({ clientMessageID: `compact:${newClientID()}`, hint: slashCommand.hint });
       return;
     }
     if (slashCommand?.id === "rename") {

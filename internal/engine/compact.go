@@ -23,8 +23,9 @@ const (
 )
 
 type CompactInput struct {
-	SessionID string
-	Hint      string
+	SessionID       string
+	Hint            string
+	ClientMessageID string
 }
 
 type CompactResult struct {
@@ -89,11 +90,17 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 
 	turnID := store.NewID("turn")
 	msgID := store.NewID("msg")
+	// 客户端触发的压缩带 clientMessageID,作为 pending overlay 与 canonical turn
+	// 的对账键(硬约束 13);自动压缩没有 pending overlay,沿用 turnID 派生的稳定键。
+	clientMessageID := strings.TrimSpace(in.ClientMessageID)
+	if clientMessageID == "" {
+		clientMessageID = "compact:" + turnID
+	}
 	res, err := e.store.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
 		SessionID:       sessionID,
 		TurnID:          turnID,
 		MessageID:       msgID,
-		ClientMessageID: "compact:" + turnID,
+		ClientMessageID: clientMessageID,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
 		Mode:            resolved.mode,

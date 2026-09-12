@@ -90,8 +90,12 @@ export function useTranscriptViewModel({
     const usedLiveTurnIDs = new Set<string>();
     const seenCanonicalTurnIDs = new Set<string>();
     const items: TranscriptTurnVM[] = [];
+    const turnClientMessageIDs = new Set<string>();
 
     for (const turn of turns) {
+      if (turn.clientMessageID) {
+        turnClientMessageIDs.add(turn.clientMessageID);
+      }
       const visibleMessages = turn.messages.filter((message) => {
         if (message.role !== "user" || !message.clientMessageID) {
           return true;
@@ -370,10 +374,12 @@ export function useTranscriptViewModel({
       });
     }
 
-    if (compactRun) {
+    // 压缩行沿用 submit 的对账规则:落库后 canonical turn 复用同一 key,列表项原地
+    // 更新。否则卸载+挂载会改变贴底偏移,表现为对话窗口跳一下。
+    if (compactRun && !turnClientMessageIDs.has(compactRun.clientMessageID)) {
       items.push({
         compact: compactRun,
-        key: `compact:${sessionID}`,
+        key: transcriptTurnKey({ clientMessageID: compactRun.clientMessageID, sessionID }),
         kind: "compact",
       });
     }

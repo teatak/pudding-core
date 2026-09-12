@@ -16,6 +16,7 @@ export type PendingUserMessage = {
 };
 
 export type CompactRun = {
+  clientMessageID: string;
   sessionID: string;
   startedAt: string;
 };
@@ -109,7 +110,7 @@ type OverlayState = {
   lastEventSeqs: Record<string, number | undefined>;
   activeTurnPlans: Record<string, ActiveTurnPlan | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
-  startCompactRun: (sessionID: string) => void;
+  startCompactRun: (sessionID: string, clientMessageID: string) => void;
   finishCompactRun: (sessionID: string) => void;
   markSessionCompleted: (sessionID: string) => void;
   clearSessionCompletion: (sessionID: string) => void;
@@ -350,11 +351,11 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     set((state) => ({
       pendingUsers: upsertPendingUser(state.pendingUsers, message),
     })),
-  startCompactRun: (sessionID) =>
+  startCompactRun: (sessionID, clientMessageID) =>
     set((state) => ({
       compactRuns: {
         ...state.compactRuns,
-        [sessionID]: { sessionID, startedAt: new Date().toISOString() },
+        [sessionID]: { clientMessageID, sessionID, startedAt: new Date().toISOString() },
       },
     })),
   finishCompactRun: (sessionID) =>

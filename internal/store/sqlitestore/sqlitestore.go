@@ -368,7 +368,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 				status = store.TurnCancelled
 			}
 			clientMessageID := sourceTurn.ClientMessageID
-			if clientMessageID == "compact:"+sourceTurn.ID {
+			if strings.HasPrefix(clientMessageID, "compact:") {
 				clientMessageID = "compact:" + newTurnID
 			}
 			if _, err := tx.ExecContext(ctx,
