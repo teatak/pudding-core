@@ -31,19 +31,40 @@ const CLICK_KEY_TIMES = {
   end: 1,
 } as const;
 export function MascotSceneV1Adapter({
-  ambientMotion = true,
+  ambientMotion: requestedAmbientMotion = true,
   className,
   gaze = DEFAULT_GAZE,
   headShakeSignal = 0,
   inputPitchBias = 0,
   mood = "idle",
   onPointerGaze,
-  pointerTracking = true,
+  pointerTracking: requestedPointerTracking = true,
 }: MascotSceneV1AdapterProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const gestureRef = useRef<HTMLDivElement>(null);
   const gestureAnimationRef = useRef<Animation | null>(null);
   const [size, setSize] = useState(128);
+  const [visible, setVisible] = useState(false);
+  const ambientMotion = requestedAmbientMotion && visible;
+  const pointerTracking = requestedPointerTracking && visible;
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let intersecting = false;
+    const updateVisibility = () => setVisible(intersecting && !document.hidden);
+    const observer = new IntersectionObserver(([entry]) => {
+      intersecting = entry.isIntersecting;
+      updateVisibility();
+    });
+    observer.observe(root);
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", updateVisibility);
+    };
+  }, []);
+
   const pose = useSceneGazePose({
     ambientMotion,
     gaze,

@@ -14,6 +14,7 @@
 | [technology-decisions.md](technology-decisions.md) | 产品定位、后端边界、状态所有权和通信架构 |
 | [contracts-checklist.md](contracts-checklist.md) | REST、SSE、消息和工具契约对照 |
 | [user-input-flow.md](user-input-flow.md) | 用户问题收集、模型等待、独立面板计时和事后补答 |
+| [transcript-stream-performance.md](transcript-stream-performance.md) | 流式回复卡顿优化、性能对比与隔离桌面验收 |
 | [design.md](design.md) | Electron Agent Shell 的 Web UI 设计底座 |
 | [apps.md](apps.md) | App 包、连接字段与 MCP App 配置 |
 | [builtin-apps-design.md](builtin-apps-design.md) | 内置 App、动态加载和 runtime-provided App |

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { fileNameFromPath, languageFromPath } from "@/lib/fileLanguage";
 import { cn } from "@/lib/utils";
-import { getShikiCodeRenderer } from "@/lib/shiki";
+import { useCodeHighlight } from "@/hooks/useCodeHighlight";
 import type { FilePreview } from "@/state/filePreviewStore";
 import { TurnFileDiffSurface } from "./TurnFileDiffSurface";
 
@@ -29,7 +29,6 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
   const { t } = useI18n();
   const typography = useEditorTypography();
   const [copied, setCopied] = useState(false);
-  const [highlighted, setHighlighted] = useState<string | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
   const language = useMemo(() => languageFromPath(preview.path), [preview.path]);
   const content = useMemo(() => preview.content.replace(/\r\n/g, "\n"), [preview.content]);
@@ -46,18 +45,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
     "--editor-line-height": `${typography.resolvedLineHeight}px`,
   } as CSSProperties;
 
-  useEffect(() => {
-    let cancelled = false;
-    setHighlighted(null);
-    void getShikiCodeRenderer().then((render) => {
-      if (!cancelled) {
-        setHighlighted(render(content, language));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [content, language]);
+  const highlighted = useCodeHighlight(content, language);
 
   useEffect(
     () => () => {

@@ -1,97 +1,48 @@
-export type CodeBlockRenderer = (code: string, lang?: string) => string | null;
+type HighlightJob = { code: string; lang?: string; receive: (html: string | null) => void };
 
-const SHIKI_THEMES = {
-  dark: "dark-plus",
-  light: "light-plus",
-} as const;
+let worker: Worker | undefined;
+let nextID = 0;
+let runningID: number | undefined;
+const jobs = new Map<number, HighlightJob>();
 
-const LANGUAGE_LOADERS = {
-  bash: () => import("@shikijs/langs/bash"),
-  css: () => import("@shikijs/langs/css"),
-  diff: () => import("@shikijs/langs/diff"),
-  go: () => import("@shikijs/langs/go"),
-  html: () => import("@shikijs/langs/html"),
-  javascript: () => import("@shikijs/langs/javascript"),
-  json: () => import("@shikijs/langs/json"),
-  jsx: () => import("@shikijs/langs/jsx"),
-  markdown: () => import("@shikijs/langs/markdown"),
-  python: () => import("@shikijs/langs/python"),
-  shellscript: () => import("@shikijs/langs/shellscript"),
-  sql: () => import("@shikijs/langs/sql"),
-  tsx: () => import("@shikijs/langs/tsx"),
-  typescript: () => import("@shikijs/langs/typescript"),
-  yaml: () => import("@shikijs/langs/yaml"),
-} as const;
-
-type SupportedLanguage = keyof typeof LANGUAGE_LOADERS;
-
-const LANGUAGE_ALIASES: Record<string, SupportedLanguage> = {
-  golang: "go",
-  js: "javascript",
-  md: "markdown",
-  py: "python",
-  shell: "shellscript",
-  sh: "shellscript",
-  ts: "typescript",
-  yml: "yaml",
-  zsh: "shellscript",
-};
-
-const COMMON_LANGUAGE_SET = new Set<string>(Object.keys(LANGUAGE_LOADERS));
-let rendererPromise: Promise<CodeBlockRenderer> | null = null;
-
-export function getShikiCodeRenderer() {
-  rendererPromise ??= createShikiCodeRenderer();
-  return rendererPromise;
-}
-
-async function createShikiCodeRenderer(): Promise<CodeBlockRenderer> {
-  const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, languages, themes] = await Promise.all([
-    import("shiki/core"),
-    import("shiki/engine/javascript"),
-    loadLanguages(),
-    loadThemes(),
-  ]);
-  const highlighter = await createHighlighterCore({
-    engine: createJavaScriptRegexEngine(),
-    langs: languages,
-    themes,
-  });
-
-  return (code, rawLang) => {
-    const lang = normalizeLanguage(rawLang);
-    if (!lang) {
-      return null;
-    }
-    try {
-      return highlighter.codeToHtml(code, {
-        lang,
-        themes: SHIKI_THEMES,
-      });
-    } catch {
-      return null;
-    }
-  };
-}
-
-async function loadLanguages() {
-  const languageGroups = await Promise.all(Object.values(LANGUAGE_LOADERS).map((loadLanguage) => loadLanguage().then((module) => module.default)));
-  return languageGroups.flat();
-}
-
-async function loadThemes() {
-  const [lightPlus, darkPlus] = await Promise.all([
-    import("@shikijs/themes/light-plus"),
-    import("@shikijs/themes/dark-plus"),
-  ]);
-  return [lightPlus.default, darkPlus.default];
-}
-
-function normalizeLanguage(rawLang?: string): SupportedLanguage | null {
-  const normalized = rawLang?.trim().toLowerCase().replace(/^\./, "");
-  if (!normalized) {
-    return null;
+function pump() {
+  if (runningID !== undefined || jobs.size === 0) return;
+  if (!worker) {
+    worker = new Worker(new URL("./shiki.worker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = ({ data }: MessageEvent<{ id: number; html: string | null }>) => {
+      const job = jobs.get(data.id);
+      jobs.delete(data.id);
+      runningID = undefined;
+      job?.receive(data.html);
+      pump();
+    };
+    worker.onerror = (event) => {
+      console.error("Code highlighting worker failed", event.message);
+      worker?.terminate();
+      worker = undefined;
+      const failed = [...jobs.values()];
+      jobs.clear();
+      runningID = undefined;
+      failed.forEach((job) => job.receive(null));
+    };
   }
-  const lang = LANGUAGE_ALIASES[normalized] || (normalized as SupportedLanguage);
-  return COMMON_LANGUAGE_SET.has(lang) ? lang : null;
+  const [id, job] = jobs.entries().next().value!;
+  runningID = id;
+  worker.postMessage({ id, code: job.code, lang: job.lang });
+}
+
+// Keep at most one worker job in flight. Effect cleanup removes superseded
+// queued versions before they consume CPU and ignores any already-running reply.
+export function requestCodeHighlight(code: string, lang: string | undefined, receive: (html: string | null) => void) {
+  const id = ++nextID;
+  jobs.set(id, { code, lang, receive });
+  pump();
+  return () => { jobs.delete(id); };
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    worker?.terminate();
+    jobs.clear();
+  });
 }

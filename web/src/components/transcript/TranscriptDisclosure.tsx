@@ -127,7 +127,7 @@ export function TranscriptDisclosure({
       >
         {row}
       </summary>
-      <div className={cn("min-w-0 max-w-full py-1", contentClassName)}>{children}</div>
+      {resolvedOpen ? <div className={cn("min-w-0 max-w-full py-1", contentClassName)}>{children}</div> : null}
     </details>
   );
 }

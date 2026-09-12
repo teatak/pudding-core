@@ -12,6 +12,10 @@ import {
 } from "@/components/icons";
 import {
   Children,
+  createContext,
+  memo,
+  useContext,
+  useMemo,
   isValidElement,
   useEffect,
   useRef,
@@ -35,7 +39,7 @@ import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { openExternalURL } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
-import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
+import { useCodeHighlight } from "@/hooks/useCodeHighlight";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
 
 import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
@@ -240,7 +244,7 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
     if (part.type === "approval") {
       continue;
     }
-    if (part.type === "tool_use" && (isBrowserScreenshotTool(part.name || part.resultName) || toolHasInlineAttachments(part))) {
+    if (part.type === "tool_use" && breaksProcessRun(part)) {
       flush();
       out.push(part);
       continue;
@@ -258,6 +262,17 @@ function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
 
 function isProcessPart(part: TurnPartVM) {
   return part.type === "thought" || part.type === "tool_use";
+}
+
+// Parts that are the turn's visible content rather than internal process stay
+// outside a compact row: media tools, and a question to the user, whose
+// reopen action has to remain reachable without expanding the run.
+function breaksProcessRun(part: Extract<TurnPartVM, { type: "tool_use" }>) {
+  return (
+    isBrowserScreenshotTool(part.name || part.resultName) ||
+    toolHasInlineAttachments(part) ||
+    (part.name || part.resultName) === "builtin_request_user_input"
+  );
 }
 
 function isActiveProcessPart(part: TurnPartVM) {
@@ -1144,7 +1159,7 @@ function ToolUsePart({
 }) {
   const { locale, t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
-  const result = formatToolResult(part.resultContent);
+  const result = useMemo(() => formatToolResult(part.resultContent), [part.resultContent]);
   const liveResult = result;
   const toolName = part.name || part.resultName || "";
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
@@ -1272,7 +1287,107 @@ type MarkdownImageItem = ImageLightboxItem & {
   sourceKey: string;
 };
 
-export function MarkdownBody({
+const MarkdownRenderContext = createContext<{
+  onResolvedLinkClick?: (href: string) => boolean;
+  resolveImageURL?: (raw: string) => string;
+  markdownImages: MarkdownImageItem[];
+  imageIndexBySource: Map<string, number>;
+  token: string;
+  setImagePreviewIndex: (index: number | null) => void;
+} | null>(null);
+
+// Stable element types preserve code/image subtrees across streamed updates.
+const markdownComponents: Components = {
+  a({ children, href, node: _node, ...props }) {
+    const { onResolvedLinkClick } = useContext(MarkdownRenderContext)!;
+    return (
+      <a
+        {...props}
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={(event) => {
+          if (href && onResolvedLinkClick?.(href)) {
+            event.preventDefault();
+            return;
+          }
+          handleMarkdownLinkClick(event);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+  img({ alt, node: _node, src }) {
+    const { resolveImageURL, imageIndexBySource, markdownImages, token, setImagePreviewIndex } = useContext(MarkdownRenderContext)!;
+    const label = alt || src || "";
+    if (!src) {
+      return label ? <span>{label}</span> : null;
+    }
+    if (resolveImageURL) {
+      return (
+        <img
+          alt={label}
+          className="my-3 max-h-[70vh] max-w-full rounded-md border object-contain"
+          decoding="async"
+          loading="lazy"
+          src={src}
+        />
+      );
+    }
+    const sourceKey = attachmentPathFromMarkdownURL(src);
+    if (sourceKey) {
+      const imageIndex = imageIndexBySource.get(sourceKey);
+      const image =
+        imageIndex !== undefined
+          ? markdownImages[imageIndex]
+          : {
+              id: sourceKey,
+              name: label || attachmentNameFromPath(sourceKey),
+              sourceKey,
+              url: attachmentResourceURL({ url: sourceKey }, token),
+            };
+      if (image.url) {
+        return (
+          <MarkdownImageCard
+            image={image}
+            onOpen={() => {
+              if (imageIndex !== undefined) {
+                setImagePreviewIndex(imageIndex);
+              }
+            }}
+          />
+        );
+      }
+    }
+    return (
+      <a href={src} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
+        {label}
+      </a>
+    );
+  },
+  pre({ children }) {
+    const block = getCodeBlock(children);
+    if (!block) {
+      return <pre tabIndex={-1}>{children}</pre>;
+    }
+    return (
+      <CodeBlock
+        code={block.code}
+        lang={block.lang}
+      />
+    );
+  },
+  table({ children, node: _node, ...props }) {
+    return (
+      <div className="table-wrap">
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
+};
+
+export const MarkdownBody = memo(function MarkdownBody({
   allowHtmlImages = true,
   messageID,
   onResolvedLinkClick,
@@ -1289,113 +1404,10 @@ export function MarkdownBody({
   text: string;
   token?: string;
 }) {
-  const { t } = useI18n();
-  const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
   const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
-  const markdownImages = extractMarkdownImageItems(text, token);
-  const imageIndexBySource = new Map(markdownImages.map((item, index) => [item.sourceKey, index]));
-  useEffect(() => {
-    let cancelled = false;
-    void getShikiCodeRenderer().then((renderer) => {
-      if (!cancelled) {
-        setCodeRenderer(() => renderer);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const components: Components = {
-    a({ children, href, node: _node, ...props }) {
-      return (
-        <a
-          {...props}
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          onClick={(event) => {
-            if (href && onResolvedLinkClick?.(href)) {
-              event.preventDefault();
-              return;
-            }
-            handleMarkdownLinkClick(event);
-          }}
-        >
-          {children}
-        </a>
-      );
-    },
-    img({ alt, node: _node, src }) {
-      const label = alt || src || "";
-      if (!src) {
-        return label ? <span>{label}</span> : null;
-      }
-      if (resolveImageURL) {
-        return (
-          <img
-            alt={label}
-            className="my-3 max-h-[70vh] max-w-full rounded-md border object-contain"
-            decoding="async"
-            loading="lazy"
-            src={src}
-          />
-        );
-      }
-      const sourceKey = attachmentPathFromMarkdownURL(src);
-      if (sourceKey) {
-        const imageIndex = imageIndexBySource.get(sourceKey);
-        const image =
-          imageIndex !== undefined
-            ? markdownImages[imageIndex]
-            : {
-                id: sourceKey,
-                name: label || attachmentNameFromPath(sourceKey),
-                sourceKey,
-                url: attachmentResourceURL({ url: sourceKey }, token),
-              };
-        if (image.url) {
-          return (
-            <MarkdownImageCard
-              image={image}
-              onOpen={() => {
-                if (imageIndex !== undefined) {
-                  setImagePreviewIndex(imageIndex);
-                }
-              }}
-            />
-          );
-        }
-      }
-      return (
-        <a href={src} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
-          {label}
-        </a>
-      );
-    },
-    pre({ children }) {
-      const block = getCodeBlock(children);
-      if (!block) {
-        return <pre tabIndex={-1}>{children}</pre>;
-      }
-      return (
-        <CodeBlock
-          code={block.code}
-          codeCopiedLabel={t("common.copied")}
-          codeCopyLabel={t("common.copy")}
-          codeRenderer={codeRenderer}
-          lang={block.lang}
-        />
-      );
-    },
-    table({ children, node: _node, ...props }) {
-      return (
-        <div className="table-wrap">
-          <table {...props}>{children}</table>
-        </div>
-      );
-    },
-  };
-
+  const markdownImages = useMemo(() => extractMarkdownImageItems(text, token), [text, token]);
+  const imageIndexBySource = useMemo(() => new Map(markdownImages.map((item, index) => [item.sourceKey, index])), [markdownImages]);
+  const context = useMemo(() => ({ onResolvedLinkClick, resolveImageURL, markdownImages, imageIndexBySource, token, setImagePreviewIndex }), [onResolvedLinkClick, resolveImageURL, markdownImages, imageIndexBySource, token]);
   const segments = allowHtmlImages ? splitMarkdownHtmlImages(text) : [{ type: "markdown" as const, text }];
   const hasHtmlImage = segments.some((segment) => segment.type === "image");
   const urlTransform: UrlTransform = (raw, key, node) => {
@@ -1409,7 +1421,7 @@ export function MarkdownBody({
   };
 
   return (
-    <>
+    <MarkdownRenderContext.Provider value={context}>
       <div
         className={cn("pudding-markdown py-1.5", hasHtmlImage && "pudding-markdown-html-images")}
         data-transcript-message-id={messageID}
@@ -1432,16 +1444,16 @@ export function MarkdownBody({
             return null;
           }
           return (
-            <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={urlTransform}>
+            <ReactMarkdown key={`md-${index}`} components={markdownComponents} remarkPlugins={[remarkGfm]} urlTransform={urlTransform}>
               {segment.text}
             </ReactMarkdown>
           );
         })}
       </div>
       <ImageLightbox images={markdownImages} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
-    </>
+    </MarkdownRenderContext.Provider>
   );
-}
+});
 
 type MarkdownImageCardVariant = "content" | "screenshot";
 
@@ -1736,19 +1748,14 @@ function codeText(children: ReactNode): string {
     .join("");
 }
 
-function CodeBlock({
+const CodeBlock = memo(function CodeBlock({
   code,
-  codeCopiedLabel,
-  codeCopyLabel,
-  codeRenderer,
   lang,
 }: {
   code: string;
-  codeCopiedLabel: string;
-  codeCopyLabel: string;
-  codeRenderer: CodeBlockRenderer | null;
   lang?: string;
 }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -1758,12 +1765,12 @@ function CodeBlock({
       }
     };
   }, []);
-  const highlighted = codeRenderer?.(code, lang);
-  const nonTabbableHighlighted = highlighted ? makeHighlightedCodeNonTabbable(highlighted) : null;
+  const highlighted = useCodeHighlight(code, lang);
+  const nonTabbableHighlighted = useMemo(() => highlighted ? makeHighlightedCodeNonTabbable(highlighted) : null, [highlighted]);
   return (
     <div className="code-block-wrap">
       <Button
-        aria-label={copied ? codeCopiedLabel : codeCopyLabel}
+        aria-label={t(copied ? "common.copied" : "common.copy")}
         className="code-copy-btn"
         data-copied={copied ? "1" : undefined}
         size="icon-xs"
@@ -1793,7 +1800,7 @@ function CodeBlock({
       </div>
     </div>
   );
-}
+});
 
 function makeHighlightedCodeNonTabbable(html: string) {
   return html.replace(/<pre\b([^>]*)>/i, (_match, attributes: string) => {
@@ -2038,7 +2045,7 @@ function RawToolDataCard({
     defaultOpen,
     onOpenChange,
   );
-  const rawJSON = rawToolJSON(toolName, args, result);
+  const rawJSON = useMemo(() => rawToolJSON(toolName, args, result), [toolName, args, result]);
   return (
     <div className="group/raw-data relative min-w-0 max-w-full">
       <details

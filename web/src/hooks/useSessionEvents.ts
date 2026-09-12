@@ -24,6 +24,7 @@ import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transc
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import { refreshInputRequestForQueuedInput } from "@/lib/inputFlowQueries";
+import { createSessionEventBatcher } from "@/lib/sessionEventBatcher";
 import { apiURL } from "@/state/apiBase";
 import { requestBrowserReveal } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -106,42 +107,45 @@ function openSessionEventSource({
       console.warn("invalid session event", parsed.error);
       return;
     }
-    if (parsed.data.kind === "turn.started") {
-      useOverlayStore.getState().clearSessionCompletion(parsed.data.sessionID);
-    } else if (!syncMessages && parsed.data.kind === "turn.completed") {
-      useOverlayStore.getState().markSessionCompleted(parsed.data.sessionID);
+    batch.push(parsed.data);
+  };
+  const batch = createSessionEventBatcher((data) => {
+    if (data.kind === "turn.started") {
+      useOverlayStore.getState().clearSessionCompletion(data.sessionID);
+    } else if (!syncMessages && data.kind === "turn.completed") {
+      useOverlayStore.getState().markSessionCompleted(data.sessionID);
     }
-    applyEvent(parsed.data);
-    syncAudioBindingsFromEvent(queryClient, parsed.data);
-    syncBrowserStateFromEvent(queryClient, parsed.data, syncMessages, token);
-    syncProjectGitFromEvent(queryClient, parsed.data);
-    syncBackgroundProcessFromEvent(queryClient, parsed.data);
-    syncSessionListFromEvent(queryClient, parsed.data);
-    syncApprovalStateFromEvent(queryClient, token, parsed.data);
-    if (parsed.data.kind === "input.queued" || parsed.data.kind === "input.updated" || parsed.data.kind === "input.steered" || parsed.data.kind === "turn.started") {
-      void refreshInputRequestForQueuedInput(queryClient, parsed.data.sessionID, parsed.data.clientMessageID);
+    applyEvent(data);
+    syncAudioBindingsFromEvent(queryClient, data);
+    syncBrowserStateFromEvent(queryClient, data, syncMessages, token);
+    syncProjectGitFromEvent(queryClient, data);
+    syncBackgroundProcessFromEvent(queryClient, data);
+    syncSessionListFromEvent(queryClient, data);
+    syncApprovalStateFromEvent(queryClient, token, data);
+    if (data.kind === "input.queued" || data.kind === "input.updated" || data.kind === "input.steered" || data.kind === "turn.started") {
+      void refreshInputRequestForQueuedInput(queryClient, data.sessionID, data.clientMessageID);
     }
     if (
-      parsed.data.kind === "turn.tool" &&
-      (parsed.data.name === "builtin_app_load" || parsed.data.name === "builtin_app_unload") &&
-      (parsed.data.phase === "ok" || parsed.data.phase === "error")
+      data.kind === "turn.tool" &&
+      (data.name === "builtin_app_load" || data.name === "builtin_app_unload") &&
+      (data.phase === "ok" || data.phase === "error")
     ) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     }
-    if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
+    if (data.kind === "turn.started" || isTurnTerminalEvent(data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
     }
-    if (isTurnTerminalEvent(parsed.data)) {
+    if (isTurnTerminalEvent(data)) {
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
     }
-    if ((parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) && syncMessages) {
-      syncTurn(queryClient, token, sessionID, parsed.data.turnID);
+    if ((data.kind === "turn.started" || isTurnTerminalEvent(data)) && syncMessages) {
+      syncTurn(queryClient, token, sessionID, data.turnID);
     }
-    if (parsed.data.kind === "input.steered" && syncMessages) {
-      syncTurn(queryClient, token, sessionID, parsed.data.turnID);
+    if (data.kind === "input.steered" && syncMessages) {
+      syncTurn(queryClient, token, sessionID, data.turnID);
     }
-    if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "input.steered" || parsed.data.kind === "turn.started")) {
-      const inputEvent = parsed.data;
+    if (syncMessages && (isInputEvent(data) || data.kind === "input.steered" || data.kind === "turn.started")) {
+      const inputEvent = data;
       if (inputEvent.kind === "turn.started" || inputEvent.kind === "input.steered" ||
         (inputEvent.kind === "input.updated" && (inputEvent.status === "promoted" || inputEvent.status === "cancelled"))) {
         queryClient.setQueryData<{ queuedInputs: QueuedInput[] }>(queryKeys.queuedInputs(sessionID), (data) => data
@@ -150,7 +154,8 @@ function openSessionEventSource({
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
     }
-  };
+  });
+  source.onerror = () => batch.flush();
 
   source.addEventListener("turn.started", handleMessage);
   source.addEventListener("turn.delta", handleMessage);
@@ -175,6 +180,7 @@ function openSessionEventSource({
   return {
     close: () => {
       source.close();
+      batch.flush();
     },
   };
 }
