@@ -1083,25 +1083,27 @@ function ModelDetailsDialog({
                   {...modelForm.register(providerProtocol === "anthropic" ? "anthropicMaxTokens" : "maxCompletionTokens")}
                 />
               </ReadableNumberField>
-              <TemperatureField
-                label={t("provider.temperature")}
-                value={temperature}
-                onValueChange={(value) => modelForm.setValue("temperature", value, { shouldDirty: true })}
-              />
-              <ReasoningEffortField
-                label={t("provider.reasoningEffort")}
-                options={reasoningEffortOptions(providerProtocol)}
-                value={reasoningEffort}
-                onValueChange={(value) =>
-                  modelForm.setValue("reasoningEffort", value === "auto" ? "" : value, { shouldDirty: true })
-                }
-              />
+              <div className="grid gap-3 sm:col-span-2 sm:grid-flow-col sm:auto-cols-fr">
+                <ReasoningEffortField
+                  label={t("provider.reasoningEffort")}
+                  options={reasoningEffortOptions(providerProtocol)}
+                  value={reasoningEffort}
+                  onValueChange={(value) =>
+                    modelForm.setValue("reasoningEffort", value === "auto" ? "" : value, { shouldDirty: true })
+                  }
+                />
+                {providerProtocol !== "anthropic" && providerProtocol !== "google" ? (
+                  <PlainField label={t("provider.maxToolLoops")}>
+                    <Input inputMode="numeric" {...modelForm.register("maxToolLoops")} />
+                  </PlainField>
+                ) : null}
+              </div>
             </div>
-            {providerProtocol !== "anthropic" && providerProtocol !== "google" ? (
-              <PlainField className="sm:w-[calc(50%-0.375rem)]" label={t("provider.maxToolLoops")}>
-                <Input inputMode="numeric" {...modelForm.register("maxToolLoops")} />
-              </PlainField>
-            ) : null}
+            <TemperatureField
+              label={t("provider.temperature")}
+              value={temperature}
+              onValueChange={(value) => modelForm.setValue("temperature", value, { shouldDirty: true })}
+            />
           </div>
           <DialogFooter className="m-0 rounded-none">
             <Button disabled={saving} type="button" variant="outline" onClick={onClose}>
@@ -1123,32 +1125,37 @@ function PlainField({
   className,
   hint,
   label,
+  labelAccessory,
 }: {
   children: ReactNode;
   className?: string;
   hint?: string;
-  label: string;
+  label: ReactNode;
+  labelAccessory?: ReactNode;
 }) {
   return (
     <Field className={cn("gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent", className)}>
-      <FieldLabel className="w-auto cursor-default gap-1.5 text-sm font-medium">
-        <span>{label}</span>
-        {hint ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                aria-label={hint}
-                className="inline-flex size-4 cursor-help items-center justify-center text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-                role="button"
-                tabIndex={0}
-              >
-                <CircleHelp className="size-3.5" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{hint}</TooltipContent>
-          </Tooltip>
-        ) : null}
-      </FieldLabel>
+      <div className="flex min-h-5 items-center justify-between gap-3">
+        <FieldLabel className="w-auto cursor-default gap-1.5 text-sm font-medium">
+          <span>{label}</span>
+          {hint ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  aria-label={hint}
+                  className="inline-flex size-4 cursor-help items-center justify-center text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                  role="button"
+                  tabIndex={0}
+                >
+                  <CircleHelp className="size-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{hint}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </FieldLabel>
+        {labelAccessory}
+      </div>
       {children}
     </Field>
   );
@@ -1166,13 +1173,16 @@ function ReadableNumberField({
   value?: string;
 }) {
   return (
-    <PlainField className={className} label={label}>
-      <div className="grid grid-cols-[minmax(0,1fr)_3.75rem] items-center gap-2">
-        {children}
-        <span className="text-right text-sm tabular-nums text-muted-foreground">
+    <PlainField
+      className={className}
+      label={label}
+      labelAccessory={
+        <span className="text-xs tabular-nums text-muted-foreground">
           {formatReadableTokenCount(value)}
         </span>
-      </div>
+      }
+    >
+      {children}
     </PlainField>
   );
 }
@@ -1207,8 +1217,28 @@ function TemperatureField({
   const usesDefault = !value?.trim();
   const temperature = Number(value?.trim() || "1");
   return (
-    <PlainField label={label}>
-      <div className="grid h-8 grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-3">
+    <PlainField
+      label={
+        <>
+          {label}
+          <span className="ml-2 text-sm font-normal tabular-nums text-muted-foreground">
+            · {usesDefault ? t("provider.temperatureDefault") : temperature.toFixed(1)}
+          </span>
+        </>
+      }
+      labelAccessory={
+        <Label className="w-fit gap-2 text-xs font-normal text-muted-foreground">
+          <Switch
+            aria-label={t("provider.temperatureUseDefault")}
+            checked={usesDefault}
+            size="sm"
+            onCheckedChange={(checked) => onValueChange(checked ? "" : "1")}
+          />
+          {t("provider.temperatureUseDefault")}
+        </Label>
+      }
+    >
+      <div className="flex h-8 items-center">
         <Slider
           aria-label={label}
           disabled={usesDefault}
@@ -1218,19 +1248,7 @@ function TemperatureField({
           value={[temperature]}
           onValueChange={([next]) => onValueChange(String(next))}
         />
-        <span className="text-right text-sm tabular-nums text-muted-foreground">
-          {usesDefault ? null : temperature.toFixed(1)}
-        </span>
       </div>
-      <Label className="w-fit gap-2 text-xs font-normal text-muted-foreground">
-        <Switch
-          aria-label={t("provider.temperatureUseDefault")}
-          checked={usesDefault}
-          size="sm"
-          onCheckedChange={(checked) => onValueChange(checked ? "" : "1")}
-        />
-        {t("provider.temperatureUseDefault")}
-      </Label>
     </PlainField>
   );
 }
