@@ -154,7 +154,7 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
 
   return (
     <>
-      <div>
+      <div data-project-git-list className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-width:thin]">
         {repositories.map((repository) => {
           const status = repository.status;
           const repositoryPending = [

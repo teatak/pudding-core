@@ -648,6 +648,52 @@ async function verifyEmptyWorkspace(projectID) {
   check("zero-tab landing: matching background, no divider/add/popup; explicit project/browser actions; plus opens resources");
 }
 
+async function verifyProjectGitScroll() {
+  phase = "project git scroll";
+  assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+  await selectSurface("项目");
+  await click('[data-project-workspace] nav button[aria-label="源代码管理"]');
+  const list = `document.querySelector('[data-project-git-list]')`;
+  await waitFor(() => js(`${list}?.querySelectorAll('[class~="group/git-file"]').length === 100`), "100 git changes loaded");
+  for (const [width, height] of [[1440, 920], [900, 640], [620, 520]]) {
+    window.setContentSize(width, height);
+    await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    const before = await js(`(() => {
+      const list = ${list}, rect = list.getBoundingClientRect();
+      list.scrollTop = 0;
+      return {height: list.clientHeight, content: list.scrollHeight, width: list.clientWidth,
+        contentWidth: list.scrollWidth, overflow: getComputedStyle(list).overflowY,
+        scrollbar: getComputedStyle(list).scrollbarWidth,
+        navTop: document.querySelector('[data-project-workspace] nav').getBoundingClientRect().top,
+        x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+    })()`);
+    assert.ok(before.height > 0 && before.content > before.height, "git list has a bounded scroll viewport");
+    assert.equal(before.overflow, "auto");
+    assert.notEqual(before.scrollbar, "none");
+    assert.equal(before.width, before.contentWidth, "long paths must not overflow horizontally");
+    const zoom = window.webContents.getZoomFactor();
+    const point = {x: Math.round(before.x * zoom), y: Math.round(before.y * zoom)};
+    const atBottom = `${list}.scrollTop > 0 && ${list}.scrollHeight - ${list}.clientHeight - ${list}.scrollTop < 2`;
+    window.webContents.sendInputEvent({type: "mouseMove", ...point});
+    for (let attempt = 0; attempt < 30; attempt++) {
+      window.webContents.sendInputEvent({type: "mouseWheel", ...point, deltaX: 0, deltaY: -600});
+      await delay(100);
+      if (await js(atBottom)) break;
+    }
+    assert.ok(await js(atBottom), "native wheel reaches last git change");
+    const after = await js(`(() => {
+      const list = ${list}, rect = list.getBoundingClientRect(), last = list.querySelectorAll('[class~="group/git-file"]');
+      const row = last[last.length - 1].getBoundingClientRect();
+      return {lastVisible: row.top >= rect.top && row.bottom <= rect.bottom + 1,
+        navTop: document.querySelector('[data-project-workspace] nav').getBoundingClientRect().top};
+    })()`);
+    assert.ok(after.lastVisible, "last change is reachable");
+    assert.equal(after.navTop, before.navTop, "view switch stays fixed while git scrolls");
+    await screenshot(`git-scroll-${width}`);
+    check(`git changes scroll to the last row at ${window.getContentSize().join("x")}, with a fixed view switch`);
+  }
+}
+
 async function verifyProjectEmpty(sessionID, projectRoot) {
   phase = "project empty viewer";
   assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
@@ -2239,6 +2285,11 @@ async function run() {
   phase = "fixtures";
   const projectRoot = path.join(home, "project");
   fs.mkdirSync(projectRoot);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "git-scroll") {
+    await runFile("git", ["init", "--quiet", projectRoot]);
+    for (let i = 0; i < 80; i++) fs.writeFileSync(path.join(projectRoot, `scroll-${String(i).padStart(2, "0")}.md`), "# Git scroll fixture\n");
+    await runFile("git", ["-C", projectRoot, "add", "scroll-00.md"]);
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "project-search") {
     fs.mkdirSync(path.join(projectRoot, "nested"));
     fs.writeFileSync(path.join(projectRoot, "nested", "match.ts"), "export const first = 1;\n// lead\nexport const PuddingSearchNeedle = 42;\n");
@@ -2313,6 +2364,11 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     await selectSurface(label);
   }
   check(`isolated source Electron/Vite/daemon; ${canvasCount} canonical canvas tabs`);
+  if (process.env.PUDDING_SMOKE_SCENARIO === "git-scroll") {
+    await verifyProjectGitScroll();
+    assert.deepEqual(rendererErrors, [], "git scroll renderer errors");
+    return;
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "project-search") {
     await verifyIntegratedProjectSearch(primary.id, secondary.id, projectRoot);
     assert.deepEqual(rendererErrors, [], "integrated project search renderer errors");
