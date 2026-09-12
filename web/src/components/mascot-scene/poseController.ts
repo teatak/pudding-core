@@ -87,11 +87,15 @@ export function useSceneGazePose({
   pointerTracking,
   rootRef,
 }: SceneGazePoseOptions): ScenePose {
-  const { pose, setPoseImmediately, setTargetPose } = useSmoothedScenePose(CENTER_POSE);
+  const { pose, setPoseImmediately, setTargetPose, stopMotion } = useSmoothedScenePose(CENTER_POSE);
   const gazeTypeRef = useRef(gaze.type);
   const lockedRef = useRef(gaze.type === "center" || mood === "error");
   const onPointerGazeRef = useRef(onPointerGaze);
   const motionEnabled = ambientMotion || pointerTracking;
+
+  useEffect(() => {
+    if (!motionEnabled) stopMotion();
+  }, [motionEnabled, stopMotion]);
 
   const setTargetFromPoint = useCallback((
     point: SceneGazePoint,
@@ -194,24 +198,24 @@ export function useSmoothedScenePose(initialPose: ScenePose) {
     }
   }, []);
 
-  const setPoseImmediately = useCallback((nextPose: ScenePose) => {
+  const stopMotion = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    const next = { ...nextPose };
     frameRef.current = null;
     previousTimeRef.current = null;
+  }, []);
+
+  const setPoseImmediately = useCallback((nextPose: ScenePose) => {
+    stopMotion();
+    const next = { ...nextPose };
     poseRef.current = next;
     targetRef.current = next;
     setPose(next);
     setTargetPoseState(next);
-  }, []);
+  }, [stopMotion]);
 
-  useEffect(() => () => {
-    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    frameRef.current = null;
-    previousTimeRef.current = null;
-  }, []);
+  useEffect(() => stopMotion, [stopMotion]);
 
-  return { pose, setPoseImmediately, setTargetPose, targetPose };
+  return { pose, setPoseImmediately, setTargetPose, stopMotion, targetPose };
 }
 
 function clamp(value: number, min: number, max: number) {

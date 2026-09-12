@@ -44,24 +44,29 @@ export function MascotSceneV1Adapter({
   const gestureRef = useRef<HTMLDivElement>(null);
   const gestureAnimationRef = useRef<Animation | null>(null);
   const [size, setSize] = useState(128);
-  const [visible, setVisible] = useState(false);
-  const ambientMotion = requestedAmbientMotion && visible;
-  const pointerTracking = requestedPointerTracking && visible;
+  const [active, setActive] = useState(false);
+  const ambientMotion = requestedAmbientMotion && active;
+  const pointerTracking = requestedPointerTracking && active;
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     let intersecting = false;
-    const updateVisibility = () => setVisible(intersecting && !document.hidden);
+    // A window can remain visible behind another app after losing focus.
+    const updateActivity = () => setActive(intersecting && !document.hidden && document.hasFocus());
     const observer = new IntersectionObserver(([entry]) => {
       intersecting = entry.isIntersecting;
-      updateVisibility();
+      updateActivity();
     });
     observer.observe(root);
-    document.addEventListener("visibilitychange", updateVisibility);
+    document.addEventListener("visibilitychange", updateActivity);
+    window.addEventListener("focus", updateActivity);
+    window.addEventListener("blur", updateActivity);
     return () => {
       observer.disconnect();
-      document.removeEventListener("visibilitychange", updateVisibility);
+      document.removeEventListener("visibilitychange", updateActivity);
+      window.removeEventListener("focus", updateActivity);
+      window.removeEventListener("blur", updateActivity);
     };
   }, []);
 

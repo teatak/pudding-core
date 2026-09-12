@@ -14,7 +14,7 @@
 - Shiki 仅在独立 Worker 加载和执行，文件预览也使用同一入口。每次只派发一个高亮任务，组件更新或卸载会删除过期排队任务，并忽略已经执行中的旧结果；显示结果必须与当前代码和语言匹配。删除了主线程同步高亮路径。
 - 关闭的 `TranscriptDisclosure` 不挂载详情。嵌套展开状态仍由已有 disclosure 状态持有，关闭父组后再次展开可恢复。工具结果解析和原始 JSON 格式化只在输入变化时重新计算。
 - 同一 session、turn、part 的连续 `turn.delta` 在固定 50ms 窗口内合并。工具、引导、终态等其他事件会先刷新缓冲再立即交付；连接出错或关闭时也刷新。canonical messages、seq、取消和对账语义未改动。
-- 吉祥物移出视口或文档隐藏时停止动画和指针跟随，重新显示后恢复。去掉 scale、调整 will-change 和阶梯动画均未测出明显空载收益，未保留这些 CSS 试验。
+- 吉祥物仅在窗口获得焦点、文档可见且自身位于视口内时运行动画和指针跟随。失焦（即使窗口仍露在屏幕上）、隐藏或移出视口时，停用 CSS 动画和过渡、取消点击/摇头动画，并取消未完成的转头动画帧；重新满足条件后恢复。去掉 scale、调整 will-change 和阶梯动画均未测出明显空载收益，未保留这些 CSS 试验。
 
 高亮尚未返回时显示当前纯文本代码，因此快速增长的长代码块可能在暂停或结束后才完成着色。内容不会等高亮完成才显示。
 
@@ -46,6 +46,7 @@
 - `electron/smoke/transcript-disclosure-smoke.cjs`：鼠标、Enter、Space 展开收起和滚动位置回归通过。
 - `electron/smoke/transcript-guides-smoke.cjs`：多次引导、附件、完成对账和 canonical 重载回归通过。
 - 吉祥物隔离 A/B：移出视口后运行动画从 9 个变为 0，GPU 约 0.02%、renderer 约 0.002%；隐藏窗口停止动画，重新显示后恢复。该夹具使用 64px 场景及与真实主窗口一致的后台节流设置，不代表整应用总 CPU。
+- 失焦补充回归 `electron/smoke/mascot-focus-smoke.cjs`：修改前原生窗口失焦但 `document.hidden=false` 时仍有 9 个运行动画；修改后为 0，待执行转头帧为 0。后台切换 idle/thinking/error、后台挂载、点击和转头中途失焦、最小化、隐藏、移出视口及恢复均通过。该补充改动的构建通过；Web 57 项测试串行通过（默认并行首次遇到现有 Vite 缓存目录竞争 `ENOTEMPTY`）。
 - `git diff --check`：通过。
 
 复现入口（仅使用临时目录，不连接 daemon 或真实会话）：
@@ -53,6 +54,7 @@
 ```sh
 npm --prefix web run build
 web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron electron/smoke/transcript-stream-smoke.cjs
+web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron electron/smoke/mascot-focus-smoke.cjs
 ```
 
 脚本输出临时目录位置，包含 `results.json`、各场景 `.cpuprofile` 和长代码截图。脚本也直接加载构建产物中的 Worker，验证生产打包路径可执行。未安装发布包或在用户原有会话内执行回归。
