@@ -606,7 +606,13 @@ export function App() {
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: 2,
-    width: workspaceOverlay ? `min(100%, ${workspaceLayout.drawerWidthPx}px)` : undefined,
+    // 窄屏抽屉会伸到窗口左缘:rail 收起时把 macOS 红绿灯那条宽度让出来,别让系统
+    // 窗口按钮压在抽屉上(--traffic-inset 在浏览器和全屏下为 0,不影响其他形态)。
+    width: workspaceOverlay
+      ? railCollapsed
+        ? `min(calc(100% - var(--traffic-inset)), ${workspaceLayout.drawerWidthPx}px)`
+        : `min(100%, ${workspaceLayout.drawerWidthPx}px)`
+      : undefined,
   } as CSSProperties;
   const chatOccupiesStageTopRight = !docked || workspaceTransition === "closing";
   const reserveWorkspaceControl = canUseWorkspace;
@@ -819,7 +825,9 @@ export function App() {
                       : "docked"
                 }
                 className={cn(
-                  "pudding-session-stage relative flex h-full min-w-0 flex-1 overflow-hidden bg-background",
+                  // overflow-clip:抽屉入场时内部 scrollIntoView 会滚动所有可滚动祖先,
+                  // 用 overflow-hidden 的话会话会被横向推走再弹回。
+                  "pudding-session-stage relative flex h-full min-w-0 flex-1 overflow-clip bg-background",
                 )}
                 style={{
                   "--workspace-control-width": workspaceOpen

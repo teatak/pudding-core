@@ -50,7 +50,7 @@ export function ComposerQueue(props: Props) {
   const ids = props.inputs.map((input) => input.clientMessageID);
   const sortable = !props.busy && !props.editingID && props.inputs.every((input) => props.persistedIDs.has(input.clientMessageID) && input.status !== "steering");
   return (
-    <section aria-label={t("composer.queueTitle")} className={cn("@container relative mx-2 -mb-3 rounded-t-2xl border border-b-0 border-border bg-muted/70 px-1 pt-1 pb-4", props.reordering && "[&_button:disabled]:opacity-100")} data-composer-queue>
+    <section aria-label={t("composer.queueTitle")} className={cn("@container relative mx-2 -mb-2 rounded-t-2xl border border-b-0 border-border bg-muted/70 px-1 pt-0.5 pb-2", props.reordering && "[&_button:disabled]:opacity-100")} data-composer-queue>
       <DndContext sensors={sensors} modifiers={queueDragModifiers} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
         if (sortable && over && active.id !== over.id) props.onReorder(arrayMove(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id))));
       }}>
@@ -72,7 +72,7 @@ function QueueRow({ input, sortable, ...props }: Props & { input: PendingUserMes
   const attachments = (input.parts || []).filter((part) => part.type === "attachment");
   const title = input.text || attachments.map((part) => part.name).join(", ") || (input.parts || []).flatMap((part) => part.type === "local_folder" || part.type === "project_reference" ? [part.path] : []).join(", ");
   return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn("relative flex min-w-0 items-center gap-1 rounded-lg px-1 py-0.5", isDragging && "z-10 bg-muted shadow-md", props.editingID === id && "bg-accent")} data-queued-input={id}>
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn("relative flex min-w-0 items-center gap-1 rounded-lg px-1", isDragging && "z-10 bg-muted shadow-md", props.editingID === id && "bg-accent")} data-queued-input={id}>
       {/* Queue acknowledgements briefly lock sorting, but must not flash every grip. */}
       <button ref={setActivatorNodeRef} type="button" {...attributes} {...listeners} disabled={!sortable} aria-label={t("composer.queueDrag")} className="flex size-7 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground outline-none enabled:cursor-grab focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing">
         <GripVertical className="size-3.5" />
