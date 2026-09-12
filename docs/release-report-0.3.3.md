@@ -4,7 +4,7 @@
 
 ## 基线与范围
 
-- 公开基线：`v0.3.2`，源码 `46e3814c750cacde9912ae3f48087642ca0eb8a4`，仍为最新稳定版。
+- 公开基线：`v0.3.2`，源码 `46e3814c750cacde9912ae3f48087642ca0eb8a4`，评估时为最新稳定版。
 - 功能范围：`v0.3.2..e296fc490d446341a913fa5d39356145f419cbce`，104 个文件、4782 行新增、909 行删除，含历史发布记录和测试文档。
 - `v0.3.3-beta.1` 仅存在旧 Draft，其源码不包含后续改动。本次创建独立的 `v0.3.3` 正式版，不复用旧包、不移动旧标签、不公开旧草稿。
 - 用户已明确批准发布 `0.3.3` 正式版。根 package 与 lockfile 两处根版本同步；不使用版本覆盖变量，不改打包脚本，不新增既定九资产之外的附件。
@@ -56,6 +56,22 @@
 - 发布前必须提交并推送版本及报告，工作树干净且与上游一致；通过官方 `make desktop-publish` 的测试、双架构构建、签名、公证、归档解包及更新元数据校验。
 - 发布时核对唯一 v0.3.3 草稿、英文功能清单、源码/公开标签锚点、公开版本清单与九资产大小及 SHA-256，再使用官方 finalize 公开为 Latest；随后核对公开下载和更新清单。
 - 本报告准备时尚未构建、签名、公证或上传 0.3.3；实际结果在后续补记。
+
+## 发布结果
+
+- 2026-09-12 14:50:15 UTC，官方 `make desktop-release-finalize RELEASE_TAG=v0.3.3` 已发布 [v0.3.3](https://github.com/teatak/pudding/releases/tag/v0.3.3)，标题为 `v0.3.3`，非草稿、非预发布，Latest 指向该版本；远端仅一份同版本 Release。
+- 源码标签 `v0.3.3` 固定指向 `97c9d24b5bf4018c78091a2134c078389cc9bbd5`。公开标签指向版本清单提交 `edeea5a7d7fe380bea19665c05501379c9828bc8`；[版本清单](https://github.com/teatak/pudding/blob/v0.3.3/releases/v0.3.3.json) 记录源码锚点、英文功能清单及九资产大小和 SHA-256。本节为发布后的文档补记，不移动标签或重新构建。
+- 官方发布流程完成 Go 全量测试、Electron 218 项测试、Web TypeScript/生产构建及 schema 检查；arm64/x64 包均完成 Developer ID 签名和 Apple 公证。完整成品验证通过，包括 staged App、ZIP/DMG 解包后的签名、公证票据、Gatekeeper、嵌套二进制、权限、第三方许可及自动更新元数据。
+- 双架构 Computer Use Helper 的 bundle ID、Team ID 及完整 designated requirement 与本机 0.3.2 一致，架构校验通过。未启动 `dist/release` 中的 App，不影响正常安装路径的注册与权限归属。
+- 首次上传及第一次续传遇到 `uploads.github.com` TLS/EOF 故障。网络恢复后通过既有 `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-upload-resume` 完成九资产上传；上传后的状态读取另遇一次 `fetch failed`，官方 `desktop-release-status` 重试通过。未改脚本、重新构建、重复公证或新增附件。
+- 本地 SHA-256、GitHub asset digest 与公开版本清单逐项一致；英文功能清单与报告一致。九资产严格为双架构 DMG/ZIP、各自 blockmap 和 `latest-mac.yml`。
+- 九个公开下载链接 HEAD 均为 HTTP 200，长度一致；实际下载的公开 `latest-mac.yml` 与已验证本地文件逐字节一致，版本 0.3.3，覆盖双架构，SHA-256 为 `5e6d6cf0bac92ba986fd51a2775e78cc366191bc9f98dd1e74bff11d1bfaee7a`。HEAD 检查不等同于全量重新下载安装包。
+
+### 未执行的验收
+
+按用户“本机暂不升级”的要求，只读确认 `/Applications/Pudding.app` 仍为 0.3.2，未替换、重启或向正式数据写入测试内容。本轮未执行正常安装位置的 0.3.2 → 0.3.3 自动更新、新签名包交互或 Intel 真机验收；源码回归、Helper 身份及成品静态检查不替代这些验收，不记为通过。
+
+发布证据：`/tmp/pudding-033-publish.log`、`/tmp/pudding-033-upload-resume-2.log`、`/tmp/pudding-033-release-status.log`、`/tmp/pudding-033-draft-verify.log`、`/tmp/pudding-033-finalize.log`、`/tmp/pudding-033-public-verify.log`、`/tmp/pudding-033-helper-{arm64,x64}.log`。
 
 ## Release Notes
 
