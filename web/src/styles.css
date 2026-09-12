@@ -549,7 +549,7 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
    includes the ChatColumn's 2.5rem gutter and the composer's two 1px borders. */
 @container chat-pane (max-width: calc(36rem + 2.5rem + 2px)) {
     .pudding-chat-project-detail,
-    .pudding-session-apps-expanded:not(:first-child),
+    .pudding-session-apps-expanded[data-compact-hidden="true"],
     .pudding-session-apps-overflow-count,
     .pudding-composer-project-name,
     .pudding-composer-approval-label,
@@ -564,10 +564,8 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
         padding-inline: 0;
     }
 
-    .pudding-session-apps-trigger,
-    .pudding-session-apps-trigger[data-overflow="false"] {
+    .pudding-session-apps-trigger[data-compact-overflow="true"] {
         display: inline-grid;
-        margin-left: 0.125rem;
     }
 
     .pudding-session-apps-compact-count {

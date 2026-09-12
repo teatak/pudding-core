@@ -76,6 +76,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
         return (
           <div
             key={appID}
+            data-compact-hidden={index > 0 && loadedAppIDs.length > 2}
             className={cn(
               "pudding-session-apps-expanded group/app relative -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full",
               "transition-[margin] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
@@ -106,7 +107,8 @@ export function SessionAppsControl({ session, token }: { session: Session; token
           <PopoverTrigger asChild>
             <button
               aria-label={loadedAppsLabel}
-              className="pudding-session-apps-trigger -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5"
+              className="pudding-session-apps-trigger relative z-10 -ml-1.5 inline-grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-medium tabular-nums text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5"
+              data-compact-overflow={loadedAppIDs.length > 2}
               data-overflow={hiddenAppCount > 0}
               type="button"
             >
