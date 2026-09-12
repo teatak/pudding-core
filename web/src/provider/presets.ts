@@ -523,16 +523,44 @@ export function providerPresetForBrand(brand: string | undefined) {
   return PROVIDER_PRESETS.find((preset) => preset.id === normalizedBrand);
 }
 
-export function providerPresetForModel(modelID: string | undefined) {
+// 模型 id 分段里用于判定厂商的家族关键字。内置清单只收录在售的完整 id,
+// 别名(deepseek-chat)、自建 id(deepseek-flash)和中转前缀(z-ai/glm-4.5-air:free)
+// 靠这里命中,否则会错误回退成 profile 品牌图标。
+const MODEL_BRAND_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["deepseek", ["deepseek"]],
+  ["anthropic", ["anthropic", "claude"]],
+  ["openai", ["gpt", "chatgpt", "o1", "o3", "o4", "o5"]],
+  ["gemini", ["gemini", "gemma"]],
+  ["qwen", ["qwen"]],
+  ["mimo", ["mimo"]],
+  ["moonshot", ["moonshot", "kimi"]],
+  ["zhipu", ["zhipu", "glm", "zai"]],
+  ["grok", ["grok"]],
+];
+
+// 模型 → 品牌图标 key。先按内置 preset 的模型清单精确命中,再按家族关键字判定
+// (id 按非字母数字分段,允许 qwen3 / kimi-k3 这类带版本号的写法);判定不出返回
+// undefined,由调用方回退 profile 品牌。
+export function providerBrandForModel(modelID: string | undefined) {
   const normalizedModelID = (modelID || "").trim().toLowerCase();
   if (!normalizedModelID) {
     return undefined;
   }
-  return PROVIDER_PRESETS.find((preset) =>
+  const exactPreset = PROVIDER_PRESETS.find((preset) =>
     preset.variants.some((variant) =>
       variant.models.some((model) => model.id.trim().toLowerCase() === normalizedModelID),
     ),
   );
+  if (exactPreset) {
+    return exactPreset.id;
+  }
+  const tokens = normalizedModelID.split(/[^a-z0-9]+/).filter(Boolean);
+  for (const [brand, keywords] of MODEL_BRAND_KEYWORDS) {
+    if (tokens.some((token) => keywords.some((keyword) => token.startsWith(keyword)))) {
+      return brand;
+    }
+  }
+  return undefined;
 }
 
 export function providerPresetVariantGroup(variant: ProviderPresetVariant | undefined) {

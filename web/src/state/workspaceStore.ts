@@ -3,7 +3,9 @@ import { createStore } from "zustand/vanilla";
 
 const STORAGE_KEY = "pudding.workspace.ui.v7";
 const PREVIOUS_STORAGE_KEYS = ["pudding.workspace.ui.v6", "pudding.workspace.ui.v5", "pudding.workspace.ui.v4", "pudding.workspace.ui.v3"];
-export const minimumFocusChatWidth = 340;
+// 会话面板的最小宽度:docked 与专注模式共用同一个下限。以前专注模式另设 340,
+// 结果同一块面板在两种模式下能拖到不同最窄宽度。
+export const minimumChatPaneWidth = 380;
 export type WorkspacePresentation = "hidden" | "standard" | "focused";
 const LEGACY_OPEN_KEY = "pudding.workspaceOpenSessions";
 const LEGACY_SURFACE_KEYS = [
@@ -132,14 +134,14 @@ export function useWorkspacePresentation(sessionID: string | undefined) {
   return useStore(workspaceStore, (state) => (sessionID && state.sessions[sessionID]?.presentation) || "hidden");
 }
 export function getWorkspaceFocusChatWidth(sessionID: string) {
-  return workspaceStore.getState().focusChatWidths[sessionID] ?? minimumFocusChatWidth;
+  return workspaceStore.getState().focusChatWidths[sessionID] ?? minimumChatPaneWidth;
 }
 export function useWorkspaceFocusChatWidth(sessionID: string) {
-  return useStore(workspaceStore, (state) => state.focusChatWidths[sessionID] ?? minimumFocusChatWidth);
+  return useStore(workspaceStore, (state) => state.focusChatWidths[sessionID] ?? minimumChatPaneWidth);
 }
 export function setWorkspaceFocusChatWidth(sessionID: string, chatWidth: number) {
   if (!sessionID || getWorkspaceSessionUI(sessionID).presentation !== "focused") return;
-  workspaceStore.setState((state) => ({ focusChatWidths: { ...state.focusChatWidths, [sessionID]: Math.max(minimumFocusChatWidth, chatWidth) } }));
+  workspaceStore.setState((state) => ({ focusChatWidths: { ...state.focusChatWidths, [sessionID]: Math.max(minimumChatPaneWidth, chatWidth) } }));
 }
 export function useWorkspaceOpen(sessionID: string | undefined) { return useWorkspacePresentation(sessionID) !== "hidden"; }
 export function useWorkspaceActiveTab(sessionID: string) {

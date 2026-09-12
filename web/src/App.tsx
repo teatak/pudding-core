@@ -51,7 +51,7 @@ import {
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 import {
-  minimumFocusChatWidth,
+  minimumChatPaneWidth,
   setWorkspaceFocusChatWidth,
   setWorkspaceOpen,
   useActiveWorkspaceSessionID,
@@ -60,7 +60,6 @@ import {
 } from "@/state/workspaceStore";
 
 const focusWorkspaceMinimumWidth = 220;
-const consoleMinimumWidth = 380;
 const workspaceMinimumWidth = workspaceLayout.minWorkspacePx;
 const workspaceTransitionDurationMs = 220;
 type WorkspaceTransitionPhase = "idle" | "opening" | "closing";
@@ -68,7 +67,7 @@ const centeredLayoutConstraints = {
   dockedMinimumWidth: workspaceLayout.drawerBreakpointPx,
   railChatMinimumWidth: workspaceLayout.railAutoCollapsePx,
   thirdColumnMinimumWidth: Math.min(
-    consoleMinimumWidth,
+    minimumChatPaneWidth,
     workspaceMinimumWidth,
   ),
 };
@@ -113,7 +112,7 @@ function readDockSplitRatio() {
 function dockSplitRatioBounds({
   layoutWidth,
   railCollapsed,
-  minimumChatWidth = consoleMinimumWidth,
+  minimumChatWidth = minimumChatPaneWidth,
   minimumWorkspaceWidth = workspaceMinimumWidth,
 }: {
   layoutWidth: number;
@@ -192,7 +191,7 @@ export function App() {
     ) => {
       const expandedBounds = dockSplitRatioBounds({
         layoutWidth,
-        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumChatWidth: minimumChatPaneWidth,
         minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed: false,
       });
@@ -417,7 +416,7 @@ export function App() {
       );
       const bounds = dockSplitRatioBounds({
         layoutWidth,
-        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumChatWidth: minimumChatPaneWidth,
         minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed:
           getRailCollapsedPreference() ||
@@ -502,7 +501,7 @@ export function App() {
         presentation.railResponsiveCollapsed;
       const bounds = dockSplitRatioBounds({
         layoutWidth,
-        minimumChatWidth: focused ? minimumFocusChatWidth : consoleMinimumWidth,
+        minimumChatWidth: minimumChatPaneWidth,
         minimumWorkspaceWidth: focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth,
         railCollapsed: liveRailCollapsed,
       });
@@ -601,10 +600,9 @@ export function App() {
   const preferredDockContainerWidth = railAdjustment === 0
     ? renderedChatContainerWidth
     : `calc(${renderedChatContainerWidth} ${railAdjustment > 0 ? "+" : "-"} ${Math.abs(railAdjustment)}px)`;
-  const minimumChatWidth = focused ? minimumFocusChatWidth : consoleMinimumWidth;
   const minimumWorkspaceWidth = focused ? focusWorkspaceMinimumWidth : workspaceMinimumWidth;
-  const dockedConsoleWidth = `clamp(${minimumChatWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockWidth}, calc(100% - min(${minimumWorkspaceWidth}px, 50%)))`;
-  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(${minimumChatWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockContainerWidth}, calc(100cqw - min(${minimumWorkspaceWidth}px, 50cqw))) - 1px))`;
+  const dockedConsoleWidth = `clamp(${minimumChatPaneWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockWidth}, calc(100% - min(${minimumWorkspaceWidth}px, 50%)))`;
+  const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(${minimumChatPaneWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockContainerWidth}, calc(100cqw - min(${minimumWorkspaceWidth}px, 50cqw))) - 1px))`;
   const workspaceSurfaceStyle = {
     "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: 2,

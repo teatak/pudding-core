@@ -30,6 +30,15 @@ export function turnFileChangeFullPath(change: TurnFileChange) {
   return `${change.rootPath.replace(/[\\/]+$/, "")}/${change.path}`;
 }
 
+// 窄卡片下只显示文件名:尾部截断会把最有信息量的文件名丢掉,先拆出 dir 段。
+export function turnFilePathParts(label: string) {
+  const index = label.lastIndexOf("/");
+  if (index < 0) {
+    return { base: label, dir: "" };
+  }
+  return { base: label.slice(index + 1), dir: label.slice(0, index + 1) };
+}
+
 function pathParts(path: string) {
   return path.replace(/[\\/]+$/, "").split(/[\\/]+/).filter(Boolean);
 }

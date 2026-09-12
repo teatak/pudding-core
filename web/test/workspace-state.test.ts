@@ -20,7 +20,7 @@ const workspace = await import("../src/state/workspaceStore.ts");
 const reconcileCanvas = (sessionID: string, ids: string[]) => workspace.updateWorkspaceSessionUI(sessionID, (current) => workspace.resolveCanvasTabs(current, ids.map(id => ({ id, visible: true, updatedAt: "2026-09-05T12:00:00Z" }))));
 
 test("focus starts compact instead of restoring a previously wide conversation", () => {
-  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-reset"), 340);
+  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-reset"), workspace.minimumChatPaneWidth);
 });
 
 test("re-entering focus resets a manually widened conversation", () => {
@@ -29,7 +29,7 @@ test("re-entering focus resets a manually widened conversation", () => {
   assert.equal(workspace.getWorkspaceFocusChatWidth("focus-reset"), 800);
   workspace.setWorkspacePresentation("focus-reset", "standard");
   workspace.setWorkspacePresentation("focus-reset", "focused");
-  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-reset"), 340);
+  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-reset"), workspace.minimumChatPaneWidth);
 });
 
 test("focus resizing survives app switches, stays session-owned and ends when hidden", () => {
@@ -39,12 +39,12 @@ test("focus resizing survives app switches, stays session-owned and ends when hi
   workspace.openWorkspaceTab("focus-a", "canvas:table");
   assert.equal(workspace.getWorkspaceFocusChatWidth("focus-a"), 460);
   workspace.setWorkspacePresentation("focus-b", "focused");
-  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-b"), 340);
+  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-b"), workspace.minimumChatPaneWidth);
   workspace.setWorkspaceFocusChatWidth("focus-b", 500);
   assert.equal(workspace.getWorkspaceFocusChatWidth("focus-a"), 460);
   workspace.setWorkspaceOpen("focus-a", false);
   workspace.setWorkspacePresentation("focus-a", "focused");
-  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-a"), 340);
+  assert.equal(workspace.getWorkspaceFocusChatWidth("focus-a"), workspace.minimumChatPaneWidth);
   const saved = JSON.parse(values.get("pudding.workspace.ui.v7")!);
   assert.equal("focusChatWidths" in saved, false);
   assert.equal("chatWidth" in saved["focus-b"], false);

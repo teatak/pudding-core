@@ -86,7 +86,9 @@ export const TranscriptList = memo(function TranscriptList({
   const { itemKeys, turnIndexByID } = structure;
   const turnCount = itemKeys.length - 1;
   const lastTurnKey = itemKeys[turnCount - 1] || "";
-  const shouldFollowTurnAppend = isAtLatestRef.current;
+  // 新 turn 到达时是否主动贴底只看 follow mode;上报给上层的 atLatest 是几何事实,
+  // 两者不能混用,否则折叠夹到末端后会被动跟随一次新 turn。
+  const shouldFollowTurnAppend = followLatestRef.current;
   const navigating = Boolean(turnReveal || (searchState.target &&
     activeSearchTargetRef.current !== searchTargetKey(searchState.target, searchState.terms)));
 
@@ -119,8 +121,11 @@ export const TranscriptList = memo(function TranscriptList({
   const handleVirtualizerChange = useCallback(
     (instance: { isAtEnd: (threshold?: number) => boolean }) => {
       const atLatest = instance.isAtEnd(SCROLL_END_THRESHOLD_PX);
+      // 对上层汇报的是几何事实"视口是否在最新内容上":折叠/收起把 scrollTop 夹到
+      // 末端时,贴底按钮必须随之消失。follow mode 仍只由向前滚动、发送和
+      // jump latest 打开,与这里的汇报解耦。
       if (atLatest || !followLatestRef.current) {
-        setLatestState(atLatest && followLatestRef.current);
+        setLatestState(atLatest);
       }
     },
     [setLatestState],
@@ -314,7 +319,7 @@ export const TranscriptList = memo(function TranscriptList({
         followLatestRef.current = true;
       }
       if (atLatest || !followLatestRef.current) {
-        setLatestState(atLatest && followLatestRef.current);
+        setLatestState(atLatest);
       }
       if (node.scrollTop < HISTORY_LOAD_SCROLL_TOP_PX) {
         historyLoader.request();

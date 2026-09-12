@@ -8,10 +8,14 @@ import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import type { TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { useI18n } from "@/i18n";
-import { turnFileChangeLabel, turnFileDiffChanges } from "@/lib/turnFileChanges";
+import { turnFileChangeLabel, turnFileDiffChanges, turnFilePathParts } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import { openTurnFileChanges } from "@/state/filePreviewStore";
 import { requestProjectFileReveal } from "@/state/projectRevealStore";
+
+// 窄卡片下操作按钮只留图标:三个按钮都有 aria-label,横挤时先让文件名保住位置。
+const NARROW_ACTION_CLASS =
+  "@max-[28rem]:size-8 @max-[28rem]:justify-center @max-[28rem]:gap-0 @max-[28rem]:px-0";
 
 export function TurnFileChanges({ changes, fileChangeState, sessionID, token, turnID }: {
   changes: TurnFileChange[];
@@ -32,6 +36,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
   const summary = singleChange
     ? turnFileChangeLabel(singleChange, changes)
     : t("transcript.turnFilesSummary").replace("{count}", String(changes.length));
+  const labelParts = singleChange ? turnFilePathParts(summary) : undefined;
   const state = fileChangeState;
   const displayState = state || "applied";
   const reversible = Boolean(state) && changes.every((change) => change.reversible);
@@ -75,7 +80,7 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
   const primaryActionAvailable = reviewable || Boolean(singleChange && previewable);
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card text-sm text-muted-foreground shadow-none dark:bg-background">
+    <section className="@container min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card text-sm text-muted-foreground shadow-none dark:bg-background">
       <div className="flex min-h-12 items-center gap-2 bg-background px-2 py-1.5 transition-colors hover:bg-muted/35 dark:bg-muted/20 dark:hover:bg-muted/35">
         <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none" disabled={!primaryActionAvailable} type="button" onClick={openPrimary}>
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-foreground/65">
@@ -84,7 +89,14 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-foreground">
               {singleChange ? <span className="shrink-0 font-medium">{t(statusLabelKey(singleChange.kind))}</span> : null}
-              <span className={cn("truncate", singleChange ? "font-mono" : "font-medium")}>{summary}</span>
+              <span className={cn("truncate", singleChange ? "font-mono" : "font-medium")} title={singleChange ? summary : undefined}>
+                {labelParts ? (
+                  <>
+                    {labelParts.dir ? <span className="@max-[25rem]:hidden">{labelParts.dir}</span> : null}
+                    {labelParts.base}
+                  </>
+                ) : summary}
+              </span>
             </span>
             {additions > 0 || deletions > 0 ? (
               <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs opacity-85">
@@ -96,31 +108,34 @@ export function TurnFileChanges({ changes, fileChangeState, sessionID, token, tu
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40"
+            className={cn("inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40", NARROW_ACTION_CLASS)}
+            aria-label={state === "undone" ? t("transcript.turnFilesRedo") : t("transcript.turnFilesUndo")}
             disabled={!reversible || actionMutation.isPending}
             title={!reversible ? t("transcript.turnFilesActionUnavailable") : undefined}
             type="button"
             onClick={() => actionMutation.mutate(state === "undone" ? "redo" : "undo")}
           >
             {actionMutation.isPending ? <Spinner className="size-3.5" /> : state === "undone" ? <Redo2 className="size-3.5" /> : <Undo2 className="size-3.5" />}
-            {state === "undone" ? t("transcript.turnFilesRedo") : t("transcript.turnFilesUndo")}
+            <span className="@max-[28rem]:hidden">{state === "undone" ? t("transcript.turnFilesRedo") : t("transcript.turnFilesUndo")}</span>
           </button>
           {changes.length === 1 ? <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-40"
+            className={cn("inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-40", NARROW_ACTION_CLASS)}
+            aria-label={t("transcript.turnFilesPreview")}
             disabled={!previewable}
             type="button"
             onClick={() => previewable && revealResource(sessionID, previewable, displayState)}
           >
             <Eye className="size-3.5" />
-            {t("transcript.turnFilesPreview")}
+            <span className="@max-[28rem]:hidden">{t("transcript.turnFilesPreview")}</span>
           </button> : null}
           {reviewable ? <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-transparent px-3 font-medium text-foreground hover:bg-muted/60"
+            className={cn("inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-transparent px-3 font-medium text-foreground hover:bg-muted/60", NARROW_ACTION_CLASS)}
+            aria-label={t("transcript.turnFilesReview")}
             type="button"
             onClick={openReview}
           >
             <FileText className="size-3.5" />
-            {t("transcript.turnFilesReview")}
+            <span className="@max-[28rem]:hidden">{t("transcript.turnFilesReview")}</span>
           </button> : null}
         </div>
       </div>

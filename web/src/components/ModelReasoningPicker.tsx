@@ -31,7 +31,7 @@ import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
-import { providerPresetForModel } from "@/provider/presets";
+import { providerBrandForModel } from "@/provider/presets";
 
 type ModelReasoningPickerProps = {
   token: string;
@@ -201,7 +201,7 @@ export function ModelReasoningPicker({
   }, [onResolvedChange, providersQuery.isSuccess, resolvedSelection]);
 
   const activeBrand = visibleModel
-    ? providerPresetForModel(visibleModel)?.id || providerBrandKey(activeProfile) || selectedProvider
+    ? providerBrandForModel(visibleModel) || providerBrandKey(activeProfile) || selectedProvider
     : "";
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
   const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${selectedReasoning}`) : "";
