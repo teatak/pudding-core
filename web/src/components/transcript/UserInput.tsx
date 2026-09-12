@@ -1,4 +1,4 @@
-import { Captions, ChevronDown, ChevronUp, FileText, FolderOpen, Mic, Pause, Play } from "@/components/icons";
+import { AudioLines, ChevronDown, ChevronUp, FileText, FolderOpen, Mic, Pause, Play } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -491,9 +491,9 @@ function ASRIndicator({ rawInput }: { rawInput: boolean }) {
       <TooltipTrigger asChild>
         <span aria-label={label} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
           {rawInput ? (
-            <Mic aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
+            <AudioLines aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
           ) : (
-            <Captions aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
+            <Mic aria-hidden="true" className="size-3.5" data-icon-weight="subtle" />
           )}
         </span>
       </TooltipTrigger>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Captions, Mic } from "@/components/icons";
+import { AudioLines, Mic } from "@/components/icons";
 import { toast } from "sonner";
 
 import {
@@ -431,7 +431,7 @@ export function AudioControlButtons({
       active={inputActive && inputMode === "transcribe"}
       disabled={inputDisabled}
       grouped={rawInputSupported}
-      icon={<Captions className="size-4" />}
+      icon={<Mic className="size-4" />}
       label={asrInputLabel}
       level={inputLevel}
       pending={inputPending && inputPendingMode !== "raw"}
@@ -447,7 +447,7 @@ export function AudioControlButtons({
             active={inputActive && inputMode === "raw"}
             disabled={inputDisabled}
             grouped
-            icon={<Mic className="size-4" />}
+            icon={<AudioLines className="size-4" />}
             label={rawInputLabel}
             level={inputLevel}
             pending={inputPending && inputPendingMode === "raw"}
