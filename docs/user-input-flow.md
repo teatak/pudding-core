@@ -7,9 +7,9 @@
 
 | 项目 | 规则 |
 | --- | --- |
-| 模型等待 | `waitSeconds`，默认 60，整数 0–300；0 立即返回 `awaiting_user`，正数暂停当前 turn 的模型循环 |
+| 模型等待 | `waitSeconds`，默认 60，整数 0–300；0 立即返回 `awaiting_user`，正数暂停当前 turn 的模型循环；截止时间在提问时固定，交互不延长 |
 | 面板收起 | 固定 60 秒无交互后收起；不由 `waitSeconds` 控制，也不结束仍有效的模型等待 |
-| 用户交互 | 点击、选择、输入、按键重置面板计时，同时将**仍有效**的模型等待延长至当前时间 + waitSeconds |
+| 用户交互 | 点击、选择、输入、按键只重置面板自身的 60 秒计时，不延长模型等待 |
 | 倒计时 | 不在初次出现时显示。面板最后 10 秒显示；模型等待仅在剩余 `min(10, waitSeconds/2)` 秒显示 |
 | 超时之后 | 继续操作或重新打开面板不会恢复已经结束的模型等待 |
 
@@ -43,4 +43,4 @@
 
 - Go：`go test -tags 'sqlite_fts5 webrtcaec' ./internal/engine ./internal/api -run 'Test(UserInput|LateUserInput)'`。
 - Web：`npm --prefix web test`、`npm --prefix web run build`。
-- 隔离桌面：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、续期、补答、长等待下重开、草稿恢复、失败重试与无重复投递、本地/SSE 撤回后直接重开补答，以及 form/repeat 数字字段的真实按键、小数、退格、文本插入和输入续时。数字输入必须通过原生按键验证，不能仅用 `insertText` 代替。HTTP 为模拟数据，不接真实 provider。
+- 隔离桌面：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、固定等待上限（交互不续期）、补答、长等待下重开、草稿恢复、失败重试与无重复投递、本地/SSE 撤回后直接重开补答，以及 form/repeat 数字字段的真实按键、小数、退格和文本插入。数字输入必须通过原生按键验证，不能仅用 `insertText` 代替。HTTP 为模拟数据，不接真实 provider。

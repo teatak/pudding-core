@@ -48,28 +48,26 @@ export function InputFlowLifecycle({request, token, children}: {request: InputFl
     }, 250);
     return () => window.clearInterval(timer);
   }, [request]);
-  function send(action: "touch" | "dismiss") {
+  function send() {
     if (token === undefined) return;
-    void actOnUserInput(token, request.sessionID, request.id, action).then((result) => {
-      // Concurrent input heartbeats may resolve out of order. Re-fetch instead
-      // of making a browser response order authoritative for the deadline.
-      if (action === "dismiss") client.setQueryData(queryKeys.inputRequest(request.sessionID, request.id), result.request);
-      else void requestQuery.refetch();
+    void actOnUserInput(token, request.sessionID, request.id, "dismiss").then((result) => {
+      // The dismiss response is the authoritative snapshot; a late response
+      // must not overwrite a later withdrawal.
+      client.setQueryData(queryKeys.inputRequest(request.sessionID, request.id), result.request);
     }).catch(() => {void requestQuery.refetch();});
   }
   function interact() {
     lastInteraction.current = Date.now();
     // Let the existing timer refresh countdowns. Rendering during input capture
     // can restore a controlled number input before its onChange saves the value.
-    if (status === undefined || status === "waiting") send("touch");
   }
   const panelSeconds = inputPanelCountdown(lastInteraction.current, now);
   const waitSeconds = status === "waiting" ? inputWaitCountdown(requestQuery.data?.deadline, Number(request.args.waitSeconds ?? 60), now) : null;
-  const countdown = <span className="ml-auto flex gap-2 text-xs text-muted-foreground" aria-live="polite">
+  const countdown = <span className="ml-auto flex items-center gap-2 py-1 text-xs text-muted-foreground" aria-live="polite">
     {waitSeconds !== null ? <span data-input-wait-countdown>{t("inputFlow.waitCountdown").replace("{seconds}", String(waitSeconds))}</span> : null}
     {panelSeconds !== null ? <span data-input-panel-countdown>{t("inputFlow.panelCountdown").replace("{seconds}", String(panelSeconds))}</span> : null}
   </span>;
-  return <LifecycleContext.Provider value={{countdown, dismiss: () => {send("dismiss"); dismissInputFlow(request);}}}>
+  return <LifecycleContext.Provider value={{countdown, dismiss: () => {send(); dismissInputFlow(request);}}}>
     <div className="contents" onPointerDownCapture={interact} onInputCapture={interact} onKeyDownCapture={interact}>
       {children}
     </div>

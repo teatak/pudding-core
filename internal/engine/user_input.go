@@ -27,7 +27,6 @@ type UserInputRequest struct {
 type pendingUserInput struct {
 	UserInputRequest
 	ctx  context.Context
-	wait time.Duration
 	wake chan struct{}
 }
 
@@ -60,9 +59,10 @@ func (e *Engine) requestUserInput(ctx context.Context, call tool.Call) tool.Resu
 	p := &pendingUserInput{UserInputRequest: UserInputRequest{
 		ID: call.TurnID + ":" + call.CallID, SessionID: call.SessionID, TurnID: call.TurnID,
 		Title: args.Title, Args: append(json.RawMessage(nil), call.Args...), Status: "awaiting_user",
-	}, ctx: ctx, wait: time.Duration(seconds) * time.Second, wake: make(chan struct{}, 1)}
+	}, ctx: ctx, wake: make(chan struct{}, 1)}
 	if seconds > 0 {
-		deadline := time.Now().Add(p.wait)
+		// 截止时间在提问时固定：交互不续期，waitSeconds 是本次等待的硬上限。
+		deadline := time.Now().Add(time.Duration(seconds) * time.Second)
 		p.Status, p.Deadline = "waiting", &deadline
 	}
 	e.mu.Lock()
@@ -209,7 +209,7 @@ func (e *Engine) UserInputRequest(ctx context.Context, sessionID, requestID stri
 }
 
 func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string, in UserInputAction) (*UserInputReply, error) {
-	if in.Action != "touch" && in.Action != "dismiss" && in.Action != "answer" {
+	if in.Action != "dismiss" && in.Action != "answer" {
 		return nil, fmt.Errorf("invalid input action")
 	}
 	if in.Action == "answer" {
@@ -228,13 +228,8 @@ func (e *Engine) ActOnUserInput(ctx context.Context, sessionID, requestID string
 	if p != nil {
 		settleUserInputWait(p, time.Now())
 		if p.Status == "waiting" {
-			switch in.Action {
-			case "touch":
-				deadline := time.Now().Add(p.wait)
-				p.Deadline = &deadline
-			case "dismiss":
-				p.Status, p.Deadline = "dismissed", nil
-			}
+			// answer 已在上面分支返回，等待中的请求这里只可能是 dismiss。
+			p.Status, p.Deadline = "dismissed", nil
 			select {
 			case p.wake <- struct{}{}:
 			default:

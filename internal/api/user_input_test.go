@@ -42,17 +42,15 @@ func TestUserInputRequestAPI(t *testing.T) {
 	if snapshot.Status != "timeout" || snapshot.Deadline != nil || snapshot.TurnID != "original" {
 		t.Fatalf("snapshot: %+v", snapshot)
 	}
-	for _, action := range []string{"touch", "dismiss"} {
-		response = req(t, http.MethodPost, url, map[string]any{"action": action})
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("%s: %d", action, response.StatusCode)
-		}
-		got := decodeJSON[engine.UserInputReply](t, response)
-		if got.Request.Status != "timeout" || got.Request.Deadline != nil {
-			t.Fatalf("ended wait renewed: %+v", got)
-		}
+	response = req(t, http.MethodPost, url, map[string]any{"action": "dismiss"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("dismiss: %d", response.StatusCode)
 	}
-	for _, body := range []map[string]any{{"action": "unknown"}, {"action": "answer"}, {"action": "answer", "text": "bad", "parts": []map[string]any{{"type": "tool_use", "name": "fake"}}}} {
+	got := decodeJSON[engine.UserInputReply](t, response)
+	if got.Request.Status != "timeout" || got.Request.Deadline != nil {
+		t.Fatalf("ended wait revived: %+v", got)
+	}
+	for _, body := range []map[string]any{{"action": "touch"}, {"action": "unknown"}, {"action": "answer"}, {"action": "answer", "text": "bad", "parts": []map[string]any{{"type": "tool_use", "name": "fake"}}}} {
 		response = req(t, http.MethodPost, url, body)
 		response.Body.Close()
 		if response.StatusCode != http.StatusBadRequest {
@@ -60,7 +58,7 @@ func TestUserInputRequestAPI(t *testing.T) {
 		}
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		response = req(t, method, srv.URL+"/sessions/other-session/input-requests/original%3Aq", map[string]any{"action": "touch"})
+		response = req(t, method, srv.URL+"/sessions/other-session/input-requests/original%3Aq", map[string]any{"action": "dismiss"})
 		response.Body.Close()
 		if response.StatusCode != http.StatusNotFound {
 			t.Fatalf("cross-session %s: %d", method, response.StatusCode)

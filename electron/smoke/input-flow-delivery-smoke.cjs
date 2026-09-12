@@ -101,15 +101,13 @@ async function run() {
               window.fixture.calls.push({path:String(url),body});
               return new Promise(resolve=>{resolveResponse=resolve;});
             }
-            if(request.status==='waiting'){
-              if(body.action==='touch'){window.fixture.touches++;request={...request,deadline:new Date(Date.now()+waitSeconds*1000).toISOString()};}
-              if(body.action==='dismiss')request={...request,status:'dismissed',deadline:undefined};
-            }
+            if(body.action!=='dismiss')throw new Error('Unexpected input action: '+body.action);
+            if(request.status==='waiting')request={...request,status:'dismissed',deadline:undefined};
             return Promise.resolve(Response.json({request}));
           }
           return Promise.resolve(Response.json(request));
         };
-        window.fixture={calls:[],touches:0,
+        window.fixture={calls:[],
           respond(error){
             const toolStatus=snapshot().status==='waiting'?'answered':snapshot().status;
             if(!error){
@@ -211,8 +209,8 @@ async function run() {
     await typeKeys(repeat?'5':'12');
     await delay(600); // Include timer ticks and the touch response, not just the key event.
     assert.equal(await js('document.querySelector('+JSON.stringify(input)+').value'),repeat?'5':'12','native digit keys must survive lifecycle refresh');
-    await waitFor('!document.querySelector('+JSON.stringify(countdown)+')','typing clears countdown');
-    assert.ok(Date.parse(await js('window.fixture.deadline()'))>Date.parse(deadline),'typing renews the active model wait');
+    assert.equal(await js('window.fixture.deadline()'),deadline,'typing must not renew the model wait');
+    if(repeat)await waitFor('!document.querySelector('+JSON.stringify(countdown)+')','typing resets the panel countdown');
     assert.equal(await js('document.querySelector("[data-input-flow-entry] button").disabled'),false);
     fs.writeFileSync(path.join(output,scenario+'-entry.png'),(await window.webContents.capturePage()).toPNG());
     if(repeat) {
@@ -248,7 +246,7 @@ async function run() {
     await waitFor('document.querySelectorAll("#transcript .pudding-user-message").length===2','numeric result user bubble');
     assert.equal(await js('!!document.querySelector("[data-input-flow-panel]")'),false,'submitted panel closes');
     fs.writeFileSync(path.join(output,scenario+'-answer.png'),(await window.webContents.capturePage()).toPNG());
-    console.log('PASS '+scenario+' native typing, timer renewal and numeric answer bubble');
+    console.log('PASS '+scenario+' native typing, fixed wait deadline and numeric answer bubble');
   }
   for(const scenario of ['sync','timeout','async','long','reject','restart','dismiss']) {
     await window.loadURL(url+'?'+scenario);
@@ -258,9 +256,11 @@ async function run() {
     if(scenario==='timeout'){
       await js('window.fixture.shift(5500)');
       await waitFor('!!document.querySelector("[data-input-wait-countdown]")','delayed model countdown');
+      const deadline=await js('window.fixture.deadline()');
       await click('[data-input-flow-panel] input');
       await window.webContents.insertText('保留草稿');
-      await waitFor('window.fixture.touches>0 && !document.querySelector("[data-input-wait-countdown]")','interaction renews model wait');
+      await delay(400);
+      assert.equal(await js('window.fixture.deadline()'),deadline,'interaction must not renew the model wait');
       await js('window.fixture.shift(11000)');
       await waitFor('window.fixture.status()==="timeout" && !document.querySelector("[data-input-wait-countdown]")','model timeout');
       assert.equal(await js('!!document.querySelector("[data-input-flow-panel]")'),true,'model timeout does not close panel');

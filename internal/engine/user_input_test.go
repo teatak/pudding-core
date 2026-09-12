@@ -37,7 +37,7 @@ func waitInputRequest(t *testing.T, e *Engine, sessionID, requestID string) *Use
 	return nil
 }
 
-func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
+func TestUserInputWaitAnswerTimeoutAndCancel(t *testing.T) {
 	for _, scenario := range []string{"answer", "timeout", "cancel", "dismiss", "async"} {
 		t.Run(scenario, func(t *testing.T) {
 			e, st, _, sid := newTestEngine(t)
@@ -60,12 +60,18 @@ func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
 			if _, err := e.ActOnUserInput(ctx, "another-session", "turn:question", inputAnswer()); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("cross-session answer: %v", err)
 			}
+			if scenario != "async" {
+				// 交互不续期：deadline 在提问时固定，touch 不再是合法动作。
+				if _, err := e.ActOnUserInput(ctx, sid, initial.ID, UserInputAction{Action: "touch"}); err == nil {
+					t.Fatal("touch must not extend a model wait")
+				}
+				again, err := e.UserInputRequest(ctx, sid, initial.ID)
+				if err != nil || again.Deadline == nil || !again.Deadline.Equal(*initial.Deadline) {
+					t.Fatalf("deadline changed: %+v %v", again, err)
+				}
+			}
 			if scenario == "answer" {
 				time.Sleep(80 * time.Millisecond)
-				touched, err := e.ActOnUserInput(ctx, sid, initial.ID, UserInputAction{Action: "touch"})
-				if err != nil || !touched.Request.Deadline.After(*initial.Deadline) {
-					t.Fatalf("deadline not renewed: %+v %v", touched, err)
-				}
 				select {
 				case <-result:
 					t.Fatal("model continued without answer")
@@ -97,8 +103,8 @@ func TestUserInputWaitRenewAnswerTimeoutAndCancel(t *testing.T) {
 			if strings.Contains(got.Content, "已填写测试") || strings.Contains(got.Content, `"answer":`) {
 				t.Fatal("answer must only exist in the user message, not the tool result")
 			}
-			req, err := e.ActOnUserInput(context.Background(), sid, initial.ID, UserInputAction{Action: "touch"})
-			if err != nil || req.Request.Deadline != nil || req.Request.Status != expected {
+			req, err := e.UserInputRequest(context.Background(), sid, initial.ID)
+			if err != nil || req.Deadline != nil || req.Status != expected {
 				t.Fatalf("ended wait revived: %+v %v", req, err)
 			}
 			messages, _ := st.ListMessages(context.Background(), sid, 0)
@@ -154,9 +160,9 @@ func TestUserInputCancellationIsVisibleBeforeUIRPCReturns(t *testing.T) {
 	<-shown
 	defer func() { close(release); <-result }()
 	cancel()
-	got, err := e.ActOnUserInput(context.Background(), sid, "t:cancel", UserInputAction{Action: "touch"})
-	if err != nil || got.Request.Status != "cancelled" || got.Request.Deadline != nil {
-		t.Fatalf("cancelled wait renewed before UI RPC returned: %+v %v", got, err)
+	got, err := e.UserInputRequest(context.Background(), sid, "t:cancel")
+	if err != nil || got.Status != "cancelled" || got.Deadline != nil {
+		t.Fatalf("cancelled wait revived before UI RPC returned: %+v %v", got, err)
 	}
 }
 

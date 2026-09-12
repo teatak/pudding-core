@@ -26,7 +26,7 @@ func (s *Server) actOnUserInput(c *cart.Context) error {
 	if err := decode(c, &in); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	if in.Action != "touch" && in.Action != "dismiss" && in.Action != "answer" {
+	if in.Action != "dismiss" && in.Action != "answer" {
 		return badRequest(c, "invalid input action")
 	}
 	result, err := s.engine.ActOnUserInput(c.Request.Context(), sessionID, requestID, in)

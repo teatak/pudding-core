@@ -1149,7 +1149,7 @@ export function getUserInputRequest(token: string, sessionID: string, requestID:
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/input-requests/${encodeURIComponent(requestID)}`, userInputRequest);
 }
 
-export function actOnUserInput(token: string, sessionID: string, requestID: string, action: "touch" | "dismiss" | "answer", answer?: {text: string; parts: ContentPart[]}) {
+export function actOnUserInput(token: string, sessionID: string, requestID: string, action: "dismiss" | "answer", answer?: {text: string; parts: ContentPart[]}) {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/input-requests/${encodeURIComponent(requestID)}`, userInputReply, {
     method: "POST", body: JSON.stringify({action, ...answer}),
   });
