@@ -36,7 +36,7 @@
 | [attachments-multimodal-plan.md](attachments-multimodal-plan.md) | 图片主链路已完成；文本/PDF、音频与 GC 仍未完成 |
 | [voice-migration-plan.md](voice-migration-plan.md) | macOS runtime 发布链路仍在收尾 |
 | [electron-migration-plan.md](electron-migration-plan.md) | 主迁移完成；保留多会话生命周期的手动验收记录 |
-| [mascot-scene-lab-plan.md](mascot-scene-lab-plan.md) | 隔离的吉祥物 2.5D Scene Lab 实施计划，待按阶段验证 |
+| [mascot-scene-lab-plan.md](mascot-scene-lab-plan.md) | 隔离的吉祥物 2.5D Scene Lab 实施计划，待按阶段验证；已记录运行时空载 CPU 归因，待优化 |
 
 ## 已完成设计记录
 

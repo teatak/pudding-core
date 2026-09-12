@@ -493,3 +493,28 @@ mood 限定图层常驻场景，通过统一的激活态切换，不再在状态
 ## 24. 删除旧路径
 
 两个生产调用点迁移完成后，删除旧 `components/Mascot.tsx`、Lab 的旧版对照组件以及对应的全局 SVG 状态选择器和 `pudding-mascot-*` 动画。旧版专用的状态灯与阴影颜色变量同步删除；新版仍使用的机身、轮廓、面罩和表情颜色变量继续由全局主题提供。Lab 现在只渲染一个 V1 场景，不再保留旧实现、feature flag 或 fallback。
+
+## 25. 运行时空载 CPU 成本(2026-09-11 实测,待优化)
+
+生产调用点(`Composer`、`DraftConversation`)全部使用 V1 场景后,发现**空载持续 CPU**:窗口拖动几次后不再操作,应用仍持续占用且不衰减——现场读数 WindowServer ~45%、应用 GPU 进程 ~28%、渲染进程 ~17%,系统闲置仅 ~84%。该开销与拖动本身无关,属于常驻成本,与第 7 节“性能与实现约束”直接相关。
+
+定位证据:
+
+1. 排除项。只剩本应用时读数不变;退出远控类进程(向日葵)后不变;内存 12G/16G 且 compressor 稳定 ~810M;壁纸/桌面代理 0%。
+2. 页面级 A/B(同一应用):「应用」页 ~14%;「新对话」空态 ~51%;会话转录页 ~45%。两个聊天页的共同点就是 composer + 吉祥物场景。
+3. 组件级 A/B。临时向 `web/src/components/mascot-scene/scene.css` 追加 `.pudding-composer-mascot-anchor .mascot-scene-v1-adapter, .pudding-draft-mascot { display: none !important; }`,同刻采样对照(dev 窗口在前台且已加载改动;release 未改、仍带吉祥物):
+   - 已隐藏吉祥物:GPU 0.0% / 渲染 0.0%;
+   - 保留吉祥物:GPU 28–32% / 渲染 ~18.5%。
+   即隐藏吉祥物后本应用从 ~45% 回落到 0%(该次未复测 WindowServer,需与改动前后同法对照)。
+
+原因:`scene.css` 里的常驻无限动画——`:91/:139` `.mascot-scene-ambient-motion`(4.8s,`translateY + scale`)、`:149` blink、`:180` mouth-idle、`:203` layer-idle-motion、`:40` thinking-dot。场景由多层绝对定位元素加 `transform-style: preserve-3d` 组成,`scale` 参与时每帧要重新栅格化;而这些动画在 composer 与空态里始终可见,所以空载也不会停。
+
+待优化方向(尚未实施):
+
+1. ambient 动画只保留 `translate`、去掉 `scale`,并把动画层提升为合成层(`will-change: transform`),避免每帧重绘/重栅格化。
+2. 场景不可见(IntersectionObserver)或窗口失焦/`document.hidden` 时 `animation-play-state: paused`。
+3. blink / mouth-idle / thinking-dot 降频,或只在 thinking 等状态运行。
+
+验证方法:同一套同刻采样(`ps -axo pcpu=,command= | grep -E 'Pudding Helper|Electron Helper'`)对照改动前后 GPU/渲染进程占用,目标为有吉祥物时也 <5%,并复测 WindowServer 是否同步回落。
+
+边界:本次定位没有把转录与观察器路径列为主因(切到「应用」页仍有 ~14% 基线);`workspace-resize-performance-plan.md` 第 7 节的收口项仍应以真实 profile 为准再动。
