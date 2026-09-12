@@ -73,6 +73,7 @@ import {
 import { NeutralRadioCard, NeutralRadioGroup } from "@/components/NeutralRadioGroup";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
@@ -1085,7 +1086,7 @@ function ModelDetailsDialog({
               <TemperatureField
                 label={t("provider.temperature")}
                 value={temperature}
-                onValueChange={(value) => modelForm.setValue("temperature", value.toFixed(1), { shouldDirty: true })}
+                onValueChange={(value) => modelForm.setValue("temperature", value, { shouldDirty: true })}
               />
               <ReasoningEffortField
                 label={t("provider.reasoningEffort")}
@@ -1200,32 +1201,38 @@ function TemperatureField({
 }: {
   label: string;
   value?: string;
-  onValueChange: (value: number) => void;
+  onValueChange: (value: string) => void;
 }) {
-  const temperature = parseTemperature(value);
+  const { t } = useI18n();
+  const usesDefault = !value?.trim();
+  const temperature = Number(value?.trim() || "1");
   return (
     <PlainField label={label}>
       <div className="grid h-8 grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-3">
         <Slider
           aria-label={label}
-          max={2}
+          disabled={usesDefault}
           min={0}
+          max={2}
           step={0.1}
           value={[temperature]}
-          onValueChange={(values) => onValueChange(values[0] ?? temperature)}
+          onValueChange={([next]) => onValueChange(String(next))}
         />
-        <span className="text-right text-sm tabular-nums text-muted-foreground">{temperature.toFixed(1)}</span>
+        <span className="text-right text-sm tabular-nums text-muted-foreground">
+          {usesDefault ? null : temperature.toFixed(1)}
+        </span>
       </div>
+      <Label className="w-fit gap-2 text-xs font-normal text-muted-foreground">
+        <Switch
+          aria-label={t("provider.temperatureUseDefault")}
+          checked={usesDefault}
+          size="sm"
+          onCheckedChange={(checked) => onValueChange(checked ? "" : "1")}
+        />
+        {t("provider.temperatureUseDefault")}
+      </Label>
     </PlainField>
   );
-}
-
-function parseTemperature(value?: string) {
-  const temperature = Number(value?.trim());
-  if (!Number.isFinite(temperature)) {
-    return 0.7;
-  }
-  return Math.min(2, Math.max(0, temperature));
 }
 
 function ReasoningEffortField({

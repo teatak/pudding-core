@@ -57,85 +57,70 @@ export type ProviderPreset = {
   variants: ProviderPresetVariant[];
 };
 
-type ProviderModelPatch = Omit<ProviderModel, "id" | "limits" | "providerOptions"> & {
-  openai?: Record<string, unknown>;
-  google?: Record<string, unknown>;
-  anthropic?: Record<string, unknown>;
-};
-
-const DEFAULT_PRESET_TEMPERATURE = 0.2;
-
-const DEEPSEEK_OPENAI_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+// Creation/import templates only; saved profile.models remain authoritative.
+// Verified against vendor model catalogs on 2026-09-12 (docs/provider-presets.md).
+const DEEPSEEK_MODELS = [
+  model("deepseek-flash", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 384_000, maxToolLoops: 64 } }),
+  model("deepseek-v4-pro", { contextWindow: 1_000_000, capabilities: { tools: true }, limits: { maxOutputTokens: 384_000, maxToolLoops: 64 } }),
 ];
 
-const DEEPSEEK_ANTHROPIC_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000 } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000 } }),
-];
-
-const MIMO_OPENAI_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: mimoCapabilities(id), openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 131_072 } }),
+const MIMO_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
+  model(id, {
+    contextWindow: 1_000_000,
+    capabilities: id === "mimo-v2.5" ? { image: true, audio: true, tools: true } : { tools: true },
+    limits: { maxOutputTokens: 131_072 },
+  }),
 );
 
-const MIMO_ANTHROPIC_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: mimoCapabilities(id), anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
+const QWEN_MODELS = ["qwen3.8-flash", "qwen3.8-max-0902", "qwen3.7-plus"].map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 131_072 } }),
 );
 
-function mimoCapabilities(id: string) {
-  return id === "mimo-v2.5" ? { image: true, audio: true, tools: true } : { tools: true };
-}
-
-const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.7-plus"];
-const QWEN_OPENAI_MODELS = QWEN_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
-);
-const QWEN_ANTHROPIC_MODELS = QWEN_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
+const MOONSHOT_MODELS = ["kimi-k3", "kimi-k2.7-code", "kimi-k2.6"].map((id) =>
+  model(id, { contextWindow: id === "kimi-k3" ? 1_000_000 : 262_144, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 131_072 } }),
 );
 
-const MOONSHOT_MODEL_IDS = ["kimi-k3", "kimi-k2.6"];
-const MOONSHOT_OPENAI_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
-);
-const MOONSHOT_ANTHROPIC_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
-);
-
-const ZHIPU_MODEL_IDS = ["glm-5.2", "glm-5.1"];
-const ZHIPU_OPENAI_MODELS = ZHIPU_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
-);
-const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
+const ZHIPU_MODELS = ["glm-5.3-flash", "glm-5.2", "glm-5.1"].map((id) =>
+  model(id, {
+    contextWindow: id === "glm-5.1" ? 200_000 : 1_000_000,
+    capabilities: { image: id === "glm-5.3-flash", tools: true },
+    limits: { maxOutputTokens: 128_000 },
+  }),
 );
 
-const OPENAI_MODELS = [
-  model("gpt-5.6-sol", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.6-terra", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.6-luna", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
-  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000 } }),
+const OPENAI_MODELS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"].map((id) =>
+  model(id, { contextWindow: id === "gpt-5.4-mini" || id === "gpt-5.4-nano" ? 400_000 : 1_050_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+);
+// Astra's tool use requires Responses; Chat Completions only supports text.
+const OPENAI_RESPONSES_MODELS = [
+  model("gpt-6-astra", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+  ...OPENAI_MODELS,
 ];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "deepseek",
     name: "DeepSeek",
-    description: "DeepSeek V4 models with OpenAI-compatible and Anthropic-compatible protocols.",
+    description: "DeepSeek models with Responses, OpenAI-compatible, and Anthropic-compatible protocols.",
     defaultVariantId: "openai",
     apiKeyURL: "https://platform.deepseek.com/api_keys",
     variants: [
+      {
+        id: "responses",
+        label: "Responses API",
+        description: "https://api.deepseek.com/responses",
+        protocol: "openai-responses",
+        baseURL: "https://api.deepseek.com",
+        models: DEEPSEEK_MODELS,
+        profileName: "DeepSeek Responses",
+      },
       {
         id: "openai",
         label: "OpenAI Compatible",
         description: "https://api.deepseek.com",
         protocol: "openai-compatible",
         baseURL: "https://api.deepseek.com",
-        models: DEEPSEEK_OPENAI_MODELS,
+        models: DEEPSEEK_MODELS,
       },
       {
         id: "anthropic",
@@ -143,7 +128,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://api.deepseek.com/anthropic",
         protocol: "anthropic",
         baseURL: "https://api.deepseek.com/anthropic",
-        models: DEEPSEEK_ANTHROPIC_MODELS,
+        models: DEEPSEEK_MODELS,
         profileName: "DeepSeek Anthropic",
       },
     ],
@@ -161,7 +146,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         protocol: "openai-compatible",
         baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        models: QWEN_OPENAI_MODELS,
+        models: QWEN_MODELS,
       },
       {
         id: "anthropic",
@@ -169,7 +154,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://dashscope.aliyuncs.com/apps/anthropic",
         protocol: "anthropic",
         baseURL: "https://dashscope.aliyuncs.com/apps/anthropic",
-        models: QWEN_ANTHROPIC_MODELS,
+        models: QWEN_MODELS,
         profileName: "Qwen Anthropic",
       },
     ],
@@ -188,7 +173,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         group: "standard",
         protocol: "openai-compatible",
         baseURL: "https://api.xiaomimimo.com/v1",
-        models: MIMO_OPENAI_MODELS,
+        models: MIMO_MODELS,
       },
       {
         id: "standard-anthropic",
@@ -201,7 +186,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
           protocol: "openai-compatible",
           baseURL: "https://api.xiaomimimo.com/v1",
         },
-        models: MIMO_ANTHROPIC_MODELS,
+        models: MIMO_MODELS,
         profileName: "MiMo Anthropic",
       },
       {
@@ -211,7 +196,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         group: "plan",
         protocol: "openai-compatible",
         baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
-        models: MIMO_OPENAI_MODELS,
+        models: MIMO_MODELS,
         profileName: "MiMo Plan",
       },
       {
@@ -225,7 +210,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
           protocol: "openai-compatible",
           baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
         },
-        models: MIMO_ANTHROPIC_MODELS,
+        models: MIMO_MODELS,
         profileName: "MiMo Plan Anthropic",
       },
     ],
@@ -244,9 +229,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "google",
         baseURL: "https://generativelanguage.googleapis.com",
         models: [
-          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true } } }),
-          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true } } }),
-        ],
+          "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview",
+        ].map((id) => model(id, {
+          contextWindow: 1_048_576,
+          capabilities: { image: true, audio: true, tools: true },
+          limits: { maxOutputTokens: 65_536 },
+          providerOptions: { google: { thinking: { include_thoughts: true } } },
+        })),
       },
     ],
   },
@@ -263,7 +252,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://api.openai.com/v1/responses",
         protocol: "openai-responses",
         baseURL: "https://api.openai.com/v1",
-        models: OPENAI_MODELS,
+        models: OPENAI_RESPONSES_MODELS,
       },
       {
         id: "compatible",
@@ -290,10 +279,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "anthropic",
         baseURL: "https://api.anthropic.com",
         models: [
-          model("claude-fable-5", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
-          model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
-          model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
-          model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
+          model("claude-fable-5-1", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+          model("claude-opus-5", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+          model("claude-sonnet-5", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+          model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 64_000 } }),
         ],
       },
     ],
@@ -311,7 +300,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://api.moonshot.cn/v1",
         protocol: "openai-compatible",
         baseURL: "https://api.moonshot.cn/v1",
-        models: MOONSHOT_OPENAI_MODELS,
+        models: MOONSHOT_MODELS,
       },
       {
         id: "anthropic",
@@ -319,7 +308,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://api.moonshot.ai/anthropic",
         protocol: "anthropic",
         baseURL: "https://api.moonshot.ai/anthropic",
-        models: MOONSHOT_ANTHROPIC_MODELS,
+        models: MOONSHOT_MODELS,
         profileName: "Moonshot Anthropic",
       },
     ],
@@ -337,7 +326,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://open.bigmodel.cn/api/paas/v4",
         protocol: "openai-compatible",
         baseURL: "https://open.bigmodel.cn/api/paas/v4",
-        models: ZHIPU_OPENAI_MODELS,
+        models: ZHIPU_MODELS,
       },
       {
         id: "anthropic",
@@ -345,7 +334,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://open.bigmodel.cn/api/anthropic",
         protocol: "anthropic",
         baseURL: "https://open.bigmodel.cn/api/anthropic",
-        models: ZHIPU_ANTHROPIC_MODELS,
+        models: ZHIPU_MODELS,
         profileName: "Zhipu GLM Anthropic",
       },
     ],
@@ -365,11 +354,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         baseURL: "https://openrouter.ai/api/v1",
         models: [
           "openrouter/free",
-          "openrouter/owl-alpha",
+          "nvidia/nemotron-3.5-lightning:free",
           "nvidia/nemotron-3-super-120b-a12b:free",
-          "poolside/laguna-m.1:free",
           "z-ai/glm-4.5-air:free",
-        ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } })),
+        ].map((id) => model(id, { capabilities: { tools: true } })),
       },
     ],
   },
@@ -655,13 +643,18 @@ export function mergeProviderModelCandidate(
   if (!globalModel) {
     return fallback;
   }
-  // 端点通常只给模型 ID。能力和限制可跨供应商复用；请求参数必须继续
-  // 使用当前协议的默认值，避免把 OpenAI options 带到 Anthropic / Google。
+  const capabilities = { ...(globalModel.capabilities || fallback.capabilities) };
+  // Astra may be discovered through Chat Completions, but its tools require Responses.
+  if (trimmedID === "gpt-6-astra" && protocol === "openai-compatible") {
+    capabilities.tools = false;
+  }
+  // 端点通常只给模型 ID。复用元数据时需遵循协议能力限制；请求参数使用
+  // 当前协议的默认值，避免把 OpenAI options 带到 Anthropic / Google。
   return {
     ...fallback,
     displayName: globalModel.displayName,
     contextWindow: globalModel.contextWindow,
-    capabilities: globalModel.capabilities ? { ...globalModel.capabilities } : fallback.capabilities,
+    capabilities,
     limits: globalModel.limits ? { ...globalModel.limits } : undefined,
   };
 }
@@ -773,74 +766,18 @@ function randomToken(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, PROFILE_ID_RANDOM_CHARS);
 }
 
-function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
-  const { openai, google, anthropic, displayName, ...rest } = patch;
-  const maxOutputTokens = numericOption(openai?.max_output_tokens ?? openai?.max_completion_tokens ?? google?.maxOutputTokens ?? anthropic?.max_tokens);
-  const maxToolLoops = numericOption(openai?.max_tool_loops);
-  const cleanOpenAI = omitOptions(openai, ["max_output_tokens", "max_completion_tokens", "max_tool_loops"]);
-  const cleanGoogle = omitOptions(google, ["maxOutputTokens", "max_output_tokens", "max_tokens"]);
-  const cleanAnthropic = omitOptions(anthropic, ["max_tokens", "max_output_tokens"]);
+function model(id: string, patch: Omit<ProviderModel, "id"> = {}): ProviderModel {
   return {
+    ...patch,
     id,
-    displayName: displayName?.trim() || providerModelDisplayName(id),
-    ...rest,
-    limits: maxOutputTokens || maxToolLoops ? { maxOutputTokens, maxToolLoops } : undefined,
-    providerOptions: cleanProviderOptions({
-      openai: cleanOpenAI,
-      google: cleanGoogle,
-      anthropic: cleanAnthropic,
-    }),
+    displayName: patch.displayName?.trim() || providerModelDisplayName(id),
   };
 }
 
 function providerModelFromCandidate(id: string, protocol: ProviderPresetProtocol): ProviderModel {
-  const capabilities = { tools: true };
-  if (protocol === "anthropic") {
-    return {
-      id,
-      displayName: providerModelDisplayName(id),
-      capabilities,
-      providerOptions: { anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE } },
-    };
-  }
-  if (protocol === "google") {
-    return {
-      id,
-      displayName: providerModelDisplayName(id),
-      capabilities,
-      providerOptions: {
-        google: {
-          temperature: DEFAULT_PRESET_TEMPERATURE,
-          thinking: { include_thoughts: true },
-        },
-      },
-    };
-  }
-  return {
-    id,
-    displayName: providerModelDisplayName(id),
-    capabilities,
-    providerOptions: { openai: { temperature: DEFAULT_PRESET_TEMPERATURE } },
-  };
-}
-
-function numericOption(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function omitOptions(options: Record<string, unknown> | undefined, keys: string[]) {
-  if (!options) {
-    return undefined;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(options)) {
-    if (!keys.includes(key) && value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-}
-
-function cleanProviderOptions(options: NonNullable<ProviderModel["providerOptions"]>) {
-  return options.openai || options.google || options.anthropic ? options : undefined;
+  // Leave sampling to the provider: several reasoning models reject temperature.
+  return model(id, {
+    capabilities: { tools: true },
+    ...(protocol === "google" ? { providerOptions: { google: { thinking: { include_thoughts: true } } } } : {}),
+  });
 }

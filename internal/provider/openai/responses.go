@@ -166,6 +166,7 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 				}
 				callIDs[item.ID] = callID
 				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					Index:  frame.OutputIndex,
 					CallID: callID,
 					Name:   item.Name,
 				}}) {
@@ -184,6 +185,7 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 					callID = frame.ItemID
 				}
 				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					Index:     frame.OutputIndex,
 					CallID:    callID,
 					ArgsDelta: frame.Delta,
 				}}) {
@@ -300,11 +302,12 @@ type responsesTool struct {
 }
 
 type responsesStreamFrame struct {
-	Type     string          `json:"type"`
-	Delta    string          `json:"delta"`
-	ItemID   string          `json:"item_id"`
-	Item     json.RawMessage `json:"item"`
-	Response struct {
+	Type        string          `json:"type"`
+	Delta       string          `json:"delta"`
+	ItemID      string          `json:"item_id"`
+	OutputIndex int             `json:"output_index"`
+	Item        json.RawMessage `json:"item"`
+	Response    struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`

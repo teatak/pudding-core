@@ -14,7 +14,7 @@ const { providerBrandForModel } = await server.ssrLoadModule("/src/provider/pres
 // 内置 preset 清单里的 id 决定图标,包括归属 openrouter 的中转 id。
 test("内置模型清单精确命中优先", () => {
   assert.equal(providerBrandForModel("deepseek-v4-pro"), "deepseek");
-  assert.equal(providerBrandForModel("claude-sonnet-4-6"), "anthropic");
+  assert.equal(providerBrandForModel("claude-sonnet-5"), "anthropic");
   assert.equal(providerBrandForModel("openrouter/free"), "openrouter");
   assert.equal(providerBrandForModel("z-ai/glm-4.5-air:free"), "openrouter");
   assert.equal(providerBrandForModel("nvidia/nemotron-3-super-120b-a12b:free"), "openrouter");

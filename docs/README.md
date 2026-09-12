@@ -13,6 +13,7 @@
 | --- | --- |
 | [technology-decisions.md](technology-decisions.md) | 产品定位、后端边界、状态所有权和通信架构 |
 | [contracts-checklist.md](contracts-checklist.md) | REST、SSE、消息和工具契约对照 |
+| [provider-presets.md](provider-presets.md) | 模型预设更新依据、能力边界与 DeepSeek Responses 接入 |
 | [user-input-flow.md](user-input-flow.md) | 用户问题收集、模型等待、独立面板计时和事后补答 |
 | [transcript-stream-performance.md](transcript-stream-performance.md) | 流式回复卡顿优化、性能对比与隔离桌面验收 |
 | [design.md](design.md) | Electron Agent Shell 的 Web UI 设计底座 |
@@ -20,6 +21,7 @@
 | [builtin-apps-design.md](builtin-apps-design.md) | 内置 App、动态加载和 runtime-provided App |
 | [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
 | [code-cli-sandbox-design.md](code-cli-sandbox-design.md) | Code CLI 沙箱与审批规则 |
+| [context-working-set.md](context-working-set.md) | 模型工具结果去重、受限预览与 canonical 分页回读 |
 | [releasing.md](releasing.md) | Desktop 构建、签名、发布和更新恢复 |
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
