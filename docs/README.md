@@ -31,7 +31,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [release-report-0.3.2.md](release-report-0.3.2.md) | 已公开为最新稳定版；双架构签名公证、九资产和更新清单校验通过；用户暂不升级本机，新签名包交互验收未执行，Worker 开发依赖告警待处理 |
+| [release-report-0.3.3.md](release-report-0.3.3.md) | 正式版发布中；源码评估与隔离桌面回归通过，待双架构打包及发布校验；本机不升级 |
 | [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区统一内容标签、项目内部文件、资源库与专注改造；保留分阶段验收记录 |
 | [computer-use-design.md](computer-use-design.md) | macOS Computer Use 已实现，含输入/实例定位/独立截图及真实 Electron 回归 |
 | [computer-use-background-input-probe.md](computer-use-background-input-probe.md) | 后台定向输入实验、五种鼠标手势接入及异常恢复；通用兼容与本次扩展的正式签名包验收未完成 |
