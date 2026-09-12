@@ -124,7 +124,7 @@ func TestClassifyToolCallGitWriteRisk(t *testing.T) {
 		{name: GitCommit, args: `{"scope":"project","message":"test"}`, operation: "git_commit"},
 	} {
 		risk, ok := ClassifyToolCall(tt.name, json.RawMessage(tt.args))
-		if !ok || risk.Class != RiskClassWrite || risk.Operation != tt.operation || risk.Scope != "project" || risk.LowRisk || len(risk.Paths) != tt.paths {
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != tt.operation || risk.Scope != "project" || !risk.LowRisk || len(risk.Paths) != tt.paths {
 			t.Fatalf("unexpected Git write risk for %s: %+v ok=%v", tt.name, risk, ok)
 		}
 	}
@@ -172,6 +172,10 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		{name: "literal wildcard search", args: `{"scope":"project","command":"rg '*'"}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
 		{name: "publish", args: `{"scope":"project","command":"npm publish"}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
 		{name: "git write", args: `{"scope":"project","command":"git add main.go"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git CLI commit", args: `{"scope":"project","command":"git commit -m test"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git discard edits", args: `{"scope":"project","command":"git reset --hard HEAD"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git delete untracked", args: `{"scope":"project","command":"git clean -fd"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git force push", args: `{"scope":"project","command":"git push --force origin main"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
 		{name: "git clone", args: `{"scope":"project","command":"git clone https://example.com/repo.git repo"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "git fetch", args: `{"scope":"project","command":"git fetch origin"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "git pull", args: `{"scope":"project","command":"git pull --ff-only"}`, class: RiskClassCommand, operation: "git", lowRisk: true},

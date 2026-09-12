@@ -18,7 +18,7 @@ Electron/daemon 进程。
 
 | Project 审批模式 | 启动前 | CLI 执行边界 |
 | --- | --- | --- |
-| `ask` | 所有 Code 操作先审批 | 命令默认仍在项目沙箱内运行;仅明确需要 host access 的调用绕过 |
+| `ask` | 项目低风险只读操作免审批;写入和命令执行仍审批 | 命令默认仍在项目沙箱内运行;仅明确需要 host access 的调用绕过 |
 | `auto` | 仅风险规则命中时审批 | 低风险命令自动在项目沙箱内运行;批准不等于自动绕过沙箱 |
 | `full` | 不弹普通审批 | CLI 不套项目沙箱 |
 
@@ -62,6 +62,9 @@ direct runner 都按该合并值解析可执行文件,因此从 Finder 启动 El
 - Python user base 和字节码缓存写入 Pudding 管理的隔离状态,不污染用户目录。
 - Python/pip/Requests/curl 默认使用可读的系统 CA bundle,禁止用 `--trusted-host`
   绕过 TLS 校验。
+- Go 等使用 macOS 原生证书验证的客户端可连接 `com.apple.trustd.agent` 做系统信任评估;
+  不因此开放 `securityd` 或用户私人钥匙串文件。`GOCACHE` / `GOMODCACHE` 仍是稳定的
+  沙箱私有可写缓存,不强制更改 `GOPROXY` / `GOSUMDB` / `GOFLAGS`。
 - npm global prefix、pnpm home、Yarn global、Corepack cache 和 Node REPL history
   写入 Pudding 管理的隔离状态;不读取用户 npm 配置。
 - 系统运行库、已解析的工具链目录:只读。
@@ -87,6 +90,10 @@ macOS Seatbelt 将 `0.0.0.0` bind 也归入 `localhost` 规则,无法在保留�
 
 ## 5. 审批规则
 
+Ask 不再询问明确标记为低风险的只读工具,包括结构化 Git status/diff/log 与代码
+导航/诊断。`LowRisk` 写入、符号重命名、任意命令执行及未明确分类为低风险的读取仍需
+审批,不把 Ask 变成 Auto。Computer Use 的首次 app 授权及项目访问边界不受此豁免影响。
+
 Auto 从命令白名单改为风险规则。以下操作仍需审批:
 
 - 明确的删除、磁盘、提权、系统配置和进程控制操作。
@@ -96,7 +103,14 @@ Auto 从命令白名单改为风险规则。以下操作仍需审批:
 - 显式通配监听或请求放宽文件系统边界。
 
 未知的直接 `argv` 不再仅因命令名未知而审批。沙箱不能保护 Project 自身免受恶意
-写入,因此 destructive 规则与 patch/git 审阅仍然保留。
+写入,因此 destructive 规则与 patch/Git 准备校验仍然保留。
+
+结构化的 `builtin_git_stage`、`builtin_git_unstage`、`builtin_git_commit` 属于受限的
+本地项目写入,在 `auto` 下不再额外弹窗,`ask` 仍逐次审批。它们始终验证项目/仓库边界、
+显式文件路径,提交仍准备 staged diff 并校验 HEAD/index 没有漂移;不执行仓库 hooks 或
+clean filters。免弹窗不意味着任务授权:模型只应在用户要求提交时创建提交,不能把无关
+修改一并暂存。任意 Git CLI 写入不继承这项豁免,`push`、强推、`reset --hard`、`clean`
+等仍受原有风险规则保护。本次没有加入自动审批模型或放宽 host 执行边界。
 
 ## 6. 失败与展示
 
@@ -121,6 +135,8 @@ Auto 从命令白名单改为风险规则。以下操作仍需审批:
 - 命令不能通过绝对路径、`..` 或符号链接读写 Project 外文件。
 - `go test`、前端 build/test、Git 只读和 Python test 可运行。
 - Git `clone/fetch/pull` 与依赖下载可在 Auto 沙箱中访问外部网络。
+- 结构化 Git 暂存、取消暂存和普通提交在 Auto 下不产生审批事件,Ask 下仍需审批;
+  两种模式均不能绕过路径、空提交和提交漂移校验。
 - 本地开发服务器可启动、轮询并停止。
 - timeout/cancel 能终止整个沙箱进程组。
 - 已运行后台进程不受后续权限变化影响。
@@ -129,3 +145,26 @@ Auto 从命令白名单改为风险规则。以下操作仍需审批:
 - 无 Project 的 Code session 使用隔离临时工作区,且删除 session 时清理。
 - `full` 保持无沙箱执行语义。
 - 沙箱不可用或策略生成失败时明确失败,不静默降级。
+
+## 8. Go TLS 回归(2026-09-12)
+
+已复现:同一自签名测试证书在 host 返回正常的不受信任错误,沙箱返回
+`x509: OSStatus -26276`;真实冷缓存 `go mod download` 在访问公共模块元数据时出现同一错误。
+逐项对照发现仅增加 `com.apple.trustd` 无效,增加 `com.apple.trustd.agent` 后恢复系统信任评估。
+最终只加入后者,不关闭 TLS 或模块校验,不引入 host 重试或缓存共享路径。
+
+- `TestMacOSCommandSandboxSystemTrust`:不联网、不安装 CA,验证 host 与 sandbox 都正常拒绝
+  未受信任的自签名证书,避免把证书校验失败误判为信任服务不可达。
+- `TestMacOSCommandSandboxGoModuleTLS`:显式启用的联网验收,在临时项目中下载 `yaml.v3`,验证
+  模块校验、冷缓存测试、跨 runner 的缓存路径稳定性,以及 `GOPROXY=off` 时的热缓存测试。
+  临时模块缓存用 Go 自带的清理命令移除,不触及真实项目或用户缓存。
+
+该联网用例默认跳过;联网验收单独启用:
+
+```sh
+PUDDING_SANDBOX_NETWORK_TEST=1 go test -tags 'sqlite_fts5 webrtcaec' ./internal/tool -run '^TestMacOSCommandSandboxGoModuleTLS$' -count=1 -v
+```
+
+本次环境的 `sum.golang.org` 在 host 上也有独立的 TLS 连接失败;联网验收显式设置
+`GOSUMDB=sum.golang.google.cn`,使用 Go 支持的官方别名和同一签名校验身份后通过。
+该设置只用于测试,不改变产品默认网络配置,也不是失败后的自动切换。

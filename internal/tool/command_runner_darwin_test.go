@@ -564,7 +564,7 @@ func TestMacOSCommandSandboxAncestorPathsGrantMetadataOnlyToParents(t *testing.T
 }
 
 func TestMacOSCommandSandboxPolicyDoesNotExposeUserPreferences(t *testing.T) {
-	for _, forbidden := range []string{"user-preference-read", "cfprefsd", "apple.cfprefs"} {
+	for _, forbidden := range []string{"user-preference-read", "cfprefsd", "apple.cfprefs", `(global-name "com.apple.securityd`} {
 		if strings.Contains(macOSCommandSandboxBasePolicy, forbidden) {
 			t.Fatalf("sandbox policy must not grant %q", forbidden)
 		}

@@ -332,7 +332,10 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	}
 	if !strings.Contains(code.SystemInstruction, "builtin_file_slice.numberedContent") ||
 		!strings.Contains(code.SystemInstruction, "direct line counting is acceptable") ||
-		!strings.Contains(code.SystemInstruction, "read a fresh numbered slice") {
+		!strings.Contains(code.SystemInstruction, "read a fresh numbered slice") ||
+		!strings.Contains(code.SystemInstruction, "recovery.candidateStartLines") ||
+		!strings.Contains(code.SystemInstruction, "multiple matches require surrounding context") ||
+		!strings.Contains(code.SystemInstruction, "copy truncated diagnostic text") {
 		t.Fatalf("code prompt missing line-safe patch workflow:\n%s", code.SystemInstruction)
 	}
 	if !strings.Contains(code.SystemInstruction, "Treat verification as part of the implementation") ||
@@ -340,6 +343,23 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 		!strings.Contains(code.SystemInstruction, "typecheck") ||
 		!strings.Contains(code.SystemInstruction, "remaining risk") {
 		t.Fatalf("code mode prompt missing compile and verification guidance")
+	}
+	for _, guidance := range []string{
+		"without asking for redundant conversational confirmation",
+		"An analysis-only request does not authorize changes",
+		"structured local Git operations need no separate approval prompt",
+		"Only commit when the user requests a commit",
+		"Ask mode still requires approval",
+		"Ask mode allows low-risk project reads without a prompt",
+		"Writes and command execution still require approval in Ask mode",
+		"Never switch tools or execution modes to bypass a denial",
+	} {
+		if !strings.Contains(code.SystemInstruction, guidance) {
+			t.Fatalf("code prompt missing approval guidance: %q", guidance)
+		}
+	}
+	if strings.Contains(code.SystemInstruction, "explicit-path approval") || strings.Contains(code.SystemInstruction, "Git-write, outside-Project") {
+		t.Fatal("code prompt still claims all local Git writes need approval")
 	}
 }
 

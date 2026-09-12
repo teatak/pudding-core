@@ -3015,7 +3015,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	}
 	runEngineGitTest(t, dir, "add", "notes.txt")
 	project := &store.Project{
-		ID: "proj_git_commit", Name: "git commit", RootDirs: []string{dir}, ApprovalMode: store.ApprovalAuto,
+		ID: "proj_git_commit", Name: "git commit", RootDirs: []string{dir}, ApprovalMode: store.ApprovalAsk,
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -3118,8 +3118,48 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk, nil); err != nil || !required {
 		t.Fatalf("ask should require command approval: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || !required {
-		t.Fatalf("ask should require read approval: required=%v err=%v", required, err)
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || required {
+		t.Fatalf("ask should allow low-risk reads: required=%v err=%v", required, err)
+	}
+	for _, risk := range []tool.ToolRisk{
+		{Class: tool.RiskClassRead},
+		projectWrite,
+		protectedWrite,
+		{Class: tool.RiskClassDestructive},
+		{},
+	} {
+		if _, required, err := eng.toolCallApprovalRequired(ctx, sid, risk, nil); err != nil || !required {
+			t.Fatalf("ask should still protect %+v: required=%v err=%v", risk, required, err)
+		}
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, tool.ToolRisk{Class: tool.RiskClassRead, LowRisk: true, Scope: "computer"}, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
+		t.Fatalf("ask must not bypass Computer Use app consent for a low-risk read: required=%v err=%v", required, err)
+	}
+	for _, test := range []struct {
+		name string
+		args string
+		ask  bool
+	}{
+		{tool.GitStatus, `{"scope":"project"}`, false},
+		{tool.GitDiff, `{"scope":"project","staged":true}`, false},
+		{tool.GitLog, `{"scope":"project","limit":5}`, false},
+		{tool.CodeSymbols, `{"scope":"project","path":".","query":"Runner"}`, false},
+		{tool.CodeDefinition, `{"scope":"project","path":"main.go","line":1,"column":1}`, false},
+		{tool.CodeReferences, `{"scope":"project","path":"main.go","line":1,"column":1}`, false},
+		{tool.CodeDiagnostics, `{"scope":"project","paths":["main.go"]}`, false},
+		{tool.CodeRename, `{"scope":"project","path":"main.go","line":1,"column":1,"new_name":"renamed"}`, true},
+		{tool.GitStage, `{"scope":"project","paths":["main.go"]}`, true},
+		{tool.GitUnstage, `{"scope":"project","paths":["main.go"]}`, true},
+		{tool.GitCommit, `{"scope":"project","message":"test"}`, true},
+		{tool.CommandRun, `{"scope":"project","command":"go test ./..."}`, true},
+	} {
+		risk, ok := tool.ClassifyToolCallForProject(test.name, json.RawMessage(test.args), project.RootDirs)
+		if !ok {
+			t.Fatalf("tool %s was not classified", test.name)
+		}
+		if _, required, err := eng.toolCallApprovalRequired(ctx, sid, risk, nil); err != nil || required != test.ask {
+			t.Fatalf("ask mode for %s: required=%v err=%v, want %v", test.name, required, err, test.ask)
+		}
 	}
 	full := store.ApprovalFull
 	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &full}); err != nil {

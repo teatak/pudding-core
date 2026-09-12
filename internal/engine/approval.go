@@ -507,7 +507,8 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 	case store.ApprovalFull:
 		return project, false, nil
 	case store.ApprovalAsk:
-		return project, true, nil
+		// Ask protects writes and execution, not routine low-risk inspection.
+		return project, risk.Class != tool.RiskClassRead || !risk.LowRisk, nil
 	default:
 		switch risk.Class {
 		case tool.RiskClassRead:

@@ -83,8 +83,9 @@ type patchFileView struct {
 }
 
 type patchError struct {
-	reason string
-	detail string
+	reason   string
+	detail   string
+	recovery *patchHunkRecovery
 }
 
 type patchLimitError struct {
@@ -489,12 +490,12 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, er
 		oldLines := *hunk.OldLines
 		start := hunk.StartLine - 1
 		if start > len(lines) || len(oldLines) > len(lines)-start {
-			return "", newPatchError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath)
+			return "", newPatchHunkError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath, filePath, index, hunk, lines, -1)
 		}
 		end := start + len(oldLines)
 		for offset, expected := range oldLines {
 			if lines[start+offset].text != expected {
-				return "", newPatchError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath)
+				return "", newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath, filePath, index, hunk, lines, offset)
 			}
 		}
 		resolved = append(resolved, resolvedHunk{index: index, start: start, end: end, newLines: *hunk.NewLines})
@@ -771,7 +772,15 @@ func patchFailure(out Result, err error) Result {
 	}
 	var patchErr *patchError
 	if errors.As(err, &patchErr) {
-		return toolJSONError(out, patchErr.reason, patchErr.detail)
+		payload := map[string]any{"ok": false, "reason": patchErr.reason, "detail": patchErr.detail}
+		if patchErr.recovery != nil {
+			payload["recovery"] = patchErr.recovery
+			payload["hint"] = patchErr.recovery.hint()
+		}
+		out = toolJSON(out, false, payload)
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = len(payload)
+		return out
 	}
 	return toolJSONError(out, "patch_failed", err.Error())
 }

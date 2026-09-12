@@ -265,6 +265,9 @@ func classifyGitWriteCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 		Scope:     managedScopeProject,
 		Paths:     paths,
 		Summary:   summary,
+		// Structured Git writes validate literal paths and repository bounds;
+		// commits retain their prepared-index check even without a human prompt.
+		LowRisk: true,
 	}, true
 }
 

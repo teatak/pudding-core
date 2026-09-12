@@ -30,6 +30,9 @@
   (global-name "com.apple.PowerManagement.control")
   (global-name "com.apple.bsd.dirhelper")
   (global-name "com.apple.logd")
+  ; Native TLS certificate evaluation (Go crypto/x509, Security.framework).
+  ; This does not grant securityd access or access to private keychain files.
+  (global-name "com.apple.trustd.agent")
   (global-name "com.apple.system.opendirectoryd.libinfo")
   (global-name "com.apple.system.opendirectoryd.membership"))
 (allow ipc-posix-sem)
