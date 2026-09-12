@@ -726,10 +726,15 @@ export function Composer({
       startCompactRun(sessionID, clientMessageID);
       resetSessionDraft();
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       clearSubmitError();
       onSubmitError?.(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
+      // turns uses static freshness; fetch the canonical row before onSettled
+      // removes its pending counterpart, even when SSE arrives after this response.
+      const turn = await getTurn(token, sessionID, result.turnID);
+      queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) =>
+        upsertTurnIntoPages(previous, turn),
+      );
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
