@@ -372,6 +372,24 @@ func hasSegment(segments []Segment, id string) bool {
 	return false
 }
 
+func TestAssembleGuidesFocusedResultReuseWithoutSkippingVerification(t *testing.T) {
+	out := Assemble(Input{Mode: "code"})
+	for _, guidance := range []string{
+		"Reuse relevant tool results already in context across turns",
+		"Refresh when the source changed",
+		"unit=lines",
+		"unit=items",
+		"not source-file line numbers",
+		"do not mask the original exit code",
+		"expand the search when completeness is required",
+		"Treat verification as part of the implementation",
+	} {
+		if !strings.Contains(out.SystemInstruction, guidance) {
+			t.Fatalf("focused context guidance missing: %s", guidance)
+		}
+	}
+}
+
 func TestLoaderListsAuthoringCapabilitiesAsApps(t *testing.T) {
 	home := t.TempDir()
 	out, err := NewLoader(home).Prompt(context.Background(), "chat")

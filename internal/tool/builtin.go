@@ -108,6 +108,10 @@ type HistoryMessageSource interface {
 	GetMessage(ctx context.Context, sessionID string, messageID string) (*store.Message, error)
 }
 
+type HistoryTurnSource interface {
+	GetConversationTurn(ctx context.Context, sessionID, turnID string) (*store.ConversationTurn, error)
+}
+
 type BrowserStateStore interface {
 	GetBrowserState(ctx context.Context, sessionID string) (*store.BrowserState, error)
 	GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*store.BrowserState, error)
@@ -127,6 +131,7 @@ type BuiltinRunner struct {
 	skillValidator           SkillValidator
 	history                  HistorySearchSource
 	historyMessages          HistoryMessageSource
+	historyTurns             HistoryTurnSource
 	browserState             BrowserStateStore
 	browser                  browser.Service
 	computer                 computer.Controller
@@ -207,6 +212,9 @@ func WithHistorySearch(source HistorySearchSource) BuiltinOption {
 		r.history = source
 		if messages, ok := source.(HistoryMessageSource); ok {
 			r.historyMessages = messages
+		}
+		if turns, ok := source.(HistoryTurnSource); ok {
+			r.historyTurns = turns
 		}
 	}
 }
@@ -332,8 +340,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        HistoryGetMessage,
-			Description: "Read one full canonical history message by message_id. Use after builtin_history_search returns @message(id), or when context contains an attachment/local folder hint and original message details are needed. Defaults to the current session.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string","description":"Canonical message id, usually from an @message(message_id) reference."},"session_id":{"type":"string","description":"Optional session id. Defaults to the current session."}},"required":["message_id"],"additionalProperties":false}`),
+			Description: "Read canonical history: message_id selects one message; result_ref selects a saved tool result, never a re-execution or current file. Use field to avoid unrelated output, unit=lines with query to locate log evidence, or unit=items for complete array records. Defaults to the current session. Reuse results already in context instead of rereading them.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string","minLength":1,"description":"Canonical message id from @message(id). Cannot be combined with result_ref or paging options."},"session_id":{"type":"string","description":"Defaults to this session; another session requires explicit user scope."},"result_ref":{"type":"object","properties":{"turn_id":{"type":"string","minLength":1},"call_id":{"type":"string","minLength":1}},"required":["turn_id","call_id"],"additionalProperties":false,"description":"Copy from a tool preview. Required for field/unit/query/offset/limit."},"field":{"type":"string","minLength":1,"description":"Exact top-level field, e.g. stdout, stderr, numberedContent, matches; omit for raw result. Not a JSON path."},"unit":{"type":"string","enum":["chars","lines","items"],"description":"Default chars: decoded text fragments. lines: complete text lines with one-based positions and original line endings. items: complete JSON array entries. Line positions refer to the selected snapshot text, not source-file line numbers."},"query":{"type":"string","minLength":1,"maxLength":500,"description":"Only with unit=lines: case-sensitive single-line literal filter, not regex. Returns matching lines only. Omit to read neighboring lines."},"offset":{"type":"integer","minimum":0,"description":"Zero-based position in the original selected field, in unit units (Unicode characters for chars). Default 0. Query does not renumber lines. Continue with next_offset."},"limit":{"type":"integer","minimum":1,"maximum":8000,"description":"Defaults: 4000 chars / 40 lines / 20 items. Caps: 8000 chars / 200 lines or items. Complete-record pages also have an 8000 encoded-character budget; use has_more/next_offset, not limit, to advance."}},"oneOf":[{"required":["message_id"]},{"required":["result_ref"]}],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
@@ -410,13 +418,13 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileSearch,
-			Description: fmt.Sprintf("Search UTF-8 text files by literal text or RE2-compatible regular expression. Supports case control, project-relative globs, and context lines. Skips binary files and common generated directories. Match text is capped at %d characters and each excerpt line at %d; check each match's truncated flag. Use the returned line numbers to read incomplete source lines with builtin_file_slice before patching.", maxFileSearchLineChars, maxFileSearchExcerptLineChars),
+			Description: fmt.Sprintf("Search UTF-8 files by literal text or RE2 regex. Narrow path/globs first; context_lines defaults to 0. Skips binary and generated files. Match text is capped at %d characters and each excerpt line at %d; check truncated. The model preview shows at most 20 matches; matchCount/resultsCapped describe the saved search. Use result_ref with builtin_history_get_message to read that snapshot, or narrow the search. Read relevant source with builtin_file_slice before patching, not incomplete search excerpts.", maxFileSearchLineChars, maxFileSearchExcerptLineChars),
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to search visible installed App package files."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":5,"description":"Context lines before and after each matching line. Defaults to 0."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSlice,
-			Description: fmt.Sprintf("Read a focused UTF-8 line slice. numberedContent contains exact one-based source line numbers; copy source text without its displayed number prefix into old_lines. Use order=natural for patch preparation. Each text field is capped at %d KiB and includes only complete lines. Returned start/end are the lowest/highest line numbers actually included, even in reverse order; lines is the actual count. All three are zero if no lines fit or the range is empty. Check truncated before continuing a read.", maxFileSlicePayload/1024),
+			Description: fmt.Sprintf("Read a focused UTF-8 line slice. The model view includes numberedContent without a duplicate raw body. It contains exact one-based source line numbers; copy source text without its displayed number prefix into old_lines. Use order=natural for patch preparation. The saved slice is capped at %d KiB per text field and includes only complete lines. start/end are the lowest/highest included line numbers; lines is the actual count, all zero if empty. Check truncated. A preview_only result is not a complete slice: read a smaller range or use result_ref before patching.", maxFileSlicePayload/1024),
 			InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect visible installed App package files."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","minimum":1,"description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","minimum":1,"description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","minimum":1,"maximum":%d,"description":"Line count for origin=end or when end is omitted. Default 100."},"skip":{"type":"integer","minimum":0,"maximum":%d,"description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`, maxFileSliceLines, maxFileSliceSkip)),
 			Capability:  store.ModeCode,
 		},

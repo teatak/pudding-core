@@ -99,6 +99,26 @@ func TestFileToolDescriptionsExplainLineSafePatchWorkflow(t *testing.T) {
 	}
 }
 
+func TestHistoryReadSchemaExposesFocusedSnapshotSelectors(t *testing.T) {
+	def := definitionByName(t, BuiltinDefinitions(), HistoryGetMessage)
+	var schema struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(schema.Properties["unit"].Enum, []string{"chars", "lines", "items"}) {
+		t.Fatal("history unit schema and implementation disagree")
+	}
+	for _, name := range []string{"message_id", "result_ref", "field", "query", "offset", "limit", "session_id"} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("missing history selector: %s", name)
+		}
+	}
+}
+
 func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
 	defs := BuiltinDefinitions()
 	if HasDefinition(CoreDefinitionsForMode(store.ModeChat, defs), PlanUpdate) {

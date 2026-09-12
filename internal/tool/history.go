@@ -107,15 +107,31 @@ func (r *BuiltinRunner) historySearch(ctx context.Context, call Call) Result {
 func (r *BuiltinRunner) historyGetMessage(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		MessageID string `json:"message_id"`
-		SessionID string `json:"session_id"`
+		MessageID string           `json:"message_id"`
+		SessionID string           `json:"session_id"`
+		ResultRef *ResultReference `json:"result_ref"`
+		resultReadOptions
 	}
-	if len(call.Args) > 0 {
-		if err := json.Unmarshal(call.Args, &args); err != nil {
-			out.Ok = false
-			out.Content = "invalid arguments: " + err.Error()
-			return out
+	if !json.Valid(call.Args) {
+		return toolJSONError(out, "invalid_arguments", "arguments must be one JSON object")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.ResultRef != nil {
+		if strings.TrimSpace(args.MessageID) != "" {
+			return toolJSONError(out, "invalid_arguments", "pass either message_id or result_ref, not both")
 		}
+		sessionID := strings.TrimSpace(args.SessionID)
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(call.SessionID)
+		}
+		return r.historyReadResult(ctx, out, sessionID, *args.ResultRef, args.resultReadOptions)
+	}
+	if args.resultReadOptions != (resultReadOptions{}) {
+		return toolJSONError(out, "invalid_arguments", "field, unit, query, offset and limit require result_ref")
 	}
 	messageID := strings.TrimSpace(args.MessageID)
 	if messageID == "" {

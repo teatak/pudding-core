@@ -1295,7 +1295,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		parts.BeginProviderCall(providerCallIndex)
 		providerCallIndex++
 		req := baseReq
-		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, e.attachmentHome, resolved.config)
+		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, turnID, e.attachmentHome, resolved.config, tool.HasDefinition(req.Tools, tool.HistoryGetMessage))
 		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(currentMode), req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("resolve skill references: %v", err), currentMode
@@ -2763,18 +2763,19 @@ func requestMessagesWithTurnParts(
 	base []provider.Message,
 	parts []store.ContentPart,
 	continuations []provider.Continuation,
-	sessionID, attachmentHome string,
+	sessionID, turnID, attachmentHome string,
 	cfg provider.ModelConfig,
+	canReadResult bool,
 ) []provider.Message {
 	out := cloneProviderMessages(base)
-	if currentTurn := currentTurnProviderMessage(parts, continuations, sessionID, attachmentHome, cfg); currentTurn != nil {
+	if currentTurn := currentTurnProviderMessage(parts, continuations, sessionID, turnID, attachmentHome, cfg, canReadResult); currentTurn != nil {
 		out = append(out, provider.SplitMessage(*currentTurn)...)
 	}
 	return out
 }
 
-func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, attachmentHome string, cfg provider.ModelConfig) *provider.Message {
-	providerParts := providerPartsFromCurrentTurn(parts, sessionID, attachmentHome, cfg)
+func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) *provider.Message {
+	providerParts := providerPartsFromCurrentTurn(parts, sessionID, turnID, attachmentHome, cfg, canReadResult)
 	if len(providerParts) == 0 {
 		return nil
 	}
@@ -2793,7 +2794,7 @@ func currentTurnProviderMessage(parts []store.ContentPart, continuations []provi
 	return message
 }
 
-func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
+func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
 	var sourceCallID, sourceTool string
 	for _, part := range parts {
@@ -2820,7 +2821,7 @@ func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, attachme
 				CallID:  part.CallID,
 				Name:    part.Name,
 				Ok:      part.Ok,
-				Content: tool.SkillReferenceOnly(part.Name, part.Ok, part.Content),
+				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, canReadResult),
 			})
 		case store.ContentPartAttachment:
 			attachmentParts := providerAttachmentParts(sessionID, part, attachmentHome, cfg)

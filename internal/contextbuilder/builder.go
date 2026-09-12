@@ -172,7 +172,7 @@ func (b *Builder) build(
 		switch m.Role {
 		case store.RoleUser:
 			flushAssistant()
-			parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
+			parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 		case store.RoleSystem:
 			flushAssistant()
@@ -186,7 +186,7 @@ func (b *Builder) build(
 			}
 		case store.RoleAssistant, store.RoleTool:
 			if isToolAttachmentMessage(m) {
-				parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
+				parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
 				if sourceCallID != "" {
 					assistantParts = append(assistantParts, provider.AttributeToolAttachments(parts, sourceCallID, sourceTool, m.Parts[0].AttachmentCreatedAt)...)
 				} else if len(parts) > 0 {
@@ -201,7 +201,7 @@ func (b *Builder) build(
 					sourceCallID, sourceTool = part.CallID, part.Name
 				}
 			}
-			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)...)
+			assistantParts = append(assistantParts, b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)...)
 			if !providerStateAllowedForTools(m, currentMode, allowedTools) {
 				assistantContinuationsAllowed = false
 				assistantContinuations = nil
@@ -217,7 +217,7 @@ func (b *Builder) build(
 			}
 		case store.RoleSummary:
 			flushAssistant()
-			parts := b.providerParts(sessionID, m.Parts, currentMode, allowedTools, cfg)
+			parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
 			if len(parts) > 0 {
 				req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: textFromProviderParts(parts), Parts: parts})
 			}
@@ -437,7 +437,7 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 }
 
 func (b *Builder) providerParts(
-	sessionID string,
+	sessionID, turnID string,
 	parts []store.ContentPart,
 	mode store.AgentMode,
 	allowedTools map[string]struct{},
@@ -502,7 +502,7 @@ func (b *Builder) providerParts(
 				CallID:  part.CallID,
 				Name:    part.Name,
 				Ok:      part.Ok,
-				Content: tool.SkillReferenceOnly(part.Name, part.Ok, part.Content),
+				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, toolIncluded(allowedTools, tool.HistoryGetMessage)),
 			})
 		case store.ContentPartAttachment:
 			if part.Origin == attachment.OriginASRAudio {

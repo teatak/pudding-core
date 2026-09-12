@@ -33,7 +33,7 @@ func TestCurrentTurnImagesStayBeforeLaterActions(t *testing.T) {
 			parts = append(parts, store.AttachmentPart(stored))
 		}
 	}
-	messages := requestMessagesWithTurnParts(nil, parts, nil, "s1", home, provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: true}})
+	messages := requestMessagesWithTurnParts(nil, parts, nil, "s1", "t1", home, provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: true}}, false)
 	var order []string
 	for _, message := range messages {
 		for _, part := range message.Parts {
@@ -123,7 +123,7 @@ func TestToolImageTimelineSurvivesCanonicalReplay(t *testing.T) {
 	defer reopened.Close()
 	for _, vision := range []bool{true, false} {
 		cfg := provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: vision}}
-		current := requestMessagesWithTurnParts(nil, all, continuations, "s1", home, cfg)
+		current := requestMessagesWithTurnParts(nil, all, continuations, "s1", "t1", home, cfg, false)
 		req, err := contextbuilder.New(reopened, nil, contextbuilder.WithAttachmentHome(home)).BuildForProviderWithTools(
 			ctx, "s1", "mock", "vision", string(store.ModeWork), []provider.ToolDef{{Name: "observe"}, {Name: "click"}}, cfg)
 		if err != nil {
@@ -167,7 +167,7 @@ func TestToolImageTimelineSurvivesCanonicalReplay(t *testing.T) {
 			t.Fatalf("screenshots moved outside their result batch: %v", got)
 		}
 		// Rebuilding cannot accumulate annotations or mutate canonical parts.
-		if again := requestMessagesWithTurnParts(nil, all, continuations, "s1", home, cfg); !reflect.DeepEqual(current, again) {
+		if again := requestMessagesWithTurnParts(nil, all, continuations, "s1", "t1", home, cfg, false); !reflect.DeepEqual(current, again) {
 			t.Fatal("request rebuild mutated the source timeline")
 		}
 	}
