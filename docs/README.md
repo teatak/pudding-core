@@ -22,6 +22,7 @@
 | [releasing.md](releasing.md) | Desktop 构建、签名、发布和更新恢复 |
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
+| [code-agent-tooling-report.md](code-agent-tooling-report.md) | Code 模式工具与终端摩擦记录、优化建议与验收标准（按会话累积） |
 
 ## 仍在收尾
 
