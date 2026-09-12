@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -11,6 +12,46 @@ const {
   installedAppPath,
   readInstalledVersion,
 } = require("../../scripts/run-update-test.cjs");
+
+const runnerPath = path.resolve(__dirname, "../../scripts/run-update-test.cjs");
+
+test("importing update verification helpers does not validate release configuration", () => {
+  for (const channel of ["", "stable", "preview"]) {
+    const result = spawnSync(process.execPath, ["-e", `require(${JSON.stringify(runnerPath)})`], {
+      env: { ...process.env, PUDDING_RELEASE_CHANNEL: channel, PUDDING_APP_VERSION: "invalid-version" },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  }
+});
+
+test("running the update CLI still validates stable and preview versions before accessing the app", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-update-cli-"));
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const missingApp = path.join(root, "Pudding.app", "Contents", "MacOS", "Pudding");
+  for (const [channel, version, expectedError] of [
+    ["stable", "0.3.3-beta.1", "stable release version must match x.y.z"],
+    ["preview", "0.3.3", "preview release version must match x.y.z-beta.n"],
+    ["stable", "0.3.3", `Pudding executable not found: ${missingApp}`],
+    ["preview", "0.3.3-beta.1", `Pudding executable not found: ${missingApp}`],
+  ]) {
+    const result = spawnSync(process.execPath, [runnerPath], {
+      env: {
+        ...process.env,
+        PUDDING_RELEASE_CHANNEL: channel,
+        PUDDING_APP_VERSION: version,
+        PUDDING_UPDATE_TEST_APP: missingApp,
+      },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1, result.stderr || result.error?.message);
+    assert.ok(result.stderr.includes(expectedError), result.stderr);
+  }
+});
 
 test("update verification detects any running Pudding app bundle", () => {
   const processes = `

@@ -10,17 +10,6 @@ const {
   verifyComputerUseHelper,
 } = require("./computer-use-release-verification.cjs");
 
-const root = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist", "release"));
-const port = positiveInt(process.env.PUDDING_UPDATE_TEST_PORT, 8099);
-const feedURL = `http://127.0.0.1:${port}`;
-const version = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
-const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, version);
-const appExecutable =
-  process.env.PUDDING_UPDATE_TEST_APP || "/Applications/Pudding.app/Contents/MacOS/Pudding";
-const expectedVersion = version;
-const timeoutMs = positiveInt(process.env.PUDDING_UPDATE_TEST_TIMEOUT_SECONDS, 600) * 1000;
-const requireComputerUseIdentity = process.env.PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY === "1";
-
 let appProcess = null;
 let feedProcess = null;
 let verificationTimer = null;
@@ -40,6 +29,18 @@ if (require.main === module) {
 }
 
 async function main() {
+  // Importing verification helpers must not initialize or validate CLI configuration.
+  const root = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist", "release"));
+  const port = positiveInt(process.env.PUDDING_UPDATE_TEST_PORT, 8099);
+  const feedURL = `http://127.0.0.1:${port}`;
+  const expectedVersion = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
+  const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, expectedVersion);
+  const feedManifestURL = `${feedURL}/${releaseChannel.updateInfoFile}`;
+  const appExecutable =
+    process.env.PUDDING_UPDATE_TEST_APP || "/Applications/Pudding.app/Contents/MacOS/Pudding";
+  const timeoutMs = positiveInt(process.env.PUDDING_UPDATE_TEST_TIMEOUT_SECONDS, 600) * 1000;
+  const requireComputerUseIdentity = process.env.PUDDING_UPDATE_TEST_REQUIRE_COMPUTER_USE_IDENTITY === "1";
+
   if (!fs.existsSync(appExecutable)) {
     throw new Error(`Pudding executable not found: ${appExecutable}`);
   }
@@ -69,11 +70,11 @@ async function main() {
     throw new Error("installed source bundle does not contain Pudding Computer Use.app");
   }
   console.log(`Installed Pudding: version=${installed.version} channel=${installed.channel}`);
-  if (!(await feedReady())) {
+  if (!(await feedReady(feedManifestURL))) {
     feedProcess = spawn(process.execPath, [path.join(__dirname, "serve-update-feed.cjs"), root, String(port)], {
       stdio: "inherit",
     });
-    await waitForFeed();
+    await waitForFeed(feedManifestURL);
   }
 
   console.log(`Launching Pudding with update feed ${feedURL}`);
@@ -92,26 +93,26 @@ async function main() {
   console.log(
     `Waiting up to ${Math.round(timeoutMs / 1000)}s for update approval and installation of ${expectedVersion}`,
   );
-  verificationTimer = setInterval(checkInstalledUpdate, 1_000);
+  verificationTimer = setInterval(() => checkInstalledUpdate(appExecutable, expectedVersion), 1_000);
   timeoutTimer = setTimeout(() => {
     console.error(`Update test timed out before Pudding ${expectedVersion} was installed`);
     shutdown(1);
   }, timeoutMs);
 }
 
-async function waitForFeed() {
+async function waitForFeed(feedManifestURL) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (await feedReady()) {
+    if (await feedReady(feedManifestURL)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`update feed did not start at ${feedURL}`);
+  throw new Error(`update feed did not start at ${feedManifestURL}`);
 }
 
-function feedReady() {
+function feedReady(feedManifestURL) {
   return new Promise((resolve) => {
-    const request = http.get(`${feedURL}/${releaseChannel.updateInfoFile}`, (response) => {
+    const request = http.get(feedManifestURL, (response) => {
       response.resume();
       resolve(response.statusCode === 200);
     });
@@ -158,7 +159,7 @@ function findRunningPuddingProcesses(output) {
     .filter((line) => line.includes("/Pudding.app/Contents/MacOS/Pudding"));
 }
 
-function checkInstalledUpdate() {
+function checkInstalledUpdate(appExecutable, expectedVersion) {
   if (stopping) {
     return;
   }
