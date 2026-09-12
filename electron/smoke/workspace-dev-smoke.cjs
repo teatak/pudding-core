@@ -745,7 +745,7 @@ async function verifyProjectTreeReveal(sessionID, projectRoot) {
   await revealMenu(); await assertRevealed('from-search');
   await click('[data-project-workspace] nav button[aria-label="源代码管理"]');
   await revealMenu(); await assertRevealed('from-git');
-  window.setContentSize(560,760); window.webContents.setZoomFactor(1.5); await delay(400);
+  window.setContentSize(620,760); window.webContents.setZoomFactor(1.5); await delay(400);
   assert.ok(await js(`document.querySelector('[data-project-workspace]').clientWidth<420`),'single-pane project layout');
   await revealMenu(); await assertRevealed('narrow');
   check('tree reveal: repeated/background/collapsed/search/git/narrow; visible and focused');
@@ -763,7 +763,7 @@ async function verifyProjectDraftLayout(sessionID, projectRoot) {
   await waitFor(hasDraft, "native input modifies the file");
   await js(`window.__draftEditor = document.querySelector('[data-project-workspace] .monaco-editor')`);
   assert.equal(fs.readFileSync(path.join(projectRoot, "draft.txt"), "utf8"), "Original file\n", "fixture remains unsaved");
-  window.setContentSize(560, 760);
+  window.setContentSize(620, 760);
   window.webContents.setZoomFactor(1.5);
   await delay(400);
   assert.ok(await js(`document.querySelector('[data-project-workspace]').clientWidth < 420`), "single-pane layout");
@@ -1408,7 +1408,7 @@ async function verifyPreviewNarrow(sessionID) {
     openFilePreview({sessionID:${JSON.stringify(sessionID)},path:'preview.txt',content:'NARROW_PREVIEW_CONTENT',source:'read',lineStart:1,lineStep:1,truncated:false});
   })()`);
   await waitFor(() => js(`document.body.innerText.includes('NARROW_PREVIEW_CONTENT')`), "preview opens in project");
-  window.setContentSize(560, 760);
+  window.setContentSize(620, 760);
   window.webContents.setZoomFactor(1.5);
   await delay(400);
   await screenshot("preview-narrow");
@@ -2585,7 +2585,7 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     await js(`import('/src/i18n/index.ts').then(m => m.setLocale(${JSON.stringify(locale)}))`);
     for (const theme of ["light", "dark"]) {
       await js(`window.puddingElectronTheme.setTheme(${JSON.stringify(theme)})`);
-      window.setContentSize(560, 680);
+      window.setContentSize(620, 680);
       window.webContents.setZoomFactor(1.25);
       await delay(300);
       assert.equal(await js(`(() => {
@@ -2613,7 +2613,7 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
   window.webContents.setZoomFactor(1);
   window.setContentSize(1440, 920);
   await js(`import('/src/i18n/index.ts').then(m => m.setLocale('zh-CN'))`);
-  check("three locales × two themes at 560px/125% zoom: navigation and native webpage stay reachable");
+  check("three locales × two themes at 620px/125% zoom: navigation and native webpage stay reachable");
 
   phase = "browser release and memory";
   for (const tab of browserTabs) await api(`/sessions/${primary.id}/browser/tabs/${tab.id}/release`, "POST");
