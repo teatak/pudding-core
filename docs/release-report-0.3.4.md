@@ -47,7 +47,7 @@
 
 ## Draft 结果与独立审查
 
-- 2026-09-14，已完成 [v0.3.4 Draft](https://github.com/teatak/pudding/releases/tag/untagged-49291a732912b5858b01)，Release ID `388298223`，标题 `v0.3.4`，`draft=true`、`prerelease=false`。Latest 仍为 `v0.3.3`；公开仓库尚无 `v0.3.4` tag，未执行 finalize。
+- 2026-09-14，[v0.3.4](https://github.com/teatak/pudding/releases/tag/v0.3.4) 完成 Draft 验收，Release ID `388298223`，标题 `v0.3.4`。该阶段为 `draft=true`、`prerelease=false`，Latest 仍为 `v0.3.3`；公开仓库尚无 `v0.3.4` tag，未执行 finalize。
 - 源码 tag 固定在 `de13085ca4401992d218fbad8dd1c7704c690c65`。公开仓库版本清单提交为 `f4b6970a2340ffcf326999a6ca6b74a12d53c6a7`，记录源码锚点、英文功能清单和九资产 SHA-256/大小。本节为事后文档补记，不移动源码 tag 或修改安装包。
 - Sol 完成源码评估、回归与版本报告准备；执行中出现多余一级委派，已关闭该协调层。共享主分支推送和官方发布命令被执行任务的权限审查拒绝，用户在原始主任务明确授权后，由主任务推送并执行官方发布流水线。此次不是子 agent 独立完成 Draft 的成功样本。
 - 官方流程完成 Go 全量、Electron 218 项、Web TypeScript/生产构建和 schema 检查；arm64/x64 均完成 Developer ID 签名和 Apple 公证。staged App 与 ZIP/DMG 解包后的签名、公证票据、Gatekeeper、嵌套二进制、权限与更新元数据全部通过。
@@ -56,7 +56,15 @@
 - 两个新包的 Computer Use Helper bundle ID、Team ID 和完整 designated requirement 与本机 0.3.3 一致。只读确认 `/Applications/Pudding.app` 仍为 0.3.3，没有替换、启动、重启或做本机升级验收。
 - 独立审查复核了原子压缩写入、上下文预算边界和测试证据，未发现新增发布阻断；修正了本报告中对正常数据库写入及 Draft/public tag 时机的两处表述。真实 provider 长会话摘要质量、实际自动升级、新包交互和 Intel 真机测试仍未验收。
 
-执行证据：`/tmp/pudding-034-main-publish.log`、`/tmp/pudding-034-main-upload-resume.log`。独立审查证据：`/tmp/pudding-034-main-draft-review.log`、`/tmp/pudding-034-main-helper-review.log`。Draft 下载尚不对普通用户公开，未将本轮校验描述为公开下载或实际升级通过。
+执行证据：`/tmp/pudding-034-main-publish.log`、`/tmp/pudding-034-main-upload-resume.log`。独立审查证据：`/tmp/pudding-034-main-draft-review.log`、`/tmp/pudding-034-main-helper-review.log`。Draft 阶段下载不对普通用户公开，该阶段校验不代表公开下载或实际升级通过。
+
+## 正式发布结果
+
+- 用户批准正式发布并停止委派后，由主任务复核现有 Draft，再执行官方 `make desktop-release-finalize RELEASE_TAG=v0.3.4`。于 `2026-09-14T10:15:32Z` 发布为稳定版并设为 Latest，Release ID 不变，未创建重复 Release。
+- 源码 tag 仍固定在 `de13085ca4401992d218fbad8dd1c7704c690c65`；公开 tag 指向版本清单提交 `f4b6970a2340ffcf326999a6ca6b74a12d53c6a7`。英文功能清单、版本清单和九资产摘要保持一致，未重新构建、公证、修改脚本或增加附件。
+- 九个资产的匿名公开下载地址均返回 HTTP 200，内容长度与版本清单一致；分别下载固定版本和 Latest 地址的 `latest-mac.yml`，均与本地清单逐字节一致。更新版本为 0.3.4，覆盖 arm64/x64 的 DMG 与 ZIP。
+- 本机 `/Applications/Pudding.app` 保持 0.3.3，未替换、启动或重启；实际自动升级、真实 provider 长会话摘要质量和 Intel 真机交互仍未验收，公开链接与清单校验不替代这些测试。
+- 发布证据：`/tmp/pudding-034-prefinalize-review.log`、`/tmp/pudding-034-finalize.log`、`/tmp/pudding-034-public-verify.log`。
 
 ## Release Notes 草案
 
