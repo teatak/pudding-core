@@ -38,6 +38,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [release-report-0.3.4.md](release-report-0.3.4.md) | 正式版发布评估已完成；schema v18 不变，待官方流程完成双架构签名、公证与 Draft 九资产验证 |
 | [release-report-0.3.3.md](release-report-0.3.3.md) | 正式版已发布为 Latest；双架构签名、公证、九资产及更新清单校验通过；本机未升级，实际升级与新包交互未验收 |
 | [workspace-redesign-plan.md](workspace-redesign-plan.md) | 工作区统一内容标签、项目内部文件、资源库与专注改造；保留分阶段验收记录 |
 | [computer-use-design.md](computer-use-design.md) | macOS Computer Use 已实现，含输入/实例定位/独立截图及真实 Electron 回归 |
