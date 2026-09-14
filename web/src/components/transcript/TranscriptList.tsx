@@ -142,7 +142,8 @@ export const TranscriptList = memo(function TranscriptList({
     measureElement: measureTranscriptItem,
     onChange: handleVirtualizerChange,
     overscan: TURN_OVERSCAN,
-    paddingStart: LIST_PADDING_TOP_PX,
+    // Keep every turn's leading gap stable when older history is prepended.
+    paddingStart: LIST_PADDING_TOP_PX - (turnCount > 0 ? TURN_GAP_PX : 0),
     scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
     // Streaming height changes must not synchronously resize an observed ancestor.
     useAnimationFrameWithResizeObserver: true,
@@ -164,8 +165,17 @@ export const TranscriptList = memo(function TranscriptList({
       virtualizer.measureElement(null);
       return;
     }
-    queueMicrotask(() => virtualizer.measureElement(node));
-  }, [virtualizer]);
+    queueMicrotask(() => {
+      if (!node.isConnected) {
+        return;
+      }
+      virtualizer.measureElement(node);
+      // During user scrolling, measureElement defers sizing to ResizeObserver.
+      // Our grid already lays out new rows at their real heights: reconcile
+      // their estimates before paint so prepend anchoring never shows a stale offset.
+      resizeMountedElement(virtualizer.indexFromElement(node), node);
+    });
+  }, [resizeMountedElement, virtualizer]);
   const setListElement = useCallback((node: HTMLDivElement | null) => {
     listElementRef.current = node;
   }, []);
@@ -573,7 +583,6 @@ export const TranscriptList = memo(function TranscriptList({
                 aria-posinset={virtualItem.index + 1}
                 aria-setsize={turns.length}
                 index={virtualItem.index}
-                leadingGap={virtualItem.index === 0 ? 0 : TURN_GAP_PX}
                 registerElement={measureElement}
                 resizeElement={resizeMountedElement}
               >
@@ -599,14 +608,12 @@ export const TranscriptList = memo(function TranscriptList({
 function MeasuredTurnItem({
   children,
   index,
-  leadingGap,
   registerElement,
   resizeElement,
   ...aria
 }: {
   children: ReactNode;
   index: number;
-  leadingGap: number;
   registerElement: (node: HTMLDivElement | null) => void;
   resizeElement: (index: number, node: HTMLDivElement) => void;
   "aria-posinset": number;
@@ -629,8 +636,8 @@ function MeasuredTurnItem({
       ref={setElement}
       {...aria}
       className="min-w-0"
-      // Include the row-specific gap in virtual measurements, not only in its visual position.
-      style={{ paddingTop: leadingGap }}
+      // Include the gap in measurements without changing it when the row moves.
+      style={{ paddingTop: TURN_GAP_PX }}
       data-index={index}
       role="listitem"
     >

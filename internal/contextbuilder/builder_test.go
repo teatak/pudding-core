@@ -1211,14 +1211,15 @@ func TestBuildUsesLatestCompactBoundary(t *testing.T) {
 	oldAssistantID := testMessageIDByText(t, beforeCompact, "old assistant")
 	tailAssistantID := testMessageIDByText(t, beforeCompact, "tail assistant")
 	if _, err := ms.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
-		SessionID:       "s1",
-		TurnID:          "t_compact",
-		MessageID:       "m_compact",
-		ClientMessageID: "compact:t_compact",
-		Provider:        "mock",
-		Model:           "mock",
-		Text:            "summary of old history",
-		Metadata:        store.CompactMessageMetadata([]string{"m_old", oldAssistantID}, []string{"m_tail", tailAssistantID}),
+		SessionID:             "s1",
+		ExpectedLastMessageID: beforeCompact[len(beforeCompact)-1].ID,
+		TurnID:                "t_compact",
+		MessageID:             "m_compact",
+		ClientMessageID:       "compact:t_compact",
+		Provider:              "mock",
+		Model:                 "mock",
+		Text:                  "summary of old history",
+		Metadata:              store.CompactMessageMetadata([]string{"m_old", oldAssistantID}, []string{"m_tail", tailAssistantID}),
 	}); err != nil {
 		t.Fatal(err)
 	}

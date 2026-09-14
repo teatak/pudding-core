@@ -72,7 +72,7 @@ export function ComposerToolbar({
   const { t } = useI18n();
 
   return (
-    <div className="flex min-w-0 items-center gap-2 px-1.5 pb-1.5">
+    <div className="flex min-w-0 items-center gap-1 px-1.5 pb-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <ComposerAddButton
           active={mentionMenuOpen}

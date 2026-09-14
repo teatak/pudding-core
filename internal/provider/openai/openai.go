@@ -257,6 +257,8 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				finish = provider.FinishStop
 				if choice.FinishReason == "tool_calls" {
 					finish = provider.FinishToolCalls
+				} else if choice.FinishReason == "length" {
+					finish = provider.FinishLength
 				}
 			}
 		}

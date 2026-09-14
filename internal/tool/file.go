@@ -1167,7 +1167,10 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_search_mode", Detail: "mode must be literal or regex"}
 	}
 	if options.ContextLines < 0 || options.ContextLines > maxFileSearchContextLines {
-		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_context_lines", Detail: "context_lines must be between 0 and 5"}
+		return TextFileSearchResult{}, &TextFileSearchError{
+			Code:   "invalid_context_lines",
+			Detail: "context_lines must be between 0 and " + strconv.Itoa(maxFileSearchContextLines) + ". Retry with context_lines=0 to locate matching line numbers, then use builtin_file_slice for a larger range.",
+		}
 	}
 	matcher, err := newFileSearchMatcher(mode, options.Query, options.CaseSensitive)
 	if err != nil {

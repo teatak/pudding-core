@@ -22,6 +22,7 @@
 | [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
 | [code-cli-sandbox-design.md](code-cli-sandbox-design.md) | Code CLI 沙箱与审批规则 |
 | [context-working-set.md](context-working-set.md) | 模型工具结果去重、受限预览与 canonical 分页回读 |
+| [context-compaction.md](context-compaction.md) | 压缩预算、工具循环内触发、并发边界和回归入口 |
 | [releasing.md](releasing.md) | Desktop 构建、签名、发布和更新恢复 |
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |

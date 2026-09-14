@@ -19,6 +19,7 @@ export type CompactRun = {
   clientMessageID: string;
   sessionID: string;
   startedAt: string;
+  error?: { code?: string; message: string };
 };
 
 export type AssistantOverlay = {
@@ -111,7 +112,8 @@ type OverlayState = {
   activeTurnPlans: Record<string, ActiveTurnPlan | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
   startCompactRun: (sessionID: string, clientMessageID: string) => void;
-  finishCompactRun: (sessionID: string) => void;
+  finishCompactRun: (sessionID: string, clientMessageID: string) => void;
+  failCompactRun: (sessionID: string, clientMessageID: string, error: NonNullable<CompactRun["error"]>) => void;
   markSessionCompleted: (sessionID: string) => void;
   clearSessionCompletion: (sessionID: string) => void;
   startSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
@@ -358,9 +360,15 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         [sessionID]: { clientMessageID, sessionID, startedAt: new Date().toISOString() },
       },
     })),
-  finishCompactRun: (sessionID) =>
+  failCompactRun: (sessionID, clientMessageID, error) =>
     set((state) => {
-      if (!state.compactRuns[sessionID]) {
+      const run = state.compactRuns[sessionID];
+      if (!run || run.clientMessageID !== clientMessageID) return state;
+      return { compactRuns: { ...state.compactRuns, [sessionID]: { ...run, error } } };
+    }),
+  finishCompactRun: (sessionID, clientMessageID) =>
+    set((state) => {
+      if (state.compactRuns[sessionID]?.clientMessageID !== clientMessageID) {
         return state;
       }
       const compactRuns = { ...state.compactRuns };
@@ -429,6 +437,9 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     })),
   applyEvent: (event) =>
     set((state) => {
+      if (event.kind === "turn.compacted") {
+        return { lastEventSeqs: recordEventSeq(state.lastEventSeqs, event) };
+      }
       if (event.kind === "ping" || event.kind === "session.titled") {
         return state; // titled 只驱动 sessions refetch,不进 overlay
       }
@@ -676,7 +687,10 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
       return {
         activeTurnPlans: { ...state.activeTurnPlans, [event.sessionID]: undefined },
-        assistants: {
+        // A manual compaction (or a completion after reconnect) can arrive
+        // without any streamed output. Its canonical snapshot owns the row;
+        // inventing an empty overlay here inserts a temporary transcript gap.
+        assistants: event.kind === "turn.completed" && !state.assistants[event.turnID] ? state.assistants : {
           ...state.assistants,
           [event.turnID]: {
             ...current,

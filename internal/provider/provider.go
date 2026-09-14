@@ -313,6 +313,7 @@ type FinishReason string
 
 const (
 	FinishStop      FinishReason = "stop"
+	FinishLength    FinishReason = "length"
 	FinishToolCalls FinishReason = "tool_calls"
 )
 

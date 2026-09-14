@@ -1475,8 +1475,8 @@ func TestAppendCompactSummaryPersistsMetadataAndEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.FinalEvent == nil || res.FinalEvent.Kind != event.TurnCompleted || res.FinalEvent.AssistantMessageID != "msg_compact" {
-		t.Fatalf("unexpected compact event: %+v", res.FinalEvent)
+	if res.Event == nil || res.Event.Kind != event.TurnCompleted || res.Event.AssistantMessageID != "msg_compact" {
+		t.Fatalf("unexpected compact event: %+v", res.Event)
 	}
 	if _, err := st.RunningTurn(ctx, "sess_compact"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("compact must not leave a running turn: %v", err)

@@ -31,6 +31,7 @@ export type AssistantOutputVM =
   | {
       canonicalReady: boolean;
       kind: "live";
+      messages?: Message[];
       overlay: AssistantOverlay;
       phase?: TurnPhaseState;
     }

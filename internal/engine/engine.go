@@ -40,10 +40,14 @@ var (
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
 	// ErrNoModel:会话未解析出可用 provider/model,且当前没有可 fallback 的配置。
 	// API 映射 400 "no_model"。
-	ErrNoModel        = errors.New("engine: no model configured for session")
-	ErrProviderConfig = errors.New("engine: provider config unavailable")
-	ErrCompactRunning = errors.New("engine: compact already running")
-	ErrCompactEmpty   = errors.New("engine: not enough history to compact")
+	ErrNoModel             = errors.New("engine: no model configured for session")
+	ErrProviderConfig      = errors.New("engine: provider config unavailable")
+	ErrCompactRunning      = errors.New("engine: compact already running")
+	ErrCompactEmpty        = errors.New("engine: not enough history to compact")
+	ErrCompactNotReduced   = errors.New("engine: compact summary does not reduce context")
+	ErrCompactIncomplete   = errors.New("engine: compact summary did not finish normally")
+	ErrCompactSummaryEmpty = errors.New("engine: compact summary is empty")
+	ErrContextBudget       = errors.New("engine: required context exceeds the model input budget")
 )
 
 // Resolver 把 provider profile 名解析为 client 实例;
@@ -110,7 +114,7 @@ type Engine struct {
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
 	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
 	wg                sync.WaitGroup
-	compactMu         sync.Mutex
+	compacting        map[string]bool // guarded by mu; independent session compactions
 	toolCloseOnce     sync.Once
 }
 
@@ -218,6 +222,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		approvals:         make(map[string]*pendingApproval),
 		turnProjectAccess: make(map[string]ProjectAccessGrant),
 		queuedRuntimeIDs:  make(map[string]string),
+		compacting:        make(map[string]bool),
 		turnFiles:         turnfiles.New(),
 	}
 	for _, opt := range opts {
@@ -562,7 +567,7 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if contextWindow > 0 {
 		percent := e.autoCompactThresholdPercent(ctx)
 		if percent > 0 {
-			threshold = contextWindow * percent / 100
+			threshold = compactTrigger(resolved.config, resolved.protocol, percent)
 		}
 	}
 	return &SessionUsageInfo{
@@ -1292,14 +1297,52 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	var continuations []provider.Continuation
 	providerCallIndex := 0
 	for {
-		parts.BeginProviderCall(providerCallIndex)
-		providerCallIndex++
+		// Inputs can arrive while the preceding context compaction is running.
+		// Apply them before rebuilding or issuing another provider request.
+		if steers := active.consumeSteers(); len(steers) > 0 {
+			if err := e.commitTurnParts(turnID, parts, true); err != nil {
+				return store.TurnFailed, fmt.Sprintf("append output before context check: %v", err), currentMode
+			}
+			if err := e.applyTurnSteers(turnID, steers); err != nil {
+				return store.TurnFailed, fmt.Sprintf("apply steer before context check: %v", err), currentMode
+			}
+			parts.Reset()
+			continuations = nil
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+			if err != nil {
+				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+			}
+		}
 		req := baseReq
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, turnID, e.attachmentHome, resolved.config, tool.HasDefinition(req.Tools, tool.HistoryGetMessage))
 		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(currentMode), req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("resolve skill references: %v", err), currentMode
 		}
+		compacted, compactErr := e.compactBeforeRequest(ctx, sessionID, turnID, resolved, currentMode, req)
+		if errors.Is(compactErr, store.ErrHistoryChanged) {
+			continue
+		}
+		if compactErr != nil {
+			if ctx.Err() != nil {
+				return store.TurnCancelled, "", currentMode
+			}
+			return store.TurnFailed, fmt.Sprintf("prepare context: %v", compactErr), currentMode
+		}
+		if compacted {
+			// All prior parts were committed before this safe boundary. Rebuild
+			// from canonical history so removed prefixes and native continuations
+			// cannot be reintroduced by the current-turn accumulator.
+			parts.Reset()
+			continuations = nil
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+			if err != nil {
+				return store.TurnFailed, fmt.Sprintf("build compacted context: %v", err), currentMode
+			}
+			continue
+		}
+		parts.BeginProviderCall(providerCallIndex)
+		providerCallIndex++
 		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
@@ -1322,7 +1365,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continuations = append(continuations, *continuation)
 		}
 		providerState := storeProviderState(resolved, continuation)
-		if finish == "" || finish == provider.FinishStop {
+		if finish == "" || finish == provider.FinishStop || finish == provider.FinishLength {
 			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}

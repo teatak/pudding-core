@@ -111,12 +111,33 @@ func (b *Builder) build(
 	if err != nil {
 		return provider.Request{}, err
 	}
+	return b.buildMessages(ctx, sess, providerName, model, mode, allowedTools, msgs, configs...)
+}
+
+// BuildForProviderWithHistory projects a canonical snapshot, optionally ending
+// in a proposed summary. Compaction uses the same projection as actual requests
+// to validate its budget before committing the new boundary.
+func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, providerName, model, mode string, defs []provider.ToolDef, msgs []*store.Message, cfg provider.ModelConfig) (provider.Request, error) {
+	sess, err := b.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	allowed := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		allowed[def.Name] = struct{}{}
+	}
+	return b.buildMessages(ctx, sess, providerName, model, mode, allowed, msgs, cfg)
+}
+
+func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
+	sessionID := sess.ID
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedAppIDs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
 	}
 	var system prompt.Output
+	var err error
 	if source, ok := b.prompts.(loadedAppsPromptSource); ok {
 		system, err = source.PromptWithLoadedApps(ctx, mode, sess.LoadedAppIDs)
 	} else {

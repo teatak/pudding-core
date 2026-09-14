@@ -188,7 +188,7 @@ func TestSubmitFallsBackWhenSessionProviderDeleted(t *testing.T) {
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		Models: []store.ProviderModel{{
 			ID:            "new-model",
-			ContextWindow: 1234,
+			ContextWindow: 12340,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -619,7 +619,7 @@ func TestProviderRequestCountRecordedWithoutUsageChunk(t *testing.T) {
 func TestCompactWritesSummaryAndContextBoundary(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"## User Context\nremembered facts"}), mock.WithDelay(time.Millisecond))
 	ctx := context.Background()
-	appendEngineTestTurn(t, ms, sid, "1", "old user", "old assistant")
+	appendEngineTestTurn(t, ms, sid, "1", strings.Repeat("old user ", 100), "old assistant")
 	appendEngineTestTurn(t, ms, sid, "2", "tail user 1", "tail assistant 1")
 	appendEngineTestTurn(t, ms, sid, "3", "tail user 2", "tail assistant 2")
 
@@ -668,7 +668,7 @@ func TestCompactWritesSummaryAndContextBoundary(t *testing.T) {
 func TestCompactCountsSystemReminderAsInputTurn(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"## User Context\nremembered facts"}), mock.WithDelay(time.Millisecond))
 	ctx := context.Background()
-	appendEngineTestTurn(t, ms, sid, "1", "old user", "old assistant")
+	appendEngineTestTurn(t, ms, sid, "1", strings.Repeat("old user ", 100), "old assistant")
 	appendEngineTestSystemTurn(t, ms, sid, "2", "system reminder", "system answer")
 	appendEngineTestTurn(t, ms, sid, "3", "tail user", "tail assistant")
 
@@ -708,25 +708,25 @@ func TestAutoCompactRunsAfterCompletedTurn(t *testing.T) {
 		Protocol:    "openai-compatible",
 		Models: []store.ProviderModel{{
 			ID:            "mock-model",
-			ContextWindow: 100,
+			ContextWindow: 16000,
 		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.SetSettings(ctx, map[string]string{
-		config.SettingCompactAutoThresholdPercent: "1",
+		config.SettingCompactAutoThresholdPercent: "30",
 		config.SettingCompactTailInputTurns:       "2",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	appendEngineTestTurn(t, ms, sid, "1", "old user 1", "old assistant 1")
-	appendEngineTestTurn(t, ms, sid, "2", "old user 2", "old assistant 2")
+	appendEngineTestTurn(t, ms, sid, "1", strings.Repeat("old user 1 ", 1000), "old assistant 1")
+	appendEngineTestTurn(t, ms, sid, "2", strings.Repeat("old user 2 ", 1000), "old assistant 2")
 	appendEngineTestTurn(t, ms, sid, "3", "tail user", "tail assistant")
 
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_auto", Text: "new user"}); err != nil {
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "current", UserMessageID: "current-user", ClientMessageID: "c_auto", UserText: "new user"}); err != nil {
 		t.Fatal(err)
 	}
-	waitTurnDone(t, ms, sid)
+	eng.finishTurn(sid, "current", store.ModeChat, store.TurnCompleted, "", store.TextPart("new assistant"))
 	eng.Wait()
 
 	msgs, err := ms.ListMessages(ctx, sid, 0)
@@ -3981,7 +3981,7 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 		BaseURL: "http://unused",
 		Models: []store.ProviderModel{{
 			ID:            "snap-model",
-			ContextWindow: 1000,
+			ContextWindow: 100000,
 			Capabilities:  &store.ModelCaps{Image: true, Audio: false, Tools: true},
 			Limits:        &store.ModelLimits{MaxOutputTokens: 8192, MaxToolLoops: 7},
 			ProviderOptions: &store.ProviderOptions{
@@ -4015,7 +4015,7 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	if err := json.Unmarshal(turn.ModelConfig, &snap); err != nil {
 		t.Fatal(err)
 	}
-	if snap.ContextWindow != 1000 || snap.Capabilities == nil || !snap.Capabilities.Image || snap.Capabilities.Audio || !snap.Capabilities.Tools {
+	if snap.ContextWindow != 100000 || snap.Capabilities == nil || !snap.Capabilities.Image || snap.Capabilities.Audio || !snap.Capabilities.Tools {
 		t.Fatalf("turn config snapshot wrong: %+v", snap)
 	}
 	if snap.Limits == nil || snap.Limits.MaxOutputTokens != 8192 || snap.Limits.MaxToolLoops != 7 {

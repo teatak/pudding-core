@@ -217,7 +217,7 @@ func TestSkillReferencesSurviveSQLiteRestartCompactionAndClone(t *testing.T) {
 	for _, message := range all {
 		ids = append(ids, message.ID)
 	}
-	if _, err := db.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{SessionID: "s", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact-c", Text: "A historical task summary", Provider: "mock", Model: "mock", Mode: store.ModeWork, Metadata: store.CompactMessageMetadata(ids, nil)}); err != nil {
+	if _, err := db.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{ExpectedLastMessageID: all[len(all)-1].ID, SessionID: "s", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact-c", Text: "A historical task summary", Provider: "mock", Model: "mock", Mode: store.ModeWork, Metadata: store.CompactMessageMetadata(ids, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := db.ListMessages(ctx, "s", 0)

@@ -2,7 +2,7 @@ import { memo } from "react";
 
 import { useI18n } from "@/i18n";
 
-import { AssistantOutput, AssistantOutputMeta, CompactPendingMarker } from "./AssistantOutput";
+import { AssistantOutput, AssistantOutputMeta, CompactRunMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
 import { assistantDisclosureKey, type AssistantOutputVM, type TranscriptDisplaySettings, type TranscriptTurnVM, type TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
@@ -100,17 +100,15 @@ function TranscriptTurnView({
             />
           ) : null}
           {metaAssistant ? (
-            <div>
-              <AssistantOutputMeta
-                assistant={metaAssistant}
-                cloningMessageID={cloningMessageID}
-                onCloneMessage={onCloneMessage}
-              />
-            </div>
+            <AssistantOutputMeta
+              assistant={metaAssistant}
+              cloningMessageID={cloningMessageID}
+              onCloneMessage={onCloneMessage}
+            />
           ) : null}
           {turn.compact ? (
             <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
-              <CompactPendingMarker />
+              <CompactRunMarker run={turn.compact} />
             </div>
           ) : null}
         </div>
@@ -178,7 +176,12 @@ function compactEqual(previous: TranscriptTurnVM["compact"], next: TranscriptTur
   if (!previous || !next) {
     return false;
   }
-  return previous.sessionID === next.sessionID && previous.startedAt === next.startedAt;
+  return (
+    previous.sessionID === next.sessionID &&
+    previous.clientMessageID === next.clientMessageID &&
+    previous.startedAt === next.startedAt &&
+    previous.error === next.error
+  );
 }
 
 function userEqual(previous: TranscriptTurnVM["user"], next: TranscriptTurnVM["user"]) {
@@ -334,6 +337,10 @@ function assistantEqual(previous: TranscriptTurnVM["assistant"], next: Transcrip
   if (previous.kind === "live" && next.kind === "live") {
     return (
       previous.canonicalReady === next.canonicalReady &&
+      (previous.messages === next.messages || Boolean(
+        previous.messages && next.messages && previous.messages.length === next.messages.length &&
+        previous.messages.every((message, index) => message === next.messages?.[index]),
+      )) &&
       previous.overlay === next.overlay &&
       previous.phase === next.phase
     );

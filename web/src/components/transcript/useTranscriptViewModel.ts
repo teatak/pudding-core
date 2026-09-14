@@ -165,9 +165,9 @@ export function useTranscriptViewModel({
             });
           }
         });
-        appliedGuides.forEach((pending) => {
+        appliedGuides.forEach((pending, index) => {
           usedPendingClientIDs.add(pending.clientMessageID);
-          appendPreviousSegment(sequence, overlay, pending.clientMessageID, messageSegments.at(-1)?.user);
+          appendPreviousSegment(sequence, overlay, pending.clientMessageID, messageSegments.at(-1)?.user, index === 0 ? messageSegments.at(-1)?.outputs : undefined);
           sequence.push({
             key: `guide:${pending.clientMessageID}`,
             kind: "guide",
@@ -180,6 +180,7 @@ export function useTranscriptViewModel({
             assistant: {
               canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
               kind: "live",
+              messages: appliedGuides.length === 0 ? messageSegments.at(-1)?.outputs : undefined,
               overlay,
               phase: phaseForTurn,
             },
@@ -221,6 +222,7 @@ export function useTranscriptViewModel({
           assistant: {
             canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
             kind: "live",
+            messages: visibleMessages.filter(isTurnOutputMessage),
             overlay,
             phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
           },
@@ -377,7 +379,13 @@ export function useTranscriptViewModel({
     // 压缩行沿用 submit 的对账规则:落库后 canonical turn 复用同一 key,列表项原地
     // 更新。否则卸载+挂载会改变贴底偏移,表现为对话窗口跳一下。
     if (compactRun && !turnClientMessageIDs.has(compactRun.clientMessageID)) {
-      items.push({
+      const times = new Map(turns.map(turn => [turn.id, Date.parse(turn.createdAt)]));
+      const startedAt = Date.parse(compactRun.startedAt);
+      const next = items.findIndex(item => {
+        const createdAt = item.turnID ? times.get(item.turnID) : Date.parse(pendingByClientID.get(item.clientMessageID || "")?.createdAt || "");
+        return createdAt !== undefined && createdAt > startedAt;
+      });
+      items.splice(next < 0 ? items.length : next, 0, {
         compact: compactRun,
         key: transcriptTurnKey({ clientMessageID: compactRun.clientMessageID, sessionID }),
         kind: "compact",
@@ -471,13 +479,14 @@ function appendPreviousSegment(
   current: AssistantOverlay | undefined,
   beforeClientMessageID: string,
   user?: Pick<Message, "clientMessageID" | "id">,
+  messages?: Message[],
 ) {
   const previous = current?.previousSegments?.find((segment) => segment.beforeClientMessageID === beforeClientMessageID)?.overlay;
   if (previous?.parts.length) {
     sequence.push({
       key: liveAssistantSegmentKey(previous, user),
       kind: "assistant",
-      assistant: { kind: "live", canonicalReady: false, overlay: previous },
+      assistant: { kind: "live", canonicalReady: false, messages, overlay: previous },
     });
   }
 }

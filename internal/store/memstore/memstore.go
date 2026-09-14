@@ -1276,8 +1276,25 @@ func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompac
 	if _, ok := m.sessions[in.SessionID]; !ok {
 		return nil, store.ErrNotFound
 	}
-	if m.runningLocked(in.SessionID) {
+	runningID := ""
+	for _, turn := range m.turns {
+		if turn.SessionID == in.SessionID && turn.Status == store.TurnRunning {
+			runningID = turn.ID
+			break
+		}
+	}
+	if runningID != "" && (runningID != in.RunningTurnID || in.TurnID != runningID) {
 		return nil, store.ErrTurnRunning
+	}
+	if runningID != in.RunningTurnID {
+		return nil, store.ErrHistoryChanged
+	}
+	lastID := ""
+	if messages := m.messages[in.SessionID]; len(messages) > 0 {
+		lastID = messages[len(messages)-1].ID
+	}
+	if lastID != in.ExpectedLastMessageID {
+		return nil, store.ErrHistoryChanged
 	}
 	now := time.Now()
 	mode := in.Mode
@@ -1300,6 +1317,16 @@ func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompac
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	index := 1
+	kind := event.TurnCompleted
+	if runningID != "" {
+		turn = m.turns[runningID]
+		maxIndex, _ := m.turnOutputStatsLocked(in.SessionID, runningID)
+		index = maxIndex + 1
+		kind = event.TurnCompacted
+		turn.UpdatedAt = now
+	}
+
 	msg := &store.Message{
 		ID:        in.MessageID,
 		SessionID: in.SessionID,
@@ -1308,14 +1335,14 @@ func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompac
 		Kind:      store.MessageKindSummary,
 		Text:      in.Text,
 		Parts:     store.TextPart(in.Text),
-		TurnIndex: 1,
+		TurnIndex: index,
 		Metadata:  normalizeJSON(in.Metadata),
 		CreatedAt: now,
 	}
 	ev := event.Event{
 		Seq:                m.nextSeq(in.SessionID),
 		SessionID:          in.SessionID,
-		Kind:               event.TurnCompleted,
+		Kind:               kind,
 		TurnID:             in.TurnID,
 		AssistantMessageID: in.MessageID,
 	}
@@ -1324,7 +1351,7 @@ func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompac
 	m.appendEventLocked(in.SessionID, ev)
 	m.sessions[in.SessionID].LastActivityAt = now
 	ec := ev
-	return &store.AppendCompactSummaryResult{Turn: cloneTurn(turn), Message: cloneMessage(msg), FinalEvent: &ec}, nil
+	return &store.AppendCompactSummaryResult{Turn: cloneTurn(turn), Message: cloneMessage(msg), Event: &ec}, nil
 }
 
 func (m *Memstore) RecordUsage(_ context.Context, in store.UsageRecordInput) (*store.UsageHourlyStat, error) {

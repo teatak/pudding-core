@@ -49,6 +49,14 @@ export const turnCompletedEvent = z.object({
   assistantMessageID: z.string(),
 });
 
+export const turnCompactedEvent = z.object({
+  kind: z.literal("turn.compacted"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  assistantMessageID: z.string(),
+});
+
 export const turnFailedEvent = z.object({
   kind: z.literal("turn.failed"),
   seq: z.number().int().positive(),
@@ -183,6 +191,7 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnDeltaEvent,
   turnToolEvent,
   turnCompletedEvent,
+  turnCompactedEvent,
   turnFailedEvent,
   turnCancelledEvent,
   inputQueuedEvent,

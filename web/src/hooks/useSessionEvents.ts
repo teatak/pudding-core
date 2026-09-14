@@ -132,13 +132,13 @@ function openSessionEventSource({
     ) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     }
-    if (data.kind === "turn.started" || isTurnTerminalEvent(data)) {
+    if (data.kind === "turn.started" || data.kind === "turn.compacted" || isTurnTerminalEvent(data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
     }
     if (isTurnTerminalEvent(data)) {
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
     }
-    if ((data.kind === "turn.started" || isTurnTerminalEvent(data)) && syncMessages) {
+    if ((data.kind === "turn.started" || data.kind === "turn.compacted" || isTurnTerminalEvent(data)) && syncMessages) {
       syncTurn(queryClient, token, sessionID, data.turnID);
     }
     if (data.kind === "input.steered" && syncMessages) {
@@ -161,6 +161,7 @@ function openSessionEventSource({
   source.addEventListener("turn.delta", handleMessage);
   source.addEventListener("turn.tool", handleMessage);
   source.addEventListener("turn.completed", handleMessage);
+  source.addEventListener("turn.compacted", handleMessage);
   source.addEventListener("turn.failed", handleMessage);
   source.addEventListener("turn.cancelled", handleMessage);
   source.addEventListener("input.queued", handleMessage);

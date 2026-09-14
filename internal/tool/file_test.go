@@ -632,6 +632,29 @@ func TestBuiltinFileSearchRejectsInvalidPatterns(t *testing.T) {
 	}
 }
 
+func TestBuiltinFileSearchContextLinesRangeAndRecovery(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	for _, lines := range []int{-1, 0, 5, 6, 12} {
+		args, _ := json.Marshal(map[string]any{"scope": "project", "path": "main.go", "query": "main", "context_lines": lines})
+		result := runner.Call(context.Background(), Call{Name: FileSearch, Args: args, ProjectDirs: []string{root}})
+		if lines == 0 || lines == 5 {
+			if !result.Ok {
+				t.Fatalf("valid context_lines=%d rejected: %s", lines, result.Content)
+			}
+			continue
+		}
+		payload := decodeToolResult(t, result)
+		detail, _ := payload["detail"].(string)
+		if result.Ok || payload["reason"] != "invalid_context_lines" || !strings.Contains(detail, "between 0 and 5") || !strings.Contains(detail, "context_lines=0") || !strings.Contains(detail, "builtin_file_slice") {
+			t.Fatalf("context_lines=%d must explain range and recovery: %s", lines, result.Content)
+		}
+	}
+}
+
 func TestBuiltinFileReadAllowsUTF8RuneAcrossProbeBoundary(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")

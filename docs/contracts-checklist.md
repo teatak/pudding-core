@@ -14,6 +14,7 @@
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
 | `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `stream?`, `content?`, `ok?`, `summaryKind?`, `summaryCount?`, `attachments?`;`phase=output` 的 stdout/stderr 只进前端 overlay,最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
+| `turn.compacted` | ✓ | ✓ | `assistantMessageID`；摘要属于当前 turn，保持 running，刷新 canonical turn |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
 | `audio.bindings` | — | — | `inputOwner`, `inputMode`, `inputLevel`;音频输入 owner 快照 |

@@ -1481,10 +1481,24 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
-		if _, err := runningTurnTx(ctx, tx, in.SessionID); err == nil {
-			return store.ErrTurnRunning
+		var owner *store.Turn
+		if running, err := runningTurnTx(ctx, tx, in.SessionID); err == nil {
+			if running.ID != in.RunningTurnID || in.TurnID != running.ID {
+				return store.ErrTurnRunning
+			}
+			owner = running
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
+		} else if in.RunningTurnID != "" {
+			return store.ErrHistoryChanged
+		}
+		var lastID string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE session_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1`, in.SessionID).Scan(&lastID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if lastID != in.ExpectedLastMessageID {
+			return store.ErrHistoryChanged
 		}
 		now := time.Now()
 		mode := in.Mode
@@ -1507,6 +1521,18 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
+		index := 1
+		kind := event.TurnCompleted
+		if owner != nil {
+			turn = owner
+			maxIndex, _, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+			if err != nil {
+				return err
+			}
+			index = maxIndex + 1
+			kind = event.TurnCompacted
+		}
+
 		msg := &store.Message{
 			ID:        in.MessageID,
 			SessionID: in.SessionID,
@@ -1515,22 +1541,29 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 			Kind:      store.MessageKindSummary,
 			Text:      in.Text,
 			Parts:     store.TextPart(in.Text),
-			TurnIndex: 1,
+			TurnIndex: index,
 			Metadata:  normalizeJSON(in.Metadata),
 			CreatedAt: now,
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
-		); err != nil {
-			return err
+		if owner == nil {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+				turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+			); err != nil {
+				return err
+			}
+		} else {
+			turn.UpdatedAt = now
+			if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
+				return err
+			}
 		}
 		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return err
 		}
 		ev := event.Event{
 			SessionID:          in.SessionID,
-			Kind:               event.TurnCompleted,
+			Kind:               kind,
 			TurnID:             in.TurnID,
 			AssistantMessageID: in.MessageID,
 		}
@@ -1540,7 +1573,7 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
 			return err
 		}
-		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, FinalEvent: &ev}
+		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, Event: &ev}
 		return nil
 	})
 	return out, err

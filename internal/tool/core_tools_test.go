@@ -119,6 +119,24 @@ func TestHistoryReadSchemaExposesFocusedSnapshotSelectors(t *testing.T) {
 	}
 }
 
+func TestFileSearchDescriptionMatchesContextLinesLimit(t *testing.T) {
+	def := definitionByName(t, BuiltinDefinitions(), FileSearch)
+	var schema struct {
+		Properties map[string]struct {
+			Minimum     int    `json:"minimum"`
+			Maximum     int    `json:"maximum"`
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	field := schema.Properties["context_lines"]
+	if field.Minimum != 0 || field.Maximum != maxFileSearchContextLines || !strings.Contains(field.Description, "0-5") || !strings.Contains(field.Description, "builtin_file_slice") || !strings.Contains(def.Description, "0-5") {
+		t.Fatal("context_lines range and recovery must be explicit in the model-facing definition")
+	}
+}
+
 func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
 	defs := BuiltinDefinitions()
 	if HasDefinition(CoreDefinitionsForMode(store.ModeChat, defs), PlanUpdate) {

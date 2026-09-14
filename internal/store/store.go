@@ -31,6 +31,7 @@ var (
 	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
 	ErrInvalidComputerAppGrant  = errors.New("store: invalid Computer Use app grant")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
+	ErrHistoryChanged           = errors.New("store: history changed during compaction")
 	ErrTurnFileChangeConflict   = errors.New("store: turn file change state conflict")
 )
 
@@ -1151,10 +1152,13 @@ type MessageMetadata struct {
 }
 
 type CompactMetadata struct {
-	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
-	TailMessageIDs   []string `json:"tail_message_ids,omitempty"`
-	SourceTurnCount  int      `json:"source_turn_count,omitempty"`
-	TailTurnCount    int      `json:"tail_turn_count,omitempty"`
+	SourceMessageIDs    []string `json:"source_message_ids,omitempty"`
+	TailMessageIDs      []string `json:"tail_message_ids,omitempty"`
+	SourceTurnCount     int      `json:"source_turn_count,omitempty"`
+	TailTurnCount       int      `json:"tail_turn_count,omitempty"`
+	BeforeInputEstimate int      `json:"before_input_estimate,omitempty"`
+	AfterInputEstimate  int      `json:"after_input_estimate,omitempty"`
+	InputBudget         int      `json:"input_budget,omitempty"`
 }
 
 func CompactMessageMetadata(sourceIDs, tailIDs []string) json.RawMessage {
@@ -2013,6 +2017,12 @@ type ApplyTurnSteersInput struct {
 }
 
 type AppendCompactSummaryInput struct {
+	// ExpectedLastMessageID is the end of the canonical snapshot summarized by
+	// this operation. Empty means the snapshot was empty, not an unchecked write.
+	ExpectedLastMessageID string
+	// RunningTurnID permits the engine to compact at this turn's safe boundary.
+	// Public/manual compaction leaves it empty and requires an idle session.
+	RunningTurnID   string
 	SessionID       string
 	TurnID          string
 	MessageID       string
@@ -2026,9 +2036,9 @@ type AppendCompactSummaryInput struct {
 }
 
 type AppendCompactSummaryResult struct {
-	Turn       *Turn
-	Message    *Message
-	FinalEvent *event.Event
+	Turn    *Turn
+	Message *Message
+	Event   *event.Event
 }
 
 type FinishTurnResult struct {

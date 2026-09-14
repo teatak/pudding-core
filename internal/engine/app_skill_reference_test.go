@@ -168,7 +168,7 @@ func TestCompactionProjectsReferencesInsteadOfSkillBodies(t *testing.T) {
 	}
 	message := &store.Message{ID: "m", Role: store.RoleTool, Parts: parts, Text: store.MessageTextFromParts(parts)}
 	before, _ := json.Marshal(message)
-	dump := compactHistoryDump([]*store.Message{message})
+	dump := compactMessageRecord(message, compactMessageText(message))
 	if !strings.Contains(dump, "KEEP_TASK_FACT") || strings.Count(dump, `"reference"`) != 2 || strings.Contains(dump, "DO_NOT_SUMMARIZE") {
 		t.Fatalf("incorrect compaction input: %s", dump)
 	}

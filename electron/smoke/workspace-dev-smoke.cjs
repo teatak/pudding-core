@@ -2328,7 +2328,7 @@ db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assi
 db.commit()
 db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
   }
-  const canvasCount = ["archive-navigation", "automation-presentation"].includes(process.env.PUDDING_SMOKE_SCENARIO) ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
+  const canvasCount = ["archive-navigation", "automation-presentation", "context-compaction"].includes(process.env.PUDDING_SMOKE_SCENARIO) ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
   for (let i = 1; i <= canvasCount; i++) await api(`/sessions/${primary.id}/canvas/items`, "POST", {
     id: `smoke-${String(i).padStart(2, "0")}`, kind: "markdown", title: `Canvas ${String(i).padStart(2, "0")}`, item: { markdown: `# Canvas ${i}\n\n${"Persistent content.\n".repeat(100)}` },
   });
@@ -2351,6 +2351,19 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     await router.navigate({ to: '/', search: { session: ${JSON.stringify(primary.id)} } });
   })()`);
   await waitFor(() => js(`Boolean(document.querySelector('button[aria-label="打开工作区"]'))`), "closed workspace ready");
+  if (process.env.PUDDING_SMOKE_SCENARIO === "context-compaction") {
+    phase = "context compaction";
+    await require('./context-compaction.cjs')({ api, js, waitFor, click, input, check, screenshot, reload: () => window.webContents.reload(), pressEnter: async () => {
+      window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+      window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+    }, scrollUp: async (deltaY) => {
+      const point = await js(`(() => {const r=document.querySelector('[data-transcript-viewport]').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+100)};})()`);
+      window.webContents.sendInputEvent({ type: 'mouseWheel', ...point, deltaX: 0, deltaY });
+      await delay(600); // Let Chromium finish the native wheel animation before comparing offsets.
+    } });
+    assert.deepEqual(rendererErrors, [], "compaction renderer errors");
+    return;
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "archive-navigation") {
     await verifyArchiveNavigation(primary.id, project.id);
     assert.deepEqual(rendererErrors, [], "archive navigation renderer errors");

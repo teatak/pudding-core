@@ -190,7 +190,7 @@ func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing
 		t.Fatal("canonical tool result was replaced by preview")
 	}
 	metadata, _ := json.Marshal(map[string]any{"compact": map[string]any{"source_message_ids": messageIDs}})
-	_, err = db.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{SessionID: "s1", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact-client", Text: "Finished inspection", Metadata: metadata})
+	_, err = db.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{ExpectedLastMessageID: messageIDs[len(messageIDs)-1], SessionID: "s1", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact-client", Text: "Finished inspection", Metadata: metadata})
 	if err != nil {
 		t.Fatal(err)
 	}

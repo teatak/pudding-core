@@ -1095,6 +1095,21 @@ func (s *Server) compactSession(c *cart.Context) error {
 	case errors.Is(err, engine.ErrCompactEmpty):
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "compact_empty"})
 		return nil
+	case errors.Is(err, store.ErrHistoryChanged):
+		c.JSON(http.StatusConflict, map[string]string{"error": "compact_history_changed"})
+		return nil
+	case errors.Is(err, engine.ErrCompactNotReduced):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "compact_not_reduced"})
+		return nil
+	case errors.Is(err, engine.ErrCompactIncomplete):
+		c.JSON(http.StatusBadGateway, map[string]string{"error": "compact_incomplete"})
+		return nil
+	case errors.Is(err, engine.ErrCompactSummaryEmpty):
+		c.JSON(http.StatusBadGateway, map[string]string{"error": "compact_summary_empty"})
+		return nil
+	case errors.Is(err, engine.ErrContextBudget):
+		c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "context_budget_exceeded"})
+		return nil
 	case errors.Is(err, engine.ErrNoModel):
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil

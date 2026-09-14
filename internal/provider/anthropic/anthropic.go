@@ -27,11 +27,11 @@ const (
 	defaultBaseURL = "https://api.anthropic.com"
 	// anthropicVersion 是 Messages API 的必填版本头(日期固定,非 SDK 版本)。
 	anthropicVersion = "2023-06-01"
-	// defaultMaxTokens:Messages API 的 max_tokens 必填。当前在售模型族
+	// DefaultMaxTokens:Messages API 的 max_tokens 必填。当前在售模型族
 	// (Sonnet/Haiku 4.5+ 64K,Opus 4.6+ 128K)输出上限都 ≥64K,
 	// 流式下取 64K 给长回复留足空间;远古模型(8K 上限)会 400,
 	// 报错信息明确,可换模型解决。
-	defaultMaxTokens = 64000
+	DefaultMaxTokens = 64000
 )
 
 type Config struct {
@@ -140,7 +140,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	}
 	body := messagesRequest{
 		Model:     req.Model,
-		MaxTokens: defaultMaxTokens,
+		MaxTokens: DefaultMaxTokens,
 		Stream:    true,
 		System:    req.System,
 		Messages:  make([]message, 0, len(req.Messages)),
@@ -338,8 +338,10 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			}
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				switch event.Delta.StopReason {
-				case "end_turn", "max_tokens", "stop_sequence":
+				case "end_turn", "stop_sequence":
 					finish = provider.FinishStop
+				case "max_tokens":
+					finish = provider.FinishLength
 				case "tool_use":
 					finish = provider.FinishToolCalls
 				default:

@@ -7,7 +7,7 @@ import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
-import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
+import { isTurnPhaseActive, type CompactRun, type TurnPhaseState } from "@/state/overlayStore";
 
 import { InterruptedBadge, MessageMeta } from "./MessageMeta";
 import { useElapsedDuration } from "./time";
@@ -19,6 +19,7 @@ import {
 } from "./TurnParts";
 import { ToolHoverCopyButton } from "./CodeToolDetails";
 import { TranscriptDisclosure } from "./TranscriptDisclosure";
+import { compactLiveOutput, isCompactMessage, splitCompactMessages } from "./compactOutput";
 import type { AssistantOutputVM, TurnDisclosureState } from "./types";
 import type { TranscriptDisplaySettings } from "./types";
 
@@ -76,16 +77,15 @@ function CanonicalAssistantOutput({
   sessionID: string;
   token: string;
 }) {
-  const parts = useMemo(() => partsFromMessages(assistant.messages), [assistant.messages]);
-  const text = useMemo(() => assistantTextFromMessages(assistant.messages), [assistant.messages]);
-  const compactMessage = assistant.messages.find(isCompactMessage);
-  if (compactMessage) {
-    return <CompactMarker message={compactMessage} sessionID={sessionID} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
-  }
+  const groups = useMemo(() => splitCompactMessages(assistant.messages), [assistant.messages]);
   return (
     <div className="group flex min-w-0 flex-col" data-transcript-message-role="assistant">
       <div className="selectable-text min-w-0 text-sm leading-6">
-        {parts.length > 0 ? <TurnParts disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} /> : null}
+        {groups.map((messages) => isCompactMessage(messages[0]) ? (
+          <CompactMarker key={messages[0].id} message={messages[0]} sessionID={sessionID} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={assistantTextFromMessages(messages)} />
+        ) : (
+          <TurnParts key={messages[0].id} disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={partsFromMessages(messages)} sessionID={sessionID} token={token} />
+        ))}
         {assistant.error ? <AssistantError error={assistant.error} /> : null}
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
@@ -103,7 +103,7 @@ export function AssistantOutputMeta({
   onCloneMessage?: (messageID: string) => void;
 }) {
   const { t } = useI18n();
-  if (assistant.kind !== "canonical" || assistant.messages.some(isCompactMessage)) {
+  if (assistant.kind !== "canonical" || assistant.messages.every(isCompactMessage)) {
     return null;
   }
   const lastMessage = assistant.messages[assistant.messages.length - 1];
@@ -151,7 +151,7 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
   const sourceTurnCount = compact?.source_turn_count || 0;
   const tailTurnCount = compact?.tail_turn_count || 0;
   const statsText =
-    tailTurnCount > 0
+    sourceTurnCount > 0 && tailTurnCount > 0
       ? t("transcript.compactStatsTurns")
           .replace("{source}", String(sourceTurnCount))
           .replace("{tail}", String(tailTurnCount))
@@ -159,46 +159,60 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
           .replace("{source}", String(sourceCount))
           .replace("{tail}", String(tailCount));
   const summaryAvailable = showSummary && Boolean(summaryText.trim());
-  if (!summaryAvailable) {
-    return (
-      <div className="selectable-text my-1" data-transcript-message-role="assistant">
-        <TranscriptDisclosure icon={<Archive className="size-3.5" />} summary={statsText} title={t("transcript.compactMark")} />
-      </div>
-    );
-  }
+  const before = compact?.before_input_estimate || 0;
+  const after = compact?.after_input_estimate || 0;
+  const budget = compact?.input_budget || 0;
+  const hasEstimate = before > 0 && after > 0;
+  const overBudget = budget > 0 && after > budget;
+  const savingsText = hasEstimate ? t("transcript.compactSavings")
+    .replace("{saved}", (before - after).toLocaleString())
+    .replace("{percent}", String(Math.round((before - after) / before * 100))) : statsText;
   return (
-    <TranscriptDisclosure
-      className="selectable-text my-1"
-      icon={<Archive className="size-3.5" />}
-      summary={statsText}
-      title={t("transcript.compactMark")}
-    >
-      <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 text-foreground/80">
-        <TurnParts disclosureRootKey={message.turnID} parts={partsFromMessages([message])} sessionID={sessionID} token="" />
-      </div>
-    </TranscriptDisclosure>
+    <div className="selectable-text" data-compact-message-id={message.id}>
+      <TranscriptDisclosure
+        icon={<Archive className="size-3.5" />}
+        summary={savingsText}
+        title={t(overBudget ? "transcript.compactOverBudget" : "transcript.compactMark")}
+      >
+        {summaryAvailable || hasEstimate ? (
+          <div className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 p-2 text-foreground/80">
+            {hasEstimate ? <p>{t("transcript.compactInputEstimate").replace("{before}", before.toLocaleString()).replace("{after}", after.toLocaleString())} · {statsText}</p> : null}
+            {overBudget ? <p>{t("transcript.compactBudgetDetail").replace("{limit}", budget.toLocaleString())}</p> : null}
+            {summaryAvailable ? <TurnParts disclosureRootKey={message.id} parts={partsFromMessages([message])} sessionID={sessionID} token="" /> : null}
+          </div>
+        ) : null}
+      </TranscriptDisclosure>
+    </div>
   );
 }
 
-export function CompactPendingMarker() {
+export function CompactRunMarker({ run }: { run: CompactRun }) {
   const { t } = useI18n();
+  const noGain = run.error?.code === "compact_not_reduced";
   return (
-    <TranscriptDisclosure
-      className="selectable-text my-1"
-      icon={<Archive className="size-3.5" />}
-      summary={<Spinner className="size-3.5 align-middle" />}
-      title={t("transcript.compactRunning")}
-    />
+    <div className="selectable-text" data-compact-run-id={run.clientMessageID}>
+      <TranscriptDisclosure
+        icon={noGain ? <Archive /> : run.error ? <CircleAlert /> : <Spinner />}
+        iconClassName={run.error && !noGain ? "text-destructive/70" : undefined}
+        title={t(noGain ? "composer.compactNoGain" : run.error ? "composer.compactFailed" : "transcript.compactRunning")}
+      >
+        {run.error ? <div className={`rounded-md border border-border/50 bg-muted/20 p-2 ${noGain ? "text-foreground/80" : "text-destructive/80"}`} role={noGain ? "status" : "alert"}>{run.error.message}</div> : null}
+      </TranscriptDisclosure>
+    </div>
   );
 }
 
-function isCompactMessage(message: Message) {
-  return Boolean(compactMetadata(message));
-}
+type CompactMetadata = {
+  source_message_ids?: string[];
+  source_turn_count?: number;
+  tail_message_ids?: string[];
+  tail_turn_count?: number;
+  before_input_estimate?: number;
+  after_input_estimate?: number;
+  input_budget?: number;
+};
 
-function compactMetadata(
-  message: Message,
-): { source_message_ids?: string[]; source_turn_count?: number; tail_message_ids?: string[]; tail_turn_count?: number } | null {
+function compactMetadata(message: Message): CompactMetadata | null {
   const meta = message.metadata;
   if (!meta || typeof meta !== "object" || !("compact" in meta)) {
     return null;
@@ -207,12 +221,7 @@ function compactMetadata(
   if (!compact || typeof compact !== "object") {
     return null;
   }
-  return compact as {
-    source_message_ids?: string[];
-    source_turn_count?: number;
-    tail_message_ids?: string[];
-    tail_turn_count?: number;
-  };
+  return compact as CompactMetadata;
 }
 
 function LiveAssistantOutput({
@@ -234,7 +243,9 @@ function LiveAssistantOutput({
   sessionID: string;
   token: string;
 }) {
-  const { overlay, phase } = assistant;
+  const projection = useMemo(() => compactLiveOutput(assistant.messages || [], assistant.overlay), [assistant.messages, assistant.overlay]);
+  const { overlay } = projection;
+  const { phase } = assistant;
   const streaming = overlay.status === "streaming";
   const text = overlay.text;
   const hasThoughtPart = overlay.parts.some((part) => part.type === "thought");
@@ -276,7 +287,7 @@ function LiveAssistantOutput({
 
   useLayoutEffect(() => {
     onContentGrow?.();
-  }, [overlay.parts, text, onContentGrow]);
+  }, [overlay.parts, text, projection.messages, onContentGrow]);
   useLayoutEffect(() => {
     const waitingForCanonical =
       overlay.status !== "streaming" && Boolean(overlay.assistantMessageID) && !assistant.canonicalReady;
@@ -298,6 +309,9 @@ function LiveAssistantOutput({
 
   return (
     <div className="selectable-text min-w-0 text-sm leading-6">
+      {projection.messages.length > 0 ? (
+        <CanonicalAssistantOutput assistant={{ kind: "canonical", messages: projection.messages }} disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} sessionID={sessionID} token={token} />
+      ) : null}
       <div className="min-w-0">
         {parts.length > 0 ? <TurnParts disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} /> : null}
       </div>

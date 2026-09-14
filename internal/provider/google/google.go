@@ -506,6 +506,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				if cand.FinishReason != "STOP" && cand.FinishReason != "MAX_TOKENS" {
 					return fmt.Errorf("google: finished with reason %s", cand.FinishReason)
 				}
+				if cand.FinishReason == "MAX_TOKENS" {
+					finish = provider.FinishLength
+				}
 			}
 		}
 	}

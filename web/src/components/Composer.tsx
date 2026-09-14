@@ -165,6 +165,7 @@ export function Composer({
   const acceptSubmittingTurn = useOverlayStore((state) => state.acceptSubmittingTurn);
   const clearSubmittingTurn = useOverlayStore((state) => state.clearSubmittingTurn);
   const finishCompactRun = useOverlayStore((state) => state.finishCompactRun);
+  const failCompactRun = useOverlayStore((state) => state.failCompactRun);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const startCompactRun = useOverlayStore((state) => state.startCompactRun);
   const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
@@ -721,6 +722,7 @@ export function Composer({
     mutationFn: ({ hint, clientMessageID }: { hint: string; clientMessageID: string }) =>
       compactSession(token, sessionID, { hint, clientMessageID }),
     onMutate: ({ clientMessageID }) => {
+      onSubmitStart?.();
       clearSubmitError();
       onSubmitError?.(null);
       startCompactRun(sessionID, clientMessageID);
@@ -738,11 +740,14 @@ export function Composer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
-    onError: (error) => {
-      showSubmitError(compactErrorMessage(error, t));
+    onError: (error, variables) => {
+      failCompactRun(sessionID, variables.clientMessageID, {
+        code: error instanceof APIError ? error.code : undefined,
+        message: compactErrorMessage(error, t),
+      });
     },
-    onSettled: () => {
-      finishCompactRun(sessionID);
+    onSettled: (_result, error, variables) => {
+      if (!error) finishCompactRun(sessionID, variables.clientMessageID);
     },
   });
   const systemSubmitMutation = useMutation({
@@ -1224,6 +1229,16 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
         return t("composer.compactEmpty");
       case "compact_running":
         return t("composer.compactRunning");
+      case "compact_history_changed":
+        return t("composer.compactHistoryChanged");
+      case "compact_not_reduced":
+        return t("composer.compactNotReduced");
+      case "compact_incomplete":
+        return t("composer.compactIncomplete");
+      case "compact_summary_empty":
+        return t("composer.compactSummaryEmpty");
+      case "context_budget_exceeded":
+        return t("composer.contextBudgetExceeded");
       case "turn_running":
         return t("composer.turnRunning");
       case "no_model":
@@ -1232,5 +1247,5 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
         return t("composer.providerConfig");
     }
   }
-  return t("composer.compactFailed");
+  return error instanceof APIError && error.detail ? error.detail : t("composer.compactFailed");
 }
