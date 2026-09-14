@@ -96,7 +96,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `GET /providers/{name}` | — | profile | 404 |
 | `PATCH /providers/{name}` | `{displayName?, protocol?, baseURL?, apiKey?, models?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
-| `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存)。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
+| `POST /providers/models` | `{protocol, baseURL?, apiKey?, brand?}` | `{models: [{id, displayName?, contextWindow?, capabilities?, limits?}]}`，按未保存的连接信息探测候选 | 400 / 502 |
+| `GET /providers/{name}/models` | — | `{models: [{id, displayName?, contextWindow?, capabilities?, limits?}]}`（代理真实端点，60s 缓存，能力缺失与 `false` 分开）。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
 

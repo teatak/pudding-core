@@ -725,7 +725,7 @@ func contentsForMessage(msg provider.Message, registry *functionRegistry) []cont
 
 // ListModels 拉取支持 generateContent 的模型目录。包级函数,
 // 不进 provider.Client 流式契约(与 openai.ListModels 同理)。
-func ListModels(ctx context.Context, cfg Config) ([]string, error) {
+func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
 		base = defaultBaseURL
@@ -747,14 +747,17 @@ func ListModels(ctx context.Context, cfg Config) ([]string, error) {
 	}
 	var payload struct {
 		Models []struct {
-			Name    string   `json:"name"`
-			Methods []string `json:"supportedGenerationMethods"`
+			Name             string   `json:"name"`
+			DisplayName      string   `json:"displayName"`
+			InputTokenLimit  int      `json:"inputTokenLimit"`
+			OutputTokenLimit int      `json:"outputTokenLimit"`
+			Methods          []string `json:"supportedGenerationMethods"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("google: parse models: %w", err)
 	}
-	var models []string
+	models := make([]provider.ModelCandidate, 0, len(payload.Models))
 	for _, m := range payload.Models {
 		supported := false
 		for _, method := range m.Methods {
@@ -764,7 +767,18 @@ func ListModels(ctx context.Context, cfg Config) ([]string, error) {
 			}
 		}
 		if supported {
-			models = append(models, strings.TrimPrefix(m.Name, "models/"))
+			id := strings.TrimPrefix(strings.TrimSpace(m.Name), "models/")
+			if id == "" {
+				continue
+			}
+			candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.DisplayName)}
+			if m.InputTokenLimit > 0 {
+				candidate.ContextWindow = m.InputTokenLimit
+			}
+			if m.OutputTokenLimit > 0 {
+				candidate.Limits = &provider.ModelLimits{MaxOutputTokens: m.OutputTokenLimit}
+			}
+			models = append(models, candidate)
 		}
 	}
 	return models, nil

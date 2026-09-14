@@ -501,7 +501,7 @@ func messagesFor(msg provider.Message) []message {
 
 // ListModels 拉取模型目录(GET /v1/models)。包级函数,
 // 不进 provider.Client 流式契约(与 openai / google 同理)。
-func ListModels(ctx context.Context, cfg Config) ([]string, error) {
+func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
 		base = defaultBaseURL
@@ -524,15 +524,37 @@ func ListModels(ctx context.Context, cfg Config) ([]string, error) {
 	}
 	var payload struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID             string `json:"id"`
+			DisplayName    string `json:"display_name"`
+			MaxInputTokens int    `json:"max_input_tokens"`
+			MaxTokens      int    `json:"max_tokens"`
+			Capabilities   struct {
+				ImageInput struct {
+					Supported *bool `json:"supported"`
+				} `json:"image_input"`
+			} `json:"capabilities"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("anthropic: parse models: %w", err)
 	}
-	models := make([]string, 0, len(payload.Data))
+	models := make([]provider.ModelCandidate, 0, len(payload.Data))
 	for _, m := range payload.Data {
-		models = append(models, m.ID)
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			continue
+		}
+		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.DisplayName)}
+		if m.MaxInputTokens > 0 {
+			candidate.ContextWindow = m.MaxInputTokens
+		}
+		if m.MaxTokens > 0 {
+			candidate.Limits = &provider.ModelLimits{MaxOutputTokens: m.MaxTokens}
+		}
+		if m.Capabilities.ImageInput.Supported != nil {
+			candidate.Capabilities = map[string]bool{"image": *m.Capabilities.ImageInput.Supported}
+		}
+		models = append(models, candidate)
 	}
 	return models, nil
 }

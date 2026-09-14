@@ -1,3 +1,4 @@
+import type { ProviderModelCandidate } from "@/contracts/api";
 import type { ProviderModel, ProviderProfile } from "@/api/client";
 
 export type ProviderPresetId =
@@ -58,7 +59,7 @@ export type ProviderPreset = {
 };
 
 // Creation/import templates only; saved profile.models remain authoritative.
-// Verified against vendor model catalogs on 2026-09-12 (docs/provider-presets.md).
+// Verified on 2026-09-12; OpenRouter refreshed on 2026-09-14 (docs/provider-presets.md).
 const DEEPSEEK_MODELS = [
   model("deepseek-flash", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 384_000, maxToolLoops: 64 } }),
   model("deepseek-v4-pro", { contextWindow: 1_000_000, capabilities: { tools: true }, limits: { maxOutputTokens: 384_000, maxToolLoops: 64 } }),
@@ -353,11 +354,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "openai-compatible",
         baseURL: "https://openrouter.ai/api/v1",
         models: [
-          "openrouter/free",
-          "nvidia/nemotron-3.5-lightning:free",
-          "nvidia/nemotron-3-super-120b-a12b:free",
-          "z-ai/glm-4.5-air:free",
-        ].map((id) => model(id, { capabilities: { tools: true } })),
+          model("openrouter/free", { displayName: "Free", contextWindow: 200_000, capabilities: { image: true, tools: true } }),
+          model("openai/gpt-5.6-sol", { displayName: "GPT 5.6 Sol", contextWindow: 1_050_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+          model("anthropic/claude-sonnet-5", { displayName: "Claude Sonnet 5", contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
+          model("google/gemini-3.8-flash", { displayName: "Gemini 3.8 Flash", contextWindow: 1_048_576, capabilities: { image: true, audio: true, tools: true }, limits: { maxOutputTokens: 65_536 } }),
+          model("deepseek/deepseek-v4.1-flash", { displayName: "DeepSeek V4.1 Flash", contextWindow: 1_048_576, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 384_000 } }),
+          model("qwen/qwen3.8-flash", { displayName: "Qwen3.8 Flash", contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 131_072 } }),
+          model("moonshotai/kimi-k3", { displayName: "Kimi K3", contextWindow: 1_048_576, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 943_718 } }),
+        ],
       },
     ],
   },
@@ -526,21 +530,12 @@ const MODEL_BRAND_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> 
   ["grok", ["grok"]],
 ];
 
-// 模型 → 品牌图标 key。先按内置 preset 的模型清单精确命中,再按家族关键字判定
-// (id 按非字母数字分段,允许 qwen3 / kimi-k3 这类带版本号的写法);判定不出返回
-// undefined,由调用方回退 profile 品牌。
+// 优先识别模型厂商，避免中转平台的预设归属覆盖模型品牌。
+// 家族无法识别时再查精确预设（例如 openrouter/free）；仍未知则由调用方使用 profile 品牌。
 export function providerBrandForModel(modelID: string | undefined) {
   const normalizedModelID = (modelID || "").trim().toLowerCase();
   if (!normalizedModelID) {
     return undefined;
-  }
-  const exactPreset = PROVIDER_PRESETS.find((preset) =>
-    preset.variants.some((variant) =>
-      variant.models.some((model) => model.id.trim().toLowerCase() === normalizedModelID),
-    ),
-  );
-  if (exactPreset) {
-    return exactPreset.id;
   }
   const tokens = normalizedModelID.split(/[^a-z0-9]+/).filter(Boolean);
   for (const [brand, keywords] of MODEL_BRAND_KEYWORDS) {
@@ -548,7 +543,11 @@ export function providerBrandForModel(modelID: string | undefined) {
       return brand;
     }
   }
-  return undefined;
+  return PROVIDER_PRESETS.find((preset) =>
+    preset.variants.some((variant) =>
+      variant.models.some((model) => model.id.trim().toLowerCase() === normalizedModelID),
+    ),
+  )?.id;
 }
 
 export function providerPresetVariantGroup(variant: ProviderPresetVariant | undefined) {
@@ -628,35 +627,39 @@ export function providerModelDiscoveryForVariant(
   };
 }
 
+export function normalizeProviderModelCandidates(candidates: ProviderModelCandidate[]): ProviderModelCandidate[] {
+  const seen = new Set<string>();
+  return candidates.flatMap((candidate) => {
+    const id = candidate.id.trim();
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [{ ...candidate, id }];
+  });
+}
+
 export function mergeProviderModelCandidate(
-  id: string,
+  candidate: ProviderModelCandidate,
   variant: ProviderPresetVariant | undefined,
   protocol: ProviderPresetProtocol,
 ): ProviderModel {
-  const trimmedID = id.trim();
-  const presetModel = variant?.models.find((model) => model.id === trimmedID);
-  if (presetModel) {
-    return { ...presetModel };
-  }
-  const fallback = providerModelFromCandidate(trimmedID, protocol);
-  const globalModel = globalPresetModel(trimmedID, protocol);
-  if (!globalModel) {
-    return fallback;
-  }
-  const capabilities = { ...(globalModel.capabilities || fallback.capabilities) };
-  // Astra may be discovered through Chat Completions, but its tools require Responses.
-  if (trimmedID === "gpt-6-astra" && protocol === "openai-compatible") {
-    capabilities.tools = false;
-  }
-  // 端点通常只给模型 ID。复用元数据时需遵循协议能力限制；请求参数使用
-  // 当前协议的默认值，避免把 OpenAI options 带到 Anthropic / Google。
-  return {
-    ...fallback,
-    displayName: globalModel.displayName,
-    contextWindow: globalModel.contextWindow,
-    capabilities,
-    limits: globalModel.limits ? { ...globalModel.limits } : undefined,
+  const id = candidate.id.trim();
+  const localPreset = variant?.models.find((model) => model.id === id);
+  const preset = localPreset || globalPresetModel(id, protocol);
+  const defaults = providerModelFromCandidate(id, protocol);
+  const merged: ProviderModel = {
+    ...defaults,
+    displayName: candidate.displayName?.trim() || preset?.displayName || defaults.displayName,
+    contextWindow: candidate.contextWindow || preset?.contextWindow,
+    capabilities: { ...defaults.capabilities, ...preset?.capabilities, ...candidate.capabilities },
+    limits: preset?.limits || candidate.limits ? { ...preset?.limits, ...candidate.limits } : undefined,
+    // Only the selected variant can supply protocol-specific options.
+    providerOptions: localPreset?.providerOptions || defaults.providerOptions,
   };
+  // Astra's tool calling requires Responses even when discovery reports tools.
+  if (id === "gpt-6-astra" && protocol === "openai-compatible") {
+    merged.capabilities!.tools = false;
+  }
+  return merged;
 }
 
 export function providerModelDisplayName(id: string) {

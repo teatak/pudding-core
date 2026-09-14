@@ -8,6 +8,7 @@ import {
   probeProviderModels,
   type ProviderProfile,
 } from "@/api/client";
+import type { ProviderModelCandidate } from "@/contracts/api";
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
 import { Spinner } from "@/components/Spinner";
@@ -35,6 +36,7 @@ import {
   defaultProviderPresetVariant,
   generateProviderProfileID,
   mergeProviderModelCandidate,
+  normalizeProviderModelCandidates,
   providerModelDisplayName,
   providerModelDiscoveryForVariant,
   providerPresetProfileName,
@@ -128,7 +130,7 @@ export function ProviderPresetCreateDialog({
   const [profileID, setProfileID] = useState("");
   const [localError, setLocalError] = useState("");
   const [modelsLoading, setModelsLoading] = useState(false);
-  const [candidateIDs, setCandidateIDs] = useState<string[]>([]);
+  const [candidates, setCandidates] = useState<ProviderModelCandidate[]>([]);
   const [selectedCandidateIDs, setSelectedCandidateIDs] = useState<string[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [verifiedModelCount, setVerifiedModelCount] = useState<number | null>(null);
@@ -150,7 +152,7 @@ export function ProviderPresetCreateDialog({
     setProfileID(generateProviderProfileID(profiles, preset.id));
     setLocalError("");
     setModelsLoading(false);
-    setCandidateIDs([]);
+    setCandidates([]);
     setSelectedCandidateIDs([]);
     setCandidateFilter("");
     setVerifiedModelCount(null);
@@ -164,7 +166,7 @@ export function ProviderPresetCreateDialog({
   const apiKeyRequired = variant ? !variant.apiKeyOptional : true;
   const activeBaseURL = variant?.baseURLEditable ? baseURL.trim() : variant?.baseURL || "";
   const activeModels = variant?.dynamicModels
-    ? selectedCandidateIDs.map((id) => mergeProviderModelCandidate(id, variant, variant.protocol))
+    ? candidates.filter(({ id }) => selectedCandidateIDs.includes(id)).map((candidate) => mergeProviderModelCandidate(candidate, variant, variant.protocol))
     : variant?.models || [];
   const baseURLReady = !variant?.baseURLEditable || Boolean(activeBaseURL);
   const modelsReady = !variant?.dynamicModels || activeModels.length > 0;
@@ -172,14 +174,14 @@ export function ProviderPresetCreateDialog({
     ? providerSupportsModelDiscovery(variant)
     : false;
   const canCreate = Boolean(preset && variant && profileID && baseURLReady && modelsReady && (!apiKeyRequired || apiKey.trim()));
-  const filteredCandidateIDs = useMemo(() => {
+  const filteredCandidates = useMemo(() => {
     const query = candidateFilter.trim().toLowerCase();
     return query
-      ? candidateIDs.filter((id) =>
-          id.toLowerCase().includes(query) || providerModelDisplayName(id).toLowerCase().includes(query),
+      ? candidates.filter(({ id, displayName }) =>
+          id.toLowerCase().includes(query) || (displayName || providerModelDisplayName(id)).toLowerCase().includes(query),
         )
-      : candidateIDs;
-  }, [candidateFilter, candidateIDs]);
+      : candidates;
+  }, [candidateFilter, candidates]);
   const initialVariant = preset ? defaultProviderPresetVariant(preset) : null;
   const dirty = Boolean(
     open &&
@@ -189,7 +191,7 @@ export function ProviderPresetCreateDialog({
   );
 
   const resetModelProbe = () => {
-    setCandidateIDs([]);
+    setCandidates([]);
     setSelectedCandidateIDs([]);
     setCandidateFilter("");
     setVerifiedModelCount(null);
@@ -226,11 +228,11 @@ export function ProviderPresetCreateDialog({
         baseURL: discovery.baseURL,
         apiKey: apiKey.trim(),
       });
-      const models = Array.from(new Set(response.models.map((id) => id.trim()).filter(Boolean)));
+      const models = normalizeProviderModelCandidates(response.models);
       setVerifiedModelCount(models.length);
       if (variant.dynamicModels) {
-        setCandidateIDs(models);
-        setSelectedCandidateIDs(models);
+        setCandidates(models);
+        setSelectedCandidateIDs(models.map(({ id }) => id));
         setCandidateFilter("");
       }
     } catch {
@@ -251,7 +253,7 @@ export function ProviderPresetCreateDialog({
   };
 
   const selectAllFilteredCandidates = () => {
-    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidateIDs])));
+    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidates.map(({ id }) => id)])));
   };
 
   const mutation = useMutation({
@@ -399,7 +401,7 @@ export function ProviderPresetCreateDialog({
                   {t("provider.testAndLoadModels")}
                 </Button>
               </div>
-              {candidateIDs.length > 8 ? (
+              {candidates.length > 8 ? (
                 <Input
                   autoComplete="off"
                   placeholder={t("provider.filterCandidates")}
@@ -407,16 +409,16 @@ export function ProviderPresetCreateDialog({
                   onChange={(event) => setCandidateFilter(event.target.value)}
                 />
               ) : null}
-              {candidateIDs.length > 0 ? (
+              {candidates.length > 0 ? (
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">
                     {t("provider.selectedAndTotalCount")
                       .replace("{selected}", String(selectedCandidateIDs.length))
-                      .replace("{total}", String(candidateIDs.length))}
+                      .replace("{total}", String(candidates.length))}
                   </span>
                   <div className="flex items-center gap-1">
                     <Button
-                      disabled={filteredCandidateIDs.length === 0}
+                      disabled={filteredCandidates.length === 0}
                       size="xs"
                       type="button"
                       variant="ghost"
@@ -436,21 +438,21 @@ export function ProviderPresetCreateDialog({
                   </div>
                 </div>
               ) : null}
-              {candidateIDs.length > 0 ? (
+              {candidates.length > 0 ? (
                 <div className="max-h-48 overflow-y-auto rounded-md border bg-background p-1">
-                  {filteredCandidateIDs.map((id) => (
+                  {filteredCandidates.map(({ id, displayName }) => (
                     <label key={id} className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent">
                       <Checkbox
                         checked={selectedCandidateIDs.includes(id)}
                         onCheckedChange={(checked) => toggleCandidate(id, checked)}
                       />
                       <span className="grid min-w-0 gap-0.5">
-                        <span className="truncate">{providerModelDisplayName(id)}</span>
+                        <span className="truncate">{displayName || providerModelDisplayName(id)}</span>
                         <span className="truncate font-mono text-xs text-muted-foreground">{id}</span>
                       </span>
                     </label>
                   ))}
-                  {filteredCandidateIDs.length === 0 ? (
+                  {filteredCandidates.length === 0 ? (
                     <div className="px-2 py-6 text-center text-sm text-muted-foreground">{t("provider.candidatesNoMatch")}</div>
                   ) : null}
                 </div>

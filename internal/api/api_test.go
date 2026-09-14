@@ -34,6 +34,7 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
@@ -3366,7 +3367,7 @@ func TestProviderModelsProxy(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"m-alpha"},{"id":"m-beta"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"m-alpha","name":"Alpha","context_length":65536,"max_output_tokens":8192,"capabilities":{"vision":false,"tools":true}},{"id":"m-beta"}]}`))
 	}))
 	defer upstream.Close()
 
@@ -3376,15 +3377,23 @@ func TestProviderModelsProxy(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	got := decodeJSON[map[string][]string](t, req(t, http.MethodGet, srv.URL+"/providers/up/models", nil))
-	if len(got["models"]) != 2 || got["models"][0] != "m-alpha" {
+	got := decodeJSON[map[string][]provider.ModelCandidate](t, req(t, http.MethodGet, srv.URL+"/providers/up/models", nil))
+	if len(got["models"]) != 2 || got["models"][0].ID != "m-alpha" {
 		t.Fatalf("unexpected models: %+v", got)
 	}
 
-	got = decodeJSON[map[string][]string](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
+	if first := got["models"][0]; first.ContextWindow != 65536 || first.Limits.MaxOutputTokens != 8192 || first.Capabilities["image"] || !first.Capabilities["tools"] {
+		t.Fatalf("metadata lost: %+v", first)
+	}
+	cached := decodeJSON[map[string][]provider.ModelCandidate](t, req(t, http.MethodGet, srv.URL+"/providers/up/models", nil))
+	if !reflect.DeepEqual(cached, got) {
+		t.Fatal("cache lost model metadata")
+	}
+
+	got = decodeJSON[map[string][]provider.ModelCandidate](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
 		"protocol": "openai-compatible", "baseURL": upstream.URL,
 	}))
-	if len(got["models"]) != 2 || got["models"][1] != "m-beta" {
+	if len(got["models"]) != 2 || got["models"][1].ID != "m-beta" {
 		t.Fatalf("unexpected probed models: %+v", got)
 	}
 
@@ -3396,10 +3405,10 @@ func TestProviderModelsProxy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"buzz-model"}]}`))
 	}))
 	defer buzzHiveUpstream.Close()
-	got = decodeJSON[map[string][]string](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
+	got = decodeJSON[map[string][]provider.ModelCandidate](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
 		"brand": "buzzhive", "protocol": "google", "baseURL": buzzHiveUpstream.URL,
 	}))
-	if len(got["models"]) != 1 || got["models"][0] != "buzz-model" {
+	if len(got["models"]) != 1 || got["models"][0].ID != "buzz-model" {
 		t.Fatalf("unexpected BuzzHive probed models: %+v", got)
 	}
 

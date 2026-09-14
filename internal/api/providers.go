@@ -10,6 +10,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
 	"github.com/teatak/pudding-core/internal/provider/openai"
@@ -261,7 +262,7 @@ func (s *Server) probeProviderModels(c *cart.Context) error {
 		return nil
 	}
 	if models == nil {
-		models = []string{}
+		models = []provider.ModelCandidate{}
 	}
 	c.JSON(http.StatusOK, map[string]any{"models": models})
 	return nil
@@ -273,7 +274,7 @@ const modelsCacheTTL = 60 * time.Second
 
 type modelsCacheEntry struct {
 	at     time.Time
-	models []string
+	models []provider.ModelCandidate
 }
 
 var (
@@ -316,7 +317,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 		return nil
 	}
 	if models == nil {
-		models = []string{}
+		models = []provider.ModelCandidate{}
 	}
 
 	modelsCacheMu.Lock()
@@ -340,7 +341,7 @@ func buzzHiveModelsBaseURL(baseURL string) string {
 	return base + "/v1"
 }
 
-func fetchProviderModels(ctx context.Context, protocol, baseURL, apiKey string) ([]string, error) {
+func fetchProviderModels(ctx context.Context, protocol, baseURL, apiKey string) ([]provider.ModelCandidate, error) {
 	switch protocol {
 	case registry.TypeOpenAICompatible, registry.TypeOpenAIResponses:
 		return openai.ListModels(ctx, openai.Config{BaseURL: baseURL, APIKey: apiKey})

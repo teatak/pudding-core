@@ -2,7 +2,7 @@
 
 `web/src/provider/presets.ts` 仅提供创建、导入模型时的模板。运行时仍以用户保存的 `<home>/config/*.yaml` 为准，更新预设不会迁移已有配置。
 
-2026-09-12 核对的更新：
+2026-09-12 核对的更新（OpenRouter 于 2026-09-14 复核）：
 
 | 厂商 | 预设变化 | 官方依据 |
 | --- | --- | --- |
@@ -13,11 +13,38 @@
 | Qwen | 更新为 3.8 Flash、3.8 Max 0902，保留 3.7 Plus；补齐图片能力和输出限制 | [更新记录](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Max 参数](https://help.aliyun.com/zh/model-studio/qwen3-8-max) |
 | Kimi | 增加 K2.7 Code；补齐视觉能力，修正 K2.6 的上下文 | [模型目录](https://platform.kimi.com/docs/models)、[K2.7 Code](https://www.kimi.com/resources/kimi-k2-7-code) |
 | GLM | 增加 5.3 Flash；5.2/5.1 标记为纯文本，5.1 上下文修正为 200K | [5.3 Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)、[5.1](https://docs.z.ai/guides/llm/glm-5.1) |
-| OpenRouter | 增加 Nemotron 3.5 Lightning Free，移除 Owl Alpha 和 Laguna 临时预设 | [在线模型目录](https://openrouter.ai/api/v1/models)、[Owl 端点](https://openrouter.ai/api/v1/models/openrouter/owl-alpha/endpoints) |
+| OpenRouter | 保留 Free 自动路由，加入六家常用付费模型；补齐视觉、音频、上下文和输出限额，移除原来的三个固定免费模型预设 | [在线模型目录](https://openrouter.ai/api/v1/models) |
 
 同一模型的能力与限额跨协议共享；输出限制直接放在 `limits.maxOutputTokens`，由适配器转换为协议字段。预设和模型导入均不再指定 `temperature=0.2`，遵循供应商默认采样行为；用户可关闭“使用供应商默认”后通过滑块设置温度，重新开启则移除温度参数。
 
 Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 保留已开放的 V2.5 系列；BuzzHive/Ollama 继续动态发现模型。
+
+## 从端点导入模型
+
+候选目录返回结构化模型信息，新建动态配置和在已有配置中添加候选都采用相同规则：端点明确返回的字段优先，缺失字段由完整模型 ID 精确匹配的预设补齐；不会依据品牌图标或模型家族猜测限额。仅有 ID 的端点仍可正常导入，未知上下文和输出上限留空。能力缺失时沿用原有表单默认（图像、音频关闭，工具开启），不代表已经确认支持；端点明确返回的 `false` 会覆盖预设。
+
+- OpenRouter：读取 `name`、`context_length`、`top_provider.max_completion_tokens`、`architecture.input_modalities` 和 `supported_parameters`。[目录协议](https://openrouter.ai/docs/api/api-reference/models/get-models)
+- BuzzHive：读取 `/v1/models` 中管理员已保存的显示名、上下文、输出限额及 `vision/audio_input/tools` 能力。BuzzHive 需更新到包含该目录扩展的版本；不会从路由名称推测能力。
+- Gemini：读取 `displayName`、`inputTokenLimit` 和 `outputTokenLimit`，只列出支持 `generateContent` 的模型。[目录协议](https://ai.google.dev/api/models)
+- Anthropic：读取 `display_name`、`max_input_tokens`、`max_tokens` 和 `capabilities.image_input.supported`。[目录协议](https://platform.claude.com/docs/en/api/models/list)
+
+候选仅是导入来源，选择添加后才写入用户配置；刷新目录不会覆盖已保存模型。采样参数保持当前协议默认，Astra 的 Chat Completions 工具限制继续生效。
+
+## OpenRouter 模型精选
+
+使用 `https://openrouter.ai/api/v1` 的 OpenAI Chat Completions 兼容协议。模型 ID、能力与限额以 OpenRouter 目录为准，不直接套用厂商直连端点的元数据。
+
+| 显示名 | 模型 ID | 类型 |
+| --- | --- | --- |
+| Free | `openrouter/free` | 免费自动路由 |
+| GPT 5.6 Sol | `openai/gpt-5.6-sol` | 付费 |
+| Claude Sonnet 5 | `anthropic/claude-sonnet-5` | 付费 |
+| Gemini 3.8 Flash | `google/gemini-3.8-flash` | 付费 |
+| DeepSeek V4.1 Flash | `deepseek/deepseek-v4.1-flash` | 付费 |
+| Qwen3.8 Flash | `qwen/qwen3.8-flash` | 付费 |
+| Kimi K3 | `moonshotai/kimi-k3` | 付费 |
+
+Free 保持列表首项，输出上限由实际路由到的模型决定，预设不填未知上限。其它模型均支持图像输入和工具调用；Gemini 另支持音频输入。移除的固定免费项不再作为创建模板提供，已有配置不变，仍可通过模型发现按需导入。
 
 ## OpenRouter 应用归属
 

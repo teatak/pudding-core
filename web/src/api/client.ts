@@ -1284,14 +1284,14 @@ export async function denyApproval(token: string, sessionID: string, approvalID:
   });
 }
 
-export function listProviderModels(token: string, name: string): Promise<{ models: string[] }> {
+export function listProviderModels(token: string, name: string): Promise<z.infer<typeof listModelsResponse>> {
   return request(token, `/providers/${encodeURIComponent(name)}/models`, listModelsResponse);
 }
 
 export function probeProviderModels(
   token: string,
   body: z.infer<typeof probeProviderModelsRequest>,
-): Promise<{ models: string[] }> {
+): Promise<z.infer<typeof listModelsResponse>> {
   return request(token, "/providers/models", listModelsResponse, {
     method: "POST",
     body: JSON.stringify(probeProviderModelsRequest.parse(body)),

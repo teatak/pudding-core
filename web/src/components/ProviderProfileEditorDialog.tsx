@@ -32,6 +32,7 @@ import {
   type ProviderModel,
   type ProviderProfile,
 } from "@/api/client";
+import type { ProviderModelCandidate } from "@/contracts/api";
 import { queryKeys } from "@/api/queryKeys";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Spinner } from "@/components/Spinner";
@@ -82,6 +83,7 @@ import { cn } from "@/lib/utils";
 import {
   generateProviderProfileID,
   mergeProviderModelCandidate,
+  normalizeProviderModelCandidates,
   providerModelDisplayName,
   providerModelDiscoveryForVariant,
   providerProtocolDisplayName,
@@ -168,7 +170,7 @@ export function ProviderProfileEditorDialog({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidatesFailed, setCandidatesFailed] = useState(false);
   const [candidatePopoverOpen, setCandidatePopoverOpen] = useState(false);
-  const [candidateIDs, setCandidateIDs] = useState<string[]>([]);
+  const [candidates, setCandidates] = useState<ProviderModelCandidate[]>([]);
   const [selectedCandidateIDs, setSelectedCandidateIDs] = useState<string[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [apiKeyVisible, setAPIKeyVisible] = useState(false);
@@ -200,15 +202,15 @@ export function ProviderProfileEditorDialog({
   );
   const supportsModelDiscovery = providerSupportsModelDiscovery(activeVariant);
   const presetGroups = useMemo(() => (preset ? providerPresetGroups(preset) : []), [preset]);
-  const filteredCandidateIDs = useMemo(() => {
+  const filteredCandidates = useMemo(() => {
     const query = candidateFilter.trim().toLowerCase();
     if (!query) {
-      return candidateIDs;
+      return candidates;
     }
-    return candidateIDs.filter((id) =>
-      id.toLowerCase().includes(query) || providerModelDisplayName(id).toLowerCase().includes(query),
+    return candidates.filter(({ id, displayName }) =>
+      id.toLowerCase().includes(query) || (displayName || providerModelDisplayName(id)).toLowerCase().includes(query),
     );
-  }, [candidateFilter, candidateIDs]);
+  }, [candidateFilter, candidates]);
   const providerProtocolOptions = useMemo(() => {
     const presetProtocols = preset ? providerPresetProtocolsForGroup(preset, providerGroup) : [];
     return presetProtocols.length > 0 ? presetProtocols : PROVIDER_PROTOCOL_OPTIONS;
@@ -240,7 +242,7 @@ export function ProviderProfileEditorDialog({
     setModelDialogSaving(false);
     setCandidatesFailed(false);
     setCandidatePopoverOpen(false);
-    setCandidateIDs([]);
+    setCandidates([]);
     setSelectedCandidateIDs([]);
     setCandidateFilter("");
   }, [form, initialValue, open, profile]);
@@ -342,7 +344,7 @@ export function ProviderProfileEditorDialog({
     setModelSaveError(null);
     setCandidatesLoading(true);
     setCandidatesFailed(false);
-    setCandidateIDs([]);
+    setCandidates([]);
     setSelectedCandidateIDs([]);
     setCandidateFilter("");
     form.clearErrors("root");
@@ -361,16 +363,8 @@ export function ProviderProfileEditorDialog({
         : await listProviderModels(token, editingID);
       const { models } = response;
       const existing = new Set(form.getValues("models").map((model) => model.id.trim()).filter(Boolean));
-      const nextCandidates: string[] = [];
-      const seen = new Set<string>();
-      for (const rawID of models) {
-        const id = rawID.trim();
-        if (id && !existing.has(id) && !seen.has(id)) {
-          nextCandidates.push(id);
-          seen.add(id);
-        }
-      }
-      setCandidateIDs(nextCandidates);
+      const nextCandidates = normalizeProviderModelCandidates(models).filter(({ id }) => !existing.has(id));
+      setCandidates(nextCandidates);
       setSelectedCandidateIDs([]);
       setCandidateFilter("");
     } catch {
@@ -390,7 +384,7 @@ export function ProviderProfileEditorDialog({
   }
 
   function selectAllFilteredCandidates() {
-    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidateIDs])));
+    setSelectedCandidateIDs((current) => Array.from(new Set([...current, ...filteredCandidates.map(({ id }) => id)])));
   }
 
   function addSelectedCandidates() {
@@ -400,18 +394,18 @@ export function ProviderProfileEditorDialog({
     const values = form.getValues();
     const variant = providerPresetVariantForSelection(preset, values.group, values.protocol);
     const existing = new Set(values.models.map((model) => model.id.trim()).filter(Boolean));
-    const selected = selectedCandidateIDs.filter((id) => !existing.has(id));
+    const selected = candidates.filter(({ id }) => selectedCandidateIDs.includes(id) && !existing.has(id));
     if (selected.length === 0) {
       setSelectedCandidateIDs([]);
       return;
     }
     const nextModels = [
       ...values.models,
-      ...selected.map((id) => modelToForm(mergeProviderModelCandidate(id, variant, values.protocol), values.protocol)),
+      ...selected.map((candidate) => modelToForm(mergeProviderModelCandidate(candidate, variant, values.protocol), values.protocol)),
     ];
     commitModels(nextModels, () => {
       setPendingRevealModelIndex(values.models.length);
-      setCandidateIDs((current) => current.filter((id) => !selected.includes(id)));
+      setCandidates((current) => current.filter(({ id }) => !selected.some((candidate) => candidate.id === id)));
       setSelectedCandidateIDs([]);
       setCandidatePopoverOpen(false);
     });
@@ -656,7 +650,7 @@ export function ProviderProfileEditorDialog({
                           <PopoverTitle>{t("provider.candidateModels")}</PopoverTitle>
                           <PopoverDescription>{t("provider.candidateModelsHint")}</PopoverDescription>
                         </PopoverHeader>
-                        {candidateIDs.length > 8 ? (
+                        {candidates.length > 8 ? (
                           <div className="border-b p-2">
                             <Input
                               autoComplete="off"
@@ -682,8 +676,8 @@ export function ProviderProfileEditorDialog({
                                   {t("provider.retryCandidates")}
                                 </Button>
                               </div>
-                            ) : filteredCandidateIDs.length > 0 ? (
-                              filteredCandidateIDs.map((id) => (
+                            ) : filteredCandidates.length > 0 ? (
+                              filteredCandidates.map(({ id, displayName }) => (
                                 <label
                                   key={id}
                                   className={cn(
@@ -696,29 +690,29 @@ export function ProviderProfileEditorDialog({
                                     onCheckedChange={(checked) => toggleCandidate(id, checked)}
                                   />
                                   <span className="grid min-w-0 gap-0.5">
-                                    <span className="truncate">{providerModelDisplayName(id)}</span>
+                                    <span className="truncate">{displayName || providerModelDisplayName(id)}</span>
                                     <span className="truncate font-mono text-xs text-muted-foreground">{id}</span>
                                   </span>
                                 </label>
                               ))
                             ) : (
                               <div className="flex h-24 items-center justify-center px-3 text-center text-sm text-muted-foreground">
-                                {candidateIDs.length > 0 ? t("provider.candidatesNoMatch") : t("provider.candidatesEmpty")}
+                                {candidates.length > 0 ? t("provider.candidatesNoMatch") : t("provider.candidatesEmpty")}
                               </div>
                             )}
                           </div>
                         </div>
-                        {candidateIDs.length > 0 && !candidatesLoading && !candidatesFailed ? (
+                        {candidates.length > 0 && !candidatesLoading && !candidatesFailed ? (
                           <div className="grid gap-2 border-t p-2">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs text-muted-foreground">
                                 {t("provider.selectedAndTotalCount")
                                   .replace("{selected}", String(selectedCandidateIDs.length))
-                                  .replace("{total}", String(candidateIDs.length))}
+                                  .replace("{total}", String(candidates.length))}
                               </span>
                               <div className="flex items-center gap-1">
                                 <Button
-                                  disabled={filteredCandidateIDs.length === 0}
+                                  disabled={filteredCandidates.length === 0}
                                   size="xs"
                                   type="button"
                                   variant="ghost"

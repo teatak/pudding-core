@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -294,7 +295,7 @@ func emit(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) 
 
 // ListModels 拉取端点的模型目录(GET /models)。包级函数而非 Client 方法:
 // 模型目录是配置面能力,不进 provider.Client 流式契约。
-func ListModels(ctx context.Context, cfg Config) ([]string, error) {
+func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
 		return nil, errors.New("openai: base url is required")
@@ -316,17 +317,58 @@ func ListModels(ctx context.Context, cfg Config) ([]string, error) {
 	}
 	var payload struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID              string `json:"id"`
+			Name            string `json:"name"`
+			ContextLength   int    `json:"context_length"`
+			MaxOutputTokens int    `json:"max_output_tokens"`
+			Capabilities    struct {
+				Vision *bool `json:"vision"`
+				Audio  *bool `json:"audio_input"`
+				Tools  *bool `json:"tools"`
+			} `json:"capabilities"`
+			Architecture struct {
+				InputModalities []string `json:"input_modalities"`
+			} `json:"architecture"`
+			SupportedParameters []string `json:"supported_parameters"`
+			TopProvider         struct {
+				MaxCompletionTokens int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("openai: parse models: %w", err)
 	}
-	models := make([]string, 0, len(payload.Data))
+	models := make([]provider.ModelCandidate, 0, len(payload.Data))
 	for _, m := range payload.Data {
-		if m.ID != "" {
-			models = append(models, m.ID)
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			continue
 		}
+		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.Name), Capabilities: map[string]bool{}}
+		if m.ContextLength > 0 {
+			candidate.ContextWindow = m.ContextLength
+		}
+		output := m.MaxOutputTokens
+		if output <= 0 {
+			output = m.TopProvider.MaxCompletionTokens
+		}
+		if output > 0 {
+			candidate.Limits = &provider.ModelLimits{MaxOutputTokens: output}
+		}
+		if m.Architecture.InputModalities != nil {
+			candidate.Capabilities["image"] = slices.Contains(m.Architecture.InputModalities, "image")
+			candidate.Capabilities["audio"] = slices.Contains(m.Architecture.InputModalities, "audio")
+		}
+		if m.SupportedParameters != nil {
+			candidate.Capabilities["tools"] = slices.Contains(m.SupportedParameters, "tools")
+		}
+		// BuzzHive publishes saved capabilities explicitly, including false values.
+		for key, value := range map[string]*bool{"image": m.Capabilities.Vision, "audio": m.Capabilities.Audio, "tools": m.Capabilities.Tools} {
+			if value != nil {
+				candidate.Capabilities[key] = *value
+			}
+		}
+		models = append(models, candidate)
 	}
 	return models, nil
 }
