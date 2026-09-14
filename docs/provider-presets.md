@@ -19,6 +19,22 @@
 
 Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 保留已开放的 V2.5 系列；BuzzHive/Ollama 继续动态发现模型。
 
+## OpenRouter 应用归属
+
+Chat Completions、Responses、Anthropic 和 Gemini 的模型请求统一携带 Pudding 应用标识，直连 OpenRouter 或经 BuzzHive 转发时均可用于归属统计，无需修改已保存的提供方配置：
+
+```http
+HTTP-Referer: https://x-t.top
+X-OpenRouter-Title: Pudding
+X-OpenRouter-Categories: programming-app,personal-agent
+```
+
+分类包括编程应用（`programming-app`）、个人助手（`personal-agent`）、通用聊天（`general-chat`）和创意写作（`creative-writing`），对应 Coding、Productivity 与 Creative 三个大类。
+
+按官方已公布的单次两个分类限制，正常模型请求轮换携带 `programming-app,personal-agent` 与 `general-chat,creative-writing`，由 OpenRouter 合并应用分类。轮换仅使用进程内原子计数，不持久化，也不额外发送模型请求；两个分组都到达 OpenRouter 后才能完成四类归属。2026-09-14 核对时，官方页面的上限数字显示缺失，搜索索引中的官方文档仍明确写明单次两个分类、累计最多十个。
+
+标识统一定义在 `internal/provider/attribution.go`，不按模型名或代理地址推断。OpenRouter 收到带标识的实际调用后可建立应用条目；榜单只统计经过 OpenRouter 的调用。规则见 [OpenRouter App Attribution](https://openrouter.ai/docs/app-attribution)。
+
 ## DeepSeek Responses
 
 复用 `internal/provider/openai/responses.go`，配置协议为 `openai-responses`、base URL 为 `https://api.deepseek.com`，实际请求 `POST /responses`。保留现有 Chat Completions 默认选项，用户可显式选择 Responses。

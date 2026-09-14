@@ -205,6 +205,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	provider.SetAppAttribution(httpReq.Header)
 	if c.apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", c.apiKey)
 	}

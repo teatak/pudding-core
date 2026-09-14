@@ -161,6 +161,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUs
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
+	provider.SetAppAttribution(httpReq.Header)
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}

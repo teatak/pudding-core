@@ -180,6 +180,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	provider.SetAppAttribution(httpReq.Header)
 	if c.apiKey != "" {
 		httpReq.Header.Set("x-api-key", c.apiKey)
 	}
