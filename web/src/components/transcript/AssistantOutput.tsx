@@ -1,4 +1,4 @@
-import { Archive, CircleAlert, Split } from "@/components/icons";
+import { CircleAlert, CircleGauge, Split } from "@/components/icons";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";
@@ -170,7 +170,7 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
   return (
     <div className="selectable-text" data-compact-message-id={message.id}>
       <TranscriptDisclosure
-        icon={<Archive className="size-3.5" />}
+        icon={<CircleGauge className="size-3.5" />}
         summary={savingsText}
         title={t(overBudget ? "transcript.compactOverBudget" : "transcript.compactMark")}
       >
@@ -192,7 +192,7 @@ export function CompactRunMarker({ run }: { run: CompactRun }) {
   return (
     <div className="selectable-text" data-compact-run-id={run.clientMessageID}>
       <TranscriptDisclosure
-        icon={noGain ? <Archive /> : run.error ? <CircleAlert /> : <Spinner />}
+        icon={noGain ? <CircleGauge /> : run.error ? <CircleAlert /> : <Spinner />}
         iconClassName={run.error && !noGain ? "text-destructive/70" : undefined}
         title={t(noGain ? "composer.compactNoGain" : run.error ? "composer.compactFailed" : "transcript.compactRunning")}
       >

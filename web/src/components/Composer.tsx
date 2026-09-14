@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  ArchiveRestore,
+  CircleGauge,
   MessageSquarePlus,
   NotebookText,
   PenLine,
@@ -293,7 +293,7 @@ export function Composer({
       command: "/compact",
       description: t("composer.commandCompactDesc"),
       hasArgs: true,
-      icon: ArchiveRestore,
+      icon: CircleGauge,
       id: "compact",
       label: t("composer.commandCompact"),
     },
