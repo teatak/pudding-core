@@ -27,6 +27,12 @@
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
 | [code-agent-tooling-report.md](code-agent-tooling-report.md) | Code 模式工具与终端摩擦记录、优化建议与验收标准（按会话累积） |
 
+## 待实施设计
+
+| 文档 | 当前状态 |
+| --- | --- |
+| [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
+
 ## 仍在收尾
 
 | 文档 | 当前状态 |
