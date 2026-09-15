@@ -76,6 +76,12 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "build"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dist"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(root, "node_modules", "hidden"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +120,7 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	tree := decodeJSON[struct {
 		Entries []projectTreeEntry `json:"entries"`
 	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_browser/project/tree?"+query.Encode(), nil))
-	wantNames := []string{".claude", ".github", ".vite", "docs", ".env", "README.md"}
+	wantNames := []string{".claude", ".github", ".vite", "build", "dist", "docs", "node_modules", ".env", "README.md"}
 	if len(tree.Entries) != len(wantNames) {
 		t.Fatalf("unexpected tree: %+v", tree.Entries)
 	}
@@ -123,7 +129,7 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 			t.Fatalf("unexpected tree: %+v", tree.Entries)
 		}
 	}
-	if tree.Entries[0].Type != "dir" || tree.Entries[4].Type != "file" {
+	if tree.Entries[0].Type != "dir" || tree.Entries[7].Type != "file" {
 		t.Fatalf("unexpected tree: %+v", tree.Entries)
 	}
 

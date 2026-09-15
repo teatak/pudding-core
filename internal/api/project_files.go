@@ -69,17 +69,9 @@ type projectSearchMatchView struct {
 }
 
 var projectTreeIgnoredDirs = map[string]struct{}{
-	".cache":        {},
-	".git":          {},
-	".hg":           {},
-	".next":         {},
-	".pytest_cache": {},
-	".svn":          {},
-	".turbo":        {},
-	"__pycache__":   {},
-	"build":         {},
-	"dist":          {},
-	"node_modules":  {},
+	".git": {},
+	".hg":  {},
+	".svn": {},
 }
 
 var projectTreeIgnoredFiles = map[string]struct{}{
