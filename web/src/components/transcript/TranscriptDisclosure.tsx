@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "@/components/icons";
+import { ChevronDown, ChevronRight, CircleAlert } from "@/components/icons";
 import {
   useContext,
   useLayoutEffect,
@@ -19,6 +19,7 @@ type TranscriptDisclosureProps = {
   children?: ReactNode;
   className?: string;
   contentClassName?: string;
+  failed?: boolean;
   icon: ReactNode;
   iconClassName?: string;
   open?: boolean;
@@ -42,6 +43,7 @@ export function TranscriptDisclosure({
   children,
   className,
   contentClassName,
+  failed,
   icon,
   iconClassName,
   open,
@@ -76,6 +78,9 @@ export function TranscriptDisclosure({
         <span className="shrink-0 truncate">{title}</span>
         {summary != null ? (
           <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
+        ) : null}
+        {failed ? (
+          <CircleAlert className="size-3.5 shrink-0 text-destructive" />
         ) : null}
         {expandable ? (
           <span className="shrink-0">

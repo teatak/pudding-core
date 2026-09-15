@@ -988,6 +988,10 @@ function FileMatchList({ callID, matches, rootPath, sessionID, t }: { callID?: s
         const line = readNumber(match, "line") ?? 1;
         const excerpt = readString(match, "excerpt") || readString(match, "text");
         const previewable = Boolean(sessionID && path && excerpt);
+        const matchRelativePath = readString(match, "relativePath");
+        const isAbsolute = path ? path.startsWith("/") || /^[a-z]:[\\/]/i.test(path) : false;
+        const resolvedAbsolutePath = isAbsolute ? path : rootPath ? `${rootPath.replace(/[\\/]+$/, "")}/${path}` : undefined;
+        const resolvedRelativePath = matchRelativePath || (!isAbsolute ? path : undefined);
         const content = (
           <>
             <code className="truncate font-mono text-muted-foreground">{path}:{line}</code>
@@ -1000,7 +1004,7 @@ function FileMatchList({ callID, matches, rootPath, sessionID, t }: { callID?: s
             className="grid w-full grid-cols-[minmax(0,1fr)] rounded-sm px-1 py-1 text-[11px] hover:bg-muted/60"
             type="button"
             onClick={() => requestProjectFileReveal({
-              absolutePath: path,
+              absolutePath: resolvedAbsolutePath || path,
               fallback: {
                 callID,
                 content: excerpt,
@@ -1012,7 +1016,7 @@ function FileMatchList({ callID, matches, rootPath, sessionID, t }: { callID?: s
                 truncated: true,
               },
               line,
-              relativePath: rootPath ? path : undefined,
+              relativePath: resolvedRelativePath,
               rootPath,
               sessionID: sessionID!,
             })}

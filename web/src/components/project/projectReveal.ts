@@ -20,15 +20,22 @@ export function resolveProjectFileReveal(
   const explicitRoot = rootPath
     ? roots.find((root) => comparablePath(root.path) === comparablePath(rootPath))
     : undefined;
+  const candidateAbsolute = absolutePath || (reveal.relativePath && isAbsolutePath(reveal.relativePath) ? normalizedPath(reveal.relativePath) : undefined);
   const root = explicitRoot || roots
-    .filter((candidate) => absolutePath && pathIsWithin(candidate.path, absolutePath))
+    .filter((candidate) => candidateAbsolute && pathIsWithin(candidate.path, candidateAbsolute))
     .sort((left, right) => normalizedPath(right.path).length - normalizedPath(left.path).length)[0];
   if (!root) {
     return undefined;
   }
-  const relativePath = normalizedRelativePath(
-    reveal.relativePath || relativePathFromRoot(root.path, reveal.absolutePath),
-  );
+  let rawRelative: string | undefined;
+  if (reveal.relativePath && pathIsWithin(root.path, reveal.relativePath)) {
+    rawRelative = relativePathFromRoot(root.path, reveal.relativePath);
+  } else if (candidateAbsolute && pathIsWithin(root.path, candidateAbsolute)) {
+    rawRelative = relativePathFromRoot(root.path, candidateAbsolute);
+  } else if (reveal.relativePath && !isAbsolutePath(reveal.relativePath)) {
+    rawRelative = reveal.relativePath;
+  }
+  const relativePath = normalizedRelativePath(rawRelative);
   if (!relativePath || relativePath === "." || relativePath.startsWith("../")) {
     return undefined;
   }
@@ -61,4 +68,10 @@ function normalizedPath(value?: string) {
 
 function normalizedRelativePath(value?: string) {
   return normalizedPath(value).replace(/^\.\//, "").replace(/^\/+/, "");
+}
+
+function isAbsolutePath(value?: string) {
+  if (!value) return false;
+  const normalized = normalizedPath(value);
+  return normalized.startsWith("/") || /^[a-z]:\//i.test(normalized);
 }
