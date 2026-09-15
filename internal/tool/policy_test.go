@@ -390,6 +390,25 @@ func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
 	}
 }
 
+func TestCommandExecutableUsesSandboxReadRoots(t *testing.T) {
+	root := t.TempDir()
+	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{chrome, "--headless=new", "--screenshot=preview.png", "demo.html"})})
+	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
+	if !ok || !risk.LowRisk || len(risk.requiredProjectPaths) != 0 {
+		t.Fatalf("sandbox-readable executable must not request project access: %+v", risk)
+	}
+	if result, failed := CommandBoundaryFailure(Call{Name: CommandRun, Args: raw}, risk); failed {
+		t.Fatalf("Chrome launch rejected before execution: %s", result.Content)
+	}
+	// Reading/executing an installed App never grants writes to its bundle.
+	raw, _ = json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"touch", chrome})})
+	risk, _ = ClassifyToolCallForProject(CommandRun, raw, []string{root})
+	if risk.LowRisk || len(risk.requiredProjectPaths) == 0 {
+		t.Fatalf("App bundle writes must remain outside project access: %+v", risk)
+	}
+}
+
 func TestClassifyToolCallBackgroundCommandUsesSameRiskRules(t *testing.T) {
 	for _, test := range []struct {
 		name    string

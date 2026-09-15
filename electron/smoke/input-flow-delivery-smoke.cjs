@@ -145,7 +145,7 @@ async function run() {
         function History(){
           const createdAt=new Date().toISOString();
           const turn=conversationTurn.parse({id:turnID,sessionID,clientMessageID:'initial',status:'completed',createdAt,updatedAt:createdAt,messages:history});
-          const {turnVMs}=useTranscriptViewModel({sessionID,sessionRunning:false,assistantOverlays:[],pendingUsers:[],turnDurationByID:new Map(),turns:[turn]});
+          const {turnVMs}=useTranscriptViewModel({sessionID,sessionRunning:false,assistantOverlays:[],pendingUsers:[],turns:[turn]});
           return turnVMs.map(turn=>h(TranscriptTurn,{key:turn.key,turn,token:'',sessionID}));
         }
         function Fixture(){

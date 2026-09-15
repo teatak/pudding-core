@@ -58,6 +58,7 @@ export function ComposerApprovalBar({
   const projectDirs = hasPayloadProjectDirs ? payloadProjectDirs : selectedProjectDirs;
   const suggestedDirName = suggestedProjectDirName(current.payload);
   const toolCallApproval = toolCallFromPayload(current.payload);
+  const commandSessionGrant = isToolCallApproval ? commandSessionGrantFromPayload(current.payload) : null;
   const patchApproval = patchApprovalFromPayload(current.payload);
   const gitCommitApproval = gitCommitFromPayload(current.payload);
   const isComputerAppApproval = isToolCallApproval && toolCallApproval.scope === "computer" && Boolean(toolCallApproval.appID);
@@ -72,7 +73,7 @@ export function ComposerApprovalBar({
     setPendingAction(scope);
     try {
       const response = await approveApproval(token, current.sessionID, current.approvalID, scope, isCodeApproval ? projectDirs : []);
-      if (scope === "session") {
+      if (scope === "session" && !isToolCallApproval) {
         await syncSessionProjectState(queryClient, token, current.sessionID, response.session);
       }
       setViewingPatchApproval(null);
@@ -134,6 +135,21 @@ export function ComposerApprovalBar({
         />
       ),
     });
+    if (commandSessionGrant) {
+      approvalMenuItems.push({
+        id: "approve-session",
+        label: t("transcript.approvalAllowPreviewSession"),
+        value: "approve-session",
+        render: () => (
+          <ApprovalMenuOption
+            description={t("transcript.approvalAllowPreviewSessionDesc")}
+            icon={ShieldCheck}
+            label={t("transcript.approvalAllowPreviewSession")}
+            loading={pendingAction === "session"}
+          />
+        ),
+      });
+    }
     if (patchApproval) {
       approvalMenuItems.push({
         id: "review-patch",
@@ -569,6 +585,18 @@ function toolCallFromPayload(payload: unknown) {
     : [];
   const valuePreview = typeof data.valuePreview === "string" ? data.valuePreview : undefined;
   return { appID, command, execution, hostAccessReason, operation, paths: dedupeStrings(paths), scope, valuePreview };
+}
+
+export function commandSessionGrantFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Record<string, unknown>;
+  if (data.toolName !== "builtin_command_run" || data.execution !== "host" || !data.sessionGrant || typeof data.sessionGrant !== "object") return null;
+  const grant = data.sessionGrant as Record<string, unknown>;
+  if (grant.kind !== "chrome_headless_screenshot") return null;
+  for (const field of ["executable", "cwd", "inputPath", "outputDirectory", "profilePath"]) {
+    if (typeof grant[field] !== "string" || !grant[field].trim()) return null;
+  }
+  return grant;
 }
 
 function patchApprovalFromPayload(payload: unknown): PatchApproval | null {

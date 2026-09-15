@@ -398,24 +398,11 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       },
     })),
   acceptSubmittingTurn: (sessionID, clientMessageID, turnID) =>
-    set((state) => {
-      const current = overlayWithDefaults(state.assistants[turnID], turnID, sessionID);
-      return {
-        pendingUsers: markPendingStarted(state.pendingUsers, sessionID, clientMessageID, turnID),
-        assistants: {
-          ...state.assistants,
-          [turnID]: { ...current, clientMessageID },
-        },
-        runningTurns: {
-          ...state.runningTurns,
-          [sessionID]: turnID,
-        },
-        turnPhases: {
-          ...state.turnPhases,
-          [sessionID]: makePhase({ clientMessageID, phase: "awaiting_model", sessionID, turnID }),
-        },
-      };
-    }),
+    // HTTP confirms acceptance, not current execution state. SSE may already
+    // have streamed or finished this turn by the time the response arrives.
+    set((state) => ({
+      pendingUsers: markPendingStarted(state.pendingUsers, sessionID, clientMessageID, turnID),
+    })),
   clearSubmittingTurn: (sessionID, clientMessageID) =>
     set((state) => {
       const phase = state.turnPhases[sessionID];

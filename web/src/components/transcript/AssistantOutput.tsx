@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type CompactRun, type TurnPhaseState } from "@/state/overlayStore";
 
-import { InterruptedBadge, MessageMeta } from "./MessageMeta";
+import { MessageMeta } from "./MessageMeta";
 import { useElapsedDuration } from "./time";
 import {
   assistantTextFromMessages,
@@ -87,7 +87,6 @@ function CanonicalAssistantOutput({
           <TurnParts key={messages[0].id} disclosure={disclosure} disclosureRootKey={disclosureRootKey} displaySettings={displaySettings} parts={partsFromMessages(messages)} sessionID={sessionID} token={token} />
         ))}
         {assistant.error ? <AssistantError error={assistant.error} /> : null}
-        {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
     </div>
   );
@@ -113,7 +112,6 @@ export function AssistantOutputMeta({
   return (
     <MessageMeta
       createdAt={lastMessage.createdAt}
-      duration={assistant.duration}
       hoverGroup="assistant-turn"
       model={assistant.model}
       text={assistantTextFromMessages(assistant.messages)}
@@ -252,17 +250,17 @@ function LiveAssistantOutput({
   const hasToolPart = overlay.parts.some((part) => part.type === "tool");
   const hasApprovalPart = overlay.parts.some((part) => part.type === "approval");
   const activePhaseName: TurnPhaseState["phase"] | undefined =
-    phase && isTurnPhaseActive(phase)
-      ? phase.phase
-      : streaming
-        ? overlay.text
+    !streaming || assistant.canonicalReady
+      ? undefined
+      : phase && isTurnPhaseActive(phase)
+        ? phase.phase
+        : overlay.text
           ? "streaming_text"
           : hasThoughtPart
             ? "thinking"
             : hasToolPart
               ? "streaming_tool_args"
-              : "awaiting_model"
-        : undefined;
+              : "awaiting_model";
   const visibleActivePhaseName = activePhaseName;
   const phaseCarriedByPart =
     (visibleActivePhaseName === "thinking" && hasThoughtPart) ||
@@ -317,7 +315,6 @@ function LiveAssistantOutput({
       </div>
       {footerPhase ? <AssistantPhaseItem phase={footerPhase} /> : null}
       {overlay.status === "failed" && overlay.error ? <AssistantError error={overlay.error} /> : null}
-      {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}
     </div>
   );
 }

@@ -33,7 +33,6 @@ export function useTranscriptData({
     messages,
     query: turnsQuery,
     revealTurn,
-    turnDurationByID,
     turns,
   } = useTranscriptTurns(token, sessionID);
 
@@ -43,7 +42,6 @@ export function useTranscriptData({
     pendingUsers,
     sessionID,
     sessionRunning,
-    turnDurationByID,
     turnPhase,
     turns,
   });

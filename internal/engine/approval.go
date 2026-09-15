@@ -56,10 +56,11 @@ type ProjectAccessGrant struct {
 }
 
 type pendingApproval struct {
-	req       ApprovalRequest
-	ch        chan approvalDecision
-	resolving bool
-	abandoned bool
+	req             ApprovalRequest
+	ch              chan approvalDecision
+	resolving       bool
+	abandoned       bool
+	commandGrantKey string // Server-computed; never accepted from approval payloads.
 }
 
 func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
@@ -113,6 +114,7 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 		return nil, err
 	}
 	computerAppID := ""
+	commandGrantKey := ""
 	switch p.req.Kind {
 	case ApprovalKindCapability:
 		if p.req.TargetMode == store.ModeCode {
@@ -154,6 +156,8 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 		computerAppID = computerAppIDFromApprovalPayload(p.req.Payload)
 		if computerAppID != "" {
 			scope = ApprovalScopeSession
+		} else if scope == ApprovalScopeSession && p.commandGrantKey != "" {
+			commandGrantKey = p.commandGrantKey
 		} else {
 			scope = ApprovalScopeTurn
 		}
@@ -166,7 +170,7 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 			return nil, err
 		}
 	}
-	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
+	if err := e.completePendingApproval(sessionID, approvalID, p, commandGrantKey); err != nil {
 		return nil, err
 	}
 	claimed = false
@@ -261,7 +265,7 @@ func (e *Engine) DenyApproval(_ context.Context, sessionID, approvalID, reason s
 			e.releasePendingApprovalClaim(sessionID, approvalID, p)
 		}
 	}()
-	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
+	if err := e.completePendingApproval(sessionID, approvalID, p, ""); err != nil {
 		return err
 	}
 	claimed = false
@@ -290,13 +294,19 @@ func (e *Engine) claimPendingApproval(sessionID, approvalID string) (*pendingApp
 	return p, nil
 }
 
-func (e *Engine) completePendingApproval(sessionID, approvalID string, p *pendingApproval) error {
+func (e *Engine) completePendingApproval(sessionID, approvalID string, p *pendingApproval, commandGrantKey string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.approvals[approvalID] != p || p.req.SessionID != sessionID || !p.resolving {
 		return ErrApprovalNotFound
 	}
 	delete(e.approvals, approvalID)
+	if commandGrantKey != "" {
+		if e.commandGrants[sessionID] == nil {
+			e.commandGrants[sessionID] = make(map[string]bool)
+		}
+		e.commandGrants[sessionID][commandGrantKey] = true
+	}
 	return nil
 }
 
@@ -429,7 +439,7 @@ func capabilityApprovalPayload(req tool.CapabilityRequest, publicTargetMode stri
 	})
 }
 
-func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any) (tool.Result, bool) {
+func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any, commandGrantKey string) (tool.Result, bool) {
 	payload := map[string]any{
 		"toolName":  call.Name,
 		"riskClass": string(risk.Class),
@@ -457,7 +467,7 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		Payload:   mustJSON(payload),
 		CreatedAt: time.Now(),
 	}
-	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1)}
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey}
 	e.mu.Lock()
 	e.approvals[approval.ID] = pending
 	e.mu.Unlock()

@@ -22,7 +22,6 @@ export type UserInputVM = {
 
 export type AssistantOutputVM =
   | {
-      duration?: string;
       error?: string;
       kind: "canonical";
       messages: Message[];
@@ -57,6 +56,7 @@ export type TranscriptTurnVM = {
   assistant?: AssistantOutputVM;
   clientMessageID?: string;
   compact?: CompactRun;
+  header?: TurnHeaderVM;
   key: string;
   kind: "canonical" | "compact" | "live" | "pending" | "phase";
   turnID?: string;
@@ -64,6 +64,12 @@ export type TranscriptTurnVM = {
   fileChanges?: TurnFileChange[];
   fileChangeState?: "applied" | "undone";
   sequence?: TranscriptTurnSequenceItem[];
+};
+
+export type TurnHeaderVM = {
+  startedAt?: string;
+  endedAt?: string;
+  status: "running" | "completed" | "failed" | "cancelled";
 };
 
 export type TurnModelVM = {

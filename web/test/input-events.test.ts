@@ -1,17 +1,10 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { test } from "node:test";
+import { createTestViteServer } from "./vite-test-server.ts";
 
 // Use the renderer's module resolver for contracts and store imports; no server
 // is started and no user data or live session is accessed.
-const server = await createServer({
-  configFile: false,
-  root: fileURLToPath(new URL("..", import.meta.url)),
-  optimizeDeps: { noDiscovery: true, include: [] },
-  server: { middlewareMode: true, watch: null, hmr: false, ws: false },
-});
-after(() => server.close());
+const server = await createTestViteServer({ configFile: false });
 const { sessionEvent } = await server.ssrLoadModule("/contracts/events.ts");
 const { useOverlayStore } = await server.ssrLoadModule("/src/state/overlayStore.ts");
 

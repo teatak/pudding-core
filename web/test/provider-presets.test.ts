@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { test } from "node:test";
+import { createTestViteServer } from "./vite-test-server.ts";
 import type { ProviderPreset, ProviderPresetProtocol } from "../src/provider/presets.ts";
 
-const server = await createServer({
-  root: fileURLToPath(new URL("..", import.meta.url)),
-  optimizeDeps: { noDiscovery: true, include: [] },
-  server: { middlewareMode: true, watch: null, hmr: false, ws: false },
-});
-after(() => server.close());
+const server = await createTestViteServer();
 const { PROVIDER_PRESETS, mergeProviderModelCandidate, providerPresetVariantForSelection } = await server.ssrLoadModule("/src/provider/presets.ts");
 const presets = PROVIDER_PRESETS as ProviderPreset[];
 

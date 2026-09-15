@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { test } from "node:test";
+import { createTestViteServer } from "./vite-test-server.ts";
 
-const server = await createServer({
-  root: fileURLToPath(new URL("..", import.meta.url)),
-  optimizeDeps: { noDiscovery: true, include: [] },
-  server: { middlewareMode: true, watch: null, hmr: false, ws: false },
-});
-after(() => server.close());
+const server = await createTestViteServer();
 const { providerBrandForModel } = await server.ssrLoadModule("/src/provider/presets.ts");
 
 test("中转预设中的模型优先显示模型厂商图标", () => {

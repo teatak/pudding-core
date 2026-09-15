@@ -715,16 +715,9 @@ func commandExecutableAllowedForAuto(executable, cwd string, projectDirs []strin
 			return true
 		}
 	}
-	if !filepath.IsAbs(executable) {
-		return false
-	}
-	cleaned := filepath.Clean(executable)
-	for _, root := range []string{"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin"} {
-		if pathInsideRoot(cleaned, root) {
-			return true
-		}
-	}
-	return false
+	// Launching a sandbox-readable executable is not a request to write to its
+	// installation directory. Use the runner's read policy, not a second list.
+	return commandPathReadableInSandbox(executable)
 }
 
 func isAlwaysRiskyCommand(operation string) bool {

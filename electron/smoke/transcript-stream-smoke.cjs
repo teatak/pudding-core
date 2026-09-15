@@ -27,7 +27,7 @@ import {createSessionEventBatcher} from '/src/lib/sessionEventBatcher.ts';
 import {setLocale} from '/src/i18n/index.ts';
 setLocale('zh-CN');
 const h=React.createElement, id='profile-session',turnID='profile-turn';
-const searchState={terms:[]},empty=[],durations=new Map(),noop=()=>{};
+const searchState={terms:[]},empty=[],noop=()=>{};
 const spec=JSON.parse(new URLSearchParams(location.search).get('spec'));
 
 const disclosureState=new Map();
@@ -47,7 +47,7 @@ function Fixture(){
  const [viewport,setViewport]=useState(null);
  const assistantOverlays=useOverlayStore(useShallow(s=>Object.values(s.assistants)));
  const turnPhase=useOverlayStore(s=>s.turnPhases[id]);
- const transcript=useTranscriptViewModel({assistantOverlays,pendingUsers:empty,sessionID:id,sessionRunning:true,turnDurationByID:durations,turnPhase,turns:canonical});
+ const transcript=useTranscriptViewModel({assistantOverlays,pendingUsers:empty,sessionID:id,sessionRunning:true,turnPhase,turns:canonical});
  return h(TooltipProvider,null,h(Profiler,{id:'transcript',onRender:(_id,_phase,duration)=>stats.commits.push(duration)},h('div',{id:'viewport',ref:setViewport,style:{height:510,overflow:'auto',overflowAnchor:'none',contain:'strict',padding:'0 24px','--pudding-composer-mask-height':'24px','--pudding-composer-overlay-height':'80px'}},h(TranscriptList,{turns:transcript.turnVMs,scrollElement:viewport,sessionID:id,searchSlot:'primary',searchState,token:'',hasMoreHistory:false,isLoadingHistory:false,jumpLatestSignal:0,onLoadHistory:noop,disclosure}))),h('textarea',{id:'input',style:{width:'90%',margin:20},placeholder:'Isolated input latency measurement'}));
 }
 await new Promise(resolve=>requestCodeHighlight('const warm = 1;', 'ts', resolve));

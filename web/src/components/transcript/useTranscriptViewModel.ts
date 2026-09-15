@@ -17,12 +17,13 @@ import {
   textFromContentParts,
   transcriptTurnKey,
   type TranscriptTurnVM,
+  type TurnHeaderVM,
   type TurnModelVM,
   type UserInputVM,
 } from "./types";
+import { isCompactMessage } from "./compactOutput";
 
 type CanonicalTurnCacheEntry = {
-  duration?: string;
   item: TranscriptTurnVM;
   phase?: TurnPhaseState;
   turn: ConversationTurn;
@@ -34,7 +35,6 @@ export function useTranscriptViewModel({
   pendingUsers,
   sessionID,
   sessionRunning,
-  turnDurationByID,
   turnPhase,
   turns,
 }: {
@@ -43,7 +43,6 @@ export function useTranscriptViewModel({
   pendingUsers: PendingUserMessage[];
   sessionID: string;
   sessionRunning: boolean;
-  turnDurationByID: Map<string, string>;
   turnPhase?: TurnPhaseState;
   turns: ConversationTurn[];
 }) {
@@ -54,14 +53,27 @@ export function useTranscriptViewModel({
   // a question is answered. Only a terminal turn snapshot contains ALL output.
   const completedCanonicalTurnIDs = useMemo(() => new Set(turns.filter((turn) => turn.status !== "running").map((turn) => turn.id)), [turns]);
   const displayPhase = useMemo<TurnPhaseState | undefined>(() => {
-    if (isTurnPhaseActive(turnPhase)) {
-      return turnPhase;
+    if (turnPhase) {
+      const ended = turnPhase.turnID && (
+        completedCanonicalTurnIDs.has(turnPhase.turnID) ||
+        assistantOverlays.some((overlay) => overlay.turnID === turnPhase.turnID && overlay.status !== "streaming")
+      );
+      return !ended && isTurnPhaseActive(turnPhase) ? turnPhase : undefined;
     }
     if (!sessionRunning || assistantOverlays.length > 0) {
       return undefined;
     }
-    return { phase: "awaiting_model", sessionID, updatedAt: "" };
-  }, [assistantOverlays.length, sessionID, sessionRunning, turnPhase]);
+    // A session list summary can lag terminal events. Restore a waiting phase
+    // only for a concrete running turn from the transcript snapshot.
+    const runningTurn = [...turns].reverse().find((turn) => turn.status === "running");
+    return runningTurn ? {
+      phase: "awaiting_model",
+      sessionID,
+      turnID: runningTurn.id,
+      clientMessageID: runningTurn.clientMessageID,
+      updatedAt: runningTurn.createdAt,
+    } : undefined;
+  }, [assistantOverlays, completedCanonicalTurnIDs, sessionID, sessionRunning, turnPhase, turns]);
 
   const visibleAssistantOverlays = useMemo(
     () =>
@@ -121,7 +133,6 @@ export function useTranscriptViewModel({
           }
         }
         const phaseForTurn = displayPhase?.turnID === turn.id ? displayPhase : undefined;
-        const duration = turnDurationByID.get(turn.id);
         const overlay = liveByTurnID.get(turn.id);
         const sequence: NonNullable<TranscriptTurnVM["sequence"]> = [];
         if (messageSegments.length === 0) {
@@ -129,7 +140,6 @@ export function useTranscriptViewModel({
           if (outputs.length > 0) {
             sequence.push({
               assistant: {
-                duration,
                 kind: "canonical",
                 messages: outputs,
                 model: modelFromTurn(turn),
@@ -155,7 +165,6 @@ export function useTranscriptViewModel({
           if (segment.outputs.length > 0 && !currentLiveSegment && !awaitingBoundary) {
             sequence.push({
               assistant: {
-                duration: index === messageSegments.length - 1 ? duration : undefined,
                 kind: "canonical",
                 messages: segment.outputs,
                 model: modelFromTurn(turn),
@@ -196,6 +205,7 @@ export function useTranscriptViewModel({
         }
         items.push({
           anchorID: turn.id,
+          header: headerFromTurn(turn, overlay),
           clientMessageID: turn.clientMessageID,
           fileChanges: turn.fileChanges,
           fileChangeState: turn.fileChangeState,
@@ -219,6 +229,7 @@ export function useTranscriptViewModel({
       if (overlay) {
         usedLiveTurnIDs.add(overlay.turnID);
         items.push({
+          header: headerFromTurn(turn, overlay),
           assistant: {
             canonicalReady: completedCanonicalTurnIDs.has(overlay.turnID),
             kind: "live",
@@ -240,9 +251,8 @@ export function useTranscriptViewModel({
       }
 
       const phaseForTurn = displayPhase?.turnID === turn.id ? displayPhase : undefined;
-      const duration = turnDurationByID.get(turn.id);
       const cached = canonicalTurnCache.get(turn.id);
-      if (cached?.turn === turn && cached.duration === duration && cached.phase === phaseForTurn) {
+      if (cached?.turn === turn && cached.phase === phaseForTurn) {
         seenCanonicalTurnIDs.add(turn.id);
         items.push(cached.item);
         continue;
@@ -251,10 +261,10 @@ export function useTranscriptViewModel({
       const outputMessages = turn.messages.filter(isTurnOutputMessage);
       const failed = turn.status === "failed" && Boolean(turn.error);
       const item: TranscriptTurnVM = {
+        header: headerFromTurn(turn),
         assistant:
           outputMessages.length > 0 || failed
             ? {
-                duration,
                 error: failed ? turn.error : undefined,
                 kind: "canonical",
                 messages: outputMessages,
@@ -279,7 +289,7 @@ export function useTranscriptViewModel({
         fileChangeState: turn.fileChangeState,
       };
       seenCanonicalTurnIDs.add(turn.id);
-      canonicalTurnCache.set(turn.id, { duration, item, phase: phaseForTurn, turn });
+      canonicalTurnCache.set(turn.id, { item, phase: phaseForTurn, turn });
       items.push(item);
     }
 
@@ -320,6 +330,7 @@ export function useTranscriptViewModel({
         });
       }
       items.push({
+        header: { status: overlay.status === "streaming" ? "running" : overlay.status },
         assistant: sequence.length > 0 ? undefined : assistant,
         clientMessageID: pendingClientID,
         key: transcriptTurnKey({
@@ -349,6 +360,7 @@ export function useTranscriptViewModel({
         usedPendingClientIDs.add(displayPhase.clientMessageID);
       }
       items.push({
+        header: { status: displayPhase.phase === "error" ? "failed" : displayPhase.phase === "cancelled" ? "cancelled" : "running" },
         assistant: {
           kind: "phase",
           phase: displayPhase,
@@ -398,8 +410,8 @@ export function useTranscriptViewModel({
       }
     }
 
-    return items.filter((item) => item.user || item.assistant || item.sequence?.length || item.compact);
-  }, [completedCanonicalTurnIDs, compactRun, displayPhase, pendingUsers, sessionID, turnDurationByID, turns, visibleAssistantOverlays]);
+    return items.filter((item) => item.user || item.assistant || item.sequence?.length || item.compact || item.header);
+  }, [completedCanonicalTurnIDs, compactRun, displayPhase, pendingUsers, sessionID, turns, visibleAssistantOverlays]);
 
   const itemKeys = useMemo(() => turnVMs.map((item) => item.key), [turnVMs]);
 
@@ -414,6 +426,18 @@ export function useTranscriptViewModel({
 
 function isTurnOutputMessage(message: Message) {
   return message.role !== "user" && message.role !== "system";
+}
+
+function headerFromTurn(turn: ConversationTurn, overlay?: AssistantOverlay): TurnHeaderVM | undefined {
+  // Standalone manual compaction is a marker, not an assistant response.
+  if (turn.messages.length > 0 && turn.messages.every(isCompactMessage)) return undefined;
+  return {
+    startedAt: turn.createdAt,
+    endedAt: turn.status === "running" ? undefined : turn.updatedAt,
+    // A terminal SSE stops the clock before the final snapshot arrives. That
+    // snapshot alone owns timestamps; phase/steering never reset them.
+    status: turn.status === "running" && overlay && overlay.status !== "streaming" ? overlay.status : turn.status,
+  };
 }
 
 function modelFromTurn(turn: ConversationTurn): TurnModelVM | undefined {

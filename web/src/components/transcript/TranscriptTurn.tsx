@@ -4,6 +4,7 @@ import { useI18n } from "@/i18n";
 
 import { AssistantOutput, AssistantOutputMeta, CompactRunMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
+import { TurnHeader } from "./TurnHeader";
 import { assistantDisclosureKey, type AssistantOutputVM, type TranscriptDisplaySettings, type TranscriptTurnVM, type TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
 
@@ -49,8 +50,9 @@ function TranscriptTurnView({
           />
         </div>
       ) : null}
-      {turn.assistant || turn.sequence?.length || turn.fileChanges?.length || metaAssistant || turn.compact ? (
+      {turn.assistant || turn.sequence?.length || turn.fileChanges?.length || metaAssistant || turn.compact || turn.header ? (
         <div className="group/assistant-turn grid min-w-0 gap-1">
+          {turn.header ? <TurnHeader header={turn.header} /> : null}
           {turn.assistant ? (
             <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
               <AssistantOutput
@@ -138,6 +140,9 @@ function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM)
     previous.kind === next.kind &&
     previous.turnID === next.turnID &&
     previous.clientMessageID === next.clientMessageID &&
+    previous.header?.startedAt === next.header?.startedAt &&
+    previous.header?.endedAt === next.header?.endedAt &&
+    previous.header?.status === next.header?.status &&
     previous.fileChanges === next.fileChanges &&
     previous.fileChangeState === next.fileChangeState &&
     compactEqual(previous.compact, next.compact) &&
@@ -332,7 +337,7 @@ function assistantEqual(previous: TranscriptTurnVM["assistant"], next: Transcrip
     return false;
   }
   if (previous.kind === "canonical" && next.kind === "canonical") {
-    return previous.duration === next.duration && previous.messages === next.messages;
+    return previous.error === next.error && previous.messages === next.messages;
   }
   if (previous.kind === "live" && next.kind === "live") {
     return (

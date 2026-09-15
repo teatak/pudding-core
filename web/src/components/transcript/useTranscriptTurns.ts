@@ -3,9 +3,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { listTurns, type ConversationTurn } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { useI18n } from "@/i18n";
-
-import { formatDurationBetween } from "./time";
 
 const TURNS_PAGE_SIZE = 20;
 type TurnsPage = { turns: ConversationTurn[]; hasMore: boolean };
@@ -13,7 +10,6 @@ export type TurnsInfiniteData = InfiniteData<TurnsPage, string | undefined>;
 const latestTurnsRefreshes = new Map<string, Promise<void>>();
 
 export function useTranscriptTurns(token: string, sessionID: string) {
-  const { locale } = useI18n();
   const queryClient = useQueryClient();
   const latestRefreshRef = useRef({
     cachePresent: false,
@@ -114,16 +110,6 @@ export function useTranscriptTurns(token: string, sessionID: string) {
 
   const turns = useMemo(() => flattenTurnPages(query.data?.pages), [query.data]);
   const messages = useMemo(() => turns.flatMap((turn) => turn.messages), [turns]);
-  const turnDurationByID = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const turn of turns) {
-      const duration = formatDurationBetween(turn.createdAt, turn.updatedAt, locale);
-      if (duration) {
-        out.set(turn.id, duration);
-      }
-    }
-    return out;
-  }, [locale, turns]);
 
   return {
     hasMoreHistory,
@@ -132,7 +118,6 @@ export function useTranscriptTurns(token: string, sessionID: string) {
     messages,
     query,
     revealTurn,
-    turnDurationByID,
     turns,
   };
 }

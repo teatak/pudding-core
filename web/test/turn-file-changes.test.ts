@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { test } from "node:test";
+import { createTestViteServer } from "./vite-test-server.ts";
 
-const server = await createServer({
-  root: fileURLToPath(new URL("..", import.meta.url)),
-  optimizeDeps: { noDiscovery: true, include: [] },
-  server: { middlewareMode: true, watch: null, hmr: false, ws: false },
-});
-after(() => server.close());
+const server = await createTestViteServer();
 const { turnFilePathParts } = await server.ssrLoadModule("/src/lib/turnFileChanges.ts");
 
 test("路径拆成目录与文件名,窄卡片只留文件名", () => {

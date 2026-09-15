@@ -2,15 +2,15 @@ import { useEffect, useState } from "react";
 
 import type { Locale } from "@/i18n";
 
-export function useElapsedDuration(startedAt: string | undefined, locale: Locale) {
+export function useElapsedDuration(startedAt: string | undefined, locale: Locale, running = true) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!startedAt) {
+    if (!startedAt || !running) {
       return;
     }
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [startedAt]);
+  }, [running, startedAt]);
   if (!startedAt) {
     return "";
   }

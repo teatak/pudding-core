@@ -22,7 +22,6 @@ export function MessageMeta({
   actions,
   align = "start",
   createdAt,
-  duration,
   hideStandardDetails = false,
   hoverGroup = "message",
   model,
@@ -34,7 +33,6 @@ export function MessageMeta({
   actions?: ReactNode;
   align?: "start" | "end";
   createdAt: string;
-  duration?: string;
   hideStandardDetails?: boolean;
   hoverGroup?: "assistant-turn" | "message";
   model?: TurnModelVM;
@@ -109,7 +107,6 @@ export function MessageMeta({
         {hideStandardDetails ? null : (
           <div className="flex items-center gap-2">
             <span>{formatClock(createdAt)}</span>
-            {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
             {model ? (
               <>
                 <span aria-hidden className="size-1 shrink-0 rounded-full bg-muted-foreground/35" />
