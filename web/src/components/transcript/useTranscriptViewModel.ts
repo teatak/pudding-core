@@ -297,9 +297,15 @@ export function useTranscriptViewModel({
       if (usedLiveTurnIDs.has(overlay.turnID)) {
         continue;
       }
-      const pendingClientID =
-        overlay.previousSegments?.[0]?.overlay.clientMessageID || overlay.clientMessageID || (displayPhase?.turnID === overlay.turnID ? displayPhase.clientMessageID : undefined);
-      const pending = pendingClientID ? pendingByClientID.get(pendingClientID) : undefined;
+      const matchedPending =
+        (overlay.previousSegments?.[0]?.overlay.clientMessageID && pendingByClientID.get(overlay.previousSegments[0].overlay.clientMessageID)) ||
+        (overlay.clientMessageID && pendingByClientID.get(overlay.clientMessageID)) ||
+        (displayPhase?.turnID === overlay.turnID && displayPhase.clientMessageID && pendingByClientID.get(displayPhase.clientMessageID)) ||
+        pendingUsers.find(
+          (p) => !usedPendingClientIDs.has(p.clientMessageID) && (p.turnID === overlay.turnID || (!p.turnID && p.status === "submitting")),
+        );
+      const pendingClientID = matchedPending?.clientMessageID || overlay.clientMessageID;
+      const pending = matchedPending;
       if (pendingClientID) {
         usedPendingClientIDs.add(pendingClientID);
       }

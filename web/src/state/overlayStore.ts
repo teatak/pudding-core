@@ -213,6 +213,31 @@ function upsertPendingUser(
   };
 }
 
+function resolveOverlayClientID(
+  currentClientID: string | undefined,
+  phase: TurnPhaseState | undefined,
+  turnID: string,
+  sessionID: string,
+  pendingUsers: Record<string, PendingUserMessage[]>,
+): string | undefined {
+  if (currentClientID) {
+    return currentClientID;
+  }
+  if (phase?.turnID === turnID && phase.clientMessageID) {
+    return phase.clientMessageID;
+  }
+  const pending = pendingUsers[sessionID]?.find(
+    (p) => p.turnID === turnID || (!p.turnID && p.status === "submitting"),
+  );
+  if (pending?.clientMessageID) {
+    return pending.clientMessageID;
+  }
+  if (phase?.clientMessageID && (!phase.turnID || phase.phase === "submitting")) {
+    return phase.clientMessageID;
+  }
+  return undefined;
+}
+
 function appendThoughtPart(parts: AssistantOverlayPart[], delta: string): AssistantOverlayPart[] {
   if (!delta) {
     return parts;
@@ -400,9 +425,20 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   acceptSubmittingTurn: (sessionID, clientMessageID, turnID) =>
     // HTTP confirms acceptance, not current execution state. SSE may already
     // have streamed or finished this turn by the time the response arrives.
-    set((state) => ({
-      pendingUsers: markPendingStarted(state.pendingUsers, sessionID, clientMessageID, turnID),
-    })),
+    set((state) => {
+      const pendingUsers = markPendingStarted(state.pendingUsers, sessionID, clientMessageID, turnID);
+      const assistant = state.assistants[turnID];
+      const assistants =
+        assistant && !assistant.clientMessageID
+          ? { ...state.assistants, [turnID]: { ...assistant, clientMessageID } }
+          : state.assistants;
+      const phase = state.turnPhases[sessionID];
+      const turnPhases =
+        phase && phase.clientMessageID === clientMessageID && !phase.turnID
+          ? { ...state.turnPhases, [sessionID]: { ...phase, turnID } }
+          : state.turnPhases;
+      return { assistants, pendingUsers, turnPhases };
+    }),
   clearSubmittingTurn: (sessionID, clientMessageID) =>
     set((state) => {
       const phase = state.turnPhases[sessionID];
@@ -568,8 +604,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               text: part === "text" ? current.text + event.delta : current.text,
               parts,
               status: "streaming",
-              clientMessageID:
-                current.clientMessageID || (phase?.turnID === event.turnID ? phase.clientMessageID : undefined),
+              clientMessageID: resolveOverlayClientID(
+                current.clientMessageID,
+                phase,
+                event.turnID,
+                event.sessionID,
+                state.pendingUsers,
+              ),
               revealed: false,
             },
           },
@@ -612,8 +653,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               ...current,
               parts: upsertToolPart(current.parts, event, callID),
               status: "streaming",
-              clientMessageID:
-                current.clientMessageID || (currentPhase?.turnID === event.turnID ? currentPhase.clientMessageID : undefined),
+              clientMessageID: resolveOverlayClientID(
+                current.clientMessageID,
+                currentPhase,
+                event.turnID,
+                event.sessionID,
+                state.pendingUsers,
+              ),
               revealed: false,
             },
           },
@@ -631,8 +677,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               ...current,
               parts: upsertApprovalPart(current.parts, event),
               status: "streaming",
-              clientMessageID:
-                current.clientMessageID || (currentPhase?.turnID === event.turnID ? currentPhase.clientMessageID : undefined),
+              clientMessageID: resolveOverlayClientID(
+                current.clientMessageID,
+                currentPhase,
+                event.turnID,
+                event.sessionID,
+                state.pendingUsers,
+              ),
               revealed: false,
             },
           },

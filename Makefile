@@ -5,6 +5,11 @@ PUDDING_NOTARY_PROFILE ?= pudding-notary
 PUDDING_NOTARY_APPLE_ID ?= yangglivecn@icloud.com
 PUDDING_NOTARY_TEAM_ID ?= 7K47HJ79JA
 
+ifeq ($(shell uname -s),Darwin)
+SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+export SDKROOT
+endif
+
 .PHONY: test schema-check tidy clean embed brand-assets mascot-scene-lab language-servers language-servers-ready computer-use-helper-dev computer-use-helper-test computer-use-fixture-dev computer-use-fixture-smoke computer-use-product-smoke computer-use-calculator-smoke computer-use-calculator-existing-smoke computer-use-electron-smoke computer-use-electron-ime-smoke desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-computer-use-update-test desktop-notary-check desktop-notary-store desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-update-test desktop-preview-computer-use-update-test desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval agent-eval
 
 brand-assets:

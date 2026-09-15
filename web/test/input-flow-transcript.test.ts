@@ -265,3 +265,17 @@ test("failed compaction keeps its row identity and stays before later conversati
   state.finishCompactRun(sessionID, "retry");
   assert.equal(useOverlayStore.getState().compactRuns[sessionID], undefined);
 });
+
+test("initial message when SSE skips turn.started still pairs user bubble with live assistant", () => {
+  const store = useOverlayStore.getState();
+  store.clearSession(sessionID);
+  store.addPendingUser({ sessionID, clientMessageID: "initial", status: "submitting", text: "寻找下推广pudding的机会", createdAt: initial.createdAt });
+  store.startSubmittingTurn(sessionID, "initial");
+  store.acceptSubmittingTurn(sessionID, "initial", turnID);
+  // turn.started is missing due to SSE tail catchup, only turn.delta arrives
+  apply({ kind: "turn.delta", part: "thought", delta: "我先看看" });
+  const vms = viewTurns([]);
+  assert.equal(vms.length, 1, "must be a single turn rather than assistant above and user below");
+  assert.equal(vms[0].user?.text, "寻找下推广pudding的机会");
+  assert.equal(vms[0].assistant?.kind, "live");
+});

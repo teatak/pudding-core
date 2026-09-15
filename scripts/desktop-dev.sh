@@ -5,6 +5,9 @@ cd "$(dirname "$0")/.."
 DEV_PORT=9679
 VITE_PORT=5174
 BUILDTAGS="${BUILDTAGS:-sqlite_fts5 webrtcaec}"
+if [ "$(uname -s)" = "Darwin" ] && [ -z "${SDKROOT:-}" ]; then
+  export SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+fi
 
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 wait_free() { for _ in $(seq 1 20); do listening "$1" || return 0; sleep 0.3; done; }

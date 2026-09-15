@@ -10,7 +10,6 @@ import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type CompactRun, type TurnPhaseState } from "@/state/overlayStore";
 
 import { MessageMeta } from "./MessageMeta";
-import { useElapsedDuration } from "./time";
 import {
   assistantTextFromMessages,
   partsFromMessages,
@@ -342,8 +341,7 @@ function AssistantError({ error }: { error: string }) {
 }
 
 function AssistantPhaseItem({ phase }: { phase: TurnPhaseState }) {
-  const { locale, t } = useI18n();
-  const elapsed = useElapsedDuration(phase.updatedAt, locale);
+  const { t } = useI18n();
   return (
     <div className="grid h-6 w-full grid-cols-[0.75rem_auto] items-center gap-1 text-xs text-muted-foreground">
       <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
@@ -351,7 +349,6 @@ function AssistantPhaseItem({ phase }: { phase: TurnPhaseState }) {
       </span>
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="shrink-0 text-muted-foreground/70">{phaseLabel(phase, t)}</span>
-        {elapsed ? <span className="shrink-0 text-muted-foreground/50">{elapsed}</span> : null}
       </span>
     </div>
   );
