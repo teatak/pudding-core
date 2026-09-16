@@ -29,6 +29,7 @@ import {
   deleteSession,
   getAudioBindings,
   getAudioRuntime,
+  getTurn,
   listApps,
   listSkills,
   listProviders,
@@ -43,6 +44,7 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import {
@@ -1062,6 +1064,14 @@ function DraftComposer({
           clearSubmittingTurn(created.id, clientMessageID);
         } else {
           acceptSubmittingTurn(created.id, clientMessageID, result.turnID);
+          try {
+            const turn = await getTurn(token, created.id, result.turnID);
+            queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(created.id), (previous) =>
+              upsertTurnIntoPages(previous, turn),
+            );
+          } catch (error) {
+            console.warn("failed to sync initial turn", error);
+          }
         }
       } catch (error) {
         // 只有拿到后端明确拒绝的响应时才回滚 draft session。

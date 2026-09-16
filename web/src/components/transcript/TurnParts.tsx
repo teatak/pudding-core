@@ -18,6 +18,7 @@ import {
   useMemo,
   isValidElement,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -45,6 +46,7 @@ import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/s
 import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
 import { useElapsedDuration } from "./time";
 import { TranscriptDisclosure } from "./TranscriptDisclosure";
+import { TranscriptItemMeasureContext } from "./TranscriptItemMeasureContext";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
 import { toolDisplayName, toolIcon } from "./turnActivitySummary";
 import {InputFlowToolAction} from "./InputFlowToolAction";
@@ -2044,11 +2046,25 @@ function RawToolDataCard({
   onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useI18n();
+  const measureItem = useContext(TranscriptItemMeasureContext);
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(
     defaultOpen,
     onOpenChange,
   );
   const rawJSON = useMemo(() => rawToolJSON(toolName, args, result), [toolName, args, result]);
+  const previousLayoutRef = useRef({ open, rawJSON });
+
+  useLayoutEffect(() => {
+    const previous = previousLayoutRef.current;
+    previousLayoutRef.current = { open, rawJSON };
+    if (!measureItem) {
+      return;
+    }
+    if (previous.open === open && (!open || previous.rawJSON === rawJSON)) {
+      return;
+    }
+    queueMicrotask(measureItem);
+  }, [measureItem, open, rawJSON]);
   return (
     <div className="group/raw-data relative min-w-0 max-w-full">
       <details

@@ -650,14 +650,14 @@ export function Composer({
       resetSessionDraft();
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
       // 事件回推),前端不写标题
-      if (result.duplicate && result.turnID) {
+      if (result.turnID) {
         try {
           const turn = await getTurn(token, sessionID, result.turnID);
           queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) =>
             upsertTurnIntoPages(previous, turn),
           );
         } catch (error) {
-          console.warn("failed to sync duplicate turn", error);
+          console.warn("failed to sync turn", error);
         }
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });

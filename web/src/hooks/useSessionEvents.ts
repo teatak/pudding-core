@@ -84,6 +84,7 @@ function openSessionEventSource({
   syncMessages: boolean;
   token: string;
 }) {
+  const syncedTurnIDs = new Set<string>();
   const params = new URLSearchParams({ token });
   const after = useOverlayStore.getState().lastEventSeqs[sessionID];
   if (after) {
@@ -139,9 +140,15 @@ function openSessionEventSource({
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
     }
     if ((data.kind === "turn.started" || data.kind === "turn.compacted" || isTurnTerminalEvent(data)) && syncMessages) {
+      syncedTurnIDs.add(data.turnID);
       syncTurn(queryClient, token, sessionID, data.turnID);
     }
     if (data.kind === "input.steered" && syncMessages) {
+      syncedTurnIDs.add(data.turnID);
+      syncTurn(queryClient, token, sessionID, data.turnID);
+    }
+    if (syncMessages && (data.kind === "turn.delta" || data.kind === "turn.tool") && data.turnID && !syncedTurnIDs.has(data.turnID)) {
+      syncedTurnIDs.add(data.turnID);
       syncTurn(queryClient, token, sessionID, data.turnID);
     }
     if (syncMessages && (isInputEvent(data) || data.kind === "input.steered" || data.kind === "turn.started")) {
