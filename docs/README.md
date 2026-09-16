@@ -33,6 +33,7 @@
 | 文档 | 当前状态 |
 | --- | --- |
 | [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
+| [local-html-preview-and-links-design.md](local-html-preview-and-links-design.md) | 任意本地 HTML 预览、聊天与 Markdown 链接统一打开、固定相对路径来源及资源授权生命周期；尚未实现 |
 
 ## 仍在收尾
 
