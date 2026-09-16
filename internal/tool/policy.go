@@ -335,7 +335,8 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		commandLowRisk := executableAllowed &&
 			!commandRequiresApproval(argv) &&
 			len(outsidePaths) == 0 &&
-			!commandNeedsHostAccess(argv)
+			!commandNeedsHostAccess(argv) &&
+			!strings.Contains(argv[0], "$")
 		risk.LowRisk = risk.LowRisk && commandLowRisk
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		risk.hostAccessRequired = risk.hostAccessRequired || commandNeedsHostAccess(argv)
@@ -1188,7 +1189,7 @@ func commandUsesOnlyLoopbackURLs(args []string) bool {
 
 func isBareCommand(executable string) bool {
 	executable = strings.TrimSpace(executable)
-	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, "/\\ \t\r\n")
+	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, "/\\ \t\r\n$")
 }
 
 func isLowRiskGitCommand(args []string) bool {
@@ -1237,111 +1238,165 @@ func isLowRiskGitCommand(args []string) bool {
 	return false
 }
 
-func isRiskyGitBranchArg(raw string) bool {
-	arg := strings.TrimSpace(raw)
-	lower := strings.ToLower(arg)
-	for _, long := range []string{
-		"--delete", "--move", "--copy",
-		"--set-upstream-to", "--unset-upstream", "--edit-description",
-	} {
-		if lower == long || strings.HasPrefix(lower, long+"=") {
-			return true
-		}
-	}
-	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-		for i := 1; i < len(arg); i++ {
-			switch arg[i] {
-			case 'd', 'D', 'm', 'M', 'c', 'C', 'u':
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func isLowRiskGitBranch(args []string) bool {
-	hasExplicitQuery := false
+	hasListQuery := false
+	hasShowCurrent := false
 	var positional []string
+
 	for _, raw := range args {
 		arg := strings.TrimSpace(raw)
 		if arg == "" {
 			continue
 		}
-		if isRiskyGitBranchArg(arg) {
+		lower := strings.ToLower(arg)
+
+		// 显式取反或取消查询模式的选项，严禁视为只读查询，直接要求审批
+		if lower == "--no-show-current" || lower == "--no-list" {
 			return false
 		}
-		lower := strings.ToLower(arg)
-		if lower == "-l" || lower == "--list" || lower == "--show-current" ||
-			lower == "-a" || lower == "--all" || lower == "-r" || lower == "--remotes" ||
-			lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
-			lower == "--merged" || strings.HasPrefix(lower, "--merged=") ||
-			lower == "--no-merged" || strings.HasPrefix(lower, "--no-merged=") {
-			hasExplicitQuery = true
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
+
+		if strings.HasPrefix(arg, "-") {
+			// 选项必须在严格的只读选项白名单内，任何未知选项、缩写选项或写选项一律拒绝
+			if !isSafeGitBranchOption(arg) {
+				return false
+			}
+			if lower == "-l" || lower == "--list" {
+				hasListQuery = true
+			} else if lower == "--show-current" {
+				hasShowCurrent = true
+			} else if lower == "--merged" || strings.HasPrefix(lower, "--merged=") ||
+				lower == "--no-merged" || strings.HasPrefix(lower, "--no-merged=") ||
+				lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
+				lower == "--no-contains" || strings.HasPrefix(lower, "--no-contains=") ||
+				lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") {
+				hasListQuery = true
+			}
+		} else {
 			positional = append(positional, arg)
 		}
 	}
-	if len(args) == 0 {
-		return true
-	}
-	if len(positional) > 0 && !hasExplicitQuery {
+
+	// 如果有 --show-current，在 Git 中不能携带额外位置参数
+	if hasShowCurrent && len(positional) > 0 {
 		return false
 	}
+
+	// 纯 git branch（无位置参数）默认列出本地分支，是安全只读
+	if len(positional) == 0 {
+		return true
+	}
+
+	// 如果有位置参数：必须有明确的列表/过滤选项，且位置参数最多作为 pattern
+	if !hasListQuery || len(positional) > 1 {
+		return false
+	}
+
 	return true
 }
 
-func isRiskyGitTagArg(raw string) bool {
-	arg := strings.TrimSpace(raw)
+func isSafeGitBranchOption(arg string) bool {
 	lower := strings.ToLower(arg)
-	for _, long := range []string{
-		"--delete", "--annotate", "--sign", "--local-user", "--force", "--message", "--file",
-	} {
-		if lower == long || strings.HasPrefix(lower, long+"=") {
-			return true
-		}
-	}
+	// 短选项检查（只允许 -a, -r, -l, -v, -vv 等只读参数）
 	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
 		for i := 1; i < len(arg); i++ {
 			switch arg[i] {
-			case 'd', 'a', 's', 'u', 'f', 'm', 'F':
-				return true
+			case 'a', 'r', 'l', 'v':
+			default:
+				return false
 			}
+		}
+		return true
+	}
+
+	// 长选项白名单
+	switch lower {
+	case "--all", "--remotes", "--list", "--show-current",
+		"--verbose", "--ignore-case", "--no-color", "--color",
+		"--no-column", "--no-abbrev":
+		return true
+	}
+	for _, prefix := range []string{
+		"--color=", "--sort=", "--format=", "--abbrev=", "--column=",
+		"--merged", "--merged=", "--no-merged", "--no-merged=",
+		"--contains", "--contains=", "--no-contains", "--no-contains=",
+		"--points-at", "--points-at=",
+	} {
+		if lower == prefix || strings.HasPrefix(lower, prefix) {
+			return true
 		}
 	}
 	return false
 }
 
 func isLowRiskGitTag(args []string) bool {
-	hasExplicitQuery := false
+	hasListQuery := false
 	var positional []string
+
 	for _, raw := range args {
 		arg := strings.TrimSpace(raw)
 		if arg == "" {
 			continue
 		}
-		if isRiskyGitTagArg(arg) {
+		lower := strings.ToLower(arg)
+
+		// 取反选项拦截
+		if lower == "--no-points-at" || lower == "--no-contains" || lower == "--no-merged" || lower == "--no-list" {
 			return false
 		}
-		lower := strings.ToLower(arg)
-		if lower == "-l" || lower == "--list" ||
-			lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
-			lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") {
-			hasExplicitQuery = true
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
+
+		if strings.HasPrefix(arg, "-") {
+			if !isSafeGitTagOption(arg) {
+				return false
+			}
+			if lower == "-l" || lower == "--list" ||
+				lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") ||
+				lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
+				lower == "--merged" || strings.HasPrefix(lower, "--merged=") {
+				hasListQuery = true
+			}
+		} else {
 			positional = append(positional, arg)
 		}
 	}
-	if len(args) == 0 {
-		return true
+
+	if len(positional) == 0 {
+		return true // 默认 git tag 列出所有标签
 	}
-	if len(positional) > 0 && !hasExplicitQuery {
+
+	if !hasListQuery || len(positional) > 1 {
 		return false
 	}
+
 	return true
+}
+
+func isSafeGitTagOption(arg string) bool {
+	lower := strings.ToLower(arg)
+	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+		for i := 1; i < len(arg); i++ {
+			switch arg[i] {
+			case 'l', 'n':
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	switch lower {
+	case "--list", "--ignore-case", "--color", "--no-color", "--no-column":
+		return true
+	}
+	for _, prefix := range []string{
+		"--sort=", "--format=", "--column=", "--color=",
+		"--points-at", "--points-at=",
+		"--contains", "--contains=",
+		"--merged", "--merged=",
+	} {
+		if lower == prefix || strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLowRiskGitRemote(args []string) bool {
@@ -1377,33 +1432,96 @@ func isRiskyGitConfigArg(raw string) bool {
 }
 
 func isLowRiskGitConfig(args []string) bool {
-	hasReadFlag := false
+	readAction := ""
 	var positional []string
-	for _, raw := range args {
-		arg := strings.TrimSpace(raw)
-		if arg == "" {
+
+	for i := 0; i < len(args); i++ {
+		raw := strings.TrimSpace(args[i])
+		if raw == "" {
 			continue
 		}
-		if isRiskyGitConfigArg(arg) {
+		lower := strings.ToLower(raw)
+
+		// 写操作选项（立即拒绝）
+		if isRiskyGitConfigArg(raw) {
 			return false
 		}
-		lower := strings.ToLower(arg)
-		if lower == "-l" || lower == "--list" ||
-			lower == "--get" || strings.HasPrefix(lower, "--get=") ||
-			lower == "--get-all" || strings.HasPrefix(lower, "--get-all=") ||
-			lower == "--get-regexp" || strings.HasPrefix(lower, "--get-regexp=") ||
-			lower == "--get-urlmatch" || strings.HasPrefix(lower, "--get-urlmatch=") {
-			hasReadFlag = true
+
+		// 消费带参数的配置选项（如 --file <path>, -f <path>, --blob <id>, --default <val>, --type <type>）
+		if lower == "--file" || raw == "-f" || lower == "--blob" || lower == "--default" || lower == "--type" {
+			if i+1 < len(args) {
+				i++ // 消费配置目标参数，不计入业务位置参数
+				continue
+			}
+			return false
+		}
+		if strings.HasPrefix(lower, "--file=") || strings.HasPrefix(raw, "-f") ||
+			strings.HasPrefix(lower, "--blob=") || strings.HasPrefix(lower, "--default=") ||
+			strings.HasPrefix(lower, "--type=") {
 			continue
 		}
-		if !strings.HasPrefix(arg, "-") {
-			positional = append(positional, arg)
+
+		// 识别只读动作选项
+		if lower == "-l" || lower == "--list" {
+			readAction = "list"
+			continue
 		}
+		if lower == "--get" || strings.HasPrefix(lower, "--get=") {
+			readAction = "get"
+			continue
+		}
+		if lower == "--get-all" || strings.HasPrefix(lower, "--get-all=") {
+			readAction = "get-all"
+			continue
+		}
+		if lower == "--get-regexp" || strings.HasPrefix(lower, "--get-regexp=") {
+			readAction = "get-regexp"
+			continue
+		}
+		if lower == "--get-urlmatch" || strings.HasPrefix(lower, "--get-urlmatch=") {
+			readAction = "get-urlmatch"
+			continue
+		}
+		if lower == "--get-color" || strings.HasPrefix(lower, "--get-color=") {
+			readAction = "get-color"
+			continue
+		}
+		if lower == "--get-colorbool" || strings.HasPrefix(lower, "--get-colorbool=") {
+			readAction = "get-colorbool"
+			continue
+		}
+
+		// 其他只读修饰标志
+		if strings.HasPrefix(raw, "-") {
+			switch lower {
+			case "--global", "--system", "--local", "--worktree",
+				"--show-origin", "--show-scope", "--null", "-z",
+				"--name-only", "--includes", "--no-includes",
+				"--bool", "--int", "--bool-or-int", "--path", "--expiry-date":
+				continue
+			default:
+				return false
+			}
+		}
+
+		positional = append(positional, raw)
 	}
-	if len(positional) > 1 {
+
+	switch readAction {
+	case "get-urlmatch":
+		// 例如：git config --get-urlmatch http https://example.invalid
+		return len(positional) <= 2
+	case "get", "get-all", "get-regexp", "get-color", "get-colorbool":
+		// 例如：git config --file .git/config --get http.sslVerify
+		return len(positional) >= 1 && len(positional) <= 2
+	case "list":
+		return len(positional) == 0
+	case "":
+		// 无显式动作：git config <name> 是读取
+		return len(positional) == 1
+	default:
 		return false
 	}
-	return hasReadFlag
 }
 
 func isLowRiskGitStash(args []string) bool {

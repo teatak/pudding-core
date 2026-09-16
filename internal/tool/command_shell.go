@@ -92,17 +92,38 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 
 func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 	argv := make([]string, 0, len(call.Args))
-	for i, word := range call.Args {
-		if i == 0 && !isStaticCommandWord(word) {
-			return argv, false
-		}
+	for _, word := range call.Args {
 		value, ok := staticShellWord(word)
 		if !ok {
 			return argv, false
 		}
 		argv = append(argv, value)
 	}
-	return argv, len(argv) > 0
+	if len(argv) == 0 {
+		return argv, false
+	}
+	// 无论是否经过包装命令（如 command, time, arch, env 等），最终解包出的有效可执行程序名在 AST 中必须为纯静态字面量
+	unwrapped := unwrapCommand(argv)
+	if len(unwrapped) > 0 && unwrapped[0] != "env_print" {
+		targetCmd := unwrapped[0]
+		foundTarget := false
+		for _, word := range call.Args {
+			val, _ := staticShellWord(word)
+			if val == targetCmd {
+				if !isStaticCommandWord(word) {
+					return argv, false
+				}
+				foundTarget = true
+				break
+			}
+		}
+		if !foundTarget {
+			return argv, false
+		}
+	} else if len(unwrapped) == 0 {
+		return argv, false
+	}
+	return argv, true
 }
 
 func isStaticCommandWord(word *syntax.Word) bool {
