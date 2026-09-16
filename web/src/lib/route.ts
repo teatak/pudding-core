@@ -9,6 +9,22 @@ export type AppSearch = {
   view?: "apps" | "projects";
 };
 
+export function routeForNewChat(
+  search: AppSearch,
+  projectID?: string,
+): AppSearch {
+  const next: AppSearch = { ...search, draft: "1" };
+  delete next.session;
+  delete next.split;
+  delete next.view;
+  if (projectID) {
+    next.project = projectID;
+  } else {
+    delete next.project;
+  }
+  return next;
+}
+
 export function routeAfterSessionArchive(
   search: AppSearch,
   archived: { id: string; projectID?: string },
@@ -20,16 +36,7 @@ export function routeAfterSessionArchive(
   if (next.session !== archived.id) {
     return next;
   }
-  delete next.session;
-  delete next.split;
-  delete next.view;
-  next.draft = "1";
-  if (archived.projectID) {
-    next.project = archived.projectID;
-  } else {
-    delete next.project;
-  }
-  return next;
+  return routeForNewChat(next, archived.projectID);
 }
 
 const lastRouteStorageKey = "pudding.lastRoute.v1";

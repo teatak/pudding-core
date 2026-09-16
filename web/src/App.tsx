@@ -39,7 +39,7 @@ import {
 } from "@/lib/layoutConstants";
 import { resolveCenteredLayoutPresentation } from "@/lib/centeredLayout";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
-import { saveLastAppRoute, type AppSearch } from "@/lib/route";
+import { routeForNewChat, saveLastAppRoute, type AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { clearFilePreviews } from "@/state/filePreviewStore";
@@ -273,13 +273,7 @@ export function App() {
   function openProjectDraft(projectID: string) {
     void navigate({
       to: "/",
-      search: (prev) => {
-        const next = { ...(prev as AppSearch), draft: "1", project: projectID };
-        delete next.session;
-        delete next.split;
-        delete next.view;
-        return next;
-      },
+      search: (prev) => routeForNewChat(prev as AppSearch, projectID),
     });
   }
 

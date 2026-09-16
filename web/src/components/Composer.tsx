@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CircleGauge,
-  MessageSquarePlus,
+  MessageCirclePlus,
   NotebookText,
   PenLine,
 } from "@/components/icons";
@@ -81,7 +81,7 @@ import {
   pickLocalFolderPaths,
   type LocalFolderPath,
 } from "@/lib/localFolders";
-import type { AppSearch } from "@/lib/route";
+import { routeForNewChat, type AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitParts";
 import { cn } from "@/lib/utils";
@@ -301,7 +301,7 @@ export function Composer({
       command: "/clear",
       description: t("composer.commandClearDesc"),
       hasArgs: false,
-      icon: MessageSquarePlus,
+      icon: MessageCirclePlus,
       id: "clear",
       label: t("composer.commandClear"),
     },
@@ -811,13 +811,9 @@ export function Composer({
     resetSessionDraft();
     void navigate({
       to: "/",
-      search: (prev) => {
-        const next = { ...(prev as AppSearch), draft: "1" };
-        delete next.session;
-        return next;
-      },
+      search: (prev) => routeForNewChat(prev as AppSearch, projectID || undefined),
     });
-  }, [clearSubmitError, navigate, onSubmitError, resetSessionDraft]);
+  }, [clearSubmitError, navigate, onSubmitError, projectID, resetSessionDraft]);
 
   const submitDraftWithMode = async (
     value: z.infer<typeof composerSchema>,

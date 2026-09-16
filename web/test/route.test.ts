@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { routeAfterSessionArchive } from "../src/lib/route.ts";
+import { routeAfterSessionArchive, routeForNewChat } from "../src/lib/route.ts";
+
+test("routeForNewChat opens a project draft when projectID is provided", () => {
+  assert.deepEqual(
+    routeForNewChat(
+      { session: "current", split: "secondary", view: "apps", project: "stale" },
+      "project-a",
+    ),
+    { draft: "1", project: "project-a" },
+  );
+});
+
+test("routeForNewChat opens a global draft when projectID is omitted", () => {
+  assert.deepEqual(
+    routeForNewChat(
+      { session: "current", split: "secondary", view: "apps", project: "stale" },
+    ),
+    { draft: "1" },
+  );
+});
 
 test("archiving the current project session opens a draft in that project", () => {
   assert.deepEqual(

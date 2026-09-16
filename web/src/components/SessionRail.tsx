@@ -23,7 +23,7 @@ import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useHasHoverInput } from "@/hooks/use-hover-input";
 import { useI18n } from "@/i18n";
 import { onDesktopMenuCommand } from "@/lib/desktopBridge";
-import type { AppSearch } from "@/lib/route";
+import { routeForNewChat, type AppSearch } from "@/lib/route";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
@@ -308,27 +308,14 @@ export function SessionRail({
   function openNewSession() {
     void navigate({
       to: "/",
-      search: (prev) => {
-        const next = { ...(prev as AppSearch), draft: "1" };
-        delete next.session;
-        delete next.split;
-        delete next.view;
-        delete next.project;
-        return next;
-      },
+      search: (prev) => routeForNewChat(prev as AppSearch),
     });
   }
 
   function openProjectDraft(projectID: string) {
     void navigate({
       to: "/",
-      search: (prev) => {
-        const next = { ...(prev as AppSearch), draft: "1", project: projectID };
-        delete next.session;
-        delete next.split;
-        delete next.view;
-        return next;
-      },
+      search: (prev) => routeForNewChat(prev as AppSearch, projectID),
     });
   }
 
