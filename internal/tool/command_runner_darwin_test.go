@@ -96,6 +96,42 @@ func TestMacOSCommandSandboxProjectBoundary(t *testing.T) {
 	}
 }
 
+func TestMacOSCommandPolicyRequiresApprovalForExpandedGitConfigWrite(t *testing.T) {
+	project := newGitTestRepository(t, true)
+	// macOS /bin/sh clears inherited OLDPWD. Set it inside the shell so this
+	// fixture verifies argument expansion without relying on environment import.
+	command := "read OLDPWD <<'VALUE'\nreview.probe changed\nVALUE\ngit config $OLDPWD"
+	raw, err := json.Marshal(map[string]any{
+		"scope":   "project",
+		"command": command,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{project})
+	if !ok || risk.LowRisk {
+		t.Fatalf("expanded Git arguments must require approval: %+v ok=%v", risk, ok)
+	}
+	// Execute only inside the fixture to verify the real macOS shell semantics
+	// behind the approval requirement, using an inert repository-local key.
+	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(t.TempDir()), commandSpec{
+		Executable:  "/bin/sh",
+		Args:        []string{"-c", command},
+		CWD:         project,
+		Env:         mustCommandEnvironment(t),
+		ProjectDirs: []string{project},
+	})
+	if result.exitCode != 0 {
+		t.Fatalf("fixture command failed: %+v", result)
+	}
+	query := exec.Command("git", "config", "--local", "--get", "review.probe")
+	query.Dir = project
+	output, err := query.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "changed" {
+		t.Fatalf("expected expanded command to write fixture config: output=%q err=%v", output, err)
+	}
+}
+
 func TestMacOSCommandSandboxFullBypassesBoundary(t *testing.T) {
 	project := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "private.txt")
