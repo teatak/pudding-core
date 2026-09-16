@@ -92,12 +92,21 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 
 func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 	argv := make([]string, 0, len(call.Args))
+	static := true
 	for _, word := range call.Args {
 		value, ok := staticShellWord(word)
 		if !ok {
 			return argv, false
 		}
 		argv = append(argv, value)
+		for _, part := range word.Parts {
+			if _, unquotedParameter := part.(*syntax.ParamExp); unquotedParameter {
+				// Unquoted expansion can split or remove arguments, even for
+				// sandbox-managed paths. Keep the words for boundary analysis,
+				// but do not use their apparent count to approve execution.
+				static = false
+			}
+		}
 	}
 	if len(argv) == 0 {
 		return argv, false
@@ -123,7 +132,7 @@ func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 	} else if len(unwrapped) == 0 {
 		return argv, false
 	}
-	return argv, true
+	return argv, static
 }
 
 func isStaticCommandWord(word *syntax.Word) bool {
@@ -211,7 +220,8 @@ func staticShellWord(word *syntax.Word) (string, bool) {
 
 func isSafeBuiltinParameter(name string) bool {
 	switch name {
-	case "PWD", "OLDPWD", "HOME":
+	case "PWD", "HOME":
+		// OLDPWD is caller-controlled and is not a sandbox-managed path.
 		return true
 	default:
 		return false

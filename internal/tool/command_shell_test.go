@@ -49,6 +49,35 @@ func TestAnalyzeShellCommandAcceptsSandboxManagedPaths(t *testing.T) {
 	}
 }
 
+func TestAnalyzeShellCommandParameterQuoting(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		dynamic bool
+	}{
+		{"unquoted working directory", `printf '%s' $PWD`, true},
+		{"unquoted home suffix", `printf '%s' ${HOME}/file`, true},
+		{"unquoted managed temporary path", `python3 $TMPDIR/script.py`, true},
+		{"quoted managed paths", `printf '%s' "$PWD" "${HOME}" "$TMPDIR/file"`, false},
+		{"unquoted caller-controlled old directory", `git config $OLDPWD`, true},
+		{"quoted caller-controlled old directory", `git config "$OLDPWD"`, true},
+		{"literal parameter text", `printf '%s' '$OLDPWD'`, false},
+		{"redirection does not split fields", `printf ok > $TMPDIR/report.txt`, false},
+		{"assignment does not split fields", `REPORT_DIR=$PWD printf ok`, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			analysis, err := analyzeShellCommand(test.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if analysis.Dynamic != test.dynamic {
+				t.Fatalf("dynamic=%v, want %v: %+v", analysis.Dynamic, test.dynamic, analysis)
+			}
+		})
+	}
+}
+
 func TestAnalyzeShellCommandRejectsMalformedAndBackgroundCommands(t *testing.T) {
 	if _, err := analyzeShellCommand(`printf "unterminated`); err == nil {
 		t.Fatal("malformed shell command must fail")

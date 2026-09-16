@@ -1252,177 +1252,114 @@ func isLowRiskGitCommand(args []string) bool {
 }
 
 func isLowRiskGitBranch(args []string) bool {
-	hasListQuery := false
-	hasShowCurrent := false
-	var positional []string
-
-	for i := 0; i < len(args); i++ {
-		raw := args[i]
-		arg := strings.TrimSpace(raw)
-		lower := strings.ToLower(arg)
-
-		// 显式取反或取消查询模式的选项，严禁视为只读查询，直接要求审批
-		if lower == "--no-show-current" || lower == "--no-list" {
-			return false
-		}
-
-		if strings.HasPrefix(arg, "-") {
-			// 选项必须在严格的只读选项白名单内，任何未知选项、缩写选项或写选项一律拒绝
-			if !isSafeGitBranchOption(arg) {
-				return false
-			}
-			if lower == "-l" || lower == "--list" {
-				hasListQuery = true
-			} else if lower == "--show-current" {
-				hasShowCurrent = true
-			} else if isFilterBranchOption(lower) {
-				hasListQuery = true
-				if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-					i++
-				}
-			}
-		} else {
-			positional = append(positional, raw)
-		}
-	}
-
-	// 如果有 --show-current，在 Git 中不能携带额外位置参数
-	if hasShowCurrent && len(positional) > 0 {
-		return false
-	}
-
-	// 纯 git branch（无位置参数）默认列出本地分支，是安全只读
-	if len(positional) == 0 {
-		return true
-	}
-
-	// 如果有位置参数：必须有明确的列表/过滤选项（模式匹配 pattern，支持多个）
-	if !hasListQuery {
-		return false
-	}
-
-	return true
-}
-
-func isFilterBranchOption(lower string) bool {
-	switch lower {
-	case "--contains", "--no-contains", "--merged", "--no-merged", "--points-at", "--sort", "--format", "--abbrev", "--column":
-		return true
-	}
-	return false
-}
-
-func isSafeGitBranchOption(arg string) bool {
-	lower := strings.ToLower(arg)
-	// 短选项检查（只允许 -a, -r, -l, -v, -vv 等只读参数）
-	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-		for i := 1; i < len(arg); i++ {
-			switch arg[i] {
-			case 'a', 'r', 'l', 'v':
-			default:
-				return false
-			}
-		}
-		return true
-	}
-
-	// 长选项白名单
-	switch lower {
-	case "--all", "--remotes", "--list", "--show-current",
-		"--verbose", "--ignore-case", "--no-color", "--color",
-		"--no-column", "--no-abbrev":
-		return true
-	}
-	for _, prefix := range []string{
-		"--color=", "--sort", "--sort=", "--format", "--format=", "--abbrev", "--abbrev=", "--column", "--column=",
-		"--merged", "--merged=", "--no-merged", "--no-merged=",
-		"--contains", "--contains=", "--no-contains", "--no-contains=",
-		"--points-at", "--points-at=",
-	} {
-		if lower == prefix || strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
+	return isLowRiskGitRefQuery(args, true)
 }
 
 func isLowRiskGitTag(args []string) bool {
+	return isLowRiskGitRefQuery(args, false)
+}
+
+func isLowRiskGitRefQuery(args []string, branch bool) bool {
 	hasListQuery := false
-	var positional []string
+	hasShowCurrent := false
+	hasPositional := false
 
 	for i := 0; i < len(args); i++ {
-		raw := args[i]
-		arg := strings.TrimSpace(raw)
-		lower := strings.ToLower(arg)
-
-		// 取反选项拦截（注意：--no-contains 和 --no-merged 是合法的负向过滤条件）
-		if lower == "--no-points-at" || lower == "--no-list" {
-			return false
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			hasPositional = true
+			continue
 		}
-
-		if strings.HasPrefix(arg, "-") {
-			if !isSafeGitTagOption(arg) {
+		if !strings.HasPrefix(arg, "--") {
+			if len(arg) == 1 {
 				return false
 			}
-			if lower == "-l" || lower == "--list" {
-				hasListQuery = true
-			} else if isFilterTagOption(lower) {
-				hasListQuery = true
-				if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-					i++
+			for j := 1; j < len(arg); j++ {
+				switch arg[j] {
+				case 'l':
+					hasListQuery = true
+				case 'a', 'r', 'v':
+					if !branch {
+						return false
+					}
+				case 'n':
+					// tag -n enables listing and only accepts an attached count.
+					// Keep counts and unknown short-option combinations conservative.
+					if branch || j != len(arg)-1 {
+						return false
+					}
+					hasListQuery = true
+				default:
+					return false
 				}
 			}
-		} else {
-			positional = append(positional, raw)
+			continue
 		}
-	}
 
-	if len(positional) == 0 {
-		return true // 默认 git tag 列出所有标签
-	}
-
-	if !hasListQuery {
-		return false
-	}
-
-	return true
-}
-
-func isFilterTagOption(lower string) bool {
-	switch lower {
-	case "--points-at", "--contains", "--no-contains", "--merged", "--no-merged", "--sort", "--format", "--column":
-		return true
-	}
-	return false
-}
-
-func isSafeGitTagOption(arg string) bool {
-	lower := strings.ToLower(arg)
-	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-		for i := 1; i < len(arg); i++ {
-			switch arg[i] {
-			case 'l', 'n':
-			default:
+		// Match exact option names without changing case or whitespace. An
+		// attached value changes argument consumption, not the option's mode.
+		name, value, attached := strings.Cut(arg, "=")
+		switch name {
+		case "--list":
+			if attached {
 				return false
 			}
+			hasListQuery = true
+		case "--show-current":
+			if !branch || attached {
+				return false
+			}
+			hasShowCurrent = true
+		case "--contains", "--no-contains", "--merged", "--no-merged", "--points-at":
+			if !attached {
+				if i+1 < len(args) {
+					i++
+					value = args[i]
+				} else if branch && name == "--points-at" {
+					return false
+				} else {
+					// Git defaults these filters to HEAD only at the end of argv.
+					value = "HEAD"
+				}
+			}
+			if value == "" || strings.HasPrefix(value, "-") {
+				return false
+			}
+			hasListQuery = true
+		case "--sort", "--format":
+			// Required values consume the next argument even when it looks like
+			// an option. Display options never enable listing on their own.
+			if !attached {
+				if i+1 == len(args) {
+					return false
+				}
+				i++
+			}
+		case "--color", "--column":
+			// Optional values must be attached; the next argument is a ref/pattern.
+		case "--abbrev":
+			if !branch {
+				return false
+			}
+		case "--ignore-case", "--no-color", "--no-column":
+			if attached {
+				return false
+			}
+		case "--all", "--remotes", "--verbose", "--no-abbrev":
+			if !branch || attached {
+				return false
+			}
+		default:
+			// This also rejects writes, abbreviated options and query cancellation.
+			return false
 		}
-		return true
 	}
-	switch lower {
-	case "--list", "--ignore-case", "--color", "--no-color", "--no-column":
-		return true
+
+	if hasShowCurrent && hasPositional {
+		return false
 	}
-	for _, prefix := range []string{
-		"--sort", "--sort=", "--format", "--format=", "--column", "--column=", "--color=",
-		"--points-at", "--points-at=",
-		"--contains", "--contains=", "--no-contains", "--no-contains=",
-		"--merged", "--merged=", "--no-merged", "--no-merged=",
-	} {
-		if lower == prefix || strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
+	// Without positional arguments both commands default to listing refs.
+	return !hasPositional || hasListQuery
 }
 
 func isLowRiskGitRemote(args []string) bool {

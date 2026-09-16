@@ -34,6 +34,8 @@ jobs:
           npm --prefix web ci
       - name: Check tracked files for secrets
         run: npm run check:secrets
+      - name: Test tool package with required build tags
+        run: go test -tags 'sqlite_fts5 webrtcaec' ./internal/tool
       - name: Test Go packages
         run: go test ./...
       - name: Test Electron shell

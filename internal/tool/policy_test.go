@@ -241,6 +241,31 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 	}
 }
 
+func TestClassifyToolCallCommandRequiresApprovalForUnresolvedArguments(t *testing.T) {
+	for _, command := range []string{
+		`git config $OLDPWD`,
+		`git config "$OLDPWD"`,
+		`git branch --list $PWD`,
+		`python3 $TMPDIR/script.py`,
+	} {
+		for _, background := range []bool{false, true} {
+			raw, err := json.Marshal(map[string]any{
+				"scope":      "project",
+				"command":    command,
+				"env":        map[string]string{"OLDPWD": "review.probe changed"},
+				"background": background,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			risk, ok := ClassifyToolCall(CommandRun, raw)
+			if !ok || risk.LowRisk {
+				t.Fatalf("unresolved arguments require approval: command=%q background=%v risk=%+v ok=%v", command, background, risk, ok)
+			}
+		}
+	}
+}
+
 func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "golang study")
 	if err := os.MkdirAll(root, 0o700); err != nil {
