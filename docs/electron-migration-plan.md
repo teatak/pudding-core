@@ -215,7 +215,7 @@ model tool call
 - Electron main 启动 Go daemon 子进程。
 - renderer 加载现有 Vite/React UI。
 - REST/SSE 仍直连 daemon。
-- macOS 使用隐藏标题栏,红绿灯固定为 `trafficLightPosition: { x: 18, y: 18 }`;会话 toolbar、画布 toolbar、rail toggle、全局拖拽带统一通过 `electron-mac` 的 CSS vars 对齐。
+- macOS 使用隐藏标题栏,红绿灯固定为 `trafficLightPosition: { x: 16, y: 16 }`;会话 toolbar、画布 toolbar、rail toggle、全局拖拽带统一通过 `electron-mac` 的 CSS vars 对齐。
 - 开发入口:`make desktop-dev`。
 
 验收:

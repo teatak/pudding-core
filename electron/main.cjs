@@ -84,7 +84,7 @@ console.info("[electron] starting", {
   composerTestState: composerTestState || undefined,
 });
 const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SCHEME || "pudding");
-const macTrafficLightPosition = { x: 18, y: 18 };
+const macTrafficLightPosition = { x: 16, y: 16 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 // 最小窗口宽 = 专注/普通共用的对话下限 380 + 专注工作区下限 220 + 1px 分隔条,再留少量余量。
 // 对应 web 侧的 minimumChatPaneWidth / focusWorkspaceMinimumWidth,两边改动需要同步。

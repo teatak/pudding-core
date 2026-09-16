@@ -242,9 +242,9 @@ textarea:not([aria-invalid="true"]):focus-visible,
 }
 
 html[data-shell="electron-mac"] {
-    /* Electron uses trafficLightPosition { x:18, y:18 }; align toolbar to that visual anchor. */
-    --traffic-inset: 72px;
-    --toolbar-h: 50px;
+    /* Electron uses trafficLightPosition { x:16, y:16 }; align toolbar to that visual anchor. */
+    --traffic-inset: 68px;
+    --toolbar-h: 46px;
     --rail-toggle-left: var(--toolbar-edge-inset);
     --workspace-toggle-right: var(--toolbar-edge-inset);
     --workspace-toolbar-pl: var(--toolbar-edge-inset);

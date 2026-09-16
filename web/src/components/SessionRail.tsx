@@ -473,7 +473,7 @@ export function SessionRail({
             className="flex h-[min(48rem,var(--radix-popover-content-available-height))] max-h-[var(--radix-popover-content-available-height)] w-[260px] flex-col gap-0 border-0 !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] ring-0 outline-none"
             collisionPadding={12}
             side="bottom"
-            sideOffset={11}
+            sideOffset={9}
             onMouseEnter={hover.cancelClose}
             onMouseLeave={hover.scheduleClose}
             onFocusOutside={(event) => event.preventDefault()}
