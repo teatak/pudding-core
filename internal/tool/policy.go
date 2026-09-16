@@ -323,7 +323,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		if len(argv) == 0 {
 			continue
 		}
-		if argv[0] == "env_print" {
+		if argv[0] == "env_print" || argv[0] == "command_query" {
 			continue
 		}
 		commandOperation := commandOperation(argv[0])
@@ -840,7 +840,7 @@ func unwrapCommand(argv []string) []string {
 				idx++
 			}
 			if isQuery {
-				return []string{"which"}
+				return []string{"command_query"}
 			}
 			if idx >= len(args) {
 				return nil
@@ -947,6 +947,10 @@ func isRiskyAwkScript(script string) bool {
 func commandEnvironmentRequiresApproval(env map[string]string) bool {
 	for key, value := range env {
 		key = strings.ToUpper(strings.TrimSpace(key))
+		trimmedVal := strings.TrimSpace(value)
+		if strings.HasPrefix(trimmedVal, "-") && !isFlagCapableEnvKey(key) {
+			return true
+		}
 		if commandBindEnvironmentKey(key) && isWildcardBindAddress(value) {
 			return true
 		}
@@ -979,6 +983,15 @@ func commandEnvironmentRequiresApproval(env map[string]string) bool {
 		}
 	}
 	return false
+}
+
+func isFlagCapableEnvKey(key string) bool {
+	switch key {
+	case "GOFLAGS", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_LDFLAGS":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandEnvironmentOutsideProjectPaths(env map[string]string, cwd string, projectDirs []string) []string {
@@ -1243,11 +1256,9 @@ func isLowRiskGitBranch(args []string) bool {
 	hasShowCurrent := false
 	var positional []string
 
-	for _, raw := range args {
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := strings.TrimSpace(raw)
-		if arg == "" {
-			continue
-		}
 		lower := strings.ToLower(arg)
 
 		// 显式取反或取消查询模式的选项，严禁视为只读查询，直接要求审批
@@ -1264,15 +1275,14 @@ func isLowRiskGitBranch(args []string) bool {
 				hasListQuery = true
 			} else if lower == "--show-current" {
 				hasShowCurrent = true
-			} else if lower == "--merged" || strings.HasPrefix(lower, "--merged=") ||
-				lower == "--no-merged" || strings.HasPrefix(lower, "--no-merged=") ||
-				lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
-				lower == "--no-contains" || strings.HasPrefix(lower, "--no-contains=") ||
-				lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") {
+			} else if isFilterBranchOption(lower) {
 				hasListQuery = true
+				if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+					i++
+				}
 			}
 		} else {
-			positional = append(positional, arg)
+			positional = append(positional, raw)
 		}
 	}
 
@@ -1286,12 +1296,20 @@ func isLowRiskGitBranch(args []string) bool {
 		return true
 	}
 
-	// 如果有位置参数：必须有明确的列表/过滤选项，且位置参数最多作为 pattern
-	if !hasListQuery || len(positional) > 1 {
+	// 如果有位置参数：必须有明确的列表/过滤选项（模式匹配 pattern，支持多个）
+	if !hasListQuery {
 		return false
 	}
 
 	return true
+}
+
+func isFilterBranchOption(lower string) bool {
+	switch lower {
+	case "--contains", "--no-contains", "--merged", "--no-merged", "--points-at", "--sort", "--format", "--abbrev", "--column":
+		return true
+	}
+	return false
 }
 
 func isSafeGitBranchOption(arg string) bool {
@@ -1316,7 +1334,7 @@ func isSafeGitBranchOption(arg string) bool {
 		return true
 	}
 	for _, prefix := range []string{
-		"--color=", "--sort=", "--format=", "--abbrev=", "--column=",
+		"--color=", "--sort", "--sort=", "--format", "--format=", "--abbrev", "--abbrev=", "--column", "--column=",
 		"--merged", "--merged=", "--no-merged", "--no-merged=",
 		"--contains", "--contains=", "--no-contains", "--no-contains=",
 		"--points-at", "--points-at=",
@@ -1332,15 +1350,13 @@ func isLowRiskGitTag(args []string) bool {
 	hasListQuery := false
 	var positional []string
 
-	for _, raw := range args {
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := strings.TrimSpace(raw)
-		if arg == "" {
-			continue
-		}
 		lower := strings.ToLower(arg)
 
-		// 取反选项拦截
-		if lower == "--no-points-at" || lower == "--no-contains" || lower == "--no-merged" || lower == "--no-list" {
+		// 取反选项拦截（注意：--no-contains 和 --no-merged 是合法的负向过滤条件）
+		if lower == "--no-points-at" || lower == "--no-list" {
 			return false
 		}
 
@@ -1348,14 +1364,16 @@ func isLowRiskGitTag(args []string) bool {
 			if !isSafeGitTagOption(arg) {
 				return false
 			}
-			if lower == "-l" || lower == "--list" ||
-				lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") ||
-				lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
-				lower == "--merged" || strings.HasPrefix(lower, "--merged=") {
+			if lower == "-l" || lower == "--list" {
 				hasListQuery = true
+			} else if isFilterTagOption(lower) {
+				hasListQuery = true
+				if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+					i++
+				}
 			}
 		} else {
-			positional = append(positional, arg)
+			positional = append(positional, raw)
 		}
 	}
 
@@ -1363,11 +1381,19 @@ func isLowRiskGitTag(args []string) bool {
 		return true // 默认 git tag 列出所有标签
 	}
 
-	if !hasListQuery || len(positional) > 1 {
+	if !hasListQuery {
 		return false
 	}
 
 	return true
+}
+
+func isFilterTagOption(lower string) bool {
+	switch lower {
+	case "--points-at", "--contains", "--no-contains", "--merged", "--no-merged", "--sort", "--format", "--column":
+		return true
+	}
+	return false
 }
 
 func isSafeGitTagOption(arg string) bool {
@@ -1387,10 +1413,10 @@ func isSafeGitTagOption(arg string) bool {
 		return true
 	}
 	for _, prefix := range []string{
-		"--sort=", "--format=", "--column=", "--color=",
+		"--sort", "--sort=", "--format", "--format=", "--column", "--column=", "--color=",
 		"--points-at", "--points-at=",
-		"--contains", "--contains=",
-		"--merged", "--merged=",
+		"--contains", "--contains=", "--no-contains", "--no-contains=",
+		"--merged", "--merged=", "--no-merged", "--no-merged=",
 	} {
 		if lower == prefix || strings.HasPrefix(lower, prefix) {
 			return true
@@ -1436,26 +1462,24 @@ func isLowRiskGitConfig(args []string) bool {
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
-		raw := strings.TrimSpace(args[i])
-		if raw == "" {
-			continue
-		}
-		lower := strings.ToLower(raw)
+		raw := args[i] // 严禁跳过空值参数
+		trimmed := strings.TrimSpace(raw)
+		lower := strings.ToLower(trimmed)
 
 		// 写操作选项（立即拒绝）
-		if isRiskyGitConfigArg(raw) {
+		if isRiskyGitConfigArg(trimmed) {
 			return false
 		}
 
 		// 消费带参数的配置选项（如 --file <path>, -f <path>, --blob <id>, --default <val>, --type <type>）
-		if lower == "--file" || raw == "-f" || lower == "--blob" || lower == "--default" || lower == "--type" {
+		if lower == "--file" || trimmed == "-f" || lower == "--blob" || lower == "--default" || lower == "--type" {
 			if i+1 < len(args) {
 				i++ // 消费配置目标参数，不计入业务位置参数
 				continue
 			}
 			return false
 		}
-		if strings.HasPrefix(lower, "--file=") || strings.HasPrefix(raw, "-f") ||
+		if strings.HasPrefix(lower, "--file=") || strings.HasPrefix(trimmed, "-f") ||
 			strings.HasPrefix(lower, "--blob=") || strings.HasPrefix(lower, "--default=") ||
 			strings.HasPrefix(lower, "--type=") {
 			continue
@@ -1492,7 +1516,7 @@ func isLowRiskGitConfig(args []string) bool {
 		}
 
 		// 其他只读修饰标志
-		if strings.HasPrefix(raw, "-") {
+		if strings.HasPrefix(trimmed, "-") {
 			switch lower {
 			case "--global", "--system", "--local", "--worktree",
 				"--show-origin", "--show-scope", "--null", "-z",
@@ -1504,21 +1528,54 @@ func isLowRiskGitConfig(args []string) bool {
 			}
 		}
 
+		// 识别现代 Git config 子命令语法
+		if readAction == "" && len(positional) == 0 {
+			switch lower {
+			case "edit", "set", "set-all", "unset", "unset-all", "rename-section", "remove-section":
+				// 新式写/编辑子命令，直接要求审批
+				return false
+			case "get":
+				readAction = "get"
+				continue
+			case "get-all":
+				readAction = "get-all"
+				continue
+			case "get-regexp":
+				readAction = "get-regexp"
+				continue
+			case "get-urlmatch":
+				readAction = "get-urlmatch"
+				continue
+			case "get-color":
+				readAction = "get-color"
+				continue
+			case "get-colorbool":
+				readAction = "get-colorbool"
+				continue
+			case "list":
+				readAction = "list"
+				continue
+			}
+		}
+
 		positional = append(positional, raw)
 	}
 
 	switch readAction {
 	case "get-urlmatch":
 		// 例如：git config --get-urlmatch http https://example.invalid
-		return len(positional) <= 2
+		return len(positional) == 2
 	case "get", "get-all", "get-regexp", "get-color", "get-colorbool":
 		// 例如：git config --file .git/config --get http.sslVerify
 		return len(positional) >= 1 && len(positional) <= 2
 	case "list":
 		return len(positional) == 0
 	case "":
-		// 无显式动作：git config <name> 是读取
-		return len(positional) == 1
+		// 无显式动作：git config <name> 是读取，必须恰好有 1 个参数且不为空字符串
+		if len(positional) == 1 && strings.TrimSpace(positional[0]) != "" {
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -1575,6 +1632,9 @@ func containsArgPrefix(args []string, prefixes ...string) bool {
 func isReadOnlyFind(args []string) bool {
 	for _, arg := range args {
 		arg = strings.ToLower(strings.TrimSpace(arg))
+		if strings.Contains(arg, "$") {
+			return false
+		}
 		switch arg {
 		case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls":
 			return false

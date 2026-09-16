@@ -104,7 +104,7 @@ func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 	}
 	// 无论是否经过包装命令（如 command, time, arch, env 等），最终解包出的有效可执行程序名在 AST 中必须为纯静态字面量
 	unwrapped := unwrapCommand(argv)
-	if len(unwrapped) > 0 && unwrapped[0] != "env_print" {
+	if len(unwrapped) > 0 && unwrapped[0] != "env_print" && unwrapped[0] != "command_query" {
 		targetCmd := unwrapped[0]
 		foundTarget := false
 		for _, word := range call.Args {
@@ -211,7 +211,7 @@ func staticShellWord(word *syntax.Word) (string, bool) {
 
 func isSafeBuiltinParameter(name string) bool {
 	switch name {
-	case "PWD", "OLDPWD", "USER", "LOGNAME", "HOME", "UID", "EUID", "SHLVL", "?", "#":
+	case "PWD", "OLDPWD", "HOME":
 		return true
 	default:
 		return false
