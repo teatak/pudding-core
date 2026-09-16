@@ -16,6 +16,7 @@ import {
   consumeTranscriptTurnReveal,
   useTranscriptTurnReveal,
 } from "@/state/transcriptRevealStore";
+import { useTranscriptViewportStore } from "@/state/transcriptViewportStore";
 
 type TranscriptProps = {
   token: string;
@@ -38,9 +39,24 @@ export function Transcript({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const disclosureByKeyRef = useRef<Record<string, boolean>>({});
-  const [isAtLatest, setIsAtLatest] = useState(true);
+  const viewportKey = `${searchSlot}:${sessionID}`;
+  const [renderedSessionKey, setRenderedSessionKey] = useState(viewportKey);
+  const [isAtLatest, setIsAtLatest] = useState(
+    () => useTranscriptViewportStore.getState().viewports[viewportKey]?.atLatest ?? true,
+  );
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
+  const sessionIDRef = useRef(sessionID);
+  const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
+  sessionIDRef.current = sessionID;
+
+  if (renderedSessionKey !== viewportKey) {
+    setRenderedSessionKey(viewportKey);
+    setIsAtLatest(useTranscriptViewportStore.getState().viewports[viewportKey]?.atLatest ?? true);
+    setNewMessageCount(0);
+    setJumpLatestSignal(0);
+    turnVMsRef.current = [];
+  }
   const turnReveal = useTranscriptTurnReveal(sessionID);
   const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, revealTurn, transcript, turnsQuery } =
     useTranscriptData({
@@ -83,9 +99,7 @@ export function Transcript({
     () => transcriptDisplaySettings(settingsQuery.data?.settings),
     [settingsQuery.data?.settings],
   );
-  const sessionIDRef = useRef(sessionID);
-  const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
-  sessionIDRef.current = sessionID;
+
   const moveToLatest = useCallback(() => {
     setNewMessageCount(0);
     setIsAtLatest(true);

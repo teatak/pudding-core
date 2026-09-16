@@ -232,6 +232,7 @@ export function Conversation({
           </ChatColumn>
       </div>
       <Transcript
+          key={`${searchSlot}:${session.id}`}
           searchSlot={searchSlot}
           searchState={searchState}
           sessionID={session.id}

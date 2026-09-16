@@ -75,7 +75,7 @@ export const TranscriptList = memo(function TranscriptList({
   const activeSearchTargetRef = useRef("");
   const followLatestRef = useRef(savedViewport?.atLatest ?? true);
   const initialScrollCompleteRef = useRef(false);
-  const isAtLatestRef = useRef(true);
+  const isAtLatestRef = useRef(savedViewport?.atLatest ?? true);
   const previousJumpLatestSignalRef = useRef(jumpLatestSignal);
   const listElementRef = useRef<HTMLDivElement | null>(null);
   const previousLastTurnKeyRef = useRef<string | null>(null);
@@ -102,9 +102,9 @@ export const TranscriptList = memo(function TranscriptList({
   );
 
   const setLatestState = useCallback(
-    (next: boolean) => {
+    (next: boolean, force = false) => {
       syncViewportScrollbar(next);
-      if (isAtLatestRef.current === next) {
+      if (!force && isAtLatestRef.current === next) {
         return;
       }
       isAtLatestRef.current = next;
@@ -216,12 +216,12 @@ export const TranscriptList = memo(function TranscriptList({
     if (savedViewport && !savedViewport.atLatest) {
       followLatestRef.current = false;
       virtualizer.scrollToOffset(savedViewport.scrollOffset, { behavior: "instant" });
-      setLatestState(false);
+      setLatestState(false, true);
       return;
     }
     followLatestRef.current = true;
     virtualizer.scrollToEnd({ behavior: "instant" });
-    setLatestState(true);
+    setLatestState(true, true);
   }, [itemKeys.length, savedViewport, scrollElement, searchState.target, setLatestState, turnReveal, virtualizer]);
 
   useLayoutEffect(() => {
