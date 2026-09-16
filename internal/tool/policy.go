@@ -735,7 +735,7 @@ func isAlwaysRiskyCommand(operation string) bool {
 		"mount", "umount", "hdiutil", "chmod", "chown", "chgrp", "security", "ssh-add", "gpg", "pass",
 		"open", "osascript", "pbpaste", "ssh", "scp", "sftp", "ftp", "nc", "ncat", "socat", "rsync",
 		"gh", "glab", "docker", "podman", "kubectl", "helm", "terraform", "tofu", "ansible", "ansible-playbook",
-		"brew", "port", "parallel",
+		"brew", "port", "xargs", "parallel", "env",
 		"script", "xcrun", "setsid", "daemon", "chronic", "chpst",
 		"ionice", "taskset", "watch", "busybox", "toybox":
 		return true
@@ -847,38 +847,55 @@ func unwrapCommand(argv []string) []string {
 			current = args[idx:]
 		case "env":
 			idx := 0
+			envMap := make(map[string]string)
+			hasComplexFlag := false
 			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
-				if args[idx] == "-u" || args[idx] == "--unset" {
+				arg := args[idx]
+				if arg == "-u" || arg == "--unset" {
 					idx += 2
-				} else {
-					idx++
+					continue
 				}
+				if strings.HasPrefix(arg, "-u") || strings.HasPrefix(arg, "--unset=") {
+					idx++
+					continue
+				}
+				if arg == "-i" || arg == "--ignore-environment" || arg == "-" || arg == "-0" || arg == "--null" || arg == "-v" {
+					idx++
+					continue
+				}
+				// 任何带值选项如 -S, --split-string, -C, --chdir, -P 等无法可靠安全解析的选项，保守拒绝解包要求审批
+				hasComplexFlag = true
+				break
+			}
+			if hasComplexFlag {
+				return current
 			}
 			for idx < len(args) && strings.Contains(args[idx], "=") && !strings.HasPrefix(args[idx], "-") {
+				parts := strings.SplitN(args[idx], "=", 2)
+				envMap[parts[0]] = parts[1]
 				idx++
+			}
+			if commandEnvironmentRequiresApproval(envMap) {
+				return current
 			}
 			if idx >= len(args) {
 				return []string{"env_print"}
 			}
-			current = args[idx:]
-		case "xargs":
-			idx := 0
-			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
-				if args[idx] == "-I" || args[idx] == "-n" || args[idx] == "-L" || args[idx] == "-s" || args[idx] == "-d" || args[idx] == "-E" {
-					idx += 2
-				} else {
-					idx++
-				}
+			subCmd := args[idx:]
+			if len(subCmd) == 0 || !isBareExecutableName(subCmd[0]) {
+				return current
 			}
-			if idx >= len(args) {
-				return []string{"echo"}
-			}
-			current = args[idx:]
+			current = subCmd
 		default:
 			return current
 		}
 	}
 	return current
+}
+
+func isBareExecutableName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && !strings.ContainsAny(name, "/\\ \t\r\n")
 }
 
 func awkRequiresApproval(args []string) bool {
@@ -887,7 +904,7 @@ func awkRequiresApproval(args []string) bool {
 	}
 	script := extractAwkInlineScript(args)
 	if script == "" {
-		return false
+		return true
 	}
 	return isRiskyAwkScript(script)
 }
@@ -915,7 +932,7 @@ func extractAwkInlineScript(args []string) string {
 
 func isRiskyAwkScript(script string) bool {
 	lower := strings.ToLower(script)
-	for _, pattern := range []string{"system(", "getline", "close(", "environ"} {
+	for _, pattern := range []string{"system", "getline", "close", "environ", "extension", "@load", "fflush"} {
 		if strings.Contains(lower, pattern) {
 			return true
 		}
@@ -1171,7 +1188,7 @@ func commandUsesOnlyLoopbackURLs(args []string) bool {
 
 func isBareCommand(executable string) bool {
 	executable = strings.TrimSpace(executable)
-	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, `/\\`)
+	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, "/\\ \t\r\n")
 }
 
 func isLowRiskGitCommand(args []string) bool {
@@ -1210,6 +1227,8 @@ func isLowRiskGitCommand(args []string) bool {
 				return !gitArgsRequireApproval(arg, args[1:])
 			case "pull":
 				return !gitArgsRequireApproval(arg, args[1:])
+			case "checkout", "switch", "restore":
+				return false
 			default:
 				return false
 			}
@@ -1218,32 +1237,109 @@ func isLowRiskGitCommand(args []string) bool {
 	return false
 }
 
+func isRiskyGitBranchArg(raw string) bool {
+	arg := strings.TrimSpace(raw)
+	lower := strings.ToLower(arg)
+	for _, long := range []string{
+		"--delete", "--move", "--copy",
+		"--set-upstream-to", "--unset-upstream", "--edit-description",
+	} {
+		if lower == long || strings.HasPrefix(lower, long+"=") {
+			return true
+		}
+	}
+	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+		for i := 1; i < len(arg); i++ {
+			switch arg[i] {
+			case 'd', 'D', 'm', 'M', 'c', 'C', 'u':
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isLowRiskGitBranch(args []string) bool {
+	hasExplicitQuery := false
+	var positional []string
 	for _, raw := range args {
-		arg := strings.ToLower(strings.TrimSpace(raw))
-		if arg == "-d" || arg == "-D" || arg == "--delete" ||
-			arg == "-m" || arg == "-M" || arg == "--move" ||
-			arg == "-c" || arg == "-C" || arg == "--copy" ||
-			arg == "-u" || arg == "--set-upstream-to" ||
-			arg == "--unset-upstream" || arg == "--edit-description" {
+		arg := strings.TrimSpace(raw)
+		if arg == "" {
+			continue
+		}
+		if isRiskyGitBranchArg(arg) {
 			return false
 		}
-		if !strings.HasPrefix(arg, "-") && !containsAnyArg(args, "--list", "-l") {
-			return false
+		lower := strings.ToLower(arg)
+		if lower == "-l" || lower == "--list" || lower == "--show-current" ||
+			lower == "-a" || lower == "--all" || lower == "-r" || lower == "--remotes" ||
+			lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
+			lower == "--merged" || strings.HasPrefix(lower, "--merged=") ||
+			lower == "--no-merged" || strings.HasPrefix(lower, "--no-merged=") {
+			hasExplicitQuery = true
+			continue
 		}
+		if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+		}
+	}
+	if len(args) == 0 {
+		return true
+	}
+	if len(positional) > 0 && !hasExplicitQuery {
+		return false
 	}
 	return true
 }
 
+func isRiskyGitTagArg(raw string) bool {
+	arg := strings.TrimSpace(raw)
+	lower := strings.ToLower(arg)
+	for _, long := range []string{
+		"--delete", "--annotate", "--sign", "--local-user", "--force", "--message", "--file",
+	} {
+		if lower == long || strings.HasPrefix(lower, long+"=") {
+			return true
+		}
+	}
+	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+		for i := 1; i < len(arg); i++ {
+			switch arg[i] {
+			case 'd', 'a', 's', 'u', 'f', 'm', 'F':
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isLowRiskGitTag(args []string) bool {
+	hasExplicitQuery := false
+	var positional []string
 	for _, raw := range args {
-		arg := strings.ToLower(strings.TrimSpace(raw))
-		if arg == "-d" || arg == "--delete" || arg == "-a" || arg == "-s" || arg == "-u" || arg == "-f" || arg == "--force" {
+		arg := strings.TrimSpace(raw)
+		if arg == "" {
+			continue
+		}
+		if isRiskyGitTagArg(arg) {
 			return false
 		}
-		if !strings.HasPrefix(arg, "-") && !containsAnyArg(args, "--list", "-l") {
-			return false
+		lower := strings.ToLower(arg)
+		if lower == "-l" || lower == "--list" ||
+			lower == "--contains" || strings.HasPrefix(lower, "--contains=") ||
+			lower == "--points-at" || strings.HasPrefix(lower, "--points-at=") {
+			hasExplicitQuery = true
+			continue
 		}
+		if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+		}
+	}
+	if len(args) == 0 {
+		return true
+	}
+	if len(positional) > 0 && !hasExplicitQuery {
+		return false
 	}
 	return true
 }
@@ -1252,23 +1348,60 @@ func isLowRiskGitRemote(args []string) bool {
 	for _, raw := range args {
 		arg := strings.ToLower(strings.TrimSpace(raw))
 		switch arg {
-		case "add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune":
+		case "add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune", "update":
 			return false
 		}
 	}
 	return true
 }
 
+func isRiskyGitConfigArg(raw string) bool {
+	arg := strings.TrimSpace(raw)
+	lower := strings.ToLower(arg)
+	for _, long := range []string{
+		"--add", "--replace-all", "--unset", "--unset-all",
+		"--remove-section", "--rename-section", "--edit",
+	} {
+		if lower == long || strings.HasPrefix(lower, long+"=") {
+			return true
+		}
+	}
+	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+		for i := 1; i < len(arg); i++ {
+			if arg[i] == 'e' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isLowRiskGitConfig(args []string) bool {
 	hasReadFlag := false
+	var positional []string
 	for _, raw := range args {
-		arg := strings.ToLower(strings.TrimSpace(raw))
-		if arg == "--add" || arg == "--replace-all" || arg == "--unset" || arg == "--unset-all" || arg == "--remove-section" || arg == "--rename-section" {
+		arg := strings.TrimSpace(raw)
+		if arg == "" {
+			continue
+		}
+		if isRiskyGitConfigArg(arg) {
 			return false
 		}
-		if arg == "-l" || arg == "--list" || arg == "--get" || arg == "--get-all" || arg == "--get-regexp" || arg == "--get-urlmatch" {
+		lower := strings.ToLower(arg)
+		if lower == "-l" || lower == "--list" ||
+			lower == "--get" || strings.HasPrefix(lower, "--get=") ||
+			lower == "--get-all" || strings.HasPrefix(lower, "--get-all=") ||
+			lower == "--get-regexp" || strings.HasPrefix(lower, "--get-regexp=") ||
+			lower == "--get-urlmatch" || strings.HasPrefix(lower, "--get-urlmatch=") {
 			hasReadFlag = true
+			continue
 		}
+		if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+		}
+	}
+	if len(positional) > 1 {
+		return false
 	}
 	return hasReadFlag
 }

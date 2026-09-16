@@ -43,14 +43,25 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 			if len(argv) > 0 {
 				analysis.Commands = append(analysis.Commands, argv)
 			}
-			hasRiskyAssign := false
+			inlineEnv := make(map[string]string)
+			hasDynamicAssign := false
 			for _, assign := range node.Assigns {
-				if assign.Name == nil || !isSafeInlineEnvName(assign.Name.Value) {
-					hasRiskyAssign = true
+				if assign.Name == nil {
+					hasDynamicAssign = true
 					break
 				}
+				val := ""
+				if assign.Value != nil {
+					staticVal, ok := staticShellWord(assign.Value)
+					if !ok {
+						hasDynamicAssign = true
+						break
+					}
+					val = staticVal
+				}
+				inlineEnv[assign.Name.Value] = val
 			}
-			if !static || hasRiskyAssign {
+			if !static || hasDynamicAssign || commandEnvironmentRequiresApproval(inlineEnv) {
 				analysis.Dynamic = true
 			}
 		case *syntax.Redirect:
@@ -81,7 +92,10 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 
 func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 	argv := make([]string, 0, len(call.Args))
-	for _, word := range call.Args {
+	for i, word := range call.Args {
+		if i == 0 && !isStaticCommandWord(word) {
+			return argv, false
+		}
 		value, ok := staticShellWord(word)
 		if !ok {
 			return argv, false
@@ -89,6 +103,34 @@ func staticCallArgv(call *syntax.CallExpr) ([]string, bool) {
 		argv = append(argv, value)
 	}
 	return argv, len(argv) > 0
+}
+
+func isStaticCommandWord(word *syntax.Word) bool {
+	if word == nil || len(word.Parts) == 0 {
+		return false
+	}
+	for _, part := range word.Parts {
+		switch part := part.(type) {
+		case *syntax.Lit:
+			// 纯静态字面量
+		case *syntax.SglQuoted:
+			if part.Dollar {
+				return false
+			}
+		case *syntax.DblQuoted:
+			if part.Dollar {
+				return false
+			}
+			for _, qp := range part.Parts {
+				if _, ok := qp.(*syntax.Lit); !ok {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func staticShellWord(word *syntax.Word) (string, bool) {
@@ -146,22 +188,9 @@ func staticShellWord(word *syntax.Word) (string, bool) {
 	return value.String(), true
 }
 
-func isSafeInlineEnvName(name string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(name))
-	if strings.HasPrefix(upper, "DYLD_") || strings.HasPrefix(upper, "LD_") || strings.HasPrefix(upper, "GIT_") {
-		return false
-	}
-	switch upper {
-	case "PATH", "SHELL", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH", "NODE_OPTIONS", "RUBYOPT", "PERL5OPT", "SSH_AUTH_SOCK":
-		return false
-	default:
-		return true
-	}
-}
-
 func isSafeBuiltinParameter(name string) bool {
 	switch name {
-	case "PWD", "OLDPWD", "USER", "LOGNAME", "HOME", "UID", "EUID", "SHLVL", "?", "#", "0":
+	case "PWD", "OLDPWD", "USER", "LOGNAME", "HOME", "UID", "EUID", "SHLVL", "?", "#":
 		return true
 	default:
 		return false
