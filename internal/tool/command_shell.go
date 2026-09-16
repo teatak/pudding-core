@@ -43,7 +43,14 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 			if len(argv) > 0 {
 				analysis.Commands = append(analysis.Commands, argv)
 			}
-			if !static || len(node.Assigns) > 0 {
+			hasRiskyAssign := false
+			for _, assign := range node.Assigns {
+				if assign.Name == nil || !isSafeInlineEnvName(assign.Name.Value) {
+					hasRiskyAssign = true
+					break
+				}
+			}
+			if !static || hasRiskyAssign {
 				analysis.Dynamic = true
 			}
 		case *syntax.Redirect:
@@ -58,8 +65,8 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 				analysis.Dynamic = true
 			}
 		case *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst,
-			*syntax.ExtGlob, *syntax.BraceExp, *syntax.IfClause, *syntax.WhileClause,
-			*syntax.ForClause, *syntax.CaseClause, *syntax.Block, *syntax.Subshell,
+			*syntax.ExtGlob, *syntax.IfClause, *syntax.WhileClause,
+			*syntax.ForClause, *syntax.CaseClause,
 			*syntax.FuncDecl, *syntax.ArithmCmd, *syntax.TestClause, *syntax.DeclClause,
 			*syntax.LetClause, *syntax.TimeClause, *syntax.CoprocClause, *syntax.TestDecl:
 			analysis.Dynamic = true
@@ -122,11 +129,43 @@ func staticShellWord(word *syntax.Word) (string, bool) {
 				return "", false
 			}
 			value.WriteString(parameter)
+		case *syntax.BraceExp:
+			var elemVals []string
+			for _, elem := range part.Elems {
+				elemVal, ok := staticShellWord(elem)
+				if !ok {
+					return "", false
+				}
+				elemVals = append(elemVals, elemVal)
+			}
+			value.WriteString("{" + strings.Join(elemVals, ",") + "}")
 		default:
 			return "", false
 		}
 	}
 	return value.String(), true
+}
+
+func isSafeInlineEnvName(name string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	if strings.HasPrefix(upper, "DYLD_") || strings.HasPrefix(upper, "LD_") || strings.HasPrefix(upper, "GIT_") {
+		return false
+	}
+	switch upper {
+	case "PATH", "SHELL", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH", "NODE_OPTIONS", "RUBYOPT", "PERL5OPT", "SSH_AUTH_SOCK":
+		return false
+	default:
+		return true
+	}
+}
+
+func isSafeBuiltinParameter(name string) bool {
+	switch name {
+	case "PWD", "OLDPWD", "USER", "LOGNAME", "HOME", "UID", "EUID", "SHLVL", "?", "#", "0":
+		return true
+	default:
+		return false
+	}
 }
 
 func staticSandboxParameter(parameter *syntax.ParamExp) (string, bool) {
@@ -137,10 +176,10 @@ func staticSandboxParameter(parameter *syntax.ParamExp) (string, bool) {
 		return "", false
 	}
 	name := parameter.Param.Value
-	if !sandboxManagedPath("$" + name) {
-		return "", false
+	if isSafeBuiltinParameter(name) || sandboxManagedPath("$"+name) {
+		return "$" + name, true
 	}
-	return "$" + name, true
+	return "", false
 }
 
 func staticShellRedirection(redirect *syntax.Redirect) (shellRedirection, bool) {

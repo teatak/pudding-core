@@ -318,7 +318,14 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		Summary:   "Run project command: " + compactShellCommand(args.Command),
 		LowRisk:   lowRisk,
 	}
-	for _, argv := range analysis.Commands {
+	for _, rawArgv := range analysis.Commands {
+		argv := unwrapCommand(rawArgv)
+		if len(argv) == 0 {
+			continue
+		}
+		if argv[0] == "env_print" {
+			continue
+		}
 		commandOperation := commandOperation(argv[0])
 		executableAllowed := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs)
 		outsidePaths := commandPathArgsOutsideProject(argv, args.CWD, projectDirs)
@@ -669,8 +676,10 @@ func commandRequiresApproval(argv []string) bool {
 		return commandSubcommand(args) == "upload"
 	case "curl", "wget":
 		return !commandUsesOnlyLoopbackURLs(args)
-	case "sh", "bash", "zsh", "dash", "ksh", "fish", "awk", "gawk", "mawk", "nawk", "powershell", "pwsh", "cmd":
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "powershell", "pwsh", "cmd":
 		return commandUsesInlineCode(operation, args)
+	case "awk", "gawk", "mawk", "nawk":
+		return awkRequiresApproval(args)
 	default:
 		return false
 	}
@@ -685,7 +694,7 @@ func commandNeedsHostAccess(argv []string) bool {
 	switch operation {
 	case "sudo", "doas", "su", "launchctl", "systemsetup", "networksetup", "scutil", "csrutil", "nvram",
 		"mount", "umount", "hdiutil", "diskutil", "mkfs", "security", "ssh-add", "gpg", "pass",
-		"open", "osascript", "pbcopy", "pbpaste", "ssh", "scp", "sftp", "ftp",
+		"open", "osascript", "pbpaste", "ssh", "scp", "sftp", "ftp",
 		"gh", "glab", "docker", "podman", "kubectl", "helm", "terraform", "tofu", "ansible", "ansible-playbook",
 		"brew", "port":
 		return true
@@ -724,15 +733,197 @@ func isAlwaysRiskyCommand(operation string) bool {
 	switch operation {
 	case "sudo", "doas", "su", "launchctl", "systemsetup", "networksetup", "scutil", "csrutil", "nvram",
 		"mount", "umount", "hdiutil", "chmod", "chown", "chgrp", "security", "ssh-add", "gpg", "pass",
-		"open", "osascript", "pbcopy", "pbpaste", "ssh", "scp", "sftp", "ftp", "nc", "ncat", "socat", "rsync",
+		"open", "osascript", "pbpaste", "ssh", "scp", "sftp", "ftp", "nc", "ncat", "socat", "rsync",
 		"gh", "glab", "docker", "podman", "kubectl", "helm", "terraform", "tofu", "ansible", "ansible-playbook",
-		"brew", "port", "xargs", "parallel", "env", "nice", "nohup", "time", "command", "arch", "caffeinate",
-		"script", "timeout", "gtimeout", "xcrun", "setsid", "stdbuf", "unbuffer", "daemon", "chronic", "chpst",
+		"brew", "port", "parallel",
+		"script", "xcrun", "setsid", "daemon", "chronic", "chpst",
 		"ionice", "taskset", "watch", "busybox", "toybox":
 		return true
 	default:
 		return false
 	}
+}
+
+func unwrapCommand(argv []string) []string {
+	current := argv
+	for len(current) > 0 {
+		op := commandOperation(current[0])
+		args := current[1:]
+		switch op {
+		case "time":
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				args = args[1:]
+			}
+			if len(args) == 0 {
+				return nil
+			}
+			current = args
+		case "timeout", "gtimeout":
+			idx := 0
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-k" || args[idx] == "--kill-after" || args[idx] == "-s" || args[idx] == "--signal" {
+					idx += 2
+				} else {
+					idx++
+				}
+			}
+			if idx < len(args) {
+				idx++
+			}
+			if idx >= len(args) {
+				return nil
+			}
+			current = args[idx:]
+		case "nice":
+			idx := 0
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-n" {
+					idx += 2
+				} else {
+					idx++
+				}
+			}
+			if idx >= len(args) {
+				return nil
+			}
+			current = args[idx:]
+		case "nohup":
+			if len(args) == 0 {
+				return nil
+			}
+			current = args
+		case "caffeinate":
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				if args[0] == "-t" || args[0] == "-w" {
+					if len(args) > 1 {
+						args = args[2:]
+					} else {
+						args = nil
+					}
+				} else {
+					args = args[1:]
+				}
+			}
+			if len(args) == 0 {
+				return nil
+			}
+			current = args
+		case "arch":
+			for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+				args = args[1:]
+			}
+			if len(args) == 0 {
+				return nil
+			}
+			current = args
+		case "stdbuf", "unbuffer":
+			idx := 0
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-i" || args[idx] == "-o" || args[idx] == "-e" {
+					idx += 2
+				} else {
+					idx++
+				}
+			}
+			if idx >= len(args) {
+				return nil
+			}
+			current = args[idx:]
+		case "command":
+			idx := 0
+			isQuery := false
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-v" || args[idx] == "-V" {
+					isQuery = true
+				}
+				idx++
+			}
+			if isQuery {
+				return []string{"which"}
+			}
+			if idx >= len(args) {
+				return nil
+			}
+			current = args[idx:]
+		case "env":
+			idx := 0
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-u" || args[idx] == "--unset" {
+					idx += 2
+				} else {
+					idx++
+				}
+			}
+			for idx < len(args) && strings.Contains(args[idx], "=") && !strings.HasPrefix(args[idx], "-") {
+				idx++
+			}
+			if idx >= len(args) {
+				return []string{"env_print"}
+			}
+			current = args[idx:]
+		case "xargs":
+			idx := 0
+			for idx < len(args) && strings.HasPrefix(args[idx], "-") {
+				if args[idx] == "-I" || args[idx] == "-n" || args[idx] == "-L" || args[idx] == "-s" || args[idx] == "-d" || args[idx] == "-E" {
+					idx += 2
+				} else {
+					idx++
+				}
+			}
+			if idx >= len(args) {
+				return []string{"echo"}
+			}
+			current = args[idx:]
+		default:
+			return current
+		}
+	}
+	return current
+}
+
+func awkRequiresApproval(args []string) bool {
+	if containsAnyArg(args, "-f", "--file") || containsArgPrefix(args, "--file") {
+		return false
+	}
+	script := extractAwkInlineScript(args)
+	if script == "" {
+		return false
+	}
+	return isRiskyAwkScript(script)
+}
+
+func extractAwkInlineScript(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		if arg == "-F" || arg == "-v" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-F") || strings.HasPrefix(arg, "-v") {
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return arg
+	}
+	return ""
+}
+
+func isRiskyAwkScript(script string) bool {
+	lower := strings.ToLower(script)
+	for _, pattern := range []string{"system(", "getline", "close(", "environ"} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	if strings.Contains(script, ">") || strings.Contains(script, "|") {
+		return true
+	}
+	return false
 }
 
 func commandEnvironmentRequiresApproval(env map[string]string) bool {
@@ -1003,8 +1194,18 @@ func isLowRiskGitCommand(args []string) bool {
 			return false
 		default:
 			switch arg {
-			case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog", "ls-remote":
+			case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog", "ls-remote", "rev-list", "name-rev", "merge-base", "check-ignore", "check-ref-format":
 				return true
+			case "branch":
+				return isLowRiskGitBranch(args[1:])
+			case "tag":
+				return isLowRiskGitTag(args[1:])
+			case "remote":
+				return isLowRiskGitRemote(args[1:])
+			case "config":
+				return isLowRiskGitConfig(args[1:])
+			case "stash":
+				return isLowRiskGitStash(args[1:])
 			case "clone", "fetch":
 				return !gitArgsRequireApproval(arg, args[1:])
 			case "pull":
@@ -1012,6 +1213,77 @@ func isLowRiskGitCommand(args []string) bool {
 			default:
 				return false
 			}
+		}
+	}
+	return false
+}
+
+func isLowRiskGitBranch(args []string) bool {
+	for _, raw := range args {
+		arg := strings.ToLower(strings.TrimSpace(raw))
+		if arg == "-d" || arg == "-D" || arg == "--delete" ||
+			arg == "-m" || arg == "-M" || arg == "--move" ||
+			arg == "-c" || arg == "-C" || arg == "--copy" ||
+			arg == "-u" || arg == "--set-upstream-to" ||
+			arg == "--unset-upstream" || arg == "--edit-description" {
+			return false
+		}
+		if !strings.HasPrefix(arg, "-") && !containsAnyArg(args, "--list", "-l") {
+			return false
+		}
+	}
+	return true
+}
+
+func isLowRiskGitTag(args []string) bool {
+	for _, raw := range args {
+		arg := strings.ToLower(strings.TrimSpace(raw))
+		if arg == "-d" || arg == "--delete" || arg == "-a" || arg == "-s" || arg == "-u" || arg == "-f" || arg == "--force" {
+			return false
+		}
+		if !strings.HasPrefix(arg, "-") && !containsAnyArg(args, "--list", "-l") {
+			return false
+		}
+	}
+	return true
+}
+
+func isLowRiskGitRemote(args []string) bool {
+	for _, raw := range args {
+		arg := strings.ToLower(strings.TrimSpace(raw))
+		switch arg {
+		case "add", "rename", "remove", "rm", "set-head", "set-branches", "set-url", "prune":
+			return false
+		}
+	}
+	return true
+}
+
+func isLowRiskGitConfig(args []string) bool {
+	hasReadFlag := false
+	for _, raw := range args {
+		arg := strings.ToLower(strings.TrimSpace(raw))
+		if arg == "--add" || arg == "--replace-all" || arg == "--unset" || arg == "--unset-all" || arg == "--remove-section" || arg == "--rename-section" {
+			return false
+		}
+		if arg == "-l" || arg == "--list" || arg == "--get" || arg == "--get-all" || arg == "--get-regexp" || arg == "--get-urlmatch" {
+			hasReadFlag = true
+		}
+	}
+	return hasReadFlag
+}
+
+func isLowRiskGitStash(args []string) bool {
+	for _, raw := range args {
+		arg := strings.ToLower(strings.TrimSpace(raw))
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		switch arg {
+		case "list", "show":
+			return true
+		default:
+			return false
 		}
 	}
 	return false
