@@ -33,7 +33,7 @@
 | 文档 | 当前状态 |
 | --- | --- |
 | [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
-| [local-html-preview-and-links-design.md](local-html-preview-and-links-design.md) | 任意本地 HTML 预览、聊天与 Markdown 链接统一打开、固定相对路径来源及资源授权生命周期；尚未实现 |
+| [local-html-preview-and-links-design.md](local-html-preview-and-links-design.md) | 任意本地 HTML 预览、聊天绝对文件链接、Markdown 相对定位、多目录歧义处理及资源授权生命周期；尚未实现 |
 | [approval-optimization-design.md](approval-optimization-design.md) | Shell 执行收敛、原项目只读沙箱、有界授权与隔离副本的分阶段审批优化方案；尚未实现 |
 
 ## 仍在收尾
