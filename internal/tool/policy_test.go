@@ -245,6 +245,7 @@ func TestClassifyToolCallCommandRequiresApprovalForUnresolvedArguments(t *testin
 	for _, command := range []string{
 		`git config $OLDPWD`,
 		`git config "$OLDPWD"`,
+		"read OLDPWD <<'VALUE'\nreview.probe changed\nVALUE\ngit config $OLDPWD",
 		`git branch --list $PWD`,
 		`python3 $TMPDIR/script.py`,
 	} {

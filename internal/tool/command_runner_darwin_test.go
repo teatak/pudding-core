@@ -98,17 +98,12 @@ func TestMacOSCommandSandboxProjectBoundary(t *testing.T) {
 
 func TestMacOSCommandPolicyRequiresApprovalForExpandedGitConfigWrite(t *testing.T) {
 	project := newGitTestRepository(t, true)
-	oldPWD := "review.probe changed"
-	// Bash retains an inherited OLDPWD only when it names an existing directory.
-	if err := os.Mkdir(filepath.Join(project, oldPWD), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	customEnv := map[string]string{"OLDPWD": oldPWD}
-	command := `git config $OLDPWD`
+	// macOS /bin/sh clears inherited OLDPWD. Set it inside the shell so this
+	// fixture verifies argument expansion without relying on environment import.
+	command := "read OLDPWD <<'VALUE'\nreview.probe changed\nVALUE\ngit config $OLDPWD"
 	raw, err := json.Marshal(map[string]any{
 		"scope":   "project",
 		"command": command,
-		"env":     customEnv,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,17 +112,13 @@ func TestMacOSCommandPolicyRequiresApprovalForExpandedGitConfigWrite(t *testing.
 	if !ok || risk.LowRisk {
 		t.Fatalf("expanded Git arguments must require approval: %+v ok=%v", risk, ok)
 	}
-	env, err := commandEnvironment(customEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Execute only inside the fixture to verify the real macOS shell semantics
 	// behind the approval requirement, using an inert repository-local key.
 	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(t.TempDir()), commandSpec{
 		Executable:  "/bin/sh",
 		Args:        []string{"-c", command},
 		CWD:         project,
-		Env:         env,
+		Env:         mustCommandEnvironment(t),
 		ProjectDirs: []string{project},
 	})
 	if result.exitCode != 0 {
