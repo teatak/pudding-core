@@ -246,9 +246,9 @@ html[data-shell="electron-mac"] {
     --traffic-inset: 68px;
     --toolbar-h: 46px;
     --rail-toggle-left: var(--toolbar-edge-inset);
-    --workspace-toggle-right: var(--toolbar-edge-inset);
-    --workspace-toolbar-pl: var(--toolbar-edge-inset);
-    --workspace-toolbar-pr: var(--toolbar-edge-inset);
+    --workspace-toggle-right: 9px;
+    --workspace-toolbar-pl: 9px;
+    --workspace-toolbar-pr: 9px;
     --toolbar-icon-button-size: 1.75rem;
     --toolbar-icon-size: 0.95rem;
     --workspace-toolbar-tab-h: 1.75rem;

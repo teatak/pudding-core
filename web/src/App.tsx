@@ -580,7 +580,6 @@ export function App() {
   };
 
   const docked = workspaceDocked;
-  const workspaceToolbarPadding = "0.75rem";
   const renderedDockSplitRatio = consoleInteracting
     ? dockSplitRatioRef.current
     : dockSplitRatio;
@@ -598,7 +597,6 @@ export function App() {
   const dockedConsoleWidth = `clamp(${minimumChatPaneWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockWidth}, calc(100% - min(${minimumWorkspaceWidth}px, 50%)))`;
   const dockedWorkspaceWidth = `max(0px, calc(100cqw - clamp(${minimumChatPaneWidth}px, ${focused ? `${focusChatWidth}px` : preferredDockContainerWidth}, calc(100cqw - min(${minimumWorkspaceWidth}px, 50cqw))) - 1px))`;
   const workspaceSurfaceStyle = {
-    "--workspace-toolbar-pl": workspaceToolbarPadding,
     order: 2,
     // 窄屏抽屉会伸到窗口左缘:rail 收起时把 macOS 红绿灯那条宽度让出来,别让系统
     // 窗口按钮压在抽屉上(--traffic-inset 在浏览器和全屏下为 0,不影响其他形态)。
