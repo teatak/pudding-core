@@ -5,7 +5,7 @@ import { BackgroundProcessControl } from "@/components/BackgroundProcessControl"
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import { composerSendButtonClassName } from "@/components/composerControlStyles";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
-import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
+import { SessionModelReasoningPicker } from "@/components/SessionModelReasoningPicker";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { Spinner } from "@/components/Spinner";
@@ -25,7 +25,6 @@ type ComposerToolbarProps = {
   context?: UIContextPart;
   mentionMenuOpen: boolean;
   projectID: string;
-  reasoningEffort: string;
   sendEnabled: boolean;
   session: Session;
   showSendButton: boolean;
@@ -38,7 +37,6 @@ type ComposerToolbarProps = {
   onAddClick: () => void;
   onCancel: () => void;
   onModelPickerClose: () => void;
-  onReasoningChange: (value: string) => void;
   onResolvedModelChange: (value: ResolvedModelSelection | null) => void;
   onUIContextEnabledChange: (enabled: boolean) => void;
 };
@@ -52,7 +50,6 @@ export function ComposerToolbar({
   context,
   mentionMenuOpen,
   projectID,
-  reasoningEffort,
   sendEnabled,
   session,
   showSendButton,
@@ -65,7 +62,6 @@ export function ComposerToolbar({
   onAddClick,
   onCancel,
   onModelPickerClose,
-  onReasoningChange,
   onResolvedModelChange,
   onUIContextEnabledChange,
 }: ComposerToolbarProps) {
@@ -101,13 +97,12 @@ export function ComposerToolbar({
       </div>
       <div className="ml-auto flex min-w-0 items-center gap-1">
         <ContextUsageRing token={token} sessionID={session.id} />
-        <ModelReasoningPicker
+        <SessionModelReasoningPicker
+          key={session.id}
           className="min-w-0"
           token={token}
           session={session}
-          reasoningValue={reasoningEffort}
           onAfterClose={onModelPickerClose}
-          onReasoningChange={onReasoningChange}
           onResolvedChange={onResolvedModelChange}
         />
       </div>

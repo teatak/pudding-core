@@ -60,11 +60,11 @@ import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbo
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { AudioControlButtons, AudioRuntimeInstallDialog, audioAPIErrorMessage } from "@/components/SessionAudioControls";
-import { type ResolvedModelSelection } from "@/lib/modelSelection";
+import { modelSelectionKey, resolveModelSelection, type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
-import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
+import { resolveReasoningEffort } from "@/lib/reasoningEffort";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -300,6 +300,7 @@ export function DraftConversation({ token, projectID }: { token: string; project
             token={token}
             modelReady={draftModelIsValid}
             modelValue={composerModelValue}
+            resolvedModel={resolveModelSelection(profiles, composerModelValue)}
             onModelValueChange={setModelValue}
             onSubmitError={setSubmitError}
           />
@@ -402,6 +403,7 @@ function DraftComposer({
   projectID,
   modelReady,
   modelValue,
+  resolvedModel,
   onModelValueChange,
   onSubmitError,
 }: {
@@ -411,6 +413,7 @@ function DraftComposer({
   projectID?: string;
   modelReady: boolean;
   modelValue: DraftModelValue;
+  resolvedModel: ResolvedModelSelection | null;
   onModelValueChange: (model: DraftModelValue) => void;
   onSubmitError: (message: string | null) => void;
 }) {
@@ -433,7 +436,6 @@ function DraftComposer({
   const clearDraft = useDraftStore((state) => state.clear);
   const reasoningEffortByModel = useReasoningEffortPreferenceStore((state) => state.byModel);
   const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
-  const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -529,10 +531,9 @@ function DraftComposer({
     () => new Map(attachmentPreviewItems.map((item, index) => [item.id, index])),
     [attachmentPreviewItems],
   );
-  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
-  const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
-  const reasoningEffort = resolvedModelKey ? reasoningEffortByModel[resolvedModelKey] || "" : "";
+  const resolvedModelKey = modelSelectionKey(modelValue);
+  const reasoningEffort = resolveReasoningEffort(resolvedModel, reasoningEffortByModel[resolvedModelKey] || "").override;
   const draftVoiceSessionID = draftVoiceSession?.id;
   useSessionEvents(draftVoiceSessionID, token);
   const draftVoiceBindingsQuery = useQuery({
@@ -625,7 +626,7 @@ function DraftComposer({
         setDraftVoiceSession(null);
         return current;
       }
-      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
+      const activeReasoningEffort = reasoningEffort;
       if (!modelValue.provider || !modelValue.model) {
         throw new APIError(400, "no_model");
       }
@@ -987,12 +988,6 @@ function DraftComposer({
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
 
   useEffect(() => {
-    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
-      setDraftReasoningEffort("");
-    }
-  }, [reasoningEffort, reasoningOptions, setDraftReasoningEffort]);
-
-  useEffect(() => {
     draftVoiceInputActiveRef.current = draftVoiceInputActive;
   }, [draftVoiceInputActive]);
 
@@ -1020,7 +1015,7 @@ function DraftComposer({
   const submitMutation = useMutation({
     mutationFn: async (value: DraftValue & { parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
-      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
+      const activeReasoningEffort = reasoningEffort;
       if (!modelValue.provider || !modelValue.model) {
         throw new APIError(400, "no_model");
       }
@@ -1160,12 +1155,6 @@ function DraftComposer({
   }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
-  const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
-    setResolvedModel(next);
-    if (next) {
-      onModelValueChange({ provider: next.provider, model: next.model });
-    }
-  }, [onModelValueChange]);
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
     textField.ref(node);
@@ -1324,7 +1313,6 @@ function DraftComposer({
                 onChange={onModelValueChange}
                 onAfterClose={focusTextarea}
                 onReasoningChange={setDraftReasoningEffort}
-                onResolvedChange={handleResolvedModelChange}
               />
               <AudioControlButtons
                 asrInputLabel={draftVoiceInputActive && draftVoiceDisplayMode === "transcribe" ? t("voice.inputASROn") : t("voice.inputASROff")}

@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CircleGauge,
@@ -43,7 +43,7 @@ import {
   type ProjectReference,
   type Session,
 } from "@/api/client";
-import { queryKeys } from "@/api/queryKeys";
+import { mutationKeys, queryKeys } from "@/api/queryKeys";
 import { readElectronBrowserSelection } from "@/browser/electronBridge";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerApprovalBar, selectPendingApproval } from "@/components/ComposerApprovalBar";
@@ -69,7 +69,6 @@ import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcrip
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
-import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useI18n } from "@/i18n";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
@@ -87,7 +86,6 @@ import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitPart
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
-import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
 import { useSessionDraftStore, queuedDraftKey, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
   getVisibleUIContext,
@@ -159,6 +157,10 @@ export function Composer({
     if (editingID && queue.query.isSuccess && !editingInput) endQueueEdit(sessionID);
   }, [editingID, editingInput, endQueueEdit, queue.query.isSuccess, sessionID]);
   const queryClient = useQueryClient();
+  const modelSettingsPending = useIsMutating({
+    mutationKey: mutationKeys.sessionModelSettings(sessionID),
+    exact: true,
+  }) > 0;
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
@@ -338,77 +340,9 @@ export function Composer({
     () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
     [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
   );
-  const reasoningOptions = useMemo(
-    () => reasoningEffortOptionsForSelection(resolvedModelDetails),
-    [resolvedModelDetails],
-  );
   const audioInputSupported = resolvedModelDetails
     ? resolvedModelDetails.modelConfig?.capabilities?.audio === true
     : undefined;
-  const resolvedModelKey = resolvedModelDetails
-    ? `${resolvedModelDetails.provider}:${resolvedModelDetails.model}`
-    : "";
-  const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
-  const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
-  const setSessionReasoningEffort = useCallback(
-    (value: string) => {
-      if (!resolvedModelKey) {
-        return;
-      }
-      setReasoningEffortForModel(resolvedModelKey, value);
-      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
-        if (!previous) {
-          return previous;
-        }
-        return {
-          sessions: previous.sessions.map((item) =>
-            item.id === sessionID
-              ? {
-                  ...item,
-                  reasoningEffort: value,
-                  reasoningModelKey: value ? resolvedModelKey : "",
-                }
-              : item,
-          ),
-        };
-      });
-      queryClient.setQueryData<Session>(queryKeys.session(sessionID), (previous) => {
-        if (!previous) {
-          return previous;
-        }
-        return {
-          ...previous,
-          reasoningEffort: value,
-          reasoningModelKey: value ? resolvedModelKey : "",
-        };
-      });
-      void updateSession(token, sessionID, { reasoningEffort: value })
-        .then((updated) => {
-          queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
-            if (!previous) {
-              return previous;
-            }
-            return {
-              sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
-            };
-          });
-          queryClient.setQueryData(queryKeys.session(updated.id), updated);
-        })
-        .catch((error) => {
-          console.warn("failed to update reasoning effort", error);
-        })
-        .finally(() => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionID) });
-        });
-    },
-    [queryClient, resolvedModelKey, sessionID, setReasoningEffortForModel, token],
-  );
-  useEffect(() => {
-    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
-      setSessionReasoningEffort("");
-    }
-  }, [reasoningEffort, reasoningOptions, setSessionReasoningEffort]);
 
   const clearSubmitError = useCallback(() => onSubmitError?.(null), [onSubmitError]);
   const resetSessionDraft = useCallback(() => {
@@ -820,6 +754,7 @@ export function Composer({
   });
   const sendEnabled =
     canSend &&
+    !modelSettingsPending &&
     !mentionMenuOpen &&
     !slashMenuOpen &&
     !submitMutation.isPending &&
@@ -858,6 +793,7 @@ export function Composer({
       compactMutation.isPending ||
       systemSubmitMutation.isPending ||
       renameMutation.isPending ||
+      queryClient.isMutating({ mutationKey: mutationKeys.sessionModelSettings(sessionID), exact: true }) > 0 ||
       submitPreparationRef.current ||
       hasPendingAttachments ||
       hasFailedAttachments
@@ -914,7 +850,13 @@ export function Composer({
       const capturedUIContext = currentUIContext
         ? await captureBrowserSelection(sessionID, currentUIContext)
         : undefined;
-      if (submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending) {
+      if (
+        submitMutation.isPending ||
+        compactMutation.isPending ||
+        systemSubmitMutation.isPending ||
+        renameMutation.isPending ||
+        queryClient.isMutating({ mutationKey: mutationKeys.sessionModelSettings(sessionID), exact: true }) > 0
+      ) {
         submitPreparationRef.current = false;
         return;
       }
@@ -1165,7 +1107,6 @@ export function Composer({
               context={workspaceOpen ? visibleUIContext : undefined}
               mentionMenuOpen={mentionMenuOpen}
               projectID={projectID}
-              reasoningEffort={reasoningEffort}
               sendEnabled={sendEnabled}
               session={session}
               showSendButton={showSendButton}
@@ -1187,7 +1128,6 @@ export function Composer({
                 }
               }}
               onModelPickerClose={focusTextarea}
-              onReasoningChange={setSessionReasoningEffort}
               onResolvedModelChange={handleResolvedModelChange}
               onUIContextEnabledChange={setUIContextEnabled}
             />}

@@ -52,3 +52,7 @@ export const queryKeys = {
   providerModels: (name: string) => ["providers", name, "models"] as const,
   provider: (name: string) => ["providers", name] as const,
 };
+
+export const mutationKeys = {
+  sessionModelSettings: (sessionID: string) => ["session", sessionID, "model-settings"] as const,
+};
