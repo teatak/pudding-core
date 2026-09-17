@@ -2,9 +2,11 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { type ProviderProfile, type Session } from "@/api/client";
+import { type AudioBindings, type AudioInputMode, type ProviderProfile, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
+import { SessionAudioControls } from "@/components/SessionAudioControls";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { setLocale } from "@/i18n";
 import { useSessionModelSettings } from "@/hooks/useSessionModelSettings";
 import type { ResolvedModelSelection } from "@/lib/modelSelection";
@@ -64,13 +66,21 @@ const queryClient = new QueryClient({
 queryClient.setQueryData(queryKeys.providers(), { providers });
 queryClient.setQueryData(queryKeys.sessions(), { sessions: [initialSession] });
 queryClient.setQueryData(queryKeys.session(initialSession.id), initialSession);
+const initialAudioBindings: AudioBindings = {
+  inputOwner: mode === "audio-active" ? initialSession.id : "",
+  inputMode: mode === "audio-active" ? "transcribe" : "",
+  inputLevel: 0,
+};
+queryClient.setQueryData(queryKeys.audioBindings(), { bindings: initialAudioBindings });
 setLocale("en");
 useReasoningEffortPreferenceStore.setState({ byModel: { [originalKey]: "max", [targetKey]: "low" } });
 
 type Patch = { provider?: string; model?: string; reasoningEffort?: string };
 const patches: Patch[] = [];
 const reasoningChanges: { modelKey: string; effort: string }[] = [];
+const audioRequests: { enabled: boolean; mode?: AudioInputMode }[] = [];
 let serverSession = initialSession;
+let serverAudioBindings = initialAudioBindings;
 let holdResponses = false;
 let failNextResponse = false;
 let lastError = "";
@@ -101,7 +111,19 @@ window.fetch = async (input, init) => {
     };
     return new Response(JSON.stringify(serverSession), { headers: { "Content-Type": "application/json" } });
   }
-  throw new Error(`Unexpected fixture request: ${url.pathname}; only session PATCH is allowed`);
+  if (url.pathname === `/sessions/${initialSession.id}/audio/input` && init?.method === "POST") {
+    const body = JSON.parse(String(init.body)) as { enabled: boolean; mode?: AudioInputMode };
+    audioRequests.push(body);
+    serverAudioBindings = {
+      inputOwner: body.enabled ? initialSession.id : "",
+      inputMode: body.enabled ? body.mode || "transcribe" : "",
+      inputLevel: 0,
+    };
+    return new Response(JSON.stringify({ ok: true, bindings: serverAudioBindings }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  throw new Error(`Unexpected fixture request: ${url.pathname}`);
 };
 
 type Snapshot = {
@@ -113,6 +135,8 @@ type Snapshot = {
   heldResponses: number;
   lastError: string;
   session: Session;
+  audioRequests: { enabled: boolean; mode?: AudioInputMode }[];
+  audioBindings: AudioBindings;
 };
 declare global {
   interface Window {
@@ -134,6 +158,11 @@ function Fixture() {
     enabled: false,
   });
   const settings = useSessionModelSettings("fixture-token", initialSession.id);
+  const audioBindingsQuery = useQuery<{ bindings: AudioBindings }>({
+    queryKey: queryKeys.audioBindings(),
+    queryFn: async () => ({ bindings: serverAudioBindings }),
+    enabled: false,
+  });
   const update = (patch: { provider: string; model: string; reasoningEffort: string }) =>
     settings.update(patch).catch((error) => {
       lastError = String(error);
@@ -157,6 +186,8 @@ function Fixture() {
       heldResponses: heldResponses.length,
       lastError,
       session: queryClient.getQueryData<Session>(queryKeys.session(initialSession.id))!,
+      audioRequests,
+      audioBindings: queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings())!.bindings,
     }),
     respond: (options) => {
       holdResponses = options.hold || false;
@@ -193,6 +224,17 @@ function Fixture() {
           onReasoningChange={onReasoningChange}
           onAfterClose={() => requestAnimationFrame(() => textareaRef.current?.focus())}
         />
+        {mode.startsWith("audio-") ? (
+          <div id="audio-controls">
+            <SessionAudioControls
+              audioInputSupported={false}
+              inputDisabled
+              bindings={audioBindingsQuery.data?.bindings}
+              token="fixture-token"
+              sessionID={initialSession.id}
+            />
+          </div>
+        ) : null}
       </div>
       <textarea id="composer-b" aria-label="Composer B" style={{ border: "1px solid", width: 260, height: 72 }} />
     </div>
@@ -201,7 +243,9 @@ function Fixture() {
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
-    <Fixture />
+    <TooltipProvider>
+      <Fixture />
+    </TooltipProvider>
   </QueryClientProvider>,
 );
 

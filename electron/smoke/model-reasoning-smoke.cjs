@@ -153,6 +153,27 @@ async function run() {
   assert.equal(await evaluate('Boolean(document.querySelector("[data-app-floating-content] button[aria-label=Medium]"))'), false);
   assert.equal(await evaluate('Boolean(document.querySelector(".pudding-composer-reasoning-detail"))'), false);
   console.log("PASS Haiku has no reasoning slider and opening it does not persist an effort");
+
+  currentCheck = "stop active audio while model settings are pending";
+  await loadFixture("audio-active");
+  assert.equal(await evaluate('document.querySelector("#audio-controls button").disabled'), false);
+  await clickSelector("#audio-controls button");
+  await waitFor("window.modelReasoningSmoke.snapshot().audioRequests.length === 1 && window.modelReasoningSmoke.snapshot().audioBindings.inputOwner === ''");
+  await frames();
+  snapshot = await evaluate("window.modelReasoningSmoke.snapshot()");
+  assert.deepEqual(snapshot.audioRequests, [{ enabled: false, mode: "transcribe" }]);
+  assert.equal(snapshot.audioBindings.inputMode, "");
+  assert.equal(await evaluate('document.querySelector("#audio-controls button").disabled'), true);
+  console.log("PASS an active microphone can stop while model settings block new input");
+
+  currentCheck = "block idle audio while model settings are pending";
+  await loadFixture("audio-idle");
+  assert.equal(await evaluate('document.querySelector("#audio-controls button").disabled'), true);
+  await clickSelector("#audio-controls button");
+  snapshot = await evaluate("window.modelReasoningSmoke.snapshot()");
+  assert.deepEqual(snapshot.audioRequests, []);
+  assert.equal(snapshot.audioBindings.inputOwner, "");
+  console.log("PASS an idle microphone cannot start until model settings are ready");
 }
 
 async function pickGoogleModel() {
