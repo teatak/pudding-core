@@ -9,6 +9,7 @@
     "desktop:dev": "electron ../electron/main.cjs",
     "smoke:electron-browser": "electron ../electron/smoke/browser-dev-smoke.cjs",
     "smoke:electron-workspace": "electron ../electron/smoke/workspace-dev-smoke.cjs",
+    "smoke:reasoning": "electron ../electron/smoke/model-reasoning-smoke.cjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },

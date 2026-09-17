@@ -24,11 +24,13 @@ import { cn } from "@/lib/utils";
 
 export function SessionAudioControls({
   audioInputSupported,
+  inputDisabled = false,
   bindings,
   token,
   sessionID,
 }: {
   audioInputSupported?: boolean;
+  inputDisabled?: boolean;
   bindings?: AudioBindings;
   token: string;
   sessionID: string;
@@ -122,6 +124,9 @@ export function SessionAudioControls({
     }
   };
   const handleInputModeClick = (mode: AudioInputMode) => {
+    if (inputDisabled && (!inputActive || activeInputMode !== mode)) {
+      return;
+    }
     setSelectedInputMode(mode);
     if (inputActive && activeInputMode === mode) {
       inputMutation.mutate({ enabled: false, mode });
@@ -145,7 +150,7 @@ export function SessionAudioControls({
         inputActive={inputActive}
         inputMode={displayInputMode}
         inputLevel={inputLevel}
-        inputBusy={inputMutation.isPending || checkingRuntime}
+        inputBusy={(inputDisabled && !inputActive) || inputMutation.isPending || checkingRuntime}
         inputPending={inputPending}
         inputPendingMode={inputPendingMode}
         rawInputLabel={inputActive && displayInputMode === "raw" ? t("voice.inputRawOn") : t("voice.inputRawOff")}

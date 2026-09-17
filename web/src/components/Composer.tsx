@@ -68,12 +68,10 @@ import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbo
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
-import { type ResolvedModelSelection } from "@/lib/modelSelection";
-import {
-  reasoningEffortOptionsForSelection,
-  recommendedReasoningEffortForSelection,
-} from "@/components/ReasoningEffortChip";
+import { modelSelectionKey, type ResolvedModelSelection } from "@/lib/modelSelection";
+import { resolveReasoningEffortForSelection } from "@/lib/reasoningEffort";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
+import { useResolvedModelSelection } from "@/hooks/useResolvedModelSelection";
 import { useI18n } from "@/i18n";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
 import { getLocalFilePath } from "@/lib/desktopBridge";
@@ -90,7 +88,7 @@ import { buildDraftSubmitParts, type DraftPartOrderItem } from "@/lib/submitPart
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
-import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
+import { useSessionModelSettings } from "@/hooks/useSessionModelSettings";
 import { useSessionDraftStore, queuedDraftKey, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
   getVisibleUIContext,
@@ -207,16 +205,7 @@ export function Composer({
     }
     return { provider: session.provider, model: session.model };
   }, [session.model, session.provider]);
-  const [pickerResolvedModel, setPickerResolvedModel] = useState<ResolvedModelSelection | null>(null);
-  const resolvedModelDetails = useMemo<ResolvedModelSelection | null>(() => {
-    if (
-      pickerResolvedModel?.provider === session.provider &&
-      pickerResolvedModel.model === session.model
-    ) {
-      return pickerResolvedModel;
-    }
-    return null;
-  }, [pickerResolvedModel, session.model, session.provider]);
+  const resolvedModelDetails = useResolvedModelSelection(token, session);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -341,88 +330,53 @@ export function Composer({
     () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
     [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
   );
-  const reasoningOptions = useMemo(
-    () => reasoningEffortOptionsForSelection(resolvedModelDetails),
-    [resolvedModelDetails],
-  );
-  const recommendedReasoning = useMemo(
-    () => (resolvedModelDetails ? recommendedReasoningEffortForSelection(resolvedModelDetails) : "medium"),
-    [resolvedModelDetails],
-  );
   const audioInputSupported = resolvedModelDetails
     ? resolvedModelDetails.modelConfig?.capabilities?.audio === true
     : undefined;
   const resolvedModelKey = resolvedModelDetails
-    ? `${resolvedModelDetails.provider}:${resolvedModelDetails.model}`
+    ? modelSelectionKey(resolvedModelDetails)
     : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
-  const effectiveReasoningEffort = reasoningOptions.length > 0
-    ? (reasoningOptions.includes(reasoningEffort) ? reasoningEffort : recommendedReasoning)
-    : "";
-  const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
+  const effectiveReasoningEffort = resolveReasoningEffortForSelection(resolvedModelDetails, reasoningEffort);
+  const { update: updateModelSettings, pending: modelSettingsPending } = useSessionModelSettings(token, sessionID);
+  const normalizationAttemptRef = useRef("");
   const setSessionReasoningEffort = useCallback(
-    (value: string) => {
-      if (!resolvedModelKey) {
-        return;
-      }
-      setReasoningEffortForModel(resolvedModelKey, value);
-      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
-        if (!previous) {
-          return previous;
-        }
-        return {
-          sessions: previous.sessions.map((item) =>
-            item.id === sessionID
-              ? {
-                  ...item,
-                  reasoningEffort: value,
-                  reasoningModelKey: value ? resolvedModelKey : "",
-                }
-              : item,
-          ),
-        };
-      });
-      queryClient.setQueryData<Session>(queryKeys.session(sessionID), (previous) => {
-        if (!previous) {
-          return previous;
-        }
-        return {
-          ...previous,
-          reasoningEffort: value,
-          reasoningModelKey: value ? resolvedModelKey : "",
-        };
-      });
-      void updateSession(token, sessionID, { reasoningEffort: value })
-        .then((updated) => {
-          queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
-            if (!previous) {
-              return previous;
-            }
-            return {
-              sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
-            };
-          });
-          queryClient.setQueryData(queryKeys.session(updated.id), updated);
-        })
-        .catch((error) => {
-          console.warn("failed to update reasoning effort", error);
-        })
-        .finally(() => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionID) });
-        });
+    (selection: ResolvedModelSelection, value: string) => {
+      void updateModelSettings({
+        provider: selection.provider,
+        model: selection.model,
+        reasoningEffort: value,
+      }).catch((error) => console.warn("failed to update reasoning effort", error));
     },
-    [queryClient, resolvedModelKey, sessionID, setReasoningEffortForModel, token],
+    [updateModelSettings],
   );
   useEffect(() => {
-    if (reasoningEffort) {
-      if (reasoningOptions.length === 0) {
-        setSessionReasoningEffort("");
-      } else if (!reasoningOptions.includes(reasoningEffort)) {
-        setSessionReasoningEffort(recommendedReasoning);
-      }
+    if (!resolvedModelDetails || modelSettingsPending || reasoningEffort === effectiveReasoningEffort) {
+      return;
     }
-  }, [reasoningEffort, reasoningOptions, recommendedReasoning, setSessionReasoningEffort]);
+    const attemptKey = JSON.stringify([sessionID, resolvedModelKey, reasoningEffort, effectiveReasoningEffort]);
+    // A failed automatic save is retried by an explicit selection or submit.
+    if (normalizationAttemptRef.current === attemptKey) {
+      return;
+    }
+    normalizationAttemptRef.current = attemptKey;
+    setSessionReasoningEffort(resolvedModelDetails, effectiveReasoningEffort);
+  }, [sessionID, resolvedModelKey, reasoningEffort, effectiveReasoningEffort, resolvedModelDetails, modelSettingsPending, setSessionReasoningEffort]);
+
+  const ensureSessionReasoning = useCallback(async () => {
+    if (!resolvedModelDetails) {
+      throw new APIError(400, "no_model");
+    }
+    // Failed normalization leaves the server value in cache. An explicit
+    // submission retries it before the server can reuse an unsupported value.
+    if (reasoningEffort !== effectiveReasoningEffort) {
+      await updateModelSettings({
+        provider: resolvedModelDetails.provider,
+        model: resolvedModelDetails.model,
+        reasoningEffort: effectiveReasoningEffort,
+      });
+    }
+  }, [resolvedModelDetails, reasoningEffort, effectiveReasoningEffort, updateModelSettings]);
 
   const clearSubmitError = useCallback(() => onSubmitError?.(null), [onSubmitError]);
   const resetSessionDraft = useCallback(() => {
@@ -674,6 +628,7 @@ export function Composer({
         clearSubmittingTurn(sessionID, clientMessageID);
         return result;
       }
+      await ensureSessionReasoning();
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
         reasoningEffort: effectiveReasoningEffort || undefined,
@@ -762,8 +717,10 @@ export function Composer({
     mutationFn: () => cancelTurn(token, sessionID),
   });
   const compactMutation = useMutation({
-    mutationFn: ({ hint, clientMessageID }: { hint: string; clientMessageID: string }) =>
-      compactSession(token, sessionID, { hint, clientMessageID }),
+    mutationFn: async ({ hint, clientMessageID }: { hint: string; clientMessageID: string }) => {
+      await ensureSessionReasoning();
+      return compactSession(token, sessionID, { hint, clientMessageID });
+    },
     onMutate: ({ clientMessageID }) => {
       onSubmitStart?.();
       clearSubmitError();
@@ -795,10 +752,13 @@ export function Composer({
   });
   const systemSubmitMutation = useMutation({
     mutationFn: async ({ clientMessageID, text }: { clientMessageID: string; text: string }) => {
-      if (!selectedModel) {
-        throw new APIError(400, "no_model");
-      }
-      return submitMessage(token, sessionID, { clientMessageID, kind: "system", text });
+      await ensureSessionReasoning();
+      return submitMessage(token, sessionID, {
+        clientMessageID,
+        kind: "system",
+        text,
+        reasoningEffort: effectiveReasoningEffort || undefined,
+      });
     },
     onMutate: () => {
       clearSubmitError();
@@ -838,10 +798,11 @@ export function Composer({
     !mentionMenuOpen &&
     !slashMenuOpen &&
     !submitMutation.isPending &&
+    !modelSettingsPending &&
     !compactMutation.isPending &&
     !systemSubmitMutation.isPending &&
     !renameMutation.isPending &&
-    (Boolean(selectedModel) || Boolean(draftSlashCommand && draftSlashCommand.id !== "summary"));
+    (Boolean(resolvedModelDetails) || Boolean(draftSlashCommand && draftSlashCommand.id !== "summary"));
   const stopEnabled = running && !cancelMutation.isPending;
   const showStopButton = (running || cancelMutation.isPending) && !hasInput;
   const showSendButton =
@@ -870,6 +831,7 @@ export function Composer({
     if (
       (!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0 && projectReferencesToSubmit.length === 0) ||
       submitMutation.isPending ||
+      modelSettingsPending ||
       compactMutation.isPending ||
       systemSubmitMutation.isPending ||
       renameMutation.isPending ||
@@ -955,23 +917,6 @@ export function Composer({
   };
   const submitDraft = (value: z.infer<typeof composerSchema>) => submitDraftWithMode(value);
 
-  const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
-    setPickerResolvedModel((current) => {
-      if (!next) {
-        return current ? null : current;
-      }
-      if (
-        current?.provider === next.provider &&
-        current.model === next.model &&
-        current.providerProtocol === next.providerProtocol &&
-        current.providerBrand === next.providerBrand &&
-        current.modelConfig === next.modelConfig
-      ) {
-        return current;
-      }
-      return next;
-    });
-  }, []);
   const focusTextarea = useCallback(() => {
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus({ preventScroll: true });
@@ -1182,6 +1127,7 @@ export function Composer({
               projectID={projectID}
               reasoningEffort={reasoningEffort}
               sendEnabled={sendEnabled}
+              audioInputDisabled={modelSettingsPending || !resolvedModelDetails || reasoningEffort !== effectiveReasoningEffort}
               session={session}
               showSendButton={showSendButton}
               showStopButton={showStopButton}
@@ -1203,7 +1149,6 @@ export function Composer({
               }}
               onModelPickerClose={focusTextarea}
               onReasoningChange={setSessionReasoningEffort}
-              onResolvedModelChange={handleResolvedModelChange}
               onUIContextEnabledChange={setUIContextEnabled}
             />}
           </div>

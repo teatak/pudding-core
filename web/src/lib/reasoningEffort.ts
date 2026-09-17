@@ -1,79 +1,37 @@
-import { ChevronDown } from "@/components/icons";
-
-import {
-  AppDropdownMenuContent as DropdownMenuContent,
-  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
-} from "@/components/AppMenu";
 import type { ResolvedModelSelection } from "@/lib/modelSelection";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuRadioGroup,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useI18n } from "@/i18n";
-
-export function ReasoningEffortChip({
-  defaultValue,
-  onAfterClose,
-  options,
-  value,
-  onValueChange,
-}: {
-  defaultValue?: string;
-  onAfterClose?: () => void;
-  options: string[];
-  value: string;
-  onValueChange: (value: string) => void;
-}) {
-  const { t } = useI18n();
-  const selectedValue = options.includes(value) ? value : "auto";
-  const knownDefault = defaultValue && options.includes(defaultValue) ? defaultValue : undefined;
-  const displayValue = selectedValue === "auto" && knownDefault ? knownDefault : selectedValue;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={t("composer.reasoning")}
-          className="h-6 max-w-32 rounded-full border-0 bg-muted py-0 pr-1.5 pl-2 text-xs font-normal text-foreground/75 transition-none hover:bg-accent aria-expanded:bg-accent"
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <span className="min-w-0 truncate">
-            {t("composer.reasoning")}：{t(`provider.reasoningEffort.${displayValue}`)}
-          </span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="min-w-24 w-28"
-        side="top"
-        sideOffset={8}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          onAfterClose?.();
-        }}
-      >
-        <DropdownMenuRadioGroup value={displayValue} onValueChange={(next) => onValueChange(next === "auto" ? "" : next)}>
-          {options.map((item) => (
-            <DropdownMenuRadioItem key={item} className="h-7 text-xs" value={item}>
-              {t(`provider.reasoningEffort.${item}`)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 export const STANDARD_REASONING_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh", "max"] as const;
 export const GOOGLE_REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
+const ANTHROPIC_BASE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
+const ANTHROPIC_MAX_EFFORT_OPTIONS = [...ANTHROPIC_BASE_EFFORT_OPTIONS, "max"] as const;
+
+// Verified 2026-09-17 against Anthropic's effort compatibility and model ID docs:
+// https://platform.claude.com/docs/en/build-with-claude/effort
+// https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions
+// Exact IDs only: the Anthropic wire protocol does not imply effort support.
+const ANTHROPIC_EFFORT_OPTIONS = new Map<string, readonly string[]>([
+  ["claude-opus-4-5", ANTHROPIC_BASE_EFFORT_OPTIONS],
+  ["claude-opus-4-5-20251101", ANTHROPIC_BASE_EFFORT_OPTIONS],
+  ["claude-opus-4-6", ANTHROPIC_MAX_EFFORT_OPTIONS],
+  ["claude-sonnet-4-6", ANTHROPIC_MAX_EFFORT_OPTIONS],
+  ["claude-opus-4-7", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-opus-4-8", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-opus-5", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-sonnet-5", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-fable-5", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-fable-5-1", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-mythos-5", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-mythos-5-1", STANDARD_REASONING_EFFORT_OPTIONS],
+  ["claude-mythos-preview", ANTHROPIC_MAX_EFFORT_OPTIONS],
+]);
+
 export function reasoningEffortOptionsForSelection(selection: ResolvedModelSelection | null): string[] {
   if (!selection) {
     return [];
+  }
+  if (selection.providerProtocol === "anthropic") {
+    return [...(ANTHROPIC_EFFORT_OPTIONS.get(selection.model) || [])];
   }
   if (supportsStandardReasoning(selection)) {
     return [...STANDARD_REASONING_EFFORT_OPTIONS];
@@ -85,11 +43,11 @@ export function reasoningEffortOptionsForSelection(selection: ResolvedModelSelec
 }
 
 export function recommendedReasoningEffortForSelection(selection: ResolvedModelSelection | null): string {
-  if (!selection) {
-    return "medium";
+  const options = reasoningEffortOptionsForSelection(selection);
+  if (!selection || options.length === 0) {
+    return "";
   }
   const configured = defaultReasoningEffortForSelection(selection);
-  const options = reasoningEffortOptionsForSelection(selection);
   if (configured && options.includes(configured)) {
     return configured;
   }
@@ -99,7 +57,17 @@ export function recommendedReasoningEffortForSelection(selection: ResolvedModelS
   if (isDeepSeek && options.includes("high")) {
     return "high";
   }
-  return options.includes("medium") ? "medium" : options[0] || "medium";
+  return options.includes("medium") ? "medium" : options[0];
+}
+
+export function resolveReasoningEffortForSelection(
+  selection: ResolvedModelSelection | null,
+  preferredValue = "",
+): string {
+  const options = reasoningEffortOptionsForSelection(selection);
+  return options.includes(preferredValue)
+    ? preferredValue
+    : recommendedReasoningEffortForSelection(selection);
 }
 
 export function defaultReasoningEffortForSelection(selection: ResolvedModelSelection | null) {
@@ -126,8 +94,7 @@ export function defaultReasoningEffortForSelection(selection: ResolvedModelSelec
 
 function supportsStandardReasoning(selection: ResolvedModelSelection) {
   return selection.providerProtocol === "openai-compatible"
-    || selection.providerProtocol === "openai-responses"
-    || selection.providerProtocol === "anthropic";
+    || selection.providerProtocol === "openai-responses";
 }
 
 function anthropicEffort(options: Record<string, unknown> | undefined) {
