@@ -22,7 +22,7 @@ import {
 } from "@/components/ReasoningEffortChip";
 import { SteppedSlider } from "@/components/SteppedSlider";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverAnchor, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
@@ -58,50 +58,18 @@ export function ModelReasoningPicker({
   const [open, setOpen] = useState(false);
   const restoreComposerFocusOnCloseRef = useRef(false);
   const triggerButtonRef = useRef<HTMLButtonElement>(null);
-  const lockedRectRef = useRef<DOMRect | null>(null);
+  const [displayAsSliderView, setDisplayAsSliderView] = useState(false);
+  const [preservedWidth, setPreservedWidth] = useState<number | null>(null);
+  const sliderViewTimerRef = useRef<number | null>(null);
 
-  const updateLockedRect = useCallback(() => {
-    if (triggerButtonRef.current) {
-      const rect = triggerButtonRef.current.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        lockedRectRef.current = rect;
-      }
+  const clearSliderViewTimer = useCallback(() => {
+    if (sliderViewTimerRef.current !== null) {
+      window.clearTimeout(sliderViewTimerRef.current);
+      sliderViewTimerRef.current = null;
     }
   }, []);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const handleWindowResize = () => {
-      updateLockedRect();
-    };
-    window.addEventListener("resize", handleWindowResize);
-    return () => {
-      window.removeEventListener("resize", handleWindowResize);
-    };
-  }, [open, updateLockedRect]);
-
-  const virtualAnchor = useMemo(
-    () => ({
-      getBoundingClientRect: () => {
-        if (lockedRectRef.current && lockedRectRef.current.width > 0) {
-          return lockedRectRef.current;
-        }
-        if (triggerButtonRef.current) {
-          const rect = triggerButtonRef.current.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            lockedRectRef.current = rect;
-            return rect;
-          }
-        }
-        return new DOMRect();
-      },
-    }),
-    [],
-  );
-  const virtualAnchorRef = useRef(virtualAnchor);
-  virtualAnchorRef.current = virtualAnchor;
+  useEffect(() => clearSliderViewTimer, [clearSliderViewTimer]);
 
   const providersQuery = useQuery({
     queryKey: queryKeys.providers(),
@@ -258,6 +226,30 @@ export function ModelReasoningPicker({
     onResolvedChange?.(resolvedSelection);
   }, [onResolvedChange, providersQuery.isSuccess, resolvedSelection]);
 
+  const isSliderViewActive = open && view === "slider" && reasoningOptions.length > 0;
+
+  useEffect(() => {
+    if (isSliderViewActive) {
+      clearSliderViewTimer();
+      if (triggerButtonRef.current && preservedWidth === null) {
+        setPreservedWidth(triggerButtonRef.current.offsetWidth);
+      }
+      setDisplayAsSliderView(true);
+    } else if (displayAsSliderView) {
+      if (!open) {
+        sliderViewTimerRef.current = window.setTimeout(() => {
+          setDisplayAsSliderView(false);
+          setPreservedWidth(null);
+          sliderViewTimerRef.current = null;
+        }, 150);
+      } else {
+        clearSliderViewTimer();
+        setDisplayAsSliderView(false);
+        setPreservedWidth(null);
+      }
+    }
+  }, [isSliderViewActive, open, displayAsSliderView, preservedWidth, clearSliderViewTimer]);
+
   const activeReasoning = selectedReasoning || effectiveReasoning;
   const activeBrand = visibleModel
     ? providerBrandForModel(visibleModel) || providerBrandKey(activeProfile) || selectedProvider
@@ -265,6 +257,8 @@ export function ModelReasoningPicker({
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
   const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${activeReasoning}`) : "";
   const triggerLabel = reasoningLabel ? `${label} · ${reasoningLabel}` : label;
+  const isSliderMode = displayAsSliderView;
+  const triggerText = isSliderMode ? t("provider.reasoningEffort.selectEffort") : triggerLabel;
 
   const handleReasoningSelect = useCallback(
     (next: string) => {
@@ -280,23 +274,25 @@ export function ModelReasoningPicker({
       onOpenChange={(next) => {
         if (next) {
           restoreComposerFocusOnCloseRef.current = false;
-          updateLockedRect();
+          if (triggerButtonRef.current) {
+            setPreservedWidth(triggerButtonRef.current.offsetWidth);
+          }
         }
         setOpen(next);
       }}
     >
-      <PopoverAnchor virtualRef={virtualAnchorRef} />
       <PopoverTrigger asChild>
         <Button
           ref={triggerButtonRef}
-          aria-label={`${t("session.model")}: ${triggerLabel}`}
+          style={isSliderMode && preservedWidth ? { width: `${preservedWidth}px` } : undefined}
+          aria-label={`${t("session.model")}: ${triggerText}`}
           className={cn(
             "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-[var(--composer-control-foreground)] transition-none",
             iconOnly
               ? "w-8 max-w-8 flex-none justify-center p-0"
               : cn(
                   "min-w-0 gap-1 pr-1.5",
-                  reasoningLabel
+                  isSliderMode || reasoningLabel
                     ? "max-w-[14rem] sm:max-w-[16rem]"
                     : "max-w-[9.5rem] sm:max-w-[10.5rem]",
                 ),
@@ -311,7 +307,14 @@ export function ModelReasoningPicker({
               ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" />
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
-          {iconOnly ? null : (
+          {iconOnly ? null : isSliderMode ? (
+            <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden">
+              <span className="pudding-composer-model-label min-w-0 flex-1 truncate">
+                {t("provider.reasoningEffort.selectEffort")}
+              </span>
+              <ChevronDown className={cn("size-3 shrink-0", visibleModel ? "text-muted-foreground" : "text-current")} />
+            </span>
+          ) : (
             <span className={cn("flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden", !visibleModel && "text-warning")}>
               <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
               {reasoningLabel ? (
