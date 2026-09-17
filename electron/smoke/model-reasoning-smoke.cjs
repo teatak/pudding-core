@@ -42,7 +42,12 @@ async function run() {
 
   const loadFixture = async (mode) => {
     await window.loadURL(`${baseURL}/test/fixtures/model-reasoning.html?mode=${mode}`);
-    await waitFor(`Boolean(window.modelReasoningSmoke && document.querySelector(".pudding-composer-model-picker"))`);
+    await waitFor(`new URL(location.href).searchParams.get("mode") === ${JSON.stringify(mode)} && Boolean(window.modelReasoningSmoke && document.querySelector(".pudding-composer-model-picker"))`);
+    app.focus({ steal: true });
+    window.focus();
+    window.webContents.focus();
+    await evaluate('document.querySelector("#composer-a").focus()');
+    await waitFor('document.hasFocus() && document.activeElement?.id === "composer-a"');
     await frames();
   };
 
@@ -169,7 +174,7 @@ async function run() {
   currentCheck = "block idle audio while model settings are pending";
   await loadFixture("audio-idle");
   assert.equal(await evaluate('document.querySelector("#audio-controls button").disabled'), true);
-  await clickSelector("#audio-controls button");
+  await clickSelector("#audio-controls button", { allowDisabled: true });
   snapshot = await evaluate("window.modelReasoningSmoke.snapshot()");
   assert.deepEqual(snapshot.audioRequests, []);
   assert.equal(snapshot.audioBindings.inputOwner, "");
@@ -183,25 +188,71 @@ async function pickGoogleModel() {
   await clickButton("Gemini smoke");
 }
 
-async function clickSelector(selector) {
-  return clickElement(`document.querySelector(${JSON.stringify(selector)})`);
+async function clickSelector(selector, options) {
+  return clickElement(`document.querySelector(${JSON.stringify(selector)})`, options);
 }
 
 async function clickButton(text) {
   return clickElement(`Array.from(document.querySelectorAll("[data-app-floating-content] button")).find((button) => button.textContent.trim() === ${JSON.stringify(text)})`);
 }
 
-async function clickElement(expression) {
-  await waitFor(`Boolean(${expression})`);
-  const point = await evaluate(`(() => {
-    const element = ${expression};
-    const rect = element.getBoundingClientRect();
-    return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
-  })()`);
+async function clickElement(expression, { allowDisabled = false } = {}) {
+  let point = await actionablePoint(expression, allowDisabled);
   window.webContents.sendInputEvent({ type: "mouseMove", ...point });
+  // Hover may change styles. Recheck actionability without repeating a click.
+  point = await actionablePoint(expression, allowDisabled);
   window.webContents.sendInputEvent({ type: "mouseDown", button: "left", clickCount: 1, ...point });
   window.webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, ...point });
   await frames();
+}
+
+function actionablePoint(expression, allowDisabled) {
+  // Radix mounts content before positioning it, and the popover then animates
+  // for 100 ms. DOM presence or two elapsed frames cannot establish a hit target.
+  return evaluate(`(async () => {
+    const deadline = Date.now() + 10_000;
+    let previousElement;
+    let previousBounds;
+    let stableFrames = 0;
+    while (Date.now() < deadline) {
+      const element = ${expression};
+      let reason = "missing element";
+      let bounds;
+      let point;
+      if (element?.isConnected) {
+        const rect = element.getBoundingClientRect();
+        bounds = [rect.x, rect.y, rect.width, rect.height];
+        point = { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+        const visible = element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && rect.width > 0 && rect.height > 0;
+        const disabled = element.matches(":disabled") || element.getAttribute("aria-disabled") === "true" || Boolean(element.closest("[inert]"));
+        const hit = document.elementFromPoint(point.x, point.y);
+        const receivesPointer = hit && (element.contains(hit) || (${allowDisabled} && disabled && hit.contains(element)));
+        const animatedElements = new Set(document.querySelectorAll("[data-app-floating-content]"));
+        for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) animatedElements.add(ancestor);
+        const moving = Array.from(animatedElements).some((target) => target.getAnimations().some((animation) =>
+          (animation.pending || animation.playState === "running") && animation.effect?.getComputedTiming().endTime !== Infinity));
+        reason = !visible ? "not visible"
+          : disabled && !${allowDisabled} ? "disabled"
+          : point.x < 0 || point.y < 0 || point.x >= innerWidth || point.y >= innerHeight ? "outside viewport"
+          : !receivesPointer ? "center is covered"
+          : moving ? "animation running"
+          : "waiting for stable bounds";
+        const unchanged = previousElement === element && previousBounds && bounds.every((value, index) => Math.abs(value - previousBounds[index]) < 0.1);
+        stableFrames = visible && (!disabled || ${allowDisabled}) && receivesPointer && !moving && unchanged ? stableFrames + 1 : 0;
+        if (stableFrames >= 2) {
+          window.modelReasoningSmokeLastAction = { expression: ${JSON.stringify(expression)}, bounds, point, reason: "ready" };
+          return point;
+        }
+      } else {
+        stableFrames = 0;
+      }
+      window.modelReasoningSmokeLastAction = { expression: ${JSON.stringify(expression)}, bounds, point, reason };
+      previousElement = element;
+      previousBounds = bounds;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    throw new Error("Actionability timeout: " + JSON.stringify(window.modelReasoningSmokeLastAction));
+  })()`);
 }
 
 function evaluate(code) {
@@ -225,7 +276,42 @@ async function finish(error) {
   if (finishing) return;
   finishing = true;
   clearTimeout(timeout);
-  if (error) console.error(error);
+  if (error) {
+    console.error(error);
+    if (window && !window.webContents.isDestroyed()) {
+      let diagnosticTimeout;
+      try {
+        const diagnosticsRequest = evaluate(`(() => {
+          const describe = (element) => {
+            if (!element) return null;
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return { tag: element.tagName, id: element.id, text: element.textContent?.trim().slice(0, 160), label: element.getAttribute("aria-label"), state: element.getAttribute("data-state"), expanded: element.getAttribute("aria-expanded"), disabled: element.matches(":disabled"), bounds: [rect.x, rect.y, rect.width, rect.height], opacity: style.opacity, transform: style.transform };
+          };
+          return {
+            url: location.href,
+            focused: document.hasFocus(),
+            activeElement: describe(document.activeElement),
+            lastAction: window.modelReasoningSmokeLastAction,
+            state: window.modelReasoningSmoke?.snapshot(),
+            buttons: Array.from(document.querySelectorAll("button")).map(describe),
+            popovers: Array.from(document.querySelectorAll("[data-app-floating-content]")).map(describe),
+          };
+        })()`);
+        const diagnostics = await Promise.race([
+          diagnosticsRequest,
+          new Promise((_resolve, reject) => {
+            diagnosticTimeout = setTimeout(() => reject(new Error("Smoke diagnostics timed out")), 2_000);
+          }),
+        ]);
+        console.error("SMOKE_DIAGNOSTICS", JSON.stringify({ currentCheck, windowFocused: window.isFocused(), ...diagnostics }));
+      } catch (diagnosticError) {
+        console.error("Could not capture smoke diagnostics", diagnosticError);
+      } finally {
+        clearTimeout(diagnosticTimeout);
+      }
+    }
+  }
   window?.destroy();
   await server?.close();
   fs.rmSync(smokeHome, { recursive: true, force: true });
