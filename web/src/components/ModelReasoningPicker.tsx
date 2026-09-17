@@ -71,7 +71,6 @@ export function ModelReasoningPicker({
 
   useEffect(() => {
     if (!open) {
-      lockedRectRef.current = null;
       return;
     }
     const handleWindowResize = () => {
@@ -86,22 +85,20 @@ export function ModelReasoningPicker({
   const virtualAnchor = useMemo(
     () => ({
       getBoundingClientRect: () => {
-        if (open && lockedRectRef.current && lockedRectRef.current.width > 0) {
+        if (lockedRectRef.current && lockedRectRef.current.width > 0) {
           return lockedRectRef.current;
         }
         if (triggerButtonRef.current) {
           const rect = triggerButtonRef.current.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0) {
-            if (open) {
-              lockedRectRef.current = rect;
-            }
+            lockedRectRef.current = rect;
             return rect;
           }
         }
         return new DOMRect();
       },
     }),
-    [open],
+    [],
   );
   const virtualAnchorRef = useRef(virtualAnchor);
   virtualAnchorRef.current = virtualAnchor;
