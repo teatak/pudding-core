@@ -120,22 +120,26 @@ export function SteppedSlider({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        {/* 内部相对定位容器 */}
-        <div className="relative h-6 w-full pointer-events-none">
-          {/* 激活区域的高亮填充条：品牌科技蓝紫色 */}
+        {/* 激活区域的高亮填充条：内层独立胶囊容器，确保圆角同心且在最大档顶满 */}
+        <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
-            className={cn("absolute top-0 bottom-0 left-0 rounded-l-full bg-[var(--brand-accent)] pointer-events-none", animClass)}
+            className={cn(
+              "h-full rounded-full bg-[var(--brand-accent)] pointer-events-none",
+              animClass,
+            )}
             style={{
-              width: activeIndex === 0
-                ? 0
-                : `calc(${stepRatio} * (100% - 24px) + 12px)`,
+              width: `calc(${stepRatio} * (100% - 24px) + 24px)`,
             }}
           />
+        </div>
+
+        {/* 内部相对定位容器 */}
+        <div className="relative h-6 w-full pointer-events-none">
 
           {/* 各刻度圆点：hover 放大动画 + 平滑过渡，保持 cursor-default */}
           {options.map((opt, idx) => {
             const r = idx / totalSteps;
-            const isFilled = idx < activeIndex;
+            const isFilled = idx <= activeIndex;
             return (
               <button
                 key={opt}
