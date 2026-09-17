@@ -10,6 +10,48 @@ type SteppedSliderProps = {
   className?: string;
 };
 
+export type EffortColorConfig = {
+  bg: string;
+  text: string;
+};
+
+export const COLOR_PALETTE: EffortColorConfig[] = [
+  {
+    // 灰 (最低档)
+    bg: "bg-zinc-400 dark:bg-zinc-500",
+    text: "text-zinc-600 dark:text-zinc-300 font-semibold",
+  },
+  {
+    // 绿
+    bg: "bg-emerald-500",
+    text: "text-emerald-600 dark:text-emerald-400 font-semibold",
+  },
+  {
+    // 蓝
+    bg: "bg-blue-500",
+    text: "text-blue-600 dark:text-blue-400 font-semibold",
+  },
+  {
+    // 紫
+    bg: "bg-violet-500",
+    text: "text-violet-600 dark:text-violet-400 font-semibold",
+  },
+  {
+    // 金 (最高档)
+    bg: "bg-amber-500 dark:bg-amber-400",
+    text: "text-amber-600 dark:text-amber-400 font-semibold",
+  },
+];
+
+export function getEffortColor(index: number, totalOptions: number): EffortColorConfig {
+  if (totalOptions <= 1) {
+    return COLOR_PALETTE[COLOR_PALETTE.length - 1]!;
+  }
+  const paletteIndex = Math.round((index / (totalOptions - 1)) * (COLOR_PALETTE.length - 1));
+  const clamped = Math.max(0, Math.min(paletteIndex, COLOR_PALETTE.length - 1));
+  return COLOR_PALETTE[clamped]!;
+}
+
 export function SteppedSlider({
   options,
   value,
@@ -104,7 +146,10 @@ export function SteppedSlider({
   }, []);
 
   const stepRatio = activeIndex / totalSteps;
-  const animClass = enableTransition ? "transition-[left,width] duration-200 ease-out" : "";
+  const animClass = enableTransition
+    ? "transition-[left,width,background-color] duration-200 ease-out"
+    : "";
+  const currentEffortColor = getEffortColor(activeIndex, options.length);
 
   return (
     <div className={cn("w-full select-none pt-1 pb-0.5", className)}>
@@ -120,11 +165,12 @@ export function SteppedSlider({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        {/* 激活区域的高亮填充条：内层独立胶囊容器，确保圆角同心且在最大档顶满 */}
+        {/* 激活区域的高亮填充条：内层独立胶囊容器，根据档位显示对应颜色并在最大档顶满 */}
         <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
             className={cn(
-              "h-full rounded-full bg-[var(--brand-accent)] pointer-events-none",
+              "h-full rounded-full pointer-events-none",
+              currentEffortColor.bg,
               animClass,
             )}
             style={{
@@ -182,20 +228,25 @@ export function SteppedSlider({
         </div>
       </div>
 
-      {/* 下方的刻度标签文字：保持 cursor-default */}
-      <div className="mt-1.5 flex w-full items-center justify-between px-1">
+      {/* 下方的刻度标签文字：与上方各刻度圆点像素级严格中心对齐 */}
+      <div className="relative mt-1.5 h-4 w-full">
         {options.map((opt, idx) => {
+          const r = idx / totalSteps;
           const isActive = idx === activeIndex;
+          const color = getEffortColor(idx, options.length);
           return (
             <button
               key={opt}
               type="button"
               className={cn(
-                "cursor-default text-[11px] transition-colors",
+                "absolute -translate-x-1/2 cursor-default text-[11px] whitespace-nowrap transition-colors",
                 isActive
-                  ? "font-medium text-foreground"
+                  ? color.text
                   : "text-muted-foreground/80 hover:text-foreground",
               )}
+              style={{
+                left: `calc(${r} * (100% - 32px) + 16px)`,
+              }}
               onClick={() => handleSelect(opt)}
             >
               {t(`provider.reasoningEffort.${opt}`)}

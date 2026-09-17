@@ -417,11 +417,9 @@ export function SessionItem({
           asChild
           className={cn(
             "h-[30px] px-2 py-1 focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-inset",
-            running
+            actionsAlwaysVisible
               ? "pr-28 group-has-data-[sidebar=menu-action]/menu-item:pr-28"
-              : actionsAlwaysVisible
-                ? "pr-28 group-has-data-[sidebar=menu-action]/menu-item:pr-28"
-                : "pr-16 group-has-data-[sidebar=menu-action]/menu-item:pr-16",
+              : "pr-16 group-has-data-[sidebar=menu-action]/menu-item:pr-16",
             suppressInteractiveState
               ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
               : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent group-focus-within/menu-item:text-sidebar-accent-foreground",
