@@ -58,10 +58,7 @@ test("model picker and reasoning slider: isolated Electron interaction regressio
     ],
     server: {
       host: "127.0.0.1",
-      port: 0,
       watch: null,
-      hmr: false,
-      ws: false,
       fs: { allow: [webRoot, temp] },
     },
   });

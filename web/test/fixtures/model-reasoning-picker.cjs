@@ -4,8 +4,9 @@ const { app, BrowserWindow } = require("electron");
 
 const [fixtureURL, userData, expectedBinary] = process.argv.slice(2);
 assert.equal(fs.realpathSync(process.execPath), fs.realpathSync(expectedBinary));
-const origin = new URL(fixtureURL).origin;
-assert.equal(new URL(fixtureURL).hostname, "127.0.0.1");
+const fixtureAddress = new URL(fixtureURL);
+const origin = fixtureAddress.origin;
+assert.equal(fixtureAddress.hostname, "127.0.0.1");
 fs.mkdirSync(userData, { recursive: true });
 app.setPath("userData", userData);
 app.setName("Pudding selector regression");
@@ -129,8 +130,9 @@ async function run() {
   window.webContents.session.webRequest.onBeforeRequest((details, callback) => {
     const target = new URL(details.url);
     const apiRequest = /^\/(providers|sessions|settings|projects)(\/|$)/.test(target.pathname);
+    const fixtureWebSocket = ["ws:", "wss:"].includes(target.protocol) && target.host === fixtureAddress.host;
     const blocked = !["data:", "blob:"].includes(target.protocol) &&
-      (target.origin !== origin || apiRequest);
+      ((target.origin !== origin && !fixtureWebSocket) || apiRequest);
     if (blocked) errors.push("unexpected request: " + details.url);
     callback({ cancel: blocked });
   });
