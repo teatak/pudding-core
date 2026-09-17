@@ -1,0 +1,204 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n";
+
+type SteppedSliderProps = {
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+  onPreviewChange?: (value: string) => void;
+  className?: string;
+};
+
+export function SteppedSlider({
+  options,
+  value,
+  onChange,
+  onPreviewChange,
+  className,
+}: SteppedSliderProps) {
+  const { t } = useI18n();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+
+  const [isDragging, setIsDragging] = useState(false);
+  const [activeOption, setActiveOption] = useState(value);
+  const activeOptionRef = useRef(value);
+
+  // 外部 value 变更时（非拖拽中）同步内部即时状态
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setActiveOption(value);
+      activeOptionRef.current = value;
+    }
+  }, [value]);
+
+
+  const totalSteps = Math.max(options.length - 1, 1);
+  const currentIndex = options.indexOf(activeOption);
+  const activeIndex = currentIndex >= 0 ? currentIndex : Math.max(options.indexOf(value), 0);
+
+  const calculateNearestOption = useCallback(
+    (clientX: number): string => {
+      const track = trackRef.current;
+      if (!track) return activeOptionRef.current;
+      const rect = track.getBoundingClientRect();
+      const innerLeft = rect.left + 4 + 12;
+      const innerWidth = Math.max(rect.width - 8 - 24, 1);
+      const relativeX = Math.max(0, Math.min(clientX - innerLeft, innerWidth));
+      const ratio = relativeX / innerWidth;
+      const nearestIndex = Math.round(ratio * totalSteps);
+      const clampedIndex = Math.max(0, Math.min(nearestIndex, options.length - 1));
+      return options[clampedIndex] || activeOptionRef.current;
+    },
+    [options, totalSteps],
+  );
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setIsDragging(true);
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    const nextOption = calculateNearestOption(e.clientX);
+    setActiveOption(nextOption);
+    activeOptionRef.current = nextOption;
+    onPreviewChange?.(nextOption);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    const nextOption = calculateNearestOption(e.clientX);
+    if (nextOption !== activeOptionRef.current) {
+      setActiveOption(nextOption);
+      activeOptionRef.current = nextOption;
+      onPreviewChange?.(nextOption);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    const finalOption = activeOptionRef.current;
+    if (finalOption) {
+      onChange(finalOption);
+    }
+  };
+
+  const handleSelect = (opt: string) => {
+    setActiveOption(opt);
+    activeOptionRef.current = opt;
+    onPreviewChange?.(opt);
+    onChange(opt);
+  };
+
+  const [enableTransition, setEnableTransition] = useState(false);
+
+  useEffect(() => {
+    // 挂载初次渲染完成后再开启过渡动画，避免从目录切回滑块时因容器尺寸更新产生从宽变窄的动画
+    const frame = requestAnimationFrame(() => {
+      setEnableTransition(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const stepRatio = activeIndex / totalSteps;
+  const animClass = enableTransition ? "transition-[left,width] duration-200 ease-out" : "";
+
+  return (
+    <div className={cn("w-full select-none pt-1 pb-0.5", className)}>
+      {/* 滑块轨道区域：拖拽中为 cursor-grabbing，否则为 cursor-default */}
+      <div
+        ref={trackRef}
+        className={cn(
+          "relative flex h-8 w-full items-center rounded-full bg-muted/80 p-1 touch-none",
+          isDragging ? "cursor-grabbing" : "cursor-default",
+        )}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        {/* 内部相对定位容器 */}
+        <div className="relative h-6 w-full pointer-events-none">
+          {/* 激活区域的高亮填充条：品牌科技蓝紫色 */}
+          <div
+            className={cn("absolute top-0 bottom-0 left-0 rounded-l-full bg-[var(--brand-accent)] pointer-events-none", animClass)}
+            style={{
+              width: activeIndex === 0
+                ? 0
+                : `calc(${stepRatio} * (100% - 24px) + 12px)`,
+            }}
+          />
+
+          {/* 各刻度圆点：hover 放大动画 + 平滑过渡，保持 cursor-default */}
+          {options.map((opt, idx) => {
+            const r = idx / totalSteps;
+            const isFilled = idx < activeIndex;
+            return (
+              <button
+                key={opt}
+                type="button"
+                aria-label={t(`provider.reasoningEffort.${opt}`)}
+                className="group/dot pointer-events-auto absolute top-0 bottom-0 flex w-5 -translate-x-1/2 cursor-default items-center justify-center outline-none"
+                style={{
+                  left: `calc(${r} * (100% - 24px) + 12px)`,
+                }}
+                onClick={() => handleSelect(opt)}
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full transition-transform duration-200 ease-out group-hover/dot:scale-[1.8]",
+                    isFilled ? "bg-white/80" : "bg-muted-foreground/35",
+                  )}
+                />
+              </button>
+            );
+          })}
+
+          {/* 实体滑动圆钮 (Thumb)：悬停 grab，拖动 grabbing */}
+          <div
+            className={cn(
+              "pointer-events-auto absolute top-0 bottom-0",
+              isDragging ? "cursor-grabbing" : "cursor-grab",
+              animClass,
+            )}
+            style={{
+              left: `calc(${stepRatio} * (100% - 24px))`,
+            }}
+          >
+            <div
+              className={cn(
+                "size-6 rounded-full bg-white shadow-md ring-1 ring-black/10 transition-transform",
+                isDragging ? "cursor-grabbing scale-95" : "cursor-grab hover:scale-105 active:scale-95",
+              )}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 下方的刻度标签文字：保持 cursor-default */}
+      <div className="mt-1.5 flex w-full items-center justify-between px-1">
+        {options.map((opt, idx) => {
+          const isActive = idx === activeIndex;
+          return (
+            <button
+              key={opt}
+              type="button"
+              className={cn(
+                "cursor-default text-[11px] transition-colors",
+                isActive
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground/80 hover:text-foreground",
+              )}
+              onClick={() => handleSelect(opt)}
+            >
+              {t(`provider.reasoningEffort.${opt}`)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

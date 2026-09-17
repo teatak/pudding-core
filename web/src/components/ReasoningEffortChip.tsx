@@ -68,19 +68,38 @@ export function ReasoningEffortChip({
   );
 }
 
-export function reasoningEffortOptionsForSelection(selection: ResolvedModelSelection | null) {
+export const STANDARD_REASONING_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const GOOGLE_REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
+
+export function reasoningEffortOptionsForSelection(selection: ResolvedModelSelection | null): string[] {
   if (!selection) {
     return [];
   }
-  const options = ["auto", "low", "medium", "high"];
-  const standardEffortOptions = [...options, "xhigh", "max"];
   if (supportsStandardReasoning(selection)) {
-    return standardEffortOptions;
+    return [...STANDARD_REASONING_EFFORT_OPTIONS];
   }
   if (supportsGoogleThinking(selection)) {
-    return options;
+    return [...GOOGLE_REASONING_EFFORT_OPTIONS];
   }
   return [];
+}
+
+export function recommendedReasoningEffortForSelection(selection: ResolvedModelSelection | null): string {
+  if (!selection) {
+    return "medium";
+  }
+  const configured = defaultReasoningEffortForSelection(selection);
+  const options = reasoningEffortOptionsForSelection(selection);
+  if (configured && options.includes(configured)) {
+    return configured;
+  }
+  const isDeepSeek =
+    selection.providerBrand === "deepseek" ||
+    selection.model.toLowerCase().includes("deepseek");
+  if (isDeepSeek && options.includes("high")) {
+    return "high";
+  }
+  return options.includes("medium") ? "medium" : options[0] || "medium";
 }
 
 export function defaultReasoningEffortForSelection(selection: ResolvedModelSelection | null) {

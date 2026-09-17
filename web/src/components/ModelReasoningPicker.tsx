@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight } from "@/components/icons";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, RotateCcw } from "@/components/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -11,23 +11,18 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
 import {
-  AppDropdownMenuContent as DropdownMenuContent,
-  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
-} from "@/components/AppMenu";
-import {
   AppPopoverContent as PopoverContent,
   appPopoverItemStateClassName,
   appPopoverSelectedItemStateClassName,
 } from "@/components/AppPopover";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
-import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuRadioGroup,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Popover, PopoverTrigger } from "@/components/ui/popover";
+  reasoningEffortOptionsForSelection,
+  recommendedReasoningEffortForSelection,
+} from "@/components/ReasoningEffortChip";
+import { SteppedSlider } from "@/components/SteppedSlider";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverAnchor, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
@@ -62,7 +57,46 @@ export function ModelReasoningPicker({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const restoreComposerFocusOnCloseRef = useRef(false);
-  const reasoningMenu = useHoverSubmenu();
+  const triggerButtonRef = useRef<HTMLButtonElement>(null);
+  const lockedRectRef = useRef<DOMRect | null>(null);
+
+  const updateLockedRect = useCallback(() => {
+    if (triggerButtonRef.current) {
+      lockedRectRef.current = triggerButtonRef.current.getBoundingClientRect();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleWindowResize = () => {
+      updateLockedRect();
+    };
+    window.addEventListener("resize", handleWindowResize);
+    return () => {
+      window.removeEventListener("resize", handleWindowResize);
+    };
+  }, [open, updateLockedRect]);
+
+  const virtualAnchor = useMemo(
+    () => ({
+      getBoundingClientRect: () => {
+        if (lockedRectRef.current) {
+          return lockedRectRef.current;
+        }
+        if (triggerButtonRef.current) {
+          const rect = triggerButtonRef.current.getBoundingClientRect();
+          lockedRectRef.current = rect;
+          return rect;
+        }
+        return new DOMRect();
+      },
+    }),
+    [],
+  );
+  const virtualAnchorRef = useRef(virtualAnchor);
+  virtualAnchorRef.current = virtualAnchor;
 
   const providersQuery = useQuery({
     queryKey: queryKeys.providers(),
@@ -171,17 +205,36 @@ export function ModelReasoningPicker({
     [currentModelAvailable, resolveSelection, selectedModel, selectedProvider],
   );
   const reasoningOptions = reasoningEffortOptionsForSelection(resolvedSelection);
-  const selectedReasoning = reasoningOptions.includes(reasoningValue) ? reasoningValue : "auto";
+  const recommendedReasoning = useMemo(
+    () => (resolvedSelection ? recommendedReasoningEffortForSelection(resolvedSelection) : "medium"),
+    [resolvedSelection],
+  );
+  const effectiveReasoning = reasoningOptions.includes(reasoningValue)
+    ? reasoningValue
+    : recommendedReasoning;
+  const [selectedReasoning, setSelectedReasoning] = useState<string | null>(null);
 
+  const [view, setView] = useState<"slider" | "catalog">("slider");
   const [viewedProfileID, setViewedProfileID] = useState(selectedProvider);
+
+  useEffect(() => {
+    setSelectedReasoning(null);
+  }, [reasoningValue, visibleModel, open]);
+
   useEffect(() => {
     if (open) {
+      if (reasoningOptions.length > 0) {
+        setView("slider");
+      } else {
+        setView("catalog");
+      }
       const initialProfile = selectableProfiles.some((profile) => profile.id === selectedProvider)
         ? selectedProvider
         : selectableProfiles[0]?.id || "";
       setViewedProfileID(initialProfile);
     }
-  }, [open, selectedProvider, selectableProfiles]);
+  }, [open, reasoningOptions.length, selectedProvider, selectableProfiles]);
+
   const viewedProfile = selectableProfiles.find((profile) => profile.id === viewedProfileID);
   const longestModelList = selectableProfiles.reduce(
     (longest, profile) =>
@@ -200,12 +253,21 @@ export function ModelReasoningPicker({
     onResolvedChange?.(resolvedSelection);
   }, [onResolvedChange, providersQuery.isSuccess, resolvedSelection]);
 
+  const activeReasoning = selectedReasoning || effectiveReasoning;
   const activeBrand = visibleModel
     ? providerBrandForModel(visibleModel) || providerBrandKey(activeProfile) || selectedProvider
     : "";
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
-  const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${selectedReasoning}`) : "";
+  const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${activeReasoning}`) : "";
   const triggerLabel = reasoningLabel ? `${label} · ${reasoningLabel}` : label;
+
+  const handleReasoningSelect = useCallback(
+    (next: string) => {
+      setSelectedReasoning(next);
+      onReasoningChange(next);
+    },
+    [onReasoningChange],
+  );
 
   return (
     <Popover
@@ -213,15 +275,15 @@ export function ModelReasoningPicker({
       onOpenChange={(next) => {
         if (next) {
           restoreComposerFocusOnCloseRef.current = false;
+          updateLockedRect();
         }
         setOpen(next);
-        if (!next) {
-          reasoningMenu.close();
-        }
       }}
     >
+      <PopoverAnchor virtualRef={virtualAnchorRef} />
       <PopoverTrigger asChild>
         <Button
+          ref={triggerButtonRef}
           aria-label={`${t("session.model")}: ${triggerLabel}`}
           className={cn(
             "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-[var(--composer-control-foreground)] transition-none",
@@ -230,7 +292,7 @@ export function ModelReasoningPicker({
               : cn(
                   "min-w-0 gap-1 pr-1.5",
                   reasoningLabel
-                    ? "max-w-[12rem] sm:max-w-[13rem]"
+                    ? "max-w-[14rem] sm:max-w-[16rem]"
                     : "max-w-[9.5rem] sm:max-w-[10.5rem]",
                 ),
             !iconOnly && (visibleModel ? "pl-1" : "pl-2"),
@@ -247,22 +309,39 @@ export function ModelReasoningPicker({
           {iconOnly ? null : (
             <span className={cn("flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden", !visibleModel && "text-warning")}>
               <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
-              {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
-              {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">{reasoningLabel}</span> : null}
+              {reasoningLabel ? (
+                <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">
+                  ·
+                </span>
+              ) : null}
+              {reasoningLabel ? (
+                <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/80 font-medium">
+                  {reasoningLabel}
+                </span>
+              ) : null}
               <ChevronDown className={cn("size-3 shrink-0", visibleModel ? "text-muted-foreground" : "text-current")} />
             </span>
           )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        align="center"
         className={cn(
           "max-h-[min(28rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0",
-          selectableProfiles.length > 1 ? "w-[19rem]" : "w-[13rem]",
+          view === "slider"
+            ? "w-[17.5rem]"
+            : selectableProfiles.length > 1
+              ? "w-[19rem]"
+              : "w-[13rem]",
         )}
         collisionPadding={8}
         side="top"
         sideOffset={8}
+        onPointerDownOutside={(event) => {
+          if (triggerButtonRef.current?.contains(event.target as Node)) {
+            event.preventDefault();
+          }
+        }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (restoreComposerFocusOnCloseRef.current) {
@@ -271,189 +350,155 @@ export function ModelReasoningPicker({
           }
         }}
       >
-        {reasoningOptions.length > 0 ? (
-          <div className="shrink-0 border-b border-border/70 px-1 py-1.5">
-            <DropdownMenu
-              modal={false}
-              open={reasoningMenu.open}
-              onOpenChange={reasoningMenu.setOpen}
-            >
-              <DropdownMenuTrigger asChild>
-                <button
-                  className={cn(
-                    "flex h-8 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs data-[state=open]:bg-interactive-selected",
-                    appPopoverItemStateClassName,
-                    "data-[state=open]:hover:bg-interactive-selected data-[state=open]:focus-within:bg-interactive-selected",
-                  )}
-                  type="button"
-                  onPointerEnter={reasoningMenu.openFromHover}
-                  onPointerLeave={reasoningMenu.closeFromHover}
-                >
-                  <span className="whitespace-nowrap text-muted-foreground">{t("provider.reasoningEffort")}</span>
-                  <span className="ml-auto whitespace-nowrap">{reasoningLabel}</span>
-                  <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-28 min-w-28"
-                collisionPadding={8}
-                side="right"
-                sideOffset={6}
-                onPointerEnter={reasoningMenu.cancelClose}
-                onPointerLeave={reasoningMenu.closeFromHover}
+        {view === "slider" && reasoningOptions.length > 0 ? (
+          <div className="w-[17.5rem] p-2.5">
+            {/* 单行 Header：展示 Logo、模型名 · 档位高亮、紧随其后的下钻箭头（hover不位移）、重置按钮 */}
+            <div className="flex h-8 items-center justify-between gap-1.5 border-b border-border/60 pb-1.5">
+              <button
+                type="button"
+                className={cn(
+                  "flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors cursor-default",
+                  appPopoverItemStateClassName,
+                )}
+                onClick={() => setView("catalog")}
               >
-                <DropdownMenuRadioGroup
-                  value={selectedReasoning}
-                  onValueChange={(next) => {
-                    onReasoningChange(next === "auto" ? "" : next);
-                    reasoningMenu.close();
-                  }}
-                >
-                  {reasoningOptions.map((item) => (
-                    <DropdownMenuRadioItem key={item} className="h-7 text-xs" value={item}>
-                      {t(`provider.reasoningEffort.${item}`)}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ) : null}
-        {providersQuery.isLoading ? (
-          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
-          </div>
-        ) : selectableProfiles.length === 0 ? (
-          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
-          </div>
-        ) : selectableProfiles.length === 1 ? (
-          <div
-            className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
-            style={{ height: profilePaneHeight }}
-          >
-            <ProfileModels
-              currentModel={currentModelAvailable ? selectedModel : ""}
-              isCurrentProfile={currentModelAvailable}
-              profile={selectableProfiles[0]}
-              onPick={(model) => {
-                const profile = selectableProfiles[0];
-                if (session) {
-                  reasoningMenu.close();
-                  restoreComposerFocusOnCloseRef.current = true;
-                  setOpen(false);
-                  patchMutation.mutate({ provider: profile.id, model });
-                  return;
-                }
-                onChange?.({ provider: profile.id, model });
-                restoreComposerFocusOnCloseRef.current = true;
-                setOpen(false);
-              }}
-            />
+                {activeBrand ? <RoundBrandIcon name={activeBrand} sizeClassName="size-4" /> : null}
+                <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                  {label}
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </button>
+              <button
+                type="button"
+                aria-label={t("provider.reasoningEffort.reset")}
+                title={t("provider.reasoningEffort.reset")}
+                disabled={activeReasoning === recommendedReasoning}
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors cursor-default",
+                  activeReasoning !== recommendedReasoning
+                    ? "hover:bg-interactive-hover hover:text-foreground"
+                    : "opacity-35",
+                )}
+                onClick={() => handleReasoningSelect(recommendedReasoning)}
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            </div>
+
+            {/* 分段滑块 */}
+            <div className="pt-2.5 px-0.5">
+              <SteppedSlider
+                options={reasoningOptions}
+                value={activeReasoning}
+                onChange={handleReasoningSelect}
+                onPreviewChange={(next) => {
+                  setSelectedReasoning(next);
+                }}
+              />
+            </div>
           </div>
         ) : (
-          <div
-            className="grid min-h-0 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
-            style={{ height: profilePaneHeight }}
-          >
-            <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1.5">
-              <div className="grid gap-0.5">
-                {selectableProfiles.map((profile) => {
-                  const viewed = viewedProfileID === profile.id;
-                  const current = currentModelAvailable && selectedProvider === profile.id;
-                  return (
-                    <button
-                      key={profile.id}
-                      aria-current={viewed ? "true" : undefined}
-                      className={cn(
-                        "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:text-foreground",
-                        appPopoverItemStateClassName,
-                        viewed && cn(appPopoverSelectedItemStateClassName, "text-foreground"),
-                      )}
-                      type="button"
-                      onClick={() => {
-                        reasoningMenu.close();
-                        setViewedProfileID(profile.id);
-                      }}
-                    >
-                      <RoundBrandIcon name={providerBrandKey(profile)} />
-                      <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
-                      {current ? <span className="size-1.5 shrink-0 rounded-full bg-success" /> : null}
-                    </button>
-                  );
-                })}
+          <div>
+            {/* 如果支持推理模型，从 slider 下钻到 catalog 时显示返回按钮 */}
+            {reasoningOptions.length > 0 ? (
+              <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2.5">
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-default"
+                  onClick={() => setView("slider")}
+                >
+                  <ChevronLeft className="size-3.5" />
+                  <span>{t("common.back")}</span>
+                </button>
               </div>
-            </div>
-            <div className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
-              {viewedProfile ? (
+            ) : null}
+
+            {providersQuery.isLoading ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+              </div>
+            ) : selectableProfiles.length === 0 ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+              </div>
+            ) : selectableProfiles.length === 1 ? (
+              <div
+                className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
+                style={{ height: profilePaneHeight }}
+              >
                 <ProfileModels
-                  currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
-                  isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
-                  profile={viewedProfile}
+                  currentModel={currentModelAvailable ? selectedModel : ""}
+                  isCurrentProfile={currentModelAvailable}
+                  profile={selectableProfiles[0]}
                   onPick={(model) => {
+                    const profile = selectableProfiles[0];
+                    setSelectedReasoning(null);
                     if (session) {
-                      reasoningMenu.close();
-                      restoreComposerFocusOnCloseRef.current = true;
-                      setOpen(false);
-                      patchMutation.mutate({ provider: viewedProfile.id, model });
-                      return;
+                      patchMutation.mutate({ provider: profile.id, model });
+                    } else {
+                      onChange?.({ provider: profile.id, model });
                     }
-                    onChange?.({ provider: viewedProfile.id, model });
-                    restoreComposerFocusOnCloseRef.current = true;
-                    setOpen(false);
+                    setView("slider");
                   }}
                 />
-              ) : (
-                <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div
+                className="grid min-h-0 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
+                style={{ height: profilePaneHeight }}
+              >
+                <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1.5">
+                  <div className="grid gap-0.5">
+                    {selectableProfiles.map((profile) => {
+                      const viewed = viewedProfileID === profile.id;
+                      const current = currentModelAvailable && selectedProvider === profile.id;
+                      return (
+                        <button
+                          key={profile.id}
+                          aria-current={viewed ? "true" : undefined}
+                          className={cn(
+                            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:text-foreground cursor-default",
+                            appPopoverItemStateClassName,
+                            viewed && cn(appPopoverSelectedItemStateClassName, "text-foreground"),
+                          )}
+                          type="button"
+                          onClick={() => setViewedProfileID(profile.id)}
+                        >
+                          <RoundBrandIcon name={providerBrandKey(profile)} />
+                          <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
+                          {current ? <span className="size-1.5 shrink-0 rounded-full bg-success" /> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
+                  {viewedProfile ? (
+                    <ProfileModels
+                      currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
+                      isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
+                      profile={viewedProfile}
+                      onPick={(model) => {
+                        setSelectedReasoning(null);
+                        if (session) {
+                          patchMutation.mutate({ provider: viewedProfile.id, model });
+                        } else {
+                          onChange?.({ provider: viewedProfile.id, model });
+                        }
+                        setView("slider");
+                      }}
+                    />
+                  ) : (
+                    <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </PopoverContent>
     </Popover>
   );
-}
-
-function useHoverSubmenu() {
-  const [open, setOpen] = useState(false);
-  const timerRef = useRef<number | null>(null);
-
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-  const close = useCallback(() => {
-    clearTimer();
-    setOpen(false);
-  }, [clearTimer]);
-  const openFromHover = useCallback(() => {
-    clearTimer();
-    timerRef.current = window.setTimeout(() => {
-      setOpen(true);
-      timerRef.current = null;
-    }, 80);
-  }, [clearTimer]);
-  const closeFromHover = useCallback(() => {
-    clearTimer();
-    timerRef.current = window.setTimeout(() => {
-      setOpen(false);
-      timerRef.current = null;
-    }, 180);
-  }, [clearTimer]);
-
-  useEffect(() => clearTimer, [clearTimer]);
-
-  return {
-    cancelClose: clearTimer,
-    close,
-    closeFromHover,
-    open,
-    openFromHover,
-    setOpen,
-  };
 }
 
 function RoundBrandIcon({
@@ -498,7 +543,7 @@ function ProfileModels({
           <button
             key={model}
             className={cn(
-              "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px]",
+              "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] cursor-default",
               appPopoverItemStateClassName,
             )}
             type="button"

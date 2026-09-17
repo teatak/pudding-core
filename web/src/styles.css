@@ -574,7 +574,8 @@ html[data-shell] :where(button, [data-slot="button"]):not([data-workspace-resour
 }
 
 @container (max-width: 28rem) {
-    .pudding-composer-model-label {
+    .pudding-composer-model-label,
+    .pudding-composer-reasoning-detail {
         display: none;
     }
 

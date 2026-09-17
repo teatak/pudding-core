@@ -356,6 +356,32 @@ export function Composer({
         return;
       }
       setReasoningEffortForModel(resolvedModelKey, value);
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
+        if (!previous) {
+          return previous;
+        }
+        return {
+          sessions: previous.sessions.map((item) =>
+            item.id === sessionID
+              ? {
+                  ...item,
+                  reasoningEffort: value,
+                  reasoningModelKey: value ? resolvedModelKey : "",
+                }
+              : item,
+          ),
+        };
+      });
+      queryClient.setQueryData<Session>(queryKeys.session(sessionID), (previous) => {
+        if (!previous) {
+          return previous;
+        }
+        return {
+          ...previous,
+          reasoningEffort: value,
+          reasoningModelKey: value ? resolvedModelKey : "",
+        };
+      });
       void updateSession(token, sessionID, { reasoningEffort: value })
         .then((updated) => {
           queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
@@ -366,12 +392,14 @@ export function Composer({
               sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
             };
           });
+          queryClient.setQueryData(queryKeys.session(updated.id), updated);
         })
         .catch((error) => {
           console.warn("failed to update reasoning effort", error);
         })
         .finally(() => {
           void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionID) });
         });
     },
     [queryClient, resolvedModelKey, sessionID, setReasoningEffortForModel, token],
