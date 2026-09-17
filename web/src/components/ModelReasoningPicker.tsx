@@ -272,6 +272,7 @@ export function ModelReasoningPicker({
     <Popover
       open={open}
       onOpenChange={(next) => {
+        clearSliderViewTimer();
         if (next) {
           restoreComposerFocusOnCloseRef.current = false;
           if (triggerButtonRef.current) {
@@ -284,7 +285,7 @@ export function ModelReasoningPicker({
       <PopoverTrigger asChild>
         <Button
           ref={triggerButtonRef}
-          style={isSliderMode && preservedWidth ? { width: `${preservedWidth}px` } : undefined}
+          style={!iconOnly && isSliderMode && preservedWidth ? { width: `${preservedWidth}px` } : undefined}
           aria-label={`${t("session.model")}: ${triggerText}`}
           className={cn(
             "pudding-composer-model-picker group/model-picker h-8 shrink rounded-full border-0 bg-transparent py-0 text-xs font-normal text-[var(--composer-control-foreground)] transition-none",
