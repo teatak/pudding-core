@@ -64,7 +64,10 @@ import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
-import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
+import {
+  reasoningEffortOptionsForSelection,
+  recommendedReasoningEffortForSelection,
+} from "@/components/ReasoningEffortChip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -530,9 +533,16 @@ function DraftComposer({
     [attachmentPreviewItems],
   );
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
+  const recommendedReasoning = useMemo(
+    () => (resolvedModel ? recommendedReasoningEffortForSelection(resolvedModel) : "medium"),
+    [resolvedModel],
+  );
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey ? reasoningEffortByModel[resolvedModelKey] || "" : "";
+  const activeReasoningEffort = reasoningOptions.length > 0
+    ? (reasoningOptions.includes(reasoningEffort) ? reasoningEffort : recommendedReasoning)
+    : "";
   const draftVoiceSessionID = draftVoiceSession?.id;
   useSessionEvents(draftVoiceSessionID, token);
   const draftVoiceBindingsQuery = useQuery({
@@ -625,7 +635,6 @@ function DraftComposer({
         setDraftVoiceSession(null);
         return current;
       }
-      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
         throw new APIError(400, "no_model");
       }
@@ -987,10 +996,14 @@ function DraftComposer({
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
 
   useEffect(() => {
-    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
-      setDraftReasoningEffort("");
+    if (reasoningEffort) {
+      if (reasoningOptions.length === 0) {
+        setDraftReasoningEffort("");
+      } else if (!reasoningOptions.includes(reasoningEffort)) {
+        setDraftReasoningEffort(recommendedReasoning);
+      }
     }
-  }, [reasoningEffort, reasoningOptions, setDraftReasoningEffort]);
+  }, [reasoningEffort, reasoningOptions, recommendedReasoning, setDraftReasoningEffort]);
 
   useEffect(() => {
     draftVoiceInputActiveRef.current = draftVoiceInputActive;
@@ -1020,7 +1033,6 @@ function DraftComposer({
   const submitMutation = useMutation({
     mutationFn: async (value: DraftValue & { parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
-      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
         throw new APIError(400, "no_model");
       }

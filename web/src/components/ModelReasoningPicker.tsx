@@ -56,7 +56,6 @@ export function ModelReasoningPicker({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const restoreComposerFocusOnCloseRef = useRef(false);
   const triggerButtonRef = useRef<HTMLButtonElement>(null);
   const [displayAsSliderView, setDisplayAsSliderView] = useState(false);
   const [preservedWidth, setPreservedWidth] = useState<number | null>(null);
@@ -98,7 +97,7 @@ export function ModelReasoningPicker({
     [profiles],
   );
   const patchMutation = useMutation({
-    mutationFn: (body: { provider?: string; model?: string }) => {
+    mutationFn: (body: { provider?: string; model?: string; reasoningEffort?: string }) => {
       if (!session) {
         throw new Error("missing session");
       }
@@ -118,13 +117,51 @@ export function ModelReasoningPicker({
         previous
           ? {
               sessions: previous.sessions.map((item) =>
-                item.id === session.id ? { ...item, ...body } : item,
+                item.id === session.id
+                  ? {
+                      ...item,
+                      ...body,
+                      reasoningEffort:
+                        body.reasoningEffort !== undefined
+                          ? body.reasoningEffort
+                          : body.model && body.model !== item.model
+                            ? ""
+                            : item.reasoningEffort,
+                      reasoningModelKey:
+                        body.reasoningEffort && body.provider && body.model
+                          ? `${body.provider}:${body.model}`
+                          : body.reasoningEffort
+                            ? item.reasoningModelKey
+                            : body.model && body.model !== item.model
+                              ? ""
+                              : item.reasoningModelKey,
+                    }
+                  : item,
               ),
             }
           : previous,
       );
       queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
-        previous ? { ...previous, ...body } : previous,
+        previous
+          ? {
+              ...previous,
+              ...body,
+              reasoningEffort:
+                body.reasoningEffort !== undefined
+                  ? body.reasoningEffort
+                  : body.model && body.model !== previous.model
+                    ? ""
+                    : previous.reasoningEffort,
+              reasoningModelKey:
+                body.reasoningEffort && body.provider && body.model
+                  ? `${body.provider}:${body.model}`
+                  : body.reasoningEffort
+                    ? previous.reasoningModelKey
+                    : body.model && body.model !== previous.model
+                      ? ""
+                      : previous.reasoningModelKey,
+            }
+          : previous,
       );
       return { previousSession, previousSessions, sessionID: session.id };
     },
@@ -186,6 +223,15 @@ export function ModelReasoningPicker({
     ? reasoningValue
     : recommendedReasoning;
   const [selectedReasoning, setSelectedReasoning] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      reasoningOptions.length > 0 &&
+      (!reasoningValue || !reasoningOptions.includes(reasoningValue))
+    ) {
+      onReasoningChange(effectiveReasoning);
+    }
+  }, [effectiveReasoning, onReasoningChange, reasoningOptions, reasoningValue]);
 
   const [view, setView] = useState<"slider" | "catalog">("slider");
   const [viewedProfileID, setViewedProfileID] = useState(selectedProvider);
@@ -270,13 +316,35 @@ export function ModelReasoningPicker({
     [onReasoningChange],
   );
 
+  const handleModelPick = useCallback(
+    (profile: ProviderProfile, model: string) => {
+      setSelectedReasoning(null);
+      const nextSelection = resolveSelection(profile.id, model);
+      const nextOptions = reasoningEffortOptionsForSelection(nextSelection);
+      const nextReasoning = nextOptions.length > 0
+        ? (reasoningValue && nextOptions.includes(reasoningValue)
+            ? reasoningValue
+            : recommendedReasoningEffortForSelection(nextSelection))
+        : "";
+      if (session) {
+        patchMutation.mutate({ provider: profile.id, model, reasoningEffort: nextReasoning });
+      } else {
+        onChange?.({ provider: profile.id, model });
+      }
+      if (nextReasoning) {
+        onReasoningChange(nextReasoning);
+      }
+      setView("slider");
+    },
+    [onChange, onReasoningChange, patchMutation, reasoningValue, resolveSelection, session],
+  );
+
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         clearSliderViewTimer();
         if (next) {
-          restoreComposerFocusOnCloseRef.current = false;
           if (triggerButtonRef.current) {
             setPreservedWidth(triggerButtonRef.current.offsetWidth);
           }
@@ -361,10 +429,9 @@ export function ModelReasoningPicker({
           }
         }}
         onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          if (restoreComposerFocusOnCloseRef.current) {
-            restoreComposerFocusOnCloseRef.current = false;
-            onAfterClose?.();
+          if (onAfterClose) {
+            event.preventDefault();
+            onAfterClose();
           }
         }}
       >
@@ -416,7 +483,7 @@ export function ModelReasoningPicker({
             </div>
           </div>
         ) : (
-          <div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {/* 如果支持推理模型，从 slider 下钻到 catalog 时显示返回按钮 */}
             {reasoningOptions.length > 0 ? (
               <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2.5">
@@ -441,29 +508,20 @@ export function ModelReasoningPicker({
               </div>
             ) : selectableProfiles.length === 1 ? (
               <div
-                className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
-                style={{ height: profilePaneHeight }}
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
+                style={{ height: profilePaneHeight, maxHeight: "100%" }}
               >
                 <ProfileModels
                   currentModel={currentModelAvailable ? selectedModel : ""}
                   isCurrentProfile={currentModelAvailable}
                   profile={selectableProfiles[0]}
-                  onPick={(model) => {
-                    const profile = selectableProfiles[0];
-                    setSelectedReasoning(null);
-                    if (session) {
-                      patchMutation.mutate({ provider: profile.id, model });
-                    } else {
-                      onChange?.({ provider: profile.id, model });
-                    }
-                    setView("slider");
-                  }}
+                  onPick={(model) => handleModelPick(selectableProfiles[0], model)}
                 />
               </div>
             ) : (
               <div
-                className="grid min-h-0 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
-                style={{ height: profilePaneHeight }}
+                className="grid min-h-0 flex-1 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
+                style={{ height: profilePaneHeight, maxHeight: "100%" }}
               >
                 <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1.5">
                   <div className="grid gap-0.5">
@@ -496,15 +554,7 @@ export function ModelReasoningPicker({
                       currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
                       isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
                       profile={viewedProfile}
-                      onPick={(model) => {
-                        setSelectedReasoning(null);
-                        if (session) {
-                          patchMutation.mutate({ provider: viewedProfile.id, model });
-                        } else {
-                          onChange?.({ provider: viewedProfile.id, model });
-                        }
-                        setView("slider");
-                      }}
+                      onPick={(model) => handleModelPick(viewedProfile, model)}
                     />
                   ) : (
                     <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>

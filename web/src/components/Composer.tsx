@@ -69,7 +69,10 @@ import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcrip
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
-import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
+import {
+  reasoningEffortOptionsForSelection,
+  recommendedReasoningEffortForSelection,
+} from "@/components/ReasoningEffortChip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useI18n } from "@/i18n";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
@@ -342,6 +345,10 @@ export function Composer({
     () => reasoningEffortOptionsForSelection(resolvedModelDetails),
     [resolvedModelDetails],
   );
+  const recommendedReasoning = useMemo(
+    () => (resolvedModelDetails ? recommendedReasoningEffortForSelection(resolvedModelDetails) : "medium"),
+    [resolvedModelDetails],
+  );
   const audioInputSupported = resolvedModelDetails
     ? resolvedModelDetails.modelConfig?.capabilities?.audio === true
     : undefined;
@@ -349,6 +356,9 @@ export function Composer({
     ? `${resolvedModelDetails.provider}:${resolvedModelDetails.model}`
     : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
+  const effectiveReasoningEffort = reasoningOptions.length > 0
+    ? (reasoningOptions.includes(reasoningEffort) ? reasoningEffort : recommendedReasoning)
+    : "";
   const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
   const setSessionReasoningEffort = useCallback(
     (value: string) => {
@@ -405,10 +415,14 @@ export function Composer({
     [queryClient, resolvedModelKey, sessionID, setReasoningEffortForModel, token],
   );
   useEffect(() => {
-    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
-      setSessionReasoningEffort("");
+    if (reasoningEffort) {
+      if (reasoningOptions.length === 0) {
+        setSessionReasoningEffort("");
+      } else if (!reasoningOptions.includes(reasoningEffort)) {
+        setSessionReasoningEffort(recommendedReasoning);
+      }
     }
-  }, [reasoningEffort, reasoningOptions, setSessionReasoningEffort]);
+  }, [reasoningEffort, reasoningOptions, recommendedReasoning, setSessionReasoningEffort]);
 
   const clearSubmitError = useCallback(() => onSubmitError?.(null), [onSubmitError]);
   const resetSessionDraft = useCallback(() => {
@@ -662,6 +676,7 @@ export function Composer({
       }
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
+        reasoningEffort: effectiveReasoningEffort || undefined,
         text: value.text,
         parts: value.parts,
       });
