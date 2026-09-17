@@ -1,16 +1,12 @@
-// 模型 id → 展示名:"deepseek-v4-flash" → "Deepseek V4 Flash"。
-// 只影响展示,提交给 API 的始终是原始 id。
-const ACRONYMS: Record<string, string> = {
-  gpt: "GPT",
-  glm: "GLM",
-  oss: "OSS",
-};
+import { providerModelDisplayName } from "@/provider/presets";
 
-export function formatModelLabel(id: string): string {
+// 模型 id / 自定义展示名 → 最终界面展示名。
+// 优先使用用户自定义的 displayName，未设置时通过统一的 providerModelDisplayName 格式化 tail id。
+export function formatModelLabel(id: string, displayName?: string): string {
+  const trimmed = displayName?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
   const tail = id.split("/").pop() || id;
-  return tail
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((segment) => ACRONYMS[segment.toLowerCase()] ?? segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
+  return providerModelDisplayName(tail);
 }

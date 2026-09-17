@@ -254,7 +254,9 @@ export function ModelReasoningPicker({
   const activeBrand = visibleModel
     ? providerBrandForModel(visibleModel) || providerBrandKey(activeProfile) || selectedProvider
     : "";
-  const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
+  const label = visibleModel
+    ? formatModelLabel(visibleModel, resolvedSelection?.modelConfig?.displayName)
+    : t("picker.selectModel");
   const reasoningLabel = reasoningOptions.length > 0 ? t(`provider.reasoningEffort.${activeReasoning}`) : "";
   const triggerLabel = reasoningLabel ? `${label} · ${reasoningLabel}` : label;
   const isSliderMode = displayAsSliderView;
@@ -538,7 +540,7 @@ function ProfileModels({
   onPick: (model: string) => void;
 }) {
   const { t } = useI18n();
-  const models = profile.models.map((model) => model.id).filter(Boolean);
+  const models = profile.models.filter((model) => Boolean(model.id));
   if (models.length === 0) {
     return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;
   }
@@ -546,17 +548,17 @@ function ProfileModels({
   return (
     <div className="grid gap-0.5">
       {models.map((model) => {
-        const selected = isCurrentProfile && currentModel === model;
-        const label = formatModelLabel(model);
+        const selected = isCurrentProfile && currentModel === model.id;
+        const label = formatModelLabel(model.id, model.displayName);
         return (
           <button
-            key={model}
+            key={model.id}
             className={cn(
               "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] cursor-default",
               appPopoverItemStateClassName,
             )}
             type="button"
-            onClick={() => onPick(model)}
+            onClick={() => onPick(model.id)}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
               <span className="block min-w-0 flex-1 truncate">
