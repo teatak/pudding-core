@@ -40,8 +40,12 @@ jobs:
         run: go test ./...
       - name: Test Electron shell
         run: npm test
+      - name: Test web logic
+        run: npm --prefix web test
       - name: Build web app
         run: npm --prefix web run build
+      - name: Test model and reasoning interactions
+        run: npm --prefix web run smoke:reasoning
       - name: Generate third-party notices
         run: npm run legal:generate
 

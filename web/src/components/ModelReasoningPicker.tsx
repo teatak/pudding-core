@@ -1,10 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, RotateCcw } from "@/components/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   listProviders,
-  updateSession,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -15,18 +14,21 @@ import {
   appPopoverItemStateClassName,
   appPopoverSelectedItemStateClassName,
 } from "@/components/AppPopover";
-import { type ResolvedModelSelection } from "@/lib/modelSelection";
+import { modelSelectionKey, resolveModelSelection, type ResolvedModelSelection } from "@/lib/modelSelection";
 import {
   reasoningEffortOptionsForSelection,
   recommendedReasoningEffortForSelection,
-} from "@/components/ReasoningEffortChip";
+  resolveReasoningEffortForSelection,
+} from "@/lib/reasoningEffort";
 import { getEffortColor, SteppedSlider } from "@/components/SteppedSlider";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
+import { useSessionModelSettings } from "@/hooks/useSessionModelSettings";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
 import { providerBrandForModel } from "@/provider/presets";
+import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
 
 type ModelReasoningPickerProps = {
   token: string;
@@ -35,8 +37,7 @@ type ModelReasoningPickerProps = {
   reasoningValue: string;
   onChange?: (value: { provider: string; model: string }) => void;
   onAfterClose?: () => void;
-  onReasoningChange: (value: string) => void;
-  onResolvedChange?: (value: ResolvedModelSelection | null) => void;
+  onReasoningChange: (selection: ResolvedModelSelection, value: string) => void;
   iconOnly?: boolean;
   className?: string;
 };
@@ -49,17 +50,17 @@ export function ModelReasoningPicker({
   onAfterClose,
   onChange,
   onReasoningChange,
-  onResolvedChange,
   iconOnly = false,
   className,
 }: ModelReasoningPickerProps) {
-  const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const interactedOutsideRef = useRef(false);
   const triggerButtonRef = useRef<HTMLButtonElement>(null);
   const [displayAsSliderView, setDisplayAsSliderView] = useState(false);
   const [preservedWidth, setPreservedWidth] = useState<number | null>(null);
   const sliderViewTimerRef = useRef<number | null>(null);
+  const { update: updateModelSettings, pending: modelSettingsPending } = useSessionModelSettings(token, session?.id);
 
   const clearSliderViewTimer = useCallback(() => {
     if (sliderViewTimerRef.current !== null) {
@@ -77,125 +78,9 @@ export function ModelReasoningPicker({
   });
   const profiles = useMemo(() => providersQuery.data?.providers ?? [], [providersQuery.data?.providers]);
   const resolveSelection = useCallback(
-    (providerID: string, modelID: string): ResolvedModelSelection | null => {
-      if (!providerID || !modelID) {
-        return null;
-      }
-      const profile = profiles.find((item) => item.id === providerID);
-      const modelConfig = profile?.models.find((item) => item.id === modelID);
-      if (!profile || !modelConfig) {
-        return { provider: providerID, model: modelID };
-      }
-      return {
-        provider: providerID,
-        model: modelID,
-        providerBrand: profile.brand,
-        providerProtocol: profile.protocol,
-        modelConfig,
-      };
-    },
+    (provider: string, model: string) => resolveModelSelection(profiles, { provider, model }),
     [profiles],
   );
-  const patchMutation = useMutation({
-    mutationFn: (body: { provider?: string; model?: string; reasoningEffort?: string }) => {
-      if (!session) {
-        throw new Error("missing session");
-      }
-      return updateSession(token, session.id, body);
-    },
-    onMutate: async (body) => {
-      if (!session) {
-        return {};
-      }
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
-        queryClient.cancelQueries({ queryKey: queryKeys.session(session.id) }),
-      ]);
-      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
-      const previousSession = queryClient.getQueryData<Session>(queryKeys.session(session.id));
-      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) =>
-        previous
-          ? {
-              sessions: previous.sessions.map((item) =>
-                item.id === session.id
-                  ? {
-                      ...item,
-                      ...body,
-                      reasoningEffort:
-                        body.reasoningEffort !== undefined
-                          ? body.reasoningEffort
-                          : body.model && body.model !== item.model
-                            ? ""
-                            : item.reasoningEffort,
-                      reasoningModelKey:
-                        body.reasoningEffort && body.provider && body.model
-                          ? `${body.provider}:${body.model}`
-                          : body.reasoningEffort
-                            ? item.reasoningModelKey
-                            : body.model && body.model !== item.model
-                              ? ""
-                              : item.reasoningModelKey,
-                    }
-                  : item,
-              ),
-            }
-          : previous,
-      );
-      queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
-        previous
-          ? {
-              ...previous,
-              ...body,
-              reasoningEffort:
-                body.reasoningEffort !== undefined
-                  ? body.reasoningEffort
-                  : body.model && body.model !== previous.model
-                    ? ""
-                    : previous.reasoningEffort,
-              reasoningModelKey:
-                body.reasoningEffort && body.provider && body.model
-                  ? `${body.provider}:${body.model}`
-                  : body.reasoningEffort
-                    ? previous.reasoningModelKey
-                    : body.model && body.model !== previous.model
-                      ? ""
-                      : previous.reasoningModelKey,
-            }
-          : previous,
-      );
-      return { previousSession, previousSessions, sessionID: session.id };
-    },
-    onError: (_error, _body, context) => {
-      if (context?.previousSessions) {
-        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
-      }
-      if (context?.previousSession && context.sessionID) {
-        queryClient.setQueryData(queryKeys.session(context.sessionID), context.previousSession);
-      }
-    },
-    onSuccess: (updated) => {
-      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) =>
-        previous
-          ? {
-              sessions: previous.sessions.map((item) =>
-                item.id === updated.id ? updated : item,
-              ),
-            }
-          : previous,
-      );
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-      if (updated.provider && updated.model) {
-        onResolvedChange?.(resolveSelection(updated.provider, updated.model));
-      }
-    },
-    onSettled: (_data, _error, _body, context) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      if (context?.sessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(context.sessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(context.sessionID) });
-      }
-    },
-  });
 
   const selectableProfiles = useMemo(
     () => profiles.filter((profile) => profile.models.some((model) => model.id)),
@@ -214,31 +99,22 @@ export function ModelReasoningPicker({
     () => (currentModelAvailable ? resolveSelection(selectedProvider, selectedModel) : null),
     [currentModelAvailable, resolveSelection, selectedModel, selectedProvider],
   );
-  const reasoningOptions = reasoningEffortOptionsForSelection(resolvedSelection);
+  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedSelection), [resolvedSelection]);
   const recommendedReasoning = useMemo(
-    () => (resolvedSelection ? recommendedReasoningEffortForSelection(resolvedSelection) : "medium"),
+    () => recommendedReasoningEffortForSelection(resolvedSelection),
     [resolvedSelection],
   );
-  const effectiveReasoning = reasoningOptions.includes(reasoningValue)
-    ? reasoningValue
-    : recommendedReasoning;
+  const effectiveReasoning = resolveReasoningEffortForSelection(resolvedSelection, reasoningValue);
   const [selectedReasoning, setSelectedReasoning] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (
-      reasoningOptions.length > 0 &&
-      (!reasoningValue || !reasoningOptions.includes(reasoningValue))
-    ) {
-      onReasoningChange(effectiveReasoning);
-    }
-  }, [effectiveReasoning, onReasoningChange, reasoningOptions, reasoningValue]);
 
   const [view, setView] = useState<"slider" | "catalog">("slider");
   const [viewedProfileID, setViewedProfileID] = useState(selectedProvider);
 
   useEffect(() => {
-    setSelectedReasoning(null);
-  }, [reasoningValue, visibleModel, open]);
+    if (!modelSettingsPending) {
+      setSelectedReasoning(null);
+    }
+  }, [reasoningValue, visibleModel, open, modelSettingsPending]);
 
   useEffect(() => {
     if (open) {
@@ -264,13 +140,6 @@ export function ModelReasoningPicker({
     Math.max(Math.max(selectableProfiles.length, longestModelList) * 34 + 12, 160),
     360,
   );
-
-  useEffect(() => {
-    if (!providersQuery.isSuccess) {
-      return;
-    }
-    onResolvedChange?.(resolvedSelection);
-  }, [onResolvedChange, providersQuery.isSuccess, resolvedSelection]);
 
   const isSliderViewActive = open && view === "slider" && reasoningOptions.length > 0;
 
@@ -310,33 +179,38 @@ export function ModelReasoningPicker({
 
   const handleReasoningSelect = useCallback(
     (next: string) => {
+      if (!resolvedSelection) {
+        return;
+      }
       setSelectedReasoning(next);
-      onReasoningChange(next);
+      onReasoningChange(resolvedSelection, next);
     },
-    [onReasoningChange],
+    [onReasoningChange, resolvedSelection],
   );
 
   const handleModelPick = useCallback(
     (profile: ProviderProfile, model: string) => {
       setSelectedReasoning(null);
       const nextSelection = resolveSelection(profile.id, model);
-      const nextOptions = reasoningEffortOptionsForSelection(nextSelection);
-      const nextReasoning = nextOptions.length > 0
-        ? (reasoningValue && nextOptions.includes(reasoningValue)
-            ? reasoningValue
-            : recommendedReasoningEffortForSelection(nextSelection))
-        : "";
+      if (!nextSelection) {
+        return;
+      }
+      const nextModelKey = modelSelectionKey(nextSelection);
+      const preferredReasoning = resolvedSelection && modelSelectionKey(resolvedSelection) === nextModelKey
+        ? reasoningValue
+        : useReasoningEffortPreferenceStore.getState().byModel[nextModelKey] || "";
+      const nextReasoning = resolveReasoningEffortForSelection(nextSelection, preferredReasoning);
       if (session) {
-        patchMutation.mutate({ provider: profile.id, model, reasoningEffort: nextReasoning });
+        void updateModelSettings({ provider: profile.id, model, reasoningEffort: nextReasoning }).catch((error) => {
+          console.warn("failed to update model settings", error);
+        });
       } else {
         onChange?.({ provider: profile.id, model });
-      }
-      if (nextReasoning) {
-        onReasoningChange(nextReasoning);
+        onReasoningChange(nextSelection, nextReasoning);
       }
       setView("slider");
     },
-    [onChange, onReasoningChange, patchMutation, reasoningValue, resolveSelection, session],
+    [onChange, onReasoningChange, reasoningValue, resolvedSelection, resolveSelection, session, updateModelSettings],
   );
 
   return (
@@ -345,6 +219,7 @@ export function ModelReasoningPicker({
       onOpenChange={(next) => {
         clearSliderViewTimer();
         if (next) {
+          interactedOutsideRef.current = false;
           if (triggerButtonRef.current) {
             setPreservedWidth(triggerButtonRef.current.offsetWidth);
           }
@@ -355,6 +230,8 @@ export function ModelReasoningPicker({
       <PopoverTrigger asChild>
         <Button
           ref={triggerButtonRef}
+          disabled={modelSettingsPending}
+          aria-busy={modelSettingsPending}
           style={!iconOnly && isSliderMode && preservedWidth ? { width: `${preservedWidth}px` } : undefined}
           aria-label={`${t("session.model")}: ${triggerText}`}
           className={cn(
@@ -428,10 +305,17 @@ export function ModelReasoningPicker({
             event.preventDefault();
           }
         }}
+        onInteractOutside={(event) => {
+          if (!triggerButtonRef.current?.contains(event.target as Node)) {
+            interactedOutsideRef.current = true;
+          }
+        }}
         onCloseAutoFocus={(event) => {
           if (onAfterClose) {
             event.preventDefault();
-            onAfterClose();
+            if (!interactedOutsideRef.current) {
+              onAfterClose();
+            }
           }
         }}
       >
@@ -457,7 +341,7 @@ export function ModelReasoningPicker({
                 type="button"
                 aria-label={t("provider.reasoningEffort.reset")}
                 title={t("provider.reasoningEffort.reset")}
-                disabled={activeReasoning === recommendedReasoning}
+                disabled={modelSettingsPending || activeReasoning === recommendedReasoning}
                 className={cn(
                   "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors cursor-default",
                   activeReasoning !== recommendedReasoning
@@ -471,7 +355,7 @@ export function ModelReasoningPicker({
             </div>
 
             {/* 分段滑块 */}
-            <div className="pt-2.5 px-0.5">
+            <div className="pt-2.5 px-0.5" inert={modelSettingsPending}>
               <SteppedSlider
                 options={reasoningOptions}
                 value={activeReasoning}
@@ -515,6 +399,7 @@ export function ModelReasoningPicker({
                   currentModel={currentModelAvailable ? selectedModel : ""}
                   isCurrentProfile={currentModelAvailable}
                   profile={selectableProfiles[0]}
+                  disabled={modelSettingsPending}
                   onPick={(model) => handleModelPick(selectableProfiles[0], model)}
                 />
               </div>
@@ -554,6 +439,7 @@ export function ModelReasoningPicker({
                       currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
                       isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
                       profile={viewedProfile}
+                      disabled={modelSettingsPending}
                       onPick={(model) => handleModelPick(viewedProfile, model)}
                     />
                   ) : (
@@ -587,11 +473,13 @@ function providerBrandKey(profile?: ProviderProfile) {
 
 function ProfileModels({
   profile,
+  disabled,
   currentModel,
   isCurrentProfile,
   onPick,
 }: {
   profile: ProviderProfile;
+  disabled: boolean;
   currentModel: string;
   isCurrentProfile: boolean;
   onPick: (model: string) => void;
@@ -615,6 +503,7 @@ function ProfileModels({
               appPopoverItemStateClassName,
             )}
             type="button"
+            disabled={disabled}
             onClick={() => onPick(model.id)}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">

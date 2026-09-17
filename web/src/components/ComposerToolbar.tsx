@@ -24,6 +24,7 @@ type ComposerToolbarProps = {
   compacting: boolean;
   context?: UIContextPart;
   mentionMenuOpen: boolean;
+  audioInputDisabled: boolean;
   projectID: string;
   reasoningEffort: string;
   sendEnabled: boolean;
@@ -38,8 +39,7 @@ type ComposerToolbarProps = {
   onAddClick: () => void;
   onCancel: () => void;
   onModelPickerClose: () => void;
-  onReasoningChange: (value: string) => void;
-  onResolvedModelChange: (value: ResolvedModelSelection | null) => void;
+  onReasoningChange: (selection: ResolvedModelSelection, value: string) => void;
   onUIContextEnabledChange: (enabled: boolean) => void;
 };
 
@@ -51,6 +51,7 @@ export function ComposerToolbar({
   compacting,
   context,
   mentionMenuOpen,
+  audioInputDisabled,
   projectID,
   reasoningEffort,
   sendEnabled,
@@ -66,7 +67,6 @@ export function ComposerToolbar({
   onCancel,
   onModelPickerClose,
   onReasoningChange,
-  onResolvedModelChange,
   onUIContextEnabledChange,
 }: ComposerToolbarProps) {
   const { t } = useI18n();
@@ -108,10 +108,10 @@ export function ComposerToolbar({
           reasoningValue={reasoningEffort}
           onAfterClose={onModelPickerClose}
           onReasoningChange={onReasoningChange}
-          onResolvedChange={onResolvedModelChange}
         />
       </div>
       <SessionAudioControls
+        inputDisabled={audioInputDisabled}
         audioInputSupported={audioInputSupported}
         bindings={audioBindings}
         token={token}

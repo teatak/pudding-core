@@ -60,14 +60,11 @@ import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbo
 import { MascotSceneV1Adapter } from "@/components/mascot-scene/MascotSceneV1Adapter";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { AudioControlButtons, AudioRuntimeInstallDialog, audioAPIErrorMessage } from "@/components/SessionAudioControls";
-import { type ResolvedModelSelection } from "@/lib/modelSelection";
+import { modelSelectionKey, type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
-import {
-  reasoningEffortOptionsForSelection,
-  recommendedReasoningEffortForSelection,
-} from "@/components/ReasoningEffortChip";
+import { resolveReasoningEffortForSelection } from "@/lib/reasoningEffort";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -76,6 +73,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
+import { useResolvedModelSelection } from "@/hooks/useResolvedModelSelection";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
@@ -436,7 +434,7 @@ function DraftComposer({
   const clearDraft = useDraftStore((state) => state.clear);
   const reasoningEffortByModel = useReasoningEffortPreferenceStore((state) => state.byModel);
   const setReasoningEffortForModel = useReasoningEffortPreferenceStore((state) => state.setForModel);
-  const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
+  const resolvedModel = useResolvedModelSelection(token, modelValue);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -532,17 +530,10 @@ function DraftComposer({
     () => new Map(attachmentPreviewItems.map((item, index) => [item.id, index])),
     [attachmentPreviewItems],
   );
-  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
-  const recommendedReasoning = useMemo(
-    () => (resolvedModel ? recommendedReasoningEffortForSelection(resolvedModel) : "medium"),
-    [resolvedModel],
-  );
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
-  const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
+  const resolvedModelKey = resolvedModel ? modelSelectionKey(resolvedModel) : "";
   const reasoningEffort = resolvedModelKey ? reasoningEffortByModel[resolvedModelKey] || "" : "";
-  const activeReasoningEffort = reasoningOptions.length > 0
-    ? (reasoningOptions.includes(reasoningEffort) ? reasoningEffort : recommendedReasoning)
-    : "";
+  const activeReasoningEffort = resolveReasoningEffortForSelection(resolvedModel, reasoningEffort);
   const draftVoiceSessionID = draftVoiceSession?.id;
   useSessionEvents(draftVoiceSessionID, token);
   const draftVoiceBindingsQuery = useQuery({
@@ -572,13 +563,10 @@ function DraftComposer({
     );
   });
   const setDraftReasoningEffort = useCallback(
-    (value: string) => {
-      if (!resolvedModelKey) {
-        return;
-      }
-      setReasoningEffortForModel(resolvedModelKey, value);
+    (selection: ResolvedModelSelection, value: string) => {
+      setReasoningEffortForModel(modelSelectionKey(selection), value);
     },
-    [resolvedModelKey, setReasoningEffortForModel],
+    [setReasoningEffortForModel],
   );
 
   const cleanupDraftVoiceSession = useCallback(
@@ -996,14 +984,10 @@ function DraftComposer({
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
 
   useEffect(() => {
-    if (reasoningEffort) {
-      if (reasoningOptions.length === 0) {
-        setDraftReasoningEffort("");
-      } else if (!reasoningOptions.includes(reasoningEffort)) {
-        setDraftReasoningEffort(recommendedReasoning);
-      }
+    if (resolvedModel && reasoningEffort !== activeReasoningEffort) {
+      setDraftReasoningEffort(resolvedModel, activeReasoningEffort);
     }
-  }, [reasoningEffort, reasoningOptions, recommendedReasoning, setDraftReasoningEffort]);
+  }, [reasoningEffort, activeReasoningEffort, resolvedModel, setDraftReasoningEffort]);
 
   useEffect(() => {
     draftVoiceInputActiveRef.current = draftVoiceInputActive;
@@ -1172,12 +1156,6 @@ function DraftComposer({
   }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
-  const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
-    setResolvedModel(next);
-    if (next) {
-      onModelValueChange({ provider: next.provider, model: next.model });
-    }
-  }, [onModelValueChange]);
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
     textField.ref(node);
@@ -1336,7 +1314,6 @@ function DraftComposer({
                 onChange={onModelValueChange}
                 onAfterClose={focusTextarea}
                 onReasoningChange={setDraftReasoningEffort}
-                onResolvedChange={handleResolvedModelChange}
               />
               <AudioControlButtons
                 asrInputLabel={draftVoiceInputActive && draftVoiceDisplayMode === "transcribe" ? t("voice.inputASROn") : t("voice.inputASROff")}
