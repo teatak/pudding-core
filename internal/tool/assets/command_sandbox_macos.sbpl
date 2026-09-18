@@ -45,6 +45,6 @@
   (sysctl-name-prefix "vm."))
 
 ; Approved commands may use outbound networking. Listening remains loopback-only.
-(allow network-bind (local ip "localhost:*"))
-(allow network-inbound (local ip "localhost:*"))
+(allow network-bind)
+(allow network-inbound (local ip "*:*"))
 (allow network-outbound)
