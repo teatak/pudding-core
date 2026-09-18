@@ -19,33 +19,33 @@ export type EffortColorConfig = {
 export const COLOR_PALETTE: EffortColorConfig[] = [
   {
     // 灰 (最低档)
-    bg: "bg-[linear-gradient(135deg,#71717a_0%,#5f5f67_100%)] dark:bg-[linear-gradient(135deg,#63636b_0%,#52525b_100%)]",
+    bg: "bg-gradient-to-b from-zinc-400 to-zinc-500 dark:from-zinc-500 dark:to-zinc-600",
     text: "text-zinc-600 dark:text-zinc-300 font-semibold",
     glow: "shadow-[0_1px_3px_rgba(113,113,122,0.15)]",
   },
   {
     // 绿
-    bg: "bg-[linear-gradient(135deg,#10b981_0%,#059669_100%)] dark:bg-[linear-gradient(135deg,#059669_0%,#047857_100%)]",
+    bg: "bg-gradient-to-b from-emerald-400 to-emerald-500 dark:from-emerald-500 dark:to-emerald-600",
     text: "text-emerald-600 dark:text-emerald-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(16,185,129,0.25)]",
+    glow: "shadow-[0_1px_4px_rgba(16,185,129,0.2)]",
   },
   {
     // 蓝
-    bg: "bg-[linear-gradient(135deg,#3b82f6_0%,#2563eb_100%)] dark:bg-[linear-gradient(135deg,#2563eb_0%,#1d4ed8_100%)]",
+    bg: "bg-gradient-to-b from-sky-400 to-blue-500 dark:from-blue-500 dark:to-blue-600",
     text: "text-blue-600 dark:text-blue-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(59,130,246,0.25)]",
+    glow: "shadow-[0_1px_4px_rgba(59,130,246,0.2)]",
   },
   {
     // 紫
-    bg: "bg-[linear-gradient(135deg,#8b5cf6_0%,#7c3aed_100%)] dark:bg-[linear-gradient(135deg,#7c3aed_0%,#6d28d9_100%)]",
+    bg: "bg-gradient-to-b from-violet-400 to-violet-500 dark:from-violet-500 dark:to-violet-600",
     text: "text-violet-600 dark:text-violet-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(139,92,246,0.25)]",
+    glow: "shadow-[0_1px_4px_rgba(139,92,246,0.2)]",
   },
   {
     // 金/橙 (最高档)
-    bg: "bg-[linear-gradient(135deg,#f59e0b_0%,#e08a00_100%)] dark:bg-[linear-gradient(135deg,#f59e0b_0%,#d97706_100%)]",
+    bg: "bg-gradient-to-b from-amber-400 to-amber-500 dark:from-amber-500 dark:to-amber-600",
     text: "text-amber-600 dark:text-amber-400 font-semibold",
-    glow: "shadow-[0_1px_5px_rgba(245,158,11,0.3)]",
+    glow: "shadow-[0_1px_5px_rgba(245,158,11,0.25)]",
   },
 ];
 
@@ -175,7 +175,7 @@ export function SteppedSlider({
         <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
             className={cn(
-              "relative h-full rounded-full pointer-events-none",
+              "h-full rounded-full pointer-events-none ring-1 ring-inset ring-white/20",
               currentEffortColor.bg,
               currentEffortColor.glow,
               animClass,
@@ -183,10 +183,7 @@ export function SteppedSlider({
             style={{
               width: `calc(${stepRatio} * (100% - 24px) + 24px)`,
             }}
-          >
-            {/* 质感高光层：克制柔和的顶部微高光线 + 纵向微立体反光 */}
-            <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/18 via-transparent to-black/8 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_1px_rgba(0,0,0,0.08)] pointer-events-none" />
-          </div>
+          />
         </div>
 
         {/* 内部相对定位容器 */}
