@@ -13,33 +13,39 @@ type SteppedSliderProps = {
 export type EffortColorConfig = {
   bg: string;
   text: string;
+  glow?: string;
 };
 
 export const COLOR_PALETTE: EffortColorConfig[] = [
   {
     // 灰 (最低档)
-    bg: "bg-zinc-400 dark:bg-zinc-500",
+    bg: "bg-[linear-gradient(135deg,#71717a_0%,#5f5f67_100%)] dark:bg-[linear-gradient(135deg,#63636b_0%,#52525b_100%)]",
     text: "text-zinc-600 dark:text-zinc-300 font-semibold",
+    glow: "shadow-[0_1px_3px_rgba(113,113,122,0.15)]",
   },
   {
     // 绿
-    bg: "bg-emerald-500",
+    bg: "bg-[linear-gradient(135deg,#10b981_0%,#059669_100%)] dark:bg-[linear-gradient(135deg,#059669_0%,#047857_100%)]",
     text: "text-emerald-600 dark:text-emerald-400 font-semibold",
+    glow: "shadow-[0_1px_4px_rgba(16,185,129,0.25)]",
   },
   {
     // 蓝
-    bg: "bg-blue-500",
+    bg: "bg-[linear-gradient(135deg,#3b82f6_0%,#2563eb_100%)] dark:bg-[linear-gradient(135deg,#2563eb_0%,#1d4ed8_100%)]",
     text: "text-blue-600 dark:text-blue-400 font-semibold",
+    glow: "shadow-[0_1px_4px_rgba(59,130,246,0.25)]",
   },
   {
     // 紫
-    bg: "bg-violet-500",
+    bg: "bg-[linear-gradient(135deg,#8b5cf6_0%,#7c3aed_100%)] dark:bg-[linear-gradient(135deg,#7c3aed_0%,#6d28d9_100%)]",
     text: "text-violet-600 dark:text-violet-400 font-semibold",
+    glow: "shadow-[0_1px_4px_rgba(139,92,246,0.25)]",
   },
   {
-    // 金 (最高档)
-    bg: "bg-amber-500 dark:bg-amber-400",
+    // 金/橙 (最高档)
+    bg: "bg-[linear-gradient(135deg,#f59e0b_0%,#e08a00_100%)] dark:bg-[linear-gradient(135deg,#f59e0b_0%,#d97706_100%)]",
     text: "text-amber-600 dark:text-amber-400 font-semibold",
+    glow: "shadow-[0_1px_5px_rgba(245,158,11,0.3)]",
   },
 ];
 
@@ -147,7 +153,7 @@ export function SteppedSlider({
 
   const stepRatio = activeIndex / totalSteps;
   const animClass = enableTransition
-    ? "transition-[left,width,background-color] duration-200 ease-out"
+    ? "transition-[left,width] duration-200 ease-out"
     : "";
   const currentEffortColor = getEffortColor(activeIndex, options.length);
 
@@ -157,7 +163,7 @@ export function SteppedSlider({
       <div
         ref={trackRef}
         className={cn(
-          "relative flex h-8 w-full items-center rounded-full bg-muted/80 p-1 touch-none",
+          "relative flex h-8 w-full items-center rounded-full bg-muted/60 p-1 touch-none shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(0,0,0,0.04)] dark:bg-muted/40 dark:shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.05)]",
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
         onPointerDown={handlePointerDown}
@@ -169,14 +175,18 @@ export function SteppedSlider({
         <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
             className={cn(
-              "h-full rounded-full pointer-events-none",
+              "relative h-full rounded-full pointer-events-none",
               currentEffortColor.bg,
+              currentEffortColor.glow,
               animClass,
             )}
             style={{
               width: `calc(${stepRatio} * (100% - 24px) + 24px)`,
             }}
-          />
+          >
+            {/* 质感高光层：克制柔和的顶部微高光线 + 纵向微立体反光 */}
+            <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/18 via-transparent to-black/8 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_1px_rgba(0,0,0,0.08)] pointer-events-none" />
+          </div>
         </div>
 
         {/* 内部相对定位容器 */}
@@ -200,7 +210,7 @@ export function SteppedSlider({
                 <span
                   className={cn(
                     "size-1.5 rounded-full transition-transform duration-200 ease-out group-hover/dot:scale-[1.8]",
-                    isFilled ? "bg-white/80" : "bg-muted-foreground/35",
+                    isFilled ? "bg-white/90 shadow-[0_0.5px_1px_rgba(0,0,0,0.25)]" : "bg-muted-foreground/35",
                   )}
                 />
               </button>
@@ -220,7 +230,7 @@ export function SteppedSlider({
           >
             <div
               className={cn(
-                "size-6 rounded-full bg-white shadow-md ring-1 ring-black/10 transition-transform",
+                "size-6 rounded-full bg-gradient-to-b from-white to-zinc-50 dark:from-zinc-100 dark:to-zinc-200 shadow-[0_2px_5px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] ring-1 ring-black/10 transition-transform",
                 isDragging ? "cursor-grabbing scale-95" : "cursor-grab hover:scale-105 active:scale-95",
               )}
             />
