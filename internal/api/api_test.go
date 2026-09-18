@@ -3419,6 +3419,62 @@ func TestProviderModelsProxy(t *testing.T) {
 	}
 }
 
+func TestSyncProviderModelsEndpoint(t *testing.T) {
+	buzzHiveUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1","name":"Upstream M1","context_length":128000,"cost_multiplier":0.1},{"id":"m2","name":"M2 Free","cost_multiplier":0}]}`))
+	}))
+	defer buzzHiveUpstream.Close()
+
+	srv, _ := newTestServer(t)
+
+	// 1. Create a generic non-buzzhive provider -> sync should fail (400)
+	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
+		"id": "openai-p", "displayName": "OpenAI", "protocol": "openai-compatible", "baseURL": "https://api.openai.com/v1",
+	})
+	resp.Body.Close()
+	syncResp := req(t, http.MethodPost, srv.URL+"/providers/openai-p/sync", nil)
+	syncResp.Body.Close()
+	if syncResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("non-buzzhive sync should return 400, got %d", syncResp.StatusCode)
+	}
+
+	// 2. Create a buzzhive provider with an initial model list
+	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
+		"id": "my-buzz", "displayName": "My BuzzHive", "brand": "buzzhive", "protocol": "openai-compatible", "baseURL": buzzHiveUpstream.URL,
+		"models": []map[string]any{
+			{"id": "m1", "displayName": "Custom Alias M1", "contextWindow": 64000},
+			{"id": "old-m", "displayName": "Decommissioned"},
+		},
+	})
+	resp.Body.Close()
+
+	// 3. Call sync endpoint
+	synced := decodeJSON[providerProfileView](t, req(t, http.MethodPost, srv.URL+"/providers/my-buzz/sync", nil))
+	if len(synced.Models) != 2 {
+		t.Fatalf("expected 2 synced models, got %d: %+v", len(synced.Models), synced.Models)
+	}
+
+	// m1 preserved custom alias, but updated context window and got costMultiplier
+	if synced.Models[0].ID != "m1" || synced.Models[0].DisplayName != "Custom Alias M1" || synced.Models[0].ContextWindow != 128000 {
+		t.Fatalf("unexpected m1: %+v", synced.Models[0])
+	}
+	if synced.Models[0].CostMultiplier == nil || *synced.Models[0].CostMultiplier != 0.1 {
+		t.Fatalf("expected cost multiplier 0.1, got %v", synced.Models[0].CostMultiplier)
+	}
+
+	// m2 added
+	if synced.Models[1].ID != "m2" || synced.Models[1].DisplayName != "M2 Free" {
+		t.Fatalf("unexpected m2: %+v", synced.Models[1])
+	}
+	if synced.Models[1].CostMultiplier == nil || *synced.Models[1].CostMultiplier != 0 {
+		t.Fatalf("expected cost multiplier 0, got %v", synced.Models[1].CostMultiplier)
+	}
+}
+
 func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	srv, _ := newTestServer(t)
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",

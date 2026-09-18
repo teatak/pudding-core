@@ -285,6 +285,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/providers/models").POST(s.probeProviderModels)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
+	app.Route("/providers/:name/sync").POST(s.syncProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/desktop/about").GET(s.desktopAbout)

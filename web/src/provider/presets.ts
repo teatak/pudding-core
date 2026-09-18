@@ -650,6 +650,7 @@ export function mergeProviderModelCandidate(
     ...defaults,
     displayName: candidate.displayName?.trim() || preset?.displayName || defaults.displayName,
     contextWindow: candidate.contextWindow || preset?.contextWindow,
+    costMultiplier: candidate.costMultiplier ?? preset?.costMultiplier,
     capabilities: { ...defaults.capabilities, ...preset?.capabilities, ...candidate.capabilities },
     limits: preset?.limits || candidate.limits ? { ...preset?.limits, ...candidate.limits } : undefined,
     // Only the selected variant can supply protocol-specific options.

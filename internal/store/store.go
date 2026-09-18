@@ -459,6 +459,7 @@ type ProviderModel struct {
 	ID              string           `json:"id" yaml:"id"`
 	DisplayName     string           `json:"displayName,omitempty" yaml:"display_name,omitempty"`
 	ContextWindow   int              `json:"contextWindow,omitempty" yaml:"context_window,omitempty"`
+	CostMultiplier  *float64         `json:"costMultiplier,omitempty" yaml:"cost_multiplier,omitempty"`
 	Capabilities    *ModelCaps       `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 	Limits          *ModelLimits     `json:"limits,omitempty" yaml:"limits,omitempty"`
 	ProviderOptions *ProviderOptions `json:"providerOptions,omitempty" yaml:"provider_options,omitempty"`

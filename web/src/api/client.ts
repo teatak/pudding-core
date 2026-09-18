@@ -1288,6 +1288,12 @@ export function listProviderModels(token: string, name: string): Promise<z.infer
   return request(token, `/providers/${encodeURIComponent(name)}/models`, listModelsResponse);
 }
 
+export function syncProviderModels(token: string, name: string): Promise<z.infer<typeof providerProfile>> {
+  return request(token, `/providers/${encodeURIComponent(name)}/sync`, providerProfile, {
+    method: "POST",
+  });
+}
+
 export function probeProviderModels(
   token: string,
   body: z.infer<typeof probeProviderModelsRequest>,

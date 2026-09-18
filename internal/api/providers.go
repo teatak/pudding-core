@@ -353,3 +353,122 @@ func fetchProviderModels(ctx context.Context, protocol, baseURL, apiKey string) 
 		return nil, errors.New("unsupported protocol: " + protocol)
 	}
 }
+
+func (s *Server) syncProviderModels(c *cart.Context) error {
+	name, _ := c.Param("name")
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	ctx := c.Request.Context()
+	p, err := cfg.GetProviderProfile(ctx, name)
+	if err != nil {
+		return s.fail(c, err)
+	}
+
+	if !strings.EqualFold(strings.TrimSpace(p.Brand), "buzzhive") {
+		return badRequest(c, "sync is only supported for buzzhive providers")
+	}
+
+	apiKey := config.EffectiveAPIKey(p)
+	modelProtocol := registry.TypeOpenAICompatible
+	modelBaseURL := buzzHiveModelsBaseURL(p.BaseURL)
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	candidates, err := fetchProviderModels(fetchCtx, modelProtocol, modelBaseURL, apiKey)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return nil
+	}
+
+	cacheKey := p.ProfileID() + "\x00" + modelProtocol + "\x00" + modelBaseURL + "\x00" + apiKey
+	modelsCacheMu.Lock()
+	modelsCache[cacheKey] = modelsCacheEntry{at: time.Now(), models: candidates}
+	modelsCacheMu.Unlock()
+
+	p.Models = syncBuzzHiveModels(p.Models, candidates)
+	if err := cfg.PutProviderProfile(ctx, p); err != nil {
+		return s.fail(c, err)
+	}
+
+	c.JSON(http.StatusOK, viewProfile(p))
+	return nil
+}
+
+func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.ModelCandidate) []store.ProviderModel {
+	candidateMap := make(map[string]provider.ModelCandidate, len(candidates))
+	for _, c := range candidates {
+		id := strings.TrimSpace(c.ID)
+		if id != "" {
+			candidateMap[id] = c
+		}
+	}
+
+	merged := make([]store.ProviderModel, 0, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+
+	for _, m := range existing {
+		id := strings.TrimSpace(m.ID)
+		cand, exists := candidateMap[id]
+		if !exists {
+			continue
+		}
+		seen[id] = true
+		m.ContextWindow = cand.ContextWindow
+		m.CostMultiplier = cand.CostMultiplier
+		if cand.Limits != nil {
+			if m.Limits == nil {
+				m.Limits = &store.ModelLimits{}
+			}
+			m.Limits.MaxOutputTokens = cand.Limits.MaxOutputTokens
+		}
+		if cand.Capabilities != nil {
+			if m.Capabilities == nil {
+				m.Capabilities = &store.ModelCaps{}
+			}
+			if v, ok := cand.Capabilities["image"]; ok {
+				m.Capabilities.Image = v
+			}
+			if v, ok := cand.Capabilities["audio"]; ok {
+				m.Capabilities.Audio = v
+			}
+			if v, ok := cand.Capabilities["tools"]; ok {
+				m.Capabilities.Tools = v
+			}
+		}
+		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
+			m.DisplayName = strings.TrimSpace(cand.DisplayName)
+		}
+		merged = append(merged, m)
+	}
+
+	for _, cand := range candidates {
+		id := strings.TrimSpace(cand.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		newModel := store.ProviderModel{
+			ID:             id,
+			DisplayName:    strings.TrimSpace(cand.DisplayName),
+			ContextWindow:  cand.ContextWindow,
+			CostMultiplier: cand.CostMultiplier,
+		}
+		if cand.Limits != nil {
+			newModel.Limits = &store.ModelLimits{MaxOutputTokens: cand.Limits.MaxOutputTokens}
+		}
+		if cand.Capabilities != nil {
+			newModel.Capabilities = &store.ModelCaps{
+				Image: cand.Capabilities["image"],
+				Audio: cand.Capabilities["audio"],
+				Tools: cand.Capabilities["tools"],
+			}
+		} else {
+			newModel.Capabilities = &store.ModelCaps{Tools: true}
+		}
+		merged = append(merged, newModel)
+	}
+
+	return cleanModels(merged)
+}

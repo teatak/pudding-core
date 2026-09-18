@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, RotateCcw } from "@/components/icons";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw, RotateCcw } from "@/components/icons";
+import { Spinner } from "@/components/Spinner";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   listProviders,
+  syncProviderModels,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -54,12 +56,15 @@ export function ModelReasoningPicker({
   className,
 }: ModelReasoningPickerProps) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const interactedOutsideRef = useRef(false);
   const triggerButtonRef = useRef<HTMLButtonElement>(null);
   const [displayAsSliderView, setDisplayAsSliderView] = useState(false);
   const [preservedWidth, setPreservedWidth] = useState<number | null>(null);
   const sliderViewTimerRef = useRef<number | null>(null);
+  const [syncingProfileID, setSyncingProfileID] = useState<string | null>(null);
+  const lastSyncedRef = useRef<Record<string, number>>({});
   const { update: updateModelSettings, pending: modelSettingsPending } = useSessionModelSettings(token, session?.id);
 
   const clearSliderViewTimer = useCallback(() => {
@@ -213,6 +218,48 @@ export function ModelReasoningPicker({
     [onChange, onReasoningChange, reasoningValue, resolvedSelection, resolveSelection, session, updateModelSettings],
   );
 
+  const handleSyncProfile = useCallback(
+    async (profileID: string) => {
+      if (syncingProfileID) {
+        return;
+      }
+      setSyncingProfileID(profileID);
+      lastSyncedRef.current[profileID] = Date.now();
+      try {
+        await syncProviderModels(token, profileID);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      } catch (error) {
+        console.warn("failed to sync provider models", error);
+      } finally {
+        setSyncingProfileID(null);
+      }
+    },
+    [queryClient, syncingProfileID, token],
+  );
+
+  useEffect(() => {
+    if (!open || !token) {
+      return;
+    }
+    const buzzhiveProfiles = profiles.filter(
+      (p) => p.brand?.toLowerCase() === "buzzhive",
+    );
+    const now = Date.now();
+    for (const p of buzzhiveProfiles) {
+      const last = lastSyncedRef.current[p.id] || 0;
+      if (now - last > 60_000) {
+        lastSyncedRef.current[p.id] = now;
+        syncProviderModels(token, p.id)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+          })
+          .catch((error) => {
+            console.warn("silent sync buzzhive models failed", error);
+          });
+      }
+    }
+  }, [open, token, profiles, queryClient]);
+
   return (
     <Popover
       open={open}
@@ -335,6 +382,18 @@ export function ModelReasoningPicker({
                 <span className="min-w-0 truncate text-xs font-medium text-foreground">
                   {label}
                 </span>
+                {resolvedSelection?.modelConfig?.costMultiplier !== undefined ? (
+                  <span
+                    className={cn(
+                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide select-none",
+                      resolvedSelection.modelConfig.costMultiplier === 0
+                        ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {formatModelCostMultiplier(resolvedSelection.modelConfig.costMultiplier, t("models.cost_free"))}
+                  </span>
+                ) : null}
                 <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
               </button>
               <button
@@ -392,16 +451,37 @@ export function ModelReasoningPicker({
               </div>
             ) : selectableProfiles.length === 1 ? (
               <div
-                className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]"
+                className="flex min-h-0 flex-1 flex-col overflow-hidden"
                 style={{ height: profilePaneHeight, maxHeight: "100%" }}
               >
-                <ProfileModels
-                  currentModel={currentModelAvailable ? selectedModel : ""}
-                  isCurrentProfile={currentModelAvailable}
-                  profile={selectableProfiles[0]}
-                  disabled={modelSettingsPending}
-                  onPick={(model) => handleModelPick(selectableProfiles[0], model)}
-                />
+                {selectableProfiles[0].brand?.toLowerCase() === "buzzhive" ? (
+                  <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/40 px-2.5 text-[11px] text-muted-foreground">
+                    <span className="truncate font-medium">{selectableProfiles[0].displayName}</span>
+                    <button
+                      type="button"
+                      aria-label={t("picker.syncModels")}
+                      title={t("picker.syncModels")}
+                      disabled={modelSettingsPending || syncingProfileID === selectableProfiles[0].id}
+                      className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
+                      onClick={() => handleSyncProfile(selectableProfiles[0].id)}
+                    >
+                      {syncingProfileID === selectableProfiles[0].id ? (
+                        <Spinner className="size-3" />
+                      ) : (
+                        <RefreshCw className="size-3" />
+                      )}
+                    </button>
+                  </div>
+                ) : null}
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
+                  <ProfileModels
+                    currentModel={currentModelAvailable ? selectedModel : ""}
+                    isCurrentProfile={currentModelAvailable}
+                    profile={selectableProfiles[0]}
+                    disabled={modelSettingsPending}
+                    onPick={(model) => handleModelPick(selectableProfiles[0], model)}
+                  />
+                </div>
               </div>
             ) : (
               <div
@@ -433,18 +513,39 @@ export function ModelReasoningPicker({
                     })}
                   </div>
                 </div>
-                <div className="min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
-                  {viewedProfile ? (
-                    <ProfileModels
-                      currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
-                      isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
-                      profile={viewedProfile}
-                      disabled={modelSettingsPending}
-                      onPick={(model) => handleModelPick(viewedProfile, model)}
-                    />
-                  ) : (
-                    <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
-                  )}
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  {viewedProfile?.brand?.toLowerCase() === "buzzhive" ? (
+                    <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/40 px-2.5 text-[11px] text-muted-foreground">
+                      <span className="truncate font-medium">{viewedProfile.displayName}</span>
+                      <button
+                        type="button"
+                        aria-label={t("picker.syncModels")}
+                        title={t("picker.syncModels")}
+                        disabled={modelSettingsPending || syncingProfileID === viewedProfile.id}
+                        className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
+                        onClick={() => handleSyncProfile(viewedProfile.id)}
+                      >
+                        {syncingProfileID === viewedProfile.id ? (
+                          <Spinner className="size-3" />
+                        ) : (
+                          <RefreshCw className="size-3" />
+                        )}
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
+                    {viewedProfile ? (
+                      <ProfileModels
+                        currentModel={currentModelAvailable && selectedProvider === viewedProfile.id ? selectedModel : ""}
+                        isCurrentProfile={currentModelAvailable && selectedProvider === viewedProfile.id}
+                        profile={viewedProfile}
+                        disabled={modelSettingsPending}
+                        onPick={(model) => handleModelPick(viewedProfile, model)}
+                      />
+                    ) : (
+                      <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -471,6 +572,24 @@ function providerBrandKey(profile?: ProviderProfile) {
   return profile?.brand || profile?.displayName || profile?.id || "";
 }
 
+function formatModelCostMultiplier(costMultiplier: number | undefined | null, freeLabel: string): string | null {
+  if (costMultiplier === undefined || costMultiplier === null) {
+    return null;
+  }
+  if (costMultiplier === 0) {
+    return freeLabel;
+  }
+  if (costMultiplier < 0.01) {
+    return "<0.01x";
+  }
+  if (costMultiplier < 1) {
+    const formatted = parseFloat(costMultiplier.toFixed(2));
+    return `${formatted}x`;
+  }
+  const formatted = parseFloat(costMultiplier.toFixed(1));
+  return `${formatted}x`;
+}
+
 function ProfileModels({
   profile,
   disabled,
@@ -495,12 +614,15 @@ function ProfileModels({
       {models.map((model) => {
         const selected = isCurrentProfile && currentModel === model.id;
         const label = formatModelLabel(model.id, model.displayName);
+        const costBadge = formatModelCostMultiplier(model.costMultiplier, t("models.cost_free"));
         return (
           <button
             key={model.id}
+            aria-current={selected ? "true" : undefined}
             className={cn(
               "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] cursor-default",
               appPopoverItemStateClassName,
+              selected && cn(appPopoverSelectedItemStateClassName, "text-foreground font-medium"),
             )}
             type="button"
             disabled={disabled}
@@ -511,7 +633,18 @@ function ProfileModels({
                 {label}
               </span>
             </span>
-            {selected ? <Check className="size-4 shrink-0" /> : null}
+            {costBadge ? (
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide select-none",
+                  model.costMultiplier === 0
+                    ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                {costBadge}
+              </span>
+            ) : null}
           </button>
         );
       })}

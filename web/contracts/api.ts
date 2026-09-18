@@ -382,6 +382,7 @@ export const providerModel = z.object({
   id: z.string().trim().min(1),
   displayName: z.string().optional(),
   contextWindow: z.number().optional(),
+  costMultiplier: z.number().optional(),
   capabilities: z
     .object({
       image: z.boolean().optional(),
@@ -432,7 +433,7 @@ export const patchProviderRequest = z.object({
 
 export const listProvidersResponse = z.object({ providers: z.array(providerProfile) });
 
-export const providerModelCandidate = providerModel.pick({ id: true, displayName: true, contextWindow: true, capabilities: true, limits: true });
+export const providerModelCandidate = providerModel.pick({ id: true, displayName: true, contextWindow: true, costMultiplier: true, capabilities: true, limits: true });
 export type ProviderModelCandidate = z.infer<typeof providerModelCandidate>;
 export const listModelsResponse = z.object({ models: z.array(providerModelCandidate) });
 

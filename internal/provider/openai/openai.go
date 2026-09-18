@@ -317,10 +317,11 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 	}
 	var payload struct {
 		Data []struct {
-			ID              string `json:"id"`
-			Name            string `json:"name"`
-			ContextLength   int    `json:"context_length"`
-			MaxOutputTokens int    `json:"max_output_tokens"`
+			ID              string   `json:"id"`
+			Name            string   `json:"name"`
+			ContextLength   int      `json:"context_length"`
+			MaxOutputTokens int      `json:"max_output_tokens"`
+			CostMultiplier  *float64 `json:"cost_multiplier"`
 			Capabilities    struct {
 				Vision *bool `json:"vision"`
 				Audio  *bool `json:"audio_input"`
@@ -344,7 +345,7 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 		if id == "" {
 			continue
 		}
-		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.Name), Capabilities: map[string]bool{}}
+		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.Name), CostMultiplier: m.CostMultiplier, Capabilities: map[string]bool{}}
 		if m.ContextLength > 0 {
 			candidate.ContextWindow = m.ContextLength
 		}

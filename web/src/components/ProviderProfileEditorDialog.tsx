@@ -110,6 +110,7 @@ const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transpare
 const modelFormSchema = z.object({
   id: z.string(),
   displayName: z.string().optional(),
+  costMultiplier: z.number().optional(),
   contextWindow: z.string().optional(),
   image: z.boolean(),
   audio: z.boolean(),
@@ -1414,6 +1415,7 @@ function modelToForm(model: ProviderModel, providerProtocol: ProviderProfileEdit
   return {
     id: model.id,
     displayName: model.displayName?.trim() || providerModelDisplayName(model.id),
+    costMultiplier: model.costMultiplier,
     contextWindow: model.contextWindow ? String(model.contextWindow) : "",
     image: model.capabilities?.image === true,
     audio: model.capabilities?.audio === true,
@@ -1468,6 +1470,9 @@ function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEdit
   const displayName = value.displayName?.trim();
   if (displayName) {
     out.displayName = displayName;
+  }
+  if (typeof value.costMultiplier === "number") {
+    out.costMultiplier = value.costMultiplier;
   }
   const contextWindow = positiveInt(value.contextWindow);
   if (contextWindow) {

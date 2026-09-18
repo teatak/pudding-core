@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 func TestProviderCatalogMetadata(t *testing.T) {
@@ -20,8 +21,9 @@ func TestProviderCatalogMetadata(t *testing.T) {
 			{ID: "vendor/model", DisplayName: "Model", ContextWindow: 65536, Capabilities: map[string]bool{"image": true, "audio": false, "tools": true}, Limits: &provider.ModelLimits{MaxOutputTokens: 8192}},
 			{ID: "text", Capabilities: map[string]bool{"image": false, "audio": false, "tools": false}},
 		}},
-		{"BuzzHive Responses", "openai-responses", "/models", `{"data":[{"id":"qwen3.6","name":"Qwen3.6","context_length":32768,"max_output_tokens":4096,"capabilities":{"vision":false,"audio_input":true,"tools":false}}]}`, []provider.ModelCandidate{
-			{ID: "qwen3.6", DisplayName: "Qwen3.6", ContextWindow: 32768, Capabilities: map[string]bool{"image": false, "audio": true, "tools": false}, Limits: &provider.ModelLimits{MaxOutputTokens: 4096}},
+		{"BuzzHive Responses", "openai-responses", "/models", `{"data":[{"id":"qwen3.6","name":"Qwen3.6","context_length":32768,"max_output_tokens":4096,"cost_multiplier":0.1,"capabilities":{"vision":false,"audio_input":true,"tools":false}},{"id":"free-model","name":"Free Model","cost_multiplier":0}]}`, []provider.ModelCandidate{
+			{ID: "qwen3.6", DisplayName: "Qwen3.6", ContextWindow: 32768, CostMultiplier: float64Ptr(0.1), Capabilities: map[string]bool{"image": false, "audio": true, "tools": false}, Limits: &provider.ModelLimits{MaxOutputTokens: 4096}},
+			{ID: "free-model", DisplayName: "Free Model", CostMultiplier: float64Ptr(0)},
 		}},
 		{"ID only and unknown limits", "openai-compatible", "/models", `{"data":[{"id":"id-only"},{"id":"unknown","context_length":-1,"max_output_tokens":0,"top_provider":{"max_completion_tokens":null},"architecture":{"input_modalities":null},"supported_parameters":null},{"id":" "}]}`, []provider.ModelCandidate{{ID: "id-only"}, {ID: "unknown"}}},
 		{"Anthropic", "anthropic", "/v1/models", `{"data":[{"id":"claude-custom","display_name":"Custom Claude","max_input_tokens":200000,"max_tokens":64000,"capabilities":{"image_input":{"supported":false}}},{"id":"unknown","max_input_tokens":null,"max_tokens":0}]}`, []provider.ModelCandidate{
@@ -51,4 +53,90 @@ func TestProviderCatalogMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyncBuzzHiveModels(t *testing.T) {
+	existing := []store.ProviderModel{
+		{
+			ID:             "deepseek-flash",
+			DisplayName:    "My Local Alias",
+			ContextWindow:  64000,
+			CostMultiplier: float64Ptr(0.15),
+			ProviderOptions: &store.ProviderOptions{
+				OpenAI: map[string]any{"temperature": 0.7},
+			},
+		},
+		{
+			ID:          "deprecated-model",
+			DisplayName: "Old Model",
+		},
+	}
+
+	candidates := []provider.ModelCandidate{
+		{
+			ID:             "deepseek-flash",
+			DisplayName:    "DeepSeek Flash (Upstream)",
+			ContextWindow:  128000,
+			CostMultiplier: float64Ptr(0.1),
+			Capabilities:   map[string]bool{"tools": true, "image": true},
+			Limits:         &provider.ModelLimits{MaxOutputTokens: 8192},
+		},
+		{
+			ID:             "owl-alpha",
+			DisplayName:    "Owl Alpha",
+			CostMultiplier: float64Ptr(0),
+		},
+	}
+
+	synced := syncBuzzHiveModels(existing, candidates)
+	if len(synced) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(synced), synced)
+	}
+
+	// 1. Preserved existing model with local DisplayName and ProviderOptions, but updated objective metadata
+	flash := synced[0]
+	if flash.ID != "deepseek-flash" {
+		t.Errorf("expected deepseek-flash first, got %s", flash.ID)
+	}
+	if flash.DisplayName != "My Local Alias" {
+		t.Errorf("expected local alias preserved, got %s", flash.DisplayName)
+	}
+	if flash.ContextWindow != 128000 {
+		t.Errorf("expected context window updated to 128000, got %d", flash.ContextWindow)
+	}
+	if flash.CostMultiplier == nil || *flash.CostMultiplier != 0.1 {
+		t.Errorf("expected cost multiplier updated to 0.1, got %v", flash.CostMultiplier)
+	}
+	if flash.ProviderOptions == nil || flash.ProviderOptions.OpenAI["temperature"] != 0.7 {
+		t.Errorf("expected ProviderOptions preserved, got %+v", flash.ProviderOptions)
+	}
+	if flash.Capabilities == nil || !flash.Capabilities.Image || !flash.Capabilities.Tools {
+		t.Errorf("expected capabilities updated, got %+v", flash.Capabilities)
+	}
+	if flash.Limits == nil || flash.Limits.MaxOutputTokens != 8192 {
+		t.Errorf("expected limits updated, got %+v", flash.Limits)
+	}
+
+	// 2. Newly discovered model appended
+	owl := synced[1]
+	if owl.ID != "owl-alpha" {
+		t.Errorf("expected owl-alpha appended, got %s", owl.ID)
+	}
+	if owl.DisplayName != "Owl Alpha" {
+		t.Errorf("expected Owl Alpha display name, got %s", owl.DisplayName)
+	}
+	if owl.CostMultiplier == nil || *owl.CostMultiplier != 0 {
+		t.Errorf("expected cost multiplier 0, got %v", owl.CostMultiplier)
+	}
+
+	// 3. deprecated-model dropped because not in candidates
+	for _, m := range synced {
+		if m.ID == "deprecated-model" {
+			t.Errorf("deprecated-model should have been removed")
+		}
+	}
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
 }
