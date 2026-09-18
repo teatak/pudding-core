@@ -175,15 +175,17 @@ export function SteppedSlider({
         <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
             className={cn(
-              "h-full rounded-full pointer-events-none ring-1 ring-inset ring-white/20",
+              "relative h-full rounded-full pointer-events-none ring-1 ring-inset ring-white/20",
               currentEffortColor.bg,
-              currentEffortColor.glow,
               animClass,
             )}
             style={{
               width: `calc(${stepRatio} * (100% - 24px) + 24px)`,
             }}
-          />
+          >
+            {/* 细腻质感微光层：仅顶部 1px 极淡微光 + 柔和通透感，保持平整高级，不做圆柱反光与底阴影 */}
+            <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/14 to-transparent pointer-events-none shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]" />
+          </div>
         </div>
 
         {/* 内部相对定位容器 */}
