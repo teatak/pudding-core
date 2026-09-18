@@ -10,7 +10,7 @@
 | OpenAI | Responses 增加 `gpt-6-astra`；保留 5.6 系列和较低成本选项；修正 5.5/5.4 的上下文和音频标记 | [Astra 指南](https://developers.openai.com/api/docs/guides/latest-model)、[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4) |
 | Anthropic | 更新为 Fable 5.1、Opus 5、Sonnet 5，保留 Haiku 4.5 | [模型目录](https://platform.claude.com/docs/en/models/overview) |
 | Gemini | 更新为 3.8 Flash、3.5 Flash-Lite、3.1 Pro Preview；修正 token 限额 | [模型目录](https://ai.google.dev/gemini-api/docs/models) |
-| Qwen | 更新为 3.8 Flash、3.8 Max 0902，保留 3.7 Plus；补齐图片能力和输出限制 | [更新记录](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Max 参数](https://help.aliyun.com/zh/model-studio/qwen3-8-max) |
+| Qwen | 更新为 3.8 Flash、3.8 Max，保留 3.7 Plus；补齐图片能力和输出限制 | [更新记录](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Max 参数](https://help.aliyun.com/zh/model-studio/qwen3-8-max) |
 | Kimi | 增加 K2.7 Code；补齐视觉能力，修正 K2.6 的上下文 | [模型目录](https://platform.kimi.com/docs/models)、[K2.7 Code](https://www.kimi.com/resources/kimi-k2-7-code) |
 | GLM | 增加 5.3 Flash；5.2/5.1 标记为纯文本，5.1 上下文修正为 200K | [5.3 Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)、[5.1](https://docs.z.ai/guides/llm/glm-5.1) |
 | OpenRouter | 保留 Free 自动路由，加入六家常用付费模型；补齐视觉、音频、上下文和输出限额，移除原来的三个固定免费模型预设 | [在线模型目录](https://openrouter.ai/api/v1/models) |

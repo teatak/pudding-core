@@ -73,7 +73,7 @@ const MIMO_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
   }),
 );
 
-const QWEN_MODELS = ["qwen3.8-flash", "qwen3.8-max-0902", "qwen3.7-plus"].map((id) =>
+const QWEN_MODELS = ["qwen3.8-flash", "qwen3.8-max", "qwen3.7-plus"].map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 131_072 } }),
 );
 
