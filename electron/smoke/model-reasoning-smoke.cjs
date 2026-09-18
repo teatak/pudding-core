@@ -193,7 +193,7 @@ async function clickSelector(selector, options) {
 }
 
 async function clickButton(text) {
-  return clickElement(`Array.from(document.querySelectorAll("[data-app-floating-content] button")).find((button) => button.textContent.trim() === ${JSON.stringify(text)})`);
+  return clickElement(`Array.from(document.querySelectorAll("[data-app-floating-content] button")).find((button) => button.textContent.trim() === ${JSON.stringify(text)} || button.getAttribute("aria-label") === ${JSON.stringify(text)} || button.getAttribute("title") === ${JSON.stringify(text)})`);
 }
 
 async function clickElement(expression, { allowDisabled = false } = {}) {

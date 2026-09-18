@@ -23,7 +23,7 @@ Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 
 
 候选目录返回结构化模型信息，新建动态配置和在已有配置中添加候选都采用相同规则：端点明确返回的字段优先，缺失字段由完整模型 ID 精确匹配的预设补齐；不会依据品牌图标或模型家族猜测限额。仅有 ID 的端点仍可正常导入，未知上下文和输出上限留空。能力缺失时沿用原有表单默认（图像、音频关闭，工具开启），不代表已经确认支持；端点明确返回的 `false` 会覆盖预设。
 
-- OpenRouter：读取 `name`、`context_length`、`top_provider.max_completion_tokens`、`architecture.input_modalities` 和 `supported_parameters`。[目录协议](https://openrouter.ai/docs/api/api-reference/models/get-models)
+- OpenRouter：读取 `name`、`context_length`、`architecture.input_modalities` 和 `supported_parameters`。[目录协议](https://openrouter.ai/docs/api/api-reference/models/get-models)
 - BuzzHive：读取 `/v1/models` 中管理员已保存的显示名、上下文、输出限额及 `vision/audio_input/tools` 能力。BuzzHive 需更新到包含该目录扩展的版本；不会从路由名称推测能力。
 - Gemini：读取 `displayName`、`inputTokenLimit` 和 `outputTokenLimit`，只列出支持 `generateContent` 的模型。[目录协议](https://ai.google.dev/api/models)
 - Anthropic：读取 `display_name`、`max_input_tokens`、`max_tokens` 和 `capabilities.image_input.supported`。[目录协议](https://platform.claude.com/docs/en/api/models/list)

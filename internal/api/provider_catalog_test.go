@@ -18,7 +18,7 @@ func TestProviderCatalogMetadata(t *testing.T) {
 		want                       []provider.ModelCandidate
 	}{
 		{"OpenRouter", "openai-compatible", "/models", `{"data":[{"id":" vendor/model ","name":"Model","context_length":65536,"architecture":{"input_modalities":["text","image"]},"supported_parameters":["tools"],"top_provider":{"max_completion_tokens":8192}},{"id":"text","architecture":{"input_modalities":["text"]},"supported_parameters":[]}]}`, []provider.ModelCandidate{
-			{ID: "vendor/model", DisplayName: "Model", ContextWindow: 65536, Capabilities: map[string]bool{"image": true, "audio": false, "tools": true}, Limits: &provider.ModelLimits{MaxOutputTokens: 8192}},
+			{ID: "vendor/model", DisplayName: "Model", ContextWindow: 65536, Capabilities: map[string]bool{"image": true, "audio": false, "tools": true}},
 			{ID: "text", Capabilities: map[string]bool{"image": false, "audio": false, "tools": false}},
 		}},
 		{"BuzzHive Responses", "openai-responses", "/models", `{"data":[{"id":"qwen3.6","name":"Qwen3.6","context_length":32768,"max_output_tokens":4096,"cost_multiplier":0.1,"capabilities":{"vision":false,"audio_input":true,"tools":false}},{"id":"free-model","name":"Free Model","cost_multiplier":0}]}`, []provider.ModelCandidate{
@@ -155,6 +155,7 @@ func TestSyncOpenRouterModels(t *testing.T) {
 			DisplayName:    "My Flash Alias",
 			ContextWindow:  100000,
 			CostMultiplier: float64Ptr(0.2),
+			Limits:         &store.ModelLimits{MaxOutputTokens: 4096},
 		},
 		{
 			ID:          "custom/unlisted",
@@ -203,6 +204,9 @@ func TestSyncOpenRouterModels(t *testing.T) {
 	}
 	if synced[1].CostMultiplier == nil || *synced[1].CostMultiplier != 0.1 {
 		t.Errorf("expected cost multiplier 0.1, got %v", synced[1].CostMultiplier)
+	}
+	if synced[1].Limits == nil || synced[1].Limits.MaxOutputTokens != 4096 {
+		t.Errorf("expected existing limits preserved, got %+v", synced[1].Limits)
 	}
 
 	// 3. custom/unlisted preserved safely and marked Unavailable: true

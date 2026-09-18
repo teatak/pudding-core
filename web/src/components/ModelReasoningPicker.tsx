@@ -500,6 +500,7 @@ export function ModelReasoningPicker({
                           onClick={() => setViewedProfileID(profile.id)}
                         >
                           <RoundBrandIcon name={providerBrandKey(profile)} />
+                          <span className="sr-only">{profile.displayName}</span>
                           {current ? (
                             <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-success ring-1 ring-background" />
                           ) : null}

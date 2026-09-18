@@ -432,12 +432,6 @@ func syncOpenRouterModels(existing []store.ProviderModel, candidates []provider.
 			m.ContextWindow = cand.ContextWindow
 		}
 		m.CostMultiplier = cand.CostMultiplier
-		if cand.Limits != nil {
-			if m.Limits == nil {
-				m.Limits = &store.ModelLimits{}
-			}
-			m.Limits.MaxOutputTokens = cand.Limits.MaxOutputTokens
-		}
 		if cand.Capabilities != nil {
 			if m.Capabilities == nil {
 				m.Capabilities = &store.ModelCaps{}

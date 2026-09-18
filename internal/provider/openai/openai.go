@@ -334,9 +334,6 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 				InputModalities []string `json:"input_modalities"`
 			} `json:"architecture"`
 			SupportedParameters []string `json:"supported_parameters"`
-			TopProvider         struct {
-				MaxCompletionTokens int `json:"max_completion_tokens"`
-			} `json:"top_provider"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -356,12 +353,8 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 		if m.ContextLength > 0 {
 			candidate.ContextWindow = m.ContextLength
 		}
-		output := m.MaxOutputTokens
-		if output <= 0 {
-			output = m.TopProvider.MaxCompletionTokens
-		}
-		if output > 0 {
-			candidate.Limits = &provider.ModelLimits{MaxOutputTokens: output}
+		if m.MaxOutputTokens > 0 {
+			candidate.Limits = &provider.ModelLimits{MaxOutputTokens: m.MaxOutputTokens}
 		}
 		if m.Architecture.InputModalities != nil {
 			candidate.Capabilities["image"] = slices.Contains(m.Architecture.InputModalities, "image")
