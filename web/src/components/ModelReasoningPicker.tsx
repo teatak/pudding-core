@@ -336,14 +336,7 @@ export function ModelReasoningPicker({
       </PopoverTrigger>
       <PopoverContent
         align="center"
-        className={cn(
-          "max-h-[min(28rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0",
-          view === "slider"
-            ? "w-[17.5rem]"
-            : selectableProfiles.length > 1
-              ? "w-[19rem]"
-              : "w-[13rem]",
-        )}
+        className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[17.5rem] max-w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0"
         collisionPadding={8}
         side="top"
         sideOffset={8}
@@ -485,11 +478,11 @@ export function ModelReasoningPicker({
               </div>
             ) : (
               <div
-                className="grid min-h-0 flex-1 shrink grid-cols-[8rem_minmax(0,1fr)] overflow-hidden"
+                className="grid min-h-0 flex-1 shrink grid-cols-[2.75rem_minmax(0,1fr)] overflow-hidden"
                 style={{ height: profilePaneHeight, maxHeight: "100%" }}
               >
-                <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1.5">
-                  <div className="grid gap-0.5">
+                <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1">
+                  <div className="flex flex-col items-center gap-0.5">
                     {selectableProfiles.map((profile) => {
                       const viewed = viewedProfileID === profile.id;
                       const current = currentModelAvailable && selectedProvider === profile.id;
@@ -497,8 +490,10 @@ export function ModelReasoningPicker({
                         <button
                           key={profile.id}
                           aria-current={viewed ? "true" : undefined}
+                          title={profile.displayName}
+                          aria-label={profile.displayName}
                           className={cn(
-                            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:text-foreground cursor-default",
+                            "relative flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground cursor-default transition-colors",
                             appPopoverItemStateClassName,
                             viewed && cn(appPopoverSelectedItemStateClassName, "text-foreground"),
                           )}
@@ -506,31 +501,34 @@ export function ModelReasoningPicker({
                           onClick={() => setViewedProfileID(profile.id)}
                         >
                           <RoundBrandIcon name={providerBrandKey(profile)} />
-                          <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
-                          {current ? <span className="size-1.5 shrink-0 rounded-full bg-success" /> : null}
+                          {current ? (
+                            <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-success ring-1 ring-background" />
+                          ) : null}
                         </button>
                       );
                     })}
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  {viewedProfile?.brand?.toLowerCase() === "buzzhive" ? (
+                  {viewedProfile ? (
                     <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/40 px-2.5 text-[11px] text-muted-foreground">
                       <span className="truncate font-medium">{viewedProfile.displayName}</span>
-                      <button
-                        type="button"
-                        aria-label={t("picker.syncModels")}
-                        title={t("picker.syncModels")}
-                        disabled={modelSettingsPending || syncingProfileID === viewedProfile.id}
-                        className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
-                        onClick={() => handleSyncProfile(viewedProfile.id)}
-                      >
-                        {syncingProfileID === viewedProfile.id ? (
-                          <Spinner className="size-3" />
-                        ) : (
-                          <RefreshCw className="size-3" />
-                        )}
-                      </button>
+                      {viewedProfile.brand?.toLowerCase() === "buzzhive" ? (
+                        <button
+                          type="button"
+                          aria-label={t("picker.syncModels")}
+                          title={t("picker.syncModels")}
+                          disabled={modelSettingsPending || syncingProfileID === viewedProfile.id}
+                          className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
+                          onClick={() => handleSyncProfile(viewedProfile.id)}
+                        >
+                          {syncingProfileID === viewedProfile.id ? (
+                            <Spinner className="size-3" />
+                          ) : (
+                            <RefreshCw className="size-3" />
+                          )}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                   <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
