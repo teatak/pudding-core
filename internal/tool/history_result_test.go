@@ -79,6 +79,28 @@ func TestResultReadPlainTextAndMissingSource(t *testing.T) {
 	}
 }
 
+func TestHistoryGetMessageRequiresExactlyOneSelector(t *testing.T) {
+	runner := NewBuiltinRunner(WithHistorySearch(&fakeResultHistory{turn: &store.ConversationTurn{ID: "t1", SessionID: "s1"}}))
+	for name, args := range map[string]string{
+		"missing selector": `{}`,
+		"both selectors":   `{"message_id":"m1","result_ref":{"turn_id":"t1","call_id":"c1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := runner.Call(context.Background(), Call{SessionID: "s1", Name: HistoryGetMessage, Args: json.RawMessage(args)})
+			if result.Ok {
+				t.Fatalf("invalid selector accepted: %s", args)
+			}
+			payload := decodeToolResult(t, result)
+			if name == "missing selector" && payload["reason"] != "missing_message_id" {
+				t.Fatalf("missing selector reason = %v", payload["reason"])
+			}
+			if name == "both selectors" && payload["reason"] != "invalid_arguments" {
+				t.Fatalf("both selectors reason = %v", payload["reason"])
+			}
+		})
+	}
+}
+
 func TestResultReadFocusedLinesAndItems(t *testing.T) {
 	log := strings.Repeat("routine output\n", 300) + "ERROR 中文🙂\r\n" + strings.Repeat("routine output\n", 300) + "ERROR second"
 	raw, _ := json.Marshal(map[string]any{"stdout": log, "matches": []any{map[string]any{"line": 5, "text": "first"}, map[string]any{"line": 9, "text": "second"}}})

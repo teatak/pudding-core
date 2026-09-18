@@ -105,9 +105,13 @@ func TestHistoryReadSchemaExposesFocusedSnapshotSelectors(t *testing.T) {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`
 		} `json:"properties"`
+		OneOf []json.RawMessage `json:"oneOf"`
 	}
 	if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
 		t.Fatal(err)
+	}
+	if len(schema.OneOf) != 0 || !strings.Contains(def.Description, "exactly one of message_id or result_ref") {
+		t.Fatalf("history selector schema must use provider-compatible flat properties: schema=%s description=%q", def.InputSchema, def.Description)
 	}
 	if !reflect.DeepEqual(schema.Properties["unit"].Enum, []string{"chars", "lines", "items"}) {
 		t.Fatal("history unit schema and implementation disagree")
