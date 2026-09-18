@@ -3454,24 +3454,64 @@ func TestSyncProviderModelsEndpoint(t *testing.T) {
 
 	// 3. Call sync endpoint
 	synced := decodeJSON[providerProfileView](t, req(t, http.MethodPost, srv.URL+"/providers/my-buzz/sync", nil))
-	if len(synced.Models) != 2 {
-		t.Fatalf("expected 2 synced models, got %d: %+v", len(synced.Models), synced.Models)
+	if len(synced.Models) != 3 {
+		t.Fatalf("expected 3 synced models, got %d: %+v", len(synced.Models), synced.Models)
 	}
 
-	// m1 preserved custom alias, but updated context window and got costMultiplier
-	if synced.Models[0].ID != "m1" || synced.Models[0].DisplayName != "Custom Alias M1" || synced.Models[0].ContextWindow != 128000 {
+	// m1 preserved custom alias, but updated context window and got costMultiplier, Unavailable=false
+	if synced.Models[0].ID != "m1" || synced.Models[0].DisplayName != "Custom Alias M1" || synced.Models[0].ContextWindow != 128000 || synced.Models[0].Unavailable {
 		t.Fatalf("unexpected m1: %+v", synced.Models[0])
 	}
 	if synced.Models[0].CostMultiplier == nil || *synced.Models[0].CostMultiplier != 0.1 {
 		t.Fatalf("expected cost multiplier 0.1, got %v", synced.Models[0].CostMultiplier)
 	}
 
-	// m2 added
-	if synced.Models[1].ID != "m2" || synced.Models[1].DisplayName != "M2 Free" {
-		t.Fatalf("unexpected m2: %+v", synced.Models[1])
+	// old-m preserved with Unavailable=true
+	if synced.Models[1].ID != "old-m" || !synced.Models[1].Unavailable {
+		t.Fatalf("unexpected old-m: %+v", synced.Models[1])
 	}
-	if synced.Models[1].CostMultiplier == nil || *synced.Models[1].CostMultiplier != 0 {
-		t.Fatalf("expected cost multiplier 0, got %v", synced.Models[1].CostMultiplier)
+
+	// m2 added with Unavailable=false
+	if synced.Models[2].ID != "m2" || synced.Models[2].DisplayName != "M2 Free" || synced.Models[2].Unavailable {
+		t.Fatalf("unexpected m2: %+v", synced.Models[2])
+	}
+	if synced.Models[2].CostMultiplier == nil || *synced.Models[2].CostMultiplier != 0 {
+		t.Fatalf("expected cost multiplier 0, got %v", synced.Models[2].CostMultiplier)
+	}
+
+	// 4. Create an openrouter provider and sync
+	openRouterUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"openrouter/free","name":"Free Router","pricing":{"prompt":"0","completion":"0"}},
+			{"id":"z-ai/glm-5.3-flash","name":"GLM 5.3 Flash","pricing":{"prompt":"0.00000009","completion":"0.0000003","input_cache_read":"0.000000018"}},
+			{"id":"unwanted-extra","name":"Extra","pricing":{"prompt":"0.001","completion":"0.002"}}
+		]}`))
+	}))
+	defer openRouterUpstream.Close()
+
+	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
+		"id": "my-or", "displayName": "My OpenRouter", "brand": "openrouter", "protocol": "openai-compatible", "baseURL": openRouterUpstream.URL,
+		"models": []map[string]any{
+			{"id": "openrouter/free", "displayName": "Free"},
+			{"id": "z-ai/glm-5.3-flash", "displayName": "GLM Flash"},
+		},
+	})
+	resp.Body.Close()
+
+	orSynced := decodeJSON[providerProfileView](t, req(t, http.MethodPost, srv.URL+"/providers/my-or/sync", nil))
+	// OpenRouter sync must not append unwanted-extra
+	if len(orSynced.Models) != 2 {
+		t.Fatalf("expected exactly 2 models in openrouter sync, got %d: %+v", len(orSynced.Models), orSynced.Models)
+	}
+	if orSynced.Models[0].ID != "openrouter/free" || orSynced.Models[0].CostMultiplier == nil || *orSynced.Models[0].CostMultiplier != 0 {
+		t.Fatalf("unexpected free model cost multiplier: %+v", orSynced.Models[0])
+	}
+	if orSynced.Models[1].ID != "z-ai/glm-5.3-flash" || orSynced.Models[1].CostMultiplier == nil || *orSynced.Models[1].CostMultiplier != 0.1 {
+		t.Fatalf("unexpected glm flash cost multiplier: %+v", orSynced.Models[1])
 	}
 }
 

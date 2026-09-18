@@ -366,13 +366,22 @@ func (s *Server) syncProviderModels(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(p.Brand), "buzzhive") {
-		return badRequest(c, "sync is only supported for buzzhive providers")
+	isBuzzHive := strings.EqualFold(strings.TrimSpace(p.Brand), "buzzhive")
+	isOpenRouter := strings.EqualFold(strings.TrimSpace(p.Brand), "openrouter")
+	if !isBuzzHive && !isOpenRouter {
+		return badRequest(c, "sync is only supported for buzzhive or openrouter providers")
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
-	modelProtocol := registry.TypeOpenAICompatible
-	modelBaseURL := buzzHiveModelsBaseURL(p.BaseURL)
+	modelProtocol := p.Protocol
+	if modelProtocol == "" {
+		modelProtocol = registry.TypeOpenAICompatible
+	}
+	modelBaseURL := p.BaseURL
+	if isBuzzHive {
+		modelProtocol = registry.TypeOpenAICompatible
+		modelBaseURL = buzzHiveModelsBaseURL(p.BaseURL)
+	}
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -387,13 +396,69 @@ func (s *Server) syncProviderModels(c *cart.Context) error {
 	modelsCache[cacheKey] = modelsCacheEntry{at: time.Now(), models: candidates}
 	modelsCacheMu.Unlock()
 
-	p.Models = syncBuzzHiveModels(p.Models, candidates)
+	if isBuzzHive {
+		p.Models = syncBuzzHiveModels(p.Models, candidates)
+	} else if isOpenRouter {
+		p.Models = syncOpenRouterModels(p.Models, candidates)
+	}
 	if err := cfg.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
 	}
 
 	c.JSON(http.StatusOK, viewProfile(p))
 	return nil
+}
+
+func syncOpenRouterModels(existing []store.ProviderModel, candidates []provider.ModelCandidate) []store.ProviderModel {
+	candidateMap := make(map[string]provider.ModelCandidate, len(candidates))
+	for _, c := range candidates {
+		id := strings.TrimSpace(c.ID)
+		if id != "" {
+			candidateMap[id] = c
+		}
+	}
+
+	merged := make([]store.ProviderModel, 0, len(existing))
+	for _, m := range existing {
+		id := strings.TrimSpace(m.ID)
+		cand, exists := candidateMap[id]
+		if !exists {
+			m.Unavailable = true
+			merged = append(merged, m)
+			continue
+		}
+		m.Unavailable = false
+		if cand.ContextWindow > 0 {
+			m.ContextWindow = cand.ContextWindow
+		}
+		m.CostMultiplier = cand.CostMultiplier
+		if cand.Limits != nil {
+			if m.Limits == nil {
+				m.Limits = &store.ModelLimits{}
+			}
+			m.Limits.MaxOutputTokens = cand.Limits.MaxOutputTokens
+		}
+		if cand.Capabilities != nil {
+			if m.Capabilities == nil {
+				m.Capabilities = &store.ModelCaps{}
+			}
+			if v, ok := cand.Capabilities["image"]; ok {
+				m.Capabilities.Image = v
+			}
+			if v, ok := cand.Capabilities["audio"]; ok {
+				m.Capabilities.Audio = v
+			}
+			if v, ok := cand.Capabilities["tools"]; ok {
+				m.Capabilities.Tools = v
+			}
+		}
+		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
+			m.DisplayName = strings.TrimSpace(cand.DisplayName)
+		}
+		merged = append(merged, m)
+	}
+
+	return cleanModels(merged)
 }
 
 func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.ModelCandidate) []store.ProviderModel {
@@ -405,16 +470,19 @@ func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.Mo
 		}
 	}
 
-	merged := make([]store.ProviderModel, 0, len(candidates))
+	merged := make([]store.ProviderModel, 0, len(candidates)+len(existing))
 	seen := make(map[string]bool, len(candidates))
 
 	for _, m := range existing {
 		id := strings.TrimSpace(m.ID)
 		cand, exists := candidateMap[id]
 		if !exists {
+			m.Unavailable = true
+			merged = append(merged, m)
 			continue
 		}
 		seen[id] = true
+		m.Unavailable = false
 		m.ContextWindow = cand.ContextWindow
 		m.CostMultiplier = cand.CostMultiplier
 		if cand.Limits != nil {

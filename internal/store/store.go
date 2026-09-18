@@ -463,6 +463,7 @@ type ProviderModel struct {
 	Capabilities    *ModelCaps       `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 	Limits          *ModelLimits     `json:"limits,omitempty" yaml:"limits,omitempty"`
 	ProviderOptions *ProviderOptions `json:"providerOptions,omitempty" yaml:"provider_options,omitempty"`
+	Unavailable     bool             `json:"unavailable,omitempty" yaml:"unavailable,omitempty"`
 }
 
 type ModelCaps struct {

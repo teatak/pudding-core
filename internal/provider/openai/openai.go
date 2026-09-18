@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -321,7 +323,8 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 			Name            string   `json:"name"`
 			ContextLength   int      `json:"context_length"`
 			MaxOutputTokens int      `json:"max_output_tokens"`
-			CostMultiplier  *float64 `json:"cost_multiplier"`
+			CostMultiplier  *float64           `json:"cost_multiplier"`
+			Pricing         *openRouterPricing `json:"pricing"`
 			Capabilities    struct {
 				Vision *bool `json:"vision"`
 				Audio  *bool `json:"audio_input"`
@@ -345,7 +348,11 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 		if id == "" {
 			continue
 		}
-		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.Name), CostMultiplier: m.CostMultiplier, Capabilities: map[string]bool{}}
+		costMultiplier := m.CostMultiplier
+		if costMultiplier == nil {
+			costMultiplier = calculateOpenRouterCostMultiplier(id, m.Pricing)
+		}
+		candidate := provider.ModelCandidate{ID: id, DisplayName: strings.TrimSpace(m.Name), CostMultiplier: costMultiplier, Capabilities: map[string]bool{}}
 		if m.ContextLength > 0 {
 			candidate.ContextWindow = m.ContextLength
 		}
@@ -372,6 +379,74 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 		models = append(models, candidate)
 	}
 	return models, nil
+}
+
+type openRouterPricing struct {
+	Prompt         string `json:"prompt"`
+	Completion     string `json:"completion"`
+	InputCacheRead string `json:"input_cache_read"`
+}
+
+func calculateOpenRouterCostMultiplier(id string, p *openRouterPricing) *float64 {
+	zero := 0.0
+	// 免费规则匹配: openrouter/free 或含有 :free 后缀
+	if id == "openrouter/free" || strings.HasSuffix(id, ":free") {
+		return &zero
+	}
+	if p == nil {
+		return nil
+	}
+
+	parseRate := func(s string) (float64, bool) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0, false
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return 0, false
+		}
+		return v, true
+	}
+
+	promptRate, promptOK := parseRate(p.Prompt)
+	completionRate, completionOK := parseRate(p.Completion)
+	cacheRate, cacheOK := parseRate(p.InputCacheRead)
+
+	if !promptOK && !completionOK {
+		return nil
+	}
+	if promptRate == 0 && completionRate == 0 {
+		return &zero
+	}
+
+	// 转换为美元/百万 Token ($ / M tokens)
+	promptPerM := promptRate * 1_000_000
+	completionPerM := completionRate * 1_000_000
+	cachePerM := cacheRate * 1_000_000
+
+	// 综合成本加权 (按照 BuzzHive 1000 积分 = 1 美元基准，即 $1/M tokens = 1.0x 费率倍率)
+	var cost float64
+	if cacheOK && cachePerM > 0 {
+		cost = cachePerM*0.48 + promptPerM*0.32 + completionPerM*0.20
+	} else {
+		cost = promptPerM*0.80 + completionPerM*0.20
+	}
+
+	if cost == 0 {
+		return &zero
+	}
+
+	var val float64
+	if cost < 1.0 {
+		val = math.Round(cost*100) / 100
+		if val == 0 && cost > 0 {
+			val = 0.01
+		}
+	} else {
+		val = math.Round(cost*10) / 10
+	}
+	return &val
 }
 
 func bodySummary(r io.Reader) string {

@@ -89,8 +89,8 @@ func TestSyncBuzzHiveModels(t *testing.T) {
 	}
 
 	synced := syncBuzzHiveModels(existing, candidates)
-	if len(synced) != 2 {
-		t.Fatalf("expected 2 models, got %d: %+v", len(synced), synced)
+	if len(synced) != 3 {
+		t.Fatalf("expected 3 models, got %d: %+v", len(synced), synced)
 	}
 
 	// 1. Preserved existing model with local DisplayName and ProviderOptions, but updated objective metadata
@@ -118,7 +118,7 @@ func TestSyncBuzzHiveModels(t *testing.T) {
 	}
 
 	// 2. Newly discovered model appended
-	owl := synced[1]
+	owl := synced[2]
 	if owl.ID != "owl-alpha" {
 		t.Errorf("expected owl-alpha appended, got %s", owl.ID)
 	}
@@ -129,11 +129,85 @@ func TestSyncBuzzHiveModels(t *testing.T) {
 		t.Errorf("expected cost multiplier 0, got %v", owl.CostMultiplier)
 	}
 
-	// 3. deprecated-model dropped because not in candidates
+	// 3. deprecated-model preserved but marked Unavailable
+	var deprecatedFound bool
 	for _, m := range synced {
 		if m.ID == "deprecated-model" {
-			t.Errorf("deprecated-model should have been removed")
+			deprecatedFound = true
+			if !m.Unavailable {
+				t.Errorf("deprecated-model should be marked Unavailable")
+			}
 		}
+	}
+	if !deprecatedFound {
+		t.Errorf("deprecated-model should be preserved with Unavailable status")
+	}
+}
+
+func TestSyncOpenRouterModels(t *testing.T) {
+	existing := []store.ProviderModel{
+		{
+			ID:          "openrouter/free",
+			DisplayName: "Free Router",
+		},
+		{
+			ID:             "z-ai/glm-5.3-flash",
+			DisplayName:    "My Flash Alias",
+			ContextWindow:  100000,
+			CostMultiplier: float64Ptr(0.2),
+		},
+		{
+			ID:          "custom/unlisted",
+			DisplayName: "Unlisted Model",
+		},
+	}
+
+	candidates := []provider.ModelCandidate{
+		{
+			ID:             "openrouter/free",
+			DisplayName:    "Free Router Upstream",
+			ContextWindow:  200000,
+			CostMultiplier: float64Ptr(0),
+			Capabilities:   map[string]bool{"tools": true, "image": true},
+		},
+		{
+			ID:             "z-ai/glm-5.3-flash",
+			DisplayName:    "GLM 5.3 Flash Upstream",
+			ContextWindow:  1000000,
+			CostMultiplier: float64Ptr(0.1),
+			Capabilities:   map[string]bool{"tools": true},
+		},
+		{
+			ID:             "other/should-not-append",
+			DisplayName:    "Thousands of Other Models",
+			CostMultiplier: float64Ptr(1.0),
+		},
+	}
+
+	synced := syncOpenRouterModels(existing, candidates)
+	if len(synced) != 3 {
+		t.Fatalf("expected exactly 3 models, got %d: %+v", len(synced), synced)
+	}
+
+	// 1. openrouter/free updated with context, cost 0, caps, not unavailable
+	if synced[0].ID != "openrouter/free" || synced[0].ContextWindow != 200000 || synced[0].Unavailable {
+		t.Errorf("unexpected free model: %+v", synced[0])
+	}
+	if synced[0].CostMultiplier == nil || *synced[0].CostMultiplier != 0 {
+		t.Errorf("expected cost multiplier 0, got %v", synced[0].CostMultiplier)
+	}
+
+	// 2. z-ai/glm-5.3-flash preserved display name alias, updated cost multiplier to 0.1, not unavailable
+	if synced[1].ID != "z-ai/glm-5.3-flash" || synced[1].DisplayName != "My Flash Alias" || synced[1].ContextWindow != 1000000 || synced[1].Unavailable {
+		t.Errorf("unexpected flash model: %+v", synced[1])
+	}
+	if synced[1].CostMultiplier == nil || *synced[1].CostMultiplier != 0.1 {
+		t.Errorf("expected cost multiplier 0.1, got %v", synced[1].CostMultiplier)
+	}
+
+	// 3. custom/unlisted preserved safely and marked Unavailable: true
+	if synced[2].ID != "custom/unlisted" || synced[2].DisplayName != "Unlisted Model" || !synced[2].Unavailable {
+		t.Errorf("expected custom/unlisted preserved with Unavailable=true, got %+v", synced[2])
 	}
 }
 

@@ -354,7 +354,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "openai-compatible",
         baseURL: "https://openrouter.ai/api/v1",
         models: [
-          model("openrouter/free", { displayName: "Free", contextWindow: 200_000, capabilities: { image: true, tools: true } }),
+          model("openrouter/free", { displayName: "Free", contextWindow: 200_000, costMultiplier: 0, capabilities: { image: true, tools: true } }),
           model("openai/gpt-5.6-sol", { displayName: "GPT 5.6 Sol", contextWindow: 1_050_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
           model("anthropic/claude-sonnet-5", { displayName: "Claude Sonnet 5", contextWindow: 1_000_000, capabilities: { image: true, tools: true }, limits: { maxOutputTokens: 128_000 } }),
           model("google/gemini-3.8-flash", { displayName: "Gemini 3.8 Flash", contextWindow: 1_048_576, capabilities: { image: true, audio: true, tools: true }, limits: { maxOutputTokens: 65_536 } }),
@@ -686,19 +686,18 @@ export function providerModelDisplayName(id: string) {
     pro: "Pro",
     qwen: "Qwen",
   };
-  return value
+  // 若包含组织命名空间前缀（如 "openrouter/free", "z-ai/glm-5.3-flash"），取模型主体
+  const target = value.includes("/") ? value.split("/").pop() || value : value;
+  return target
     .replaceAll("_", "-")
-    .split("/")
-    .map((segment) => segment
-      .split("-")
-      .map((word) => {
-        const [base, suffix] = word.split(":", 2);
-        const normalized = wordNames[base.toLowerCase()]
-          || (/^v\d/i.test(base) ? `V${base.slice(1)}` : `${base.charAt(0).toUpperCase()}${base.slice(1)}`);
-        return suffix ? `${normalized} (${suffix.charAt(0).toUpperCase()}${suffix.slice(1)})` : normalized;
-      })
-      .join(" "))
-    .join(" / ");
+    .split("-")
+    .map((word) => {
+      const [base, suffix] = word.split(":", 2);
+      const normalized = wordNames[base.toLowerCase()]
+        || (/^v\d/i.test(base) ? `V${base.slice(1)}` : `${base.charAt(0).toUpperCase()}${base.slice(1)}`);
+      return suffix ? `${normalized} (${suffix.charAt(0).toUpperCase()}${suffix.slice(1)})` : normalized;
+    })
+    .join(" ");
 }
 
 function globalPresetModel(id: string, protocol: ProviderPresetProtocol): ProviderModel | undefined {

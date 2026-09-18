@@ -392,6 +392,7 @@ export const providerModel = z.object({
     .optional(),
   limits: providerModelLimits.optional(),
   providerOptions: providerModelOptions.optional(),
+  unavailable: z.boolean().optional(),
 });
 export type ProviderModel = z.infer<typeof providerModel>;
 

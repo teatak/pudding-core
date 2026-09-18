@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw, RotateCcw } from "@/components/icons";
 import { Spinner } from "@/components/Spinner";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -241,11 +242,9 @@ export function ModelReasoningPicker({
     if (!open || !token) {
       return;
     }
-    const buzzhiveProfiles = profiles.filter(
-      (p) => p.brand?.toLowerCase() === "buzzhive",
-    );
+    const syncableProfiles = profiles.filter(isSyncableProfile);
     const now = Date.now();
-    for (const p of buzzhiveProfiles) {
+    for (const p of syncableProfiles) {
       const last = lastSyncedRef.current[p.id] || 0;
       if (now - last > 60_000) {
         lastSyncedRef.current[p.id] = now;
@@ -254,7 +253,7 @@ export function ModelReasoningPicker({
             void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
           })
           .catch((error) => {
-            console.warn("silent sync buzzhive models failed", error);
+            console.warn("silent sync provider models failed", error);
           });
       }
     }
@@ -447,7 +446,7 @@ export function ModelReasoningPicker({
                 className="flex min-h-0 flex-1 flex-col overflow-hidden"
                 style={{ height: profilePaneHeight, maxHeight: "100%" }}
               >
-                {selectableProfiles[0].brand?.toLowerCase() === "buzzhive" ? (
+                {isSyncableProfile(selectableProfiles[0]) ? (
                   <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/40 px-2.5 text-[11px] text-muted-foreground">
                     <span className="truncate font-medium">{selectableProfiles[0].displayName}</span>
                     <button
@@ -510,25 +509,23 @@ export function ModelReasoningPicker({
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  {viewedProfile ? (
+                  {viewedProfile && isSyncableProfile(viewedProfile) ? (
                     <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/40 px-2.5 text-[11px] text-muted-foreground">
                       <span className="truncate font-medium">{viewedProfile.displayName}</span>
-                      {viewedProfile.brand?.toLowerCase() === "buzzhive" ? (
-                        <button
-                          type="button"
-                          aria-label={t("picker.syncModels")}
-                          title={t("picker.syncModels")}
-                          disabled={modelSettingsPending || syncingProfileID === viewedProfile.id}
-                          className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
-                          onClick={() => handleSyncProfile(viewedProfile.id)}
-                        >
-                          {syncingProfileID === viewedProfile.id ? (
-                            <Spinner className="size-3" />
-                          ) : (
-                            <RefreshCw className="size-3" />
-                          )}
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={t("picker.syncModels")}
+                        title={t("picker.syncModels")}
+                        disabled={modelSettingsPending || syncingProfileID === viewedProfile.id}
+                        className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground cursor-default"
+                        onClick={() => handleSyncProfile(viewedProfile.id)}
+                      >
+                        {syncingProfileID === viewedProfile.id ? (
+                          <Spinner className="size-3" />
+                        ) : (
+                          <RefreshCw className="size-3" />
+                        )}
+                      </button>
                     </div>
                   ) : null}
                   <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-gutter:stable]">
@@ -570,6 +567,24 @@ function providerBrandKey(profile?: ProviderProfile) {
   return profile?.brand || profile?.displayName || profile?.id || "";
 }
 
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const m = tokens / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  if (tokens >= 1_000) {
+    const k = tokens / 1_000;
+    return `${Number.isInteger(k) ? k : k.toFixed(0)}K`;
+  }
+  return String(tokens);
+}
+
+function isSyncableProfile(profile: ProviderProfile | undefined | null): boolean {
+  if (!profile?.brand) return false;
+  const brand = profile.brand.toLowerCase();
+  return brand === "buzzhive" || brand === "openrouter";
+}
+
 function formatModelCostMultiplier(costMultiplier: number | undefined | null, freeLabel: string): string | null {
   if (costMultiplier === undefined || costMultiplier === null) {
     return null;
@@ -608,44 +623,113 @@ function ProfileModels({
   }
 
   return (
-    <div className="grid gap-0.5">
-      {models.map((model) => {
-        const selected = isCurrentProfile && currentModel === model.id;
-        const label = formatModelLabel(model.id, model.displayName);
-        const costBadge = formatModelCostMultiplier(model.costMultiplier, t("models.cost_free"));
-        return (
-          <button
-            key={model.id}
-            aria-current={selected ? "true" : undefined}
-            className={cn(
-              "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] cursor-default",
-              appPopoverItemStateClassName,
-              selected && cn(appPopoverSelectedItemStateClassName, "text-foreground font-medium"),
-            )}
-            type="button"
-            disabled={disabled}
-            onClick={() => onPick(model.id)}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-              <span className="block min-w-0 flex-1 truncate">
-                {label}
-              </span>
-            </span>
-            {costBadge ? (
-              <span
-                className={cn(
-                  "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide select-none",
-                  model.costMultiplier === 0
-                    ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
-                    : "bg-muted text-muted-foreground",
-                )}
+    <TooltipProvider delayDuration={350}>
+      <div className="grid gap-0.5">
+        {models.map((model) => {
+          const selected = isCurrentProfile && currentModel === model.id;
+          const unavailable = Boolean(model.unavailable);
+          const label = formatModelLabel(model.id, model.displayName);
+          const costBadge = formatModelCostMultiplier(model.costMultiplier, t("models.cost_free"));
+
+          const caps: string[] = [];
+          if (model.capabilities?.image) {
+            caps.push(t("models.capability.vision"));
+          }
+          if (model.capabilities?.tools !== false) {
+            caps.push(t("models.capability.tools"));
+          }
+          if (model.capabilities?.audio) {
+            caps.push(t("models.capability.audio"));
+          }
+          const capabilitiesText = caps.length > 0 ? caps.join(" · ") : null;
+
+          return (
+            <Tooltip key={model.id}>
+              <TooltipTrigger asChild>
+                <button
+                  aria-current={selected ? "true" : undefined}
+                  className={cn(
+                    "flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-[13px] cursor-default",
+                    appPopoverItemStateClassName,
+                    selected && cn(appPopoverSelectedItemStateClassName, "text-foreground font-medium"),
+                    unavailable && "opacity-50 hover:bg-transparent cursor-not-allowed",
+                  )}
+                  type="button"
+                  disabled={disabled || unavailable}
+                  onClick={() => !unavailable && onPick(model.id)}
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                    <span className={cn("block min-w-0 flex-1 truncate", unavailable && "line-through text-muted-foreground")}>
+                      {label}
+                    </span>
+                  </span>
+                  {unavailable ? (
+                    <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide select-none bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive">
+                      {t("models.unavailable")}
+                    </span>
+                  ) : costBadge ? (
+                    <span
+                      className={cn(
+                        "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide select-none",
+                        model.costMultiplier === 0
+                          ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {costBadge}
+                    </span>
+                  ) : null}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                align="center"
+                sideOffset={8}
+                className="grid gap-1.5 p-2 text-xs font-normal"
               >
-                {costBadge}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-    </div>
+                <div className="flex flex-col">
+                  <span className="font-medium text-background">{label}</span>
+                  {model.id !== label ? (
+                    <span className="font-mono text-[10px] text-background/70">{model.id}</span>
+                  ) : null}
+                </div>
+                <div className="grid gap-0.5 border-t border-background/20 pt-1 text-[11px] text-background/80">
+                  {model.contextWindow ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>{t("provider.contextWindow")}</span>
+                      <span className="font-mono text-background">{formatContextWindow(model.contextWindow)}</span>
+                    </div>
+                  ) : null}
+                  {capabilitiesText ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>{t("provider.capabilities")}</span>
+                      <span className="text-background">{capabilitiesText}</span>
+                    </div>
+                  ) : null}
+                  {costBadge ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>{t("models.costMultiplier")}</span>
+                      <span
+                        className={cn(
+                          "font-medium",
+                          model.costMultiplier === 0 ? "text-emerald-400" : "text-background",
+                        )}
+                      >
+                        {costBadge}
+                      </span>
+                    </div>
+                  ) : null}
+                  {unavailable ? (
+                    <div className="border-t border-background/20 pt-1 text-[11px] text-amber-400">
+                      {t("models.unavailableTip")}
+                    </div>
+                  ) : null}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }

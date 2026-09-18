@@ -111,6 +111,7 @@ const modelFormSchema = z.object({
   id: z.string(),
   displayName: z.string().optional(),
   costMultiplier: z.number().optional(),
+  unavailable: z.boolean().optional(),
   contextWindow: z.string().optional(),
   image: z.boolean(),
   audio: z.boolean(),
@@ -1416,6 +1417,7 @@ function modelToForm(model: ProviderModel, providerProtocol: ProviderProfileEdit
     id: model.id,
     displayName: model.displayName?.trim() || providerModelDisplayName(model.id),
     costMultiplier: model.costMultiplier,
+    unavailable: model.unavailable,
     contextWindow: model.contextWindow ? String(model.contextWindow) : "",
     image: model.capabilities?.image === true,
     audio: model.capabilities?.audio === true,
@@ -1473,6 +1475,9 @@ function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEdit
   }
   if (typeof value.costMultiplier === "number") {
     out.costMultiplier = value.costMultiplier;
+  }
+  if (value.unavailable) {
+    out.unavailable = true;
   }
   const contextWindow = positiveInt(value.contextWindow);
   if (contextWindow) {

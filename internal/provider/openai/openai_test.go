@@ -601,3 +601,77 @@ func chunksText(chunks []provider.Chunk) string {
 	}
 	return b.String()
 }
+
+func TestListModelsOpenRouterPricing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"data": [
+				{
+					"id": "openrouter/free",
+					"name": "Free Router",
+					"pricing": {"prompt": "0", "completion": "0"}
+				},
+				{
+					"id": "z-ai/glm-5.2:free",
+					"name": "GLM 5.2 Free",
+					"pricing": {"prompt": "0", "completion": "0"}
+				},
+				{
+					"id": "z-ai/glm-5.3-flash",
+					"name": "GLM 5.3 Flash",
+					"pricing": {
+						"prompt": "0.00000009",
+						"completion": "0.0000003",
+						"input_cache_read": "0.000000018"
+					}
+				},
+				{
+					"id": "custom/buzzhive-model",
+					"name": "BuzzHive Model",
+					"cost_multiplier": 1.5,
+					"pricing": {"prompt": "0.000005", "completion": "0.00001"}
+				}
+			]
+		}`)
+	}))
+	defer srv.Close()
+
+	candidates, err := ListModels(context.Background(), Config{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 4 {
+		t.Fatalf("expected 4 candidates, got %d", len(candidates))
+	}
+
+	candMap := make(map[string]provider.ModelCandidate)
+	for _, c := range candidates {
+		candMap[c.ID] = c
+	}
+
+	// 1. openrouter/free => costMultiplier = 0.0
+	freeCand, ok := candMap["openrouter/free"]
+	if !ok || freeCand.CostMultiplier == nil || *freeCand.CostMultiplier != 0.0 {
+		t.Fatalf("expected openrouter/free costMultiplier=0.0, got %+v", freeCand.CostMultiplier)
+	}
+
+	// 2. z-ai/glm-5.2:free => costMultiplier = 0.0
+	glmFree, ok := candMap["z-ai/glm-5.2:free"]
+	if !ok || glmFree.CostMultiplier == nil || *glmFree.CostMultiplier != 0.0 {
+		t.Fatalf("expected z-ai/glm-5.2:free costMultiplier=0.0, got %+v", glmFree.CostMultiplier)
+	}
+
+	// 3. z-ai/glm-5.3-flash => costMultiplier = 0.1
+	// cost = 0.018 * 0.48 + 0.09 * 0.32 + 0.30 * 0.20 = 0.09744 => 0.1
+	glmFlash, ok := candMap["z-ai/glm-5.3-flash"]
+	if !ok || glmFlash.CostMultiplier == nil || *glmFlash.CostMultiplier != 0.1 {
+		t.Fatalf("expected z-ai/glm-5.3-flash costMultiplier=0.1, got %+v", glmFlash.CostMultiplier)
+	}
+
+	// 4. BuzzHive model with explicit cost_multiplier => 1.5
+	buzzCand, ok := candMap["custom/buzzhive-model"]
+	if !ok || buzzCand.CostMultiplier == nil || *buzzCand.CostMultiplier != 1.5 {
+		t.Fatalf("expected custom/buzzhive-model costMultiplier=1.5, got %+v", buzzCand.CostMultiplier)
+	}
+}
