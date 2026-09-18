@@ -276,7 +276,6 @@ export function ModelReasoningPicker({
       <PopoverTrigger asChild>
         <Button
           ref={triggerButtonRef}
-          disabled={modelSettingsPending}
           aria-busy={modelSettingsPending}
           style={!iconOnly && isSliderMode && preservedWidth ? { width: `${preservedWidth}px` } : undefined}
           aria-label={`${t("session.model")}: ${triggerText}`}

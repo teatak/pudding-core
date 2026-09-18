@@ -1127,7 +1127,7 @@ export function Composer({
               projectID={projectID}
               reasoningEffort={reasoningEffort}
               sendEnabled={sendEnabled}
-              audioInputDisabled={modelSettingsPending || !resolvedModelDetails || reasoningEffort !== effectiveReasoningEffort}
+              audioInputDisabled={!resolvedModelDetails || reasoningEffort !== effectiveReasoningEffort}
               session={session}
               showSendButton={showSendButton}
               showStopButton={showStopButton}
