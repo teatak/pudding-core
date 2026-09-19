@@ -2,9 +2,10 @@ import { APIError } from "@/api/client";
 
 export function projectBrowserError(error: unknown, t: (key: string) => string) {
   if (error instanceof APIError) {
-    if (error.code === "project_path_not_found" || error.code === "project_file_not_found" || error.code === "path_not_authorized") {
+    if (error.code === "project_path_not_found" || error.code === "project_file_not_found") {
       return t("project.browserFileUnavailable");
     }
+    if (error.code === "path_not_authorized" || error.code === "invalid_project_root") return t("project.browserFileAccessDenied");
     if (error.code === "session_has_no_project") {
       return t("project.browserNoProject");
     }

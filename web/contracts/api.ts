@@ -120,6 +120,12 @@ export const projectSearchResponse = z.object({
 });
 export type ProjectSearchResponse = z.infer<typeof projectSearchResponse>;
 
+export const projectEntry = z.object({
+  rootID: z.string(),
+  path: z.string(),
+  type: z.enum(["file", "dir"]),
+});
+
 export const projectFile = z.object({
   rootID: z.string(),
   path: z.string(),

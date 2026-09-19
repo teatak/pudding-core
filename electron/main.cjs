@@ -49,6 +49,7 @@ const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
 const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
 const { createSystemTerminalOpener } = require("./system-terminal.cjs");
+const { createLocalFileBrowserOpener } = require("./local-file-browser.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const browserPreloadPath = path.join(__dirname, "browser-preload.cjs");
@@ -1354,6 +1355,34 @@ ipcMain.handle("pudding:project-file:watch", (event, request) => {
 ipcMain.handle("pudding:project-file:unwatch", (event, request) => {
   assertTrustedSender(event);
   return projectFileWatcher.unsubscribe(event.sender, request);
+});
+
+const openLocalBrowserFile = createLocalFileBrowserOpener({
+  host: browserHost,
+  requestAPI: async (route, method = "GET") => {
+    const response = await fetch(apiBase + route, {
+      method, headers: { Authorization: `Bearer ${await readDaemonToken()}` },
+    });
+    if (!response.ok) throw new Error(`browser file request failed: ${response.status}`);
+    return response.status === 204 ? undefined : response.json();
+  },
+  confirm: async (owner, filename) => {
+    const result = await dialog.showMessageBox(owner, {
+      type: "warning",
+      title: nativeText(shellLocale, "browserLocalFileTitle"),
+      message: nativeText(shellLocale, "browserLocalFileMessage"),
+      detail: filename + "\n\n" + nativeText(shellLocale, "browserLocalFileDetail"),
+      buttons: [nativeText(shellLocale, "browserLocalFileOpen"), nativeText(shellLocale, "browserLocalFileCancel")],
+      defaultId: 1, cancelId: 1, noLink: true,
+    });
+    return result.response === 0;
+  },
+});
+
+ipcMain.handle("pudding:browser:open-local-file", (event, request) => {
+  const owner = assertTrustedSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error("untrusted frame");
+  return openLocalBrowserFile(owner, request);
 });
 
 ipcMain.handle("pudding:browser:ensure", (event, request) => {

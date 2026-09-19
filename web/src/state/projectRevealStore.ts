@@ -4,6 +4,7 @@ import type { FilePreviewInput } from "@/state/filePreviewStore";
 import { openWorkspaceTab } from "@/state/workspaceStore";
 
 export type ProjectFileRevealInput = {
+  kind?: "file" | "dir";
   absolutePath?: string;
   anchor?: string;
   column?: number;

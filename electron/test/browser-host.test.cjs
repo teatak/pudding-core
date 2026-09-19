@@ -1748,6 +1748,27 @@ test("allows trusted project files and blocks file navigation outside the grant"
   host.closeAll();
 });
 
+test("native single-file grants do not authorize siblings, symlink retargets or later directories", async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pudding-browser-single-file-")));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "preview.html"), sibling = path.join(root, "private.html");
+  fs.writeFileSync(file, "preview"); fs.writeFileSync(sibling, "private");
+  const url = pathToFileURL(file).href;
+  let required;
+  const host = new BrowserHost(undefined, undefined, undefined, request => { required = request; });
+  t.after(() => host.closeAll());
+  const request = { sessionID: "single-file", tabID: "file", url, fileRoot: { file }, _fileAuthorized: true };
+  const opening = host.ensure(request);
+  await new Promise(resolve => setImmediate(resolve));
+  await host.registerWebContents(required, new FakeWebContents(63));
+  assert.equal((await opening).url, url);
+  await assert.rejects(host.loadURL({ ...request, _fileAuthorized: false, url: pathToFileURL(sibling).href }), /outside the session project/);
+  fs.unlinkSync(file); fs.symlinkSync(sibling, file);
+  await assert.rejects(host.loadURL({ ...request, _fileAuthorized: false }), /outside the session project/);
+  fs.unlinkSync(file); fs.mkdirSync(file); fs.writeFileSync(path.join(file, "nested.html"), "nested");
+  await assert.rejects(host.loadURL({ ...request, _fileAuthorized: false, url: pathToFileURL(path.join(file, "nested.html")).href }), /outside the session project/);
+});
+
 test("does not accept file grants from an untrusted renderer request", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-browser-untrusted-"));
   const file = path.join(root, "inside.html");

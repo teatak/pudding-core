@@ -179,6 +179,37 @@ func TestBrowserTabsPersistAndReleaseIndependently(t *testing.T) {
 	}
 }
 
+func TestBrowserRecoveryDiscardsExpiredFilePreviewWithoutBlockingWebTabs(t *testing.T) {
+	for _, endpoint := range []string{"tabs", "state"} {
+		t.Run(endpoint, func(t *testing.T) {
+			srv, st, svc := newBrowserTestServer(t)
+			svc.supportsMetadataRecovery = true
+			svc.recoverErrors = map[string]error{"expired_file": browser.ErrFileURLNotAllowed}
+			ctx := context.Background()
+			if err := st.CreateSession(ctx, &store.Session{ID: "preview_restart", Provider: "mock", Model: "mock"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range []struct{ id, url string }{{"web", "https://example.com/"}, {"expired_file", "file:///outside/preview.html"}} {
+				if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{SessionID: "preview_restart", TabID: item.id, URL: item.url}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resp := req(t, http.MethodGet, srv.URL+"/sessions/preview_restart/browser/"+endpoint, nil)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expired file preview blocked recovery: status=%d", resp.StatusCode)
+			}
+			states, err := st.ListBrowserStates(ctx, "preview_restart")
+			if err != nil || len(states) != 1 || states[0].TabID != "web" {
+				t.Fatalf("only inaccessible preview should be forgotten: states=%+v err=%v", states, err)
+			}
+			if _, exists := svc.tabs["expired_file"]; exists {
+				t.Fatal("expired file permission was restored")
+			}
+		})
+	}
+}
+
 func TestListBrowserTabsRecoversAllStoredTabs(t *testing.T) {
 	srv, st, browserSvc := newBrowserTestServer(t)
 	browserSvc.supportsMetadataRecovery = true
@@ -1115,6 +1146,7 @@ func TestProjectChangesRevokeLiveBrowserFileAccess(t *testing.T) {
 }
 
 type fakeBrowserService struct {
+	recoverErrors            map[string]error
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
 	processMode              string
@@ -1201,6 +1233,9 @@ func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) 
 }
 
 func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
+	if err := f.recoverErrors[hint.TabID]; err != nil {
+		return browser.TabSnapshot{}, err
+	}
 	if hint.TabID == "" {
 		return browser.TabSnapshot{}, browser.ErrTabNotFound
 	}

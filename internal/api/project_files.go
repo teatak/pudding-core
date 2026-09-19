@@ -245,12 +245,43 @@ func (s *Server) listProjectTree(c *cart.Context) error {
 	return nil
 }
 
+// Resolve one clicked target, without guessing its type from an extension or
+// searching a truncated/filtered directory listing. Reads still recheck scope.
+func (s *Server) getProjectEntry(c *cart.Context) error {
+	_, roots, ok := s.sessionWorkspace(c)
+	if !ok {
+		return nil
+	}
+	root, target, rel, ok := s.resolveProjectRequestPath(c, roots, true, true)
+	if !ok {
+		return nil
+	}
+	info, err := os.Stat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return projectFileError(c, http.StatusNotFound, "project_path_not_found")
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
+	}
+	if err != nil {
+		return s.fail(c, err)
+	}
+	kind := "file"
+	if info.IsDir() {
+		kind = "dir"
+	} else if !info.Mode().IsRegular() {
+		return projectFileError(c, http.StatusUnsupportedMediaType, "project_file_not_regular")
+	}
+	c.JSON(http.StatusOK, map[string]any{"rootID": root.ID, "path": rel, "type": kind})
+	return nil
+}
+
 func (s *Server) getProjectFile(c *cart.Context) error {
 	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
-	root, target, rel, ok := s.resolveProjectRequestPath(c, roots, false)
+	root, target, rel, ok := s.resolveProjectRequestPath(c, roots, false, false)
 	if !ok {
 		return nil
 	}
@@ -399,7 +430,7 @@ func projectRootByID(roots []projectRootView, id string) (projectRootView, bool)
 	return projectRootView{}, false
 }
 
-func (s *Server) resolveProjectRequestPath(c *cart.Context, roots []projectRootView, allowRoot bool) (projectRootView, string, string, bool) {
+func (s *Server) resolveProjectRequestPath(c *cart.Context, roots []projectRootView, allowRoot, allowMissing bool) (projectRootView, string, string, bool) {
 	root, ok := projectRootByID(roots, strings.TrimSpace(c.Request.URL.Query().Get("rootID")))
 	if !ok {
 		_ = projectFileError(c, http.StatusBadRequest, "invalid_project_root")
@@ -410,7 +441,7 @@ func (s *Server) resolveProjectRequestPath(c *cart.Context, roots []projectRootV
 		_ = projectFileError(c, http.StatusForbidden, "path_not_authorized")
 		return projectRootView{}, "", "", false
 	}
-	_, target, resolvedRel, err := projectpath.Resolve([]string{root.Path}, rel, allowRoot, false)
+	_, target, resolvedRel, err := projectpath.Resolve([]string{root.Path}, rel, allowRoot, allowMissing)
 	if err != nil {
 		_ = projectResolveError(c, err)
 		return projectRootView{}, "", "", false

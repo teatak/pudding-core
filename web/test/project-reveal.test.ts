@@ -75,3 +75,17 @@ test("resolveProjectFileReveal returns undefined for path outside roots", () => 
   });
   assert.equal(result, undefined);
 });
+
+test("overlapping roots reuse an existing file identity, not a second draft", () => {
+  const nested = [roots[0], { id: "nested", name: "Web", path: `${roots[0].path}/web` }];
+  const existing = { rootID: roots[0].id, path: "web/README.md" };
+  const target = { absolutePath: `${roots[0].path}/web/README.md` };
+  assert.deepEqual(resolveProjectFileReveal(nested, target), { rootID: "nested", path: "README.md" });
+  assert.deepEqual(resolveProjectFileReveal(nested, target, [existing]), existing);
+  assert.deepEqual(resolveProjectFileReveal([...nested].reverse(), target, [existing]), existing);
+});
+
+test("root directory and filesystem-root targets have valid tree selections", () => {
+  assert.deepEqual(resolveProjectFileReveal(roots, { absolutePath: roots[0].path }), { rootID: roots[0].id, path: "." });
+  assert.deepEqual(resolveProjectFileReveal([{ id: "all", name: "Disk", path: "/" }], { absolutePath: "/docs/a.md" }), { rootID: "all", path: "docs/a.md" });
+});

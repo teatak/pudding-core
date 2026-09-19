@@ -175,6 +175,14 @@ function ProjectDirectoryNode({
   const { t } = useI18n();
   const key = `${root.id}:${path}`;
   const expanded = hideSelf || expandedKeys.has(key);
+  const directoryRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!reveal || reveal.rootID !== root.id || reveal.path !== path) return;
+    directoryRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    directoryRef.current?.focus({ preventScroll: true });
+    if (!expanded) onToggle(root.id, path);
+    onRevealed(reveal);
+  }, [reveal, root.id, path, expanded, onToggle, onRevealed]);
   const [dropActive, setDropActive] = useState(false);
   const target: ProjectEntryTarget = { rootID: root.id, path, name: label, type: "dir" };
   const treeQuery = useQuery({
@@ -188,6 +196,7 @@ function ProjectDirectoryNode({
     <div>
       {!hideSelf ? <ProjectEntryContextMenu {...actions} isRoot={isRoot} target={target}>
         <button
+          ref={directoryRef}
           className={cn(
             "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground",
             label.startsWith(".") && "text-muted-foreground",

@@ -147,8 +147,9 @@ test("cancelled/failed turns without assistant output retain the clock; compact-
     assert.match(html, /data-turn-header/);
     assert.match(html, status === "failed" ? /本轮在 1分23秒 后失败/ : /本轮在 1分23秒 后中止/);
     const interrupted = { ...message("partial", "assistant", [{ type: "text", text: "Partial output" }]), interrupted: true };
-    const partialHTML = renderToString(React.createElement(TooltipProvider, null,
-      React.createElement(TranscriptTurn, { sessionID, token: "", turn: view([initial, interrupted], status) })));
+    const partialHTML = renderToString(React.createElement(QueryClientProvider, { client: new QueryClient() },
+      React.createElement(TooltipProvider, null,
+        React.createElement(TranscriptTurn, { sessionID, token: "", turn: view([initial, interrupted], status) }))));
     assert.ok(!partialHTML.includes("已中断"), "the old interrupted badge is replaced by the turn header");
   }
   const compact = { ...message("compact-only", "summary", [{ type: "text", text: "Summary" }]), metadata: { compact: {} } };

@@ -526,7 +526,6 @@ export const WorkspacePane = memo(function WorkspacePane({
         ) : null}
         {actorSessionID ? (
           <ProjectBrowserSurface
-            onOpenBrowserURL={openBrowserLink}
             active={projectActive && presented}
             activePreviewID={activeFilePreview?.id}
             hasProject={hasProject}

@@ -34,6 +34,7 @@ import {
   patchProjectRequest,
   projectBrowserRootsResponse,
   projectEntryMutation,
+  projectEntry,
   projectFile,
   projectGitDiff,
   projectGitBranches,
@@ -418,6 +419,11 @@ export function searchProjectFiles(
     projectSearchResponse,
     { signal },
   );
+}
+
+export function getProjectEntry(token: string, sessionID: string, rootID: string, path: string) {
+  const query = new URLSearchParams({ rootID, path });
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entry?${query}`, projectEntry);
 }
 
 export function getProjectFile(token: string, sessionID: string, rootID: string, path: string): Promise<ProjectFile> {

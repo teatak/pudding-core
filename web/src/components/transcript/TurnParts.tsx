@@ -14,6 +14,7 @@ import {
   Children,
   createContext,
   memo,
+  useCallback,
   useContext,
   useMemo,
   isValidElement,
@@ -38,7 +39,8 @@ import { Button } from "@/components/ui/button";
 import { useDesktopApplicationIdentity } from "@/hooks/useDesktopApplicationIdentity";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
-import { openExternalURL } from "@/lib/desktopBridge";
+import { markdownLinkHref } from "@/lib/markdownLinks";
+import { useMarkdownLink } from "@/components/project/useMarkdownLink";
 import { cn } from "@/lib/utils";
 import { useCodeHighlight } from "@/hooks/useCodeHighlight";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
@@ -139,7 +141,7 @@ function renderTranscriptPart({
 }) {
   switch (part.type) {
     case "text":
-      return <MarkdownBody key={partKey} messageID={part.messageID} text={part.text} token={token} />;
+      return <MarkdownBody key={partKey} messageID={part.messageID} sessionID={sessionID} text={part.text} token={token} />;
     case "attachment":
       return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
     case "thought":
@@ -1308,23 +1310,24 @@ const markdownComponents: Components = {
     return (
       <a
         {...props}
-        href={href}
+        href={href ? markdownLinkHref(href) : undefined}
+        role="link"
+        tabIndex={0}
         target="_blank"
         rel="noreferrer noopener"
         onClick={(event) => {
-          if (href && onResolvedLinkClick?.(href)) {
-            event.preventDefault();
-            return;
-          }
-          handleMarkdownLinkClick(event);
+          event.preventDefault();
+          if (href) onResolvedLinkClick?.(href);
         }}
+        onAuxClick={(event) => { event.preventDefault(); if (event.button === 1 && href) onResolvedLinkClick?.(href); }}
+        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (href) onResolvedLinkClick?.(href); } }}
       >
         {children}
       </a>
     );
   },
   img({ alt, node: _node, src }) {
-    const { resolveImageURL, imageIndexBySource, markdownImages, token, setImagePreviewIndex } = useContext(MarkdownRenderContext)!;
+    const { onResolvedLinkClick, resolveImageURL, imageIndexBySource, markdownImages, token, setImagePreviewIndex } = useContext(MarkdownRenderContext)!;
     const label = alt || src || "";
     if (!src) {
       return label ? <span>{label}</span> : null;
@@ -1366,7 +1369,7 @@ const markdownComponents: Components = {
       }
     }
     return (
-      <a href={src} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
+      <a href={markdownLinkHref(src)} role="link" tabIndex={0} target="_blank" rel="noreferrer noopener" onClick={(event) => { event.preventDefault(); onResolvedLinkClick?.(src); }}>
         {label}
       </a>
     );
@@ -1398,6 +1401,7 @@ export const MarkdownBody = memo(function MarkdownBody({
   onResolvedLinkClick,
   resolveImageURL,
   resolveLinkURL,
+  sessionID,
   text,
   token = "",
 }: {
@@ -1406,13 +1410,16 @@ export const MarkdownBody = memo(function MarkdownBody({
   onResolvedLinkClick?: (href: string) => boolean;
   resolveImageURL?: (raw: string) => string;
   resolveLinkURL?: (raw: string) => string;
+  sessionID?: string;
   text: string;
   token?: string;
 }) {
   const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
   const markdownImages = useMemo(() => extractMarkdownImageItems(text, token), [text, token]);
   const imageIndexBySource = useMemo(() => new Map(markdownImages.map((item, index) => [item.sourceKey, index])), [markdownImages]);
-  const context = useMemo(() => ({ onResolvedLinkClick, resolveImageURL, markdownImages, imageIndexBySource, token, setImagePreviewIndex }), [onResolvedLinkClick, resolveImageURL, markdownImages, imageIndexBySource, token]);
+  const openLink = useMarkdownLink({ sessionID, token });
+  const handleLink = useCallback((href: string) => onResolvedLinkClick?.(href) || openLink(href), [onResolvedLinkClick, openLink]);
+  const context = useMemo(() => ({ onResolvedLinkClick: handleLink, resolveImageURL, markdownImages, imageIndexBySource, token, setImagePreviewIndex }), [handleLink, resolveImageURL, markdownImages, imageIndexBySource, token]);
   const segments = allowHtmlImages ? splitMarkdownHtmlImages(text) : [{ type: "markdown" as const, text }];
   const hasHtmlImage = segments.some((segment) => segment.type === "image");
   const urlTransform: UrlTransform = (raw, key, node) => {
@@ -1707,28 +1714,10 @@ const markdownUrlTransform: UrlTransform = (raw, key, node) => {
   if (key === "src" || node.tagName === "img") {
     return attachmentPathFromMarkdownURL(raw);
   }
-  try {
-    const url = new URL(raw, window.location.origin);
-    if (key === "href" && (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:")) {
-      return url.href;
-    }
-  } catch {
-    return "";
-  }
-  return "";
+  // The custom anchor component sanitizes its DOM href and dispatches the raw
+  // target. Do not resolve it against the application's own origin here.
+  return key === "href" ? raw : undefined;
 };
-
-function handleMarkdownLinkClick(event: MouseEvent<HTMLAnchorElement>) {
-  if (event.defaultPrevented || event.button !== 0) {
-    return;
-  }
-  const href = event.currentTarget.href;
-  if (!href) {
-    return;
-  }
-  event.preventDefault();
-  openExternalURL(href);
-}
 
 type CodeElementProps = {
   children?: ReactNode;

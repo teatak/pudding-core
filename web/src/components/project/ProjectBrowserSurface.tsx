@@ -67,7 +67,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   token,
   previewTabs,
   onActivatePreview,
-  onOpenBrowserURL,
   onClosePreviews,
   onDeactivatePreview,
   onVisibleContextChange,
@@ -80,7 +79,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   token: string;
   previewTabs: FilePreview[];
   onActivatePreview: (previewID: string) => void;
-  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onClosePreviews: (previewIDs: string[]) => void;
   onDeactivatePreview: () => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
@@ -294,8 +292,10 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
       consumeProjectFileReveal(sessionID, fileReveal.serial);
       return;
     }
-    const selection = resolveProjectFileReveal(roots, fileReveal);
-    if (selection) {
+    const selection = resolveProjectFileReveal(roots, fileReveal, workspace.tabs.filter(tab => !isProjectGitDiffTab(tab)));
+    if (selection && fileReveal.kind === "dir") {
+      revealInTree(selection);
+    } else if (selection) {
       onDeactivatePreview();
       workspace.openPreview(selection);
       setNarrowPane("viewer");
@@ -577,13 +577,16 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
     });
   };
 
-  const revealInTree = (selection: ProjectSelection) => {
+  function revealInTree(selection: ProjectSelection) {
+    // A clicked file can be newer than the cached listing (e.g. created by an
+    // external editor). Refresh the tree so its reveal row can actually mount.
+    void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "tree", selection.rootID] });
     workspace.expandTo(selection);
     setSearchQuery("");
     setSidebarView("files");
     setNarrowPane("tree");
     setTreeReveal({ ...selection, sessionID });
-  };
+  }
 
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
@@ -662,7 +665,6 @@ export const ProjectBrowserSurface = memo(function ProjectBrowserSurface({
   );
   const projectViewer = (
     <ProjectFileViewer
-      onOpenBrowserURL={onOpenBrowserURL}
       active={active && (!narrow || narrowPane === "viewer")}
       activePreview={activePreview}
       activeTurnDiff={activeTurnDiff}

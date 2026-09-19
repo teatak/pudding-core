@@ -2,16 +2,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { adoptBrowserTab, createBrowserTab, openBrowserTab, releaseBrowserTab } from "@/api/client";
+import { adoptBrowserTab, releaseBrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
-  allowElectronBrowserTab,
   cacheElectronBrowserSnapshot,
   clearElectronBrowserSessionGate,
   electronBrowserBridge,
 } from "@/browser/electronBridge";
-import { upsertBrowserTab } from "@/browser/helpers";
 import { useSessionBrowserTabs } from "@/browser/useSessionBrowserTabs";
+import { useOpenBrowserTab } from "@/browser/useOpenBrowserTab";
 import type { BrowserTabsData } from "@/browser/types";
 import { useI18n } from "@/i18n";
 import { consumeBrowserReveal, useBrowserReveal } from "@/state/browserRevealStore";
@@ -19,7 +18,6 @@ import {
   browserWorkspaceTabKey,
   mergeWorkspaceTabOrder,
   closeWorkspaceTab,
-  openWorkspaceTab,
   setWorkspaceActiveTab,
   useWorkspaceActiveTab,
   useWorkspaceTabOrder,
@@ -158,27 +156,7 @@ export function useWorkspaceBrowserSurface({
     });
   }, [enabled, sessionID]);
 
-  const createBrowserTabMutation = useMutation({
-    mutationFn: async ({ targetSessionID, url }: { targetSessionID: string; url?: string }) => {
-      if (!targetSessionID) throw new Error("browser session id missing");
-      const tab = await createBrowserTab(token, targetSessionID);
-      allowElectronBrowserTab(targetSessionID, tab.id);
-      clearElectronBrowserSessionGate(targetSessionID);
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({ tabs: upsertBrowserTab(current?.tabs || [], tab), processMode: tab.mode || current?.processMode || processModeFallback }));
-      openWorkspaceTab(targetSessionID, browserWorkspaceTabKey(tab.id));
-      return { sessionID: targetSessionID, tab: url ? await openBrowserTab(token, targetSessionID, tab.id, { url }) : tab };
-    },
-    onSuccess: ({ sessionID: targetSessionID, tab }) => {
-      allowElectronBrowserTab(targetSessionID, tab.id);
-      clearElectronBrowserSessionGate(targetSessionID);
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({
-        tabs: upsertBrowserTab(current?.tabs || [], tab),
-        processMode: tab.mode || current?.processMode || processModeFallback,
-      }));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-    },
-    onError: () => toast.error(t("browser.createFailed")),
-  });
+  const createBrowserTabMutation = useOpenBrowserTab(token);
 
   const createNewBrowserTab = useCallback(() => {
     if (!sessionID || createBrowserTabMutation.isPending) return;
@@ -186,10 +164,8 @@ export function useWorkspaceBrowserSurface({
   }, [createBrowserTabMutation.isPending, createBrowserTabMutation.mutate, sessionID]);
 
   const openBrowserLink = useCallback((targetSessionID: string, url: string) => {
-    const existing = browserTabs.find((tab) => tab.sessionID === targetSessionID && tab.url === url);
-    if (existing) { openWorkspaceTab(targetSessionID, browserWorkspaceTabKey(existing.id)); return; }
     if (targetSessionID && !createBrowserTabMutation.isPending) createBrowserTabMutation.mutate({ targetSessionID, url });
-  }, [browserTabs, createBrowserTabMutation.isPending, createBrowserTabMutation.mutate]);
+  }, [createBrowserTabMutation.isPending, createBrowserTabMutation.mutate]);
 
   useEffect(() => {
     if (!enabled || !sessionID || !browserReveal) return;

@@ -2029,7 +2029,15 @@ function acceptTrustedFileRoots(slot, request) {
   }
 }
 
+// Directory strings are project scopes; native confirmations use exact-file
+// objects so their type cannot change when the underlying filesystem changes.
 function normalizeFileRoot(rawRoot) {
+  if (rawRoot && typeof rawRoot === "object" && typeof rawRoot.file === "string") {
+    try {
+      const file = fs.realpathSync(rawRoot.file);
+      return file === rawRoot.file && fs.statSync(file).isFile() ? Object.freeze({ file }) : "";
+    } catch { return ""; }
+  }
   const value = String(rawRoot || "").trim();
   if (!value) {
     return "";
@@ -2055,7 +2063,11 @@ function fileURLAllowed(url, roots) {
   } catch {
     return false;
   }
-  return roots.some((root) => pathIsInside(target, root));
+  return roots.some((root) => {
+    // The scope type is fixed at approval time; replacing a file with a
+    // directory must never turn a one-file confirmation into a subtree grant.
+    return typeof root === "string" ? pathIsInside(target, root) : target === root.file;
+  });
 }
 
 function pathIsInside(target, root) {

@@ -1083,6 +1083,11 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		Mode:       recoverMode,
 		CreatedAt:  state.CreatedAt,
 	})
+	if errors.Is(err, browser.ErrFileURLNotAllowed) {
+		// A saved URL is not a file grant. Native preview approval dies with
+		// its live tab; discard only that stale binding, preserving web tabs.
+		return browser.TabSnapshot{}, false, s.store.DeleteBrowserState(ctx, sessionID, state.TabID)
+	}
 	if errors.Is(err, browser.ErrTabNotFound) {
 		return browser.TabSnapshot{}, false, nil
 	}

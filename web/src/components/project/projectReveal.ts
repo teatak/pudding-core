@@ -11,9 +11,10 @@ export type ProjectEditorReveal = {
   serial: number;
 };
 
-export function resolveProjectFileReveal(
+export function resolveProjectFileReveal<T extends Pick<ProjectFileReveal, "rootPath" | "absolutePath" | "relativePath">>(
   roots: ProjectBrowserRoot[],
-  reveal: ProjectFileReveal,
+  reveal: T,
+  openFiles: ProjectSelection[] = [],
 ): ProjectSelection | undefined {
   const rootPath = normalizedPath(reveal.rootPath);
   const absolutePath = normalizedPath(reveal.absolutePath);
@@ -36,19 +37,24 @@ export function resolveProjectFileReveal(
     rawRelative = reveal.relativePath;
   }
   const relativePath = normalizedRelativePath(rawRelative);
-  if (!relativePath || relativePath === "." || relativePath.startsWith("../")) {
+  if (!relativePath || relativePath.startsWith("../")) {
     return undefined;
   }
-  return { rootID: root.id, path: relativePath };
+  const targetPath = comparablePath(`${root.path}/${relativePath}`).replace(/\/\.$/, "");
+  const existing = openFiles.find(file => {
+    const fileRoot = roots.find(root => root.id === file.rootID);
+    return fileRoot && comparablePath(`${fileRoot.path}/${file.path}`) === targetPath;
+  });
+  return existing ? { rootID: existing.rootID, path: existing.path } : { rootID: root.id, path: relativePath };
 }
 
 function relativePathFromRoot(rootPath: string, absolutePath?: string) {
-  const root = normalizedPath(rootPath).replace(/\/$/, "");
+  const root = normalizedPath(rootPath).replace(/\/$/, "") || "/";
   const absolute = normalizedPath(absolutePath);
   if (!root || !absolute || !pathIsWithin(root, absolute)) {
     return "";
   }
-  return absolute.slice(root.length).replace(/^\/+/, "");
+  return absolute.slice(root.length).replace(/^\/+/, "") || ".";
 }
 
 function pathIsWithin(rootPath: string, absolutePath: string) {

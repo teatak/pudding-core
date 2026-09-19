@@ -7,16 +7,16 @@ const http = require("node:http");
 const { execFile, spawn } = require("node:child_process");
 const { promisify } = require("node:util");
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, webContents } = require("electron");
+const { app, BrowserWindow, webContents, dialog } = require("electron");
 
 const repo = path.resolve(__dirname, "../..");
-const home = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-workspace-smoke-"));
+const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pudding-workspace-smoke-")));
 const reportDir = process.env.PUDDING_SMOKE_OUTPUT || path.join(os.tmpdir(), "pudding-workspace-smoke-results");
 fs.mkdirSync(reportDir, { recursive: true });
 process.env.PUDDING_HOME = home;
 process.env.PUDDING_ELECTRON_USER_DATA_DIR = path.join(home, "user-data");
 process.env.PUDDING_DAEMON_BIN ||= path.join(repo, "bin/puddingd");
-if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview", "project-activity"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
+if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview", "project-activity", "markdown-links"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
   const wrapper = path.join(home, "mock-daemon");
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
   fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(process.env.PUDDING_DAEMON_BIN)} -mock "$@"\n`, { mode: 0o755 });
@@ -27,6 +27,19 @@ delete process.env.PUDDING_API_BASE;
 let vite, window, apiBase, token, phase = "startup", finished = false, exitCode = 0;
 let computerBridgeIdentity, computerPreviewManager;
 const previewReveals = [];
+const browserFileWarnings = [];
+const browserFileChoices = [];
+if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
+  // Exercise production IPC, scope checks and real guest rendering. Supply only
+  // the native dialog response so unattended runs do not hang on an OS sheet.
+  const showMessageBox = dialog.showMessageBox;
+  dialog.showMessageBox = async (owner, options) => {
+    if (options.title !== '打开项目外文件') return showMessageBox.call(dialog, owner, options);
+    browserFileWarnings.push(options);
+    assert.ok(browserFileChoices.length, 'unexpected file approval dialog');
+    return { response: browserFileChoices.shift(), checkboxChecked: false };
+  };
+}
 if (process.env.PUDDING_SMOKE_SCENARIO === "computer-preview") {
   // Observe the real native managers without exposing production testing IPC.
   const { ComputerUseBridgeServer } = require('../computer-use-bridge-server.cjs');
@@ -1975,7 +1988,19 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   const source = '# Link fixture\n\n[中文文档](docs/%E4%B8%AD%E6%96%87%20Guide.md#%E5%AE%89%E8%A3%85)\n\n[Web](' + webURL + ')\n\n[Missing](gone.md)\n\n[Code](main.ts#L12)\n\n[Missing heading](#unknown-heading)\n\n[Outside](../outside.md)\n\n[Local](#local-section)\n\n[Reference][guide]\n\n[guide]: docs/%E4%B8%AD%E6%96%87%20Guide.md\n\n' + 'Spacing paragraph.\n\n'.repeat(70) + '## Local section\n\nEnd\n';
   const target = '# 中文文档\n\n[Back](../README.md)\n\n' + 'Spacing.\n\n'.repeat(65) + '## 安装\n\nInstall here.\n\n' + 'Tail.\n\n'.repeat(30);
   fs.mkdirSync(path.join(projectRoot,'docs'));
-  fs.writeFileSync(path.join(projectRoot,'README.md'),source);
+  const absoluteLink = path.join(projectRoot, 'main.ts') + '#L12';
+  const specialName = '中文 (guide)#?%.md';
+  const crossLink = '../linked-project/other.md';
+  const browserFile = pathToFileURL(path.join(home, 'local-preview.html')).href + '?from=markdown#intro';
+  const insideBrowserFile = pathToFileURL(path.join(projectRoot, 'page.html')).href + '?inside=1#local';
+  const extraLinks = `\n\n[Absolute](${absoluteLink})\n\n[Cross](${crossLink})\n\n[Directory](docs)\n\n[Root](.)\n\n[Special](${encodeURIComponent(specialName)})\n\n[HTML source](page.html)\n\n[Browser file](${browserFile})\n\n[Inside browser file](${insideBrowserFile})\n\n`;
+  const fixtureSource = source.replace('# Link fixture\n', '# Link fixture\n' + extraLinks);
+  fs.writeFileSync(path.join(projectRoot,'README.md'),fixtureSource);
+  fs.writeFileSync(path.join(projectRoot,specialName),'# Special filename\n\n[Back](README.md)\n');
+  fs.writeFileSync(path.join(projectRoot,'page.html'),'<h1 id="local">HTML_SOURCE_ONLY</h1><script>window.puddingUnsafeHTML = true</script>');
+  fs.writeFileSync(path.join(home,'linked-project','other.md'),'# CROSS_ROOT_TARGET\n\n[Back](../project/README.md)\n');
+  fs.writeFileSync(path.join(home,'linked-project','gone.md'),'# Must not be used as fallback');
+  fs.writeFileSync(path.join(home,'local-preview.html'),'<title>Pudding Markdown link test</title><h1 id="intro">Local preview test</h1>');
   fs.writeFileSync(path.join(projectRoot,'docs','中文 Guide.md'),target);
   fs.writeFileSync(path.join(projectRoot,'main.ts'), Array.from({length:40},(_,i)=>`export const value${i}= ${i};`).join('\n'));
   const existingURLs = [process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=1', process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=2'];
@@ -2026,7 +2051,7 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   check('reference-style Markdown link uses its definition destination');
   await open('README.md');
   await activate('../outside.md',true);
-  await waitFor(()=>js(`document.body.innerText.includes('路径不在项目内')`),'out-of-root link feedback');
+  await waitFor(()=>js(`document.body.innerText.includes('目标不在当前会话可访问')`),'out-of-root link feedback');
   assert.ok((await doc()).some(x=>x.endsWith(':README.md')));
   await activate('#unknown-heading',true);
   await waitFor(()=>js(`document.body.innerText.includes('文档中未找到此锚点')`),'missing anchor feedback');
@@ -2036,8 +2061,27 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   check('code links reveal line numbers and missing Markdown anchors report failure');
   await open('README.md');
   await activate('gone.md',true);
-  await waitFor(()=>js(`document.body.innerText.includes('文件不存在，或不在可访问')`),'missing file feedback');
+  await waitFor(()=>js(`document.body.innerText.includes('目标文件或目录不存在')`),'missing file feedback');
+  assert.ok((await doc()).some(x=>x.endsWith(':README.md')), 'missing link leaves source tab intact, despite same filename in another root');
   check('invalid and missing local links show feedback instead of opening a web page');
+
+  await activate(absoluteLink,true);
+  await waitFor(()=>js(`import('/__workspace_editor.js').then(({editor})=>editor.getEditors().some(e=>e.getDomNode()?.getBoundingClientRect().width>0&&e.getSelection()?.startLineNumber===12))`),'absolute source line link');
+  await open('README.md');
+  await activate(crossLink,true);
+  await waitFor(()=>js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir')?.textContent.includes('CROSS_ROOT_TARGET')`),'cross root exact target');
+  await open('README.md');
+  await activate(encodeURIComponent(specialName),true);
+  await waitFor(async()=>(await doc()).some(x=>x.endsWith(':'+specialName)),'special encoded filename');
+  await open('README.md');
+  await activate('docs',true);
+  await waitFor(()=>js(`document.activeElement?.textContent.trim()==='docs'`),'directory link focuses file tree');
+  await activate('.',true);
+  await waitFor(()=>js(`document.activeElement?.textContent.trim()==='project'`),'root link focuses file tree');
+  await activate('page.html',true);
+  await waitFor(()=>js(`import('/__workspace_editor.js').then(({editor})=>editor.getEditors().some(e=>e.getDomNode()?.getBoundingClientRect().width>0&&e.getValue().includes('HTML_SOURCE_ONLY')))`),'ordinary HTML path opens source');
+  assert.equal(await js('Boolean(window.puddingUnsafeHTML)'),false);
+  check('absolute, cross-root, encoded filenames and directory links resolve correctly; plain HTML paths do not execute');
 
   await open('README.md');
   await click('[data-project-document]:not([hidden]) button[aria-label="查看源码"]');
@@ -2060,12 +2104,65 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   assert.equal(window.webContents.getURL(),initialURL);
   await open('README.md');
   assert.ok(await js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir').textContent.includes('DRAFT_UNSAVED')`));
-  assert.equal(fs.readFileSync(path.join(projectRoot,'README.md'),'utf8'),source);
+  assert.equal(fs.readFileSync(path.join(projectRoot,'README.md'),'utf8'),fixtureSource);
   await activate(webURL,true);
   await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:')}+${q(tab.id)})`),'existing web tab selected');
   assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,3);
   await open('README.md');
   check('web link opens session-scoped workspace browser, preserves existing pages, reuses its tab and retains unsaved draft');
+  await activate('#local-section',true);
+  assert.ok(await js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir').textContent.includes('DRAFT_UNSAVED')`));
+  await activate(absoluteLink,true);
+  await open('README.md');
+  assert.ok(await js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir').textContent.includes('DRAFT_UNSAVED')`));
+  check('local anchor and file navigation preserve the unsaved Markdown draft');
+  await activate(insideBrowserFile,true);
+  const guestFor = url => webContents.getAllWebContents().find(contents => contents.getType() === 'webview' && contents.getURL() === url);
+  await waitFor(()=>guestFor(insideBrowserFile),'project file loads in real guest');
+  assert.equal(await guestFor(insideBrowserFile).executeJavaScript('window.puddingUnsafeHTML'),true);
+  assert.equal(browserFileWarnings.length,0);
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,4);
+  await open('README.md');
+  browserFileChoices.push(1);
+  await activate(browserFile,true);
+  await waitFor(()=>browserFileWarnings.length===1,'outside file warns before tab creation');
+  assert.ok(browserFileWarnings[0].detail.includes(fs.realpathSync(path.join(home,'local-preview.html'))));
+  assert.ok(browserFileWarnings[0].detail.includes('运行脚本、访问网络'));
+  assert.equal(browserFileWarnings[0].defaultId,1);
+  assert.equal(browserFileWarnings[0].cancelId,1);
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,4,'cancel creates no empty tab');
+  browserFileChoices.push(0);
+  await activate(browserFile,true);
+  await waitFor(()=>guestFor(browserFile),'confirmed outside file renders in real guest');
+  assert.equal(await guestFor(browserFile).executeJavaScript('document.querySelector("h1").textContent'),'Local preview test');
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,5);
+  assert.equal(window.webContents.getURL(),initialURL);
+  check('project file renders without warning; outside file cancel leaves no tab, confirm opens real HTML with query/fragment');
+  const chatLink = label => `Array.from(document.querySelectorAll('.pudding-conversation[data-session-id="${sessionID}"] .pudding-markdown a')).find(a=>a.textContent===${q(label)})`;
+  await clickElement(chatLink('Chat absolute'));
+  await waitFor(async()=>(await doc()).some(x=>x.endsWith(':main.ts')),'chat absolute opens source file');
+  await clickElement(chatLink('Chat relative'));
+  await waitFor(()=>js(`document.body.innerText.includes('此相对链接缺少源文件位置')`),'chat relative has no guessed directory');
+  assert.equal(window.webContents.getURL(),initialURL);
+  await clickElement(chatLink('Chat web'));
+  await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:')}+${q(tab.id)})`),'chat reuses document web tab');
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,5);
+  await clickElement(chatLink('Chat file'));
+  const fileTab = (await api(`/sessions/${sessionID}/browser/tabs`)).tabs.find(item=>item.url===browserFile);
+  await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:' + fileTab.id)})`),'chat reuses confirmed file tab');
+  assert.equal(browserFileWarnings.length,2,'existing file tab does not prompt again');
+  assert.equal((await api(`/sessions/${sessionID}/browser/tabs`)).tabs.length,5);
+  // Confirmation did not change daemon project/model file access.
+  const refused = await fetch(apiBase + `/sessions/${sessionID}/browser/tabs/${fileTab.id}/open`, {method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({url:browserFile})});
+  assert.equal(refused.status,403);
+  assert.equal((await api(`/sessions/${secondaryID}/browser/tabs`)).tabs.length,0);
+  await click(`[data-workspace-tab-key="browser:${fileTab.id}"] .pudding-workspace-tab-close`);
+  await waitFor(async()=>!(await api(`/sessions/${sessionID}/browser/tabs`)).tabs.some(item=>item.id===fileTab.id),'confirmed file tab closes');
+  browserFileChoices.push(1);
+  await clickElement(chatLink('Chat file'));
+  await waitFor(()=>browserFileWarnings.length===3,'closed file requires a new confirmation');
+  assert.equal((await api(`/sessions/${secondaryID}/browser/tabs`)).tabs.length,0);
+  check('chat reuses confirmed tab; closing clears approval; daemon file permission and other session remain unchanged');
   await screenshot('markdown-links');
 }
 
@@ -2305,9 +2402,24 @@ async function run() {
     fs.writeFileSync(path.join(folder, "target.md"), "# Reveal target");
   }
   for (let i = 1; i <= 20; i++) fs.writeFileSync(path.join(projectRoot, `file-${String(i).padStart(2, "0")}.md`), `# File ${i}\n\n${"Long project document.\n".repeat(150)}`);
-  const project = await api("/projects", "POST", { name: "Workspace smoke", rootDirs: [projectRoot] });
+  const rootDirs = [projectRoot];
+  if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
+    const linkedRoot = path.join(home, 'linked-project');
+    fs.mkdirSync(linkedRoot);
+    rootDirs.push(linkedRoot);
+  }
+  const project = await api("/projects", "POST", { name: "Workspace smoke", rootDirs });
   const primary = await api("/sessions", "POST", { title: "Workspace acceptance", provider: "mock", model: "mock", projectID: project.id });
   const secondary = await api("/sessions", "POST", { title: "Conflict source", provider: "mock", model: "mock", projectID: project.id });
+  if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
+    const turn = await api(`/sessions/${primary.id}/submit`, 'POST', {clientMessageID:'markdown-link-fixture',parts:[{type:'text',text:'Markdown link acceptance'}]});
+    await waitFor(async()=>(await api(`/sessions/${primary.id}/turns?limit=1`)).turns.some(t=>t.id===turn.turnID&&t.status==='completed'),'mock chat turn');
+    const text = `[Chat absolute](${path.join(projectRoot,'main.ts')}#L12)\n\n[Chat relative](docs/guide.md)\n\n[Chat web](${process.env.PUDDING_DEV_URL}/__workspace_smoke?from=markdown#intro)\n\n[Chat file](${pathToFileURL(path.join(home,'local-preview.html')).href}?from=markdown#intro)`;
+    await runFile('python3',['-c',`import sqlite3,json,sys
+db=sqlite3.connect(sys.argv[1])
+db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assistant'",(sys.argv[3],json.dumps([{"type":"text","text":sys.argv[3]}]),sys.argv[2]))
+db.commit();db.close()`,path.join(home,'data/pudding.db'),primary.id,text]);
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "conversation-restore") {
     await Promise.all([seedConversation(primary.id), seedConversation(secondary.id)]);
   }

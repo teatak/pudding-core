@@ -112,6 +112,7 @@ contextBridge.exposeInMainWorld("puddingElectronProjectFiles", {
 });
 
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
+  openLocalFile: (request) => ipcRenderer.invoke("pudding:browser:open-local-file", request),
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
   resolveFavicon: (request) => ipcRenderer.invoke("pudding:browser:resolve-favicon", request),
   registerWebview: (request) => ipcRenderer.invoke("pudding:browser:webview-register", request),

@@ -14,9 +14,7 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceStartPage } from "@/components/workspace/WorkspaceStartPage";
 import { useI18n } from "@/i18n";
 import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
-import { requestProjectFileReveal } from "@/state/projectRevealStore";
-import { openExternalURL } from "@/lib/desktopBridge";
-import { resolveProjectMarkdownLink } from "./projectMarkdownLinks";
+import { useMarkdownLink } from "./useMarkdownLink";
 import { languageFromPath } from "@/lib/fileLanguage";
 import type { FilePreview } from "@/state/filePreviewStore";
 
@@ -75,7 +73,6 @@ export function ProjectFileViewer({
   onClosePreviews,
   onDirtyChange,
   onOpenPreview,
-  onOpenBrowserURL,
   onPin,
   onPinInSession,
   onMoveTab,
@@ -105,7 +102,6 @@ export function ProjectFileViewer({
   onClosePreviews: (previewIDs: string[]) => void;
   onDirtyChange: (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onOpenPreview: (selection: ProjectSelection) => void;
-  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onPin: (selection: ProjectTab) => void;
   onPinInSession: (sessionID: string, selection: ProjectSelection) => void;
   onMoveTab: (activeID: string, overID: string) => void;
@@ -184,7 +180,6 @@ export function ProjectFileViewer({
             discardRequest={discardRequest}
             reveal={documentSessionID === sessionID && reveal?.key === key ? reveal : undefined}
             requestedView={requestedView?.sessionID === documentSessionID && requestedView.key === key ? requestedView : undefined}
-            onOpenBrowserURL={onOpenBrowserURL}
             onDirtyChange={onDirtyChange}
             onPin={() => onPinInSession(documentSessionID, documentSelection)}
             onReference={onReference}
@@ -195,7 +190,7 @@ export function ProjectFileViewer({
   );
 }
 
-function ProjectFileDocument({ active, visible, absolutePath, selection, sessionID, roots, token, discardRequest, reveal, requestedView, onOpenBrowserURL, onDirtyChange, onPin, onReference }: {
+function ProjectFileDocument({ active, visible, absolutePath, selection, sessionID, roots, token, discardRequest, reveal, requestedView, onDirtyChange, onPin, onReference }: {
   active: boolean;
   visible: boolean;
   absolutePath?: string;
@@ -206,7 +201,6 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
   discardRequest?: { id: number; keys: string[]; sessionID: string };
   reveal?: ProjectEditorReveal;
   requestedView?: { mode: FileViewMode };
-  onOpenBrowserURL: (sessionID: string, url: string) => void;
   onDirtyChange: (sessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onPin: () => void;
   onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
@@ -289,25 +283,7 @@ function ProjectFileDocument({ active, visible, absolutePath, selection, session
     if (existing.externalRevision !== externalRevision) updateDraft({ ...existing, externalRevision });
   }, [file, selection, sessionID]);
 
-  const openLink = (href: string) => {
-    const target = resolveProjectMarkdownLink(href, selection, roots);
-    if (target.kind === "invalid") {
-      toast.warning(t("project.browserLinkUnavailable"));
-    } else if (target.kind === "file") {
-      const root = roots.find((item) => item.id === target.selection.rootID);
-      if (!root) return;
-      const sourceLine = target.anchor?.match(/^L([1-9]\d*)(?:-L[1-9]\d*)?$/);
-      requestProjectFileReveal({
-        sessionID, rootPath: root.path, relativePath: target.selection.path,
-        line: sourceLine ? Number(sourceLine[1]) : undefined,
-        anchor: sourceLine ? undefined : target.anchor,
-      });
-    } else if (target.kind === "web") {
-      onOpenBrowserURL(sessionID, target.url);
-    } else {
-      void openExternalURL(target.url);
-    }
-  };
+  const openLink = useMarkdownLink({ current: selection, roots, sessionID, token });
 
   const saveMutation = useMutation({
     mutationFn: ({ expectedRevision, target, targetSessionID, value }: SaveDraftRequest) => {

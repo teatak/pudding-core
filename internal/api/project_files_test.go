@@ -70,6 +70,61 @@ func TestSessionWorkspaceKeepsTemporaryRootAfterBindingProject(t *testing.T) {
 	}
 }
 
+func TestProjectEntryResolvesClickedFilesAndDirectories(t *testing.T) {
+	srv, st := newTestServer(t)
+	root := t.TempDir()
+	outside := t.TempDir()
+	createProjectSession(t, st, "proj_link", "sess_link", root)
+	createProjectSession(t, st, "proj_other_link", "sess_other_link", outside)
+	if err := os.Mkdir(filepath.Join(root, "docs.md"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "中文 (guide)#?%.md"
+	if err := os.WriteFile(filepath.Join(root, name), []byte("# Hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roots := decodeJSON[struct {
+		Roots []projectRootView `json:"roots"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_link/project/tree", nil))
+	for _, tc := range []struct{ path, kind string }{{".", "dir"}, {"docs.md", "dir"}, {name, "file"}} {
+		query := url.Values{"rootID": {roots.Roots[0].ID}, "path": {tc.path}}
+		result := decodeJSON[struct{ RootID, Path, Type string }](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_link/project/entry?"+query.Encode(), nil))
+		if result.RootID != roots.Roots[0].ID || result.Path != tc.path || result.Type != tc.kind {
+			t.Fatalf("entry = %+v, want %+v", result, tc)
+		}
+	}
+	for _, tc := range []struct {
+		session, path string
+		status        int
+	}{
+		{"sess_link", "missing.md", http.StatusNotFound},
+		{"sess_link", "../outside", http.StatusForbidden},
+		{"sess_link", filepath.Join(outside, "file.md"), http.StatusForbidden},
+		{"sess_other_link", name, http.StatusBadRequest},
+	} {
+		query := url.Values{"rootID": {roots.Roots[0].ID}, "path": {tc.path}}
+		response := req(t, http.MethodGet, srv.URL+"/sessions/"+tc.session+"/project/entry?"+query.Encode(), nil)
+		response.Body.Close()
+		if response.StatusCode != tc.status {
+			t.Fatalf("%+v: status = %d", tc, response.StatusCode)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "escape")); err != nil {
+			t.Fatal(err)
+		}
+		query := url.Values{"rootID": {roots.Roots[0].ID}, "path": {"escape"}}
+		response := req(t, http.MethodGet, srv.URL+"/sessions/sess_link/project/entry?"+query.Encode(), nil)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("symlink escape: %d", response.StatusCode)
+		}
+	}
+}
+
 func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	srv, st := newTestServer(t)
 	root := t.TempDir()
