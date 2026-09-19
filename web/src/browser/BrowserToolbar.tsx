@@ -16,6 +16,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrowserAddressField } from "./BrowserAddressField";
+import { openLocalBrowserFile } from "./openLocalFile";
 import { browserOpenErrorDescription, type BrowserOpenAttempt } from "./browserErrors";
 import { BrowserOptionsMenu } from "@/browser/BrowserOptionsMenu";
 import {
@@ -142,6 +143,9 @@ export function BrowserToolbar({
   const openMutation = useMutation({
     mutationFn: async (url: string) => {
       lastOpenAttemptRef.current = { url };
+      if (/^file:/i.test(url)) {
+        return openLocalBrowserFile({ sessionID, tabID: activeTab?.id, url }, t);
+      }
       if (activeTab) {
         return openBrowserTab(token, sessionID, activeTab.id, { url });
       }
@@ -149,6 +153,10 @@ export function BrowserToolbar({
     },
     onSuccess: (tab) => {
       setPendingSubmittedURL("");
+      if (!tab) {
+        setURLDraft(browserDisplayURL(targetURL));
+        return;
+      }
       setURLDraft(browserDisplayURL(tab.url));
       void persistTab(tab, { refreshAfterPersist: !embeddedBrowser });
     },

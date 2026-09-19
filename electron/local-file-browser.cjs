@@ -8,10 +8,11 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
   return async (owner, request) => {
     const sessionID = String(request?.sessionID || "").trim();
     const raw = request?.url;
-    if (!sessionID || typeof raw !== "string") return { ok: false, reason: "invalid" };
-    const key = JSON.stringify([sessionID, raw]);
+    const tabID = typeof request?.tabID === "string" ? request.tabID.trim() : "";
+    if (!sessionID || typeof raw !== "string" || (request?.tabID !== undefined && !tabID)) return { ok: false, reason: "invalid" };
+    const key = JSON.stringify([sessionID, tabID, raw]);
     if (pending.has(key)) return pending.get(key);
-    const work = open(owner, sessionID, raw).catch(error => ({
+    const work = open(owner, sessionID, tabID, raw).catch(error => ({
       ok: false,
       reason: error.code === "ENOENT" ? "not_found" : ["EACCES", "EPERM"].includes(error.code) ? "denied" : "failed",
     }));
@@ -46,17 +47,22 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
     return { url: canonical.href, path: target, projectRoot };
   }
 
-  async function open(owner, sessionID, raw) {
+  async function open(owner, sessionID, tabID, raw) {
     const target = await resolve(sessionID, raw);
-    const existing = host.listTabs({ sessionID }).tabs.find(tab => tab.url === target.url);
+    const tabs = host.listTabs({ sessionID }).tabs;
+    // Address-bar navigation belongs to this tab, even if another tab already
+    // shows the file. Markdown clicks (no tabID) still reuse matching tabs.
+    if (tabID && !tabs.some(tab => tab.tabID === tabID)) return { ok: false, reason: "tab_not_found" };
+    const existing = tabs.find(tab => tab.url === target.url && (!tabID || tab.tabID === tabID));
     if (existing) return { ok: true, tab: existing };
     if (!target.projectRoot && !(await confirm(owner, target.path))) return { ok: false, cancelled: true };
     if (owner.isDestroyed()) return { ok: false, cancelled: true };
     // A symlink, session or project may have changed while the dialog was open.
     const current = await resolve(sessionID, raw);
     if (current.path !== target.path || current.projectRoot !== target.projectRoot) return { ok: false, reason: "changed" };
+    if (tabID && !host.listTabs({ sessionID }).tabs.some(tab => tab.tabID === tabID)) return { ok: false, reason: "tab_not_found" };
     const route = `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`;
-    const tab = await requestAPI(route, "POST");
+    const tab = tabID ? { id: tabID } : await requestAPI(route, "POST");
     try {
       const snapshot = await host.ensure({
         sessionID, tabID: tab.id, url: target.url,
@@ -66,7 +72,7 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
       });
       return { ok: true, tab: snapshot };
     } catch (error) {
-      await requestAPI(`${route}/${encodeURIComponent(tab.id)}/release`, "POST");
+      if (!tabID) await requestAPI(`${route}/${encodeURIComponent(tab.id)}/release`, "POST");
       throw error;
     }
   }

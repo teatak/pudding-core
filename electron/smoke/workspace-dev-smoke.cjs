@@ -16,7 +16,7 @@ fs.mkdirSync(reportDir, { recursive: true });
 process.env.PUDDING_HOME = home;
 process.env.PUDDING_ELECTRON_USER_DATA_DIR = path.join(home, "user-data");
 process.env.PUDDING_DAEMON_BIN ||= path.join(repo, "bin/puddingd");
-if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview", "project-activity", "markdown-links"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
+if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview", "project-activity", "markdown-links", "browser-local-navigation"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
   const wrapper = path.join(home, "mock-daemon");
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
   fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(process.env.PUDDING_DAEMON_BIN)} -mock "$@"\n`, { mode: 0o755 });
@@ -29,7 +29,7 @@ let computerBridgeIdentity, computerPreviewManager;
 const previewReveals = [];
 const browserFileWarnings = [];
 const browserFileChoices = [];
-if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
+if (['markdown-links', 'browser-local-navigation'].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
   // Exercise production IPC, scope checks and real guest rendering. Supply only
   // the native dialog response so unattended runs do not hang on an OS sheet.
   const showMessageBox = dialog.showMessageBox;
@@ -94,7 +94,7 @@ async function api(route, method = "GET", body) {
 const js = (source) => window.webContents.executeJavaScript(source, true);
 const runFile = promisify(execFile);
 async function focusSmokeWindow() {
-  if (process.env.PUDDING_SMOKE_SCENARIO === 'command-session-approvals') {
+  if (['command-session-approvals', 'browser-local-navigation'].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
     // This scenario checks renderer pointer handling, not OS keyboard/IME
     // routing. macOS may refuse foreground activation while another app is in
     // use; renderer focus and targeted input avoid stealing the user's focus.
@@ -2549,6 +2549,16 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     phase = "command session approvals";
     await require('./command-session-approvals.cjs')({ api, js, waitFor, click, clickText, check, screenshot, projectID: project.id, projectRoot });
     assert.deepEqual(rendererErrors, [], "command approval renderer errors");
+    return;
+  }
+  if (process.env.PUDDING_SMOKE_SCENARIO === "browser-local-navigation") {
+    assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+    phase = "browser local navigation";
+    await require('./browser-local-navigation.cjs')({
+      api, js, waitFor, click, input, check, screenshot, home, projectRoot,
+      sessionID: primary.id, browserFileWarnings, browserFileChoices,
+    });
+    assert.deepEqual(rendererErrors, [], "browser address renderer errors");
     return;
   }
   if (process.env.PUDDING_SMOKE_SCENARIO === "archive-navigation") {

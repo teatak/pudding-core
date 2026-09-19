@@ -153,7 +153,7 @@ export type ElectronBrowserCredentialImportResult = {
 };
 
 export type ElectronBrowserBridge = {
-  openLocalFile: (request: { sessionID: string; url: string }) => Promise<
+  openLocalFile: (request: { sessionID: string; tabID?: string; url: string }) => Promise<
     { ok: true; tab: ElectronBrowserSnapshot } | { ok: false; cancelled?: boolean; reason?: string }
   >;
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;

@@ -13,6 +13,15 @@ export function browserAddressToURL(value: string): string {
   if (searchText) {
     return browserSearchURL(searchText);
   }
+  const windowsPath = /^[a-z]:[\\/]/i.test(raw);
+  if (windowsPath || (raw.startsWith("/") && !raw.startsWith("//"))) {
+    // Native paths are filenames, not URLs: #, ? and % must stay literal.
+    // Query/fragment navigation uses an explicit file:// URL instead.
+    const path = windowsPath ? raw.replaceAll("\\", "/") : raw;
+    const parts = path.split("/").map(encodeURIComponent);
+    if (windowsPath) parts[0] = raw.slice(0, 2);
+    return `${windowsPath ? "file:///" : "file://"}${parts.join("/")}`;
+  }
   if (hasURLScheme(raw)) {
     return raw;
   }

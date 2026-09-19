@@ -5,8 +5,9 @@ import { createBrowserTab, listBrowserTabs, openBrowserTab } from "@/api/client"
 import { queryKeys } from "@/api/queryKeys";
 import { useI18n } from "@/i18n";
 import { browserWorkspaceTabKey, openWorkspaceTab } from "@/state/workspaceStore";
-import { allowElectronBrowserTab, clearElectronBrowserSessionGate, electronBrowserBridge, electronBrowserSnapshotToTab } from "./electronBridge";
+import { allowElectronBrowserTab, clearElectronBrowserSessionGate, electronBrowserBridge } from "./electronBridge";
 import { upsertBrowserTab } from "./helpers";
+import { openLocalBrowserFile } from "./openLocalFile";
 import type { BrowserTabsData } from "./types";
 
 // User navigation shares the same session-scoped browser tabs in every surface.
@@ -16,15 +17,10 @@ export function useOpenBrowserTab(token: string) {
   return useMutation({
     mutationFn: async ({ targetSessionID, url }: { targetSessionID: string; url?: string }) => {
       if (!targetSessionID) throw new Error("browser session id missing");
-      const localFile = url?.startsWith("file:") ? url : undefined;
-      const localResult = localFile ? await electronBrowserBridge()?.openLocalFile({ sessionID: targetSessionID, url: localFile }) : undefined;
-      if (localFile && !localResult?.ok) {
-        if (localResult?.cancelled) return;
-        toast.error(t(localResult?.reason === "not_found" ? "project.browserFileUnavailable" : localResult?.reason === "denied" ? "project.browserFileAccessDenied" : "project.browserLocalFileFailed"));
-        return;
-      }
-      const existing = localResult?.ok ? electronBrowserSnapshotToTab(localResult.tab)
-        : url ? (await listBrowserTabs(token, targetSessionID)).tabs.find(tab => tab.url === url) : undefined;
+      const localFile = url && /^file:/i.test(url) ? url : undefined;
+      const localTab = localFile ? await openLocalBrowserFile({ sessionID: targetSessionID, url: localFile }, t) : undefined;
+      if (localFile && !localTab) return;
+      const existing = localTab || (url ? (await listBrowserTabs(token, targetSessionID)).tabs.find(tab => tab.url === url) : undefined);
       let tab = existing || await createBrowserTab(token, targetSessionID);
       const reveal = () => {
         allowElectronBrowserTab(targetSessionID, tab.id);

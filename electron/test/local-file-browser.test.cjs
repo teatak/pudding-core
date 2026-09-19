@@ -25,7 +25,10 @@ function fixture(t) {
     listTabs: ({ sessionID }) => ({ tabs: state.tabs.filter(tab => tab.sessionID === sessionID) }),
     ensure: async request => {
       state.grants.push(request);
-      const tab = { ...request }; state.tabs.push(tab); return tab;
+      const tab = { ...request };
+      const index = state.tabs.findIndex(item => item.sessionID === tab.sessionID && item.tabID === tab.tabID);
+      if (index < 0) state.tabs.push(tab); else state.tabs[index] = tab;
+      return tab;
     },
   };
   const confirm = async (_owner, filename) => {
@@ -108,5 +111,66 @@ test("a destroyed owner does not open the file after confirmation", async t => {
   const f = fixture(t);
   f.state.onConfirm = () => { f.owner.isDestroyed = () => true; return true; };
   assert.deepEqual(await f.open(f.owner, f.request(f.outside)), { ok: false, cancelled: true });
+  assert.equal(f.state.creates, 0);
+});
+
+test("address navigation uses the requested tab even when another tab has the same URL", async t => {
+  const f = fixture(t), req = { ...f.request(f.inside), tabID: "current" };
+  f.state.tabs = [
+    { sessionID: req.sessionID, tabID: "current", url: "about:blank" },
+    { sessionID: req.sessionID, tabID: "other", url: req.url },
+  ];
+  const result = await f.open(f.owner, req);
+  assert.equal(result.ok, true);
+  assert.equal(result.tab.tabID, "current");
+  assert.equal(f.state.creates, 0);
+  assert.equal(f.state.tabs.length, 2);
+  assert.equal(f.state.grants[0].fileRoot, f.project);
+  assert.deepEqual(f.state.confirmations, []);
+});
+
+test("outside address navigation preserves the original tab on cancel, then opens in place on confirmation", async t => {
+  const f = fixture(t), req = { ...f.request(f.outside), tabID: "current" };
+  const original = { sessionID: req.sessionID, tabID: "current", url: "https://example.com/" };
+  f.state.tabs = [original]; f.state.allowed = false;
+  assert.deepEqual(await f.open(f.owner, req), { ok: false, cancelled: true });
+  assert.deepEqual(f.state.tabs, [original]);
+  assert.equal(f.state.grants.length, 0);
+  f.state.allowed = true;
+  const result = await f.open(f.owner, req);
+  assert.equal(result.tab.tabID, "current");
+  assert.equal(result.tab.url, req.url);
+  assert.deepEqual(f.state.grants[0].fileRoot, { file: f.outside });
+  assert.equal(f.state.creates, 0);
+  assert.equal(f.state.tabs.length, 1);
+});
+
+test("missing, foreign or closed target tabs are not created or resurrected by local navigation", async t => {
+  const f = fixture(t), req = { ...f.request(f.outside), tabID: "current" };
+  f.state.tabs = [{ sessionID: "other-session", tabID: "current", url: "about:blank" }];
+  assert.deepEqual(await f.open(f.owner, req), { ok: false, reason: "tab_not_found" });
+  assert.deepEqual(f.state.confirmations, []);
+  f.state.tabs = [{ sessionID: req.sessionID, tabID: "current", url: "about:blank" }];
+  f.state.onConfirm = () => { f.state.tabs = []; return true; };
+  assert.deepEqual(await f.open(f.owner, req), { ok: false, reason: "tab_not_found" });
+  assert.equal(f.state.creates, 0);
+  assert.equal(f.state.grants.length, 0);
+});
+
+test("failed local navigation never releases the existing tab", async t => {
+  const f = fixture(t), req = { ...f.request(f.inside), tabID: "current" };
+  f.state.tabs = [{ sessionID: req.sessionID, tabID: "current", url: "about:blank" }];
+  f.host.ensure = async () => { throw new Error("navigation failed"); };
+  assert.equal((await f.open(f.owner, req)).ok, false);
+  assert.equal(f.state.creates, 0);
+  assert.equal(f.state.tabs.length, 1);
+  assert.ok(f.state.requests.every(([, method]) => !method));
+});
+
+test("simultaneous navigation of two tabs is not merged into one target", async t => {
+  const f = fixture(t), req = f.request(f.inside);
+  f.state.tabs = ["a", "b"].map(tabID => ({ sessionID: req.sessionID, tabID, url: "about:blank" }));
+  const results = await Promise.all(["a", "b"].map(tabID => f.open(f.owner, { ...req, tabID })));
+  assert.deepEqual(results.map(result => result.tab.tabID), ["a", "b"]);
   assert.equal(f.state.creates, 0);
 });

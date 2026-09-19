@@ -1,6 +1,6 @@
 # Markdown 链接优化
 
-> 更新：2026-09-19。实现同项目文件链接、共享聊天解析，以及内置浏览器 file URL 预览；项目外文件由用户确认，验证记录见末尾。
+> 更新：2026-09-20。实现同项目文件链接、共享聊天解析，以及内置浏览器 file URL / 地址栏本地绝对路径预览；项目外文件由用户确认，验证记录见末尾。
 > 本文保留原文件名以维持引用。按用户最新要求，**file URL 进入浏览器，不进入文件编辑器**，替代上一版规划中的同视图规则。
 
 ## 1. 打开规则
@@ -62,18 +62,26 @@
 
 ### 3.2 file URL 交给内置浏览器
 
-受信任主 frame 的专用 IPC `pudding:browser:open-local-file`，显式带 sessionID 和 URL：
+受信任主 frame 的专用 IPC `pudding:browser:open-local-file`，显式带 sessionID 和 URL；地址栏导航另外传当前 tabID：
 
 - 主进程重新校验 URL、realpath 和普通文件类型；会话及项目 roots 从现有 daemon REST 读取，不接受调用方自报 roots/confirmed。
 - 当前会话关联项目内直接打开；项目外（含未关联项目的会话）显示原生警告，包含完整真实路径、脚本/网络提示、仅预览声明，默认按钮为取消。
 - 确认后重新核对路径和项目归属，防止弹窗期间符号链接换目标。取消、目标变化或会话消失均不创建标签页。
-- 仅在同意后通过现有 session-scoped REST 创建标签，BrowserHost 负责预览。已有相同规范 URL 的标签直接复用；并发相同点击合并，不重复弹窗。
+- Markdown 点击仅在同意后通过现有 session-scoped REST 创建标签，BrowserHost 负责预览。已有相同规范 URL 的标签直接复用；并发相同点击合并，不重复弹窗。
+- 地址栏传 tabID 时只导航该会话的现有标签，不新建、不切到另一个相同 URL 的标签。确认前后均检查目标标签仍存在，关闭或跨会话的标签不能被重新创建；失败时不释放原标签。并发合并键包含 tabID，不合并不同标签的导航。
 - 项目授权沿用目录范围；项目外仅记录 `{file: canonicalPath}`，不是父目录授权。该授权只存在于 BrowserHost 的当前标签，关闭或进程重启即失效，不写入项目或模型授权。
 - 关闭后重开需要重新确认，重启不自动恢复项目外文件授权。模型文件工具及 daemon 原有文件打开授权规则不变。
 - 保留现有沙箱、上下文隔离、关闭 Node.js、设备权限拒绝和内置浏览器独立存储分区。不新增存储分区，不放宽 `openExternal` 白名单。
 - 缺失、无法访问和打开失败有提示，不偷偷改用其他打开方式；打开失败清理本次新建标签。
 
-浏览器隔离不代表任意 HTML 安全：页面仍可能执行脚本、访问网络或诱导操作。上述目录/单文件授权限制浏览器打开和导航目标，**不是操作系统级的页面子资源目录沙箱**；本轮不另加资源拦截机制。此入口只在明确点击时启动。
+浏览器隔离不代表任意 HTML 安全：页面仍可能执行脚本、访问网络或诱导操作。上述目录/单文件授权限制浏览器打开和导航目标，**不是操作系统级的页面子资源目录沙箱**；本轮不另加资源拦截机制。此入口只在用户明确打开时启动。
+
+#### 浏览器地址栏
+
+- `/Users/.../page.html`、`C:/work/page.html` 等原生绝对路径优先识别为本地文件，不补 HTTPS、不作为搜索词。地址栏打开 HTML 是浏览器导航，和 Markdown 中普通路径打开源码的规则不同。
+- 中文、空格及原生文件名里的 `#`、`?`、`%` 按文件名编码；若需要网页 query/fragment，输入明确的 `file:///.../page.html?q=1#intro`。不猜测当前目录、不展开 `~` 或相对路径。
+- 原生路径转换与显式 file URL 共用 [openLocalFile.ts](../web/src/browser/openLocalFile.ts) 和上述主进程校验。项目内直接预览；项目外警告确认；取消或文件缺失时保持原页面并恢复地址显示。
+- 普通网址、localhost 及显式 `? 搜索词` 保持原行为，不修改 Markdown 文件编辑器的打开规则。
 
 ### 3.3 HTTP/HTTPS
 
@@ -98,6 +106,8 @@
 - `internal/api/project_files_test.go`：新接口文件/目录类型、缺失、跨会话 root 与符号链接逃逸。
 - `internal/api/browser_test.go`：预览临时授权失效后，仅删除不可恢复的标签绑定，保留其他网页与正常列表响应。
 - `electron/test/local-file-browser.test.cjs`：项目内免确认、项目外取消/确认、并发复用、单文件范围、符号链接换目标、关闭与会话隔离。
+- `web/test/browser-address.test.ts`：原生绝对路径与 URL 的区分、中文/空格/标点编码，以及普通网址/搜索回归。
+- `PUDDING_SMOKE_SCENARIO=browser-local-navigation npm --prefix web run smoke:electron-workspace`：真实地址栏提交、原标签页与同一 Chromium guest 保留、项目外取消/确认、缺失文件、前进后退；原生对话框仅自动供应用户选择。
 - `electron/test/browser-host.test.cjs`：单文件授权不放行相邻文件、符号链接换目标或后来替换成的目录。
 - `PUDDING_SMOKE_SCENARIO=markdown-links npm --prefix web run smoke:electron-workspace`：真实桌面点击、编码、标题、行号、目录、多 root、草稿与浏览器标签复用。
 
@@ -106,5 +116,7 @@
 上一轮 file URL 实现已通过：Web 113 项测试与构建、Electron 226 项测试（后续单文件权限收紧再次通过 56 项定向测试）、浏览器/项目文件 API 定向测试、共享 prompt 测试，以及源码 Electron 点击回归（11 项检查、无 renderer 错误）。真实 HTML 预览已验证；原生弹窗的取消/确认由测试自动供应，未手动检查系统弹窗外观。
 
 本轮聊天相对路径增量已通过：Web 116 项测试与构建、共享 prompt 测试，以及源码 Electron 点击回归（13 项检查、无 renderer 错误）。先以测试复现缺少源文件的拒绝，再在桌面回归中复现项目移动后旧 roots 缓存导致的错误解析，修改后通过同一场景；覆盖唯一项目根附带 scratch、查看子目录文档时点击聊天链接、HTML 源码、缺失/越界、移动及解除项目。
+
+2026-09-20 地址栏增量已通过：Web 121 项测试与构建、Electron 231 项测试，以及隔离源码 Electron 地址栏回归（5 项检查）和原有 Markdown 链接回归（13 项检查），均无 renderer 错误。先用失败测试复现本地路径被补为 HTTPS、指定标签被忽略等问题，再验证原标签页导航、取消/缺失保持原页面与前进后退。测试使用地址栏的真实提交按钮；不声称验证了后台窗口的系统回车投递或系统警告框的外观。
 
 测试环境需使用本机 Xcode 的 macOS 26.5 SDK；默认 CommandLineTools 的 macOS 27 SDK 与当前链接器不匹配。测试服务器使用临时监听端口和临时数据目录，不重启常用开发实例。
