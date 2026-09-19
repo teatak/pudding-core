@@ -57,8 +57,8 @@ type mutationCopyArgs struct {
 }
 
 // MutationTrackingForCall resolves only explicit project paths. Foreground
-// commands are included when their write targets can be determined statically;
-// opaque, root-wide, and background command effects are deliberately excluded.
+// commands report statically known targets and also observe already-tracked
+// files. Opaque commands never discover new targets; background effects are excluded.
 func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 	switch call.Name {
 	case CommandRun:
@@ -124,14 +124,15 @@ func structuredMutationTracking(targets []string) (ProjectMutationTracking, bool
 }
 
 func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
-	if runtime.GOOS == "windows" {
-		// command_run uses PowerShell on Windows, while the static analyzer is
-		// intentionally POSIX-shell based.
-		return ProjectMutationTracking{}, false
-	}
 	args, err := decodeCommandRunArgs(call.Args)
 	if err != nil || args.Background {
 		return ProjectMutationTracking{}, false
+	}
+	observation := ProjectMutationTracking{Origin: store.FileChangeOriginCommandObserved}
+	if runtime.GOOS == "windows" {
+		// command_run uses PowerShell on Windows, while the static analyzer is
+		// intentionally POSIX-shell based.
+		return observation, true
 	}
 	cwd := strings.TrimSpace(args.CWD)
 	if cwd == "" {
@@ -143,7 +144,7 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 	}
 	analysis, err := analyzeShellCommand(args.Command)
 	if err != nil || analysis.Background {
-		return ProjectMutationTracking{}, false
+		return observation, true
 	}
 
 	rawTargets := make([]string, 0, len(analysis.Redirections))
@@ -162,7 +163,7 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 	seen := make(map[string]struct{}, len(rawTargets))
 	for _, raw := range rawTargets {
 		if len(targets) >= maxCommandMutationTargets {
-			return ProjectMutationTracking{}, false
+			return observation, true
 		}
 		target, ok := resolveCommandMutationTarget(call.ProjectDirs, resolvedCWD, raw)
 		if !ok {
@@ -175,7 +176,7 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		targets = append(targets, target)
 	}
 	if len(targets) == 0 {
-		return ProjectMutationTracking{}, false
+		return observation, true
 	}
 	sort.Strings(targets)
 	return ProjectMutationTracking{
@@ -207,6 +208,8 @@ func commandMutationPaths(argv []string) []string {
 	operation := commandOperation(argv[0])
 	args := argv[1:]
 	switch operation {
+	case "curl", "wget":
+		return parseCommandDownload(argv).outputs
 	case "npx", "bunx":
 		return wrappedCommandMutationPaths(args)
 	case "npm", "pnpm", "yarn", "bun":

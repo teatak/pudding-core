@@ -19,6 +19,7 @@ type Call struct {
 	ProjectDirs     []string
 	CommandSandbox  CommandSandboxMode
 	CommandStateKey string
+	CommandGrant    *CommandSessionGrant // Engine-owned prepared invocation, never tool input.
 }
 
 type CommandSandboxMode string

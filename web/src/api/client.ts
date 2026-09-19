@@ -1270,6 +1270,20 @@ export function listPendingApprovals(token: string, sessionID: string): Promise<
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals`, listPendingApprovalsResponse);
 }
 
+const commandApprovalStatus = z.object({
+  grantCount: z.number().int().nonnegative(),
+  reusedCount: z.number().int().nonnegative(),
+  approvalReasons: z.record(z.string(), z.number().int().nonnegative()),
+});
+
+export function getCommandApprovals(token: string, sessionID: string) {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/command-approvals`, commandApprovalStatus);
+}
+
+export function revokeCommandApprovals(token: string, sessionID: string) {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/command-approvals`, commandApprovalStatus, { method: "DELETE" });
+}
+
 export function approveApproval(
   token: string,
   sessionID: string,

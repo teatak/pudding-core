@@ -34,9 +34,11 @@
 - 原生源文件位置与 Markdown URL 分开处理。先拆 query/hash，再解码一次，支持中文、空格、括号、`%23`、`%3F`、`%25`。
 - 普通绝对路径始终是文件系统绝对路径；不兼容原来“补项目根”的错误解释。
 - 本地文件 query 不参与磁盘定位；fragment 只用于标题/行号。
-- 相对路径先基于源文档目录得到唯一绝对目标，再映射到当前会话有效 root。不搜索其他目录中的同名文件，不因目标缺失更换解释。
+- Markdown 文件中的相对路径先基于源文档目录得到唯一绝对目标，再映射到当前会话有效 root。不搜索其他目录中的同名文件，不因目标缺失更换解释。
 - 不同 root 与嵌套 root 可映射同一绝对文件；已有标签页身份优先复用，保留其未保存内容。
-- 聊天没有源文档目录：普通绝对路径可以打开；相对路径明确提示缺少来源，不猜 primary root、最近 cwd 或其他会话。
+- 聊天中的相对路径以当前会话所属项目的唯一根目录为基准：例如项目为 `/work/app`，`./docs/guide.md` 打开 `/work/app/docs/guide.md`。目录来自既有 session-scoped roots API，排除 `temporary` 临时工作目录；没有项目根或有多个项目根时明确提示，不猜 primary root、最近 cwd、正在查看的文件或其他会话。
+- 聊天点击时刷新目录查询（仅查询 roots，不扫描项目文件），避免刚移动或解除项目时沿用旧缓存；不新增基目录状态。
+- 聊天中的普通绝对路径不受根目录数量影响；裸 `#标题` / `?query` 没有源文件仍提示，不能把项目目录冒充 Markdown 文件。历史消息按点击时会话的项目归属解析；需要固定指向原文件时使用绝对路径。
 - 仅接受完整本地 file URL：`file:///...`、`file://localhost/...`。远程 host、UNC 形式、不完整 `file:relative`、控制字符、畸形编码、编码分隔符和执行型 scheme 拒绝。
 - 不产生空 href 或跳回应用页面。禁止协议仍保留点击反馈，不把正文改写成另一个链接。
 
@@ -91,7 +93,7 @@
 已覆盖的自动化入口：
 
 - `web/test/markdown-links.test.ts`：URL 分类、源目录、编码、缺少来源、危险协议。
-- `web/test/project-markdown-links.test.ts`：绝对路径不补根、跨 root、file URL 单独分派。
+- `web/test/project-markdown-links.test.ts`：绝对路径不补根、跨 root、file URL 单独分派，以及聊天唯一项目根、临时目录排除、多根/无项目/裸锚点拒绝。
 - `web/test/project-reveal.test.ts`：嵌套 root 标签身份复用和目录定位。
 - `internal/api/project_files_test.go`：新接口文件/目录类型、缺失、跨会话 root 与符号链接逃逸。
 - `internal/api/browser_test.go`：预览临时授权失效后，仅删除不可恢复的标签绑定，保留其他网页与正常列表响应。
@@ -101,6 +103,8 @@
 
 桌面 smoke 保留真实 IPC、daemon、BrowserHost 和 Chromium 页面渲染，只在原生对话框返回处供应取消/确认选择，便于无人值守运行。不声称已手动验证系统弹窗外观。
 
-本次已通过：Web 113 项测试与构建、Electron 226 项测试（后续单文件权限收紧再次通过 56 项定向测试）、浏览器/项目文件 API 定向测试、共享 prompt 测试，以及最终源码 Electron 点击回归（11 项检查、无 renderer 错误）。真实 HTML 预览已验证；原生弹窗的取消/确认由测试自动供应，未手动检查系统弹窗外观。
+上一轮 file URL 实现已通过：Web 113 项测试与构建、Electron 226 项测试（后续单文件权限收紧再次通过 56 项定向测试）、浏览器/项目文件 API 定向测试、共享 prompt 测试，以及源码 Electron 点击回归（11 项检查、无 renderer 错误）。真实 HTML 预览已验证；原生弹窗的取消/确认由测试自动供应，未手动检查系统弹窗外观。
+
+本轮聊天相对路径增量已通过：Web 116 项测试与构建、共享 prompt 测试，以及源码 Electron 点击回归（13 项检查、无 renderer 错误）。先以测试复现缺少源文件的拒绝，再在桌面回归中复现项目移动后旧 roots 缓存导致的错误解析，修改后通过同一场景；覆盖唯一项目根附带 scratch、查看子目录文档时点击聊天链接、HTML 源码、缺失/越界、移动及解除项目。
 
 测试环境需使用本机 Xcode 的 macOS 26.5 SDK；默认 CommandLineTools 的 macOS 27 SDK 与当前链接器不匹配。测试服务器使用临时监听端口和临时数据目录，不重启常用开发实例。

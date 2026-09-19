@@ -26,6 +26,7 @@ type SessionItemsProps = {
   showEmptyDropTarget: boolean;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
+  onCommandApprovals: (id: string) => void;
   onOpenProjectPicker: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
   onProjectChange: (id: string, projectID: string) => Promise<void>;
@@ -72,6 +73,7 @@ export function SessionItems({
   showEmptyDropTarget,
   onSelect,
   onOpenSplit,
+  onCommandApprovals,
   onOpenProjectPicker,
   onPinChange,
   onProjectChange,
@@ -129,6 +131,7 @@ export function SessionItems({
               suppressInteractiveState={Boolean(draggingSessionID)}
               onArchive={() => onArchive(session.id)}
               onOpenSplit={() => onOpenSplit(session.id)}
+              onCommandApprovals={() => onCommandApprovals(session.id)}
               onOpenProjectPicker={() => onOpenProjectPicker(session.id)}
               onPinChange={(pinned) => onPinChange(session.id, pinned)}
               onRemoveProject={() => onProjectChange(session.id, "")}

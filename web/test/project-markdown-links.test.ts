@@ -25,6 +25,31 @@ test("absolute paths never acquire a second project prefix", () => {
   assert.deepEqual(resolve("/README.md"), { kind: "invalid", reason: "outside_project" });
 });
 
+test("chat relative paths use the sole project root, not a document directory or scratch root", () => {
+  const withScratch = [...roots, { id: "scratch", name: "Scratch", path: "/tmp/session", temporary: true }];
+  for (const href of ["docs/guide.md", "./docs/guide.md"]) {
+    assert.deepEqual(resolveProjectMarkdownLink(href, undefined, withScratch), file("docs/guide.md"));
+  }
+  assert.deepEqual(resolveProjectMarkdownLink("docs/../main.ts#L12", undefined, withScratch), file("main.ts", "L12"));
+  assert.deepEqual(resolveProjectMarkdownLink("%E4%B8%AD%E6%96%87%20Guide.md", undefined, roots), file("中文 Guide.md"));
+  assert.deepEqual(resolveProjectMarkdownLink("./", undefined, roots), file("."));
+  assert.deepEqual(resolveProjectMarkdownLink("../outside.md", undefined, roots), { kind: "invalid", reason: "outside_project" });
+});
+
+test("chat relative paths require one project root; fragments still require a source document", () => {
+  const multiRoots = [...roots, { id: "back", name: "Back", path: "/work/back" }];
+  for (const candidates of [[], multiRoots, [{ id: "scratch", name: "Scratch", path: "/tmp/session", temporary: true }]]) {
+    assert.deepEqual(resolveProjectMarkdownLink("docs/guide.md", undefined, candidates), { kind: "invalid", reason: "missing_source" });
+  }
+  for (const href of ["#section", "?raw=1#section", "#"]) {
+    assert.deepEqual(resolveProjectMarkdownLink(href, undefined, roots), { kind: "invalid", reason: "missing_source" });
+  }
+  assert.deepEqual(resolveProjectMarkdownLink("/work/back/guide.md", undefined, multiRoots), {
+    kind: "file", selection: { rootID: "back", path: "guide.md" }, anchor: undefined,
+  });
+  assert.deepEqual(resolveProjectMarkdownLink("guide.md", { rootID: "removed", path: "README.md" }, roots), { kind: "invalid", reason: "missing_source" });
+});
+
 test("relative links can cross into another authorized root", () => {
   const multiRoots = [...roots, { id: "back", name: "Back", path: "/work/back" }];
   assert.deepEqual(resolveProjectMarkdownLink("../../back/schema.md", current, multiRoots), {

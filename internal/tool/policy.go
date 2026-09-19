@@ -3,8 +3,6 @@ package tool
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -25,6 +23,7 @@ type ToolRisk struct {
 	Paths                []string  `json:"paths,omitempty"`
 	Summary              string    `json:"summary"`
 	LowRisk              bool      `json:"lowRisk,omitempty"`
+	ApprovalReasons      []string  `json:"approvalReasons,omitempty"`
 	hostAccessRequired   bool
 	requiredProjectPaths []string
 }
@@ -301,7 +300,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	if err != nil {
 		return ToolRisk{}, false
 	}
-	analysis, err := analyzeShellCommand(args.Command)
+	analysis, err := analyzeCommandPolicy(args.Command, 0)
 	if err != nil {
 		return ToolRisk{}, false
 	}
@@ -318,7 +317,10 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		Summary:   "Run project command: " + compactShellCommand(args.Command),
 		LowRisk:   lowRisk,
 	}
-	for _, rawArgv := range analysis.Commands {
+	if !lowRisk {
+		risk.ApprovalReasons = append(risk.ApprovalReasons, "dynamic_command")
+	}
+	for index, rawArgv := range append(analysis.Commands, analysis.wrappers...) {
 		argv := unwrapCommand(rawArgv)
 		if len(argv) == 0 {
 			continue
@@ -333,11 +335,20 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, args.CWD, projectDirs)...)
 		}
 		commandLowRisk := executableAllowed &&
-			!commandRequiresApproval(argv) &&
+			(index >= len(analysis.Commands) || !commandRequiresApproval(argv)) &&
 			len(outsidePaths) == 0 &&
 			!commandNeedsHostAccess(argv) &&
 			!strings.Contains(argv[0], "$")
 		risk.LowRisk = risk.LowRisk && commandLowRisk
+		if !commandLowRisk {
+			risk.ApprovalReasons = append(risk.ApprovalReasons, "sensitive_command")
+		}
+		// A download exemption never approves a compound download-and-execute
+		// workflow. Review the complete command rather than only its HTTP segment.
+		if (commandOperation == "curl" || commandOperation == "wget") && !downloadCompanionsAreNonExecuting(analysis.Commands) {
+			risk.LowRisk = false
+			risk.ApprovalReasons = append(risk.ApprovalReasons, "download_and_execute")
+		}
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		risk.hostAccessRequired = risk.hostAccessRequired || commandNeedsHostAccess(argv)
 		if isDestructiveCommand(commandOperation) {
@@ -353,6 +364,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
 		if commandEnvironmentRequiresApproval(args.Env) {
 			risk.LowRisk = false
+			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}
 		if outsidePaths := commandEnvironmentOutsideProjectPaths(args.Env, args.CWD, projectDirs); len(outsidePaths) > 0 {
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
@@ -366,14 +378,20 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		}
 	}
 	if risk.Class == RiskClassDestructive {
+		risk.ApprovalReasons = append(risk.ApprovalReasons, "destructive_command")
 		risk.Summary = "Run destructive project command: " + compactShellCommand(args.Command)
 	}
 	if args.Execution == CommandExecutionHost {
+		risk.ApprovalReasons = append(risk.ApprovalReasons, "host_execution")
 		risk.LowRisk = false
 		risk.Paths = compactRiskPaths(append(risk.Paths, risk.requiredProjectPaths...)...)
 		risk.Summary = "Run one command outside the project sandbox: " + compactShellCommand(args.Command)
 	}
 	risk.requiredProjectPaths = compactRiskPaths(risk.requiredProjectPaths...)
+	if len(risk.requiredProjectPaths) > 0 {
+		risk.ApprovalReasons = append(risk.ApprovalReasons, "outside_project")
+	}
+	risk.ApprovalReasons = compactRiskPaths(risk.ApprovalReasons...)
 	return risk, true
 }
 
@@ -429,6 +447,15 @@ func isSafeDeviceRedirection(path string) bool {
 func commandPathArgsOutsideProject(argv []string, cwd string, projectDirs []string) []string {
 	if len(argv) == 0 {
 		return nil
+	}
+	if operation := commandOperation(argv[0]); operation == "curl" || operation == "wget" {
+		var outputs []shellRedirection
+		for _, path := range parseCommandDownload(argv).outputs {
+			outputs = append(outputs, shellRedirection{Path: path, Writes: true})
+		}
+		// Download destinations are writes, including relative symlink paths.
+		// Reuse the redirection boundary rather than a read-path exemption.
+		return commandRedirectionsOutsideProject(outputs, cwd, projectDirs)
 	}
 	outside := commandPathsOutsideProject(commandPathArgs(argv), cwd, projectDirs)
 	if !commandReadsSandboxSystemPaths(commandOperation(argv[0])) {
@@ -676,7 +703,7 @@ func commandRequiresApproval(argv []string) bool {
 	case "twine":
 		return commandSubcommand(args) == "upload"
 	case "curl", "wget":
-		return !commandUsesOnlyLoopbackURLs(args)
+		return !parseCommandDownload(argv).plain
 	case "sh", "bash", "zsh", "dash", "ksh", "fish", "powershell", "pwsh", "cmd":
 		return commandUsesInlineCode(operation, args)
 	case "awk", "gawk", "mawk", "nawk":
@@ -1165,39 +1192,6 @@ func containsAttachedShortOption(args []string, options ...string) bool {
 		}
 	}
 	return false
-}
-
-func commandUsesOnlyLoopbackURLs(args []string) bool {
-	found := false
-	for _, arg := range args {
-		arg = strings.TrimSpace(arg)
-		if arg == "" || strings.HasPrefix(arg, "-") {
-			continue
-		}
-		host := ""
-		if parsed, err := url.Parse(arg); err == nil && parsed.Hostname() != "" {
-			host = parsed.Hostname()
-		} else {
-			candidate := strings.TrimPrefix(arg, "//")
-			candidate = strings.SplitN(candidate, "/", 2)[0]
-			if parsedHost, _, err := net.SplitHostPort(candidate); err == nil {
-				host = strings.Trim(parsedHost, "[]")
-			} else if strings.EqualFold(candidate, "localhost") {
-				host = candidate
-			}
-		}
-		if host == "" {
-			continue
-		}
-		found = true
-		if !strings.EqualFold(host, "localhost") {
-			ip := net.ParseIP(host)
-			if ip == nil || !ip.IsLoopback() {
-				return false
-			}
-		}
-	}
-	return found
 }
 
 func isBareCommand(executable string) bool {

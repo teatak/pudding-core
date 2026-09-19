@@ -61,6 +61,7 @@ type pendingApproval struct {
 	resolving       bool
 	abandoned       bool
 	commandGrantKey string // Server-computed; never accepted from approval payloads.
+	commandState    *commandApprovalState
 }
 
 func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
@@ -140,9 +141,13 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 				}
 			}
 			wasRunning := sess.Running
+			projectChanged := upd.ProjectID != nil && *upd.ProjectID != sess.ProjectID
 			sess, err = e.store.UpdateSession(ctx, sessionID, upd)
 			if err != nil {
 				return nil, err
+			}
+			if projectChanged {
+				e.RevokeCommandApprovals(sessionID)
 			}
 			sess.Running = wasRunning
 		} else if p.req.TargetMode == store.ModeCode && len(projectDirs) > 0 {
@@ -208,6 +213,7 @@ func (e *Engine) bindSessionProject(ctx context.Context, sessionID string, rootD
 			if err != nil {
 				return nil, err
 			}
+			e.RevokeProjectCommandApprovals(project.ID)
 		}
 		return project, nil
 	}
@@ -301,11 +307,8 @@ func (e *Engine) completePendingApproval(sessionID, approvalID string, p *pendin
 		return ErrApprovalNotFound
 	}
 	delete(e.approvals, approvalID)
-	if commandGrantKey != "" {
-		if e.commandGrants[sessionID] == nil {
-			e.commandGrants[sessionID] = make(map[string]bool)
-		}
-		e.commandGrants[sessionID][commandGrantKey] = true
+	if commandGrantKey != "" && e.commandGrants[sessionID] == p.commandState && p.commandState != nil {
+		p.commandState.grants[commandGrantKey] = true
 	}
 	return nil
 }
@@ -439,7 +442,7 @@ func capabilityApprovalPayload(req tool.CapabilityRequest, publicTargetMode stri
 	})
 }
 
-func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any, commandGrantKey string) (tool.Result, bool) {
+func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any, commandGrantKey string, commandState *commandApprovalState) (tool.Result, bool) {
 	payload := map[string]any{
 		"toolName":  call.Name,
 		"riskClass": string(risk.Class),
@@ -450,6 +453,9 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	}
 	for key, value := range details {
 		payload[key] = value
+	}
+	if call.Name == tool.CommandRun {
+		payload["approvalReasons"] = commandApprovalReasons(risk)
 	}
 	if project != nil {
 		payload["projectID"] = project.ID
@@ -467,9 +473,14 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		Payload:   mustJSON(payload),
 		CreatedAt: time.Now(),
 	}
-	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey}
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey, commandState: commandState}
 	e.mu.Lock()
 	e.approvals[approval.ID] = pending
+	if commandState != nil {
+		for _, reason := range commandApprovalReasons(risk) {
+			commandState.reasons[reason]++
+		}
+	}
 	e.mu.Unlock()
 	e.hub.Publish(event.Event{
 		SessionID:    sessionID,

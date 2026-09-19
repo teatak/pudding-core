@@ -109,7 +109,7 @@ type Engine struct {
 	mu                sync.Mutex
 	running           map[string]*activeTurn // sessionID → 当前 turn
 	approvals         map[string]*pendingApproval
-	commandGrants     map[string]map[string]bool // sessionID → explicitly approved, process-lifetime command leases
+	commandGrants     map[string]*commandApprovalState // session-scoped, process-lifetime command leases
 	inputRequests     map[string]*pendingUserInput
 	inputAnswerMu     sync.Mutex                    // serialize answer deduplication across steer/submit boundaries
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
@@ -221,7 +221,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		auxCancel:         auxCancel,
 		running:           make(map[string]*activeTurn),
 		approvals:         make(map[string]*pendingApproval),
-		commandGrants:     make(map[string]map[string]bool),
+		commandGrants:     make(map[string]*commandApprovalState),
 		turnProjectAccess: make(map[string]ProjectAccessGrant),
 		queuedRuntimeIDs:  make(map[string]string),
 		compacting:        make(map[string]bool),
@@ -2050,6 +2050,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	call.Mode = store.NormalizeAgentMode(mode)
 	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
+	var commandState *commandApprovalState
 	if risk, ok := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs); ok {
 		var approvalDetails map[string]any
 		var approvalDetailsErr error
@@ -2064,6 +2065,9 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk, approvalDetails)
 		call.CommandSandbox = commandSandboxModeForProject(project)
 		call.CommandStateKey = commandSandboxStateKey(project, sessionID)
+		if call.Name == tool.CommandRun && err == nil && required {
+			commandState = e.commandApprovalState(sessionID, project, call.ProjectDirs)
+		}
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)
 		} else if err != nil {
@@ -2076,21 +2080,30 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		commandGrantKey := ""
 		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun {
 			if grant := tool.CommandSessionGrantForCall(call); grant != nil {
+				call.CommandGrant = grant
 				commandGrantKey = commandSandboxStateKey(project, sessionID) + ":" + grant.Key
 				e.mu.Lock()
-				granted := e.commandGrants[sessionID][commandGrantKey]
+				granted := e.commandGrants[sessionID] == commandState && commandState.grants[commandGrantKey]
+				if granted {
+					commandState.reused++
+				}
 				e.mu.Unlock()
 				if granted {
 					required = false
-					call.CommandSandbox = tool.CommandSandboxBypass
+					if grant.Execution == tool.CommandExecutionHost {
+						call.CommandSandbox = tool.CommandSandboxBypass
+					}
 				} else {
+					if approvalDetails == nil {
+						approvalDetails = make(map[string]any)
+					}
 					approvalDetails["sessionGrant"] = grant
 				}
 			}
 		}
 		if result.CallID == "" && result.Name == "" && required {
 			var approved bool
-			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails, commandGrantKey)
+			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails, commandGrantKey, commandState)
 			if approved {
 				if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce {
 					execution, _ := tool.RequestedCommandExecution(call.Args)
@@ -2098,11 +2111,13 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 						call.CommandSandbox = tool.CommandSandboxBypass
 					}
 				}
-				result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 			}
 		}
 	}
 	if result.CallID == "" && result.Name == "" {
+		if commandState != nil && !e.commandApprovalStillCurrent(ctx, sessionID, turnID, mode, commandState) {
+			return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "approval_context_changed", "detail": "Command permissions or project changed; submit the command again."})
+		}
 		result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 	}
 	return result

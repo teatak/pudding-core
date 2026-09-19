@@ -49,7 +49,7 @@ import { useI18n } from "@/i18n";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-type SessionMenuCommand = "move-project" | "remove-project" | "toggle-pin" | "open-split" | "rename";
+type SessionMenuCommand = "move-project" | "remove-project" | "toggle-pin" | "open-split" | "rename" | "command-approvals";
 
 type SessionMenuEntry =
   | { type: "label"; label: string; icon?: ReactNode }
@@ -76,6 +76,7 @@ type SessionItemProps = {
   dragging: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
+  onCommandApprovals: () => void;
   onOpenProjectPicker: () => void;
   onPinChange: (pinned: boolean) => void;
   onRemoveProject: () => Promise<void>;
@@ -100,6 +101,7 @@ export function SessionItem({
   dragging,
   onSelect,
   onOpenSplit,
+  onCommandApprovals,
   onOpenProjectPicker,
   onPinChange,
   onRemoveProject,
@@ -162,6 +164,7 @@ export function SessionItem({
     },
     { type: "item", id: "open-split", label: t("session.openSplit") },
     { type: "item", id: "rename", label: t("session.rename") },
+    { type: "item", id: "command-approvals", label: t("commandApproval.title") },
   ];
 
   useRailOverlayHold(actionsOpen);
@@ -211,6 +214,9 @@ export function SessionItem({
         return;
       case "rename":
         startEditing();
+        return;
+      case "command-approvals":
+        onCommandApprovals();
     }
   }
 

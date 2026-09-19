@@ -17,6 +17,7 @@ import { useDesktopApplicationIdentity } from "@/hooks/useDesktopApplicationIden
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
+import { commandApprovalReasonLabels } from "@/lib/commandApprovalReasons";
 import { syncSessionProjectState } from "@/lib/sessionProjectState";
 import type { AssistantOverlay, AssistantOverlayPart } from "@/state/overlayStore";
 
@@ -59,6 +60,8 @@ export function ComposerApprovalBar({
   const suggestedDirName = suggestedProjectDirName(current.payload);
   const toolCallApproval = toolCallFromPayload(current.payload);
   const commandSessionGrant = isToolCallApproval ? commandSessionGrantFromPayload(current.payload) : null;
+  const sandboxGrant = commandSessionGrant?.kind === "sandbox_command";
+  const commandReasons = commandApprovalReasonLabels(current.payload, t);
   const patchApproval = patchApprovalFromPayload(current.payload);
   const gitCommitApproval = gitCommitFromPayload(current.payload);
   const isComputerAppApproval = isToolCallApproval && toolCallApproval.scope === "computer" && Boolean(toolCallApproval.appID);
@@ -73,6 +76,7 @@ export function ComposerApprovalBar({
     setPendingAction(scope);
     try {
       const response = await approveApproval(token, current.sessionID, current.approvalID, scope, isCodeApproval ? projectDirs : []);
+      if (commandSessionGrant) void queryClient.invalidateQueries({ queryKey: queryKeys.commandApprovals(current.sessionID) });
       if (scope === "session" && !isToolCallApproval) {
         await syncSessionProjectState(queryClient, token, current.sessionID, response.session);
       }
@@ -138,13 +142,13 @@ export function ComposerApprovalBar({
     if (commandSessionGrant) {
       approvalMenuItems.push({
         id: "approve-session",
-        label: t("transcript.approvalAllowPreviewSession"),
+        label: t(sandboxGrant ? "commandApproval.allowSession" : "transcript.approvalAllowPreviewSession"),
         value: "approve-session",
         render: () => (
           <ApprovalMenuOption
-            description={t("transcript.approvalAllowPreviewSessionDesc")}
+            description={t(sandboxGrant ? "commandApproval.allowSessionDescription" : "transcript.approvalAllowPreviewSessionDesc")}
             icon={ShieldCheck}
-            label={t("transcript.approvalAllowPreviewSession")}
+            label={t(sandboxGrant ? "commandApproval.allowSession" : "transcript.approvalAllowPreviewSession")}
             loading={pendingAction === "session"}
           />
         ),
@@ -277,6 +281,8 @@ export function ComposerApprovalBar({
         data-approval-body
       >
         {!isComputerAppApproval && approvalReason ? <div className="text-sm leading-5 text-muted-foreground">{approvalReason}</div> : null}
+        {commandReasons.length > 0 ? <p data-command-approval-reasons className="text-xs text-muted-foreground">{commandReasons.join(" · ")}</p> : null}
+        {commandSessionGrant ? <p className="break-all text-xs text-muted-foreground">{String(commandSessionGrant.executable)} · {String(commandSessionGrant.cwd)}</p> : null}
         {isToolCallApproval && toolCallApproval.command ? (
           <div className="max-h-28 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
             <pre className="whitespace-pre-wrap break-words"><span className="select-none text-muted-foreground">$ </span>{toolCallApproval.command}</pre>
@@ -590,10 +596,12 @@ function toolCallFromPayload(payload: unknown) {
 export function commandSessionGrantFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") return null;
   const data = payload as Record<string, unknown>;
-  if (data.toolName !== "builtin_command_run" || data.execution !== "host" || !data.sessionGrant || typeof data.sessionGrant !== "object") return null;
+  if (data.toolName !== "builtin_command_run" || !data.sessionGrant || typeof data.sessionGrant !== "object") return null;
   const grant = data.sessionGrant as Record<string, unknown>;
-  if (grant.kind !== "chrome_headless_screenshot") return null;
-  for (const field of ["executable", "cwd", "inputPath", "outputDirectory", "profilePath"]) {
+  const sandbox = grant.kind === "sandbox_command" && data.execution === "sandbox" && grant.execution === "sandbox";
+  const chrome = grant.kind === "chrome_headless_screenshot" && data.execution === "host" && grant.execution === "host";
+  if (!sandbox && !chrome) return null;
+  for (const field of sandbox ? ["executable", "cwd"] : ["executable", "cwd", "inputPath", "outputDirectory", "profilePath"]) {
     if (typeof grant[field] !== "string" || !grant[field].trim()) return null;
   }
   return grant;

@@ -202,6 +202,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
+	app.Route("/sessions/:id/command-approvals").GET(s.commandApprovals).DELETE(s.revokeCommandApprovals)
 	app.Route("/sessions/:id/approvals/:approvalID/approve").POST(s.approveApproval)
 	app.Route("/sessions/:id/approvals/:approvalID/deny").POST(s.denyApproval)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
@@ -518,6 +519,9 @@ func (s *Server) patchProject(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if upd.RootDirs != nil || upd.ApprovalMode != nil {
+		s.engine.RevokeProjectCommandApprovals(id)
+	}
 	if upd.RootDirs != nil {
 		if err := s.revokeProjectBrowserFileAccess(c.Request.Context(), project.ID); err != nil {
 			return s.browserError(c, err)
@@ -561,6 +565,8 @@ func (s *Server) mergeProject(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	seenSessionIDs := make(map[string]bool, len(targetSessionIDs)+len(sourceSessionIDs))
+	s.engine.RevokeProjectCommandApprovals(targetID)
+	s.engine.RevokeProjectCommandApprovals(req.SourceProjectID)
 	for _, sessionID := range append(targetSessionIDs, sourceSessionIDs...) {
 		if seenSessionIDs[sessionID] {
 			continue
@@ -588,6 +594,7 @@ func (s *Server) deleteProject(c *cart.Context) error {
 	if err := s.store.DeleteProject(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
+	s.engine.RevokeProjectCommandApprovals(id)
 	for _, sessionID := range sessionIDs {
 		if err := s.revokeBrowserFileAccess(c.Request.Context(), sessionID); err != nil {
 			return s.browserError(c, err)
@@ -691,9 +698,20 @@ func (s *Server) patchSession(c *cart.Context) error {
 		projectID := strings.TrimSpace(*upd.ProjectID)
 		upd.ProjectID = &projectID
 	}
+	projectChanged := false
+	if upd.ProjectID != nil {
+		before, err := s.store.GetSession(c.Request.Context(), id)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		projectChanged = before.ProjectID != *upd.ProjectID
+	}
 	sess, err := s.store.UpdateSession(c.Request.Context(), id, upd)
 	if err != nil {
 		return s.fail(c, err)
+	}
+	if projectChanged {
+		s.engine.RevokeCommandApprovals(id)
 	}
 	if upd.ProjectID != nil {
 		if err := s.revokeBrowserFileAccess(c.Request.Context(), id); err != nil {
@@ -1131,6 +1149,25 @@ func (s *Server) compactSession(c *cart.Context) error {
 type approveApprovalReq struct {
 	Scope       string   `json:"scope"`
 	ProjectDirs []string `json:"projectDirs"`
+}
+
+func (s *Server) commandApprovals(c *cart.Context) error {
+	id, _ := c.Param("id")
+	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, s.engine.CommandApprovals(id))
+	return nil
+}
+
+func (s *Server) revokeCommandApprovals(c *cart.Context) error {
+	id, _ := c.Param("id")
+	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	s.engine.RevokeCommandApprovals(id)
+	c.JSON(http.StatusOK, s.engine.CommandApprovals(id))
+	return nil
 }
 
 type approvalView struct {

@@ -40,6 +40,7 @@ type turnState struct {
 type callSnapshot struct {
 	roots   []string
 	targets []string
+	known   []fileKey
 	before  map[fileKey]fileSnapshot
 	origin  store.FileChangeOrigin
 	ready   bool
@@ -73,7 +74,8 @@ func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string) erro
 }
 
 // BeginCallWithOrigin captures explicit targets and records how the mutation
-// was attributed. It never expands an empty or project-root target.
+// was attributed. Command observations additionally capture already-tracked
+// files. Empty or project-root targets never expand into a project-wide scan.
 func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin) error {
 	turnID = strings.TrimSpace(turnID)
 	callID = strings.TrimSpace(callID)
@@ -85,12 +87,28 @@ func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []st
 		return nil
 	}
 	targets = normalizeTargets(roots, targets)
-	if len(targets) == 0 {
-		return nil
-	}
-
 	t.mu.Lock()
 	tracked := t.turns[turnID]
+	var known []fileKey
+	if tracked != nil && origin == store.FileChangeOriginCommandObserved {
+		// Opaque commands may modify or remove files already owned by this turn.
+		// Observe those exact files, never discover additional project content.
+		for key := range tracked.touched {
+			if containingRoot(roots, key.root) != "" {
+				known = append(known, key)
+			}
+		}
+		sort.Slice(known, func(i, j int) bool {
+			if known[i].root != known[j].root {
+				return known[i].root < known[j].root
+			}
+			return known[i].path < known[j].path
+		})
+	}
+	if len(targets) == 0 && len(known) == 0 {
+		t.mu.Unlock()
+		return nil
+	}
 	if tracked == nil {
 		tracked = newTurnState()
 		t.turns[turnID] = tracked
@@ -98,12 +116,13 @@ func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []st
 	call := &callSnapshot{
 		roots:   roots,
 		targets: targets,
+		known:   known,
 		origin:  store.NormalizeFileChangeOrigin(origin),
 	}
 	tracked.calls[callID] = call
 	t.mu.Unlock()
 
-	before, err := snapshotScope(roots, targets)
+	before, err := snapshotScope(roots, targets, known)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	current := t.turns[turnID]
@@ -138,7 +157,7 @@ func (t *Tracker) EndCall(turnID, callID string) error {
 	if !ok || !call.ready {
 		return nil
 	}
-	after, err := snapshotScope(call.roots, call.targets)
+	after, err := snapshotScope(call.roots, call.targets, call.known)
 	if err != nil {
 		t.mu.Lock()
 		if current := t.turns[turnID]; current == tracked && current.calls[callID] == call {
@@ -331,10 +350,7 @@ func normalizeTargets(roots, targets []string) []string {
 	return out
 }
 
-func snapshotScope(roots, targets []string) (map[fileKey]fileSnapshot, error) {
-	if len(targets) == 0 {
-		return map[fileKey]fileSnapshot{}, nil
-	}
+func snapshotScope(roots, targets []string, known []fileKey) (map[fileKey]fileSnapshot, error) {
 	out := make(map[fileKey]fileSnapshot)
 	remainingContentBytes := int64(maxSnapshotTotalContentBytes)
 	for _, target := range targets {
@@ -344,6 +360,23 @@ func snapshotScope(roots, targets []string) (map[fileKey]fileSnapshot, error) {
 		}
 		if err := snapshotPath(out, root, target, &remainingContentBytes); err != nil {
 			return nil, err
+		}
+	}
+	for _, key := range known {
+		if _, captured := out[key]; captured {
+			continue
+		}
+		path := filepath.Join(key.root, filepath.FromSlash(key.path))
+		// Do not traverse a parent replaced by an out-of-project symlink.
+		if _, _, _, err := projectpath.Resolve(roots, filepath.Dir(path), true, true); err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		// A previously tracked file becoming a directory must not cause a scan.
+		if file, ok := readSnapshotFile(path, &remainingContentBytes); ok {
+			out[key] = file
 		}
 	}
 	return out, nil

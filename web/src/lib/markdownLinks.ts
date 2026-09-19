@@ -6,9 +6,11 @@ export type MarkdownLink =
 
 const controls = /[\u0000-\u001f\u007f]/;
 
-// Source is a native absolute filename, not a renderer URL or a project root.
+type MarkdownLinkBase = { kind: "file" | "directory"; path: string };
+
+// Base is a native absolute path with an explicit kind, never a renderer URL.
 // Decode the URL path once, after separating query/hash from the filename.
-export function resolveMarkdownLink(raw: string, sourcePath?: string): MarkdownLink {
+export function resolveMarkdownLink(raw: string, base?: MarkdownLinkBase): MarkdownLink {
   const value = raw.trim();
   if (!value || controls.test(raw)) return { kind: "invalid", reason: "invalid" };
   try {
@@ -34,10 +36,11 @@ export function resolveMarkdownLink(raw: string, sourcePath?: string): MarkdownL
       rawPath = value.split(/[?#]/, 1)[0];
     }
     const pathname = decodeURIComponent(rawPath);
-    const source = sourcePath ? normalizeAbsolutePath(sourcePath) : undefined;
+    const source = base ? normalizeAbsolutePath(base.path) : undefined;
+    const directory = base?.kind === "directory" ? source : source?.slice(0, source.lastIndexOf("/") + 1);
     const absolute = isAbsolutePath(pathname)
       ? pathname
-      : !pathname ? source : source && `${source.slice(0, source.lastIndexOf("/") + 1)}${pathname}`;
+      : !pathname ? (base?.kind === "file" ? source : undefined) : directory && `${directory}/${pathname}`;
     if (!absolute) return { kind: "invalid", reason: "missing_source" };
     const absolutePath = normalizeAbsolutePath(absolute);
     return absolutePath ? { kind: "file", absolutePath, anchor } : { kind: "invalid", reason: "invalid" };

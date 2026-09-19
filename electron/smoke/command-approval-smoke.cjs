@@ -44,7 +44,7 @@ async function run() {
         window.fixture={requests:[],show(bounded=true){
           this.requests=[];setLocale('zh-CN');
           const approval={type:'approval',approvalID:bounded?'bounded':'ordinary',approvalKind:'tool_call',sessionID:'s',payload:{toolName:'builtin_command_run',operation:'shell',execution:'host',hostAccessReason:'渲染项目内预览页面',command:'Chrome --headless=new --user-data-dir=.preview-profile --screenshot=preview.png page.html',
-            ...(bounded?{sessionGrant:{kind:'chrome_headless_screenshot',executable:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',cwd:'/project',inputPath:'/project/page.html',outputDirectory:'/project',profilePath:'/project/.preview-profile'}}:{})}};
+            ...(bounded?{sessionGrant:{kind:'chrome_headless_screenshot',execution:'host',executable:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',cwd:'/project',inputPath:'/project/page.html',outputDirectory:'/project',profilePath:'/project/.preview-profile'}}:{})}};
           root.render(h(QueryClientProvider,{client},h(TooltipProvider,null,h('div',{style:{position:'relative',height:0,margin:'620px 24px 0'}},h(ComposerApprovalBar,{key:approval.approvalID,approval,token:'fixture'})))));
         }};
         window.fetch=async(url,init)=>{window.fixture.requests.push({url:String(url),body:JSON.parse(init.body)});return Response.json({status:String(url).endsWith('/deny')?'denied':'approved',session});};

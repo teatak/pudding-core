@@ -35,19 +35,24 @@ export function useMarkdownLink({ current, roots, sessionID, token }: {
         if (!browser.isPending) browser.mutate({ targetSessionID: sessionID, url: initial.url });
         return;
       }
-      // A chat has no source directory. Do not fetch roots just to guess one.
-      if (!current && initial.kind === "invalid") {
-        toast.warning(t(initial.reason === "missing_source" ? "project.browserLinkMissingSource" : "project.browserLinkUnavailable"));
+      // Relative paths need session roots before their base can be determined.
+      if (initial.kind === "invalid" && initial.reason !== "missing_source") {
+        toast.warning(t("project.browserLinkUnavailable"));
         return;
       }
       if (!sessionID) { toast.warning(t("project.browserLinkMissingSource")); return; }
       const effectiveRoots = roots || (await queryClient.fetchQuery({
         queryKey: queryKeys.projectBrowserRoots(sessionID),
         queryFn: () => listProjectBrowserRoots(token, sessionID),
+        // Chat links use the current project assignment, even just after a move.
+        staleTime: 0,
       })).roots;
       const target = resolveProjectMarkdownLink(href, current, effectiveRoots);
       if (target.kind !== "file") {
-        toast.warning(t(target.kind === "invalid" && target.reason === "outside_project" ? "project.browserLinkOutsideProject" : "project.browserLinkUnavailable"));
+        const message = target.kind === "invalid" && target.reason === "outside_project" ? "project.browserLinkOutsideProject"
+          : target.kind === "invalid" && target.reason === "missing_source" ? "project.browserLinkMissingSource"
+          : "project.browserLinkUnavailable";
+        toast.warning(t(message));
         return;
       }
       const root = effectiveRoots.find(item => item.id === target.selection.rootID)!;

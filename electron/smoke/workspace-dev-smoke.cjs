@@ -94,6 +94,14 @@ async function api(route, method = "GET", body) {
 const js = (source) => window.webContents.executeJavaScript(source, true);
 const runFile = promisify(execFile);
 async function focusSmokeWindow() {
+  if (process.env.PUDDING_SMOKE_SCENARIO === 'command-session-approvals') {
+    // This scenario checks renderer pointer handling, not OS keyboard/IME
+    // routing. macOS may refuse foreground activation while another app is in
+    // use; renderer focus and targeted input avoid stealing the user's focus.
+    window.showInactive();
+    window.webContents.focus();
+    return;
+  }
   const helper = path.join(home, "macos-input");
   if (!fs.existsSync(helper)) await runFile("xcrun", ["clang", "-fobjc-arc", "-framework", "AppKit", "-framework", "ApplicationServices", "-framework", "Carbon", path.join(__dirname, "macos-input.m"), "-o", helper]);
   // Several source Electron instances may share one bundle ID; activate this PID.
@@ -2002,6 +2010,7 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   fs.writeFileSync(path.join(home,'linked-project','gone.md'),'# Must not be used as fallback');
   fs.writeFileSync(path.join(home,'local-preview.html'),'<title>Pudding Markdown link test</title><h1 id="intro">Local preview test</h1>');
   fs.writeFileSync(path.join(projectRoot,'docs','中文 Guide.md'),target);
+  fs.writeFileSync(path.join(projectRoot,'docs','guide.md'),'# CHAT_PROJECT_ROOT\n\n[Back](../README.md)\n');
   fs.writeFileSync(path.join(projectRoot,'main.ts'), Array.from({length:40},(_,i)=>`export const value${i}= ${i};`).join('\n'));
   const existingURLs = [process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=1', process.env.PUDDING_DEV_URL + '/__workspace_smoke?existing=2'];
   for (const url of existingURLs) {
@@ -2094,8 +2103,11 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   window.webContents.sendInputEvent({type:'keyUp',keyCode:'Left'});
   await waitFor(()=>js(`(${link(webURL)}).classList.contains('vditor-ir__node--expand')`),'link expanded for text editing');
   await activate(webURL,true);
-  await waitFor(async()=> (await api(`/sessions/${sessionID}/browser/tabs`)).tabs.some(t=>t.url===webURL),'web URL opened in correct session');
-  const tabsResult=await api(`/sessions/${sessionID}/browser/tabs`);
+  let tabsResult;
+  await waitFor(async()=> {
+    tabsResult=await api(`/sessions/${sessionID}/browser/tabs`);
+    return tabsResult.tabs.some(t=>t.url===webURL);
+  },'web URL opened in correct session');
   const tab=tabsResult.tabs.find(t=>t.url===webURL);
   assert.equal(tabsResult.tabs.length,3);
   assert.ok(existingURLs.every(url=>tabsResult.tabs.some(tab=>tab.url===url)), 'existing browser pages preserved');
@@ -2142,7 +2154,8 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   await clickElement(chatLink('Chat absolute'));
   await waitFor(async()=>(await doc()).some(x=>x.endsWith(':main.ts')),'chat absolute opens source file');
   await clickElement(chatLink('Chat relative'));
-  await waitFor(()=>js(`document.body.innerText.includes('此相对链接缺少源文件位置')`),'chat relative has no guessed directory');
+  await waitFor(()=>js(`document.body.innerText.includes('无法确定此相对链接的源文件或唯一项目目录')`),'chat with multiple project roots has no guessed directory');
+  assert.ok((await doc()).some(x=>x.endsWith(':main.ts')), 'ambiguous chat link preserves the selected document');
   assert.equal(window.webContents.getURL(),initialURL);
   await clickElement(chatLink('Chat web'));
   await waitFor(()=>js(`import('/src/state/workspaceStore.ts').then(m=>m.getWorkspaceSessionUI(${q(sessionID)}).activeTab===${q('browser:')}+${q(tab.id)})`),'chat reuses document web tab');
@@ -2163,6 +2176,54 @@ async function verifyMarkdownLinks(sessionID, secondaryID, projectRoot) {
   await waitFor(()=>browserFileWarnings.length===3,'closed file requires a new confirmation');
   assert.equal((await api(`/sessions/${secondaryID}/browser/tabs`)).tabs.length,0);
   check('chat reuses confirmed tab; closing clears approval; daemon file permission and other session remain unchanged');
+
+  // Rebind the same chat to test live project identity, rather than manufacturing
+  // a base from the selected document or letting Query retain the old roots.
+  const originalProject = (await api(`/sessions/${sessionID}`)).projectID;
+  const entryRequests = [];
+  window.webContents.session.webRequest.onBeforeRequest({urls:[`${apiBase}/sessions/*/project/entry*`]}, (details, callback) => {
+    entryRequests.push(details.url);
+    callback({});
+  });
+  const singleProject = await api('/projects', 'POST', { name: 'Single relative base', rootDirs: [projectRoot] });
+  const scratch = path.join(home, 'temp', '.code', sessionID);
+  fs.mkdirSync(scratch, {recursive:true});
+  fs.writeFileSync(path.join(scratch, 'gone.md'), '# Must not be used as fallback');
+  await api(`/sessions/${sessionID}`, 'PATCH', {projectID:singleProject.id});
+  const singleRoots = (await api(`/sessions/${sessionID}/project/tree`)).roots;
+  assert.equal(singleRoots.filter(root=>!root.temporary).length,1);
+  assert.equal(singleRoots.filter(root=>root.temporary).length,1);
+  await open('docs/中文 Guide.md');
+  await clickElement(chatLink('Chat relative'));
+  await waitFor(()=>js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir')?.textContent.includes('CHAT_PROJECT_ROOT')`),'chat resolves from sole project root, not selected docs directory or scratch');
+  await clickElement(chatLink('Chat dot'));
+  await waitFor(()=>js(`import('/__workspace_editor.js').then(({editor})=>editor.getEditors().some(e=>e.getDomNode()?.getBoundingClientRect().width>0&&e.getValue().includes('HTML_SOURCE_ONLY')))`),'chat ./ HTML path opens source without execution');
+  await clickElement(chatLink('Chat missing'));
+  await waitFor(()=>js(`document.body.innerText.includes('目标文件或目录不存在')`),'missing chat path reports absence, not same-named scratch file');
+  assert.ok((await doc()).some(x=>x.endsWith(':page.html')));
+  await clickElement(chatLink('Chat escape'));
+  await waitFor(()=>js(`document.body.innerText.includes('目标不在当前会话可访问')`),'chat relative traversal does not gain file permissions');
+  assert.equal((await api(`/sessions/${secondaryID}`)).projectID,originalProject);
+  check('chat uses the sole live project root, excludes scratch, preserves source-relative documents and rejects missing/outside targets');
+
+  // A moved chat must use its new project even with the same relative filename.
+  const movedRoot = path.join(home, 'moved-project');
+  fs.mkdirSync(path.join(movedRoot,'docs'),{recursive:true});
+  fs.writeFileSync(path.join(movedRoot,'docs','guide.md'),'# CHAT_MOVED_PROJECT\n\n[Local](#chat-moved-project)\n');
+  const movedProject = await api('/projects','POST',{name:'Moved relative base',rootDirs:[movedRoot]});
+  await api(`/sessions/${sessionID}`,'PATCH',{projectID:movedProject.id});
+  await clickElement(chatLink('Chat relative'));
+  await waitFor(()=>js(`document.querySelector('[data-project-document]:not([hidden]) .vditor-ir')?.textContent.includes('CHAT_MOVED_PROJECT')`),'chat resolves against new project after reassignment');
+  await api(`/sessions/${sessionID}`,'PATCH',{projectID:''});
+  const rootsAfterDetach = (await api(`/sessions/${sessionID}/project/tree`)).roots;
+  assert.ok(rootsAfterDetach.length===1&&rootsAfterDetach[0].temporary, 'detached chat has only scratch');
+  const before = entryRequests.length;
+  await clickElement(chatLink('Chat relative'));
+  await waitFor(()=>js(`document.body.innerText.includes('无法确定此相对链接的源文件或唯一项目目录')`),'detached chat does not reuse its former project or scratch as a base');
+  assert.equal(entryRequests.length,before,'unresolved link does not access a file');
+  window.webContents.session.webRequest.onBeforeRequest(null);
+  assert.equal(window.webContents.getURL(),initialURL);
+  check('moving a chat changes its relative base; detaching it disables relative resolution without guessing a scratch root');
   await screenshot('markdown-links');
 }
 
@@ -2414,7 +2475,7 @@ async function run() {
   if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
     const turn = await api(`/sessions/${primary.id}/submit`, 'POST', {clientMessageID:'markdown-link-fixture',parts:[{type:'text',text:'Markdown link acceptance'}]});
     await waitFor(async()=>(await api(`/sessions/${primary.id}/turns?limit=1`)).turns.some(t=>t.id===turn.turnID&&t.status==='completed'),'mock chat turn');
-    const text = `[Chat absolute](${path.join(projectRoot,'main.ts')}#L12)\n\n[Chat relative](docs/guide.md)\n\n[Chat web](${process.env.PUDDING_DEV_URL}/__workspace_smoke?from=markdown#intro)\n\n[Chat file](${pathToFileURL(path.join(home,'local-preview.html')).href}?from=markdown#intro)`;
+    const text = `[Chat absolute](${path.join(projectRoot,'main.ts')}#L12)\n\n[Chat relative](docs/guide.md)\n\n[Chat dot](./page.html)\n\n[Chat missing](gone.md)\n\n[Chat escape](../outside.md)\n\n[Chat web](${process.env.PUDDING_DEV_URL}/__workspace_smoke?from=markdown#intro)\n\n[Chat file](${pathToFileURL(path.join(home,'local-preview.html')).href}?from=markdown#intro)`;
     await runFile('python3',['-c',`import sqlite3,json,sys
 db=sqlite3.connect(sys.argv[1])
 db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assistant'",(sys.argv[3],json.dumps([{"type":"text","text":sys.argv[3]}]),sys.argv[2]))
@@ -2481,6 +2542,13 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
       await delay(600); // Let Chromium finish the native wheel animation before comparing offsets.
     } });
     assert.deepEqual(rendererErrors, [], "compaction renderer errors");
+    return;
+  }
+  if (process.env.PUDDING_SMOKE_SCENARIO === "command-session-approvals") {
+    assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+    phase = "command session approvals";
+    await require('./command-session-approvals.cjs')({ api, js, waitFor, click, clickText, check, screenshot, projectID: project.id, projectRoot });
+    assert.deepEqual(rendererErrors, [], "command approval renderer errors");
     return;
   }
   if (process.env.PUDDING_SMOKE_SCENARIO === "archive-navigation") {

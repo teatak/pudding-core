@@ -52,6 +52,7 @@ import {
   SessionListSkeleton,
 } from "@/components/session-rail/SessionItems";
 import { SessionProjectPickerDialog } from "@/components/session-rail/SessionProjectPickerDialog";
+import { CommandApprovalsDialog } from "@/components/session-rail/CommandApprovalsDialog";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -192,6 +193,7 @@ export function RailPanel({
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const [draggingSessionID, setDraggingSessionID] = useState<string | null>(null);
   const [projectPickerSessionID, setProjectPickerSessionID] = useState<string | null>(null);
+  const [commandApprovalsSessionID, setCommandApprovalsSessionID] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<SessionDropTarget | null>(null);
   const [dragPreview, setDragPreview] = useState<{
     id: string;
@@ -860,6 +862,7 @@ export function RailPanel({
                               onArchive={onArchive}
                               onOpenSplit={onOpenSplit}
                               onOpenProjectPicker={setProjectPickerSessionID}
+                              onCommandApprovals={setCommandApprovalsSessionID}
                               onPinChange={onPinChange}
                               onProjectChange={onProjectChange}
                               onPointerDragCancel={clearDragState}
@@ -914,6 +917,7 @@ export function RailPanel({
                                 onArchive={onArchive}
                                 onOpenSplit={onOpenSplit}
                                 onOpenProjectPicker={setProjectPickerSessionID}
+                                onCommandApprovals={setCommandApprovalsSessionID}
                                 onPinChange={onPinChange}
                                 onProjectChange={onProjectChange}
                                 onPointerDragCancel={clearDragState}
@@ -1036,6 +1040,7 @@ export function RailPanel({
                                             onArchive={onArchive}
                                             onOpenSplit={onOpenSplit}
                                             onOpenProjectPicker={setProjectPickerSessionID}
+                                            onCommandApprovals={setCommandApprovalsSessionID}
                                             onPinChange={onPinChange}
                                             onProjectChange={onProjectChange}
                                             onPointerDragCancel={clearDragState}
@@ -1105,6 +1110,7 @@ export function RailPanel({
             return onProjectChange(projectPickerSessionID, projectID);
           }}
         />
+        {commandApprovalsSessionID ? <CommandApprovalsDialog key={commandApprovalsSessionID} token={token} sessionID={commandApprovalsSessionID} onClose={() => setCommandApprovalsSessionID(null)} /> : null}
       </SidebarProvider>
     </RailOverlayHoldContext.Provider>
   );

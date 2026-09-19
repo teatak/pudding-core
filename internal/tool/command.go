@@ -81,6 +81,13 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	if call.CommandGrant != nil {
+		executable, commandArgs, env, err = call.CommandGrant.invocation(call)
+		if err != nil {
+			return toolJSONError(out, "approval_context_changed", err.Error())
+		}
+		shell = "sh"
+	}
 	execution, err := r.commands.Prepare(commandSpec{
 		Executable:  executable,
 		Args:        commandArgs,
