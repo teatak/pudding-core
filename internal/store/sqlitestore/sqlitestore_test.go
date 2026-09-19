@@ -216,12 +216,11 @@ func TestProjectsUseLatestSessionActivity(t *testing.T) {
 	if len(projects) != 2 || projects[0].ID != older.ID {
 		t.Fatalf("projects not sorted by session activity: %+v", projects)
 	}
-	if projects[0].LastActivityAt == nil ||
-		projects[0].LastActivityAt.UnixMilli() != session.LastActivityAt.UnixMilli() {
+	if projects[0].LastActivityAt.UnixMilli() != session.LastActivityAt.UnixMilli() {
 		t.Fatalf("last activity = %v, want %v", projects[0].LastActivityAt, session.LastActivityAt)
 	}
-	if projects[1].LastActivityAt != nil {
-		t.Fatalf("project without sessions has activity: %v", projects[1].LastActivityAt)
+	if !projects[1].LastActivityAt.Equal(projects[1].CreatedAt) {
+		t.Fatalf("project without sessions should retain creation time: %v", projects[1].LastActivityAt)
 	}
 }
 
@@ -671,8 +670,8 @@ func TestArchiveSessionLifecycle(t *testing.T) {
 		t.Fatalf("archived queued sessions = %+v, err=%v", queued, err)
 	}
 	projects, err := st.ListProjects(ctx)
-	if err != nil || len(projects) != 1 || projects[0].LastActivityAt != nil {
-		t.Fatalf("archived activity leaked into project: projects=%+v err=%v", projects, err)
+	if err != nil || len(projects) != 1 || !projects[0].LastActivityAt.Equal(archived.LastActivityAt) {
+		t.Fatalf("archiving lost project activity: projects=%+v err=%v", projects, err)
 	}
 	expired, err := st.ListExpiredArchivedSessionIDs(ctx, time.Now().Add(time.Second))
 	if err != nil || len(expired) != 1 || expired[0] != "sess_archive" {

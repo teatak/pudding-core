@@ -34,6 +34,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/turnfiles"
+	"golang.org/x/sync/singleflight"
 )
 
 type Server struct {
@@ -61,6 +62,8 @@ type Server struct {
 	oauth             map[string]oauthStartState
 	oauthBroker       *oauthbroker.Client
 	github            *githubapp.Client
+
+	providerSyncs singleflight.Group
 }
 
 type voiceController interface {

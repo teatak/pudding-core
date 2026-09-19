@@ -31,7 +31,7 @@ const providers: ProviderProfile[] = [
     id: "google-smoke",
     displayName: "Google smoke",
     protocol: "google",
-    brand: "google",
+    brand: mode === "sync" ? "openrouter" : "google",
     apiKeySet: false,
     baseURL: "https://example.invalid",
     models: [{ id: "gemini-3.1-pro-preview", displayName: "Gemini smoke" }],
@@ -85,12 +85,25 @@ let holdResponses = false;
 let failNextResponse = false;
 let lastError = "";
 const heldResponses: (() => void)[] = [];
+const heldSyncResponses: (() => void)[] = [];
+let syncRequests = 0;
+let serverProviders = providers;
 
 // Intercept only the fixture API. The picker still uses the real API payload
 // schema, mutation, Query cache and preference store.
-const fetchOriginal = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+  if (url.pathname === "/providers/google-smoke/sync" && init?.method === "POST") {
+    const count = ++syncRequests;
+    await new Promise<void>((resolve) => heldSyncResponses.push(resolve));
+    serverProviders = serverProviders.map((profile) => profile.id === "google-smoke"
+      ? { ...profile, models: profile.models.map((model) => ({ ...model, costMultiplier: count / 10 })) }
+      : profile);
+    return new Response(JSON.stringify(serverProviders.find((profile) => profile.id === "google-smoke")));
+  }
+  if (url.pathname === "/providers") {
+    return new Response(JSON.stringify({ providers: serverProviders }));
+  }
   if (url.pathname === `/sessions/${initialSession.id}` && init?.method === "PATCH") {
     const patch = JSON.parse(String(init.body)) as Patch;
     patches.push(patch);
@@ -137,6 +150,8 @@ type Snapshot = {
   session: Session;
   audioRequests: { enabled: boolean; mode?: AudioInputMode }[];
   audioBindings: AudioBindings;
+  syncRequests: number;
+  providers: ProviderProfile[];
 };
 declare global {
   interface Window {
@@ -144,6 +159,8 @@ declare global {
       snapshot: () => Snapshot;
       respond: (options: { hold?: boolean; failNext?: boolean }) => void;
       release: () => void;
+      releaseSync: () => void;
+      removeProfile: (id: string) => Promise<void>;
       update: (patch: { provider: string; model: string; reasoningEffort: string }) => Promise<Session | null>;
     };
   }
@@ -188,12 +205,19 @@ function Fixture() {
       session: queryClient.getQueryData<Session>(queryKeys.session(initialSession.id))!,
       audioRequests,
       audioBindings: queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings())!.bindings,
+      syncRequests,
+      providers: queryClient.getQueryData<{ providers: ProviderProfile[] }>(queryKeys.providers())!.providers,
     }),
     respond: (options) => {
       holdResponses = options.hold || false;
       failNextResponse = options.failNext || false;
     },
     release: () => heldResponses.shift()?.(),
+    releaseSync: () => heldSyncResponses.shift()?.(),
+    removeProfile: async (id) => {
+      serverProviders = serverProviders.filter((profile) => profile.id !== id);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    },
     update,
   };
 

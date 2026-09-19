@@ -16,7 +16,7 @@ fs.mkdirSync(reportDir, { recursive: true });
 process.env.PUDDING_HOME = home;
 process.env.PUDDING_ELECTRON_USER_DATA_DIR = path.join(home, "user-data");
 process.env.PUDDING_DAEMON_BIN ||= path.join(repo, "bin/puddingd");
-if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
+if (["conversation-restore", "conversation-resize", "conversation-markdown-resize", "native-ime", "computer-preview", "project-activity"].includes(process.env.PUDDING_SMOKE_SCENARIO)) {
   const wrapper = path.join(home, "mock-daemon");
   const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
   fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(process.env.PUDDING_DAEMON_BIN)} -mock "$@"\n`, { mode: 0o755 });
@@ -2328,7 +2328,7 @@ db.execute("UPDATE messages SET text=?,parts=? WHERE session_id=? AND role='assi
 db.commit()
 db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
   }
-  const canvasCount = ["archive-navigation", "automation-presentation", "context-compaction"].includes(process.env.PUDDING_SMOKE_SCENARIO) ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
+  const canvasCount = ["archive-navigation", "automation-presentation", "context-compaction", "project-activity"].includes(process.env.PUDDING_SMOKE_SCENARIO) ? 1 : process.env.PUDDING_SMOKE_SCENARIO === "artifact-visibility" ? 3 : 20;
   for (let i = 1; i <= canvasCount; i++) await api(`/sessions/${primary.id}/canvas/items`, "POST", {
     id: `smoke-${String(i).padStart(2, "0")}`, kind: "markdown", title: `Canvas ${String(i).padStart(2, "0")}`, item: { markdown: `# Canvas ${i}\n\n${"Persistent content.\n".repeat(100)}` },
   });
@@ -2351,6 +2351,13 @@ db.close()`, path.join(home, "data/pudding.db"), primary.id, markdown]);
     await router.navigate({ to: '/', search: { session: ${JSON.stringify(primary.id)} } });
   })()`);
   await waitFor(() => js(`Boolean(document.querySelector('button[aria-label="打开工作区"]'))`), "closed workspace ready");
+  if (process.env.PUDDING_SMOKE_SCENARIO === "project-activity") {
+    assert.equal(process.execPath, path.join(repo, "web/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
+    phase = "project activity";
+    await require('./project-activity.cjs')({ api, js, waitFor, click, clickText, check, screenshot, projectID: project.id, sessionID: primary.id, reload: () => window.webContents.reload() });
+    assert.deepEqual(rendererErrors, [], "project activity renderer errors");
+    return;
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === "context-compaction") {
     phase = "context compaction";
     await require('./context-compaction.cjs')({ api, js, waitFor, click, input, check, screenshot, reload: () => window.webContents.reload(), pressEnter: async () => {

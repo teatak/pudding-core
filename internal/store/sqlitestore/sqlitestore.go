@@ -95,6 +95,8 @@ const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_in
 
 const messageSelectColumnsAliasM = `m.id,m.session_id,m.turn_id,m.role,m.kind,m.text,m.parts,m.turn_index,m.metadata,m.client_message_id,m.interrupted,m.created_at`
 
+const projectSelectColumns = `id,name,root_dirs,approval_mode,created_at,updated_at,last_activity_at`
+
 const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_app_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -105,10 +107,10 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project) error
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now()
-		project.CreatedAt, project.UpdatedAt = now, now
+		project.CreatedAt, project.UpdatedAt, project.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO projects(id,name,root_dirs,approval_mode,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(now), unixMS(now),
+			`INSERT INTO projects(`+projectSelectColumns+`) VALUES(?,?,?,?,?,?,?)`,
+			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -123,21 +125,15 @@ func (s *Store) GetProject(ctx context.Context, id string) (*store.Project, erro
 func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
-		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0)
-		FROM projects p
-		ORDER BY COALESCE(
-			(SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0),
-			p.updated_at
-		) DESC, p.created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+projectSelectColumns+` FROM projects
+		ORDER BY last_activity_at DESC, created_at DESC, id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]*store.Project, 0)
 	for rows.Next() {
-		project, err := scanProjectWithLastActivity(rows)
+		project, err := scanProject(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -214,9 +210,12 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 			target.ApprovalMode = *upd.ApprovalMode
 		}
 		target.UpdatedAt = time.Now()
+		if source.LastActivityAt.After(target.LastActivityAt) {
+			target.LastActivityAt = source.LastActivityAt
+		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=? WHERE id=?`,
-			target.Name, encodeStringSlice(target.RootDirs), target.ApprovalMode, unixMS(target.UpdatedAt), targetID,
+			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=?, last_activity_at=? WHERE id=?`,
+			target.Name, encodeStringSlice(target.RootDirs), target.ApprovalMode, unixMS(target.UpdatedAt), unixMS(target.LastActivityAt), targetID,
 		); err != nil {
 			return err
 		}
@@ -268,7 +267,10 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		return advanceProjectActivityTx(ctx, tx, sess.ID)
 	})
 }
 
@@ -391,7 +393,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 			}
 		}
 		out = &target
-		return nil
+		return advanceProjectActivityTx(ctx, tx, target.ID)
 	})
 	return out, err
 }
@@ -508,6 +510,10 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 			return err
 		}
 		out = sess
+		if upd.ProjectID != nil {
+			// Moving a session carries its activity, not the metadata edit time.
+			return advanceProjectActivityTx(ctx, tx, sess.ID)
+		}
 		return nil
 	})
 	return out, err
@@ -736,7 +742,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.BeginTurnResult{Turn: turn, UserMessage: msg, StartedEvent: &ev}
@@ -818,7 +824,7 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.BeginSystemTurnResult{Turn: turn, SystemMessage: msg, StartedEvent: &ev}
@@ -885,7 +891,7 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.QueueInputResult{Input: input, QueuedEvent: &ev}
@@ -1077,7 +1083,7 @@ func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputI
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, turn.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.SteerQueuedInputResult{
@@ -1170,7 +1176,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 			if err := insertEventTx(ctx, tx, &ev); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+			if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 				return err
 			}
 			out = &store.PromoteQueuedInputResult{Input: input, Turn: turn, UserMessage: msg, StartedEvent: &ev}
@@ -1281,7 +1287,7 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, turn.SessionID, now); err != nil {
 			return err
 		}
 		res.FinalEvent = &ev
@@ -1339,7 +1345,7 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, turn.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.AppendTurnOutputResult{Messages: messages}
@@ -1406,7 +1412,7 @@ func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInp
 		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, turn.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.AppendTurnSteerResult{UserMessage: message, Event: &ev}
@@ -1570,7 +1576,7 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 			return err
 		}
 		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, Event: &ev}
@@ -2398,12 +2404,8 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 }
 
 func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT p.id,p.name,p.root_dirs,p.approval_mode,p.created_at,p.updated_at,
-		       (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=p.id AND s.archived_at=0)
-		FROM projects p
-		WHERE p.id=?`, id)
-	project, err := scanProjectWithLastActivity(row)
+	row := s.db.QueryRowContext(ctx, `SELECT `+projectSelectColumns+` FROM projects WHERE id=?`, id)
+	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -2447,8 +2449,23 @@ func getSessionAnyTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session
 	return sess, err
 }
 
+// Session activity and the project's high-water mark commit together.
+func touchSessionActivityTx(ctx context.Context, tx *sql.Tx, sessionID string, at time.Time) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(at), sessionID); err != nil {
+		return err
+	}
+	return advanceProjectActivityTx(ctx, tx, sessionID)
+}
+
+func advanceProjectActivityTx(ctx context.Context, tx *sql.Tx, sessionID string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE projects SET last_activity_at=MAX(last_activity_at,
+		(SELECT last_activity_at FROM sessions WHERE id=?))
+		WHERE id=(SELECT project_id FROM sessions WHERE id=?)`, sessionID, sessionID)
+	return err
+}
+
 func getProjectTx(ctx context.Context, tx *sql.Tx, id string) (*store.Project, error) {
-	row := tx.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects WHERE id=?`, id)
+	row := tx.QueryRowContext(ctx, `SELECT `+projectSelectColumns+` FROM projects WHERE id=?`, id)
 	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
@@ -2675,39 +2692,14 @@ func scanSession(row messageScanner) (*store.Session, error) {
 func scanProject(row messageScanner) (*store.Project, error) {
 	var project store.Project
 	var rootDirs string
-	var created, updated int64
-	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &project.ApprovalMode, &created, &updated); err != nil {
+	var created, updated, lastActivity int64
+	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &project.ApprovalMode, &created, &updated, &lastActivity); err != nil {
 		return nil, err
 	}
 	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
 	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
 	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-	return &project, nil
-}
-
-func scanProjectWithLastActivity(row messageScanner) (*store.Project, error) {
-	var project store.Project
-	var rootDirs string
-	var created, updated int64
-	var lastActivity sql.NullInt64
-	if err := row.Scan(
-		&project.ID,
-		&project.Name,
-		&rootDirs,
-		&project.ApprovalMode,
-		&created,
-		&updated,
-		&lastActivity,
-	); err != nil {
-		return nil, err
-	}
-	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
-	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
-	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-	if lastActivity.Valid {
-		value := timeFromMS(lastActivity.Int64)
-		project.LastActivityAt = &value
-	}
+	project.LastActivityAt = timeFromMS(lastActivity)
 	return &project, nil
 }
 

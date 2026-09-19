@@ -16,6 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
+	"golang.org/x/sync/singleflight"
 )
 
 // providerProfileView 是 profile 的响应形状:api_key 存在本地配置中,
@@ -79,6 +80,7 @@ type providerWriter interface {
 	ListProviderProfiles(ctx context.Context) ([]*store.ProviderProfile, error)
 	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
 	PutProviderProfile(ctx context.Context, p *store.ProviderProfile) error
+	UpdateProviderProfile(ctx context.Context, name string, update func(*store.ProviderProfile) error) (*store.ProviderProfile, error)
 	DeleteProviderProfile(ctx context.Context, name string) error
 }
 
@@ -165,38 +167,37 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	p, err := cfg.GetProviderProfile(ctx, name)
+	if req.Protocol != nil && !registry.SupportedProtocol(*req.Protocol) {
+		return badRequest(c, "unsupported protocol: "+*req.Protocol)
+	}
+	p, err := cfg.UpdateProviderProfile(ctx, name, func(p *store.ProviderProfile) error {
+		if req.DisplayName != nil {
+			p.DisplayName = strings.TrimSpace(*req.DisplayName)
+			if p.DisplayName == "" {
+				p.DisplayName = p.ProfileID()
+			}
+		}
+		if req.Brand != nil {
+			p.Brand = strings.TrimSpace(*req.Brand)
+		}
+		if req.Group != nil {
+			p.Group = strings.TrimSpace(*req.Group)
+		}
+		if req.Protocol != nil {
+			p.Protocol = *req.Protocol
+		}
+		if req.BaseURL != nil {
+			p.BaseURL = strings.TrimRight(*req.BaseURL, "/")
+		}
+		if req.APIKey != nil && *req.APIKey != "" {
+			p.APIKey = *req.APIKey
+		}
+		if req.Models != nil {
+			p.Models = cleanModels(*req.Models)
+		}
+		return nil
+	})
 	if err != nil {
-		return s.fail(c, err)
-	}
-	if req.DisplayName != nil {
-		p.DisplayName = strings.TrimSpace(*req.DisplayName)
-		if p.DisplayName == "" {
-			p.DisplayName = p.ProfileID()
-		}
-	}
-	if req.Brand != nil {
-		p.Brand = strings.TrimSpace(*req.Brand)
-	}
-	if req.Group != nil {
-		p.Group = strings.TrimSpace(*req.Group)
-	}
-	if req.Protocol != nil {
-		if !registry.SupportedProtocol(*req.Protocol) {
-			return badRequest(c, "unsupported protocol: "+*req.Protocol)
-		}
-		p.Protocol = *req.Protocol
-	}
-	if req.BaseURL != nil {
-		p.BaseURL = strings.TrimRight(*req.BaseURL, "/")
-	}
-	if req.APIKey != nil && *req.APIKey != "" {
-		p.APIKey = *req.APIKey
-	}
-	if req.Models != nil {
-		p.Models = cleanModels(*req.Models)
-	}
-	if err := cfg.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, viewProfile(p))
@@ -365,11 +366,43 @@ func (s *Server) syncProviderModels(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	result := s.syncProviderProfile(ctx, cfg, p)
+	select {
+	case <-ctx.Done():
+		return nil
+	case result := <-result:
+		if result.Err != nil {
+			return s.fail(c, result.Err)
+		}
+		response := result.Val.(providerSyncResponse)
+		c.JSON(response.status, response.body)
+		return nil
+	}
+}
 
+func (s *Server) syncProviderProfile(ctx context.Context, cfg providerWriter, p *store.ProviderProfile) <-chan singleflight.Result {
+	// Share the entire fetch/merge/cache operation, not just the upstream fetch:
+	// a delayed merge must not overwrite a later sync's result.
+	key := strings.Join([]string{p.ProfileID(), p.Brand, p.Protocol, p.BaseURL, config.EffectiveAPIKey(p)}, "\x00")
+	return s.providerSyncs.DoChan(key, func() (any, error) {
+		// One caller closing its request must not cancel the other waiters.
+		// Shared work retains the existing bounded upstream timeout.
+		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return fetchAndMergeProviderModels(syncCtx, cfg, p)
+	})
+}
+
+type providerSyncResponse struct {
+	status int
+	body   any
+}
+
+func fetchAndMergeProviderModels(ctx context.Context, cfg providerWriter, p *store.ProviderProfile) (providerSyncResponse, error) {
 	isBuzzHive := strings.EqualFold(strings.TrimSpace(p.Brand), "buzzhive")
 	isOpenRouter := strings.EqualFold(strings.TrimSpace(p.Brand), "openrouter")
 	if !isBuzzHive && !isOpenRouter {
-		return badRequest(c, "sync is only supported for buzzhive or openrouter providers")
+		return providerSyncResponse{http.StatusBadRequest, map[string]string{"error": "sync is only supported for buzzhive or openrouter providers"}}, nil
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
@@ -383,30 +416,37 @@ func (s *Server) syncProviderModels(c *cart.Context) error {
 		modelBaseURL = buzzHiveModelsBaseURL(p.BaseURL)
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	candidates, err := fetchProviderModels(fetchCtx, modelProtocol, modelBaseURL, apiKey)
+	candidates, err := fetchProviderModels(ctx, modelProtocol, modelBaseURL, apiKey)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return providerSyncResponse{http.StatusBadGateway, map[string]string{"error": err.Error()}}, nil
+	}
+
+	// Merge into the latest profile, not the snapshot from before the network
+	// request. An endpoint/key change makes that response stale.
+	errStale := errors.New("provider_changed_during_sync")
+	updated, err := cfg.UpdateProviderProfile(ctx, p.ProfileID(), func(current *store.ProviderProfile) error {
+		if current.Brand != p.Brand || current.Protocol != p.Protocol || current.BaseURL != p.BaseURL || config.EffectiveAPIKey(current) != apiKey {
+			return errStale
+		}
+		if isBuzzHive {
+			current.Models = syncBuzzHiveModels(current.Models, candidates)
+		} else {
+			current.Models = syncOpenRouterModels(current.Models, candidates)
+		}
 		return nil
+	})
+	if errors.Is(err, errStale) {
+		return providerSyncResponse{http.StatusConflict, map[string]string{"error": errStale.Error()}}, nil
+	}
+	if err != nil {
+		return providerSyncResponse{}, err
 	}
 
 	cacheKey := p.ProfileID() + "\x00" + modelProtocol + "\x00" + modelBaseURL + "\x00" + apiKey
 	modelsCacheMu.Lock()
 	modelsCache[cacheKey] = modelsCacheEntry{at: time.Now(), models: candidates}
 	modelsCacheMu.Unlock()
-
-	if isBuzzHive {
-		p.Models = syncBuzzHiveModels(p.Models, candidates)
-	} else if isOpenRouter {
-		p.Models = syncOpenRouterModels(p.Models, candidates)
-	}
-	if err := cfg.PutProviderProfile(ctx, p); err != nil {
-		return s.fail(c, err)
-	}
-
-	c.JSON(http.StatusOK, viewProfile(p))
-	return nil
+	return providerSyncResponse{http.StatusOK, viewProfile(updated)}, nil
 }
 
 func syncOpenRouterModels(existing []store.ProviderModel, candidates []provider.ModelCandidate) []store.ProviderModel {
@@ -432,20 +472,7 @@ func syncOpenRouterModels(existing []store.ProviderModel, candidates []provider.
 			m.ContextWindow = cand.ContextWindow
 		}
 		m.CostMultiplier = cand.CostMultiplier
-		if cand.Capabilities != nil {
-			if m.Capabilities == nil {
-				m.Capabilities = &store.ModelCaps{}
-			}
-			if v, ok := cand.Capabilities["image"]; ok {
-				m.Capabilities.Image = v
-			}
-			if v, ok := cand.Capabilities["audio"]; ok {
-				m.Capabilities.Audio = v
-			}
-			if v, ok := cand.Capabilities["tools"]; ok {
-				m.Capabilities.Tools = v
-			}
-		}
+		m.Capabilities = mergeModelCapabilities(m.Capabilities, cand.Capabilities)
 		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
 			m.DisplayName = strings.TrimSpace(cand.DisplayName)
 		}
@@ -480,25 +507,14 @@ func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.Mo
 		m.ContextWindow = cand.ContextWindow
 		m.CostMultiplier = cand.CostMultiplier
 		if cand.Limits != nil {
-			if m.Limits == nil {
-				m.Limits = &store.ModelLimits{}
+			limits := store.ModelLimits{}
+			if m.Limits != nil {
+				limits = *m.Limits
 			}
-			m.Limits.MaxOutputTokens = cand.Limits.MaxOutputTokens
+			limits.MaxOutputTokens = cand.Limits.MaxOutputTokens
+			m.Limits = &limits
 		}
-		if cand.Capabilities != nil {
-			if m.Capabilities == nil {
-				m.Capabilities = &store.ModelCaps{}
-			}
-			if v, ok := cand.Capabilities["image"]; ok {
-				m.Capabilities.Image = v
-			}
-			if v, ok := cand.Capabilities["audio"]; ok {
-				m.Capabilities.Audio = v
-			}
-			if v, ok := cand.Capabilities["tools"]; ok {
-				m.Capabilities.Tools = v
-			}
-		}
+		m.Capabilities = mergeModelCapabilities(m.Capabilities, cand.Capabilities)
 		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
 			m.DisplayName = strings.TrimSpace(cand.DisplayName)
 		}
@@ -520,17 +536,31 @@ func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.Mo
 		if cand.Limits != nil {
 			newModel.Limits = &store.ModelLimits{MaxOutputTokens: cand.Limits.MaxOutputTokens}
 		}
-		if cand.Capabilities != nil {
-			newModel.Capabilities = &store.ModelCaps{
-				Image: cand.Capabilities["image"],
-				Audio: cand.Capabilities["audio"],
-				Tools: cand.Capabilities["tools"],
-			}
-		} else {
-			newModel.Capabilities = &store.ModelCaps{Tools: true}
-		}
+		newModel.Capabilities = mergeModelCapabilities(nil, cand.Capabilities)
 		merged = append(merged, newModel)
 	}
 
 	return cleanModels(merged)
+}
+
+func mergeModelCapabilities(existing *store.ModelCaps, reported map[string]bool) *store.ModelCaps {
+	if len(reported) == 0 {
+		return existing
+	}
+	// A nil capability config allows tools in the engine. Missing catalog fields
+	// must retain that behavior; only an explicit false may disable a capability.
+	caps := store.ModelCaps{Tools: true}
+	if existing != nil {
+		caps = *existing
+	}
+	if v, ok := reported["image"]; ok {
+		caps.Image = v
+	}
+	if v, ok := reported["audio"]; ok {
+		caps.Audio = v
+	}
+	if v, ok := reported["tools"]; ok {
+		caps.Tools = v
+	}
+	return &caps
 }

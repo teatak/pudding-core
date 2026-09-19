@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 18
+	currentSchemaVersion       = 19
 )
 
 var (
@@ -378,6 +378,17 @@ WITH ranked AS (
 UPDATE queued_inputs SET sort_order=(SELECT position FROM ranked WHERE rid=queued_inputs.rowid);
 DROP INDEX queued_inputs_session_active;
 CREATE INDEX queued_inputs_session_active ON queued_inputs(session_id,sort_order) WHERE status IN ('queued','editing','cancelled');`)
+		return err
+	},
+	19: func(tx *sql.Tx) error {
+		exists, err := tableColumnExists(tx, "projects", "last_activity_at")
+		if err != nil || exists {
+			return err
+		}
+		// Archived sessions still represent past activity; metadata edits do not.
+		_, err = tx.Exec(`ALTER TABLE projects ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0;
+UPDATE projects SET last_activity_at=MAX(created_at, COALESCE(
+ (SELECT MAX(s.last_activity_at) FROM sessions s WHERE s.project_id=projects.id), created_at));`)
 		return err
 	},
 }
@@ -783,6 +794,7 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
 	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
+	out.tables["projects"] = append(out.tables["projects"], "last_activity_at")
 	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
 	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")

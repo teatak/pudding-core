@@ -73,7 +73,7 @@ func (m *Memstore) CreateProject(_ context.Context, p *store.Project) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	p.CreatedAt, p.UpdatedAt = now, now
+	p.CreatedAt, p.UpdatedAt, p.LastActivityAt = now, now, now
 	m.projects[p.ID] = cloneProject(p)
 	return nil
 }
@@ -85,7 +85,7 @@ func (m *Memstore) GetProject(_ context.Context, id string) (*store.Project, err
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return m.projectWithActivityLocked(p), nil
+	return cloneProject(p), nil
 }
 
 func (m *Memstore) ListProjects(_ context.Context) ([]*store.Project, error) {
@@ -93,14 +93,17 @@ func (m *Memstore) ListProjects(_ context.Context) ([]*store.Project, error) {
 	defer m.mu.Unlock()
 	out := make([]*store.Project, 0, len(m.projects))
 	for _, p := range m.projects {
-		out = append(out, m.projectWithActivityLocked(p))
+		out = append(out, cloneProject(p))
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left, right := projectActivityAt(out[i]), projectActivityAt(out[j])
+		left, right := out[i].LastActivityAt, out[j].LastActivityAt
 		if !left.Equal(right) {
 			return left.After(right)
 		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
 	})
 	return out, nil
 }
@@ -125,7 +128,7 @@ func (m *Memstore) UpdateProject(_ context.Context, id string, upd store.Project
 		p.ApprovalMode = *upd.ApprovalMode
 	}
 	p.UpdatedAt = time.Now()
-	return m.projectWithActivityLocked(p), nil
+	return cloneProject(p), nil
 }
 
 func (m *Memstore) MergeProjects(_ context.Context, targetID, sourceID string, upd store.ProjectUpdate) (*store.Project, error) {
@@ -155,6 +158,7 @@ func (m *Memstore) MergeProjects(_ context.Context, targetID, sourceID string, u
 		target.ApprovalMode = *upd.ApprovalMode
 	}
 	target.UpdatedAt = time.Now()
+	m.advanceProjectActivityLocked(targetID, source.LastActivityAt)
 	for _, session := range m.sessions {
 		if session.ProjectID == sourceID {
 			session.ProjectID = targetID
@@ -162,7 +166,7 @@ func (m *Memstore) MergeProjects(_ context.Context, targetID, sourceID string, u
 		}
 	}
 	delete(m.projects, sourceID)
-	return m.projectWithActivityLocked(target), nil
+	return cloneProject(target), nil
 }
 
 func (m *Memstore) DeleteProject(_ context.Context, id string) error {
@@ -195,6 +199,7 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
 	s.ArchivedAt = nil
 	m.sessions[s.ID] = cloneSession(s)
+	m.advanceProjectActivityLocked(s.ProjectID, now)
 	return nil
 }
 
@@ -281,6 +286,7 @@ func (m *Memstore) CloneSession(_ context.Context, in store.CloneSessionInput) (
 	}
 	m.sessions[target.ID] = target
 	m.messages[target.ID] = targetMessages
+	m.advanceProjectActivityLocked(target.ProjectID, now)
 	return cloneSession(target), nil
 }
 
@@ -401,6 +407,7 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 			}
 		}
 		s.ProjectID = *upd.ProjectID
+		m.advanceProjectActivityLocked(s.ProjectID, s.LastActivityAt)
 	}
 	if upd.LoadedAppIDs != nil {
 		s.LoadedAppIDs = append([]string(nil), (*upd.LoadedAppIDs)...)
@@ -428,25 +435,16 @@ func cloneProject(p *store.Project) *store.Project {
 	return &cp
 }
 
-func (m *Memstore) projectWithActivityLocked(project *store.Project) *store.Project {
-	cloned := cloneProject(project)
-	for _, session := range m.sessions {
-		if session.ProjectID != project.ID || session.ArchivedAt != nil {
-			continue
-		}
-		if cloned.LastActivityAt == nil || session.LastActivityAt.After(*cloned.LastActivityAt) {
-			value := session.LastActivityAt
-			cloned.LastActivityAt = &value
-		}
-	}
-	return cloned
+func (m *Memstore) touchSessionActivityLocked(sessionID string, at time.Time) {
+	session := m.sessions[sessionID]
+	session.LastActivityAt = at
+	m.advanceProjectActivityLocked(session.ProjectID, at)
 }
 
-func projectActivityAt(project *store.Project) time.Time {
-	if project.LastActivityAt != nil {
-		return *project.LastActivityAt
+func (m *Memstore) advanceProjectActivityLocked(projectID string, at time.Time) {
+	if project := m.projects[projectID]; project != nil && at.After(project.LastActivityAt) {
+		project.LastActivityAt = at
 	}
-	return project.UpdatedAt
 }
 
 func cloneSession(s *store.Session) *store.Session {
@@ -644,7 +642,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
 	m.appendEventLocked(in.SessionID, ev)
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 
 	ec := ev
 	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: cloneMessage(msg), StartedEvent: &ec}, nil
@@ -712,7 +710,7 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
 	m.appendEventLocked(in.SessionID, ev)
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 
 	ec := ev
 	return &store.BeginSystemTurnResult{Turn: cloneTurn(turn), SystemMessage: cloneMessage(msg), StartedEvent: &ec}, nil
@@ -766,7 +764,7 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 	}
 	m.queued[in.SessionID] = append(m.queued[in.SessionID], input)
 	m.appendEventLocked(in.SessionID, ev)
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 	ec := ev
 	return &store.QueueInputResult{Input: cloneQueuedInput(input), QueuedEvent: &ec}, nil
 }
@@ -909,7 +907,7 @@ func (m *Memstore) SteerQueuedInput(_ context.Context, in store.SteerQueuedInput
 	}
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
 	turn.UpdatedAt = now
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 	m.appendEventLocked(in.SessionID, updatedEvent)
 	updatedCopy := updatedEvent
 	steeredCopy := steeredEvent
@@ -984,7 +982,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 			input.TurnID = turn.ID
 			input.UpdatedAt = now
 			m.appendEventLocked(input.SessionID, ev)
-			m.sessions[input.SessionID].LastActivityAt = now
+			m.touchSessionActivityLocked(input.SessionID, now)
 			ec := ev
 			return &store.PromoteQueuedInputResult{
 				Input:        cloneQueuedInput(input),
@@ -1111,7 +1109,7 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 		return left.ID < right.ID
 	})
 	m.appendEventLocked(turn.SessionID, ev)
-	m.sessions[turn.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(turn.SessionID, now)
 	res.FinalEvent = &ev
 	return res, nil
 }
@@ -1151,7 +1149,7 @@ func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutput
 		}
 	}
 	turn.UpdatedAt = now
-	m.sessions[turn.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(turn.SessionID, now)
 	out := make([]*store.Message, 0, len(messages))
 	for _, msg := range messages {
 		out = append(out, cloneMessage(msg))
@@ -1208,7 +1206,7 @@ func (m *Memstore) AppendTurnSteer(_ context.Context, in store.AppendTurnSteerIn
 	}
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
 	turn.UpdatedAt = now
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 	eventCopy := ev
 	return &store.AppendTurnSteerResult{
 		UserMessage: cloneMessage(message),
@@ -1349,7 +1347,7 @@ func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompac
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
 	m.appendEventLocked(in.SessionID, ev)
-	m.sessions[in.SessionID].LastActivityAt = now
+	m.touchSessionActivityLocked(in.SessionID, now)
 	ec := ev
 	return &store.AppendCompactSummaryResult{Turn: cloneTurn(turn), Message: cloneMessage(msg), Event: &ec}, nil
 }
@@ -2424,6 +2422,25 @@ func (m *Memstore) DeleteProviderProfile(_ context.Context, name string) error {
 	}
 	delete(m.profiles, name)
 	return nil
+}
+
+func (m *Memstore) UpdateProviderProfile(_ context.Context, name string, update func(*store.ProviderProfile) error) (*store.ProviderProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.profiles[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *p
+	cp.Models = append([]store.ProviderModel(nil), p.Models...)
+	if err := update(&cp); err != nil {
+		return nil, err
+	}
+	cp.UpdatedAt = time.Now()
+	m.profiles[name] = &cp
+	result := cp
+	result.Models = append([]store.ProviderModel(nil), cp.Models...)
+	return &result, nil
 }
 
 func (m *Memstore) Close() error { return nil }

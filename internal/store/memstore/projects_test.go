@@ -91,7 +91,7 @@ func TestProjectsIncludeLatestSessionActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 1 || projects[0].LastActivityAt == nil {
+	if len(projects) != 1 || projects[0].LastActivityAt.IsZero() {
 		t.Fatalf("project activity missing: %+v", projects)
 	}
 	if !projects[0].LastActivityAt.Equal(session.LastActivityAt) {

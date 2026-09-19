@@ -39,7 +39,7 @@ export function groupProjectSessions(projects: Project[], sessions: Session[]): 
       project,
       projectID: project.id,
       sessions: [],
-      lastActivity: new Date(project.updatedAt || project.createdAt).getTime(),
+      lastActivity: new Date(project.lastActivityAt).getTime(),
     });
   }
   for (const session of sessions) {
@@ -47,7 +47,6 @@ export function groupProjectSessions(projects: Project[], sessions: Session[]): 
     const existing = groups.get(key);
     if (existing) {
       existing.sessions.push(session);
-      existing.lastActivity = Math.max(existing.lastActivity, sessionActivityTime(session));
       continue;
     }
     groups.set(key, {

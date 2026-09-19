@@ -122,21 +122,7 @@ export function ModelReasoningPicker({
     }
   }, [reasoningValue, visibleModel, open, modelSettingsPending]);
 
-  useEffect(() => {
-    if (open) {
-      if (reasoningOptions.length > 0) {
-        setView("slider");
-      } else {
-        setView("catalog");
-      }
-      const initialProfile = selectableProfiles.some((profile) => profile.id === selectedProvider)
-        ? selectedProvider
-        : selectableProfiles[0]?.id || "";
-      setViewedProfileID(initialProfile);
-    }
-  }, [open, reasoningOptions.length, selectedProvider, selectableProfiles]);
-
-  const viewedProfile = selectableProfiles.find((profile) => profile.id === viewedProfileID);
+  const viewedProfile = selectableProfiles.find((profile) => profile.id === viewedProfileID) || selectableProfiles[0];
   const longestModelList = selectableProfiles.reduce(
     (longest, profile) =>
       Math.max(longest, profile.models.filter((model) => model.id).length),
@@ -266,6 +252,8 @@ export function ModelReasoningPicker({
         clearSliderViewTimer();
         if (next) {
           interactedOutsideRef.current = false;
+          setView(reasoningOptions.length > 0 ? "slider" : "catalog");
+          setViewedProfileID(selectedProvider);
           if (triggerButtonRef.current) {
             setPreservedWidth(triggerButtonRef.current.offsetWidth);
           }
@@ -482,7 +470,7 @@ export function ModelReasoningPicker({
                 <div className="min-h-0 overflow-y-auto border-r border-border/70 p-1">
                   <div className="flex flex-col items-center gap-0.5">
                     {selectableProfiles.map((profile) => {
-                      const viewed = viewedProfileID === profile.id;
+                      const viewed = viewedProfile?.id === profile.id;
                       const current = currentModelAvailable && selectedProvider === profile.id;
                       return (
                         <button

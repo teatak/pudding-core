@@ -154,8 +154,9 @@ type Project struct {
 	ApprovalMode ApprovalMode `json:"approvalMode"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
-	// LastActivityAt 由项目下会话的 LastActivityAt 最大值派生，不落 projects 表。
-	LastActivityAt *time.Time `json:"lastActivityAt,omitempty"`
+	// LastActivityAt 持久化项目最近活动时间，初值为创建时间。
+	// 会话内容活动只推进此值；删除、归档、元数据修改不改变它。
+	LastActivityAt time.Time `json:"lastActivityAt"`
 }
 
 type ProjectUpdate struct {

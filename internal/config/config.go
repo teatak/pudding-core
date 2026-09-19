@@ -224,6 +224,30 @@ func (m *Manager) DeleteProviderProfile(_ context.Context, id string) error {
 	return m.writeProfiles(cfg)
 }
 
+// UpdateProviderProfile reads and updates an existing profile under one lock.
+// The callback must not perform I/O; upstream requests belong before this step.
+func (m *Manager) UpdateProviderProfile(_ context.Context, id string, update func(*store.ProviderProfile) error) (*store.ProviderProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, err := m.readProfiles()
+	if err != nil {
+		return nil, err
+	}
+	p, ok := cfg.Profiles[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	p = cloneProfile(id, p)
+	if err := update(p); err != nil {
+		return nil, err
+	}
+	cfg.Profiles[id] = p
+	if err := m.writeProfiles(cfg); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 func EffectiveAPIKey(p *store.ProviderProfile) string {
 	if p == nil {
 		return ""

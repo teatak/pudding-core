@@ -485,7 +485,7 @@ function ProjectRow({
           <h2 className="truncate font-medium">{project.name}</h2>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>
-              {formatProjectActivityAt(project.lastActivityAt || project.updatedAt, locale, t)}
+              {formatProjectActivityAt(project.lastActivityAt, locale, t)}
             </span>
             {project.rootDirs.length !== 1 ? (
               <span>
@@ -525,9 +525,9 @@ function compareProjects(left: Project, right: Project, sort: ProjectSort, local
   }
   const key = sort === "created-desc" ? "createdAt" : "updatedAt";
   const leftValue =
-    sort === "updated-desc" ? left.lastActivityAt || left.updatedAt : left[key];
+    sort === "updated-desc" ? left.lastActivityAt : left[key];
   const rightValue =
-    sort === "updated-desc" ? right.lastActivityAt || right.updatedAt : right[key];
+    sort === "updated-desc" ? right.lastActivityAt : right[key];
   return new Date(rightValue).getTime() - new Date(leftValue).getTime();
 }
 

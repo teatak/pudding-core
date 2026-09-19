@@ -94,6 +94,7 @@ function openSessionEventSource({
   source.onopen = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.backgroundProcesses(sessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
   };
   const handleMessage = (event: MessageEvent<string>) => {
     let payload: unknown;
@@ -496,7 +497,7 @@ function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent)
     void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
     return;
   }
-  if (event.kind === "input.queued" || event.kind === "input.steered") {
+  if (event.kind === "input.queued" || event.kind === "input.steered" || event.kind === "turn.compacted") {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
     return;

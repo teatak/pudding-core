@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS projects (
     root_dirs     TEXT    NOT NULL DEFAULT '[]',
     approval_mode TEXT    NOT NULL DEFAULT 'auto',
     created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    last_activity_at INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS turns (

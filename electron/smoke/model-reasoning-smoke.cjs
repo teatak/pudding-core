@@ -18,6 +18,7 @@ const timeout = setTimeout(() => finish(new Error(`Timed out during ${currentChe
 void app.whenReady().then(run).then(() => finish()).catch(finish);
 
 async function run() {
+  assert.equal(process.execPath, path.join(webRoot, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
   const { createServer } = await import(pathToFileURL(require.resolve("vite", { paths: [webRoot] })).href);
   server = await createServer({
     root: webRoot,
@@ -147,6 +148,39 @@ async function run() {
   assert.equal(await evaluate('document.querySelector("#composer-b").value'), "outside click");
   assert.equal(await evaluate('document.querySelector("#composer-a").value'), "");
   console.log("PASS clicking another composer keeps focus and text in that composer");
+
+  currentCheck = "model catalog stays open during automatic and manual sync";
+  await loadFixture("sync");
+  await clickSelector(".pudding-composer-model-picker");
+  await waitFor("window.modelReasoningSmoke.snapshot().syncRequests === 1");
+  await clickButton("Opus smoke");
+  await clickButton("Google smoke");
+  const viewedGoogle = `document.querySelector('button[aria-label="Google smoke"]')?.getAttribute("aria-current") === "true"`;
+  const geminiVisible = `Array.from(document.querySelectorAll("[data-app-floating-content] button")).some((button) => button.textContent.includes("Gemini smoke"))`;
+  for (const count of [1, 2]) {
+    if (count === 2) {
+      await clickButton("Sync models");
+      await waitFor("window.modelReasoningSmoke.snapshot().syncRequests === 2");
+    }
+    await evaluate("window.modelReasoningSmoke.releaseSync()");
+    await waitFor(`window.modelReasoningSmoke.snapshot().providers.find((p) => p.id === "google-smoke").models[0].costMultiplier === ${count / 10}`);
+    await frames();
+    assert.equal(await evaluate(viewedGoogle), true);
+    assert.equal(await evaluate(geminiVisible), true);
+  }
+  console.log("PASS automatic and manual model sync preserve the catalog view and viewed provider");
+
+  currentCheck = "reopen initializes model picker; deleted viewed provider does not leave a blank pane";
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  await waitFor(`document.querySelector(".pudding-composer-model-picker")?.getAttribute("aria-expanded") === "false"`);
+  await clickSelector(".pudding-composer-model-picker");
+  await clickButton("Opus smoke");
+  assert.equal(await evaluate(`document.querySelector('button[aria-label="Anthropic smoke"]')?.getAttribute("aria-current")`), "true");
+  await clickButton("Google smoke");
+  await evaluate('window.modelReasoningSmoke.removeProfile("google-smoke")');
+  await waitFor(`Array.from(document.querySelectorAll("[data-app-floating-content] button")).some((button) => button.textContent.trim() === "Haiku smoke")`);
+  console.log("PASS reopening selects the current provider and removing a viewed provider keeps the catalog usable");
 
   currentCheck = "unsupported reasoning model";
   await loadFixture("haiku");

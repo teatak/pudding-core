@@ -40,7 +40,7 @@ export const project = z.object({
   approvalMode,
   createdAt: z.string(),
   updatedAt: z.string(),
-  lastActivityAt: z.string().optional(),
+  lastActivityAt: z.string(),
 });
 export type Project = z.infer<typeof project>;
 
