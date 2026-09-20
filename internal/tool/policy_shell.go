@@ -1,69 +1,113 @@
 package tool
 
+import (
+	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
+)
+
+// NUL cannot occur in valid command input. Preserve unknown argument positions
+// without inventing paths or executing expansions. Never pass this to execution.
+const unknownPolicyWord = "\x00"
+
 type commandPolicyAnalysis struct {
-	shellCommandAnalysis
-	wrappers [][]string
+	Commands     [][]string
+	Redirections []shellRedirection
+	Environments []map[string]string
+	wrappers     [][]string
 }
 
-// analyzeCommandPolicy expands only literal, non-login POSIX shell wrappers
-// for policy inspection. Execution still receives the original command string.
-// Keep the wrapper executable in the analysis so its own path is also checked.
+// Auto trusts code inside the authorized sandbox. Inspect for explicit hazards
+// and resource requests, not to prove arbitrary code safe. Unknown values and
+// control flow do not independently need approval. Execution, verification and
+// reusable grants retain their strict analyzers.
 func analyzeCommandPolicy(command string, depth int) (commandPolicyAnalysis, error) {
-	parsed, err := analyzeShellCommand(command)
-	analysis := commandPolicyAnalysis{shellCommandAnalysis: parsed}
-	if err != nil || depth >= 4 {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangPOSIX)).Parse(strings.NewReader(command), "policy")
+	analysis := commandPolicyAnalysis{}
+	if err != nil {
 		return analysis, err
 	}
-	var commands [][]string
-	for _, raw := range analysis.Commands {
-		argv := unwrapCommand(raw)
-		script, ok := policyShellScript(argv)
-		if !ok {
-			commands = append(commands, raw)
-			continue
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			argv := make([]string, len(node.Args))
+			for index, word := range node.Args {
+				value, ok := staticShellWord(word)
+				if !ok || (index == 0 && !isStaticCommandWord(word)) {
+					value = unknownPolicyWord
+				}
+				argv[index] = value
+			}
+			if len(argv) > 0 {
+				analysis.Commands = append(analysis.Commands, argv)
+			}
+			for _, assign := range node.Assigns {
+				if assign.Name != nil {
+					value, ok := staticShellWord(assign.Value)
+					if !ok {
+						value = unknownPolicyWord
+					}
+					// Keep each occurrence: later assignments cannot erase an
+					// earlier explicit permission request or risky environment.
+					analysis.Environments = append(analysis.Environments, map[string]string{assign.Name.Value: value})
+				}
+			}
+		case *syntax.Redirect:
+			if redirect, ok := staticShellRedirection(node); ok && redirect.Path != "" {
+				analysis.Redirections = append(analysis.Redirections, redirect)
+			}
 		}
-		nested, err := analyzeCommandPolicy(script, depth+1)
-		if err != nil {
-			commands = append(commands, raw)
-			continue
-		}
-		analysis.wrappers = append(analysis.wrappers, argv)
-		analysis.wrappers = append(analysis.wrappers, nested.wrappers...)
-		commands = append(commands, nested.Commands...)
-		analysis.Redirections = append(analysis.Redirections, nested.Redirections...)
-		analysis.Dynamic = analysis.Dynamic || nested.Dynamic
-		analysis.Background = analysis.Background || nested.Background
-	}
-	analysis.Commands = commands
-	if len(analysis.wrappers) > 0 {
-		for _, child := range commands {
-			child = unwrapCommand(child)
-			if len(child) == 0 {
+		return true // Includes calls inside loops, functions and substitutions.
+	})
+	// Bound inspection work, not execution authority. Literal nested bodies are
+	// useful evidence; opaque/different-dialect scripts still use the sandbox.
+	if depth < 4 {
+		var commands [][]string
+		for _, raw := range analysis.Commands {
+			script, ok := policyShellScript(unwrapCommand(raw))
+			if !ok {
+				commands = append(commands, raw)
 				continue
 			}
-			switch commandOperation(child[0]) {
-			case "cd", "pushd", "popd", "eval", "exec", "source", ".", "export", "unset", "set", "alias", "unalias", "read", "trap", "getopts", "builtin", "enable":
-				// These can change cwd, environment or subsequent command meaning.
-				analysis.Dynamic = true
-			case "sh", "bash", "dash", "ksh", "zsh", "fish":
-				// Any shell left here has not had its body expanded and checked.
-				analysis.Dynamic = true
+			nested, err := analyzeCommandPolicy(script, depth+1)
+			if err != nil {
+				commands = append(commands, raw)
+				continue
 			}
+			// Keep wrappers for executable/env checks, but do not count the
+			// same shell body twice when checking download-and-execute chains.
+			analysis.wrappers = append(analysis.wrappers, raw)
+			analysis.wrappers = append(analysis.wrappers, nested.wrappers...)
+			commands = append(commands, nested.Commands...)
+			analysis.Redirections = append(analysis.Redirections, nested.Redirections...)
+			analysis.Environments = append(analysis.Environments, nested.Environments...)
 		}
+		analysis.Commands = commands
 	}
 	return analysis, nil
 }
 
 func policyShellScript(argv []string) (string, bool) {
-	if len(argv) == 3 && argv[1] == "-c" {
-		switch argv[0] {
-		case "sh", "/bin/sh", "dash", "/bin/dash":
-			return argv[2], true
-		}
+	if len(argv) == 0 {
+		return "", false
 	}
-	if len(argv) == 5 && argv[1] == "--noprofile" && argv[2] == "--norc" && argv[3] == "-c" &&
-		(argv[0] == "bash" || argv[0] == "/bin/bash") {
-		return argv[4], true
+	switch commandOperation(argv[0]) {
+	case "builtin":
+		return policyShellScript(argv[1:])
+	case "eval":
+		if len(argv) > 1 && !strings.Contains(strings.Join(argv[1:], " "), unknownPolicyWord) {
+			return strings.Join(argv[1:], " "), true
+		}
+	case "sh", "bash", "dash", "ksh", "zsh":
+		for index := 1; index < len(argv); index++ {
+			arg := argv[index]
+			if arg == "--" || !strings.HasPrefix(arg, "-") {
+				break
+			}
+			if !strings.HasPrefix(arg, "--") && strings.Contains(arg, "c") && index+1 < len(argv) {
+				return argv[index+1], argv[index+1] != unknownPolicyWord
+			}
+		}
 	}
 	return "", false
 }

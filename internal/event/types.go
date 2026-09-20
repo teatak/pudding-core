@@ -35,7 +35,7 @@ const (
 
 // Event 的字段按 Kind 选填:
 //
-//	turn.started   seq, turnID, clientMessageID, userMessageID, text?
+//	turn.started   seq, turnID, clientMessageID, userMessageID?, retryOfTurnID?, text?
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
 //	turn.tool      turnID, callID, name, phase, argsDelta/stream/content/ok/summaryKind/summaryCount/attachments (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
@@ -55,6 +55,7 @@ const (
 // 纯附件输入的 text 为空时省略;接收方将缺省 text 解释为空字符串,
 // 附件仍以 canonical message.parts 为事实源。
 type Event struct {
+	RetryOfTurnID string `json:"retryOfTurnID,omitempty"`
 	// Seq 是 per-session 单调递增序号,仅落库的 lifecycle 事件持有(>0),
 	// 同时作为 SSE 的 id 字段承载 Last-Event-ID 续传。
 	Seq                int64           `json:"seq,omitempty"`

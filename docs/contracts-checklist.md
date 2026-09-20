@@ -1,14 +1,14 @@
 # 契约字段对照 checklist
 
 > 用途:事件协议与 REST payload 的 Go ↔ TS 字段对照(docs/phase-1-plan.md 第 2 节)。  
-> 来源:Go = `internal/event/types.go` / `internal/store/store.go`;TS = `web/contracts/`。  
+> 来源:Go = `internal/event/types.go` / `internal/store/store.go`;TS = `contracts/`（desktop 生成到 `web/contracts/`）。
 > 规则:改任何一边必须同步另一边并更新本表,契约改动单独提交。
 
 ## 事件协议
 
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
-| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text?` |
+| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID?`, `retryOfTurnID?`, `text?`；system/retry 不含 user message |
 | `input.queued` / `input.updated` | ✓ | ✓ | `clientMessageID`, `text?`, `status`;纯附件输入省略空 `text` |
 | `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text?`;在安全采样边界应用引导后发布，后续输出位于该引导之后 |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
@@ -39,7 +39,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/work/code), modeLease, projectID?, createdAt, updatedAt, running(读取时派生), backgroundProcessCount(读取时派生) |
 | Project | `store.Project` | `project` | id, name, rootDirs, approvalMode, createdAt, updatedAt |
-| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[], fileChanges[] |
+| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, retryOfTurnID?, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[], fileChanges[] |
 | TurnFileChange | `store.TurnFileChange` | `turnFileChange` | id, sessionID, turnID, rootPath, kind(added/modified/deleted/renamed), originalPath?, path, additions, deletions, binary, tooLarge, oldSize, newSize, oldContent?, newContent? |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount?, attachments?(tool_result user-display artifacts) |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
@@ -63,6 +63,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |
+| `POST /sessions/{id}/turns/{turnID}/retry` | `{clientMessageID}` | 202 `{turnID}`;重复 200 `{duplicate:true,turnID}` | 400 / 404 / 409 `turn_not_retryable` / `turn_running` |
 | `GET /sessions/{id}/input-requests/{requestID}` | — | 200 `{id,sessionID,turnID,title,args,status,deadline?}`，由当前等待或 canonical messages 恢复 | 404 |
 | `POST /sessions/{id}/input-requests/{requestID}` | `{action:touch\|dismiss\|answer,text?,parts?}`；answer 必须带 text 和 text/form_result parts | 200 `{request,turnID?,userMessageID?,queued?,duplicate?}`；答案统一投递 user message，tool 只返回状态；以 request.status 判断是否已回答 | 400 / 404 |
 | `POST /sessions/{id}/queued-inputs/{clientMessageID}/steer` | `{turnID}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` / `queued_input_editing` |
@@ -106,6 +107,15 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 安全采样边界加入 provider context。普通 `submit` 在已有 running turn 时仍进入
 `queued_inputs`,供 Composer 的“稍后发送”使用。队列消息可原子提升为当前 turn 的引导输入;
 提升失败时消息继续留在队列中。
+
+`retry` 只重试本会话最新的 failed turn，且会话没有运行 turn 或活动队列；
+同一 `clientMessageID` 幂等返回原 attempt，不重新调用模型。新 attempt 使用新的 turnID，
+持久化 `retryOfTurnID` 指向前次失败，旧 turn 保持终态；`turn.started` 同样携带该关联，
+没有 `userMessageID` 或用户消息。每次重试写入 canonical system reminder，从既有 canonical
+messages（包括工具结果、已交付的提问回答和中断输出）继续，使用会话当前模型及设置。
+不会由重试机制重放已完成的工具操作；不确定是否执行成功的动作要求模型先检查状态。
+取消仍走 session-scoped `/cancel`。`GET turns` 的分页边界会扩展至重试链起点，
+因此返回数量可能超过 `limit`；克隆会话会重映射关联，不引用原会话 turn。
 
 ## LLM Tool 契约
 

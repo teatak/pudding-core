@@ -6,12 +6,13 @@ import { z } from "zod";
 import { attachment, backgroundProcess, contentPart } from "./api";
 
 export const turnStartedEvent = z.object({
+  retryOfTurnID: z.string().optional(),
   kind: z.literal("turn.started"),
   seq: z.number().int().positive(),
   sessionID: z.string(),
   turnID: z.string(),
   clientMessageID: z.string(),
-  userMessageID: z.string(),
+  userMessageID: z.string().optional(),
   text: z.string().optional(),
   parts: z.array(contentPart).optional(),
 });

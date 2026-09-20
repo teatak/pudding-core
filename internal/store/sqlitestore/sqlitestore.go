@@ -354,7 +354,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 				continue
 			}
 			sourceTurn, err := scanTurn(tx.QueryRowContext(ctx,
-				`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
+				`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`,
 				in.SourceSessionID, sourceMessage.TurnID,
 			))
 			if errors.Is(err, sql.ErrNoRows) {
@@ -374,8 +374,8 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 				clientMessageID = "compact:" + newTurnID
 			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-				newTurnID, target.ID, clientMessageID, status, sourceTurn.Provider, sourceTurn.Model, sourceTurn.Mode, string(normalizeJSON(sourceTurn.ModelConfig)), sourceTurn.Error, unixMS(sourceTurn.CreatedAt), unixMS(sourceTurn.UpdatedAt),
+				`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+				newTurnID, target.ID, clientMessageID, status, sourceTurn.Provider, sourceTurn.Model, sourceTurn.Mode, string(normalizeJSON(sourceTurn.ModelConfig)), sourceTurn.Error, unixMS(sourceTurn.CreatedAt), unixMS(sourceTurn.UpdatedAt), turnIDs[sourceTurn.RetryOfTurnID],
 			); err != nil {
 				return err
 			}
@@ -760,6 +760,9 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 
 		existing, err := getTurnByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID)
 		if err == nil {
+			if existing.RetryOfTurnID != in.RetryOfTurnID {
+				return store.ErrInvalidRetry
+			}
 			out = &store.BeginSystemTurnResult{Duplicate: true, Turn: existing}
 			return nil
 		}
@@ -772,6 +775,26 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
+		if in.RetryOfTurnID != "" {
+			parent, err := getTurnTx(ctx, tx, in.RetryOfTurnID)
+			if err != nil {
+				return err
+			}
+			if parent.SessionID != in.SessionID {
+				return store.ErrNotFound
+			}
+			var latest string
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM turns WHERE session_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1`, in.SessionID).Scan(&latest); err != nil {
+				return err
+			}
+			var queued bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM queued_inputs WHERE session_id=? AND status IN ('queued','editing'))`, in.SessionID).Scan(&queued); err != nil {
+				return err
+			}
+			if parent.Status != store.TurnFailed || latest != parent.ID || queued {
+				return store.ErrInvalidRetry
+			}
+		}
 
 		now := time.Now()
 		mode := in.Mode
@@ -783,6 +806,7 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 			mode = store.ModeChat
 		}
 		turn := &store.Turn{
+			RetryOfTurnID:   in.RetryOfTurnID,
 			ID:              in.TurnID,
 			SessionID:       in.SessionID,
 			ClientMessageID: in.ClientMessageID,
@@ -806,8 +830,8 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 			CreatedAt: now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now), turn.RetryOfTurnID,
 		); err != nil {
 			return err
 		}
@@ -815,6 +839,7 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 			return err
 		}
 		ev := event.Event{
+			RetryOfTurnID:   in.RetryOfTurnID,
 			Seq:             0,
 			SessionID:       in.SessionID,
 			Kind:            event.TurnStarted,
@@ -1774,7 +1799,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
 		FROM turns WHERE status=?`, store.TurnRunning)
 	if err != nil {
 		return nil, err
@@ -2222,7 +2247,7 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		return nil, err
 	}
 
-	query := `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+	query := `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
 	args := []any{sessionID}
 	if beforeTurnID != "" {
 		var beforeCreated int64
@@ -2237,7 +2262,7 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		if err != nil {
 			return nil, err
 		}
-		query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
+		query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
 			FROM turns
 			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 			ORDER BY created_at ASC, rowid ASC`
@@ -2247,12 +2272,12 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 	if fetchLimit > 0 {
 		fetchLimit++
 		if beforeTurnID == "" {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM (
+			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
 				SELECT rowid AS rid, * FROM turns WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
 			) ORDER BY created_at ASC, rid ASC`
 			args = []any{sessionID, fetchLimit}
 		} else {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM (
+			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
 				SELECT rowid AS rid, * FROM turns
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 				ORDER BY created_at DESC, rowid DESC LIMIT ?
@@ -2281,6 +2306,24 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 	if limit > 0 && len(turns) > limit {
 		hasMore = true
 		turns = turns[1:]
+	}
+	// Never split a retry chain across pages: its original user message owns
+	// the stable transcript row, including after reconnect/restart.
+	for len(turns) > 0 && turns[0].RetryOfTurnID != "" {
+		parent, err := getTurnTx(ctx, tx, turns[0].RetryOfTurnID)
+		if err != nil {
+			return nil, err
+		}
+		turns = append([]*store.Turn{parent}, turns...)
+	}
+	if len(turns) > 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM turns t, turns first
+			WHERE first.id=? AND t.session_id=?
+			AND (t.created_at < first.created_at OR (t.created_at=first.created_at AND t.rowid < first.rowid))
+		)`, turns[0].ID, sessionID).Scan(&hasMore); err != nil {
+			return nil, err
+		}
 	}
 	out := make([]*store.ConversationTurn, 0, len(turns))
 	for _, turn := range turns {
@@ -2313,7 +2356,7 @@ func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnI
 		return nil, err
 	}
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`,
 		sessionID, turnID,
 	)
 	turn, err := scanTurn(row)
@@ -2478,7 +2521,7 @@ func getProjectTx(ctx context.Context, tx *sql.Tx, id string) (*store.Project, e
 
 func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE id=?`, id,
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE id=?`, id,
 	)
 	turn, err := scanTurn(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2492,7 +2535,7 @@ func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) 
 
 func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
 		FROM turns WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -2508,7 +2551,7 @@ func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clie
 
 func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
 		FROM turns WHERE session_id=? AND status=?`,
 		sessionID, store.TurnRunning,
 	)
@@ -2595,6 +2638,7 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileCh
 		}
 	}
 	return &store.ConversationTurn{
+		RetryOfTurnID:   turn.RetryOfTurnID,
 		ID:              turn.ID,
 		SessionID:       turn.SessionID,
 		ClientMessageID: turn.ClientMessageID,
@@ -2719,6 +2763,7 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 		&turn.Error,
 		&created,
 		&updated,
+		&turn.RetryOfTurnID,
 	)
 	if err != nil {
 		return nil, err

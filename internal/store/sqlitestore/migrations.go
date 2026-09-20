@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 19
+	currentSchemaVersion       = 20
 )
 
 var (
@@ -378,6 +378,13 @@ WITH ranked AS (
 UPDATE queued_inputs SET sort_order=(SELECT position FROM ranked WHERE rid=queued_inputs.rowid);
 DROP INDEX queued_inputs_session_active;
 CREATE INDEX queued_inputs_session_active ON queued_inputs(session_id,sort_order) WHERE status IN ('queued','editing','cancelled');`)
+		return err
+	},
+	20: func(tx *sql.Tx) error {
+		if err := addTableColumnIfMissing(tx, "turns", "retry_of_turn_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS turns_one_retry ON turns(session_id,retry_of_turn_id) WHERE retry_of_turn_id <> '';`)
 		return err
 	},
 	19: func(tx *sql.Tx) error {

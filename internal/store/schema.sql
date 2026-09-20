@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS turns (
     mode              TEXT    NOT NULL DEFAULT 'chat',
     model_config      TEXT    NOT NULL DEFAULT '{}',
     error             TEXT    NOT NULL DEFAULT '',
+    retry_of_turn_id  TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     -- submit 幂等键:同 session 内 clientMessageID 唯一
@@ -60,6 +61,9 @@ CREATE TABLE IF NOT EXISTS turns (
 -- 第一阶段不允许并发 turn:每个 session 至多一个 running(开放问题第 14 节)
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running
     ON turns(session_id) WHERE status = 'running';
+
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_retry
+    ON turns(session_id,retry_of_turn_id) WHERE retry_of_turn_id <> '';
 
 CREATE TABLE IF NOT EXISTS turn_file_changes (
     id            TEXT PRIMARY KEY,

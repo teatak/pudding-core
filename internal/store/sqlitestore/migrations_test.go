@@ -35,6 +35,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		17: "f3ec9cc37e5c136e2170a13f02f13c9c4984fb9e83bba154f245ac9798dd89c3",
 		18: "ebf8a68ae4799a117f114a3c86e3471c64eb5b2fe1096efbadb6771592c004af",
 		19: "e64d2cd9818e1f55e2209ed26a3146b57b266dfe9ae5ab39a877ae3bf94fd4aa",
+		20: "b210b07dc8c4b385bf13b4784e1aa5586a9587bc5cae6469c3ff94ad3445eee5",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {

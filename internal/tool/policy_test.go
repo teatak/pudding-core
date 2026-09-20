@@ -198,7 +198,7 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		{name: "safe git remote query", args: `{"scope":"project","command":"git remote -v"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "safe git config query", args: `{"scope":"project","command":"git config --get user.name"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "safe git stash list", args: `{"scope":"project","command":"git stash list"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
-		{name: "dollar zero command bypass", args: `{"scope":"project","command":"\"$0\" -c 'printf ok'"}`, class: RiskClassCommand, operation: "shell", lowRisk: false},
+		{name: "dynamic executable stays sandboxed", args: `{"scope":"project","command":"\"$0\" -c 'printf ok'"}`, class: RiskClassCommand, operation: "shell", lowRisk: true},
 		{name: "xargs requires approval", args: `{"scope":"project","command":"printf '%s\\n' -delete | xargs find fixture"}`, class: RiskClassCommand, operation: "shell", lowRisk: false},
 		{name: "env -S split string requires approval", args: `{"scope":"project","command":"env -S 'rm -f fixture'"}`, class: RiskClassCommand, operation: "env", lowRisk: false},
 		{name: "awk system with space requires approval", args: `{"scope":"project","command":"awk 'BEGIN { system (\"touch marker\") }'"}`, class: RiskClassCommand, operation: "awk", lowRisk: false},
@@ -223,12 +223,12 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		{name: "git branch contains query", args: `{"scope":"project","command":"git branch --contains HEAD main"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "git tag list no-contains query", args: `{"scope":"project","command":"git tag --list --no-contains HEAD"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
 		{name: "find with dynamic variable parameter requires approval", args: `{"scope":"project","env":{"USER":"-delete"},"command":"command find fixture \"$USER\""}`, class: RiskClassCommand, operation: "command", lowRisk: false},
-		{name: "wrapper command variable bypass requires approval", args: `{"scope":"project","env":{"USER":"sh"},"command":"command \"$USER\" -c 'printf ok'"}`, class: RiskClassCommand, operation: "command", lowRisk: false},
+		{name: "wrapper variable stays sandboxed", args: `{"scope":"project","env":{"USER":"sh"},"command":"command \"$USER\" -c 'printf ok'"}`, class: RiskClassCommand, operation: "command", lowRisk: true},
 		{name: "brace expansion", args: `{"scope":"project","command":"ls *.{go,mod}"}`, class: RiskClassCommand, operation: "ls", lowRisk: true},
 		{name: "safe subshell", args: `{"scope":"project","command":"(go test ./...)"}`, class: RiskClassCommand, operation: "go", lowRisk: true},
 		{name: "safe compound subshell", args: `{"scope":"project","command":"(go test ./... && go vet ./...)"}`, class: RiskClassCommand, operation: "shell", lowRisk: true},
 		{name: "pipeline", args: `{"scope":"project","command":"go test ./... | tee test.log"}`, class: RiskClassCommand, operation: "shell", lowRisk: true},
-		{name: "dynamic expansion", args: `{"scope":"project","command":"printf '%s' \"$TOKEN\""}`, class: RiskClassCommand, operation: "printf", lowRisk: false},
+		{name: "dynamic expansion", args: `{"scope":"project","command":"printf '%s' \"$TOKEN\""}`, class: RiskClassCommand, operation: "printf", lowRisk: true},
 		{name: "destructive", args: `{"scope":"project","command":"rm -rf build"}`, class: RiskClassDestructive, operation: "rm", lowRisk: false},
 	}
 	for _, tt := range tests {
@@ -241,7 +241,7 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 	}
 }
 
-func TestClassifyToolCallCommandRequiresApprovalForUnresolvedArguments(t *testing.T) {
+func TestClassifyToolCallCommandSandboxHandlesUnresolvedArguments(t *testing.T) {
 	for _, command := range []string{
 		`git config $OLDPWD`,
 		`git config "$OLDPWD"`,
@@ -260,8 +260,8 @@ func TestClassifyToolCallCommandRequiresApprovalForUnresolvedArguments(t *testin
 				t.Fatal(err)
 			}
 			risk, ok := ClassifyToolCall(CommandRun, raw)
-			if !ok || risk.LowRisk {
-				t.Fatalf("unresolved arguments require approval: command=%q background=%v risk=%+v ok=%v", command, background, risk, ok)
+			if !ok || !risk.LowRisk {
+				t.Fatalf("unresolved arguments alone do not require approval: command=%q background=%v risk=%+v ok=%v", command, background, risk, ok)
 			}
 		}
 	}
@@ -332,8 +332,8 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 	}
 
 	dynamicRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"printf ok > \"$OUTPUT\""}`), []string{root})
-	if !ok || dynamicRisk.LowRisk {
-		t.Fatalf("dynamic output redirection must require approval: %+v ok=%v", dynamicRisk, ok)
+	if !ok || !dynamicRisk.LowRisk {
+		t.Fatalf("dynamic output redirection remains in the sandbox: %+v ok=%v", dynamicRisk, ok)
 	}
 
 	tempRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat > \"$TMPDIR/report.py\""}`), []string{root})

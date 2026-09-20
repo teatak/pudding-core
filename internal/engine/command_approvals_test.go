@@ -15,6 +15,86 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
+func TestSandboxAutonomyApprovalModes(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	ms := memstore.New()
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
+	t.Cleanup(eng.Stop)
+	for _, mode := range []store.ApprovalMode{store.ApprovalAuto, store.ApprovalAsk, store.ApprovalFull} {
+		id := string(mode)
+		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: mode}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ms.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock", ProjectID: id}); err != nil {
+			t.Fatal(err)
+		}
+		for _, command := range []string{
+			`git ls-tree -r -l HEAD | awk '$4 > 200000 {print $5}'`,
+			`echo "count: $(git ls-files | wc -l)"`,
+			`for d in . docs; do ls "$d"; done`,
+			`python3 -c 'print(1)'; for d in . docs; do ls "$d"; done`,
+			`for d in $(ls); do git -C "$d" status; done`,
+			`f() { printf '%s' "$1"; }; f ok`,
+			`n=$(git ls-files | wc -l); echo "$n"`,
+		} {
+			raw, _ := json.Marshal(map[string]any{"scope": "project", "cwd": root, "command": command})
+			risk, ok := tool.ClassifyToolCallForProject(tool.CommandRun, raw, []string{root})
+			if !ok || !risk.LowRisk {
+				t.Fatalf("project code not eligible for sandbox Auto: %+v", risk)
+			}
+			_, required, err := eng.toolCallApprovalRequired(ctx, id, risk, nil)
+			if err != nil || required != (mode == store.ApprovalAsk) {
+				t.Fatalf("mode=%s command=%s required=%v err=%v", mode, command, required, err)
+			}
+		}
+	}
+}
+
+func TestAutoDynamicCommandDispatchKeepsSandboxAndScope(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	ms := memstore.New()
+	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ProjectID: "project"}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	events, unsubscribe := hub.Subscribe("session")
+	defer unsubscribe()
+	calls := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(&approvalDetailsRecordingToolRunner{recordingToolRunner: calls}))
+	t.Cleanup(eng.Stop)
+	for _, background := range []bool{false, true} {
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": `for f in *; do printf '%s' "$f"; done`, "background": background})
+		runCtx, cancel := context.WithTimeout(ctx, time.Second)
+		result := eng.executeAllowedTool(runCtx, "session", "turn", store.ModeCode, tool.Call{Name: tool.CommandRun, CallID: "call", SessionID: "session", Args: raw})
+		cancel()
+		if !result.Ok {
+			t.Fatalf("unexpected approval or dispatch failure: %+v", result)
+		}
+		call := calls.calls[len(calls.calls)-1]
+		if call.CommandSandbox != tool.CommandSandboxEnforce || call.SessionID != "session" || string(call.Args) != string(raw) || len(call.ProjectDirs) != 1 || call.ProjectDirs[0] != root || call.CommandGrant != nil {
+			t.Fatalf("autonomy changed execution authority: %+v", call)
+		}
+	}
+	for {
+		select {
+		case ev := <-events:
+			if ev.Kind == event.ApprovalRequested {
+				t.Fatal("syntax generated an approval")
+			}
+		default:
+			if status := eng.CommandApprovals("session"); status.GrantCount != 0 || status.ReusedCount != 0 || len(status.ApprovalReasons) != 0 {
+				t.Fatalf("autonomy created an implicit reusable grant: %+v", status)
+			}
+			return
+		}
+	}
+}
+
 func TestSandboxSessionCommandApprovals(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

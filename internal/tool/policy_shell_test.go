@@ -12,6 +12,7 @@ func TestCommandApprovalStaticShellWrappers(t *testing.T) {
 		lowRisk bool
 	}{
 		{`sh -c 'go test ./...'`, true},
+		{`sh -c 'go test ./... || exit 1'`, true},
 		{`/bin/sh -c 'rg TODO . | head -20'`, true},
 		{`bash --noprofile --norc -c 'npm run build'`, true},
 		{`sh -c 'printf ok > output.txt'`, true},
@@ -25,13 +26,15 @@ func TestCommandApprovalStaticShellWrappers(t *testing.T) {
 		{`sh -c 'builtin eval "rm important.txt"'`, false},
 		{`sh -c "sh -c 'go test ./...'"`, true},
 		{`sh -c "sh -c 'rm important.txt'"`, false},
-		{`sh -c 'printf "rm important.txt" | sh'`, false},
-		{`sh -c 'printf "rm important.txt"' | sh -s`, false},
+		// Stdin code is opaque, just like a Python heredoc or a project script.
+		// Auto trusts the sandbox; it does not claim to interpret arbitrary data.
+		{`sh -c 'printf "printf ok" | sh'`, true},
+		{`sh -c 'printf "printf ok"' | sh -s`, true},
 		{`sh -c 'for f in *; do rm "$f"; done'`, false},
-		{`sh -c 'printf "%s" "$ARG"'`, false},
-		{`sh -c 'go test ./...' ignored`, false},
-		{`bash -lc 'go test ./...'`, false},
-		{`zsh -c 'go test ./...'`, false},
+		{`sh -c 'printf "%s" "$ARG"'`, true},
+		{`sh -c 'go test ./...' ignored`, true},
+		{`bash -lc 'go test ./...'`, true},
+		{`zsh -c 'go test ./...'`, true},
 		{`BASH_ENV=./startup sh -c 'go test ./...'`, false},
 	} {
 		t.Run(test.command, func(t *testing.T) {

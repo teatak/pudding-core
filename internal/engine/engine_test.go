@@ -4185,6 +4185,28 @@ func TestReasoningEffortUsesProtocolStandardValues(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:     "google max",
+			protocol: "google",
+			effort:   "max",
+			assert: func(t *testing.T, cfg provider.ModelConfig) {
+				thinking, _ := cfg.GoogleOptions()["thinking"].(map[string]any)
+				if got, _ := provider.StringOption(thinking, "level"); got != "max" {
+					t.Fatalf("Google product effort = %q", got)
+				}
+			},
+		},
+		{
+			name:     "google xhigh",
+			protocol: "google",
+			effort:   "xhigh",
+			assert: func(t *testing.T, cfg provider.ModelConfig) {
+				thinking, _ := cfg.GoogleOptions()["thinking"].(map[string]any)
+				if got, _ := provider.StringOption(thinking, "level"); got != "xhigh" {
+					t.Fatalf("Google product effort = %q", got)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

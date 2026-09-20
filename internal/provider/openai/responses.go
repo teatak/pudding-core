@@ -85,7 +85,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		body.MaxOutputTokens = &v
 	}
 	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
-		body.Reasoning = &responsesReasoning{Effort: v}
+		body.Reasoning = &responsesReasoning{Effort: provider.WireReasoningEffort("openai-responses", req.Model, v)}
 	}
 	if req.System != "" {
 		body.Instructions = req.System

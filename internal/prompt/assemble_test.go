@@ -352,6 +352,9 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 		"Ask mode still requires approval",
 		"Ask mode allows low-risk project reads without a prompt",
 		"Writes and command execution still require approval in Ask mode",
+		"Auto trusts code execution within the authorized project sandbox",
+		"do not require approval solely because their behavior cannot be statically proved",
+		"A failed compound command may have completed earlier steps",
 		"Never switch tools or execution modes to bypass a denial",
 	} {
 		if !strings.Contains(code.SystemInstruction, guidance) {

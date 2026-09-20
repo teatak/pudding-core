@@ -265,6 +265,7 @@ func (m *Memstore) CloneSession(_ context.Context, in store.CloneSessionInput) (
 		turn := cloneTurn(sourceTurn)
 		turn.ID = newTurnID
 		turn.SessionID = in.TargetSessionID
+		turn.RetryOfTurnID = turnIDs[sourceTurn.RetryOfTurnID]
 		if turn.Status == store.TurnRunning {
 			turn.Status = store.TurnCancelled
 		}
@@ -656,6 +657,9 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 	}
 	for _, t := range m.turns {
 		if t.SessionID == in.SessionID && t.ClientMessageID == in.ClientMessageID {
+			if t.RetryOfTurnID != in.RetryOfTurnID {
+				return nil, store.ErrInvalidRetry
+			}
 			return &store.BeginSystemTurnResult{
 				Duplicate: true,
 				Turn:      cloneTurn(t),
@@ -665,6 +669,25 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 	for _, t := range m.turns {
 		if t.SessionID == in.SessionID && t.Status == store.TurnRunning {
 			return nil, store.ErrTurnRunning
+		}
+	}
+	if in.RetryOfTurnID != "" {
+		parent := m.turns[in.RetryOfTurnID]
+		if parent == nil || parent.SessionID != in.SessionID {
+			return nil, store.ErrNotFound
+		}
+		if parent.Status != store.TurnFailed {
+			return nil, store.ErrInvalidRetry
+		}
+		for _, turn := range m.turns {
+			if turn.SessionID == in.SessionID && (turn.CreatedAt.After(parent.CreatedAt) || (turn.CreatedAt.Equal(parent.CreatedAt) && turn.ID > parent.ID) || turn.RetryOfTurnID == parent.ID) {
+				return nil, store.ErrInvalidRetry
+			}
+		}
+		for _, input := range m.queued[in.SessionID] {
+			if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
+				return nil, store.ErrInvalidRetry
+			}
 		}
 	}
 
@@ -678,6 +701,7 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 		mode = store.ModeChat
 	}
 	turn := &store.Turn{
+		RetryOfTurnID:   in.RetryOfTurnID,
 		ID:              in.TurnID,
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
@@ -701,6 +725,7 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 		CreatedAt: now,
 	}
 	ev := event.Event{
+		RetryOfTurnID:   in.RetryOfTurnID,
 		Seq:             m.nextSeq(in.SessionID),
 		SessionID:       in.SessionID,
 		Kind:            event.TurnStarted,
@@ -2157,6 +2182,10 @@ func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurn
 		start = end - limit
 		hasMore = start > 0
 	}
+	for start > 0 && turns[start].RetryOfTurnID != "" {
+		start--
+	}
+	hasMore = start > 0
 	out := make([]*store.ConversationTurn, 0, end-start)
 	for _, turn := range turns[start:end] {
 		out = append(out, conversationTurnFromMem(turn, m.messages[sessionID], m.fileChanges[turn.ID], m.fileChangeStates[turn.ID]))
@@ -2194,6 +2223,7 @@ func (m *Memstore) GetTurnFileChange(_ context.Context, sessionID string, turnID
 
 func conversationTurnFromMem(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange, fileChangeState store.TurnFileChangeState) *store.ConversationTurn {
 	out := &store.ConversationTurn{
+		RetryOfTurnID:   turn.RetryOfTurnID,
 		ID:              turn.ID,
 		SessionID:       turn.SessionID,
 		ClientMessageID: turn.ClientMessageID,

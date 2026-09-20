@@ -292,6 +292,7 @@ func (e *Engine) StopBackgroundProcess(sessionID, processID string) (tool.Backgr
 }
 
 type SubmitInput struct {
+	retryOfTurnID   string
 	SessionID       string
 	ClientMessageID string
 	Text            string
@@ -479,14 +480,18 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 }
 
 func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *resolvedModel, client provider.Client) (*SubmitResult, error) {
-	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	if queued {
-		return nil, ErrTurnRunning
+	// Retry validates queue ownership atomically, after idempotency, in the store.
+	if in.retryOfTurnID == "" {
+		queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if queued {
+			return nil, ErrTurnRunning
+		}
 	}
 	res, err := e.store.BeginSystemTurn(ctx, store.BeginSystemTurnInput{
+		RetryOfTurnID:   in.retryOfTurnID,
 		SessionID:       in.SessionID,
 		TurnID:          store.NewID("turn"),
 		SystemMessageID: store.NewID("msg"),
@@ -809,7 +814,7 @@ func (r *resolvedModel) applyReasoningEffort(value string) error {
 		outputConfig["effort"] = effort
 		r.config.ProviderOptions.Anthropic["output_config"] = outputConfig
 	case "google":
-		if effort != "low" && effort != "medium" && effort != "high" {
+		if !validStandardReasoningEffort(effort) {
 			return nil
 		}
 		if r.config.ProviderOptions == nil {

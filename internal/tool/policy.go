@@ -305,24 +305,22 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		return ToolRisk{}, false
 	}
 	operation := "shell"
-	if len(analysis.Commands) == 1 {
+	if len(analysis.Commands) == 1 && analysis.Commands[0][0] != unknownPolicyWord {
 		operation = commandOperation(analysis.Commands[0][0])
 	}
-	lowRisk := !analysis.Dynamic && len(analysis.Commands) > 0
 	risk := ToolRisk{
 		Class:     RiskClassCommand,
 		Operation: operation,
 		Scope:     managedScopeProject,
 		Paths:     compactRiskPaths(args.CWD),
 		Summary:   "Run project command: " + compactShellCommand(args.Command),
-		LowRisk:   lowRisk,
+		// Eligible for Auto within the sandbox, not a proof of read-only code.
+		// Ask still confirms command execution.
+		LowRisk: true,
 	}
-	if !lowRisk {
-		risk.ApprovalReasons = append(risk.ApprovalReasons, "dynamic_command")
-	}
-	for index, rawArgv := range append(analysis.Commands, analysis.wrappers...) {
+	for _, rawArgv := range append(analysis.Commands, analysis.wrappers...) {
 		argv := unwrapCommand(rawArgv)
-		if len(argv) == 0 {
+		if len(argv) == 0 || argv[0] == unknownPolicyWord {
 			continue
 		}
 		if argv[0] == "env_print" || argv[0] == "command_query" {
@@ -334,8 +332,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		if !executableAllowed && !isBareCommand(argv[0]) {
 			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, args.CWD, projectDirs)...)
 		}
-		commandLowRisk := executableAllowed &&
-			(index >= len(analysis.Commands) || !commandRequiresApproval(argv)) &&
+		commandLowRisk := executableAllowed && !commandRequiresApproval(argv) &&
 			len(outsidePaths) == 0 &&
 			!commandNeedsHostAccess(argv) &&
 			!strings.Contains(argv[0], "$")
@@ -355,10 +352,29 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 			risk.Class = RiskClassDestructive
 			risk.LowRisk = false
 		}
+		// Literal read operands also catch relative symlink escapes. Unknown
+		// operands remain subject to the OS sandbox when actually accessed.
+		if commandReadsSandboxSystemPaths(commandOperation) || commandOperation == "test" || commandOperation == "[" {
+			for _, path := range commandPathArgs(argv) {
+				if path != unknownPolicyWord && !sandboxManagedPath(path) {
+					analysis.Redirections = append(analysis.Redirections, shellRedirection{Path: path})
+				}
+			}
+		}
 	}
 	if outsidePaths := commandRedirectionsOutsideProject(analysis.Redirections, args.CWD, projectDirs); len(outsidePaths) > 0 {
 		risk.LowRisk = false
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
+	}
+	for _, environment := range analysis.Environments {
+		if commandEnvironmentRequiresApproval(environment) {
+			risk.LowRisk = false
+			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
+		}
+		if paths := commandEnvironmentOutsideProjectPaths(environment, args.CWD, projectDirs); len(paths) > 0 {
+			risk.LowRisk = false
+			risk.requiredProjectPaths = append(risk.requiredProjectPaths, paths...)
+		}
 	}
 	if len(args.Env) > 0 {
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
@@ -483,7 +499,7 @@ func commandPathsOutsideProject(paths []string, cwd string, projectDirs []string
 			candidate = candidate[index+1:]
 		}
 		candidate = strings.Trim(candidate, "\"'")
-		if candidate == "" {
+		if candidate == "" || strings.Contains(candidate, unknownPolicyWord) {
 			continue
 		}
 		if sandboxManagedPath(candidate) {
@@ -501,7 +517,7 @@ func commandPathsOutsideProject(paths []string, cwd string, projectDirs []string
 
 func commandReadsSandboxSystemPaths(operation string) bool {
 	switch operation {
-	case "cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath":
+	case "cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath", "head", "tail", "cut", "diff":
 		return true
 	default:
 		return false
@@ -516,10 +532,17 @@ func commandPathArgs(argv []string) []string {
 	args := argv[1:]
 	switch operation {
 	case "mkdir", "touch", "cp", "mv", "rm", "rmdir", "unlink", "shred", "truncate",
-		"cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath":
+		"cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath", "head", "tail", "cut", "diff":
 		return commandNonOptionArgs(args, 0)
+	case "test", "[":
+		if path, ok := commandTestPath(argv); ok {
+			return []string{path}
+		}
+		return nil
 	case "chmod", "chown", "chgrp":
 		return commandNonOptionArgs(args, 1)
+	case "cd", "pushd":
+		return commandNonOptionArgs(args, 0)
 	case "dd":
 		var paths []string
 		for _, arg := range args {
@@ -530,6 +553,10 @@ func commandPathArgs(argv []string) []string {
 		return paths
 	case "find":
 		var paths []string
+		// find's traversal flags precede its roots, not its predicates.
+		for len(args) > 0 && containsAnyArg([]string{args[0]}, "-H", "-L", "-P", "-E", "-X", "-s") {
+			args = args[1:]
+		}
 		for _, arg := range args {
 			arg = strings.TrimSpace(arg)
 			if arg == "" {
@@ -581,6 +608,19 @@ func commandPathArgs(argv []string) []string {
 	default:
 		return nil
 	}
+}
+
+func commandTestPath(argv []string) (string, bool) {
+	if len(argv) > 0 && commandOperation(argv[0]) == "[" {
+		if argv[len(argv)-1] != "]" {
+			return "", false
+		}
+		argv = argv[:len(argv)-1]
+	}
+	if len(argv) == 3 && containsAnyArg(argv[1:2], "-e", "-f", "-d", "-L", "-r", "-w", "-x", "-s") {
+		return argv[2], true
+	}
+	return "", false
 }
 
 func commandNonOptionArgs(args []string, skip int) []string {
@@ -705,7 +745,9 @@ func commandRequiresApproval(argv []string) bool {
 	case "curl", "wget":
 		return !parseCommandDownload(argv).plain
 	case "sh", "bash", "zsh", "dash", "ksh", "fish", "powershell", "pwsh", "cmd":
-		return commandUsesInlineCode(operation, args)
+		// Shell code has the same sandbox authority as Python/Node code.
+		// Literal bodies are independently inspected for explicit hazards.
+		return false
 	case "awk", "gawk", "mawk", "nawk":
 		return awkRequiresApproval(args)
 	default:
@@ -960,12 +1002,16 @@ func extractAwkInlineScript(args []string) string {
 
 func isRiskyAwkScript(script string) bool {
 	lower := strings.ToLower(script)
-	for _, pattern := range []string{"system", "getline", "close", "environ", "extension", "@load", "fflush"} {
+	for _, pattern := range []string{"system", "getline", "close", "environ", "extension", "@", "fflush"} {
 		if strings.Contains(lower, pattern) {
 			return true
 		}
 	}
-	if strings.Contains(script, ">") || strings.Contains(script, "|") {
+	// Before the first action, > is a pattern comparison, not print redirection.
+	// Keep actions conservative; distinguishing their expressions from output
+	// redirection would require an AWK parser, not a shell/substring heuristic.
+	_, action, hasAction := strings.Cut(script, "{")
+	if (hasAction && strings.Contains(action, ">")) || strings.Contains(script, "|") {
 		return true
 	}
 	return false
@@ -1121,33 +1167,6 @@ func commandHasPublishingArgument(args []string) bool {
 	return false
 }
 
-func commandUsesInlineCode(operation string, args []string) bool {
-	switch operation {
-	case "sh", "bash", "zsh", "dash", "ksh", "fish":
-		return containsAnyArg(args, "-c", "-lc") || containsAttachedShortOption(args, "-c", "-lc")
-	case "python", "python3", "py":
-		return containsAnyArg(args, "-c") || containsAttachedShortOption(args, "-c")
-	case "node", "deno":
-		return containsAnyArg(args, "-e", "--eval", "-p", "--print") ||
-			containsArgPrefix(args, "-e", "--eval", "-p", "--print") ||
-			containsAttachedShortOption(args, "-e", "-p") ||
-			commandSubcommand(args) == "eval"
-	case "ruby", "perl", "php", "lua", "luajit", "julia", "elixir", "swift", "r", "rscript":
-		return containsAnyArg(args, "-e", "-r", "--eval") ||
-			containsArgPrefix(args, "--eval") ||
-			containsAttachedShortOption(args, "-e", "-r")
-	case "awk", "gawk", "mawk", "nawk":
-		return !containsAnyArg(args, "-f", "--file") && !containsArgPrefix(args, "--file")
-	case "powershell", "pwsh":
-		return containsAnyArg(args, "-c", "-command", "-encodedcommand") ||
-			containsAttachedShortOption(args, "-c", "-command", "-encodedcommand")
-	case "cmd":
-		return containsAnyArg(args, "/c", "/k") || containsAttachedShortOption(args, "/c", "/k")
-	default:
-		return false
-	}
-}
-
 func sandboxManagedPath(path string) bool {
 	path = strings.Trim(strings.TrimSpace(path), "\"'")
 	for _, variable := range []string{
@@ -1219,7 +1238,10 @@ func isLowRiskGitCommand(args []string) bool {
 			return false
 		default:
 			switch arg {
-			case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog", "ls-remote", "rev-list", "name-rev", "merge-base", "check-ignore", "check-ref-format":
+			case unknownPolicyWord:
+				// Unknown code is still confined to the authorized sandbox.
+				return true
+			case "status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "grep", "blame", "describe", "shortlog", "ls-remote", "rev-list", "name-rev", "merge-base", "check-ignore", "check-ref-format":
 				return true
 			case "branch":
 				return isLowRiskGitBranch(args[1:])

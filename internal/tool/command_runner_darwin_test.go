@@ -96,7 +96,7 @@ func TestMacOSCommandSandboxProjectBoundary(t *testing.T) {
 	}
 }
 
-func TestMacOSCommandPolicyRequiresApprovalForExpandedGitConfigWrite(t *testing.T) {
+func TestMacOSCommandSandboxTrustsExpandedProjectCode(t *testing.T) {
 	project := newGitTestRepository(t, true)
 	// macOS /bin/sh clears inherited OLDPWD. Set it inside the shell so this
 	// fixture verifies argument expansion without relying on environment import.
@@ -109,11 +109,11 @@ func TestMacOSCommandPolicyRequiresApprovalForExpandedGitConfigWrite(t *testing.
 		t.Fatal(err)
 	}
 	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{project})
-	if !ok || risk.LowRisk {
-		t.Fatalf("expanded Git arguments must require approval: %+v ok=%v", risk, ok)
+	if !ok || !risk.LowRisk {
+		t.Fatalf("unknown expansion alone must not require approval: %+v ok=%v", risk, ok)
 	}
-	// Execute only inside the fixture to verify the real macOS shell semantics
-	// behind the approval requirement, using an inert repository-local key.
+	// Auto trusts project code, not a read-only proof. Verify the actual shell
+	// can write an inert repository-local key without escaping the sandbox.
 	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(t.TempDir()), commandSpec{
 		Executable:  "/bin/sh",
 		Args:        []string{"-c", command},

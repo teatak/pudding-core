@@ -156,6 +156,16 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	}
 	if outputConfig, ok := opts["output_config"]; ok {
 		body.OutputConfig = outputConfig
+		if config, ok := outputConfig.(map[string]any); ok {
+			if effort, ok := provider.StringOption(config, "effort"); ok {
+				mapped := make(map[string]any, len(config))
+				for key, value := range config {
+					mapped[key] = value
+				}
+				mapped["effort"] = provider.WireReasoningEffort("anthropic", req.Model, effort)
+				body.OutputConfig = mapped
+			}
+		}
 	}
 	if len(req.Tools) > 0 {
 		body.Tools = make([]tool, 0, len(req.Tools))

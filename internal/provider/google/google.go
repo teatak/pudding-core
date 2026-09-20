@@ -222,6 +222,7 @@ func googleThinkingConfig(model string, opts map[string]any) *thinkingConfig {
 	if level == "" {
 		level, _ = provider.StringOption(opts, "thinkingLevel", "thinking_level")
 	}
+	level = provider.WireReasoningEffort("google", model, level)
 	budget, budgetSet := provider.IntOption(thinking, "budget", "thinkingBudget", "thinking_budget")
 	if !budgetSet {
 		budget, budgetSet = provider.IntOption(opts, "thinkingBudget", "thinking_budget")

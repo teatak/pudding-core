@@ -610,6 +610,7 @@ export const searchMessagesInSessionRequest = z.object({
 export const searchMessagesInSessionResponse = searchSessionMessagesResponse;
 
 export const conversationTurn = z.object({
+  retryOfTurnID: z.string().optional(),
   id: z.string(),
   sessionID: z.string(),
   clientMessageID: z.string(),
@@ -678,6 +679,8 @@ export const submitResponse = z.object({
   status: queuedInputStatus.optional(),
   clientMessageID: z.string().optional(),
 });
+
+export const retryTurnRequest = z.object({ clientMessageID: z.string().trim().min(1) });
 
 export const steerRequest = z.object({
   clientMessageID: z.string().min(1),

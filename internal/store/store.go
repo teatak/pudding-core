@@ -20,6 +20,7 @@ var (
 	// ErrTurnRunning:同一 session 已有 running turn。第一阶段不允许并发 turn,
 	// API 层映射为 409(docs/technology-decisions.md 第 14 节)。
 	ErrTurnRunning              = errors.New("store: session has a running turn")
+	ErrInvalidRetry             = errors.New("store: only the latest failed turn can be retried")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
 	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
@@ -1757,6 +1758,7 @@ type SteerQueuedInputResult struct {
 }
 
 type ConversationTurn struct {
+	RetryOfTurnID   string              `json:"retryOfTurnID,omitempty"`
 	ID              string              `json:"id"`
 	SessionID       string              `json:"sessionID"`
 	ClientMessageID string              `json:"clientMessageID"`
@@ -1787,6 +1789,7 @@ const (
 )
 
 type Turn struct {
+	RetryOfTurnID   string     `json:"retryOfTurnID,omitempty"`
 	ID              string     `json:"id"`
 	SessionID       string     `json:"sessionID"`
 	ClientMessageID string     `json:"clientMessageID"`
@@ -1826,6 +1829,9 @@ type BeginTurnResult struct {
 }
 
 type BeginSystemTurnInput struct {
+	// RetryOfTurnID requires the latest failed turn and an empty input queue.
+	// The new attempt keeps its own immutable lifecycle and reuses canonical history.
+	RetryOfTurnID   string
 	SessionID       string
 	TurnID          string
 	SystemMessageID string
@@ -2378,7 +2384,7 @@ type Store interface {
 	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn
 	// + turn.started 事件。
 	BeginTurn(ctx context.Context, in BeginTurnInput) (*BeginTurnResult, error)
-	// BeginSystemTurn 创建无 user message 的 running turn。用于 /summary
+	// BeginSystemTurn 创建无 user message 的 running turn。用于重试和 /summary
 	// 这类 system reminder:触发模型回复,但不在 transcript 里冒用户气泡。
 	BeginSystemTurn(ctx context.Context, in BeginSystemTurnInput) (*BeginSystemTurnResult, error)
 	// QueueInput 持久化等待发送的用户输入。Duplicate 表示同一

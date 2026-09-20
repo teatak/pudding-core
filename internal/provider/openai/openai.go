@@ -132,7 +132,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUs
 		body.MaxCompletionTokens = &v
 	}
 	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
-		body.ReasoningEffort = v
+		body.ReasoningEffort = provider.WireReasoningEffort("openai-compatible", req.Model, v)
 	}
 	if req.System != "" {
 		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
