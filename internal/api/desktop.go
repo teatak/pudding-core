@@ -21,6 +21,7 @@ import (
 
 	"github.com/kbinani/screenshot"
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/buildinfo"
 	"github.com/teatak/pudding-core/internal/config"
@@ -28,7 +29,8 @@ import (
 )
 
 const desktopSaveBodyLimit = 80 * 1024 * 1024
-const daemonProtocolVersion = 1
+
+var daemonProtocolVersion = contracts.Runtime().ProtocolVersion
 
 var (
 	errDesktopScreenshotUnsupported = errors.New("desktop screenshot unsupported")

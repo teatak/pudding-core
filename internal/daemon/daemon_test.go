@@ -30,6 +30,20 @@ func TestStartClaimsPortBeforeOpeningRuntimeState(t *testing.T) {
 	}
 }
 
+func TestStartRejectsNonLoopbackBeforeOpeningDatabase(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:0", "[::]:0", ":0", "192.0.2.1:0"} {
+		t.Run(addr, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := Start(Options{Home: dir, Addr: addr}); err == nil {
+				t.Fatal("accepted a non-loopback listener")
+			}
+			if _, err := os.Stat(home.DBPath(dir)); !os.IsNotExist(err) {
+				t.Fatalf("database opened before address validation: %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadOrCreateTokenIsAtomicAcrossConcurrentStarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.token")
 	const workers = 32

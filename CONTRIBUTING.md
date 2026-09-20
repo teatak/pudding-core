@@ -1,51 +1,21 @@
-# Contributing to Pudding
+# Contributing to Pudding Core
 
-Thank you for helping improve Pudding. Keep changes focused, explain the user-visible behavior, and include tests
-for behavior changes.
+Read [AGENTS.md](AGENTS.md) and [the documentation index](docs/README.md) first.
+Keep session ownership, canonical message storage and lifecycle transactions intact.
 
-## Before you start
+Install Go 1.25.1, Xcode command-line tools and PortAudio, then run:
 
-- Read `AGENTS.md` and `docs/technology-decisions.md`.
-- Search existing issues and pull requests before opening a duplicate.
-- Discuss architectural or product-scope changes in an issue before implementing them.
-- Never include credentials, personal data, production databases, signing material, or generated release bundles.
-
-## Development setup
-
-Pudding currently targets macOS. Install Go 1.25.1, Node.js 24, npm, Xcode command-line tools, and PortAudio,
-then run:
-
-```bash
-brew install portaudio
-npm ci
-npm --prefix web ci
-go test ./...
-npm test
-npm --prefix web run build
+```sh
+make test
+make schema-check
+make daemon
 ```
 
-Start the development desktop app with `make desktop-dev`. Development data is stored separately from release
-data as described in `AGENTS.md`.
+Tests must use temporary data directories. Do not include credentials, production data or generated bundles.
+Desktop UI, Electron and the native Computer Use helper are maintained in `pudding-desktop`.
+A wire-contract change must update the public `contracts/` definitions and its consumer tests;
+update the desktop core pin when integrating the change. Runtime JSON is the sole source of the handshake
+version and browser limits. Do not duplicate these values in a client.
 
-LLM-driven Composer states can be previewed in the real conversation layout without calling a model:
-
-```bash
-PUDDING_COMPOSER_TEST_STATE=approval make desktop-dev
-PUDDING_COMPOSER_TEST_STATE=app-approval make desktop-dev
-PUDDING_COMPOSER_TEST_STATE=interaction make desktop-dev
-PUDDING_COMPOSER_TEST_STATE=steps make desktop-dev
-```
-
-These states are available only in the unpackaged development desktop app and do not call the backend when
-their simulated controls are used.
-
-## Pull requests
-
-1. Create a short-lived branch from `main`.
-2. Keep one behavior change per pull request.
-3. Update tests and documentation together with the implementation.
-4. Run `npm run check:secrets`, `go test ./...`, `npm test`, and `npm --prefix web run build`.
-5. Explain verification and any remaining limitations in the pull request description.
-
-By submitting a contribution, you agree that it may be distributed under the repository's
-AGPL-3.0-only license. Pudding names and brand assets remain governed by `TRADEMARKS.md`.
+The existing AGPL declaration remains in place. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).

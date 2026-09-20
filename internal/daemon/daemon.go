@@ -40,20 +40,19 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/lsp"
-	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 	"github.com/teatak/pudding-core/internal/tool"
-	"github.com/teatak/pudding-core/internal/webui"
 )
 
 type Options struct {
-	Home string // 空 = 通道默认目录
-	Addr string // 空 = 通道默认地址
-	Mock bool
+	Home  string // 空 = 通道默认目录
+	Addr  string // 空 = 通道默认地址
+	Mock  bool
+	UIDir string // Optional external client bundle; empty means API-only.
 }
 
 type Daemon struct {
@@ -84,7 +83,15 @@ func Start(opts Options) (*Daemon, error) {
 	if addr == "" {
 		addr = home.DefaultAddr()
 	}
-	ln, err := net.Listen("tcp", addr)
+	listenAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil || listenAddr == nil || !listenAddr.IP.IsLoopback() {
+		return nil, fmt.Errorf("daemon address must resolve to loopback: %s", addr)
+	}
+	ui, err := api.UIHandler(opts.UIDir)
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.ListenTCP("tcp", listenAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +101,7 @@ func Start(opts Options) (*Daemon, error) {
 			_ = ln.Close()
 		}
 	}()
-	localAddr := localAddrFor(ln.Addr().String())
+	localAddr := ln.Addr().String()
 	environmentCtx, cancelEnvironment := context.WithTimeout(context.Background(), 5*time.Second)
 	environment, environmentErr := tool.CaptureCommandEnvironment(environmentCtx)
 	cancelEnvironment()
@@ -208,23 +215,13 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
 	}
 
-	devices, err := mobileauth.OpenDeviceStore(home.MobileDevicesPath(dir))
-	if err != nil {
-		_ = languageServers.Close(context.Background())
-		_ = st.Close()
-		return nil, err
-	}
-	pairing := mobileauth.NewManager(devices, nil)
-
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
 	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,
-			webui.Handler(),
-			api.WithDeviceTokenValidator(devices),
-			api.WithPairing(pairing),
+			ui,
 		),
 		BaseContext: func(net.Listener) context.Context { return sseCtx },
 	}
@@ -254,7 +251,7 @@ func Start(opts Options) (*Daemon, error) {
 		"listen", ln.Addr().String(),
 		"provider", providerLabel,
 		"store", "sqlite")
-	slog.Info("puddingd ready", "url", fmt.Sprintf("http://%s/", d.Addr()))
+	slog.Info("puddingd ready", "api", fmt.Sprintf("http://%s/", d.Addr()))
 	return d, nil
 }
 
@@ -298,18 +295,6 @@ func (d *Daemon) Addr() string { return d.localAddr }
 func (d *Daemon) Token() string { return d.token }
 
 func (d *Daemon) Home() string { return d.homeDir }
-
-// OpenURL 是带 token 的一键入口;前端读取后会从地址栏清掉。
-func (d *Daemon) OpenURL() string {
-	return fmt.Sprintf("http://%s/?token=%s", d.Addr(), d.token)
-}
-
-func localAddrFor(actualAddr string) string {
-	if host, port, err := net.SplitHostPort(actualAddr); err == nil && isUnspecifiedHost(host) {
-		return net.JoinHostPort("127.0.0.1", port)
-	}
-	return actualAddr
-}
 
 func defaultCaptureDriver(cfg config.AudioConfig) audiodriver.Driver {
 	cfg = cfg.WithDefaults()
@@ -441,11 +426,6 @@ func resolveAudioPath(homeDir, raw, modelSubdir string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
-}
-
-func isUnspecifiedHost(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsUnspecified()
 }
 
 // ServeErr 在 serve 异常退出时收到错误(正常 Shutdown 收到 http.ErrServerClosed)。

@@ -32,10 +32,10 @@
 | 重启恢复 | `Engine.Recover` 将遗留 running turn 收尾为 failed，原因是 daemon restart。当前不能恢复原 Go 调用栈或待审批命令 |
 | 用户问题 | [用户问题收集](user-input-flow.md) 已有提问、等待、补答、幂等与 canonical 恢复；不能再建另一套答案事实源 |
 | 用量与结果读取 | 已有会话用量和 [工具结果按需读取](context-working-set.md)。任务视图引用这些记录，不另建 token 计数器或完整日志副本 |
-| 桌面界面 | [RailPanel](../web/src/components/session-rail/RailPanel.tsx) 按项目组织会话；[Conversation](../web/src/components/Conversation.tsx) 复用 Transcript / Composer；[WorkspacePane](../web/src/components/workspace/WorkspacePane.tsx) 管理项目、网页和产物 |
+| 桌面界面 | [RailPanel](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/session-rail/RailPanel.tsx) 按项目组织会话；[Conversation](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/Conversation.tsx) 复用 Transcript / Composer；[WorkspacePane](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/workspace/WorkspacePane.tsx) 管理项目、网页和产物 |
 | 任务系统 | 本轮代码核对未发现本文所需的任务定义、定时调度、A2A 委派或业务结果 callback 主链路，需要新增 |
 
-界面以当前代码和用户提供的 Pudding 截图为基线。[旧设计底座](design.md) 中部分导航、品牌和消息展示描述已与当前界面不同，不能照其旧布局重建工作台。实际样式沿用 [styles.css](../web/src/styles.css)。
+界面以当前代码和用户提供的 Pudding 截图为基线。[旧设计底座](https://github.com/teatak/pudding-desktop/blob/main/docs/design.md) 中部分导航、品牌和消息展示描述已与当前界面不同，不能照其旧布局重建工作台。实际样式沿用 [styles.css](https://github.com/teatak/pudding-desktop/blob/main/web/src/styles.css)。
 
 鉴权存在需要明确处理的冲突：当前 `server.go` 仍有 mobile device token 分支，与 [AGENTS.md](../AGENTS.md) 的仅 Electron、启动 token 边界不一致。实现外部接入触及鉴权时应清理相关旧路径，不能复用移动端配对或把 daemon 暴露到公网。本次文档不修改该代码。
 

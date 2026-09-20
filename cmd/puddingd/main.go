@@ -50,9 +50,10 @@ func run() error {
 	}
 
 	var (
-		flagHome = flag.String("home", "", "data home (default: channel home, see docs)")
-		flagAddr = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
-		flagMock = flag.Bool("mock", false, "use mock provider")
+		flagHome  = flag.String("home", "", "data home (default: channel home, see docs)")
+		flagAddr  = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
+		flagUIDir = flag.String("ui-dir", "", "absolute path to an external client bundle (optional)")
+		flagMock  = flag.Bool("mock", false, "use mock provider")
 	)
 	flag.Parse()
 	resolvedHome, err := home.Resolve(*flagHome)
@@ -67,9 +68,10 @@ func run() error {
 	}
 
 	d, err := daemon.Start(daemon.Options{
-		Home: resolvedHome,
-		Addr: *flagAddr,
-		Mock: *flagMock,
+		Home:  resolvedHome,
+		Addr:  *flagAddr,
+		Mock:  *flagMock,
+		UIDir: *flagUIDir,
 	})
 	if err != nil {
 		slog.Error("puddingd startup failed", "addr", *flagAddr, "err", err)

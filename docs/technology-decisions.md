@@ -461,7 +461,7 @@ home 内容(第一阶段):
 
 ## 11. Audio
 
-当前只保留语音输入,详见 [voice-migration-plan.md](voice-migration-plan.md)。
+当前只保留语音输入,详见 [voice-migration-plan.md](https://github.com/teatak/pudding-desktop/blob/main/docs/voice-migration-plan.md)。
 
 - hardware belongs to daemon。
 - mic / ASR 通过 session-scoped input binding 显式路由。

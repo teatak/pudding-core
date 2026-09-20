@@ -1,15 +1,12 @@
-name: CI
-
+name: Core CI
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
-  desktop:
+  core:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
@@ -17,52 +14,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - run: brew install portaudio
+      - run: make test
+      - run: make schema-check
+      - run: make daemon
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
-      - name: Install native dependency
-        run: brew install portaudio
-      - name: Use repository npm version
-        run: npm install --global npm@11.6.0
-      - name: Install JavaScript dependencies
-        run: |
-          npm ci
-          npm --prefix web ci
-      - name: Check tracked files for secrets
-        run: npm run check:secrets
-      - name: Test tool package with required build tags
-        run: go test -tags 'sqlite_fts5 webrtcaec' ./internal/tool
-      - name: Test Go packages
-        run: go test ./...
-      - name: Test Electron shell
-        run: npm test
-      - name: Test web logic
-        run: npm --prefix web test
-      - name: Build web app
-        run: npm --prefix web run build
-      - name: Test model and reasoning interactions
-        run: npm --prefix web run smoke:reasoning
-      - name: Generate third-party notices
-        run: npm run legal:generate
-
-  oauth-worker:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: workers/oauth
-    steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.2
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: workers/oauth/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      - run: node scripts/scan-secrets.cjs

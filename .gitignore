@@ -21,6 +21,4 @@ internal/audio/dsp/webrtc_bridge/lib/darwin-amd64/
 *.db-wal
 *.db-shm
 .tmp
-!internal/webui/dist/
-internal/webui/dist/*
-!internal/webui/dist/.gitkeep
+.vite/

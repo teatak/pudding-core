@@ -1,5 +1,5 @@
 // Package event 定义 session-scoped 事件协议(docs/technology-decisions.md 第 8 节)。
-// 本文件是事件契约的 Go 侧唯一来源;web 侧镜像在 web/contracts/events.ts,
+// 本文件是事件契约的 Go 侧唯一来源;web 侧镜像在 contracts/events.ts,
 // 字段名必须一一对应,对照表见 docs/contracts-checklist.md。
 package event
 

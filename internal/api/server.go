@@ -29,7 +29,6 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/githubapp"
 	"github.com/teatak/pudding-core/internal/home"
-	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -132,7 +131,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
+var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -152,40 +151,12 @@ type browserMCPService interface {
 	BrowserSessions() []tool.BrowserMCPSessionSnapshot
 }
 
-type deviceTokenValidator interface {
-	ValidToken(token string) bool
-}
-
-type pairingService interface {
-	Create(fallbackBaseURL string) (mobileauth.Pairing, error)
-	Claim(code, deviceName string) (mobileauth.ClaimResult, error)
-}
-
-type handlerConfig struct {
-	deviceTokens deviceTokenValidator
-	pairing      pairingService
-}
-
-type HandlerOption func(*handlerConfig)
-
-func WithDeviceTokenValidator(v deviceTokenValidator) HandlerOption {
-	return func(cfg *handlerConfig) { cfg.deviceTokens = v }
-}
-
-func WithPairing(p pairingService) HandlerOption {
-	return func(cfg *handlerConfig) { cfg.pairing = p }
-}
-
 // Handler 返回根 handler:API 前缀走 token 鉴权 + cart 路由,
 // 其余路径 serve 静态 web UI(HTML/JS 非敏感,数据全在 API 后面;
 // static 为 nil 时只有 API)。
 // token 经 Authorization: Bearer 或 ?token= 传递;后者服务 EventSource
 // (浏览器 SSE 无法自定义 header)。
-func (s *Server) Handler(token string, static http.Handler, options ...HandlerOption) http.Handler {
-	cfg := handlerConfig{}
-	for _, option := range options {
-		option(&cfg)
-	}
+func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
@@ -317,40 +288,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
 	public.Route("/desktop/health").GET(desktopHealth(token))
 	app.Route("/usage/daily").GET(s.getDailyUsage)
-	if cfg.pairing != nil {
-		app.Route("/mobile/pairings").POST(func(c *cart.Context) error {
-			pairing, err := cfg.pairing.Create(requestBaseURL(c.Request))
-			if err != nil {
-				return s.fail(c, err)
-			}
-			c.JSON(http.StatusCreated, pairing)
-			return nil
-		})
-		public.Route("/mobile/pairings/:code/claim").POST(func(c *cart.Context) error {
-			code, _ := c.Param("code")
-			var req struct {
-				DeviceName string `json:"deviceName"`
-			}
-			if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
-				return badRequest(c, "invalid json body")
-			}
-			claim, err := cfg.pairing.Claim(code, req.DeviceName)
-			if errors.Is(err, mobileauth.ErrPairingInvalid) {
-				c.JSON(http.StatusNotFound, map[string]string{"error": "pairing_invalid"})
-				return nil
-			}
-			if err != nil {
-				return s.fail(c, err)
-			}
-			c.JSON(http.StatusOK, claim)
-			return nil
-		})
-	}
-
-	authed := withAuth(token, cfg.deviceTokens, app)
+	authed := withAuth(token, app)
 	var mcpAuthed http.Handler
 	if s.browserMCP != nil {
-		mcpAuthed = withAuth(token, cfg.deviceTokens, s.browserMCP)
+		mcpAuthed = withAuth(token, s.browserMCP)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
@@ -359,10 +300,6 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 		}
 		if r.URL.Path == browserTestFormPath {
 			serveBrowserTestForm(w, r)
-			return
-		}
-		if cfg.pairing != nil && isPublicMobilePath(r.URL.Path) {
-			public.ServeHTTP(w, r)
 			return
 		}
 		if isPublicOAuthPath(r.URL.Path) {
@@ -388,9 +325,9 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	return withCORS(handler)
 }
 
-func withAuth(token string, devices deviceTokenValidator, next http.Handler) http.Handler {
+func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if validBearerToken(r, token, devices) {
+		if validBearerToken(r, token) {
 			runtimeID := strings.TrimSpace(r.Header.Get(app.RuntimeIDHeader))
 			if runtimeID != "" {
 				r = r.WithContext(app.WithRuntimeID(r.Context(), runtimeID))
@@ -404,7 +341,7 @@ func withAuth(token string, devices deviceTokenValidator, next http.Handler) htt
 	})
 }
 
-func validBearerToken(r *http.Request, daemonToken string, devices deviceTokenValidator) bool {
+func validBearerToken(r *http.Request, daemonToken string) bool {
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if token == r.Header.Get("Authorization") {
 		token = ""
@@ -418,11 +355,7 @@ func validBearerToken(r *http.Request, daemonToken string, devices deviceTokenVa
 	if token == daemonToken {
 		return true
 	}
-	return devices != nil && devices.ValidToken(token)
-}
-
-func isPublicMobilePath(path string) bool {
-	return strings.HasPrefix(path, "/mobile/pairings/") && strings.HasSuffix(path, "/claim")
+	return false
 }
 
 func isPublicOAuthPath(path string) bool {

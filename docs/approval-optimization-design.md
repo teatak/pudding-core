@@ -23,7 +23,7 @@
 - 同一已批准用途、执行边界和有效期限内，符合明确复用规则的操作不再询问。
 - 同一次调用的目录扩展、操作风险和 host 需求，在条件明确时合并为一张卡。
 - 高风险操作仍展示具体对象；批准普通命令不等于授予 host，也不改变项目审批模式。
-- 手动点击 Markdown 文件链接走用户打开入口，不触发 LLM 命令审批，见[链接方案](local-html-preview-and-links-design.md)。
+- 手动点击 Markdown 文件链接走用户打开入口，不触发 LLM 命令审批，见[链接方案](https://github.com/teatak/pudding-desktop/blob/main/docs/local-html-preview-and-links-design.md)。
 
 本轮不做：默认原项目只读、默认全局禁网、隔离副本/worktree、Task/Run 系统、替换沙箱运行时、freeform 或强制 executable + argv 改造。这些不是降低重复审批的前提。`file_patch` 的严格行号、内容匹配及漂移校验保持不变。
 

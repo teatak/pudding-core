@@ -10,7 +10,7 @@ import (
 
 func TestAuthScopesRequestToExplicitRuntime(t *testing.T) {
 	var got string
-	handler := withAuth("token", nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := withAuth("token", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = app.RuntimeIDFromContext(r.Context())
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/apps", nil)

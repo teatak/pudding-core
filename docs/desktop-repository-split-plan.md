@@ -1,8 +1,8 @@
 # Pudding Core / Desktop 拆仓准备方案
 
-> 状态：准备方案，尚未实施。
-> 日期：2026-09-20；代码核对基线：`42b5379d`。
-> 本次只新增方案和文档索引，不移动代码、不修改许可证、不变更仓库可见性。
+> 状态：工程拆分已落地，正在进行构建和产物验收。
+> 日期：2026-09-20；实际迁移来源：`846ed125`。
+> core 使用 `codex/split-desktop` 分支，desktop 使用已有 `main`；不修改许可证、仓库可见性或历史。
 
 ## 1. 目标与已确认决定
 
@@ -13,7 +13,7 @@
 - 桌面闭源目标针对拆分后在私有仓库持续开发的版本；历史桌面源码可继续被查看。已有授权的适用范围与后续许可证另行核对，不能把迁移目录当作收回已有授权。
 - 桌面源码迁出后，core 主线不再同步桌面的实现代码；允许桌面通过公开协议使用 core。
 
-以下内容是建议的实施方案。许可证、OAuth Worker 归属等未定事项见第 8 节，不能当作已完成决策。
+已确认官网与 OAuth Worker 随 desktop 迁移，部署配置与 URL 保持不变；这次保留现有 AGPL 声明，后续许可证另行确定。
 
 ## 2. 仓库与目录边界
 
@@ -30,7 +30,7 @@
 | `packaging/`、`scripts/`、根 Makefile | 按职责拆分 | Go runtime 的构建依赖归 core；Electron 打包、签名、公证、更新归 desktop |
 | 语言服务版本清单与准备脚本 | core | 保留版本权威来源；desktop 将指定版本产物装入应用 |
 | CI、法律声明生成、开发文档 | 各仓维护自身部分 | desktop 汇总实际随包交付的 core、前端及原生依赖声明 |
-| `workers/oauth` | 待定 | 同时包含官网与 OAuth 服务，见第 8 节 |
+| `workers/oauth` | desktop | 官网与 OAuth 服务整体迁移，保持原部署配置与 URL |
 | `teatak/pudding` 发布仓库 | 保持现用途 | 继续公开安装包、更新元数据和发布说明 |
 
 不能按文件名批量搬走所有带 `desktop` 的 Go 文件。例如健康握手、相机采集、截图与附件保存分别涉及进程、hardware 和 session。按职责逐项处理；纯窗口或系统 UI 操作归 Electron，hardware 仍归 daemon。
@@ -57,18 +57,18 @@
 
 Core 的独立使用入口是 API。提供最小请求示例用于创建会话、提交、订阅事件和取消；本次不新增一套开源 Web UI 或交互式 CLI。
 
-## 4. 已证实的耦合及处理方向
+## 4. 实际拆分方式
 
-| 现有证据 | 拆分需要处理的内容 |
+| 耦合点 | 已实现的边界 |
 | --- | --- |
-| [Makefile](../Makefile) 的 `embed` 将 `web/dist` 复制进 [internal/webui](../internal/webui/webui.go)，由 [daemon](../internal/daemon/daemon.go) 提供页面 | 去掉 core 构建对产品前端的依赖；前端资源由 desktop 管理 |
-| [electron/main.cjs](../electron/main.cjs) 的 `loadRenderer` 默认加载 daemon URL，`isTrustedRendererURL` 按现有 origin 判断 | 一起调整页面加载、preload 信任边界、资源 URL、API / SSE / MCP 连接及 OAuth 回流；选定一种生产加载路径后删除旧内嵌路径 |
-| [electron/browser-host.cjs](../electron/browser-host.cjs) 直接读取 `internal/browser/tab_limits.json` | core 提供公开的契约资产出口，desktop 构建时消费锁定版本的产物；不得各维护一份限额常量 |
-| [internal/event/types.go](../internal/event/types.go)、[web/contracts/events.ts](../web/contracts/events.ts) 和 [web/contracts/api.ts](../web/contracts/api.ts) 分别表达服务端与客户端契约 | 明确 core 的公开协议及版本；客户端校验类型随所依赖 core 修订验证，不形成独立业务事实源 |
-| [prepare-runtime.sh](../packaging/macos/prepare-runtime.sh) 同仓构建 Go、Swift 和语言服务 | 拆成 core 可独立构建的 runtime 与 desktop 原生构建；desktop 负责最终装配与签名 |
-| [release-metadata.cjs](../scripts/release-metadata.cjs) 将唯一源码仓库写为 `teatak/pudding-core` | 后续发布记录同时标识 desktop 版本/提交和 core 提交；不重写旧发布记录 |
-
-这张表用于拆分前定位。迁移文档时应更新仍需使用的链接，历史记录由原提交定位。
+| core 内嵌 Web UI | 删除 `internal/webui` 与 `embed` 构建；core 默认只提供 API，可通过 `-ui-dir` 挂载绝对路径下的外置前端 |
+| Electron 页面与 API origin | desktop 将 `web/dist` 放入应用的 `Resources/app/web/dist`，Electron 启动 daemon 时传入；沿用原 loopback origin、preload 信任边界和浏览器存储 |
+| 浏览器限额与握手版本 | [contracts/runtime.json](../contracts/runtime.json) 是唯一来源，协议版本为 2，避免连接旧启动契约的 daemon |
+| TypeScript API / SSE 契约 | [contracts/api.ts](../contracts/api.ts)、[contracts/events.ts](../contracts/events.ts) 属于 core；desktop 从选定 core 生成被忽略的 `web/contracts/` |
+| Go / Swift / 语言服务构建 | core 的 [build-runtime.sh](../scripts/build-runtime.sh) 构建 Go runtime 与语言服务；desktop 负责 Swift helper、资源装配与签名 |
+| core 依赖 | desktop 的 `core.lock.json` 锁定完整 SHA；默认自动检出，开发可显式指定 `PUDDING_CORE_DIR`，打包要求其提交匹配且工作区干净 |
+| 发布溯源 | 新发布清单同时记录 desktop 提交和 core SHA；安装包仍发布到 `teatak/pudding`，历史发布记录不重写 |
+| 移动兼容 | 删除 MobileAccessBridge、配对 API、设备 token、设置界面和 Worker 移动回调；daemon 拒绝非 loopback 地址 |
 
 协议和状态约束继续遵循 [AGENTS.md](../AGENTS.md)：session scope、`clientMessageID`、单调事件序号、可取消流、canonical message、事务收尾、loopback 与 token 均不得因拆仓改变。无需为拆仓把 Go `internal` 改成供 desktop 直接导入的 SDK，也不新增第三个协议仓库。
 
@@ -84,7 +84,7 @@ Core 的独立使用入口是 API。提供最小请求示例用于创建会话�
 
 ### 5.2 日常入口
 
-建议在 desktop 保留原有使用方式：
+desktop 保留原有使用方式：
 
 | 操作 | desktop 入口 | 目标行为 |
 | --- | --- | --- |
@@ -110,19 +110,19 @@ core 保留 `make test`、`make schema-check` 与独立 daemon 构建入口，�
 
 ### 阶段一：确定迁移清单与契约
 
-- [ ] 确定许可证方案和 OAuth Worker 归属。
-- [ ] 逐项划分源码、测试、构建依赖、品牌资源和当前文档；保留 core 的历史提交和 tag。
-- [ ] 记录迁移来源提交，定义 core 依赖记录与公开契约资产出口。
-- [ ] 明确生产前端加载方式及信任边界，覆盖附件、App/Skill 资源与回调 URL。
+- [x] 确认先保留 AGPL 声明，OAuth Worker 与官网随 desktop 迁移。
+- [x] 逐项划分源码、测试、构建依赖、品牌资源和当前文档；保留 core 的历史提交和 tag。
+- [x] 记录迁移来源提交，定义 core 依赖记录与公开契约资产出口。
+- [x] 明确生产前端加载方式及信任边界，覆盖附件、App/Skill 资源与回调 URL。
 
 ### 阶段二：完成独立 core 与 desktop 开发链路
 
-- [ ] 创建私有 desktop 仓库并迁入桌面文件；core 当前树删除已迁出的实现，不保留双轨。
-- [ ] 去掉 core 的 Web 内嵌和私有目录依赖，实现 desktop 自动构建指定 core。
-- [ ] 拆分 CI、Makefile、脚本和测试，迁移各仓适用的 AGENTS、开发及发布文档。
-- [ ] 清理拆分触及的移动端兼容路径。当前 `MobileAccessBridge` 与 `/mobile` 路由仍存在，与 AGENTS 第 20 条冲突，不能将其作为新的桌面职责保留下来。
-- [ ] 在临时数据目录验证 core 独立启动、模型请求、会话隔离、submit / cancel、SSE 续传及存储。
-- [ ] 通过 core Go 测试与 schema 检查，通过 desktop Electron 测试、Web 测试和生产构建。
+- [x] 创建私有 desktop 仓库并迁入桌面文件；core 当前树删除已迁出的实现，不保留双轨。
+- [x] 去掉 core 的 Web 内嵌和私有目录依赖，实现 desktop 自动构建指定 core。
+- [x] 拆分 CI、Makefile、脚本和测试，迁移各仓适用的 AGENTS、开发及发布文档。
+- [x] 清理拆分触及的移动端兼容路径。已删除原有配对与移动桥接，不保留双轨。
+- [x] 在临时数据目录验证 core 独立启动、模型请求、会话隔离、submit / cancel、SSE 续传及存储。
+- [x] 通过 core Go 测试与 schema 检查，通过 desktop Electron 测试、Web 测试和生产构建。
 
 ### 阶段三：桌面与正式产物回归
 
@@ -135,23 +135,23 @@ core 保留 `make test`、`make schema-check` 与独立 daemon 构建入口，�
 
 ### 阶段四：开源资料与仓库公开准备
 
-- [ ] 更新 core README / CONTRIBUTING / 文档索引，清楚说明独立能力、执行端依赖与构建要求。
+- [x] 更新 core README / CONTRIBUTING / 文档索引，清楚说明独立能力、执行端依赖与构建要求。
 - [ ] 完成当前文件及历史中的凭据、私密配置核查；历史桌面源码公开是已接受决定，不作为清历史的理由。若发现真实凭据，单独处理吊销、轮换和影响范围。
 - [ ] 核对许可证、第三方声明和历史分发版本的授权安排；不将私有仓库可见性等同于许可证。
 - [ ] 检查两个仓库的 diff、新文件与旧路径残留，确认完整回归结果后完成公开准备。
 
-本次任务只交付这份文档。上述复选框全部是后续工作，未执行创建仓库、拆分、发布或修改 GitHub 可见性。
+实际验证记录见 desktop 的 `docs/repository-split-verification.md`。未勾选项不代表已经完成；正式发布、仓库公开及许可证决定仍是独立操作。
 
 ## 7. 规模与工作量
 
-2026-09-20 按跟踪文件估算，行数包含注释和空行，不含依赖、构建产物、文档和图片：
+拆分前（2026-09-20）按跟踪文件估算，行数包含注释和空行，不含依赖、构建产物、文档和图片：
 
 | 仓库 | 源码，不含测试和构建脚本 | 含测试、构建与发布脚本 |
 | --- | ---: | ---: |
 | core | 约 7.5 万行 | 约 12.3 万行 |
 | desktop | 约 9.6 万行 | 约 12 万行 |
 
-desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Worker 另约 1900 行，暂未计入。最终数值会随公共契约、脚本归属和旧路径清理变化；大部分工作是迁移现有实现。
+desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Worker 另约 1900 行，迁入 desktop，未计入上表的原估算。最终数值会随公共契约、脚本归属和旧路径清理变化；大部分工作是迁移现有实现。
 
 按一名熟悉项目的开发者估算：
 
@@ -165,9 +165,9 @@ desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Wo
 
 跑通开发版预计 2–3 天，包含在总量内；6–10 人日是可开源、可发布的完整工程估算，不含许可证处理和外部服务等待时间。保留 Git 历史省去历史过滤工作，但不减少打包和升级验证。
 
-## 8. 尚需确定的事项
+## 8. 决策与剩余事项
 
 1. **许可证。** 当前根目录与 npm 元数据标为 AGPL-3.0。需要确定 core 后续许可证、desktop 使用 core 的授权及未来贡献接收条件；本方案不改许可证，也不把分进程通信视为自动满足闭源授权。版权人另行授权及程序组合边界可参考 [GNU 授权说明](https://www.gnu.org/licenses/gpl-faq.en.html#ReleaseUnderGPLAndNF) 和 [程序组合说明](https://www.gnu.org/licenses/old-licenses/gpl-2.0-faq.en.html#MereAggregation)，具体安排取决于实际版权和第三方代码来源。
-2. **OAuth Worker / 官网。** `workers/oauth` 同时负责官方站点和授权交接，不属于纯 Agent 核心。首期建议随 desktop 迁到私有仓库，保留原部署与 URL；是否公开这部分代码仍待确定，core 的本地功能不得依赖私有源码才能构建。
-3. **core 版本命名。** 首期可以用完整 SHA 锁定，不急于增加单独的二进制发布系统；之后采用独立版本 tag 时，须避免改写已有应用历史 tag。
+2. **OAuth Worker / 官网（已确认）。** 随 desktop 迁移，保持原部署与 URL；本次没有触发部署。core 本地构建不依赖这部分私有源码。
+3. **core 版本命名（已采用）。** 首期用完整 SHA 锁定，不急于增加单独的二进制发布系统；之后采用独立版本 tag 时，须避免改写已有应用历史 tag。
 

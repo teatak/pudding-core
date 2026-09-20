@@ -1,13 +1,10 @@
 # Third-party notices
 
-Pudding release bundles include software maintained by third parties. Their license texts and attribution
-notices are generated from the exact locked dependencies used for a release:
+The root `LICENSE` covers Pudding Core. Native dependency license texts are kept in
+`legal/native/`; Go modules and language servers retain their respective upstream licenses.
 
-```bash
-npm run legal:generate
-```
+The desktop repository generates distribution notices from the exact locked core, npm,
+Electron and native dependencies. Run `npm run legal:generate` in `pudding-desktop`.
+Core builds do not require the desktop notice generator or its private sources.
 
-The command writes `dist/legal/`. The packaging pipeline copies that directory to
-`Pudding.app/Contents/Resources/legal`, and the release verifier rejects bundles with missing notices.
-
-Do not edit generated notice files by hand. Update the relevant dependency, lockfile, or source license instead.
+Do not edit upstream license texts or generated notices by hand.

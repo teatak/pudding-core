@@ -1,6 +1,0 @@
-"CFBundleDisplayName" = "Pudding";
-"CFBundleName" = "Pudding";
-"NSCameraUsageDescription" = "Pudding 仅在你选择拍照时使用相机。";
-"NSLocalNetworkUsageDescription" = "Pudding 使用本地网络，让同一网络中的设备连接到 Pudding。";
-"NSMicrophoneUsageDescription" = "Pudding 使用麦克风进行本地听写和语音输入。";
-"NSScreenCaptureUsageDescription" = "Pudding 仅在你选择截取桌面画面时使用屏幕录制权限。";
