@@ -30,7 +30,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [desktop-repository-split-plan.md](desktop-repository-split-plan.md) | Core 开源 / Desktop 闭源拆仓准备；保留完整 Git 历史；工程拆分进行中，完成项与待验收项见文档 |
+| [desktop-repository-split-plan.md](desktop-repository-split-plan.md) | 拆仓过程与开源记录；工程拆分和 preview 发布已完成，core 采用 Apache-2.0，保留完整 Git 历史 |
 | [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
 | [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
 

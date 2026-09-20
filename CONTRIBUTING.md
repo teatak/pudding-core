@@ -17,5 +17,9 @@ A wire-contract change must update the public `contracts/` definitions and its c
 update the desktop core pin when integrating the change. Runtime JSON is the sole source of the handshake
 version and browser limits. Do not duplicate these values in a client.
 
-The existing AGPL declaration remains in place. Report vulnerabilities privately as described in
-[SECURITY.md](SECURITY.md).
+Pudding Core is licensed under [Apache License 2.0](LICENSE). Unless explicitly stated otherwise,
+contributions intentionally submitted for inclusion are provided under the same license.
+Preserve third-party copyright and license notices. This license change does not rewrite historical
+releases or revoke rights already granted under their licenses.
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

@@ -1,7 +1,7 @@
 # Pudding Core
 
 Pudding 的本地优先、多会话 Agent daemon，使用 Go、SQLite 和 loopback HTTP。
-桌面产品源码在 [pudding-desktop](https://github.com/teatak/pudding-desktop)，安装包和更新仍由
+桌面产品在私有仓库 `pudding-desktop` 中独立开发，安装包和更新由
 [teatak/pudding](https://github.com/teatak/pudding/releases) 分发。
 
 ## 保留能力
@@ -44,6 +44,11 @@ make schema-check
 
 ## 历史与许可证
 
-保留完整 Git 历史，历史版本中包含旧桌面源码。仓库是否公开由单独的发布操作决定。
-本次工程拆分保留 [AGPL-3.0](LICENSE) 声明，后续 desktop 授权方案另行确定。
-第三方组件保留各自许可证。参与开发请阅读 [AGENTS.md](AGENTS.md) 和 [CONTRIBUTING.md](CONTRIBUTING.md)。
+Copyright 2026 Pudding Core contributors.
+
+当前版本的 Pudding Core 采用 [Apache License 2.0](LICENSE)，允许在遵守协议的条件下商用、修改和分发，
+也可作为闭源产品的组件。第三方依赖及其版权、许可证声明仍按各自条款保留。
+
+保留完整 Git 历史，历史提交和 tag 中包含旧桌面源码及当时的 AGPL 声明；本次许可证变更不重写历史，
+也不撤回历史版本已经授予的权利。独立的 `pudding-desktop` 不属于本仓库 Apache-2.0 授权范围。
+参与开发请阅读 [AGENTS.md](AGENTS.md) 和 [CONTRIBUTING.md](CONTRIBUTING.md)。
