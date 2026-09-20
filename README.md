@@ -1,8 +1,6 @@
 # Pudding Core
 
 A local-first, multi-session agent daemon built with Go, SQLite, and loopback HTTP.
-The desktop product is developed separately in the private `pudding-desktop` repository.
-Desktop installers and updates are available from [Pudding releases](https://github.com/teatak/pudding/releases).
 
 ## Capabilities
 
@@ -12,15 +10,14 @@ Desktop installers and updates are available from [Pudding releases](https://git
 - Skills, Apps, MCP, attachments, resource libraries, canvas data, and usage tracking.
 - Audio and camera services in Go, plus protocols and session management for browser and computer-use tools.
 
-The visual browser, native computer-use actions, and frontend canvas tools require the desktop client.
+Visual browsing, native computer-use actions, and interactive canvas tools require external client implementations.
 Headless browser capabilities require a local Chrome installation. Hardware features and native dependencies
 remain subject to their supported platforms.
 
 ## Development
 
 Development on macOS uses Apple Silicon and requires Go 1.25.1, Xcode command-line tools, PortAudio,
-and a pinned version of Abseil. Building the daemon does not require the web frontend, Electron,
-or access to a private repository.
+and a pinned version of Abseil.
 
 ```sh
 brew install portaudio cmake pkgconf
@@ -44,15 +41,10 @@ See the [API quickstart](docs/api-quickstart.md) for standalone usage examples,
 [contracts](contracts/README.md) for protocol definitions and client validation schemas,
 and the [documentation index](docs/README.md) for design and feature documentation.
 
-## Desktop Integration
+## Optional UI Hosting
 
-`pudding-desktop/core.lock.json` pins an exact core commit. The desktop build handles the frontend,
-Swift helper, application packaging, signing, and updates. Core builds the daemon and its dependencies,
-including language servers.
-
-The desktop client can pass `-ui-dir /absolute/path/to/web/dist` to serve external static assets
-from the same origin as the API. Without this option, the root path returns 404 and the daemon serves
-only its APIs. There is no embedded frontend or placeholder page.
+Start the daemon with `-ui-dir /absolute/path/to/ui` to serve static UI assets from the same origin
+as the API. Without this option, the daemon serves only its APIs and the root path returns 404.
 
 ## History and License
 
@@ -62,9 +54,7 @@ The current version of Pudding Core is licensed under the [Apache License 2.0](L
 Commercial use, modification, redistribution, and use in proprietary products are permitted subject to
 the license terms. Third-party dependencies retain their own copyright notices and licenses.
 
-The complete Git history is preserved, including older desktop source code and the AGPL declarations
-in historical commits and tags. This license change does not rewrite history or revoke rights already
-granted for earlier versions. The separate `pudding-desktop` repository is outside the scope of this
-repository's Apache-2.0 license.
+The complete Git history is preserved, including the AGPL declarations in historical commits and tags.
+This license change does not rewrite history or revoke rights already granted for earlier versions.
 
 Before contributing, read [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
