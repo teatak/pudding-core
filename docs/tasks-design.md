@@ -1,5 +1,9 @@
 # 任务：定时执行与 Agent-to-Agent 协作
 
+> 归属：跨仓设计草案；core 维护任务调度、数据与 API 设计，desktop 承载任务视图。
+> `internal/`、`contracts/` 路径相对 core；`web/`、`electron/` 和 `make desktop-dev` 属于 `pudding-desktop`。
+> 规划中的接口和文件不表示已实现；下文链接到 desktop 的现有界面仅作为产品参考。
+
 > 日期：2026-09-13。状态：设计草案，尚未实现。
 > 范围：Pudding Electron 桌面端、local-first、单机执行。
 > 本文确定任务的行为边界、数据归属、外部接口与验收条件，不代表当前产品已有这些能力。
@@ -37,7 +41,8 @@
 
 界面以当前代码和用户提供的 Pudding 截图为基线。[旧设计底座](https://github.com/teatak/pudding-desktop/blob/main/docs/design.md) 中部分导航、品牌和消息展示描述已与当前界面不同，不能照其旧布局重建工作台。实际样式沿用 [styles.css](https://github.com/teatak/pudding-desktop/blob/main/web/src/styles.css)。
 
-鉴权存在需要明确处理的冲突：当前 `server.go` 仍有 mobile device token 分支，与 [AGENTS.md](../AGENTS.md) 的仅 Electron、启动 token 边界不一致。实现外部接入触及鉴权时应清理相关旧路径，不能复用移动端配对或把 daemon 暴露到公网。本次文档不修改该代码。
+鉴权基线更新（2026-09-20）：拆仓已删除 mobile device token 与移动配对路径。外部接入仍须遵守
+[AGENTS.md](../AGENTS.md) 的 loopback 与启动 token 边界，不得恢复移动端配对或把 daemon 暴露到公网。
 
 ## 3. 用户界面
 

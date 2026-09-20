@@ -7,6 +7,14 @@
 3. 下方“当前参考”文档。
 4. 已完成设计记录与历史文档。
 
+## 文档归属与路径
+
+本仓维护 daemon、公共协议、数据与工具执行的文档。纯桌面 UI、原生交互和应用发布文档归属
+`pudding-desktop`。涉及前后端协作的文档保留一个版本，并在文首标明路径归属。
+
+跨仓文档中的 `internal/`、`cmd/`、`contracts/` 相对 core 根目录；`web/`、`electron/`、
+`native/` 相对 desktop 根目录。历史文档中的文件名和行号对应记录时的版本，不保证仍存在。
+
 ## 当前参考
 
 | 文档 | 用途 |
@@ -15,7 +23,7 @@
 | [technology-decisions.md](technology-decisions.md) | 产品定位、后端边界、状态所有权和通信架构 |
 | [contracts-checklist.md](contracts-checklist.md) | REST、SSE、消息和工具契约对照 |
 | [provider-presets.md](provider-presets.md) | 模型预设更新依据、能力边界与 DeepSeek Responses 接入 |
-| [user-input-flow.md](user-input-flow.md) | 用户问题收集、模型等待、独立面板计时和事后补答 |
+| [user-input-flow.md](user-input-flow.md) | 跨仓契约：core 的模型等待与答复路由，以及 desktop 的提问面板 |
 | [apps.md](apps.md) | App 包、连接字段与 MCP App 配置 |
 | [builtin-apps-design.md](builtin-apps-design.md) | 内置 App、动态加载和 runtime-provided App |
 | [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
@@ -24,25 +32,20 @@
 | [context-compaction.md](context-compaction.md) | 压缩预算、工具循环内触发、并发边界和回归入口 |
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
-| [code-agent-tooling-report.md](code-agent-tooling-report.md) | Code 模式工具与终端摩擦记录、优化建议与验收标准（按会话累积） |
+| [code-agent-tooling-report.md](code-agent-tooling-report.md) | core 工具与沙箱改进记录；桌面问题样本按文首跨仓路径约定读取 |
 
 ## 待实施设计
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [desktop-repository-split-plan.md](desktop-repository-split-plan.md) | 拆仓过程与开源记录；工程拆分和 preview 发布已完成，core 采用 Apache-2.0，保留完整 Git 历史 |
-| [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
+| [tasks-design.md](tasks-design.md) | 跨仓任务设计：core 的调度、持久化与接口，以及 desktop 的任务视图；尚未实现 |
 | [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
-
-## 仍在收尾
-
-| 文档 | 当前状态 |
-| --- | --- |
 
 ## 已完成设计记录
 
 这些文档用于解释决策过程，不作为待办列表:
 
+- [desktop-repository-split-plan.md](desktop-repository-split-plan.md)：工程拆分和 preview 发布已完成；core 采用 Apache-2.0，保留完整 Git 历史。
 - [phase-1-plan.md](phase-1-plan.md)
 - [code-capabilities-plan.md](code-capabilities-plan.md)
 - [code-refactor-design.md](code-refactor-design.md)

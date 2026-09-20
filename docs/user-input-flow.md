@@ -1,7 +1,11 @@
 # 用户问题收集
 
+> 归属：跨仓交互契约，保留在 core 维护模型等待、答复路由和 canonical 数据语义。
+> `internal/` 路径相对 core；`web/`、`electron/` 路径及 Web/桌面验证命令属于 `pudding-desktop`。
+
 当前入口为 `builtin_request_user_input`。LLM 可见说明和 JSON schema 位于
-`web/src/mcp/inputFlowTools.ts`；模型等待及答复路由由 `internal/engine/user_input.go` 管理。
+[desktop 的 inputFlowTools.ts](https://github.com/teatak/pudding-desktop/blob/main/web/src/mcp/inputFlowTools.ts)；
+模型等待及答复路由由 [core 的 user_input.go](../internal/engine/user_input.go) 管理。
 
 ## 两个独立计时器
 
@@ -41,6 +45,6 @@
 
 ## 验证入口
 
-- Go：`go test -tags 'sqlite_fts5 webrtcaec' ./internal/engine ./internal/api -run 'Test(UserInput|LateUserInput)'`。
-- Web：`npm --prefix web test`、`npm --prefix web run build`。
-- 隔离桌面：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、固定等待上限（交互不续期）、补答、长等待下重开、草稿恢复、失败重试与无重复投递、本地/SSE 撤回后直接重开补答，以及 form/repeat 数字字段的真实按键、小数、退格和文本插入。数字输入必须通过原生按键验证，不能仅用 `insertText` 代替。HTTP 为模拟数据，不接真实 provider。
+- Go（在 core 执行）：`go test -tags 'sqlite_fts5 webrtcaec' ./internal/engine ./internal/api -run 'Test(UserInput|LateUserInput)'`。
+- Web（在 desktop 执行）：`npm --prefix web test`、`npm --prefix web run build`。
+- 隔离桌面（在 desktop 执行）：当前源码 Electron 运行 `electron/smoke/input-flow-smoke.cjs` 和 `electron/smoke/input-flow-delivery-smoke.cjs`；后者覆盖两个计时器、固定等待上限（交互不续期）、补答、长等待下重开、草稿恢复、失败重试与无重复投递、本地/SSE 撤回后直接重开补答，以及 form/repeat 数字字段的真实按键、小数、退格和文本插入。数字输入必须通过原生按键验证，不能仅用 `insertText` 代替。HTTP 为模拟数据，不接真实 provider。
