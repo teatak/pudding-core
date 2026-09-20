@@ -32,6 +32,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [desktop-repository-split-plan.md](desktop-repository-split-plan.md) | Core 开源 / Desktop 闭源拆仓准备；保留完整 Git 历史，含功能边界、构建发布调整与验收条件，尚未实施 |
 | [tasks-design.md](tasks-design.md) | 手动、定时与外部 Agent 共用的任务系统设计草案；含执行记录、结果审查、审批恢复与 callback，尚未实现 |
 | [local-html-preview-and-links-design.md](local-html-preview-and-links-design.md) | Markdown 同项目相对/绝对路径与目录定位；file URL 进入内置浏览器，项目外先确认；项目外普通路径只读查看待实施 |
 | [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
