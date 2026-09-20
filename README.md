@@ -1,24 +1,26 @@
 # Pudding Core
 
-Pudding 的本地优先、多会话 Agent daemon，使用 Go、SQLite 和 loopback HTTP。
-桌面产品在私有仓库 `pudding-desktop` 中独立开发，安装包和更新由
-[teatak/pudding](https://github.com/teatak/pudding/releases) 分发。
+A local-first, multi-session agent daemon built with Go, SQLite, and loopback HTTP.
+The desktop product is developed separately in the private `pudding-desktop` repository.
+Desktop installers and updates are available from [Pudding releases](https://github.com/teatak/pudding/releases).
 
-## 保留能力
+## Capabilities
 
-- 模型接入、流式输出、上下文构建与压缩、工具循环。
-- 多会话、消息历史、输入队列、取消、审批和可续传 SSE。
-- 项目与文件、CLI / 后台进程、Git、LSP、权限与沙箱。
-- Skills、Apps、MCP、附件、资源库、画布数据、用量统计。
-- Go 音频与相机能力；浏览器和电脑操作保留协议及会话管理。
+- Model providers, streaming output, context building and compaction, and tool execution loops.
+- Multiple sessions, message history, input queues, cancellation, approvals, and resumable SSE streams.
+- Projects and files, command execution and background processes, Git, LSP, permissions, and sandboxing.
+- Skills, Apps, MCP, attachments, resource libraries, canvas data, and usage tracking.
+- Audio and camera services in Go, plus protocols and session management for browser and computer-use tools.
 
-没有 desktop 执行端时，不提供其可视浏览器、原生电脑操作和前端画布工具。
-现有无头 Chrome 能力需要本机 Chrome；硬件及原生依赖仍受现有平台支持范围限制。
+The visual browser, native computer-use actions, and frontend canvas tools require the desktop client.
+Headless browser capabilities require a local Chrome installation. Hardware features and native dependencies
+remain subject to their supported platforms.
 
-## 开发
+## Development
 
-macOS 开发环境使用 Apple Silicon，需要 Go 1.25.1、Xcode command-line tools、PortAudio 和固定版本 Abseil。
-构建 daemon 不需要 Web、Electron 或私有仓库。
+Development on macOS uses Apple Silicon and requires Go 1.25.1, Xcode command-line tools, PortAudio,
+and a pinned version of Abseil. Building the daemon does not require the web frontend, Electron,
+or access to a private repository.
 
 ```sh
 brew install portaudio cmake pkgconf
@@ -29,31 +31,40 @@ make test
 make schema-check
 ```
 
-Abseil 版本由准备脚本锁定，与现有 arm64 WebRTC 库的 ABI 一致；不要用系统最新版替代。
-重新打开终端时需再次设置上述 `PKG_CONFIG_PATH`。Intel 发布构建使用独立的 `make runtime ARCH=x64 OUT=/absolute/path` 依赖链路。
+The preparation script pins Abseil to match the ABI of the existing arm64 WebRTC library;
+do not replace it with the latest system version. Set `PKG_CONFIG_PATH` again when opening a new terminal.
+Intel release builds use a separate dependency setup through `make runtime ARCH=x64 OUT=/absolute/path`.
 
-`make daemon-dev` 启动开发服务。开发数据为 `~/.pudding-dev`，发布构建为 `~/.pudding`；
-测试必须使用临时目录。CLI 仅监听 loopback，API 需要 `<home>/daemon.token` 中的启动令牌。
-可选语言服务通过 `make language-servers` 准备，这一步另需 Node/npm。
+Run `make daemon-dev` to start the development daemon. Development data is stored in `~/.pudding-dev`;
+release builds use `~/.pudding`. Tests must use temporary directories. The daemon listens only on loopback,
+and API requests require the startup token stored in `<home>/daemon.token`.
+Optional language servers can be prepared with `make language-servers`, which also requires Node.js and npm.
 
-独立使用示例见 [API 快速开始](docs/api-quickstart.md)。协议与客户端校验定义位于
-[contracts](contracts/README.md)，设计与功能说明见 [文档索引](docs/README.md)。
+See the [API quickstart](docs/api-quickstart.md) for standalone usage examples,
+[contracts](contracts/README.md) for protocol definitions and client validation schemas,
+and the [documentation index](docs/README.md) for design and feature documentation.
 
-## 桌面集成
+## Desktop Integration
 
-`pudding-desktop/core.lock.json` 锁定 core 的准确提交。桌面构建负责前端、Swift helper、
-应用装配、签名与更新；core 只构建 daemon 和其语言服务等依赖。
+`pudding-desktop/core.lock.json` pins an exact core commit. The desktop build handles the frontend,
+Swift helper, application packaging, signing, and updates. Core builds the daemon and its dependencies,
+including language servers.
 
-桌面可以通过 `-ui-dir /absolute/path/to/web/dist` 提供外置静态资源，沿用原本的页面来源与 API 地址。
-该选项为空时根路径返回 404，仅提供 API；没有内嵌前端或占位页面。
+The desktop client can pass `-ui-dir /absolute/path/to/web/dist` to serve external static assets
+from the same origin as the API. Without this option, the root path returns 404 and the daemon serves
+only its APIs. There is no embedded frontend or placeholder page.
 
-## 历史与许可证
+## History and License
 
 Copyright 2026 Pudding Core contributors.
 
-当前版本的 Pudding Core 采用 [Apache License 2.0](LICENSE)，允许在遵守协议的条件下商用、修改和分发，
-也可作为闭源产品的组件。第三方依赖及其版权、许可证声明仍按各自条款保留。
+The current version of Pudding Core is licensed under the [Apache License 2.0](LICENSE).
+Commercial use, modification, redistribution, and use in proprietary products are permitted subject to
+the license terms. Third-party dependencies retain their own copyright notices and licenses.
 
-保留完整 Git 历史，历史提交和 tag 中包含旧桌面源码及当时的 AGPL 声明；本次许可证变更不重写历史，
-也不撤回历史版本已经授予的权利。独立的 `pudding-desktop` 不属于本仓库 Apache-2.0 授权范围。
-参与开发请阅读 [AGENTS.md](AGENTS.md) 和 [CONTRIBUTING.md](CONTRIBUTING.md)。
+The complete Git history is preserved, including older desktop source code and the AGPL declarations
+in historical commits and tags. This license change does not rewrite history or revoke rights already
+granted for earlier versions. The separate `pudding-desktop` repository is outside the scope of this
+repository's Apache-2.0 license.
+
+Before contributing, read [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -3,7 +3,7 @@
 Read [AGENTS.md](AGENTS.md) and [the documentation index](docs/README.md) first.
 Keep session ownership, canonical message storage and lifecycle transactions intact.
 
-On Apple Silicon, follow the [README setup](README.md#开发) to install Go, the native build tools,
+On Apple Silicon, follow the [README setup](README.md#development) to install Go, the native build tools,
 PortAudio and the pinned Abseil version, and export `PKG_CONFIG_PATH`. Then run:
 
 ```sh
