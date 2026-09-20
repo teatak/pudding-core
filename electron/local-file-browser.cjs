@@ -33,7 +33,16 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
     if (session.projectID) {
       const project = await requestAPI(`/projects/${encodeURIComponent(session.projectID)}`);
       for (const root of project.rootDirs) {
-        const realRoot = await fs.realpath(root);
+        let realRoot;
+        try {
+          realRoot = await fs.realpath(root);
+          if (!(await fs.stat(realRoot)).isDirectory()) continue;
+        } catch (error) {
+          // Stale roots are not missing target files. Keep checking other roots,
+          // but do not hide permission or unexpected filesystem errors.
+          if (error.code === "ENOENT" || error.code === "ENOTDIR") continue;
+          throw error;
+        }
         const relative = path.relative(realRoot, target);
         if (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
           projectRoot = realRoot;
@@ -55,7 +64,8 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
     if (tabID && !tabs.some(tab => tab.tabID === tabID)) return { ok: false, reason: "tab_not_found" };
     const existing = tabs.find(tab => tab.url === target.url && (!tabID || tab.tabID === tabID));
     if (existing) return { ok: true, tab: existing };
-    if (!target.projectRoot && !(await confirm(owner, target.path))) return { ok: false, cancelled: true };
+    const reuseGrant = Boolean(tabID && host.allowsFileURL({ sessionID, tabID, url: target.url }));
+    if (!target.projectRoot && !reuseGrant && !(await confirm(owner, target.path))) return { ok: false, cancelled: true };
     if (owner.isDestroyed()) return { ok: false, cancelled: true };
     // A symlink, session or project may have changed while the dialog was open.
     const current = await resolve(sessionID, raw);
@@ -66,9 +76,13 @@ function createLocalFileBrowserOpener({ host, requestAPI, confirm }) {
     try {
       const snapshot = await host.ensure({
         sessionID, tabID: tab.id, url: target.url,
-        _fileAuthorized: true,
-        // A regular-file scope grants only this file, never its parent directory.
-        fileRoot: target.projectRoot || { file: target.path },
+        // Reuse the live scope without re-granting it: revocation during the
+        // async checks must still be enforced by BrowserHost.ensure.
+        ...(!reuseGrant ? {
+          _fileAuthorized: true,
+          // A regular-file scope grants only this file, never its parent directory.
+          fileRoot: target.projectRoot || { file: target.path },
+        } : {}),
       });
       return { ok: true, tab: snapshot };
     } catch (error) {

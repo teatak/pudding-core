@@ -10,46 +10,34 @@ type SteppedSliderProps = {
   className?: string;
 };
 
-export type EffortColorConfig = {
-  bg: string;
-  text: string;
-  glow?: string;
-};
+type EffortColorConfig = { bg: string; text: string };
 
-export const COLOR_PALETTE: EffortColorConfig[] = [
+// Preserve the original light palette. Dark mode only softens the same colors;
+// gold is slightly softened without darkening into a brown surface.
+const COLOR_PALETTE: EffortColorConfig[] = [
   {
-    // 灰 (最低档)
-    bg: "bg-gradient-to-b from-zinc-400 to-zinc-500 dark:from-zinc-500 dark:to-zinc-600",
+    bg: "bg-gradient-to-b from-zinc-400 to-zinc-500 dark:from-zinc-400/90 dark:to-zinc-500/90",
     text: "text-zinc-600 dark:text-zinc-300 font-semibold",
-    glow: "shadow-[0_1px_3px_rgba(113,113,122,0.15)]",
   },
   {
-    // 绿
-    bg: "bg-gradient-to-b from-emerald-400 to-emerald-500 dark:from-emerald-500 dark:to-emerald-600",
+    bg: "bg-gradient-to-b from-emerald-400 to-emerald-500 dark:from-emerald-400/85 dark:to-emerald-500/90",
     text: "text-emerald-600 dark:text-emerald-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(16,185,129,0.2)]",
   },
   {
-    // 蓝
-    bg: "bg-gradient-to-b from-sky-400 to-blue-500 dark:from-blue-500 dark:to-blue-600",
+    bg: "bg-gradient-to-b from-sky-400 to-blue-500 dark:from-sky-400/85 dark:to-blue-500/90",
     text: "text-blue-600 dark:text-blue-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(59,130,246,0.2)]",
   },
   {
-    // 紫
-    bg: "bg-gradient-to-b from-violet-400 to-violet-500 dark:from-violet-500 dark:to-violet-600",
+    bg: "bg-gradient-to-b from-violet-400 to-violet-500 dark:from-violet-400/85 dark:to-violet-500/90",
     text: "text-violet-600 dark:text-violet-400 font-semibold",
-    glow: "shadow-[0_1px_4px_rgba(139,92,246,0.2)]",
   },
   {
-    // 金/橙 (最高档)
-    bg: "bg-gradient-to-b from-amber-400 to-amber-500 dark:from-amber-500 dark:to-amber-600",
-    text: "text-amber-600 dark:text-amber-400 font-semibold",
-    glow: "shadow-[0_1px_5px_rgba(245,158,11,0.25)]",
+    bg: "bg-gradient-to-b from-amber-400 to-amber-500 dark:from-amber-300/90 dark:to-amber-400/90",
+    text: "text-amber-600 dark:text-amber-300/90 font-semibold",
   },
 ];
 
-export function getEffortColor(index: number, totalOptions: number): EffortColorConfig {
+function getEffortColor(index: number, totalOptions: number): EffortColorConfig {
   if (totalOptions <= 1) {
     return COLOR_PALETTE[COLOR_PALETTE.length - 1]!;
   }
@@ -158,12 +146,12 @@ export function SteppedSlider({
   const currentEffortColor = getEffortColor(activeIndex, options.length);
 
   return (
-    <div className={cn("w-full select-none pt-1 pb-0.5", className)}>
+    <div className={cn("pudding-effort-slider w-full select-none pt-1 pb-0.5", className)}>
       {/* 滑块轨道区域：拖拽中为 cursor-grabbing，否则为 cursor-default */}
       <div
         ref={trackRef}
         className={cn(
-          "relative flex h-8 w-full items-center rounded-full bg-muted/60 p-1 touch-none shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(0,0,0,0.04)] dark:bg-muted/40 dark:shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.05)]",
+          "pudding-effort-track relative flex h-8 w-full items-center rounded-full bg-muted/60 p-1 touch-none shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(0,0,0,0.04)] dark:bg-muted/40 dark:shadow-[inset_0_1px_2.5px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.05)]",
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
         onPointerDown={handlePointerDown}
@@ -175,7 +163,7 @@ export function SteppedSlider({
         <div className="absolute inset-1 overflow-hidden rounded-full pointer-events-none">
           <div
             className={cn(
-              "h-full rounded-full pointer-events-none ring-1 ring-inset ring-white/20",
+              "pudding-effort-fill h-full rounded-full pointer-events-none ring-1 ring-inset ring-white/20 dark:ring-white/10",
               currentEffortColor.bg,
               animClass,
             )}
@@ -226,7 +214,7 @@ export function SteppedSlider({
           >
             <div
               className={cn(
-                "size-6 rounded-full bg-gradient-to-b from-white to-zinc-50 dark:from-zinc-100 dark:to-zinc-200 shadow-[0_2px_5px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] ring-1 ring-black/10 transition-transform",
+                "pudding-effort-thumb size-6 rounded-full bg-gradient-to-b from-white to-zinc-50 dark:from-zinc-200 dark:to-zinc-300 shadow-[0_2px_5px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] ring-1 ring-black/10 transition-transform",
                 isDragging ? "cursor-grabbing scale-95" : "cursor-grab hover:scale-105 active:scale-95",
               )}
             />
@@ -239,16 +227,16 @@ export function SteppedSlider({
         {options.map((opt, idx) => {
           const r = idx / totalSteps;
           const isActive = idx === activeIndex;
-          const color = getEffortColor(idx, options.length);
           return (
             <button
               key={opt}
               type="button"
+              aria-pressed={isActive}
               className={cn(
                 "absolute -translate-x-1/2 cursor-default text-[11px] whitespace-nowrap transition-colors",
                 isActive
-                  ? color.text
-                  : "text-muted-foreground/80 hover:text-foreground",
+                  ? currentEffortColor.text
+                  : "text-muted-foreground/80 dark:text-muted-foreground hover:text-foreground",
               )}
               style={{
                 left: `calc(${r} * (100% - 32px) + 16px)`,

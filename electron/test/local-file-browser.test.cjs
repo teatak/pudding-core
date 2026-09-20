@@ -4,25 +4,28 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { BrowserHost } = require("../browser-host.cjs");
 const { createLocalFileBrowserOpener } = require("../local-file-browser.cjs");
 
-function fixture(t) {
+function fixture(t, nativeHost = false) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pudding-file-preview-")));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const project = path.join(home, "project");
   fs.mkdirSync(project);
   const inside = path.join(project, "中文 #?%.html"), outside = path.join(home, "outside.html");
   for (const file of [inside, outside]) fs.writeFileSync(file, "<h1>fixture</h1>");
-  const state = { confirmations: [], creates: 0, grants: [], tabs: [], requests: [], allowed: true, hasProject: true };
+  const state = { confirmations: [], creates: 0, grants: [], tabs: [], requests: [], allowed: true, hasProject: true, rootDirs: [project] };
   const owner = { isDestroyed: () => false };
   const requestAPI = async (route, method) => {
     state.requests.push([route, method]);
     if (method === "POST") { state.creates++; return { id: `tab-${state.creates}` }; }
     if (route.startsWith("/sessions/")) return { projectID: state.hasProject ? "project-1" : "" };
-    return { rootDirs: [project] };
+    await state.onProjectRead?.();
+    return { rootDirs: state.rootDirs };
   };
-  const host = {
+  const host = nativeHost ? new BrowserHost() : {
     listTabs: ({ sessionID }) => ({ tabs: state.tabs.filter(tab => tab.sessionID === sessionID) }),
+    allowsFileURL: () => false,
     ensure: async request => {
       state.grants.push(request);
       const tab = { ...request };
@@ -31,6 +34,14 @@ function fixture(t) {
       return tab;
     },
   };
+  if (nativeHost) {
+    // Keep the real tab-owned grants and URL checks; only skip guest rendering.
+    host.requestWebview = () => {};
+    host.ensure = async request => {
+      state.grants.push(request);
+      return host.createTab(request);
+    };
+  }
   const confirm = async (_owner, filename) => {
     state.confirmations.push(filename);
     if (state.onConfirm) return state.onConfirm();
@@ -172,5 +183,89 @@ test("simultaneous navigation of two tabs is not merged into one target", async 
   f.state.tabs = ["a", "b"].map(tabID => ({ sessionID: req.sessionID, tabID, url: "about:blank" }));
   const results = await Promise.all(["a", "b"].map(tabID => f.open(f.owner, { ...req, tabID })));
   assert.deepEqual(results.map(result => result.tab.tabID), ["a", "b"]);
+  assert.equal(f.state.creates, 0);
+});
+
+test("a tab reuses its native file grant across query, fragment and website navigation", async t => {
+  const f = fixture(t, true), req = { ...f.request(f.outside), tabID: "current" };
+  f.host.createTab({ ...req, url: "about:blank" });
+  const url = pathToFileURL(f.outside).href;
+  for (const suffix of ["", "#intro", "?q=2#intro"]) {
+    const result = await f.open(f.owner, { ...req, url: url + suffix });
+    assert.equal(result.ok, true);
+    assert.equal(result.tab.url, url + suffix);
+  }
+  f.host.createTab({ ...req, url: "https://example.com/" });
+  assert.equal((await f.open(f.owner, req)).ok, true);
+  assert.equal(f.state.confirmations.length, 1);
+  assert.equal(f.host.getSlot(req).fileRoots.length, 1, "reuse does not add duplicate grants");
+});
+
+test("native grant reuse cannot authorize siblings, other tabs or sessions, or a reopened tab", async t => {
+  const f = fixture(t, true), req = { ...f.request(f.outside), tabID: "current" };
+  f.host.createTab({ ...req, url: "about:blank" });
+  await f.open(f.owner, req);
+  const sibling = path.join(f.home, "sibling.html");
+  fs.writeFileSync(sibling, "sibling");
+  f.state.allowed = false;
+  assert.deepEqual(await f.open(f.owner, { ...req, url: pathToFileURL(sibling).href }), { ok: false, cancelled: true });
+  for (const next of [{ ...req, tabID: "other" }, { ...req, sessionID: "other-session" }]) {
+    f.host.createTab({ ...next, url: "about:blank" });
+    assert.deepEqual(await f.open(f.owner, next), { ok: false, cancelled: true });
+  }
+  f.host.closeTab(req);
+  f.host.createTab({ ...req, url: "about:blank" });
+  assert.deepEqual(await f.open(f.owner, req), { ok: false, cancelled: true });
+  assert.equal(f.state.confirmations.length, 5);
+});
+
+test("a grant revoked during revalidation is not silently restored by reuse", async t => {
+  const f = fixture(t, true), req = { ...f.request(f.outside), tabID: "current" };
+  f.host.createTab({ ...req, url: "about:blank" });
+  await f.open(f.owner, req);
+  f.host.createTab({ ...req, url: "https://example.com/" });
+  let reads = 0;
+  f.state.onProjectRead = async () => {
+    if (++reads === 2) await f.host.revokeFileAccess({ sessionID: req.sessionID });
+  };
+  assert.equal((await f.open(f.owner, req)).ok, false);
+  assert.equal(f.host.getSlot(req).fileRoots.length, 0);
+  assert.equal(f.state.confirmations.length, 1);
+  f.state.onProjectRead = undefined;
+  assert.equal((await f.open(f.owner, req)).ok, true);
+  assert.equal(f.state.confirmations.length, 2);
+});
+
+test("missing or non-directory project roots do not hide a file in a later valid root", async t => {
+  const f = fixture(t);
+  for (const invalid of [path.join(f.home, "removed"), path.join(f.outside, "not-a-directory"), f.inside]) {
+    f.state.rootDirs = [invalid, f.project];
+    f.state.tabs = [];
+    const result = await f.open(f.owner, f.request(f.inside));
+    assert.equal(result.ok, true, invalid);
+    assert.equal(f.state.grants.at(-1).fileRoot, f.project);
+  }
+  assert.deepEqual(f.state.confirmations, []);
+});
+
+test("all project roots missing still requires outside confirmation; a missing target stays not_found", async t => {
+  const f = fixture(t);
+  f.state.rootDirs = [path.join(f.home, "removed")];
+  f.state.allowed = false;
+  assert.deepEqual(await f.open(f.owner, f.request(f.inside)), { ok: false, cancelled: true });
+  assert.deepEqual(f.state.confirmations, [f.inside]);
+  assert.deepEqual(await f.open(f.owner, f.request(path.join(f.project, "missing.html"))), { ok: false, reason: "not_found" });
+  assert.equal(f.state.confirmations.length, 1);
+});
+
+test("project root permission errors remain denied rather than being ignored", async t => {
+  const f = fixture(t), promises = require("node:fs/promises");
+  const realpath = promises.realpath;
+  t.mock.method(promises, "realpath", async (...args) => {
+    if (args[0] === f.project) throw Object.assign(new Error("denied"), { code: "EACCES" });
+    return realpath(...args);
+  });
+  assert.deepEqual(await f.open(f.owner, f.request(f.inside)), { ok: false, reason: "denied" });
+  assert.deepEqual(f.state.confirmations, []);
   assert.equal(f.state.creates, 0);
 });

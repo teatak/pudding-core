@@ -23,7 +23,7 @@ import {
   recommendedReasoningEffortForSelection,
   resolveReasoningEffortForSelection,
 } from "@/lib/reasoningEffort";
-import { getEffortColor, SteppedSlider } from "@/components/SteppedSlider";
+import { SteppedSlider } from "@/components/SteppedSlider";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -304,14 +304,7 @@ export function ModelReasoningPicker({
                 </span>
               ) : null}
               {reasoningLabel ? (
-                <span
-                  className={cn(
-                    "pudding-composer-reasoning-detail shrink-0 font-medium",
-                    reasoningOptions.length > 0 && reasoningOptions.indexOf(activeReasoning) >= 0
-                      ? getEffortColor(reasoningOptions.indexOf(activeReasoning), reasoningOptions.length).text
-                      : "text-muted-foreground/80",
-                  )}
-                >
+                <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground">
                   {reasoningLabel}
                 </span>
               ) : null}

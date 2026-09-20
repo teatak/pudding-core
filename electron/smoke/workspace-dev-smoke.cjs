@@ -2464,12 +2464,18 @@ async function run() {
   }
   for (let i = 1; i <= 20; i++) fs.writeFileSync(path.join(projectRoot, `file-${String(i).padStart(2, "0")}.md`), `# File ${i}\n\n${"Long project document.\n".repeat(150)}`);
   const rootDirs = [projectRoot];
+  if (process.env.PUDDING_SMOKE_SCENARIO === 'browser-local-navigation') {
+    const staleRoot = path.join(home, 'removed-project-root');
+    fs.mkdirSync(staleRoot);
+    rootDirs.unshift(staleRoot);
+  }
   if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {
     const linkedRoot = path.join(home, 'linked-project');
     fs.mkdirSync(linkedRoot);
     rootDirs.push(linkedRoot);
   }
   const project = await api("/projects", "POST", { name: "Workspace smoke", rootDirs });
+  if (process.env.PUDDING_SMOKE_SCENARIO === 'browser-local-navigation') fs.rmdirSync(rootDirs[0]);
   const primary = await api("/sessions", "POST", { title: "Workspace acceptance", provider: "mock", model: "mock", projectID: project.id });
   const secondary = await api("/sessions", "POST", { title: "Conflict source", provider: "mock", model: "mock", projectID: project.id });
   if (process.env.PUDDING_SMOKE_SCENARIO === 'markdown-links') {

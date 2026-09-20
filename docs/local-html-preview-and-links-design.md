@@ -65,11 +65,13 @@
 受信任主 frame 的专用 IPC `pudding:browser:open-local-file`，显式带 sessionID 和 URL；地址栏导航另外传当前 tabID：
 
 - 主进程重新校验 URL、realpath 和普通文件类型；会话及项目 roots 从现有 daemon REST 读取，不接受调用方自报 roots/confirmed。
+- 检查项目 roots 时跳过已不存在或不再是目录的项，继续验证其余 roots；权限及其他文件系统错误仍报错，不静默忽略。目标文件本身不存在仍返回缺失提示。
 - 当前会话关联项目内直接打开；项目外（含未关联项目的会话）显示原生警告，包含完整真实路径、脚本/网络提示、仅预览声明，默认按钮为取消。
 - 确认后重新核对路径和项目归属，防止弹窗期间符号链接换目标。取消、目标变化或会话消失均不创建标签页。
 - Markdown 点击仅在同意后通过现有 session-scoped REST 创建标签，BrowserHost 负责预览。已有相同规范 URL 的标签直接复用；并发相同点击合并，不重复弹窗。
 - 地址栏传 tabID 时只导航该会话的现有标签，不新建、不切到另一个相同 URL 的标签。确认前后均检查目标标签仍存在，关闭或跨会话的标签不能被重新创建；失败时不释放原标签。并发合并键包含 tabID，不合并不同标签的导航。
 - 项目授权沿用目录范围；项目外仅记录 `{file: canonicalPath}`，不是父目录授权。该授权只存在于 BrowserHost 的当前标签，关闭或进程重启即失效，不写入项目或模型授权。
+- 地址栏导航直接查询当前标签的既有 BrowserHost 授权；同一文件修改 query/fragment 或离开后返回无需再次确认。复用时不重新添加授权，校验期间若授权被撤销则拒绝导航；不跨标签、跨会话复用，也不新增权限缓存。
 - 关闭后重开需要重新确认，重启不自动恢复项目外文件授权。模型文件工具及 daemon 原有文件打开授权规则不变。
 - 保留现有沙箱、上下文隔离、关闭 Node.js、设备权限拒绝和内置浏览器独立存储分区。不新增存储分区，不放宽 `openExternal` 白名单。
 - 缺失、无法访问和打开失败有提示，不偷偷改用其他打开方式；打开失败清理本次新建标签。
@@ -105,9 +107,9 @@
 - `web/test/project-reveal.test.ts`：嵌套 root 标签身份复用和目录定位。
 - `internal/api/project_files_test.go`：新接口文件/目录类型、缺失、跨会话 root 与符号链接逃逸。
 - `internal/api/browser_test.go`：预览临时授权失效后，仅删除不可恢复的标签绑定，保留其他网页与正常列表响应。
-- `electron/test/local-file-browser.test.cjs`：项目内免确认、项目外取消/确认、并发复用、单文件范围、符号链接换目标、关闭与会话隔离。
+- `electron/test/local-file-browser.test.cjs`：项目内免确认、项目外取消/确认、并发复用、单文件范围、符号链接换目标、关闭与会话隔离；同标签授权复用、撤销竞态、失效 roots 与权限错误区分。
 - `web/test/browser-address.test.ts`：原生绝对路径与 URL 的区分、中文/空格/标点编码，以及普通网址/搜索回归。
-- `PUDDING_SMOKE_SCENARIO=browser-local-navigation npm --prefix web run smoke:electron-workspace`：真实地址栏提交、原标签页与同一 Chromium guest 保留、项目外取消/确认、缺失文件、前进后退；原生对话框仅自动供应用户选择。
+- `PUDDING_SMOKE_SCENARIO=browser-local-navigation npm --prefix web run smoke:electron-workspace`：真实地址栏提交、原标签页与同一 Chromium guest 保留、项目外取消/确认、缺失文件、前进后退、同文件锚点/参数不重复授权及失效 roots；原生对话框仅自动供应用户选择。
 - `electron/test/browser-host.test.cjs`：单文件授权不放行相邻文件、符号链接换目标或后来替换成的目录。
 - `PUDDING_SMOKE_SCENARIO=markdown-links npm --prefix web run smoke:electron-workspace`：真实桌面点击、编码、标题、行号、目录、多 root、草稿与浏览器标签复用。
 
@@ -118,5 +120,7 @@
 本轮聊天相对路径增量已通过：Web 116 项测试与构建、共享 prompt 测试，以及源码 Electron 点击回归（13 项检查、无 renderer 错误）。先以测试复现缺少源文件的拒绝，再在桌面回归中复现项目移动后旧 roots 缓存导致的错误解析，修改后通过同一场景；覆盖唯一项目根附带 scratch、查看子目录文档时点击聊天链接、HTML 源码、缺失/越界、移动及解除项目。
 
 2026-09-20 地址栏增量已通过：Web 121 项测试与构建、Electron 231 项测试，以及隔离源码 Electron 地址栏回归（5 项检查）和原有 Markdown 链接回归（13 项检查），均无 renderer 错误。先用失败测试复现本地路径被补为 HTTPS、指定标签被忽略等问题，再验证原标签页导航、取消/缺失保持原页面与前进后退。测试使用地址栏的真实提交按钮；不声称验证了后台窗口的系统回车投递或系统警告框的外观。
+
+2026-09-20 边界修复已通过：Electron 237 项测试和隔离源码 Electron 地址栏回归（6 项检查，无 renderer 错误）。新增测试先复现重复确认、失效 roots 误报，再验证修复；覆盖授权撤销时不重新授权、不同标签/会话与相邻文件隔离。桌面验证前置 root 删除后仍可打开有效项目文件，以及已确认的项目外文件修改锚点/参数、离开后返回均不重复弹窗。
 
 测试环境需使用本机 Xcode 的 macOS 26.5 SDK；默认 CommandLineTools 的 macOS 27 SDK 与当前链接器不匹配。测试服务器使用临时监听端口和临时数据目录，不重启常用开发实例。

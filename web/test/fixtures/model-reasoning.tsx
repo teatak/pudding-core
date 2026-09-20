@@ -6,11 +6,13 @@ import { type AudioBindings, type AudioInputMode, type ProviderProfile, type Ses
 import { queryKeys } from "@/api/queryKeys";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
+import { SteppedSlider } from "@/components/SteppedSlider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setLocale } from "@/i18n";
 import { useSessionModelSettings } from "@/hooks/useSessionModelSettings";
 import type { ResolvedModelSelection } from "@/lib/modelSelection";
 import { useReasoningEffortPreferenceStore } from "@/state/reasoningEffortPreferenceStore";
+import { applyTheme } from "@/theme/theme";
 import "@/styles.css";
 
 const mode = new URLSearchParams(window.location.search).get("mode") || "draft";
@@ -161,6 +163,7 @@ declare global {
       release: () => void;
       releaseSync: () => void;
       removeProfile: (id: string) => Promise<void>;
+      setTheme: (theme: "light" | "dark") => void;
       update: (patch: { provider: string; model: string; reasoningEffort: string }) => Promise<Session | null>;
     };
   }
@@ -219,6 +222,7 @@ function Fixture() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
     },
     update,
+    setTheme: applyTheme,
   };
 
   const onReasoningChange = (selection: ResolvedModelSelection, effort: string) => {
@@ -236,32 +240,52 @@ function Fixture() {
   };
 
   return (
-    <div style={{ display: "flex", gap: 48, padding: 24, paddingTop: 360 }}>
-      <div style={{ width: 340 }}>
-        <textarea id="composer-a" ref={textareaRef} aria-label="Composer A" style={{ border: "1px solid", width: "100%" }} />
-        <ModelReasoningPicker
-          token="fixture-token"
-          session={mode === "session" ? currentSession : undefined}
-          value={mode === "session" ? undefined : draftModel}
-          reasoningValue={reasoningValue}
-          onChange={setDraftModel}
-          onReasoningChange={onReasoningChange}
-          onAfterClose={() => requestAnimationFrame(() => textareaRef.current?.focus())}
-        />
-        {mode.startsWith("audio-") ? (
-          <div id="audio-controls">
-            <SessionAudioControls
-              audioInputSupported={false}
-              inputDisabled
-              bindings={audioBindingsQuery.data?.bindings}
-              token="fixture-token"
-              sessionID={initialSession.id}
-            />
-          </div>
-        ) : null}
+    <>
+      {mode === "palette" ? (
+        <div className="grid grid-cols-3 gap-5 p-6">
+          {[
+            ["low", "medium", "high"],
+            ["low", "medium", "high", "max"],
+            ["low", "medium", "high", "xhigh", "max"],
+          ].map((options) => (
+            <section key={options.length} className="space-y-3">
+              <h2>{options.length} levels</h2>
+              {options.map((value) => (
+                <div key={value} data-effort-example={`${options.length}-${value}`} className="rounded-xl border bg-popover p-4">
+                  <SteppedSlider options={options} value={value} onChange={() => {}} />
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ display: "flex", gap: 48, padding: 24, paddingTop: mode === "palette" ? 0 : 360 }}>
+        <div style={{ width: 340 }}>
+          <textarea id="composer-a" ref={textareaRef} aria-label="Composer A" style={{ border: "1px solid", width: "100%" }} />
+          <ModelReasoningPicker
+            token="fixture-token"
+            session={mode === "session" ? currentSession : undefined}
+            value={mode === "session" ? undefined : draftModel}
+            reasoningValue={reasoningValue}
+            onChange={setDraftModel}
+            onReasoningChange={onReasoningChange}
+            onAfterClose={() => requestAnimationFrame(() => textareaRef.current?.focus())}
+          />
+          {mode.startsWith("audio-") ? (
+            <div id="audio-controls">
+              <SessionAudioControls
+                audioInputSupported={false}
+                inputDisabled
+                bindings={audioBindingsQuery.data?.bindings}
+                token="fixture-token"
+                sessionID={initialSession.id}
+              />
+            </div>
+          ) : null}
+        </div>
+        <textarea id="composer-b" aria-label="Composer B" style={{ border: "1px solid", width: 260, height: 72 }} />
       </div>
-      <textarea id="composer-b" aria-label="Composer B" style={{ border: "1px solid", width: 260, height: 72 }} />
-    </div>
+    </>
   );
 }
 
@@ -272,5 +296,3 @@ createRoot(document.getElementById("root")!).render(
     </TooltipProvider>
   </QueryClientProvider>,
 );
-
-window.addEventListener("unload", () => { window.fetch = fetchOriginal; });

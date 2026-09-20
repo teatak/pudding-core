@@ -60,6 +60,11 @@ class BrowserHost {
     return snapshot(slot);
   }
 
+  allowsFileURL(request) {
+    const slot = this.getSlot(request);
+    return Boolean(slot && normalizeURL(request.url, slot.fileRoots).startsWith("file:"));
+  }
+
   allowsAttachmentURL(rawURL) {
     return [...this.slots.values()].some((slot) => (
       sameNormalizedURL(slot.displayURL, rawURL, slot.fileRoots)

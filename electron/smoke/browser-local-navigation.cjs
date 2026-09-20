@@ -46,7 +46,7 @@ module.exports = async ({ api, js, waitFor, click, input, check, screenshot, hom
   await submit(inside);
   await expectPage(pathToFileURL(inside).href, 'PROJECT_HTML');
   assert.equal(browserFileWarnings.length, 0);
-  check('raw project HTML path renders in the current tab without approval');
+  check('raw project HTML path renders without approval despite an earlier missing project root');
   const runtime = guest(pathToFileURL(inside).href).id;
 
   await submit(special);
@@ -84,6 +84,19 @@ module.exports = async ({ api, js, waitFor, click, input, check, screenshot, hom
   await expectPage(pathToFileURL(outside).href, 'OUTSIDE_HTML');
   assert.equal(browserFileWarnings.length, 2);
   check('back/forward keep native page history and existing file authorization');
+
+  const outsideURL = pathToFileURL(outside).href;
+  for (const suffix of ['#intro', '?q=2#intro']) {
+    await submit(outsideURL + suffix);
+    await expectPage(outsideURL + suffix, 'OUTSIDE_HTML');
+    assert.equal(browserFileWarnings.length, 2, 'same-file fragment/query never prompts again');
+  }
+  await submit(inside);
+  await expectPage(pathToFileURL(inside).href, 'PROJECT_HTML');
+  await submit(outside);
+  await expectPage(outsideURL, 'OUTSIDE_HTML');
+  assert.equal(browserFileWarnings.length, 2, 'returning to an approved file reuses this tab grant');
+  check('same tab reuses the approved file across fragments, queries and leaving/returning');
   assert.equal(browserFileChoices.length, 0);
   await screenshot('browser-local-navigation');
 };

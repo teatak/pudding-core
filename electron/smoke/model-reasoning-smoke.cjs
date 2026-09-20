@@ -213,6 +213,125 @@ async function run() {
   assert.deepEqual(snapshot.audioRequests, []);
   assert.equal(snapshot.audioBindings.inputOwner, "");
   console.log("PASS an idle microphone cannot start until model settings are ready");
+
+  currentCheck = "all effort levels in light and dark themes";
+  window.setContentSize(1120, 820);
+  await loadFixture("palette");
+  const appearances = {};
+  for (const theme of ["light", "dark"]) {
+    await evaluate(`window.modelReasoningSmoke.setTheme(${JSON.stringify(theme)})`);
+    await frames();
+    await evaluate(`Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity).map((animation) => animation.finished.catch(() => {})))`);
+    appearances[theme] = await evaluate(`Array.from(document.querySelectorAll("[data-effort-example]")).map((example) => {
+      const style = (selector) => getComputedStyle(example.querySelector(selector));
+      const originalPalette = [
+        ["from-zinc-400 to-zinc-500", "text-zinc-600"],
+        ["from-emerald-400 to-emerald-500", "text-emerald-600"],
+        ["from-sky-400 to-blue-500", "text-blue-600"],
+        ["from-violet-400 to-violet-500", "text-violet-600"],
+        ["from-amber-400 to-amber-500", "text-amber-600"],
+      ];
+      const labels = Array.from(example.querySelectorAll("button[aria-pressed]"));
+      const selectedIndex = labels.findIndex((label) => label.getAttribute("aria-pressed") === "true");
+      const original = originalPalette[Math.round(selectedIndex / (labels.length - 1) * 4)];
+      const referenceStyle = (className, property) => {
+        const reference = document.createElement("div");
+        reference.className = className;
+        example.append(reference);
+        const value = getComputedStyle(reference)[property];
+        reference.remove();
+        return value;
+      };
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext("2d");
+      const rgb = (color) => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return Array.from(ctx.getImageData(0, 0, 1, 1).data).slice(0, 3);
+      };
+      const luminance = (color) => {
+        const linear = rgb(color).map((v) => {
+          const c = v / 255;
+          return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        });
+        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+      };
+      const surface = luminance(getComputedStyle(example).backgroundColor);
+      const labelContrasts = Array.from(example.querySelectorAll("button[aria-pressed]")).map((label) => {
+        const text = luminance(getComputedStyle(label).color);
+        return (Math.max(surface, text) + 0.05) / (Math.min(surface, text) + 0.05);
+      });
+      return {
+        id: example.dataset.effortExample,
+        fill: style(".pudding-effort-fill").backgroundImage,
+        fillRGB: rgb(style(".pudding-effort-fill").getPropertyValue("--tw-gradient-to")),
+        track: style(".pudding-effort-track").backgroundColor,
+        thumb: style(".pudding-effort-thumb").backgroundImage,
+        label: style('[aria-pressed="true"]').color,
+        inactiveLabel: style('[aria-pressed="false"]').color,
+        labelContrasts,
+        originalLight: {
+          fill: referenceStyle("bg-gradient-to-b " + original[0], "backgroundImage"),
+          label: referenceStyle(original[1], "color"),
+          inactiveLabel: referenceStyle("text-muted-foreground/80", "color"),
+          track: referenceStyle("bg-muted/60", "backgroundColor"),
+          thumb: referenceStyle("bg-gradient-to-b from-white to-zinc-50", "backgroundImage"),
+        },
+      };
+    })`);
+    assert.equal(appearances[theme].length, 12);
+    for (const appearance of appearances[theme]) {
+      if (theme === "light") {
+        for (const [part, original] of Object.entries(appearance.originalLight)) {
+          assert.equal(appearance[part], original, `${appearance.id}: keep original light-mode ${part}`);
+        }
+      } else {
+        assert.ok(appearance.labelContrasts.every((contrast) => contrast >= 4.5), `${theme}/${appearance.id}: label contrast ${appearance.labelContrasts}`);
+      }
+    }
+    const fiveLevels = appearances[theme].filter((appearance) => appearance.id.startsWith("5-"));
+    assert.equal(new Set(fiveLevels.map((appearance) => appearance.fill)).size, 5, `${theme}: every effort level has its own fill`);
+    const [gray, green, blue, purple, gold] = fiveLevels.map((appearance) => appearance.fillRGB);
+    assert.ok(Math.max(...gray) - Math.min(...gray) < 20, `${theme}: gray stays neutral`);
+    assert.ok(green[1] > green[0] * 1.2 && green[1] > green[2] * 1.05, `${theme}: green does not shift yellow`);
+    assert.ok(blue[2] > blue[0] * 1.25 && blue[2] > blue[1] * 1.05, `${theme}: blue does not shift purple`);
+    assert.ok(purple[2] > purple[1] * 1.2 && purple[0] > purple[1] * 1.1, `${theme}: purple stays purple`);
+    assert.ok(gold[0] > gold[1] && gold[1] > gold[2] * 1.5, `${theme}: gold stays golden`);
+    if (theme === "dark") assert.ok(gold[0] >= 200 && gold[1] >= 160, "dark: gold must not darken into muddy brown");
+    assert.equal(await evaluate(`(() => {
+      const trigger = document.querySelector(".pudding-composer-model-picker");
+      const reference = document.createElement("span");
+      reference.className = "text-muted-foreground";
+      trigger.append(reference);
+      const expected = getComputedStyle(reference).color;
+      reference.remove();
+      return getComputedStyle(trigger.querySelector(".pudding-composer-reasoning-detail:last-of-type")).color === expected;
+    })()`), true, `${theme}: max effort in the trigger is neutral, not amber`);
+    if (process.env.PUDDING_REASONING_SMOKE_OUTPUT) {
+      fs.mkdirSync(process.env.PUDDING_REASONING_SMOKE_OUTPUT, { recursive: true });
+      fs.writeFileSync(path.join(process.env.PUDDING_REASONING_SMOKE_OUTPUT, `effort-${theme}.png`), (await window.webContents.capturePage()).toPNG());
+    }
+  }
+  for (const [index, light] of appearances.light.entries()) {
+    const dark = appearances.dark[index];
+    for (const part of ["fill", "track", "thumb", "label"]) {
+      assert.notEqual(light[part], dark[part], `${light.id}: ${part} must adapt to the theme`);
+    }
+  }
+  console.log("PASS original light colors preserved at all 3/4/5 levels; dark colors adapt gently and the trigger stays neutral");
+
+  currentCheck = "theme switches preserve selected effort and geometry";
+  const example = '[data-effort-example="5-max"]';
+  await clickSelector(`${example} button[aria-pressed]:first-child`);
+  await waitFor(`document.querySelector('${example} button[aria-pressed="true"]').textContent.trim() === "Low"`);
+  const before = await evaluate(`document.querySelector('${example}').getBoundingClientRect().toJSON()`);
+  await evaluate('window.modelReasoningSmoke.setTheme("light")');
+  await frames();
+  assert.equal(await evaluate(`document.querySelector('${example} button[aria-pressed="true"]').textContent.trim()`), "Low");
+  assert.deepEqual(await evaluate(`document.querySelector('${example}').getBoundingClientRect().toJSON()`), before);
+  console.log("PASS selecting effort still works and theme changes preserve selection and layout");
 }
 
 async function pickGoogleModel() {
