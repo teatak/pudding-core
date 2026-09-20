@@ -14,7 +14,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: brew install portaudio
+      - run: brew install portaudio cmake pkgconf
+      - name: Prepare pinned Abseil for the arm64 audio bridge
+        run: |
+          bash scripts/prepare-abseil.sh
+          echo "PKG_CONFIG_PATH=$PWD/dist/deps/abseil/lib/pkgconfig" >> "$GITHUB_ENV"
       - run: make test
       - run: make schema-check
       - run: make daemon

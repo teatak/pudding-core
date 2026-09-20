@@ -17,15 +17,20 @@ Pudding 的本地优先、多会话 Agent daemon，使用 Go、SQLite 和 loopba
 
 ## 开发
 
-macOS 需要 Go 1.25.1、Xcode command-line tools 和 PortAudio。
+macOS 开发环境使用 Apple Silicon，需要 Go 1.25.1、Xcode command-line tools、PortAudio 和固定版本 Abseil。
 构建 daemon 不需要 Web、Electron 或私有仓库。
 
 ```sh
-brew install portaudio
+brew install portaudio cmake pkgconf
+bash scripts/prepare-abseil.sh
+export PKG_CONFIG_PATH="$PWD/dist/deps/abseil/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 make daemon
 make test
 make schema-check
 ```
+
+Abseil 版本由准备脚本锁定，与现有 arm64 WebRTC 库的 ABI 一致；不要用系统最新版替代。
+重新打开终端时需再次设置上述 `PKG_CONFIG_PATH`。Intel 发布构建使用独立的 `make runtime ARCH=x64 OUT=/absolute/path` 依赖链路。
 
 `make daemon-dev` 启动开发服务。开发数据为 `~/.pudding-dev`，发布构建为 `~/.pudding`；
 测试必须使用临时目录。CLI 仅监听 loopback，API 需要 `<home>/daemon.token` 中的启动令牌。

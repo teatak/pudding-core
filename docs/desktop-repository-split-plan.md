@@ -179,3 +179,5 @@ desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Wo
 - 扫描前全部 refs 可达 702 个提交，Gitleaks 8.30.1 报告检查 693 个提交的补丁，唯一命中已核对为 [公开上游 Edge TTS 常量](https://github.com/rany2/edge-tts/blob/master/src/edge_tts/constants.py)，不是账户凭据；当前树已无该实现。当前 521 个跟踪文件检查通过，历史文件路径检查未发现受检查的密钥或数据库文件。自动扫描结果不等同于人工审计每段历史内容。
 - 原 core 基线仍是当前 main 的祖先，所有本地既有 tag 的对象 ID 前后相同；未清空、过滤、压缩或重写历史。历史桌面源码随完整 Git 历史保留。
 - 已发布 `0.3.5-beta.1` 继续对应原 core SHA 和随包的 AGPL 文本；本次不替换其安装包、发布清单或 tag。desktop 后续构建应锁定新的 Apache-2.0 core 提交并生成相应声明。
+- 公开后实际 Core CI 暴露了新环境漏装 Abseil 的问题；源码与原生归档确认 arm64 音频桥依赖 `absl::lts_20250512`。新增共用准备脚本，校验固定 `20250512.1` 源码并在忽略目录构建静态依赖，CI 和开发说明同步接入，避免依赖 Homebrew 的滚动最新版。
+- 本地屏蔽系统 Abseil 搜索路径后，使用新准备的依赖执行完整 `make test`、`make schema-check` 和临时输出的 `make daemon`，全部通过；未启动或修改现有应用和用户数据库。新增依赖准备不修改 Go 业务代码或 schema。
