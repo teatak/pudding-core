@@ -18,7 +18,7 @@ func UIHandler(dir string) (http.Handler, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("UI directory must be absolute")
 	}
-	files := os.DirFS(dir)
+	files := uiFS(dir)
 	index, err := fs.Stat(files, "index.html")
 	if err != nil || !index.Mode().IsRegular() {
 		return nil, fmt.Errorf("UI directory must contain index.html: %s", dir)
@@ -43,4 +43,15 @@ func UIHandler(dir string) (http.Handler, error) {
 		}
 		server.ServeHTTP(w, r)
 	}), nil
+}
+
+// OpenInRoot confines every open, including FileServer's later reads, so a
+// symlink cannot expose files outside the explicitly supplied UI directory.
+type uiFS string
+
+func (dir uiFS) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	return os.OpenInRoot(string(dir), name)
 }

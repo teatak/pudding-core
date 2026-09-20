@@ -54,3 +54,38 @@ func TestExternalUIIsOptionalAndValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalUIConfinesSymlinksToBundle(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "private.txt")
+	for name, data := range map[string]string{filepath.Join(dir, "index.html"): "desktop", outside: "private fixture"} {
+		if err := os.WriteFile(name, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, target := range map[string]string{"leak.txt": outside, "safe.html": "index.html"} {
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler, err := UIHandler(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for url, want := range map[string]int{"/leak.txt": http.StatusNotFound, "/safe.html": http.StatusOK} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, url, nil))
+		if response.Code != want {
+			t.Errorf("%s status = %d, want %d", url, response.Code, want)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, "index.html")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "index.html")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UIHandler(dir); err == nil {
+		t.Fatal("accepted an index outside the UI bundle")
+	}
+}
