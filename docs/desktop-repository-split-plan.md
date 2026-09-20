@@ -1,6 +1,6 @@
 # Pudding Core / Desktop 拆仓准备方案
 
-> 状态：工程拆分及 `0.3.5-beta.1` 公开预览版发布已完成；core 改用 Apache-2.0，准备公开仓库。
+> 状态：工程拆分及 `0.3.5-beta.1` 公开预览版发布已完成；core 已采用 Apache-2.0 并公开仓库。
 > 日期：2026-09-20；实际迁移来源：`846ed125`。
 > core 拆分分支已合并并推送到 `main`，desktop 使用已有 `main`；两仓历史均保持原样。
 
@@ -140,7 +140,7 @@ core 保留 `make test`、`make schema-check` 与独立 daemon 构建入口，�
 - [ ] 核对许可证、第三方声明和历史分发版本的授权安排；不将私有仓库可见性等同于许可证。
 - [ ] 检查两个仓库的 diff、新文件与旧路径残留，确认完整回归结果后完成公开准备。
 
-实际验证记录见 desktop 的 `docs/repository-split-verification.md`。未勾选项不代表已经完成；正式发布、仓库公开及许可证决定仍是独立操作。
+桌面实际验证记录见私有 desktop 的 `docs/repository-split-verification.md`；core 开源结果见下文。未勾选的实际升级与外部服务回归仍未完成。
 
 ## 7. 规模与工作量
 
@@ -170,3 +170,12 @@ desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Wo
 1. **Core 许可证（已确认）。** 用户选择 [Apache-2.0](../LICENSE)，当前 core 及后续默认贡献采用该协议；第三方依赖保留原条款。历史提交、tag 和已发布安装包不重写，原有 AGPL 授权不撤回。desktop 需要锁定本次变更后的 core 提交并同步第三方声明；desktop 自身的许可证不随 core 自动变更。
 2. **OAuth Worker / 官网（已确认）。** 随 desktop 迁移，保持原部署与 URL；本次没有触发部署。core 本地构建不依赖这部分私有源码。
 3. **core 版本命名（已采用）。** 首期用完整 SHA 锁定，不急于增加单独的二进制发布系统；之后采用独立版本 tag 时，须避免改写已有应用历史 tag。
+
+## 9. Core 开源结果（2026-09-20）
+
+- [teatak/pudding-core](https://github.com/teatak/pudding-core) 已设为 public，GitHub 识别许可证为 `Apache-2.0`；未认证下载的 `LICENSE` 与 Apache 官方原文逐字节一致。
+- 许可证变更始于 `19813dd93fbbbc7518dfe076475a26c26b7e2f4a`。该提交只修改 LICENSE 和四份说明文档，没有修改运行代码、协议、依赖或数据库结构。README 和 CONTRIBUTING 明确当前授权、默认贡献条款和历史授权边界。
+- 检查 Git 作者记录，人工提交归于同一邮箱，另有 Dependabot 依赖更新；没有改写第三方许可证和原生依赖声明。
+- 扫描前全部 refs 可达 702 个提交，Gitleaks 8.30.1 报告检查 693 个提交的补丁，唯一命中已核对为 [公开上游 Edge TTS 常量](https://github.com/rany2/edge-tts/blob/master/src/edge_tts/constants.py)，不是账户凭据；当前树已无该实现。当前 521 个跟踪文件检查通过，历史文件路径检查未发现受检查的密钥或数据库文件。自动扫描结果不等同于人工审计每段历史内容。
+- 原 core 基线仍是当前 main 的祖先，所有本地既有 tag 的对象 ID 前后相同；未清空、过滤、压缩或重写历史。历史桌面源码随完整 Git 历史保留。
+- 已发布 `0.3.5-beta.1` 继续对应原 core SHA 和随包的 AGPL 文本；本次不替换其安装包、发布清单或 tag。desktop 后续构建应锁定新的 Apache-2.0 core 提交并生成相应声明。
