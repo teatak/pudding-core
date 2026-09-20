@@ -1,6 +1,6 @@
 # Pudding Core / Desktop 拆仓准备方案
 
-> 状态：工程拆分完成；core 已采用 Apache-2.0 并公开。`0.3.5-beta.1` 曾公开发布，现已由用户下架；后续直接准备 `0.3.5` 正式版。
+> 状态：工程拆分完成；core 已采用 Apache-2.0 并公开。`0.3.5-beta.1` 已由用户下架；[0.3.5 正式版](https://github.com/teatak/pudding/releases/tag/v0.3.5) 已发布并设为 Latest。
 > 日期：2026-09-20；实际迁移来源：`846ed125`。
 > core 拆分分支已合并并推送到 `main`，desktop 使用已有 `main`；两仓历史均保持原样。
 
