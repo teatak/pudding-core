@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_archived_at
     ON sessions(archived_at);
 
+-- Immutable ownership only; messages and execution state stay on Session/Turn.
+CREATE TABLE IF NOT EXISTS session_children (
+    child_session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+    CHECK (child_session_id <> parent_session_id)
+);
+CREATE INDEX IF NOT EXISTS session_children_parent
+    ON session_children(parent_session_id);
+
 CREATE TABLE IF NOT EXISTS computer_app_grants (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     app_id     TEXT NOT NULL,
@@ -297,3 +306,13 @@ CREATE TABLE IF NOT EXISTS library_recent_opens (
 CREATE UNIQUE INDEX IF NOT EXISTS library_recent_canvas ON library_recent_opens(source_session_id,canvas_item_id) WHERE kind='canvas';
 CREATE UNIQUE INDEX IF NOT EXISTS library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
 CREATE INDEX IF NOT EXISTS library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS session_dispatches (
+    child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
+    parent_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    call_id TEXT NOT NULL,
+    UNIQUE(parent_turn_id, call_id)
+);
+CREATE TABLE IF NOT EXISTS collaboration_stops (
+    parent_turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE
+);

@@ -313,6 +313,10 @@ func WithWeatherEndpoint(endpoint string) BuiltinOption {
 }
 
 func BuiltinDefinitions() []provider.ToolDef {
+	return append(CollaborationDefinitions(), builtinRunnerDefinitions()...)
+}
+
+func builtinRunnerDefinitions() []provider.ToolDef {
 	return []provider.ToolDef{
 		{
 			Name:        TimeGetCurrent,

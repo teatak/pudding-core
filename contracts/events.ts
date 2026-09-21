@@ -187,7 +187,12 @@ export const pingEvent = z.object({
   sessionID: z.string(),
 });
 
+export const collaborationChangedEvent = z.object({
+ kind: z.literal("collaboration.changed"), sessionID: z.string(), seq: z.number().int().positive(),
+});
+
 export const sessionEvent = z.discriminatedUnion("kind", [
+ collaborationChangedEvent,
   turnStartedEvent,
   turnDeltaEvent,
   turnToolEvent,

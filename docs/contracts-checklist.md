@@ -16,6 +16,7 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.compacted` | ✓ | ✓ | `assistantMessageID`；摘要属于当前 turn，保持 running，刷新 canonical turn |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
+| `collaboration.changed` | ✓ | ✓ | 父会话子任务集合或结果变更；按父 sessionID 重新读取快照 |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
 | `audio.bindings` | — | — | `inputOwner`, `inputMode`, `inputLevel`;音频输入 owner 快照 |
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
@@ -57,7 +58,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | 端点 | 请求 | 响应 | 错误 |
 | --- | --- | --- | --- |
 | `POST /sessions` | `{title?, provider, model, projectID?}` | 201 Session | — |
-| `GET /sessions` | — | `{sessions: []}` | — |
+| `GET /sessions` | — | `{sessions: []}`，普通／归档列表仅返回主会话 | — |
+| `GET /sessions/{id}/children` | — | `{children: [{session,status,latestTurnID?,pendingApprovals,resultCollected,summary?}]}`，包括最新重试轮次 | 404 |
+| `POST /sessions/{id}/collaboration/stop` | — | 204；取消子会话运行／排队输入，保留主会话与历史 | 400 / 404 |
 | `GET /sessions/{id}` | — | Session | 404 |
 | `PATCH /sessions/{id}` | `{title?, provider?, model?, projectID?, activeMode?, modeLease?}` | Session | 404 |
 | `DELETE /sessions/{id}` | — | 204 | 404 |
@@ -73,7 +76,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
 | `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, inputLevel}}` | 404 / 503 |
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
-| `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
+| `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照；主会话包含所有子会话请求及 `sourceTitle?`，按创建时间／ID 排序，保留真实子 `sessionID` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status, session}` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |

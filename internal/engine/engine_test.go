@@ -1301,7 +1301,11 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if hasToolDef(chatDefs, tool.BrowserOpen) {
 		t.Fatal("mode downgrade must hide loaded browser tools")
 	}
-	apps.defs[0].Enabled = false
+	for _, definition := range apps.defs {
+		if definition.ID == app.BuiltinBrowserID {
+			definition.Enabled = false
+		}
+	}
 	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)

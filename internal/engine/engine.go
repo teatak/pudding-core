@@ -106,6 +106,9 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
+	collaborationMu   sync.Mutex
+	resourceMu        sync.Mutex
+	resourceLocks     map[string]chan struct{}
 	mu                sync.Mutex
 	running           map[string]*activeTurn // sessionID → 当前 turn
 	approvals         map[string]*pendingApproval
@@ -423,6 +426,15 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return e.submitSystem(ctx, in, resolved, client)
 	}
 
+	if owner, err := e.store.ParentSessionID(ctx, in.SessionID); err != nil {
+		return nil, err
+	} else if owner != "" {
+		out, err := e.queueSubmit(ctx, in, resolved)
+		if err == nil {
+			e.TryDrainQueued(in.SessionID)
+		}
+		return out, err
+	}
 	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
 	if err != nil {
 		return nil, err
@@ -480,6 +492,14 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 }
 
 func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *resolvedModel, client provider.Client) (*SubmitResult, error) {
+	e.collaborationMu.Lock()
+	defer e.collaborationMu.Unlock()
+	if available, err := e.childSlotAvailable(ctx, in.SessionID); err != nil {
+		return nil, err
+	} else if !available {
+		return nil, ErrTurnRunning
+	}
+
 	// Retry validates queue ownership atomically, after idempotency, in the store.
 	if in.retryOfTurnID == "" {
 		queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
@@ -1024,10 +1044,23 @@ func (e *Engine) Recover(ctx context.Context) error {
 
 // Cancel 中断 session 当前 turn;收尾(落库 + final 事件)由 runTurn 完成。
 func (e *Engine) Cancel(sessionID string) error {
+	owner, err := e.store.ParentSessionID(context.Background(), sessionID)
+	if err != nil {
+		return err
+	}
+	if owner == "" {
+		if err := e.StopCollaboration(context.Background(), sessionID); err != nil {
+			return err
+		}
+	}
+	return e.cancelOne(sessionID)
+}
+
+func (e *Engine) cancelOne(sessionID string) error {
 	e.mu.Lock()
-	active, ok := e.running[sessionID]
+	active := e.running[sessionID]
 	e.mu.Unlock()
-	if !ok {
+	if active == nil {
 		return ErrNoRunningTurn
 	}
 	active.stopAcceptingSteers()
@@ -1207,7 +1240,11 @@ func (e *Engine) finishTurnWithInterrupted(
 	}
 	e.clearRunning(sessionID, turnID)
 	e.hub.Publish(*res.FinalEvent)
+	if res.CollaborationEvent != nil {
+		e.hub.Publish(*res.CollaborationEvent)
+	}
 	e.TryDrainQueued(sessionID)
+	e.childTurnFinished(sessionID, status)
 	if status == store.TurnCompleted {
 		e.scheduleAutoCompact(sessionID)
 	}
@@ -1232,27 +1269,12 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	if sessionID == "" {
 		return
 	}
-	res, err := e.store.PromoteNextQueuedInput(context.Background(), store.PromoteQueuedInputInput{
-		SessionID:     sessionID,
-		TurnID:        store.NewID("turn"),
-		UserMessageID: store.NewID("msg"),
-	})
-	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrQueueBlocked) || errors.Is(err, store.ErrTurnRunning) {
+	e.collaborationMu.Lock()
+	res, active, turnCtx := e.promoteQueuedForRun(sessionID)
+	e.collaborationMu.Unlock()
+	if res == nil {
 		return
 	}
-	if err != nil {
-		slog.Error("engine: drain queued input", "sessionID", sessionID, "err", err)
-		return
-	}
-	if res == nil || res.Turn == nil || res.Input == nil || res.StartedEvent == nil {
-		return
-	}
-	runtimeID := e.takeQueuedRuntime(sessionID, res.Input.ClientMessageID)
-	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
-	active := newActiveTurn(res.Turn.ID, cancel)
-	e.mu.Lock()
-	e.running[sessionID] = active
-	e.mu.Unlock()
 	e.hub.Publish(*res.StartedEvent)
 
 	var cfg provider.ModelConfig
@@ -1291,6 +1313,9 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	currentMode = store.NormalizeAgentMode(currentMode)
 	if currentMode == "" {
 		currentMode = store.ModeChat
+	}
+	if _, err := e.collectChildResults(ctx, sessionID); err != nil {
+		return store.TurnFailed, collaborationContextError(err), currentMode
 	}
 	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 	if err != nil {
@@ -1377,6 +1402,24 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
+			if err := e.waitForChildren(ctx, sessionID); err != nil {
+				if ctx.Err() != nil {
+					return store.TurnCancelled, "", currentMode
+				}
+				return store.TurnFailed, collaborationContextError(err), currentMode
+			}
+			if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
+				return store.TurnFailed, collaborationContextError(err), currentMode
+			} else if collected {
+				parts.Reset()
+				continuations = nil
+				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+				if err != nil {
+					return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				}
+				consecutiveToolOnlyLoops = 0
+				continue
+			}
 			if steers := active.consumeSteersOrSeal(); len(steers) > 0 {
 				if err := e.applyTurnSteers(turnID, steers); err != nil {
 					return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
@@ -1430,6 +1473,17 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
 			}
 			consecutiveToolOnlyLoops = 0
+			continue
+		}
+		if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
+			return store.TurnFailed, collaborationContextError(err), currentMode
+		} else if collected {
+			parts.Reset()
+			continuations = nil
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+			if err != nil {
+				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+			}
 			continue
 		}
 		if changed {
@@ -1570,6 +1624,18 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 			return nil, fmt.Errorf("list tools: %w", err)
 		}
 		defs = runnerDefs
+	}
+	runnerDefs := defs
+	defs = nil
+	for _, def := range runnerDefs {
+		if !tool.IsCollaborationTool(def.Name) {
+			defs = append(defs, def)
+		}
+	}
+	if owner, err := e.store.ParentSessionID(ctx, sessionID); err != nil {
+		return nil, err
+	} else if owner == "" {
+		defs = append(defs, tool.CollaborationDefinitions()...)
 	}
 	coreDefs := make([]provider.ToolDef, 0, len(defs))
 	appDefs := make([]provider.ToolDef, 0)
@@ -2044,6 +2110,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	if tool.IsCollaborationTool(call.Name) {
+		return e.executeCollaboration(ctx, sessionID, turnID, mode, call)
+	}
 	if e.tools == nil {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 	}
@@ -2142,6 +2211,12 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 	request, err := tool.DecodeAppLoadRequest(call.Args)
 	if err != nil {
 		return appLoadFailure(call, "invalid_arguments", err.Error(), nil), false
+	}
+	if request.AppID == app.BuiltinCollaborationID {
+		owner, err := e.store.ParentSessionID(ctx, sessionID)
+		if err != nil || owner != "" {
+			return appLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false
+		}
 	}
 	definitions, err := e.apps.ListDefinitions(ctx)
 	if err != nil {
@@ -2353,6 +2428,12 @@ func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call to
 }
 
 func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	release, err := e.acquireToolResources(ctx, call)
+	if err != nil {
+		return tool.Result{CallID: call.CallID, Name: call.Name, Content: err.Error()}
+	}
+	defer e.releaseToolResources(ctx, call, release)
+
 	tracked := false
 	if mode == store.ModeCode && e.turnFiles != nil && len(call.ProjectDirs) > 0 {
 		ctx = tool.WithMutationTrackingSink(ctx, func(targets []string) {
@@ -3040,4 +3121,33 @@ func cloneProviderMessages(in []provider.Message) []provider.Message {
 		out = append(out, cp)
 	}
 	return out
+}
+
+func (e *Engine) promoteQueuedForRun(sessionID string) (*store.PromoteQueuedInputResult, *activeTurn, context.Context) {
+	if available, err := e.childSlotAvailable(context.Background(), sessionID); err != nil || !available {
+		return nil, nil, nil
+	}
+	res, err := e.store.PromoteNextQueuedInput(context.Background(), store.PromoteQueuedInputInput{
+		SessionID:     sessionID,
+		TurnID:        store.NewID("turn"),
+		UserMessageID: store.NewID("msg"),
+	})
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrQueueBlocked) || errors.Is(err, store.ErrTurnRunning) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		slog.Error("engine: drain queued input", "sessionID", sessionID, "err", err)
+		return nil, nil, nil
+	}
+	if res == nil || res.Turn == nil || res.Input == nil || res.StartedEvent == nil {
+		return nil, nil, nil
+	}
+
+	runtimeID := e.takeQueuedRuntime(sessionID, res.Input.ClientMessageID)
+	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
+	active := newActiveTurn(res.Turn.ID, cancel)
+	e.mu.Lock()
+	e.running[sessionID] = active
+	e.mu.Unlock()
+	return res, active, turnCtx
 }

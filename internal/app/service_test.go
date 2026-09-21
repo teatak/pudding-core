@@ -102,7 +102,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 5 {
+	if len(defs) != len(BuiltinDefinitions()) {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
 	}
 	if definitionByID(defs, "project-files") != nil {
@@ -202,7 +202,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 5 {
+	if len(defs) != len(BuiltinDefinitions()) {
 		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
 	}
 
@@ -212,7 +212,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	canvas := definitionByID(defs, "canvas")
-	if len(defs) != 6 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
+	if len(defs) != len(BuiltinDefinitions())+1 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
 		t.Fatalf("unexpected runtime app definition: %+v", defs)
 	}
 	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {

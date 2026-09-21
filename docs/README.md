@@ -26,6 +26,7 @@
 | [user-input-flow.md](user-input-flow.md) | 跨仓契约：core 的模型等待与答复路由，以及 desktop 的提问面板 |
 | [apps.md](apps.md) | App 包、连接字段与 MCP App 配置 |
 | [builtin-apps-design.md](builtin-apps-design.md) | 内置 App、动态加载和 runtime-provided App |
+| [session-collaboration-plan.md](session-collaboration-plan.md) | 协作 App、父子调度、底部卡片、右侧完整会话及统一审批；首版已实现 |
 | [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
 | [code-cli-sandbox-design.md](code-cli-sandbox-design.md) | Code CLI 沙箱与审批规则 |
 | [context-working-set.md](context-working-set.md) | 模型工具结果去重、受限预览与 canonical 分页回读 |

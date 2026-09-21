@@ -18,6 +18,7 @@ Pudding 使用统一的 **App** 概念承载需要说明、工具、界面和运
 | App | 最低模式 | 边界 |
 | --- | --- | --- |
 | Browser | Work | 浏览器标签页、页面状态和页面交互工具 |
+| Collaboration（协作） | Work | 主会话派发、补充、等待和停止子任务；关闭后已接受任务继续收尾，结果回收不依赖工具开关 |
 | Canvas | Chat | 由已连接 Desktop 动态提供的画布组件与可视化工具 |
 | Project Files | Code | 结构化文件浏览、检索与写操作 |
 | Source Control | Code | Git 状态、差异、暂存与提交操作 |

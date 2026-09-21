@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 20
+	currentSchemaVersion       = 22
 )
 
 var (
@@ -33,6 +33,28 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	22: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS session_dispatches (
+    child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
+    parent_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    call_id TEXT NOT NULL,
+    UNIQUE(parent_turn_id, call_id)
+);
+CREATE TABLE IF NOT EXISTS collaboration_stops (
+    parent_turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE
+);
+`)
+		return err
+	},
+	21: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS session_children (
+    child_session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT,
+    CHECK (child_session_id <> parent_session_id)
+);
+CREATE INDEX IF NOT EXISTS session_children_parent ON session_children(parent_session_id);`)
+		return err
+	},
 	2: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
 			CREATE TABLE turn_file_changes (
@@ -786,6 +808,9 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"session_children":     {"child_session_id", "parent_session_id"},
+		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
+		"collaboration_stops":  {"parent_turn_id"},
 		"computer_app_grants":  {"session_id", "app_id", "created_at"},
 		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
 		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
@@ -805,6 +830,7 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
 	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
+	out.indexes = append(out.indexes, "session_children_parent")
 	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}
 	return out
 }()

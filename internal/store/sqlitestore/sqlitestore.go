@@ -256,22 +256,26 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		return err
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		if sess.ProjectID != "" {
-			if _, err := getProjectTx(ctx, tx, sess.ProjectID); err != nil {
-				return err
-			}
-		}
-		now := time.Now()
-		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
-		)
-		if err != nil {
+		return createSessionTx(ctx, tx, sess)
+	})
+}
+
+func createSessionTx(ctx context.Context, tx *sql.Tx, sess *store.Session) error {
+	if sess.ProjectID != "" {
+		if _, err := getProjectTx(ctx, tx, sess.ProjectID); err != nil {
 			return err
 		}
-		return advanceProjectActivityTx(ctx, tx, sess.ID)
-	})
+	}
+	now := time.Now()
+	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+	)
+	if err != nil {
+		return err
+	}
+	return advanceProjectActivityTx(ctx, tx, sess.ID)
 }
 
 func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*store.Session, error) {
@@ -422,6 +426,9 @@ func (s *Store) ListSessions(ctx context.Context, options ...store.SessionListOp
 		return nil, store.ErrInvalidSession
 	}
 	args := make([]any, 0, 2)
+	if resolved.Scope != store.SessionListAll {
+		where += " AND NOT EXISTS(SELECT 1 FROM session_children c WHERE c.child_session_id=s.id)"
+	}
 	if resolved.Query != "" {
 		where += " AND (instr(lower(s.title),lower(?))>0 OR instr(lower(coalesce(p.name,'')),lower(?))>0)"
 		args = append(args, resolved.Query, resolved.Query)
@@ -522,6 +529,11 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, error) {
 	var out *store.Session
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if parentID, err := parentSessionIDTx(ctx, tx, id); err != nil {
+			return err
+		} else if parentID != "" {
+			return store.ErrInvalidSessionRelation
+		}
 		now := time.Now()
 		res, err := tx.ExecContext(ctx,
 			`UPDATE sessions SET archived_at=?,updated_at=? WHERE id=? AND archived_at=0`,
@@ -537,9 +549,14 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 		if n == 0 {
 			return store.ErrNotFound
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=?,updated_at=?
+			WHERE id IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, unixMS(now), unixMS(now), id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE queued_inputs SET status=?,updated_at=? WHERE session_id=? AND status IN (?,?)`,
-			store.QueuedInputCancelled, unixMS(now), id, store.QueuedInputQueued, store.QueuedInputEditing,
+			`UPDATE queued_inputs SET status=?,updated_at=? WHERE (session_id=? OR session_id IN
+			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)) AND status IN (?,?)`,
+			store.QueuedInputCancelled, unixMS(now), id, id, store.QueuedInputQueued, store.QueuedInputEditing,
 		); err != nil {
 			return err
 		}
@@ -552,6 +569,11 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 func (s *Store) RestoreSession(ctx context.Context, id string) (*store.Session, error) {
 	var out *store.Session
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if parentID, err := parentSessionIDTx(ctx, tx, id); err != nil {
+			return err
+		} else if parentID != "" {
+			return store.ErrInvalidSessionRelation
+		}
 		now := time.Now()
 		res, err := tx.ExecContext(ctx,
 			`UPDATE sessions SET archived_at=0,updated_at=? WHERE id=? AND archived_at>0`,
@@ -567,6 +589,10 @@ func (s *Store) RestoreSession(ctx context.Context, id string) (*store.Session, 
 		if n == 0 {
 			return store.ErrNotFound
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=0,updated_at=?
+			WHERE id IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, unixMS(now), id); err != nil {
+			return err
+		}
 		out, err = getSessionTx(ctx, tx, id)
 		return err
 	})
@@ -577,7 +603,8 @@ func (s *Store) ListExpiredArchivedSessionIDs(ctx context.Context, cutoff time.T
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id FROM sessions WHERE archived_at>0 AND archived_at<=? ORDER BY archived_at ASC`,
+		`SELECT id FROM sessions WHERE archived_at>0 AND archived_at<=?
+		AND NOT EXISTS(SELECT 1 FROM session_children c WHERE c.child_session_id=sessions.id) ORDER BY archived_at ASC`,
 		unixMS(cutoff),
 	)
 	if err != nil {
@@ -608,6 +635,10 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 
 func (s *Store) deleteSession(ctx context.Context, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id IN
+			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
 		if err != nil {
 			return err
@@ -860,69 +891,68 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 
 func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
 	var out *store.QueueInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
-			return err
-		}
-		if existing, err := getTurnByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
-			out = &store.QueueInputResult{Duplicate: true, ExistingTurn: existing}
-			return nil
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		if existing, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
-			out = &store.QueueInputResult{Duplicate: true, Input: existing}
-			return nil
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-
-		now := time.Now()
-		mode := in.Mode
-		if mode == "" {
-			mode = store.ModeChat
-		}
-		mode = store.NormalizeAgentMode(mode)
-		if mode == "" {
-			mode = store.ModeChat
-		}
-		input := &store.QueuedInput{
-			SessionID:       in.SessionID,
-			ClientMessageID: in.ClientMessageID,
-			Text:            in.Text,
-			Parts:           store.UserInputParts(in.Text, in.Parts),
-			Status:          store.QueuedInputQueued,
-			Provider:        in.Provider,
-			Model:           in.Model,
-			Mode:            mode,
-			ModelConfig:     normalizeJSON(in.ModelConfig),
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM queued_inputs WHERE session_id=?))`,
-			input.SessionID, input.ClientMessageID, input.Text, encodeParts(input.Parts), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
-			input.SessionID,
-		); err != nil {
-			return err
-		}
-		ev := event.Event{
-			SessionID:       input.SessionID,
-			Kind:            event.InputQueued,
-			ClientMessageID: input.ClientMessageID,
-			Text:            input.Text,
-			Status:          string(input.Status),
-		}
-		if err := insertEventTx(ctx, tx, &ev); err != nil {
-			return err
-		}
-		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
-			return err
-		}
-		out = &store.QueueInputResult{Input: input, QueuedEvent: &ev}
-		return nil
-	})
+	err := s.tx(ctx, func(tx *sql.Tx) error { var err error; out, err = queueInputTx(ctx, tx, in); return err })
 	return out, err
+}
+
+func queueInputTx(ctx context.Context, tx *sql.Tx, in store.QueueInputInput) (*store.QueueInputResult, error) {
+	if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
+		return nil, err
+	}
+	if existing, err := getTurnByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
+		return &store.QueueInputResult{Duplicate: true, ExistingTurn: existing}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	if existing, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
+		return &store.QueueInputResult{Duplicate: true, Input: existing}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+
+	now := time.Now()
+	mode := in.Mode
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	input := &store.QueuedInput{
+		SessionID:       in.SessionID,
+		ClientMessageID: in.ClientMessageID,
+		Text:            in.Text,
+		Parts:           store.UserInputParts(in.Text, in.Parts),
+		Status:          store.QueuedInputQueued,
+		Provider:        in.Provider,
+		Model:           in.Model,
+		Mode:            mode,
+		ModelConfig:     normalizeJSON(in.ModelConfig),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO queued_inputs(session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM queued_inputs WHERE session_id=?))`,
+		input.SessionID, input.ClientMessageID, input.Text, encodeParts(input.Parts), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+		input.SessionID,
+	); err != nil {
+		return nil, err
+	}
+	ev := event.Event{
+		SessionID:       input.SessionID,
+		Kind:            event.InputQueued,
+		ClientMessageID: input.ClientMessageID,
+		Text:            input.Text,
+		Status:          string(input.Status),
+	}
+	if err := insertEventTx(ctx, tx, &ev); err != nil {
+		return nil, err
+	}
+	if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
+		return nil, err
+	}
+	return &store.QueueInputResult{Input: input, QueuedEvent: &ev}, nil
 }
 
 func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*store.QueuedInput, error) {
@@ -1314,6 +1344,17 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		}
 		if err := touchSessionActivityTx(ctx, tx, turn.SessionID, now); err != nil {
 			return err
+		}
+		parentID, err := parentSessionIDTx(ctx, tx, turn.SessionID)
+		if err != nil {
+			return err
+		}
+		if parentID != "" {
+			changed := event.Event{SessionID: parentID, Kind: event.CollaborationChanged}
+			if err := insertEventTx(ctx, tx, &changed); err != nil {
+				return err
+			}
+			res.CollaborationEvent = &changed
 		}
 		res.FinalEvent = &ev
 		out = res

@@ -18,49 +18,55 @@ import (
 )
 
 type Memstore struct {
-	mu               sync.Mutex
-	sessions         map[string]*store.Session
-	projects         map[string]*store.Project
-	turns            map[string]*store.Turn
-	fileChanges      map[string][]*store.TurnFileChange // turnID → root/path order
-	fileChangeStates map[string]store.TurnFileChangeState
-	messages         map[string][]*store.Message // sessionID → 时间升序
-	queued           map[string][]*store.QueuedInput
-	usage            map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	susage           map[string]*store.SessionUsageStat  // sessionID → session stats
-	canvas           map[string]*store.CanvasItem        // sessionID/itemID → session canvas item
-	favorites        map[string]*store.LibraryFavorite
-	savedCanvas      map[string]*store.SavedCanvasItem         // id → globally saved canvas item
-	browser          map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
-	browserHistory   map[string]*store.BrowserHistoryEntry     // id → global browser history
-	computerGrants   map[string]map[string]struct{}            // sessionID → approved app IDs
-	events           map[string][]event.Event                  // sessionID → seq 升序
-	seq              map[string]int64
-	settings         map[string]string
-	profiles         map[string]*store.ProviderProfile
+	mu                 sync.Mutex
+	sessions           map[string]*store.Session
+	dispatches         map[string]childDispatch
+	collaborationStops map[string]bool
+	parents            map[string]string // child session ID -> immutable parent session ID
+	projects           map[string]*store.Project
+	turns              map[string]*store.Turn
+	fileChanges        map[string][]*store.TurnFileChange // turnID → root/path order
+	fileChangeStates   map[string]store.TurnFileChangeState
+	messages           map[string][]*store.Message // sessionID → 时间升序
+	queued             map[string][]*store.QueuedInput
+	usage              map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	susage             map[string]*store.SessionUsageStat  // sessionID → session stats
+	canvas             map[string]*store.CanvasItem        // sessionID/itemID → session canvas item
+	favorites          map[string]*store.LibraryFavorite
+	savedCanvas        map[string]*store.SavedCanvasItem         // id → globally saved canvas item
+	browser            map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	browserHistory     map[string]*store.BrowserHistoryEntry     // id → global browser history
+	computerGrants     map[string]map[string]struct{}            // sessionID → approved app IDs
+	events             map[string][]event.Event                  // sessionID → seq 升序
+	seq                map[string]int64
+	settings           map[string]string
+	profiles           map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:         make(map[string]*store.Session),
-		projects:         make(map[string]*store.Project),
-		turns:            make(map[string]*store.Turn),
-		fileChanges:      make(map[string][]*store.TurnFileChange),
-		fileChangeStates: make(map[string]store.TurnFileChangeState),
-		messages:         make(map[string][]*store.Message),
-		queued:           make(map[string][]*store.QueuedInput),
-		usage:            make(map[usageKey]*store.UsageHourlyStat),
-		susage:           make(map[string]*store.SessionUsageStat),
-		canvas:           make(map[string]*store.CanvasItem),
-		savedCanvas:      make(map[string]*store.SavedCanvasItem),
-		favorites:        make(map[string]*store.LibraryFavorite),
-		browser:          make(map[string]map[string]*store.BrowserState),
-		browserHistory:   make(map[string]*store.BrowserHistoryEntry),
-		computerGrants:   make(map[string]map[string]struct{}),
-		events:           make(map[string][]event.Event),
-		seq:              make(map[string]int64),
-		settings:         make(map[string]string),
-		profiles:         make(map[string]*store.ProviderProfile),
+		sessions:           make(map[string]*store.Session),
+		parents:            make(map[string]string),
+		dispatches:         make(map[string]childDispatch),
+		collaborationStops: make(map[string]bool),
+		projects:           make(map[string]*store.Project),
+		turns:              make(map[string]*store.Turn),
+		fileChanges:        make(map[string][]*store.TurnFileChange),
+		fileChangeStates:   make(map[string]store.TurnFileChangeState),
+		messages:           make(map[string][]*store.Message),
+		queued:             make(map[string][]*store.QueuedInput),
+		usage:              make(map[usageKey]*store.UsageHourlyStat),
+		susage:             make(map[string]*store.SessionUsageStat),
+		canvas:             make(map[string]*store.CanvasItem),
+		savedCanvas:        make(map[string]*store.SavedCanvasItem),
+		favorites:          make(map[string]*store.LibraryFavorite),
+		browser:            make(map[string]map[string]*store.BrowserState),
+		browserHistory:     make(map[string]*store.BrowserHistoryEntry),
+		computerGrants:     make(map[string]map[string]struct{}),
+		events:             make(map[string][]event.Event),
+		seq:                make(map[string]int64),
+		settings:           make(map[string]string),
+		profiles:           make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -190,6 +196,13 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.createSessionLocked(s)
+}
+
+func (m *Memstore) createSessionLocked(s *store.Session) error {
+	if _, exists := m.sessions[s.ID]; exists {
+		return store.ErrInvalidSession
+	}
 	if s.ProjectID != "" {
 		if _, ok := m.projects[s.ProjectID]; !ok {
 			return store.ErrNotFound
@@ -317,6 +330,9 @@ func (m *Memstore) ListSessions(_ context.Context, options ...store.SessionListO
 	query := strings.ToLower(resolved.Query)
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
+		if resolved.Scope != store.SessionListAll && m.parents[s.ID] != "" {
+			continue
+		}
 		if resolved.Scope == store.SessionListActive && s.ArchivedAt != nil {
 			continue
 		}
@@ -468,13 +484,19 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 	if !ok || session.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
+	if m.parents[id] != "" {
+		return nil, store.ErrInvalidSessionRelation
+	}
 	now := time.Now()
-	session.ArchivedAt = &now
-	session.UpdatedAt = now
-	for _, input := range m.queued[id] {
-		if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
-			input.Status = store.QueuedInputCancelled
-			input.UpdatedAt = now
+	for _, memberID := range m.sessionGroupIDsLocked(id) {
+		member := m.sessions[memberID]
+		member.ArchivedAt = &now
+		member.UpdatedAt = now
+		for _, input := range m.queued[memberID] {
+			if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
+				input.Status = store.QueuedInputCancelled
+				input.UpdatedAt = now
+			}
 		}
 	}
 	return cloneSession(session), nil
@@ -487,8 +509,14 @@ func (m *Memstore) RestoreSession(_ context.Context, id string) (*store.Session,
 	if !ok || session.ArchivedAt == nil {
 		return nil, store.ErrNotFound
 	}
-	session.ArchivedAt = nil
-	session.UpdatedAt = time.Now()
+	if m.parents[id] != "" {
+		return nil, store.ErrInvalidSessionRelation
+	}
+	now := time.Now()
+	for _, memberID := range m.sessionGroupIDsLocked(id) {
+		m.sessions[memberID].ArchivedAt = nil
+		m.sessions[memberID].UpdatedAt = now
+	}
 	return cloneSession(session), nil
 }
 
@@ -497,7 +525,7 @@ func (m *Memstore) ListExpiredArchivedSessionIDs(_ context.Context, cutoff time.
 	defer m.mu.Unlock()
 	ids := make([]string, 0)
 	for id, session := range m.sessions {
-		if session.ArchivedAt != nil && !session.ArchivedAt.After(cutoff) {
+		if m.parents[id] == "" && session.ArchivedAt != nil && !session.ArchivedAt.After(cutoff) {
 			ids = append(ids, id)
 		}
 	}
@@ -511,6 +539,15 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	if _, ok := m.sessions[id]; !ok {
 		return store.ErrNotFound
 	}
+	for _, memberID := range m.sessionGroupIDsLocked(id) {
+		m.deleteSessionLocked(memberID)
+	}
+	return nil
+}
+
+func (m *Memstore) deleteSessionLocked(id string) {
+	delete(m.parents, id)
+	delete(m.dispatches, id)
 	delete(m.sessions, id)
 	delete(m.messages, id)
 	delete(m.queued, id)
@@ -528,11 +565,11 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	for tid, t := range m.turns {
 		if t.SessionID == id {
 			delete(m.turns, tid)
+			delete(m.collaborationStops, tid)
 			delete(m.fileChanges, tid)
 			delete(m.fileChangeStates, tid)
 		}
 	}
-	return nil
 }
 
 func (m *Memstore) HasComputerAppGrant(_ context.Context, sessionID, appID string) (bool, error) {
@@ -744,6 +781,10 @@ func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnIn
 func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.queueInputLocked(in)
+}
+
+func (m *Memstore) queueInputLocked(in store.QueueInputInput) (*store.QueueInputResult, error) {
 	if _, ok := m.sessions[in.SessionID]; !ok {
 		return nil, store.ErrNotFound
 	}
@@ -1135,6 +1176,11 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	})
 	m.appendEventLocked(turn.SessionID, ev)
 	m.touchSessionActivityLocked(turn.SessionID, now)
+	if parentID := m.parents[turn.SessionID]; parentID != "" {
+		changed := event.Event{SessionID: parentID, Seq: m.nextSeq(parentID), Kind: event.CollaborationChanged}
+		m.appendEventLocked(parentID, changed)
+		res.CollaborationEvent = &changed
+	}
 	res.FinalEvent = &ev
 	return res, nil
 }

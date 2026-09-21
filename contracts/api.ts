@@ -24,6 +24,14 @@ export const session = z.object({
 });
 export type Session = z.infer<typeof session>;
 
+export const childSession = z.object({
+ session, status: z.enum(["idle", "queued", "running", "completed", "failed", "cancelled"]),
+ latestTurnID: z.string().optional(), pendingApprovals: z.number().int().nonnegative(), resultCollected: z.boolean(), summary: z.string().optional(),
+});
+export type ChildSession = z.infer<typeof childSession>;
+export const listChildSessionsResponse = z.object({ children: z.array(childSession) });
+
+
 export const approveApprovalResponse = z.object({
   status: z.literal("approved"),
   session,
@@ -548,7 +556,7 @@ export const message = z
     sessionID: z.string(),
     turnID: z.string(),
     role: z.enum(["user", "assistant", "tool", "system", "summary"]),
-    kind: z.enum(["text", "thought", "tool_use", "tool_result", "summary"]),
+    kind: z.enum(["text", "thought", "tool_use", "tool_result", "summary", "collaboration_result"]),
     text: z.string(),
     parts: z.array(contentPart),
     turnIndex: z.number().int(),
@@ -708,6 +716,7 @@ export const compactResponse = z.object({
 });
 
 export const pendingApproval = z.object({
+ sourceTitle: z.string().optional(),
   id: z.string(),
   sessionID: z.string(),
   turnID: z.string(),

@@ -22,6 +22,7 @@ var (
 	ErrTurnRunning              = errors.New("store: session has a running turn")
 	ErrInvalidRetry             = errors.New("store: only the latest failed turn can be retried")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
+	ErrInvalidSessionRelation   = errors.New("store: invalid parent-child session relation")
 	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
@@ -2051,9 +2052,10 @@ type AppendCompactSummaryResult struct {
 }
 
 type FinishTurnResult struct {
-	AssistantMessage  *Message // failed/cancelled 无产出时为 nil;多 segment 时指向第一条输出消息
-	AssistantMessages []*Message
-	FinalEvent        *event.Event
+	CollaborationEvent *event.Event
+	AssistantMessage   *Message // failed/cancelled 无产出时为 nil;多 segment 时指向第一条输出消息
+	AssistantMessages  []*Message
+	FinalEvent         *event.Event
 }
 
 type UsageRecordInput struct {
@@ -2368,9 +2370,22 @@ type Store interface {
 	DeleteProject(ctx context.Context, id string) error
 
 	CreateSession(ctx context.Context, s *Session) error
+	// CreateChildSession creates the Session and its immutable parent relation
+	// atomically. Only an active root session can own children. Execution and
+	// permission grants are not started or copied by this storage operation.
+	CreateChildSession(ctx context.Context, parentSessionID string, child *Session) error
+	DispatchChild(ctx context.Context, in DispatchChildInput) (*DispatchChildResult, error)
+	QueueChildInput(ctx context.Context, parentSessionID, parentTurnID string, in QueueInputInput) (*QueueInputResult, error)
+	StopCollaboration(ctx context.Context, parentSessionID string) ([]event.Event, error)
+	CollectChildResults(ctx context.Context, parentSessionID string) ([]event.Event, error)
+	HasUncollectedChildResults(ctx context.Context, parentSessionID string) (bool, error)
+	// ParentSessionID returns an empty string for an existing root session.
+	// Relations remain readable while a session group is archived.
+	ParentSessionID(ctx context.Context, sessionID string) (string, error)
+	ListChildSessions(ctx context.Context, parentSessionID string) ([]*Session, error)
 	CloneSession(ctx context.Context, in CloneSessionInput) (*Session, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
-	// ListSessions 默认只返回 active session；内部维护任务必须显式使用 all。
+	// ListSessions 默认只返回 active 主会话；all 包含归档及子会话，供内部维护使用。
 	ListSessions(ctx context.Context, options ...SessionListOptions) ([]*Session, error)
 	UpdateSession(ctx context.Context, id string, upd SessionUpdate) (*Session, error)
 	ArchiveSession(ctx context.Context, id string) (*Session, error)

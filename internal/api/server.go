@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -172,6 +173,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/turns/:turnID/retry").POST(s.retryTurn)
 	app.Route("/sessions/:id/input-requests/:requestID").GET(s.getUserInputRequest).POST(s.actOnUserInput)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
+	app.Route("/sessions/:id/children").GET(s.listChildSessions)
+	app.Route("/sessions/:id/collaboration/stop").POST(s.stopCollaboration)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
 	app.Route("/sessions/:id/command-approvals").GET(s.commandApprovals).DELETE(s.revokeCommandApprovals)
@@ -539,14 +542,14 @@ func (s *Server) deleteProject(c *cart.Context) error {
 }
 
 func (s *Server) projectSessionIDs(ctx context.Context, projectID string) ([]string, error) {
-	sessions, err := s.store.ListSessions(ctx)
+	sessions, err := s.store.ListSessions(ctx, store.SessionListOptions{Scope: store.SessionListAll})
 	if err != nil {
 		return nil, err
 	}
 	projectID = strings.TrimSpace(projectID)
 	out := make([]string, 0)
 	for _, session := range sessions {
-		if session != nil && strings.TrimSpace(session.ProjectID) == projectID {
+		if session != nil && session.ArchivedAt == nil && strings.TrimSpace(session.ProjectID) == projectID {
 			out = append(out, session.ID)
 		}
 	}
@@ -696,14 +699,23 @@ func (s *Server) deleteSession(c *cart.Context) error {
 
 func (s *Server) archiveSession(c *cart.Context) error {
 	id, _ := c.Param("id")
-	if err := s.cancelSessionWork(c.Request.Context(), id); err != nil {
-		return s.fail(c, err)
-	}
+	// Archive first closes admission and cancels queued inputs atomically. A
+	// finishing turn therefore cannot promote another input while cleanup runs.
 	session, err := s.store.ArchiveSession(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if err := s.cancelSessionWork(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	children, err := s.store.ListChildSessions(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
 	s.releaseSessionResources(c.Request.Context(), id, false)
+	for _, child := range children {
+		s.releaseSessionResources(c.Request.Context(), child.ID, false)
+	}
 	c.JSON(http.StatusOK, session)
 	return nil
 }
@@ -720,13 +732,33 @@ func (s *Server) restoreSession(c *cart.Context) error {
 }
 
 func (s *Server) purgeSession(ctx context.Context, id string) error {
+	owner, err := s.store.ParentSessionID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if owner == "" {
+		if _, err := s.store.GetSession(ctx, id); err == nil {
+			if _, err := s.store.ArchiveSession(ctx, id); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
 	if err := s.cancelSessionWork(ctx, id); err != nil {
+		return err
+	}
+	children, err := s.store.ListChildSessions(ctx, id)
+	if err != nil {
 		return err
 	}
 	if err := s.store.DeleteSession(ctx, id); err != nil {
 		return err
 	}
 	s.releaseSessionResources(ctx, id, true)
+	for _, child := range children {
+		s.releaseSessionResources(ctx, child.ID, true)
+	}
 	return nil
 }
 
@@ -1105,6 +1137,7 @@ func (s *Server) revokeCommandApprovals(c *cart.Context) error {
 }
 
 type approvalView struct {
+	SourceTitle  string          `json:"sourceTitle,omitempty"`
 	ID           string          `json:"id"`
 	SessionID    string          `json:"sessionID"`
 	TurnID       string          `json:"turnID"`
@@ -1121,9 +1154,26 @@ type approvalView struct {
 func (s *Server) listApprovals(c *cart.Context) error {
 	id, _ := c.Param("id")
 	pending := s.engine.PendingApprovals(id)
+	children, err := s.store.ListChildSessions(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	titles := make(map[string]string)
+	for _, child := range children {
+		pending = append(pending, s.engine.PendingApprovals(child.ID)...)
+		titles[child.ID] = child.Title
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].CreatedAt.Equal(pending[j].CreatedAt) {
+			return pending[i].ID < pending[j].ID
+		}
+		return pending[i].CreatedAt.Before(pending[j].CreatedAt)
+	})
+
 	views := make([]approvalView, 0, len(pending))
 	for _, approval := range pending {
 		views = append(views, approvalView{
+			SourceTitle:  titles[approval.SessionID],
 			ID:           approval.ID,
 			SessionID:    approval.SessionID,
 			TurnID:       approval.TurnID,
@@ -1551,6 +1601,9 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	if errors.Is(err, store.ErrInvalidSession) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
+	}
+	if errors.Is(err, store.ErrInvalidSessionRelation) {
+		return badRequest(c, "invalid_session_relation")
 	}
 	if errors.Is(err, store.ErrInvalidProject) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_project"})
