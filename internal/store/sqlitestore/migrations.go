@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 23
+	currentSchemaVersion       = 24
 )
 
 var (
@@ -33,6 +33,43 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	24: func(tx *sql.Tx) error {
+		// Early development v23 databases were opened before run snapshots
+		// were added. Keep the completed v23 layout and its snapshots intact.
+		exists, err := tableColumnExists(tx, "scheduled_task_runs", "schedule")
+		if err != nil || exists {
+			return err
+		}
+		// Rebuild to the canonical layout without a permanent default or read
+		// fallback. The early layout only retained the plan's current rule.
+		_, err = tx.Exec(`ALTER TABLE scheduled_task_runs RENAME TO scheduled_task_runs_v23;
+CREATE TABLE scheduled_task_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    definition_revision INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    scheduled_for INTEGER NOT NULL,
+    accepted_at INTEGER NOT NULL,
+    client_message_id TEXT NOT NULL UNIQUE,
+    handoff TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    skipped_through INTEGER NOT NULL DEFAULT 0,
+    trigger_key TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    UNIQUE(task_id, trigger_key)
+);
+INSERT INTO scheduled_task_runs(rowid,id,task_id,session_id,name,prompt,definition_revision,source,scheduled_for,accepted_at,client_message_id,handoff,reason,skipped_through,trigger_key,schedule)
+SELECT rowid,id,task_id,session_id,name,prompt,definition_revision,source,scheduled_for,accepted_at,client_message_id,handoff,reason,skipped_through,trigger_key,
+    (SELECT schedule FROM scheduled_tasks WHERE id=scheduled_task_runs_v23.task_id)
+FROM scheduled_task_runs_v23 ORDER BY rowid;
+DROP TABLE scheduled_task_runs_v23;
+CREATE INDEX scheduled_task_runs_task ON scheduled_task_runs(task_id, accepted_at);
+CREATE INDEX scheduled_task_runs_pending ON scheduled_task_runs(handoff, accepted_at);`)
+		return err
+	},
 	23: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id TEXT PRIMARY KEY,
@@ -853,6 +890,8 @@ var currentSchemaContract = func() schemaContract {
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":  {"parent_turn_id"},
+		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
+		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
 		"computer_app_grants":  {"session_id", "app_id", "created_at"},
 		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
 		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
@@ -873,6 +912,7 @@ var currentSchemaContract = func() schemaContract {
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
 	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
+	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
 	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}
 	return out
 }()
