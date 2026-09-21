@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +110,82 @@ func TestScheduledTasksMigrationArchive(t *testing.T) {
 	task, err = st.GetScheduledTask(ctx, task.ID)
 	if err != nil || task.Enabled {
 		t.Fatalf("archive failed to pause %+v %v", task, err)
+	}
+}
+
+func TestScheduledRunsVersion23Migration(t *testing.T) {
+	for _, missingSchedule := range []bool{true, false} {
+		t.Run(map[bool]string{true: "early-layout", false: "complete-layout"}[missingSchedule], func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "v23.db")
+			st, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			createTestSession(t, st, "target")
+			beginTestTurn(t, st, "target", "turn", "message", "input")
+			if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "turn", Status: store.TurnCompleted}); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			prepared, err := store.PrepareScheduledTask(store.ScheduledTaskCreate{SessionID: "target", RequestID: "create", Name: "check", Prompt: "check", Schedule: store.TaskSchedule{Kind: "daily", Timezone: "Asia/Shanghai", Time: "09:00"}}, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err := st.CreateScheduledTask(ctx, prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, Now: now, RequestID: "manual"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !missingSchedule {
+				// An existing snapshot must survive even when the plan has changed.
+				task, _ = st.GetScheduledTask(ctx, task.ID)
+				schedule := store.TaskSchedule{Kind: "daily", Timezone: "UTC", Time: "13:00"}
+				if _, err := st.UpdateScheduledTask(ctx, task.ID, store.ScheduledTaskUpdate{Revision: task.Revision, Schedule: &schedule}, now); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := st.db.Exec(`ALTER TABLE scheduled_task_runs DROP COLUMN schedule`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.db.Exec(`PRAGMA user_version=23`); err != nil {
+				t.Fatal(err)
+			}
+			st.Close()
+			for range 2 {
+				st, err = Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pending, err := st.PendingScheduledTaskRuns(ctx)
+				if err != nil || len(pending) != 1 || !reflect.DeepEqual(pending[0], run) {
+					t.Fatalf("pending run not preserved: %+v, %v; want %+v", pending, err, run)
+				}
+				if _, err := st.GetMessage(ctx, "target", "message"); err != nil {
+					t.Fatal("migration lost conversation", err)
+				}
+				if err := validateCurrentSchema(st.db); err != nil {
+					t.Fatal(err)
+				}
+				st.Close()
+			}
+		})
+	}
+}
+
+func TestScheduledRunsMissingScheduleRejectedAtCurrentVersion(t *testing.T) {
+	st, path := openTestStore(t)
+	if _, err := st.db.Exec(`ALTER TABLE scheduled_task_runs DROP COLUMN schedule`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	reopened, err := Open(path)
+	if reopened != nil {
+		reopened.Close()
+	}
+	if !errors.Is(err, ErrUnsupportedSchema) || !strings.Contains(err.Error(), "scheduled_task_runs is missing column schedule") {
+		t.Fatalf("missing schedule must fail startup validation: %v", err)
 	}
 }
