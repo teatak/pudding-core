@@ -26,12 +26,12 @@ func TestScheduledTasksPersistenceAndAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := st.CreateScheduledTask(ctx, prepared)
+	task, err := st.CreateScheduledTask(ctx, prepared, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	replay, _ := store.PrepareScheduledTask(in, now.Add(time.Hour))
-	same, err := st.CreateScheduledTask(ctx, replay)
+	same, err := st.CreateScheduledTask(ctx, replay, nil)
 	if err != nil || same.ID != task.ID || !same.NextAt.Equal(*task.NextAt) {
 		t.Fatalf("idempotent creation: %+v %v", same, err)
 	}
@@ -100,7 +100,7 @@ func TestScheduledTasksMigrationArchive(t *testing.T) {
 		t.Fatal("migration lost session", err)
 	}
 	task, _ := store.PrepareScheduledTask(store.ScheduledTaskCreate{SessionID: "old-session", RequestID: "once", Name: "test", Prompt: "test", Schedule: store.TaskSchedule{Kind: "daily", Timezone: "UTC", Time: "09:00"}}, time.Now())
-	task, err = st.CreateScheduledTask(ctx, task)
+	task, err = st.CreateScheduledTask(ctx, task, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestScheduledRunsVersion23Migration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			task, err := st.CreateScheduledTask(ctx, prepared)
+			task, err := st.CreateScheduledTask(ctx, prepared, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -29,7 +29,11 @@ export const scheduledTaskRunsResponse = z.object({ runs: z.array(scheduledTaskR
 export type ScheduledTask = z.infer<typeof scheduledTask>;
 export type ScheduledTaskView = z.infer<typeof scheduledTaskView>;
 export type ScheduledTaskRun = z.infer<typeof scheduledTaskRun>;
-export const createScheduledTaskRequest = z.object({ sessionID: z.string().min(1), requestID: z.string().min(1), name: z.string().trim().min(1).max(100), prompt: z.string().trim().min(1).max(65536), schedule: taskSchedule, delaySeconds: z.number().int().positive().optional() });
+export const createScheduledTaskRequest = z.object({
+  sessionID: z.string().min(1).optional(),
+  newSession: z.object({ provider: z.string().trim().min(1), model: z.string().trim().min(1) }).optional(),
+  requestID: z.string().min(1).max(256), name: z.string().trim().min(1).max(100), prompt: z.string().trim().min(1).max(65536), schedule: taskSchedule, delaySeconds: z.number().int().positive().optional(),
+}).refine((value) => Boolean(value.sessionID) !== Boolean(value.newSession), { message: "Choose an existing session or create a new one" });
 export const patchScheduledTaskRequest = z.object({ revision: z.number(), name: z.string().optional(), prompt: z.string().optional(), schedule: taskSchedule.optional(), enabled: z.boolean().optional() });
 
 export const session = z.object({

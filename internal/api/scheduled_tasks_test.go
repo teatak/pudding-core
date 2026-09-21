@@ -46,6 +46,28 @@ func TestScheduledTaskHTTPAdmissionScopeAndHistory(t *testing.T) {
 	if response.Code != 201 {
 		t.Fatal(response.Code, response.Body.String())
 	}
+	newBody := strings.Replace(body, `"sessionID":"target"`, `"newSession":{"provider":"mock","model":"model"}`, 1)
+	created := request("POST", "/scheduled-tasks", newBody)
+	if created.Code != 201 {
+		t.Fatal(created.Code, created.Body.String())
+	}
+	var newTask store.ScheduledTask
+	if err := json.Unmarshal(created.Body.Bytes(), &newTask); err != nil {
+		t.Fatal(err)
+	}
+	newSession, err := st.GetSession(ctx, newTask.SessionID)
+	if err != nil || newSession.Title != "Check" || newSession.ActiveMode != store.ModeChat {
+		t.Fatalf("new session: %+v %v", newSession, err)
+	}
+	for _, invalid := range []string{
+		strings.Replace(body, `"sessionID":"target",`, "", 1),
+		strings.Replace(newBody, `"newSession":`, `"sessionID":"target","newSession":`, 1),
+		strings.Replace(newBody, `"model":"model"`, `"model":""`, 1),
+	} {
+		if response := request("POST", "/scheduled-tasks", invalid); response.Code != 400 {
+			t.Fatal("invalid target admitted", response.Code, response.Body.String())
+		}
+	}
 	var task store.ScheduledTask
 	if err := json.Unmarshal(response.Body.Bytes(), &task); err != nil {
 		t.Fatal(err)

@@ -62,7 +62,7 @@ func scheduledTargetTx(ctx context.Context, tx *sql.Tx, id string) error {
 	}
 	return nil
 }
-func (s *Store) CreateScheduledTask(ctx context.Context, t *store.ScheduledTask) (*store.ScheduledTask, error) {
+func (s *Store) CreateScheduledTask(ctx context.Context, t *store.ScheduledTask, session *store.Session) (*store.ScheduledTask, error) {
 	var out *store.ScheduledTask
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		prev, err := scanScheduledTask(tx.QueryRowContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE session_id=? AND request_id=?`, t.SessionID, t.RequestID))
@@ -75,6 +75,17 @@ func (s *Store) CreateScheduledTask(ctx context.Context, t *store.ScheduledTask)
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return err
+		}
+		if session != nil {
+			if session.ID != t.SessionID {
+				return store.ErrInvalidSession
+			}
+			if err := store.NormalizeSessionProviderModel(session); err != nil {
+				return err
+			}
+			if err := createSessionTx(ctx, tx, session); err != nil {
+				return err
+			}
 		}
 		if err := scheduledTargetTx(ctx, tx, t.SessionID); err != nil {
 			return err

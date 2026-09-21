@@ -39,7 +39,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [scheduled-tasks-plan.md](scheduled-tasks-plan.md) | 定时任务首版：独立菜单、绑定原会话、一次性／每天／每周调度、执行记录与通知；首版已实现，含边界、验证记录与发布回归清单 |
+| [scheduled-tasks-plan.md](scheduled-tasks-plan.md) | 定时任务首版：独立菜单、新建或绑定会话、一次性／每天／每周调度、执行记录与通知；首版已实现，含边界、验证记录与发布回归清单 |
 | [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
 
 ## 已完成设计记录

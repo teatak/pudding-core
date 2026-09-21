@@ -40,7 +40,7 @@ func (m *Memstore) scheduledTargetLocked(id string) error {
 	}
 	return nil
 }
-func (m *Memstore) CreateScheduledTask(_ context.Context, t *store.ScheduledTask) (*store.ScheduledTask, error) {
+func (m *Memstore) CreateScheduledTask(_ context.Context, t *store.ScheduledTask, session *store.Session) (*store.ScheduledTask, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, prev := range m.scheduledTasks {
@@ -51,11 +51,21 @@ func (m *Memstore) CreateScheduledTask(_ context.Context, t *store.ScheduledTask
 			return cloneScheduledTask(prev), nil
 		}
 	}
-	if err := m.scheduledTargetLocked(t.SessionID); err != nil {
-		return nil, err
-	}
 	if t.NextAt == nil {
 		return nil, store.ErrInvalidSchedule
+	}
+	if session != nil {
+		if session.ID != t.SessionID {
+			return nil, store.ErrInvalidSession
+		}
+		if err := store.NormalizeSessionProviderModel(session); err != nil {
+			return nil, err
+		}
+		if err := m.createSessionLocked(session); err != nil {
+			return nil, err
+		}
+	} else if err := m.scheduledTargetLocked(t.SessionID); err != nil {
+		return nil, err
 	}
 	m.scheduledTasks[t.ID] = cloneScheduledTask(t)
 	return cloneScheduledTask(t), nil

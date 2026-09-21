@@ -7,10 +7,76 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
+
+func TestScheduledNewSessionRequiresApprovalAndReusesSession(t *testing.T) {
+	ctx := context.Background()
+	client := &capabilityClient{}
+	eng, st, _ := newCollaborationEngine(t, client)
+	in := store.ScheduledTaskCreate{RequestID: "new", Name: "Local report", Prompt: "Read local files", NewSession: &store.ScheduledTaskNewSession{Provider: client.Name(), Model: "model"}, Schedule: store.TaskSchedule{Kind: "daily", Timezone: "UTC", Time: "09:00"}}
+	task, err := eng.CreateScheduledTask(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.GrantComputerApp(ctx, "root", "com.example.Editor"); err != nil {
+		t.Fatal(err)
+	}
+	if granted, err := st.HasComputerAppGrant(ctx, task.SessionID, "com.example.Editor"); err != nil || granted {
+		t.Fatalf("new session inherited another session's grant: %v %v", granted, err)
+	}
+	if parent, err := st.ParentSessionID(ctx, task.SessionID); err != nil || parent != "" {
+		t.Fatalf("task target must be a root session: %q %v", parent, err)
+	}
+	sub, unsubscribe := eng.hub.Subscribe(task.SessionID)
+	defer unsubscribe()
+	run, err := eng.RunScheduledTask(ctx, task.ID, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalID string
+	deadline := time.After(3 * time.Second)
+	for approvalID == "" {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approvalID = ev.ApprovalID
+			}
+		case <-deadline:
+			t.Fatal("scheduled execution bypassed or failed to surface approval")
+		}
+	}
+	view, err := eng.ScheduledRun(ctx, run.ScheduledTaskRun)
+	if err != nil || view.Status != "awaiting_approval" || view.AttentionID != approvalID {
+		t.Fatalf("approval not tracked: %+v %v", view, err)
+	}
+	if _, err := eng.RunScheduledTask(ctx, task.ID, "blocked"); !errors.Is(err, store.ErrScheduledTaskBusy) {
+		t.Fatalf("overlap while awaiting approval: %v", err)
+	}
+	if err := eng.ApproveApproval(ctx, "root", approvalID, ApprovalScopeSession, nil); !errors.Is(err, ErrApprovalNotFound) {
+		t.Fatalf("wrong session accepted approval: %v", err)
+	}
+	if err := eng.ApproveApproval(ctx, task.SessionID, approvalID, ApprovalScopeSession, []string{t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	eng.Wait()
+	view, err = eng.ScheduledRun(ctx, run.ScheduledTaskRun)
+	if err != nil || view.Status != "completed" {
+		t.Fatalf("approved task did not finish: %+v %v", view, err)
+	}
+	again, err := eng.RunScheduledTask(ctx, task.ID, "second")
+	if err != nil || again.SessionID != task.SessionID {
+		t.Fatalf("run changed session: %+v %v", again, err)
+	}
+	eng.Wait()
+	sessions, _ := st.ListSessions(ctx, store.SessionListOptions{Scope: store.SessionListAll})
+	if len(sessions) != 2 {
+		t.Fatalf("runs created extra sessions: %d", len(sessions))
+	}
+}
 
 func TestScheduledTaskQueueRecoveryAndSkip(t *testing.T) {
 	ctx := context.Background()
@@ -117,7 +183,7 @@ func TestScheduledTaskMissedAndAcceptedBeforeRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		task, err = st.CreateScheduledTask(ctx, task)
+		task, err = st.CreateScheduledTask(ctx, task, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

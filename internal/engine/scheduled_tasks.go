@@ -44,7 +44,11 @@ func (e *Engine) CreateScheduledTask(ctx context.Context, in store.ScheduledTask
 	if err != nil {
 		return nil, err
 	}
-	t, err = e.store.CreateScheduledTask(ctx, t)
+	var session *store.Session
+	if in.NewSession != nil {
+		session = &store.Session{ID: t.SessionID, Title: t.Name, Provider: in.NewSession.Provider, Model: in.NewSession.Model}
+	}
+	t, err = e.store.CreateScheduledTask(ctx, t, session)
 	if err == nil {
 		e.rememberScheduledRuntime(t.SessionID, app.RuntimeIDFromContext(ctx))
 	}

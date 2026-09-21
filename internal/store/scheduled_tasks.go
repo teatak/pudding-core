@@ -126,12 +126,20 @@ type ScheduledTask struct {
 }
 
 type ScheduledTaskCreate struct {
-	SessionID    string       `json:"sessionID"`
-	RequestID    string       `json:"requestID"`
-	Name         string       `json:"name"`
-	Prompt       string       `json:"prompt"`
-	Schedule     TaskSchedule `json:"schedule"`
-	DelaySeconds int64        `json:"delaySeconds,omitempty"`
+	SessionID    string                   `json:"sessionID"`
+	NewSession   *ScheduledTaskNewSession `json:"newSession,omitempty"`
+	RequestID    string                   `json:"requestID"`
+	Name         string                   `json:"name"`
+	Prompt       string                   `json:"prompt"`
+	Schedule     TaskSchedule             `json:"schedule"`
+	DelaySeconds int64                    `json:"delaySeconds,omitempty"`
+}
+
+// ScheduledTaskNewSession only chooses the model. Permissions, project access,
+// loaded apps and mode use ordinary new-session defaults, never another session.
+type ScheduledTaskNewSession struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }
 type ScheduledTaskUpdate struct {
 	Revision int64         `json:"revision"`
@@ -144,11 +152,19 @@ type ScheduledTaskUpdate struct {
 
 func PrepareScheduledTask(in ScheduledTaskCreate, now time.Time) (*ScheduledTask, error) {
 	in.Name, in.Prompt = strings.TrimSpace(in.Name), strings.TrimSpace(in.Prompt)
-	if in.SessionID == "" || in.RequestID == "" || len(in.RequestID) > 256 || !validTaskText(in.Name, in.Prompt) {
+	if (in.SessionID == "") == (in.NewSession == nil) || in.RequestID == "" || len(in.RequestID) > 256 || !validTaskText(in.Name, in.Prompt) {
+		return nil, ErrInvalidSchedule
+	}
+	if in.NewSession != nil && (strings.TrimSpace(in.NewSession.Provider) == "" || strings.TrimSpace(in.NewSession.Model) == "") {
 		return nil, ErrInvalidSchedule
 	}
 	raw, _ := json.Marshal(in)
 	hash := fmt.Sprintf("%x", sha256.Sum256(raw))
+	if in.NewSession != nil {
+		// Stable across response loss and daemon restart; the persisted task's
+		// existing (session_id, request_id) key remains the sole deduplication source.
+		in.SessionID = fmt.Sprintf("sess_schedule_%x", sha256.Sum256([]byte(in.RequestID)))
+	}
 	if in.DelaySeconds != 0 {
 		if in.DelaySeconds < 1 || in.DelaySeconds > 366*86400 || in.Schedule.Kind != "once" || in.Schedule.At != nil {
 			return nil, ErrInvalidSchedule
@@ -276,7 +292,7 @@ func PrepareScheduledTaskRun(t *ScheduledTask, in ScheduledTaskAccept) (*Schedul
 type ScheduledTaskStore interface {
 	GetScheduledTaskTurn(context.Context, string, string) (*ConversationTurn, error)
 	GetScheduledTaskRun(context.Context, string, string) (*ScheduledTaskRun, error)
-	CreateScheduledTask(context.Context, *ScheduledTask) (*ScheduledTask, error)
+	CreateScheduledTask(context.Context, *ScheduledTask, *Session) (*ScheduledTask, error)
 	GetScheduledTask(context.Context, string) (*ScheduledTask, error)
 	ListScheduledTasks(context.Context, string, bool) ([]*ScheduledTask, error)
 	UpdateScheduledTask(context.Context, string, ScheduledTaskUpdate, time.Time) (*ScheduledTask, error)
