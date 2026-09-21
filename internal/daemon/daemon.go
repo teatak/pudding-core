@@ -241,6 +241,7 @@ func Start(opts Options) (*Daemon, error) {
 		serveErr:  make(chan error, 1),
 	}
 	listenerOwned = true
+	eng.StartScheduledTasks()
 	go apiServer.RunSessionArchiveJanitor(sseCtx)
 	go func() { d.serveErr <- server.Serve(ln) }()
 

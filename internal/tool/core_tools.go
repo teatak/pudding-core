@@ -10,6 +10,7 @@ import (
 )
 
 var chatCoreTools = map[string]bool{
+	ScheduledTask:  true,
 	TimeGetCurrent: true, WebSearch: true, WebFetch: true,
 	HistorySearch: true, HistoryGetMessage: true, SkillRead: true,
 	MediaRead: true, WeatherGet: true,

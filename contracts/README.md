@@ -8,3 +8,5 @@ Server structs and lifecycle semantics remain owned by core; verify both sides w
 Protocol 2 adds the external `-ui-dir` startup contract and removes mobile pairing/device-token authentication.
 Clients reject incompatible daemon handshakes rather than attaching to an older embedded-UI runtime.
 The generated client files must not be edited or committed in desktop.
+
+Protocol 3 adds scheduled task definitions, run history, and daemon scheduling. Desktop requires these routes; the handshake rejects older daemons rather than presenting a management page backed by missing endpoints.

@@ -2,6 +2,36 @@
 // 与 internal/api/server.go(请求/响应);字段名一一对应。
 import { z } from "zod";
 
+export const taskSchedule = z.object({
+  kind: z.enum(["once", "daily", "weekly"]), timezone: z.string(),
+  at: z.string().optional(), time: z.string().optional(), weekdays: z.array(z.number().int().min(0).max(6)).optional(),
+});
+export type TaskSchedule = z.infer<typeof taskSchedule>;
+export const scheduledTask = z.object({
+  id: z.string(), sessionID: z.string(), name: z.string(), prompt: z.string(), schedule: taskSchedule,
+  enabled: z.boolean(), deleted: z.boolean().optional(), revision: z.number(), scheduleRevision: z.number(),
+  nextAt: z.string().optional(), createdAt: z.string(), updatedAt: z.string(),
+});
+export const scheduledTaskRun = z.object({
+  id: z.string(), taskID: z.string(), sessionID: z.string(), name: z.string(), prompt: z.string(),
+  schedule: taskSchedule, skippedCount: z.number().optional(), definitionRevision: z.number(), source: z.enum(["scheduled", "manual"]), scheduledFor: z.string(), acceptedAt: z.string(),
+  clientMessageID: z.string(), handoff: z.enum(["pending", "submitted", "skipped", "failed"]), reason: z.string().optional(), skippedThrough: z.string().optional(),
+  status: z.enum(["pending", "queued", "running", "awaiting_approval", "awaiting_input", "completed", "failed", "cancelled", "skipped"]),
+  queuedInputID: z.string().optional(), turnID: z.string().optional(), messageID: z.string().optional(), startedAt: z.string().optional(), finishedAt: z.string().optional(),
+  detail: z.string().optional(), attentionID: z.string().optional(),
+});
+export const scheduledTaskView = scheduledTask.extend({
+  sessionTitle: z.string(), sessionArchived: z.boolean(), state: z.enum(["enabled", "paused", "ended", "deleted"]),
+  latestRun: scheduledTaskRun.optional(), activeRun: scheduledTaskRun.optional(),
+});
+export const scheduledTasksResponse = z.object({ tasks: z.array(scheduledTaskView) });
+export const scheduledTaskRunsResponse = z.object({ runs: z.array(scheduledTaskRun), hasMore: z.boolean() });
+export type ScheduledTask = z.infer<typeof scheduledTask>;
+export type ScheduledTaskView = z.infer<typeof scheduledTaskView>;
+export type ScheduledTaskRun = z.infer<typeof scheduledTaskRun>;
+export const createScheduledTaskRequest = z.object({ sessionID: z.string().min(1), requestID: z.string().min(1), name: z.string().trim().min(1).max(100), prompt: z.string().trim().min(1).max(65536), schedule: taskSchedule, delaySeconds: z.number().int().positive().optional() });
+export const patchScheduledTaskRequest = z.object({ revision: z.number(), name: z.string().optional(), prompt: z.string().optional(), schedule: taskSchedule.optional(), enabled: z.boolean().optional() });
+
 export const session = z.object({
   id: z.string(),
   title: z.string(),

@@ -313,7 +313,7 @@ func WithWeatherEndpoint(endpoint string) BuiltinOption {
 }
 
 func BuiltinDefinitions() []provider.ToolDef {
-	return append(CollaborationDefinitions(), builtinRunnerDefinitions()...)
+	return append(append(CollaborationDefinitions(), ScheduledTaskDefinitions()...), builtinRunnerDefinitions()...)
 }
 
 func builtinRunnerDefinitions() []provider.ToolDef {

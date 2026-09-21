@@ -1,5 +1,8 @@
 # 任务：定时执行与 Agent-to-Agent 协作
 
+> 历史方案（2026-09-21）：本轮定时任务以 [定时任务首版实施计划](scheduled-tasks-plan.md) 为唯一实施依据。以下保留原始草案用于追溯，不作为待办。
+> 本轮采用独立菜单管理、绑定原会话执行；下文每次运行新建 Session、外部 Agent、结果审查、callback、审批持久化及 worktree 等设计均不属于当前实施范围。
+
 > 归属：跨仓设计草案；core 维护任务调度、数据与 API 设计，desktop 承载任务视图。
 > `internal/`、`contracts/` 路径相对 core；`web/`、`electron/` 和 `make desktop-dev` 属于 `pudding-desktop`。
 > 规划中的接口和文件不表示已实现；下文链接到 desktop 的现有界面仅作为产品参考。

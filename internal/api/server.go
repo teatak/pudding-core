@@ -132,7 +132,8 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
+var apiPrefixes = []string{
+	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -161,6 +162,10 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
+	app.Route("/scheduled-tasks").GET(s.listScheduledTasks).POST(s.createScheduledTask)
+	app.Route("/scheduled-tasks/:taskID").GET(s.getScheduledTask).PATCH(s.updateScheduledTask).DELETE(s.updateScheduledTask)
+	app.Route("/scheduled-tasks/:taskID/runs").GET(s.listScheduledTaskRuns).POST(s.runScheduledTask)
+	app.Route("/sessions/:id/scheduled-task-runs/:runID").GET(s.getScheduledTaskRun)
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
 	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)

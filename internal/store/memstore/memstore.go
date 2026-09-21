@@ -18,6 +18,9 @@ import (
 )
 
 type Memstore struct {
+	scheduledTasks     map[string]*store.ScheduledTask
+	scheduledRuns      map[string]*store.ScheduledTaskRun
+	scheduledRunOrder  []string
 	mu                 sync.Mutex
 	sessions           map[string]*store.Session
 	dispatches         map[string]childDispatch
@@ -45,6 +48,8 @@ type Memstore struct {
 
 func New() *Memstore {
 	return &Memstore{
+		scheduledTasks:     make(map[string]*store.ScheduledTask),
+		scheduledRuns:      make(map[string]*store.ScheduledTaskRun),
 		sessions:           make(map[string]*store.Session),
 		parents:            make(map[string]string),
 		dispatches:         make(map[string]childDispatch),
@@ -488,6 +493,13 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 		return nil, store.ErrInvalidSessionRelation
 	}
 	now := time.Now()
+	for _, task := range m.scheduledTasks {
+		if task.SessionID == id && !task.Deleted {
+			task.Enabled = false
+			task.Revision++
+			task.UpdatedAt = now
+		}
+	}
 	for _, memberID := range m.sessionGroupIDsLocked(id) {
 		member := m.sessions[memberID]
 		member.ArchivedAt = &now
@@ -546,6 +558,23 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 }
 
 func (m *Memstore) deleteSessionLocked(id string) {
+	for key, task := range m.scheduledTasks {
+		if task.SessionID == id {
+			delete(m.scheduledTasks, key)
+		}
+	}
+	for key, run := range m.scheduledRuns {
+		if run.SessionID == id {
+			delete(m.scheduledRuns, key)
+		}
+	}
+	order := m.scheduledRunOrder[:0]
+	for _, runID := range m.scheduledRunOrder {
+		if m.scheduledRuns[runID] != nil {
+			order = append(order, runID)
+		}
+	}
+	m.scheduledRunOrder = order
 	delete(m.parents, id)
 	delete(m.dispatches, id)
 	delete(m.sessions, id)

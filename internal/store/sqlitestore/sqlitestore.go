@@ -560,6 +560,9 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 		); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE scheduled_tasks SET enabled=0,revision=revision+1,updated_at=? WHERE session_id=? AND deleted=0`, unixMS(now), id); err != nil {
+			return err
+		}
 		out, err = getSessionAnyTx(ctx, tx, id)
 		return err
 	})

@@ -316,3 +316,42 @@ CREATE TABLE IF NOT EXISTS session_dispatches (
 CREATE TABLE IF NOT EXISTS collaboration_stops (
     parent_turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL,
+    schedule_revision INTEGER NOT NULL,
+    next_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    request_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    UNIQUE(session_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS scheduled_tasks_due ON scheduled_tasks(enabled, deleted, next_at);
+CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    definition_revision INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    scheduled_for INTEGER NOT NULL,
+    accepted_at INTEGER NOT NULL,
+    client_message_id TEXT NOT NULL UNIQUE,
+    handoff TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    skipped_through INTEGER NOT NULL DEFAULT 0,
+    trigger_key TEXT NOT NULL,
+  schedule TEXT NOT NULL,
+    UNIQUE(task_id, trigger_key)
+);
+CREATE INDEX IF NOT EXISTS scheduled_task_runs_task ON scheduled_task_runs(task_id, accepted_at);
+CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(handoff, accepted_at);

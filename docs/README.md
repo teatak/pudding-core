@@ -39,7 +39,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [tasks-design.md](tasks-design.md) | 跨仓任务设计：core 的调度、持久化与接口，以及 desktop 的任务视图；尚未实现 |
+| [scheduled-tasks-plan.md](scheduled-tasks-plan.md) | 定时任务首版：独立菜单、绑定原会话、一次性／每天／每周调度、执行记录与通知；首版已实现，含边界、验证记录与发布回归清单 |
 | [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
 
 ## 已完成设计记录
@@ -64,6 +64,7 @@
 
 | 文档 | 取代原因 |
 | --- | --- |
+| [tasks-design.md](tasks-design.md) | 旧任务／A2A 综合草案；当前定时任务以 scheduled-tasks-plan.md 为准，外部 Agent、审查与 callback 不在本轮范围 |
 | [progress.md](archive/progress.md) | 2026-07-09 的项目快照，已不再维护 |
 | [tool-migration-status.md](archive/tool-migration-status.md) | 仍使用旧 workspace 模式和旧工具归属 |
 | [design-tools.md](archive/design-tools.md) | 早期工具/MCP 分阶段草案，已由当前契约和 App 架构取代 |

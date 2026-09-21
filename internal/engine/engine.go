@@ -86,14 +86,17 @@ func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderP
 }
 
 type Engine struct {
-	store     store.Store
-	config    ConfigSource
-	hub       *event.Hub
-	resolver  Resolver
-	builder   *contextbuilder.Builder
-	tools     tool.Runner
-	apps      AppSource
-	turnFiles *turnfiles.Tracker
+	scheduleMu          sync.Mutex
+	scheduleStart       sync.Once
+	scheduledRuntimeIDs map[string]string
+	store               store.Store
+	config              ConfigSource
+	hub                 *event.Hub
+	resolver            Resolver
+	builder             *contextbuilder.Builder
+	tools               tool.Runner
+	apps                AppSource
+	turnFiles           *turnfiles.Tracker
 
 	promptSource   contextbuilder.PromptSource
 	skills         contextbuilder.SkillSource
@@ -215,20 +218,21 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		store:             s,
-		config:            cfg,
-		hub:               hub,
-		resolver:          resolver,
-		builder:           contextbuilder.New(s, nil),
-		auxCtx:            auxCtx,
-		auxCancel:         auxCancel,
-		running:           make(map[string]*activeTurn),
-		approvals:         make(map[string]*pendingApproval),
-		commandGrants:     make(map[string]*commandApprovalState),
-		turnProjectAccess: make(map[string]ProjectAccessGrant),
-		queuedRuntimeIDs:  make(map[string]string),
-		compacting:        make(map[string]bool),
-		turnFiles:         turnfiles.New(),
+		scheduledRuntimeIDs: make(map[string]string),
+		store:               s,
+		config:              cfg,
+		hub:                 hub,
+		resolver:            resolver,
+		builder:             contextbuilder.New(s, nil),
+		auxCtx:              auxCtx,
+		auxCancel:           auxCancel,
+		running:             make(map[string]*activeTurn),
+		approvals:           make(map[string]*pendingApproval),
+		commandGrants:       make(map[string]*commandApprovalState),
+		turnProjectAccess:   make(map[string]ProjectAccessGrant),
+		queuedRuntimeIDs:    make(map[string]string),
+		compacting:          make(map[string]bool),
+		turnFiles:           turnfiles.New(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -252,6 +256,7 @@ func (e *Engine) Stop() {
 func (e *Engine) ReleaseSessionResources(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	e.mu.Lock()
+	delete(e.scheduledRuntimeIDs, sessionID)
 	delete(e.commandGrants, sessionID)
 	for key := range e.queuedRuntimeIDs {
 		if strings.HasPrefix(key, sessionID+"\x00") {
@@ -1605,6 +1610,10 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 			}
 			defs = runnerDefs
 		}
+		defs, err := e.scheduledToolDefinitions(ctx, sessionID, defs)
+		if err != nil {
+			return nil, err
+		}
 		return tool.CoreDefinitionsForMode(mode, defs), nil
 	}
 	appStates, err := e.sessionAppStates(ctx, sessionID)
@@ -1624,6 +1633,10 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 			return nil, fmt.Errorf("list tools: %w", err)
 		}
 		defs = runnerDefs
+	}
+	defs, err = e.scheduledToolDefinitions(ctx, sessionID, defs)
+	if err != nil {
+		return nil, err
 	}
 	runnerDefs := defs
 	defs = nil
@@ -2110,6 +2123,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	if tool.IsScheduledTaskTool(call.Name) {
+		return e.executeScheduledTask(ctx, sessionID, turnID, call)
+	}
 	if tool.IsCollaborationTool(call.Name) {
 		return e.executeCollaboration(ctx, sessionID, turnID, mode, call)
 	}
