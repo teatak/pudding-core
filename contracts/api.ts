@@ -25,7 +25,7 @@ export const session = z.object({
 export type Session = z.infer<typeof session>;
 
 export const childSession = z.object({
- session, status: z.enum(["idle", "queued", "running", "completed", "failed", "cancelled"]),
+ session, taskTitle: z.string(), status: z.enum(["idle", "queued", "running", "completed", "failed", "cancelled"]),
  latestTurnID: z.string().optional(), pendingApprovals: z.number().int().nonnegative(), resultCollected: z.boolean(), summary: z.string().optional(),
 });
 export type ChildSession = z.infer<typeof childSession>;
