@@ -189,3 +189,45 @@ func TestScheduledRunsMissingScheduleRejectedAtCurrentVersion(t *testing.T) {
 		t.Fatalf("missing schedule must fail startup validation: %v", err)
 	}
 }
+
+func TestScheduledRunsVersion23MigrationRollback(t *testing.T) {
+	st, path := openTestStore(t)
+	createTestSession(t, st, "target")
+	// A broken parent reference makes snapshot backfill fail. Neither the
+	// original rows nor the schema version may be changed by that failure.
+	if _, err := st.db.Exec(`PRAGMA foreign_keys=OFF;
+ALTER TABLE scheduled_task_runs DROP COLUMN schedule;
+INSERT INTO scheduled_task_runs(id,task_id,session_id,name,prompt,definition_revision,source,scheduled_for,accepted_at,client_message_id,handoff,trigger_key)
+VALUES('run','missing-task','target','check','check',1,'manual',1,1,'input','pending','manual:run');
+PRAGMA user_version=23;`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	reopened, err := Open(path)
+	if reopened != nil {
+		reopened.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "migrate to v24") {
+		t.Fatalf("expected migration failure: %v", err)
+	}
+	db := openMigrationTestDB(t, path)
+	defer db.Close()
+	version, err := schemaVersion(db)
+	if err != nil || version != 23 {
+		t.Fatalf("failed migration changed version: %d %v", version, err)
+	}
+	columns, err := tableColumns(db, "scheduled_task_runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := columns["schedule"]; exists {
+		t.Fatal("failed migration retained new column")
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM scheduled_task_runs WHERE id='run' AND client_message_id='input'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failed migration lost run: %d %v", count, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='scheduled_task_runs_v23'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed migration retained temporary table: %d %v", count, err)
+	}
+}
