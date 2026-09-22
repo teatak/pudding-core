@@ -376,7 +376,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	fileCopy := runner.Call(context.Background(), Call{
 		Name:        FileCopy,
-		Args:        json.RawMessage(`{"scope":"project","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
+		Args:        json.RawMessage(`{"from":{"scope":"project","path":"src/note.txt"},"to":{"scope":"project","path":"copy/note.txt"}}`),
 		ProjectDirs: []string{root},
 	})
 	if !fileCopy.Ok {
@@ -392,7 +392,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	dirWithoutRecursive := runner.Call(context.Background(), Call{
 		Name:        FileCopy,
-		Args:        json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src"}`),
+		Args:        json.RawMessage(`{"from":{"scope":"project","path":"src"},"to":{"scope":"project","path":"copy/src"}}`),
 		ProjectDirs: []string{root},
 	})
 	if dirWithoutRecursive.Ok {
@@ -405,7 +405,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	dirCopy := runner.Call(context.Background(), Call{
 		Name:        FileCopy,
-		Args:        json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src","recursive":true}`),
+		Args:        json.RawMessage(`{"from":{"scope":"project","path":"src"},"to":{"scope":"project","path":"copy/src"},"recursive":true}`),
 		ProjectDirs: []string{root},
 	})
 	if !dirCopy.Ok {

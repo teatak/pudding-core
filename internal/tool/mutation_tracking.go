@@ -51,11 +51,6 @@ type mutationMoveArgs struct {
 	ToPath   string `json:"to_path"`
 }
 
-type mutationCopyArgs struct {
-	Scope  string `json:"scope"`
-	ToPath string `json:"to_path"`
-}
-
 // MutationTrackingForCall resolves only explicit project paths. Foreground
 // commands report statically known targets and also observe already-tracked
 // files. Opaque commands never discover new targets; background effects are excluded.
@@ -99,11 +94,11 @@ func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 		}
 		return structuredMutationTracking([]string{from, to})
 	case FileCopy:
-		var args mutationCopyArgs
-		if !decodeProjectMutationArgs(call.Args, &args) {
+		args, err := decodeFileCopyArgs(call.Args)
+		if err != nil || !isProjectFileScope(args.To.Scope) {
 			return ProjectMutationTracking{}, false
 		}
-		target, ok := resolveMutationTarget(call.ProjectDirs, args.ToPath, true)
+		target, ok := resolveMutationTarget(call.ProjectDirs, args.To.Path, true)
 		if !ok {
 			return ProjectMutationTracking{}, false
 		}
@@ -396,8 +391,6 @@ func mutationScope(value any) (string, bool) {
 	case *mutationPathArgs:
 		return args.Scope, true
 	case *mutationMoveArgs:
-		return args.Scope, true
-	case *mutationCopyArgs:
 		return args.Scope, true
 	default:
 		return "", false

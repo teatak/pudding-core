@@ -15,7 +15,7 @@ func TestClassifyToolCallProjectFileWrites(t *testing.T) {
 	}{
 		{name: FileWrite, args: `{"scope":"project","path":"main.go","content":"x"}`, operation: "write"},
 		{name: FileMove, args: `{"scope":"project","from_path":"old.go","to_path":"new.go"}`, operation: "move"},
-		{name: FileCopy, args: `{"scope":"project","from_path":"main.go","to_path":"copy.go"}`, operation: "copy"},
+		{name: FileCopy, args: `{"from":{"scope":"project","path":"main.go"},"to":{"scope":"project","path":"copy.go"}}`, operation: "copy"},
 		{name: AttachmentExport, args: `{"scope":"project","attachmentKey":"sessions/s1/blobs/capture.png","path":"assets/capture.png"}`, operation: "attachment_export"},
 	} {
 		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))

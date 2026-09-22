@@ -199,6 +199,25 @@ unified diff 和源文件 hash 快照,审批通过后消费同一快照;模型�
 backup + rename 提交,失败时逆序回滚。修改完成后由 Turn 文件 Diff 记录本轮产物,
 供 transcript 与项目浏览器统一审阅。
 
+## 文件复制工具
+
+`builtin_file_copy` 使用独立的源、目标对象，不再接受顶层 `scope/from_path/to_path`：
+
+```json
+{
+  "from": {"scope": "temp", "path": "page.html"},
+  "to": {"scope": "project", "path": "page.html"},
+  "overwrite": false
+}
+```
+
+- 两端分别校验 `scope/path`；`temp/skill` 只接受区内相对路径，`project` 接受已授权根内的绝对或相对路径。支持跨 scope 和已授权项目根，不隐式扩大权限。
+- `to.path` 是完整目标路径，不是容纳文件的目录；目录复制需 `recursive=true`，覆盖需 `overwrite=true`。
+- 禁止同路径／同文件及源目标目录相互包含；递归源中的符号链接或特殊文件会在替换目标前拒绝。
+- 结果包含 `fromScope/toScope`、`from/to`，项目端各自附带 `fromRoot/fromRelativePath` 或 `toRoot/toRelativePath`。
+- 项目写审批与 Turn 文件变更追踪以目标端为准；复制到项目适用已有 Ask/Auto 策略，撤销只作用于目标，不修改源。
+- 工具定义由 Core 下发；desktop 的复制摘要和文件操作分组同步读取嵌套参数。`file_move` 参数未变。
+
 ## settings 约定键
 
 > REST settings 仍是扁平 k=v,value 一律纯字符串;磁盘事实源是

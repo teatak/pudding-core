@@ -23,7 +23,7 @@ func TestFiveLevelReasoningWireRequests(t *testing.T) {
 		want      []string
 		anthropic bool
 	}{
-		{[]string{"mimo-v2.5", "mimo-v2.5-pro"}, []string{"low", "medium", "high", "high", "high"}, false},
+		{[]string{"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.6-flash", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed", "mimo-v3-flash", "xiaomi/mimo-v2.6-flash", "xiaomimimo/mimo-v2.6-pro"}, []string{"low", "medium", "high", "high", "high"}, true},
 		{[]string{"gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"}, []string{"low", "medium", "high", "high", "high"}, false},
 		{[]string{"kimi-k3", "glm-5.3", "glm-5.3-flash"}, []string{"low", "high", "high", "max", "max"}, false},
 		{[]string{"glm-5.2"}, []string{"high", "high", "high", "max", "max"}, false},
@@ -31,7 +31,7 @@ func TestFiveLevelReasoningWireRequests(t *testing.T) {
 		{[]string{"claude-opus-4-5", "claude-opus-4-5-20251101"}, []string{"low", "medium", "high", "high", "high"}, true},
 		{[]string{"claude-opus-4-6", "claude-sonnet-4-6", "claude-mythos-preview"}, []string{"low", "medium", "high", "max", "max"}, true},
 		{[]string{"deepseek-flash", "deepseek-v4-pro", "claude-opus-5"}, levels, true},
-		{[]string{"gpt-6-astra", "gpt-5.6-terra", "custom-model", "mimo-custom", "gpt-5.5-custom", "gemini-custom"}, levels, false},
+		{[]string{"gpt-6-astra", "gpt-5.6-terra", "custom-model", "mimo-custom", "mimo-vnext", "mimo-v2.5-tts", "mimo-v2.5-asr", "custom/mimo-v2.6-flash", "gpt-5.5-custom", "gemini-custom"}, levels, false},
 	}
 	for _, tt := range tests {
 		protocols := []string{"chat", "responses"}

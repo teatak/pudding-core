@@ -66,7 +66,7 @@ func TestMutationTrackingForCall(t *testing.T) {
 		},
 		{
 			name:        "copy owns only destination",
-			call:        Call{Name: FileCopy, Args: json.RawMessage(`{"scope":"project","from_path":"source.txt","to_path":"copy.txt"}`), ProjectDirs: []string{root}},
+			call:        Call{Name: FileCopy, Args: json.RawMessage(`{"from":{"scope":"project","path":"source.txt"},"to":{"scope":"project","path":"copy.txt"}}`), ProjectDirs: []string{root}},
 			wantOK:      true,
 			wantTargets: []string{filepath.Join(resolvedRoot, "copy.txt")},
 			wantOrigin:  store.FileChangeOriginStructured,

@@ -613,31 +613,67 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	return out
 }
 
+type fileCopyEndpoint struct {
+	Scope string `json:"scope"`
+	Path  string `json:"path"`
+}
+
+type fileCopyArgs struct {
+	From      fileCopyEndpoint `json:"from"`
+	To        fileCopyEndpoint `json:"to"`
+	Recursive bool             `json:"recursive"`
+	Overwrite bool             `json:"overwrite"`
+}
+
+func decodeFileCopyArgs(raw json.RawMessage) (fileCopyArgs, error) {
+	var args fileCopyArgs
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return args, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return args, errors.New("expected one JSON object")
+	}
+	for _, endpoint := range []struct {
+		name  string
+		value *fileCopyEndpoint
+	}{{"from", &args.From}, {"to", &args.To}} {
+		endpoint.value.Scope = strings.TrimSpace(endpoint.value.Scope)
+		endpoint.value.Path = strings.TrimSpace(endpoint.value.Path)
+		switch endpoint.value.Scope {
+		case managedScopeTemp, managedScopeSkill, managedScopeProject:
+		default:
+			return args, errors.New(endpoint.name + ".scope must be temp, skill or project")
+		}
+		if endpoint.value.Path == "" {
+			return args, errors.New(endpoint.name + ".path is required")
+		}
+	}
+	return args, nil
+}
+
 func (r *BuiltinRunner) fileCopy(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	var args struct {
-		Scope     string `json:"scope"`
-		FromPath  string `json:"from_path"`
-		ToPath    string `json:"to_path"`
-		Recursive bool   `json:"recursive"`
-		Overwrite bool   `json:"overwrite"`
-	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+	args, err := decodeFileCopyArgs(call.Args)
+	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	fromResolved, err := r.resolveFilePath(call, args.Scope, args.FromPath, false, false, false)
+	fromResolved, err := r.resolveFilePath(call, args.From.Scope, args.From.Path, false, false, false)
 	if err != nil {
-		return filePathErrorWithReason(out, args.Scope, "from_path_not_allowed", err)
+		return filePathErrorWithReason(out, args.From.Scope, "from_path_not_allowed", err)
 	}
-	toResolved, err := r.resolveFilePath(call, args.Scope, args.ToPath, true, false, true)
+	toResolved, err := r.resolveFilePath(call, args.To.Scope, args.To.Path, true, false, true)
 	if err != nil {
-		return filePathErrorWithReason(out, args.Scope, "to_path_not_allowed", err)
-	}
-	if fromResolved.root != toResolved.root {
-		return toolJSONError(out, "cross_root_copy", "from_path and to_path must be inside the same authorized root")
+		return filePathErrorWithReason(out, args.To.Scope, "to_path_not_allowed", err)
 	}
 	if filepath.Clean(fromResolved.target) == filepath.Clean(toResolved.target) {
 		return toolJSONError(out, "same_path", "source and destination are the same path")
+	}
+	// Replacing an ancestor would remove the source before it could be copied,
+	// including when different scope labels resolve to overlapping directories.
+	if pathInsideRoot(fromResolved.target, toResolved.target) {
+		return toolJSONError(out, "copy_overlap", "destination contains the source path")
 	}
 	info, err := os.Lstat(fromResolved.target)
 	if err != nil {
@@ -649,14 +685,31 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return toolJSONError(out, "symlink_unsupported", "copying symlinks is not supported")
 	}
+	if toInfo, err := os.Stat(toResolved.target); err == nil && os.SameFile(info, toInfo) {
+		return toolJSONError(out, "same_path", "source and destination refer to the same file")
+	}
+	payload := map[string]any{
+		"ok": true, "fromScope": args.From.Scope, "toScope": args.To.Scope,
+		"from": fromResolved.outputPath(), "to": toResolved.outputPath(),
+	}
+	if fromResolved.project {
+		payload["fromRoot"] = fromResolved.root
+		payload["fromRelativePath"] = fromResolved.rel
+	}
+	if toResolved.project {
+		payload["toRoot"] = toResolved.root
+		payload["toRelativePath"] = toResolved.rel
+	}
 	if info.IsDir() {
 		if !args.Recursive {
 			return toolJSONError(out, "recursive_required", "recursive=true is required to copy a directory")
 		}
-		fromDir := filepath.Clean(fromResolved.target) + string(os.PathSeparator)
-		toDir := filepath.Clean(toResolved.target) + string(os.PathSeparator)
-		if strings.HasPrefix(toDir, fromDir) {
+		if pathInsideRoot(toResolved.target, fromResolved.target) {
 			return toolJSONError(out, "copy_into_self", "cannot copy a directory into itself or its descendants")
+		}
+		// Reject unsupported entries before replacing an existing destination.
+		if err := validateFileCopyDir(fromResolved.target); err != nil {
+			return toolJSONError(out, "copy_failed", err.Error())
 		}
 		if err := prepareFileCopyDestination(toResolved.target, args.Overwrite); err != nil {
 			return fileCopyDestinationError(out, toResolved.outputPath(), err)
@@ -664,40 +717,40 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 		if err := copyFileDir(fromResolved.target, toResolved.target); err != nil {
 			return toolJSONError(out, "copy_failed", err.Error())
 		}
-		payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "directory"}
-		if fromResolved.project {
-			payload["fromRoot"] = fromResolved.root
-			payload["fromRelativePath"] = fromResolved.rel
-			payload["toRoot"] = toResolved.root
-			payload["toRelativePath"] = toResolved.rel
+		payload["copied"] = "directory"
+	} else {
+		if !info.Mode().IsRegular() {
+			return toolJSONError(out, "unsupported_file_type", "copy supports regular files and directories only")
 		}
-		out.Ok = true
-		out.Content = jsonString(payload)
-		out.SummaryKind = SummaryReturnedFields
-		out.SummaryCount = len(payload)
-		return out
-	}
-	if !info.Mode().IsRegular() {
-		return toolJSONError(out, "unsupported_file_type", "copy supports regular files and directories only")
-	}
-	if err := prepareFileCopyDestination(toResolved.target, args.Overwrite); err != nil {
-		return fileCopyDestinationError(out, toResolved.outputPath(), err)
-	}
-	if err := copyFileBytes(fromResolved.target, toResolved.target, info); err != nil {
-		return toolJSONError(out, "copy_failed", err.Error())
-	}
-	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "file", "bytes": info.Size()}
-	if fromResolved.project {
-		payload["fromRoot"] = fromResolved.root
-		payload["fromRelativePath"] = fromResolved.rel
-		payload["toRoot"] = toResolved.root
-		payload["toRelativePath"] = toResolved.rel
+		if err := prepareFileCopyDestination(toResolved.target, args.Overwrite); err != nil {
+			return fileCopyDestinationError(out, toResolved.outputPath(), err)
+		}
+		if err := copyFileBytes(fromResolved.target, toResolved.target, info); err != nil {
+			return toolJSONError(out, "copy_failed", err.Error())
+		}
+		payload["copied"] = "file"
+		payload["bytes"] = info.Size()
 	}
 	out.Ok = true
 	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = len(payload)
 	return out
+}
+
+func validateFileCopyDir(root string) error {
+	return filepath.WalkDir(root, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("copying symlinks is not supported")
+		}
+		if !entry.IsDir() && !entry.Type().IsRegular() {
+			return errors.New("copy supports regular files and directories only")
+		}
+		return nil
+	})
 }
 
 var errFileCopyDestinationExists = errors.New("copy destination exists")

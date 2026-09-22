@@ -1,13 +1,20 @@
 package provider
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+// Match versioned Mimo reasoning models, including vendor-qualified IDs, but
+// not unrelated aliases or the ASR/TTS families.
+var mimoReasoningModel = regexp.MustCompile(`(?i)^(?:xiaomi/|xiaomimimo/)?mimo-v[0-9]+(?:\.[0-9]+)*(?:-(?:flash|pro)(?:-ultraspeed)?)?$`)
 
 // WireReasoningEffort translates the five product choices only when building a
 // provider request. Keep session preferences and model configuration unchanged.
 // Missing levels map to the next supported level above them, capped at the
 // model's maximum. This is product policy, not an upstream alias guarantee.
-// Unlisted models and non-product values pass through; do not guess capabilities
-// from provider brands or fuzzy model names. Verified 2026-09-20.
+// Unlisted models/families and non-product values pass through; provider brands
+// do not determine capabilities. Mimo family verified 2026-09-22.
 func WireReasoningEffort(protocol, model, effort string) string {
 	if protocol == "google" {
 		// https://ai.google.dev/gemini-api/docs/generate-content/thinking
@@ -17,13 +24,12 @@ func WireReasoningEffort(protocol, model, effort string) string {
 		}
 		return effort
 	}
-	switch model {
 	// https://mimo.mi.com/docs/en-US/api/chat/responses
 	// Live Chat/Responses probes rejected xhigh and accepted high.
-	case "mimo-v2.5", "mimo-v2.5-pro":
-		if effort == "xhigh" || effort == "max" {
-			return "high"
-		}
+	if mimoReasoningModel.MatchString(model) && (effort == "xhigh" || effort == "max") {
+		return "high"
+	}
+	switch model {
 	// Gemini also accepts reasoning_effort through OpenAI-compatible endpoints.
 	// https://ai.google.dev/gemini-api/docs/openai#thinking
 	case "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview",

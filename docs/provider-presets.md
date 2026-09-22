@@ -1,6 +1,6 @@
 # 模型预设
 
-`web/src/provider/presets.ts` 仅提供创建、导入模型时的模板。运行时仍以用户保存的 `<home>/config/*.yaml` 为准，更新预设不会迁移已有配置。
+桌面仓库 `pudding-desktop/web/src/provider/presets.ts` 仅提供创建、导入模型时的模板。运行时仍以用户保存的 `<home>/config/*.yaml` 为准，更新预设不会迁移已有配置。
 
 2026-09-12 核对的更新（OpenRouter 于 2026-09-14 复核）：
 
@@ -17,7 +17,15 @@
 
 同一模型的能力与限额跨协议共享；输出限制直接放在 `limits.maxOutputTokens`，由适配器转换为协议字段。预设和模型导入均不再指定 `temperature=0.2`，遵循供应商默认采样行为；用户可关闭“使用供应商默认”后通过滑块设置温度，重新开启则移除温度参数。
 
-Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 保留已开放的 V2.5 系列；BuzzHive/Ollama 继续动态发现模型。
+Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。Mimo 包含 V2.6 Flash / Pro 和 V2.5 系列；BuzzHive/Ollama 继续动态发现模型。
+
+## Mimo V2.6（2026-09-22）
+
+标准及 Plan 的 OpenAI / Anthropic 模板均增加 `mimo-v2.6-flash`、`mimo-v2.6-pro`；显示名统一使用 `Mimo`。两者标记图像、音频和工具能力，上下文按官方 1M 保守设置为 1,000,000，最大输出 131,072。依据：[V2.6 发布说明](https://mimo.mi.com/docs/en-US/news/latest/v2-6)、[模型参数](https://mimo.mi.com/models/en-US/mimo-v2.6-pro)、[Responses API](https://mimo.mi.com/docs/en-US/api/chat/responses)。
+
+思考强度在 provider 请求边界按版本化 Mimo 推理模型家族适配，不再枚举 V2.5 两个 ID：`xhigh/max` 发送为 `high`，其余值原样保留；包括 `xiaomi/`、`xiaomimimo/` 厂商前缀，不匹配 ASR/TTS 或任意自定义别名。会话五档偏好和已保存配置不变。官方目前说明非 `none` 档位均启用思考、实际强度不区分；此映射避免兼容端点拒绝扩展档位。
+
+回归使用模拟上游检查 Chat、Responses、Anthropic 实际序列化请求及配置不变性，不代表已完成付费 API 实测。已有模型显示名和配置不会随模板更新自动迁移。
 
 ## 从端点导入模型
 

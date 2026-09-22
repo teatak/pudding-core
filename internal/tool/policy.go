@@ -113,6 +113,18 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	if name == CommandRun {
 		return classifyCommandCall(raw, projectDirs)
 	}
+	if name == FileCopy {
+		args, err := decodeFileCopyArgs(raw)
+		if err != nil || !isProjectFileScope(args.To.Scope) {
+			return ToolRisk{}, false
+		}
+		summary := "Copy a file or directory into the project."
+		if args.Overwrite {
+			summary = "Copy a file or directory into the project and replace the destination."
+		}
+		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: managedScopeProject,
+			Paths: compactRiskPaths(args.To.Path), Summary: summary, LowRisk: true}, true
+	}
 	if name == GitStatus || name == GitDiff || name == GitLog {
 		return classifyGitReadCall(name, raw)
 	}
@@ -193,12 +205,6 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		return ToolRisk{Class: RiskClassDestructive, Operation: "delete", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: summary}, true
 	case FileMove:
 		return ToolRisk{Class: RiskClassWrite, Operation: "move", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: "Move or rename a project path.", LowRisk: true}, true
-	case FileCopy:
-		summary := "Copy a project path."
-		if args.Overwrite {
-			summary = "Copy a project path and overwrite the destination if it exists."
-		}
-		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: summary, LowRisk: true}, true
 	default:
 		return ToolRisk{}, false
 	}

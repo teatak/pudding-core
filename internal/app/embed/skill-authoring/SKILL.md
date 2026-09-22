@@ -51,7 +51,8 @@ The read records a registered skill reference, not a frozen copy of the body. Ea
 - Use `builtin_file_list` and `builtin_file_read` with `scope="skill"` to inspect global user Skills; pass `path="."` to list the root.
 - Use `builtin_file_write` with `scope="skill"` to create files.
 - Use `builtin_file_write` with `scope="skill"` to replace an existing Skill file after reading its current contents.
-- Use `builtin_file_delete`, `builtin_file_move`, and `builtin_file_copy` with `scope="skill"` only when the requested change requires them.
+- Use `builtin_file_delete` and `builtin_file_move` with `scope="skill"` only when the requested change requires them.
+- Use `builtin_file_copy` with independent `from` and `to` objects, each containing `scope` and `path`. For a copy within user Skills, set both scopes to `"skill"` and use paths relative to the skills root.
 - Use `builtin_skill_validate(skill_id="<name>")` after writing.
 
 Do not delete an entire Skill or unrelated assets unless the user explicitly asks. The App's bundled authoring Skill is outside the writable `skill` scope.
