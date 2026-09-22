@@ -291,6 +291,69 @@ func TestProviderSyncConcurrentChanges(t *testing.T) {
 	}
 }
 
+func TestProviderSyncPreservesClearedModelName(t *testing.T) {
+	for _, brand := range []string{"openrouter", "buzzhive"} {
+		t.Run(brand, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"data":[{"id":"m1","name":"DeepSeek Flash","context_length":128000},{"id":"m2","name":"MiMo V2.6 Flash"},{"id":"m3","name":"MiMo V2.6 Pro"}]}`))
+			}))
+			defer upstream.Close()
+			homeDir := t.TempDir()
+			cfg := config.NewManager(homeDir)
+			if err := cfg.Prepare(); err != nil {
+				t.Fatal(err)
+			}
+			ms, hub := memstore.New(), event.NewHub()
+			eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
+			srv := httptest.NewServer(New(eng, ms, cfg, hub).Handler(testToken, nil))
+			defer srv.Close()
+			decodeJSON[providerProfileView](t, req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
+				"id": "sync-name", "brand": brand, "protocol": "openai-compatible", "baseURL": upstream.URL,
+				"models": []map[string]any{{"id": "m1", "displayName": "DeepSeek Flash"}, {"id": "m2", "displayName": "My alias"}},
+			}))
+			// The editor omits displayName after the user clears the field.
+			saved := decodeJSON[providerProfileView](t, req(t, http.MethodPatch, srv.URL+"/providers/sync-name", map[string]any{
+				"models": []map[string]any{{"id": "m1"}, {"id": "m2", "displayName": "My alias"}},
+			}))
+			if len(saved.Models) != 2 || saved.Models[0].DisplayName != "" {
+				t.Fatalf("save did not clear the name: %+v", saved.Models)
+			}
+			// Both automatic and manual sync use this endpoint. Repeated syncs must
+			// preserve the user's name state while still refreshing catalog metadata.
+			for i := 0; i < 2; i++ {
+				response := req(t, http.MethodPost, srv.URL+"/providers/sync-name/sync", nil)
+				status := response.StatusCode
+				synced := decodeJSON[providerProfileView](t, response)
+				wantCount := 2
+				if brand == "buzzhive" {
+					wantCount = 3
+				}
+				if status != http.StatusOK || len(synced.Models) != wantCount {
+					t.Fatalf("sync %d: status=%d models=%+v", i, status, synced.Models)
+				}
+				if synced.Models[0].DisplayName != "" || synced.Models[1].DisplayName != "My alias" {
+					t.Fatalf("sync %d overwrote local names: %+v", i, synced.Models)
+				}
+				if synced.Models[0].ContextWindow != 128000 || synced.Models[0].Unavailable {
+					t.Fatalf("sync %d did not refresh metadata: %+v", i, synced.Models[0])
+				}
+				if brand == "buzzhive" && (synced.Models[2].ID != "m3" || synced.Models[2].DisplayName != "MiMo V2.6 Pro") {
+					t.Fatalf("new model did not inherit its catalog name: %+v", synced.Models[2])
+				}
+				// Reopen the YAML configuration to verify this is persisted state,
+				// not just a corrected response or in-memory overlay.
+				reloaded, err := config.NewManager(homeDir).GetProviderProfile(context.Background(), "sync-name")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(reloaded.Models, synced.Models) {
+					t.Fatalf("persisted models differ: got=%+v want=%+v", reloaded.Models, synced.Models)
+				}
+			}
+		})
+	}
+}
+
 func TestSyncCatalogCapabilitiesPreserveUnknown(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields   string

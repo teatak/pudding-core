@@ -38,6 +38,8 @@ Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 
 
 候选仅是导入来源，选择添加后才写入用户配置；刷新目录不会覆盖已保存模型。采样参数保持当前协议默认，Astra 的 Chat Completions 工具限制继续生效。
 
+模型选择器中的 BuzzHive/OpenRouter 自动或手动同步会更新上下文、能力等目录元数据，但不改写已有模型的显示名，包括用户清空后的空值。BuzzHive 同步新发现的模型时仍采用上游名称；OpenRouter 不自动追加目录中的其他模型。
+
 ## OpenRouter 模型精选
 
 使用 `https://openrouter.ai/api/v1` 的 OpenAI Chat Completions 兼容协议。模型 ID、能力与限额以 OpenRouter 目录为准，不直接套用厂商直连端点的元数据。

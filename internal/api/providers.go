@@ -473,9 +473,6 @@ func syncOpenRouterModels(existing []store.ProviderModel, candidates []provider.
 		}
 		m.CostMultiplier = cand.CostMultiplier
 		m.Capabilities = mergeModelCapabilities(m.Capabilities, cand.Capabilities)
-		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
-			m.DisplayName = strings.TrimSpace(cand.DisplayName)
-		}
 		merged = append(merged, m)
 	}
 
@@ -515,9 +512,6 @@ func syncBuzzHiveModels(existing []store.ProviderModel, candidates []provider.Mo
 			m.Limits = &limits
 		}
 		m.Capabilities = mergeModelCapabilities(m.Capabilities, cand.Capabilities)
-		if strings.TrimSpace(m.DisplayName) == "" && strings.TrimSpace(cand.DisplayName) != "" {
-			m.DisplayName = strings.TrimSpace(cand.DisplayName)
-		}
 		merged = append(merged, m)
 	}
 
