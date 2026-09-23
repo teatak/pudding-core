@@ -40,19 +40,23 @@ func (s *Server) cloneSession(c *cart.Context) error {
 	targetSessionID := store.NewID("sess")
 	attachmentService := attachment.NewService(s.home)
 	replacements := make(map[string]store.Attachment)
-	copied := make([]store.Attachment, 0)
+	copied := make([]store.AttachmentCleanupItem, 0)
 	for _, message := range prefix {
 		for _, item := range store.AttachmentsFromParts(message.Parts) {
 			if _, exists := replacements[item.AttachmentKey]; exists {
 				continue
 			}
-			next, err := attachmentService.CopyToSession(sourceSessionID, targetSessionID, item)
+			attachmentSource, attachmentTarget := sourceSessionID, targetSessionID
+			if item.Origin == attachment.OriginTemp {
+				attachmentSource, attachmentTarget = attachment.DraftSessionID, attachment.DraftSessionID
+			}
+			next, err := attachmentService.CopyToSession(attachmentSource, attachmentTarget, item)
 			if err != nil {
-				cleanupClonedAttachments(attachmentService, targetSessionID, copied)
+				cleanupClonedAttachments(attachmentService, copied)
 				return s.fail(c, err)
 			}
 			replacements[item.AttachmentKey] = next
-			copied = append(copied, next)
+			copied = append(copied, store.AttachmentCleanupItem{SessionID: attachmentTarget, Attachment: next})
 		}
 	}
 
@@ -64,7 +68,7 @@ func (s *Server) cloneSession(c *cart.Context) error {
 		AttachmentReplacements: replacements,
 	})
 	if err != nil {
-		cleanupClonedAttachments(attachmentService, targetSessionID, copied)
+		cleanupClonedAttachments(attachmentService, copied)
 		return s.fail(c, err)
 	}
 	s.enrichSessionProcesses(cloned)
@@ -72,8 +76,8 @@ func (s *Server) cloneSession(c *cart.Context) error {
 	return nil
 }
 
-func cleanupClonedAttachments(service *attachment.Service, sessionID string, items []store.Attachment) {
+func cleanupClonedAttachments(service *attachment.Service, items []store.AttachmentCleanupItem) {
 	for _, item := range items {
-		_ = service.Delete(sessionID, item.AttachmentKey)
+		_ = service.Delete(item.SessionID, item.Attachment.AttachmentKey)
 	}
 }

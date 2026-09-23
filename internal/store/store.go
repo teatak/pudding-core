@@ -89,7 +89,8 @@ type SessionUpdate struct {
 
 // CloneSessionInput creates an independent session from canonical history up to
 // and including ThroughMessageID. AttachmentReplacements is keyed by the source
-// attachment key and must point at the copied blob owned by TargetSessionID.
+// attachment key and must point at an independent copied blob: session attachments
+// are owned by TargetSessionID; temp attachments retain draft scope with a new key.
 type CloneSessionInput struct {
 	SourceSessionID        string
 	ThroughMessageID       string
@@ -1232,6 +1233,19 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 func ReplaceContentPartAttachments(parts []ContentPart, replacements map[string]Attachment) []ContentPart {
 	out := CloneContentParts(parts)
 	references := make(map[string]string)
+	// Temp tool references may occur in later messages with no attachment parts.
+	for sourceKey, target := range replacements {
+		if target.Origin != "temp" || !strings.HasPrefix(sourceKey, "sessions/draft/blobs/") || !strings.HasPrefix(target.AttachmentKey, "sessions/draft/blobs/") {
+			continue
+		}
+		references[sourceKey] = target.AttachmentKey
+		if target.URL != "" {
+			references["/sessions/draft/attachments/"+strings.TrimPrefix(sourceKey, "sessions/draft/")] = target.URL
+		}
+		sourcePath := filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(sourceKey))))
+		targetPath := filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(target.AttachmentKey))))
+		references[sourcePath] = targetPath
+	}
 	addReferences := func(source Attachment) {
 		if source.AttachmentKey == "" {
 			return
@@ -1255,12 +1269,16 @@ func ReplaceContentPartAttachments(parts []ContentPart, replacements map[string]
 			}
 		}
 	}
-	replaceReferences := func(value string) string {
-		for source, target := range references {
-			value = strings.ReplaceAll(value, source, target)
-		}
-		return value
+	sources := make([]string, 0, len(references))
+	for source := range references {
+		sources = append(sources, source)
 	}
+	sort.Slice(sources, func(i, j int) bool { return len(sources[i]) > len(sources[j]) })
+	pairs := make([]string, 0, len(sources)*2)
+	for _, source := range sources {
+		pairs = append(pairs, source, references[source])
+	}
+	replaceReferences := strings.NewReplacer(pairs...).Replace
 	for i := range out {
 		part := &out[i]
 		part.Content = replaceReferences(part.Content)
