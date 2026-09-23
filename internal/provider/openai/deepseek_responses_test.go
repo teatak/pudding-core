@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,12 +144,24 @@ func TestDeepSeekResponsesToolRoundTrip(t *testing.T) {
 }
 
 func TestResponsesIncompleteDoesNotCompleteTurn(t *testing.T) {
-	out := make(chan provider.Chunk, 2)
-	err := readResponsesSSE(context.Background(), strings.NewReader(
-		"data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
-	), out)
-	if err == nil || !strings.Contains(err.Error(), "max_output_tokens") || len(out) != 0 {
-		t.Fatalf("incomplete response must fail, got err=%v chunks=%d", err, len(out))
+	for _, reason := range []string{"max_output_tokens", "private-unknown-reason", ""} {
+		t.Run(reason, func(t *testing.T) {
+			out := make(chan provider.Chunk, 2)
+			err := readResponsesSSE(context.Background(), strings.NewReader(fmt.Sprintf(
+				"data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":%q}}}\n\n", reason,
+			)), out)
+			want := "openai responses: response incomplete"
+			if reason != "" {
+				want = "openai responses: incomplete: " + reason
+			}
+			if err == nil || err.Error() != want || len(out) != 0 {
+				t.Fatalf("incomplete response behavior changed, got err=%v chunks=%d", err, len(out))
+			}
+			var outputLimitErr *provider.OutputLimitError
+			if errors.As(err, &outputLimitErr) != (reason == "max_output_tokens") {
+				t.Fatalf("incorrect output-limit classification: %T %v", err, err)
+			}
+		})
 	}
 }
 

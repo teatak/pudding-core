@@ -492,7 +492,24 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 	if m.parents[id] != "" {
 		return nil, store.ErrInvalidSessionRelation
 	}
-	now := time.Now()
+	m.archiveSessionGroupLocked(id, time.Now())
+	return cloneSession(session), nil
+}
+
+func (m *Memstore) PrepareSessionDeletion(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessions[id] == nil {
+		return store.ErrNotFound
+	}
+	m.archiveSessionGroupLocked(id, time.Now())
+	return nil
+}
+
+func (m *Memstore) archiveSessionGroupLocked(id string, now time.Time) {
 	for _, task := range m.scheduledTasks {
 		if task.SessionID == id && !task.Deleted {
 			task.Enabled = false
@@ -502,8 +519,10 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 	}
 	for _, memberID := range m.sessionGroupIDsLocked(id) {
 		member := m.sessions[memberID]
-		member.ArchivedAt = &now
-		member.UpdatedAt = now
+		if member.ArchivedAt == nil {
+			member.ArchivedAt = &now
+			member.UpdatedAt = now
+		}
 		for _, input := range m.queued[memberID] {
 			if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
 				input.Status = store.QueuedInputCancelled
@@ -511,7 +530,6 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 			}
 		}
 	}
-	return cloneSession(session), nil
 }
 
 func (m *Memstore) RestoreSession(_ context.Context, id string) (*store.Session, error) {
@@ -639,7 +657,7 @@ func (m *Memstore) GrantComputerApp(_ context.Context, sessionID, appID string) 
 func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store.BeginTurnResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.sessions[in.SessionID]; !ok {
+	if session := m.sessions[in.SessionID]; session == nil || session.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
 	// 幂等优先于并发检查:重放同一 clientMessageID 永远拿到同一结果,
@@ -718,7 +736,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnInput) (*store.BeginSystemTurnResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.sessions[in.SessionID]; !ok {
+	if session := m.sessions[in.SessionID]; session == nil || session.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
 	for _, t := range m.turns {
@@ -814,7 +832,7 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 }
 
 func (m *Memstore) queueInputLocked(in store.QueueInputInput) (*store.QueueInputResult, error) {
-	if _, ok := m.sessions[in.SessionID]; !ok {
+	if session := m.sessions[in.SessionID]; session == nil || session.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
 	for _, t := range m.turns {
@@ -1017,7 +1035,7 @@ func (m *Memstore) SteerQueuedInput(_ context.Context, in store.SteerQueuedInput
 func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.sessions[in.SessionID]; !ok {
+	if session := m.sessions[in.SessionID]; session == nil || session.ArchivedAt != nil {
 		return nil, store.ErrNotFound
 	}
 	if m.runningLocked(in.SessionID) {

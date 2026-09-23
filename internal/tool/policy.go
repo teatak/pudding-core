@@ -34,11 +34,11 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 
 // ClassifyToolCallForProject uses the authorized roots to distinguish an
 // in-project absolute path from a real project escape.
-func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
-	return classifyToolCall(name, raw, projectDirs)
+func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []string, managedDirs ...string) (ToolRisk, bool) {
+	return classifyToolCall(name, raw, projectDirs, managedDirs...)
 }
 
-func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
+func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, managedDirs ...string) (ToolRisk, bool) {
 	if name == ComputerUseApp {
 		args, err := decodeComputerUseAppArgs(raw)
 		if err != nil {
@@ -111,7 +111,7 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		return classifyCodeReadCall(name, raw)
 	}
 	if name == CommandRun {
-		return classifyCommandCall(raw, projectDirs)
+		return classifyCommandCall(raw, projectDirs, managedDirs...)
 	}
 	if name == FileCopy {
 		args, err := decodeFileCopyArgs(raw)
@@ -301,7 +301,7 @@ func classifyGitReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	}, true
 }
 
-func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
+func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs ...string) (ToolRisk, bool) {
 	args, err := decodeCommandRunArgs(raw)
 	if err != nil {
 		return ToolRisk{}, false
@@ -324,6 +324,19 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		// Ask still confirms command execution.
 		LowRisk: true,
 	}
+	if len(normalizeProjectDirs(projectDirs)) > 0 {
+		cwd, err := resolveCommandCWD(projectDirs, args.CWD)
+		if err != nil {
+			// ApprovalDetails reports the same path error as execution. An
+			// ambiguous cwd must not become a request for more project access.
+			return risk, true
+		}
+		args.CWD = cwd
+		risk.Paths = compactRiskPaths(cwd)
+	}
+	// Session artifacts are approved command operands, not project roots:
+	// they never select cwd or authorize launching an executable.
+	operandDirs := normalizeProjectDirs(append(append([]string(nil), projectDirs...), managedDirs...))
 	for _, rawArgv := range append(analysis.Commands, analysis.wrappers...) {
 		argv := unwrapCommand(rawArgv)
 		if len(argv) == 0 || argv[0] == unknownPolicyWord {
@@ -334,7 +347,19 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 		}
 		commandOperation := commandOperation(argv[0])
 		executableAllowed := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs)
-		outsidePaths := commandPathArgsOutsideProject(argv, args.CWD, projectDirs)
+		pathDirs := operandDirs
+		if commandOperation == "cd" || commandOperation == "pushd" {
+			// Directory changes select a working directory, not a data operand.
+			pathDirs = projectDirs
+		}
+		outsidePaths := commandPathArgsOutsideProject(argv, args.CWD, pathDirs)
+		if (commandOperation == "cd" || commandOperation == "pushd") && len(normalizeProjectDirs(projectDirs)) > 0 {
+			for _, path := range commandPathArgs(argv) {
+				if path != unknownPolicyWord && !sandboxManagedPath(path) && !commandPathInsideProject(path, args.CWD, projectDirs) {
+					outsidePaths = append(outsidePaths, path)
+				}
+			}
+		}
 		if !executableAllowed && !isBareCommand(argv[0]) {
 			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, args.CWD, projectDirs)...)
 		}
@@ -368,7 +393,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 			}
 		}
 	}
-	if outsidePaths := commandRedirectionsOutsideProject(analysis.Redirections, args.CWD, projectDirs); len(outsidePaths) > 0 {
+	if outsidePaths := commandRedirectionsOutsideProject(analysis.Redirections, args.CWD, operandDirs); len(outsidePaths) > 0 {
 		risk.LowRisk = false
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 	}
@@ -377,7 +402,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}
-		if paths := commandEnvironmentOutsideProjectPaths(environment, args.CWD, projectDirs); len(paths) > 0 {
+		if paths := commandEnvironmentOutsideProjectPaths(environment, args.CWD, operandDirs); len(paths) > 0 {
 			risk.LowRisk = false
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, paths...)
 		}
@@ -388,7 +413,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}
-		if outsidePaths := commandEnvironmentOutsideProjectPaths(args.Env, args.CWD, projectDirs); len(outsidePaths) > 0 {
+		if outsidePaths := commandEnvironmentOutsideProjectPaths(args.Env, args.CWD, operandDirs); len(outsidePaths) > 0 {
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		}
 	}

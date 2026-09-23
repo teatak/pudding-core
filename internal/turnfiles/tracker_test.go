@@ -67,6 +67,55 @@ func TestTrackerCollectsTurnFileChanges(t *testing.T) {
 	}
 }
 
+func TestTrackerPreservesChangesAcrossAncestorAndRootSymlinks(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalParent := filepath.Join(base, "private", "var")
+	canonicalRoot := filepath.Join(canonicalParent, "real")
+	if err := os.MkdirAll(canonicalRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ancestorAlias := filepath.Join(base, "var")
+	if err := os.Symlink(canonicalParent, ancestorAlias); err != nil {
+		t.Fatal(err)
+	}
+	realSpelling := filepath.Join(ancestorAlias, "real")
+	rootAlias := filepath.Join(ancestorAlias, "alias")
+	if err := os.Symlink(realSpelling, rootAlias); err != nil {
+		t.Fatal(err)
+	}
+	for _, authorized := range []string{realSpelling, rootAlias, canonicalRoot} {
+		t.Run(filepath.Base(authorized)+"_"+filepath.Base(filepath.Dir(authorized)), func(t *testing.T) {
+			writeTestFile(t, canonicalRoot, "modify.txt", "before\n")
+			tracker := New()
+			if err := tracker.BeginCall("turn_alias", "call_1", []string{authorized}, []string{filepath.Join(realSpelling, "modify.txt")}); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, rootAlias, "modify.txt", "middle\n")
+			if err := tracker.EndCall("turn_alias", "call_1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tracker.BeginCallWithOrigin("turn_alias", "call_2", []string{authorized}, nil, store.FileChangeOriginCommandObserved); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, canonicalRoot, "modify.txt", "after\n")
+			if err := tracker.EndCall("turn_alias", "call_2"); err != nil {
+				t.Fatal(err)
+			}
+			changes, err := tracker.Finish("turn_alias")
+			if err != nil || len(changes) != 1 {
+				t.Fatalf("authorized=%q: changes=%+v err=%v", authorized, changes, err)
+			}
+			change := changes[0]
+			if change.RootPath != canonicalRoot || change.Path != "modify.txt" || change.OldContent != "before\n" || change.NewContent != "after\n" || change.Origin != store.FileChangeOriginCommandObserved {
+				t.Fatalf("inconsistent tracked identity: %+v", change)
+			}
+		})
+	}
+}
+
 func TestTrackerAccumulatesCallsAcrossRoots(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

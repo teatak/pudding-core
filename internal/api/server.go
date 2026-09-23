@@ -64,6 +64,9 @@ type Server struct {
 	github            *githubapp.Client
 
 	providerSyncs singleflight.Group
+
+	sessionLifecycleMu sync.Mutex
+	sessionLifecycles  map[string]chan struct{}
 }
 
 type voiceController interface {
@@ -704,16 +707,18 @@ func (s *Server) deleteSession(c *cart.Context) error {
 
 func (s *Server) archiveSession(c *cart.Context) error {
 	id, _ := c.Param("id")
+	unlock, err := s.lockSessionLifecycle(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer unlock()
 	// Archive first closes admission and cancels queued inputs atomically. A
 	// finishing turn therefore cannot promote another input while cleanup runs.
 	session, err := s.store.ArchiveSession(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if err := s.cancelSessionWork(c.Request.Context(), id); err != nil {
-		return s.fail(c, err)
-	}
-	children, err := s.store.ListChildSessions(c.Request.Context(), id)
+	children, err := s.cancelSessionWork(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -727,6 +732,11 @@ func (s *Server) archiveSession(c *cart.Context) error {
 
 func (s *Server) restoreSession(c *cart.Context) error {
 	id, _ := c.Param("id")
+	unlock, err := s.lockSessionLifecycle(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer unlock()
 	session, err := s.store.RestoreSession(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
@@ -737,23 +747,17 @@ func (s *Server) restoreSession(c *cart.Context) error {
 }
 
 func (s *Server) purgeSession(ctx context.Context, id string) error {
-	owner, err := s.store.ParentSessionID(ctx, id)
+	unlock, err := s.lockSessionLifecycle(ctx, id)
 	if err != nil {
 		return err
 	}
-	if owner == "" {
-		if _, err := s.store.GetSession(ctx, id); err == nil {
-			if _, err := s.store.ArchiveSession(ctx, id); err != nil {
-				return err
-			}
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-	}
-	if err := s.cancelSessionWork(ctx, id); err != nil {
+	defer unlock()
+	// A child can be deleted independently. Close its admission too, while
+	// keeping the public archive operation scoped to complete session groups.
+	if err := s.store.PrepareSessionDeletion(ctx, id); err != nil {
 		return err
 	}
-	children, err := s.store.ListChildSessions(ctx, id)
+	children, err := s.cancelSessionWork(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -767,14 +771,25 @@ func (s *Server) purgeSession(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Server) cancelSessionWork(ctx context.Context, id string) error {
-	// 先 cancel 进行中的 turn:否则 provider 流会继续跑到自然结束,
-	// 且收尾 FinishTurn 撞上已删除的 session。无进行中 turn 时 cancel 返回
-	// ErrNoRunningTurn,忽略即可。
+func (s *Server) cancelSessionWork(ctx context.Context, id string) ([]*store.Session, error) {
+	// Admission is already closed. Cancel the entire group before joining any
+	// member, so a child blocked on a tool cannot survive resource cleanup.
 	if err := s.engine.Cancel(id); err != nil && !errors.Is(err, engine.ErrNoRunningTurn) {
-		return err
+		return nil, err
 	}
-	return nil
+	children, err := s.store.ListChildSessions(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.engine.WaitSession(ctx, id); err != nil {
+		return nil, err
+	}
+	for _, child := range children {
+		if err := s.engine.WaitSession(ctx, child.ID); err != nil {
+			return nil, err
+		}
+	}
+	return children, nil
 }
 
 func (s *Server) releaseSessionResources(ctx context.Context, id string, removeScratch bool) {
@@ -782,6 +797,9 @@ func (s *Server) releaseSessionResources(ctx context.Context, id string, removeS
 	if removeScratch {
 		if err := home.RemoveCodeScratch(s.home, id); err != nil {
 			slog.Warn("remove session code scratch failed", "sessionID", id, "err", err)
+		}
+		if err := home.RemoveSessionArtifacts(s.home, id); err != nil {
+			slog.Warn("remove session artifacts failed", "sessionID", id, "err", err)
 		}
 	}
 	if s.voice != nil {

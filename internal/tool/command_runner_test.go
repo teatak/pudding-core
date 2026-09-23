@@ -99,6 +99,7 @@ func TestCompareVersionNamesUsesNumericOrder(t *testing.T) {
 func (r *recordingCommandRunner) Prepare(spec commandSpec) (*commandExecution, error) {
 	r.mu.Lock()
 	r.specs = append(r.specs, commandSpec{
+		SessionID:   spec.SessionID,
 		Executable:  spec.Executable,
 		Args:        append([]string(nil), spec.Args...),
 		CWD:         spec.CWD,
@@ -182,6 +183,7 @@ func TestForegroundAndBackgroundCommandsShareRunner(t *testing.T) {
 		"command": commandHelperCommand("report"),
 	})
 	foreground := runner.Call(context.Background(), Call{
+		SessionID:   "sess_runner",
 		CallID:      "call_foreground_runner",
 		Name:        CommandRun,
 		Args:        raw,
@@ -205,6 +207,9 @@ func TestForegroundAndBackgroundCommandsShareRunner(t *testing.T) {
 		t.Fatalf("shared runner prepared %d commands, want 2", len(specs))
 	}
 	for _, spec := range specs {
+		if spec.SessionID != "sess_runner" {
+			t.Fatalf("runner lost session artifact authority: %q", spec.SessionID)
+		}
 		if len(spec.ProjectDirs) != 1 || spec.ProjectDirs[0] != root {
 			t.Fatalf("runner lost project authorization snapshot: %+v", spec.ProjectDirs)
 		}

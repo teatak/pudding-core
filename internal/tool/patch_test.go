@@ -36,6 +36,7 @@ func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 		{name: "wrong files type", args: `{"scope":"project","files":"large patch"}`, kind: "invalid_type", field: "files", expected: "array", hasOffset: true},
 		{name: "missing files", args: `{"scope":"project"}`, kind: "missing_field", field: "files", expected: "array"},
 		{name: "empty files", args: `{"scope":"project","files":[]}`, kind: "empty_files", field: "files", expected: "non-empty array"},
+		{name: "missing path", args: `{"scope":"project","files":[{"action":"delete"}]}`, kind: "path_required", field: "files[0].path", expected: "non-empty string"},
 		{name: "removed base revision", args: `{"scope":"project","files":[{"path":"notes.txt","action":"delete","base_revision":"sha256:abc123"}]}`, kind: "unknown_field"},
 		{name: "invalid action", args: `{"scope":"project","files":[{"path":"notes.txt","action":"write"}]}`, kind: "invalid_action", field: "files[0].action", expected: "create, replace, edit, or delete"},
 		{name: "missing hunk input", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"new_lines":["new"]}]}]}`, kind: "hunk_old_lines_required", field: "files[0].hunks[0].old_lines", expected: "array"},
@@ -57,6 +58,9 @@ func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 			payload := decodeToolResult(t, result)
 			if payload["reason"] != "invalid_arguments" || payload["errorKind"] != test.kind {
 				t.Fatalf("unexpected argument error: %+v", payload)
+			}
+			if payload["receivedBytes"] != float64(len(test.args)) {
+				t.Fatalf("input byte count missing: %+v", payload)
 			}
 			if test.field != "" && payload["field"] != test.field {
 				t.Fatalf("field=%v want %q: %+v", payload["field"], test.field, payload)
@@ -91,7 +95,7 @@ func TestPatchApprovalDetailsFailurePreservesArgumentRecoveryData(t *testing.T) 
 		t.Fatal("invalid approval arguments should fail")
 	}
 	payload := decodeToolResult(t, ApprovalDetailsFailure(call, err))
-	if payload["reason"] != "invalid_arguments" || payload["errorKind"] != "invalid_type" || payload["field"] != "files" || payload["expected"] != "array" || payload["hint"] == "" {
+	if payload["reason"] != "invalid_arguments" || payload["errorKind"] != "invalid_type" || payload["field"] != "files" || payload["expected"] != "array" || payload["hint"] == "" || payload["receivedBytes"] != float64(len(call.Args)) {
 		t.Fatalf("approval argument recovery data was lost: %+v", payload)
 	}
 }
@@ -112,7 +116,7 @@ func TestFilePatchSizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 		t.Fatalf("too many files should fail: %+v", tooMany)
 	}
 	tooManyPayload := decodeToolResult(t, tooMany)
-	if tooManyPayload["reason"] != "too_many_files" || tooManyPayload["limit"] != float64(patchMaxFiles) {
+	if tooManyPayload["reason"] != "too_many_files" || tooManyPayload["limit"] != float64(patchMaxFiles) || tooManyPayload["metric"] != "files" || tooManyPayload["unit"] != "files" || tooManyPayload["actual"] != float64(patchMaxFiles+1) || tooManyPayload["count"] != float64(patchMaxFiles+1) {
 		t.Fatalf("unexpected file-count error: %+v", tooManyPayload)
 	}
 
@@ -126,6 +130,111 @@ func TestFilePatchSizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 	})
 	if tooLarge.Ok || !strings.Contains(tooLarge.Content, `"reason":"file_too_large"`) {
 		t.Fatalf("large file content should report its size limit: %+v", tooLarge)
+	}
+	tooLargePayload := decodeToolResult(t, tooLarge)
+	if tooLargePayload["metric"] != "destination_file_bytes" || tooLargePayload["unit"] != "bytes" || tooLargePayload["actual"] != float64(patchMaxFileBytes+1) || tooLargePayload["limit"] != float64(patchMaxFileBytes) || tooLargePayload["errorKind"] != nil {
+		t.Fatalf("file size and JSON errors were conflated: %s", tooLarge.Content)
+	}
+}
+
+func TestFilePatchResourceDiagnosticsLeaveFilesUnchanged(t *testing.T) {
+	for _, test := range []struct {
+		name, reason, metric, unit string
+		limit, wantActual          int
+		setup                      func(*testing.T, string) []map[string]any
+	}{
+		{
+			name: "source file", reason: "file_too_large", metric: "source_file_bytes", unit: "bytes", limit: patchMaxFileBytes, wantActual: patchMaxFileBytes + 1,
+			setup: func(t *testing.T, root string) []map[string]any {
+				writePatchTestFile(t, filepath.Join(root, "notes.txt"), strings.Repeat("x", patchMaxFileBytes+1))
+				return []map[string]any{{"path": "notes.txt", "action": "delete"}}
+			},
+		},
+		{
+			name: "edited file", reason: "file_too_large", metric: "destination_file_bytes", unit: "bytes", limit: patchMaxFileBytes, wantActual: patchMaxFileBytes + 6,
+			setup: func(t *testing.T, root string) []map[string]any {
+				writePatchTestFile(t, filepath.Join(root, "notes.txt"), "old\n")
+				return []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": []string{"old"}, "new_lines": []string{strings.Repeat("x", patchMaxFileBytes), "tail"}}}}}
+			},
+		},
+		{
+			name: "hunks", reason: "too_many_hunks", metric: "hunks", unit: "hunks", limit: patchMaxHunksPerFile, wantActual: patchMaxHunksPerFile + 1,
+			setup: func(t *testing.T, root string) []map[string]any {
+				writePatchTestFile(t, filepath.Join(root, "notes.txt"), "old\n")
+				hunks := make([]map[string]any, patchMaxHunksPerFile+1)
+				for i := range hunks {
+					hunks[i] = map[string]any{"start_line": 1, "old_lines": []string{"old"}, "new_lines": []string{"new"}}
+				}
+				return []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": hunks}}
+			},
+		},
+		{
+			name: "combined text", reason: "patch_too_large", metric: "combined_source_destination_bytes", unit: "bytes", limit: patchMaxTotalBytes, wantActual: 3 * 2 * 400004,
+			setup: func(t *testing.T, root string) []map[string]any {
+				content := "old\n" + strings.Repeat(strings.Repeat("x", 99)+"\n", 4000)
+				var files []map[string]any
+				for i := 0; i < 3; i++ {
+					path := "notes-" + strconv.Itoa(i) + ".txt"
+					writePatchTestFile(t, filepath.Join(root, path), content)
+					files = append(files, map[string]any{"path": path, "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": []string{"old"}, "new_lines": []string{"new"}}}})
+				}
+				return files
+			},
+		},
+		{
+			name: "review diff", reason: "patch_diff_too_large", metric: "review_diff_bytes", unit: "bytes", limit: patchMaxDiffBytes,
+			setup: func(t *testing.T, root string) []map[string]any {
+				writePatchTestFile(t, filepath.Join(root, "notes.txt"), strings.Repeat("a", 140<<10)+"\n")
+				return []map[string]any{{"path": "notes.txt", "action": "replace", "content": strings.Repeat("b", 140<<10) + "\n"}}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			files := test.setup(t, root)
+			before := make(map[string]string)
+			for _, file := range files {
+				path := filepath.Join(root, file["path"].(string))
+				before[path] = readPatchTestFile(t, path)
+			}
+			result := patchTestCall(NewBuiltinRunner(), "session_limits", root, FilePatch, map[string]any{"scope": "project", "files": files})
+			payload := decodeToolResult(t, result)
+			if result.Ok || payload["reason"] != test.reason || payload["metric"] != test.metric || payload["unit"] != test.unit || payload["limit"] != float64(test.limit) {
+				t.Fatalf("wrong resource diagnostic: %s", result.Content)
+			}
+			if actual, ok := payload["actual"].(float64); !ok || actual <= float64(test.limit) {
+				t.Fatalf("missing measured overage: %s", result.Content)
+			}
+			if test.wantActual > 0 && payload["actual"] != float64(test.wantActual) {
+				t.Fatalf("wrong measured size: %s", result.Content)
+			}
+			if payload["errorKind"] != nil {
+				t.Fatalf("resource limit reported as argument syntax: %s", result.Content)
+			}
+			for path, content := range before {
+				if got := readPatchTestFile(t, path); got != content {
+					t.Fatalf("rejected patch changed %s", path)
+				}
+			}
+		})
+	}
+}
+
+func TestFilePatchMissingPathRejectsWholeBatch(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "original\n")
+	args := map[string]any{"scope": "project", "files": []map[string]any{
+		{"path": "notes.txt", "action": "replace", "content": "changed\n"},
+		{"action": "create", "content": "must not be written\n"},
+	}}
+	result := patchTestCall(NewBuiltinRunner(), "session_missing_path", root, FilePatch, args)
+	payload := decodeToolResult(t, result)
+	if result.Ok || payload["errorKind"] != "path_required" || payload["field"] != "files[1].path" || payload["receivedBytes"] != float64(len(resultJSON(args))) {
+		t.Fatalf("missing path was not diagnosed before approval: %s", result.Content)
+	}
+	if got := readPatchTestFile(t, path); got != "original\n" {
+		t.Fatalf("invalid batch changed the first file: %q", got)
 	}
 }
 

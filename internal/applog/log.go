@@ -149,6 +149,15 @@ func cleanupExpired(dir, prefix string, retentionDays int, now time.Time) error 
 
 func redactAttr(_ []string, attr slog.Attr) slog.Attr {
 	key := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(attr.Key, "_", ""), "-", ""))
+	// Numeric usage diagnostics are counts, not credentials. Keep the allowlist
+	// exact and type-checked so token strings and unknown token fields stay hidden.
+	if attr.Value.Kind() == slog.KindInt64 || attr.Value.Kind() == slog.KindUint64 {
+		switch key {
+		case "maxoutputtokens", "estimatedinputtokens", "inputuncachedtokens",
+			"inputcachedtokens", "cachecreationtokens", "outputcontenttokens", "outputreasoningtokens":
+			return attr
+		}
+	}
 	if strings.Contains(key, "token") || strings.Contains(key, "secret") || strings.Contains(key, "password") ||
 		strings.Contains(key, "authorization") || strings.Contains(key, "cookie") || strings.Contains(key, "apikey") ||
 		key == "text" || key == "prompt" || key == "content" || key == "transcript" {

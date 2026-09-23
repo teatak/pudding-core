@@ -128,6 +128,7 @@ type Engine struct {
 type activeTurn struct {
 	turnID string
 	cancel context.CancelFunc
+	done   chan struct{}
 
 	mu              sync.Mutex
 	acceptingSteers bool
@@ -140,7 +141,7 @@ type pendingSteer struct {
 }
 
 func newActiveTurn(turnID string, cancel context.CancelFunc) *activeTurn {
-	return &activeTurn{turnID: turnID, cancel: cancel, acceptingSteers: true}
+	return &activeTurn{turnID: turnID, cancel: cancel, done: make(chan struct{}), acceptingSteers: true}
 }
 
 func (t *activeTurn) consumeSteers() []pendingSteer {
@@ -448,6 +449,9 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return e.queueSubmit(ctx, in, resolved)
 	}
 
+	// Keep canonical admission and runtime registration indivisible to Cancel
+	// and WaitSession. No tool execution or event publication occurs under mu.
+	e.mu.Lock()
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
 		SessionID:       in.SessionID,
 		TurnID:          store.NewID("turn"),
@@ -461,12 +465,15 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		ModelConfig:     resolved.configJSON,
 	})
 	if errors.Is(err, store.ErrTurnRunning) {
+		e.mu.Unlock()
 		return e.queueSubmit(ctx, in, resolved)
 	}
 	if err != nil {
+		e.mu.Unlock()
 		return nil, err
 	}
 	if res.Duplicate {
+		e.mu.Unlock()
 		out := &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}
 		if res.UserMessage != nil {
 			out.UserMessageID = res.UserMessage.ID
@@ -478,7 +485,6 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 请求,不继承请求 ctx;取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
-	e.mu.Lock()
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
@@ -515,6 +521,7 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 			return nil, ErrTurnRunning
 		}
 	}
+	e.mu.Lock()
 	res, err := e.store.BeginSystemTurn(ctx, store.BeginSystemTurnInput{
 		RetryOfTurnID:   in.retryOfTurnID,
 		SessionID:       in.SessionID,
@@ -528,17 +535,19 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 		ModelConfig:     resolved.configJSON,
 	})
 	if errors.Is(err, store.ErrTurnRunning) {
+		e.mu.Unlock()
 		return nil, ErrTurnRunning
 	}
 	if err != nil {
+		e.mu.Unlock()
 		return nil, err
 	}
 	if res.Duplicate {
+		e.mu.Unlock()
 		return &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}, nil
 	}
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
-	e.mu.Lock()
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
@@ -710,11 +719,15 @@ func (e *Engine) rememberQueuedRuntime(sessionID, clientMessageID, runtimeID str
 }
 
 func (e *Engine) takeQueuedRuntime(sessionID, clientMessageID string) string {
-	key := queuedRuntimeKey(sessionID, clientMessageID)
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.takeQueuedRuntimeLocked(sessionID, clientMessageID)
+}
+
+func (e *Engine) takeQueuedRuntimeLocked(sessionID, clientMessageID string) string {
+	key := queuedRuntimeKey(sessionID, clientMessageID)
 	runtimeID := e.queuedRuntimeIDs[key]
 	delete(e.queuedRuntimeIDs, key)
-	e.mu.Unlock()
 	return runtimeID
 }
 
@@ -1181,6 +1194,28 @@ func (e *Engine) SteerQueuedInput(ctx context.Context, sessionID, turnID, client
 // Wait 等待所有进行中的 turn 收尾,服务优雅退出。
 func (e *Engine) Wait() { e.wg.Wait() }
 
+// WaitSession waits for this session's current foreground tool work and
+// canonical turn finalization. Callers must close admission before using it
+// as a resource cleanup barrier; it does not wait for later turns or other
+// sessions. Cancellation alone does not join a synchronous tool invocation.
+func (e *Engine) WaitSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	active := e.running[sessionID]
+	e.mu.Unlock()
+	if active == nil {
+		return ctx.Err()
+	}
+	select {
+	case <-active.done:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, active *activeTurn) {
 	defer e.wg.Done()
 
@@ -1230,20 +1265,22 @@ func (e *Engine) finishTurnWithInterrupted(
 		// (docs/technology-decisions.md 第 14 节的当前倾向)。
 		in.Interrupted = true
 	}
+	// Clear the registered turn before another admission can observe the
+	// finished canonical state and replace its completion signal.
+	e.mu.Lock()
 	res, err := e.store.FinishTurn(context.Background(), in)
+	e.clearRunningLocked(sessionID, turnID)
+	e.mu.Unlock()
 	if err != nil {
 		// session 在 turn 进行中被删除:turn 已随级联删除消失,收尾无处可写,
 		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
 		if errors.Is(err, store.ErrNotFound) {
 			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
-			e.clearRunning(sessionID, turnID)
 			return
 		}
 		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
-		e.clearRunning(sessionID, turnID)
 		return
 	}
-	e.clearRunning(sessionID, turnID)
 	e.hub.Publish(*res.FinalEvent)
 	if res.CollaborationEvent != nil {
 		e.hub.Publish(*res.CollaborationEvent)
@@ -1257,6 +1294,11 @@ func (e *Engine) finishTurnWithInterrupted(
 
 func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
+	e.clearRunningLocked(sessionID, turnID)
+	e.mu.Unlock()
+}
+
+func (e *Engine) clearRunningLocked(sessionID, turnID string) {
 	if active := e.running[sessionID]; active != nil && active.turnID == turnID {
 		delete(e.running, sessionID)
 		for id, request := range e.inputRequests {
@@ -1264,9 +1306,9 @@ func (e *Engine) clearRunning(sessionID, turnID string) {
 				delete(e.inputRequests, id)
 			}
 		}
+		close(active.done)
 	}
 	delete(e.turnProjectAccess, turnID)
-	e.mu.Unlock()
 }
 
 func (e *Engine) TryDrainQueued(sessionID string) {
@@ -1379,11 +1421,17 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			}
 			continue
 		}
+		requestLogger := slog.With("requestKind", "tool_loop", "sessionID", sessionID, "turnID", turnID,
+			"provider", resolved.providerName, "model", resolved.model, "providerCallIndex", providerCallIndex)
 		parts.BeginProviderCall(providerCallIndex)
 		providerCallIndex++
 		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
-		ch, err := client.Stream(ctx, req)
+		// Scope diagnostics to this tool-loop request. Compaction and titling
+		// retain their own contexts, without inheriting this call's attribution.
+		requestCtx := provider.WithRequestLogger(ctx, requestLogger)
+		ch, err := client.Stream(requestCtx, req)
 		if err != nil {
+			requestLogger.WarnContext(ctx, "engine: tool-loop provider request failed", providerErrorLogAttrs(err)...)
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
 		}
 		finish, status, errMsg, assistantOutput, continuation := e.consumeStream(
@@ -1395,6 +1443,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			estimatedInputTokens,
 			ch,
 			parts,
+			requestLogger,
 		)
 		if status != store.TurnRunning {
 			return status, errMsg, currentMode
@@ -1777,17 +1826,33 @@ func (e *Engine) consumeStream(
 	estimatedInputTokens int,
 	ch <-chan provider.Chunk,
 	parts *turnPartAccumulator,
-) (provider.FinishReason, store.TurnStatus, string, bool, *provider.Continuation) {
+	logger *slog.Logger,
+) (finish provider.FinishReason, status store.TurnStatus, errMsg string, assistantOutput bool, continuation *provider.Continuation) {
 	coalescer := newStreamEventCoalescer(e.hub)
 	defer coalescer.Flush()
 	var usage provider.UsageInfo
 	usageSeen := false
-	assistantOutput := false
-	var continuation *provider.Continuation
+	terminal := "missing_terminal"
+	var streamErr error
+	defer func() {
+		attrs := []any{
+			"terminal", terminal, "finishReason", finish,
+			"usageSeen", usageSeen, "estimatedInputTokens", estimatedInputTokens,
+			"inputUncachedTokens", usage.InputUncachedTokens, "inputCachedTokens", usage.InputCachedTokens,
+			"cacheCreationTokens", usage.CacheCreationTokens, "outputContentTokens", usage.OutputContentTokens,
+			"outputReasoningTokens", usage.OutputReasoningTokens,
+		}
+		if streamErr != nil {
+			attrs = append(attrs, providerErrorLogAttrs(streamErr)...)
+		}
+		logger.InfoContext(ctx, "engine: tool-loop provider stream finished", attrs...)
+		logProviderToolArguments(ctx, logger, parts)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
+			terminal, streamErr = "cancelled", ctx.Err()
 			return "", store.TurnCancelled, "", assistantOutput, nil
 		case <-coalescer.C():
 			coalescer.Flush()
@@ -1796,6 +1861,7 @@ func (e *Engine) consumeStream(
 				// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
 				// 避免用户主动停止被记成 failed。
 				if ctx.Err() != nil {
+					terminal, streamErr = "cancelled", ctx.Err()
 					return "", store.TurnCancelled, "", assistantOutput, nil
 				}
 				if usageSeen {
@@ -1810,7 +1876,9 @@ func (e *Engine) consumeStream(
 			}
 			switch {
 			case chunk.Err != nil:
+				terminal, streamErr = "provider_error", chunk.Err
 				if errors.Is(chunk.Err, context.Canceled) {
+					terminal = "cancelled"
 					return "", store.TurnCancelled, "", assistantOutput, nil
 				}
 				if usageSeen {
@@ -1821,6 +1889,7 @@ func (e *Engine) consumeStream(
 				mergeUsageInfo(&usage, *chunk.Usage)
 				usageSeen = true
 			case chunk.Done:
+				terminal = "done"
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				} else {
@@ -1830,6 +1899,7 @@ func (e *Engine) consumeStream(
 			case chunk.Tool != nil:
 				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
+					terminal, streamErr = "persistence_error", err
 					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput, nil
 				}
 				coalescer.Push(event.Event{
@@ -1852,6 +1922,7 @@ func (e *Engine) consumeStream(
 				assistantOutput = true
 				parts.AppendDelta(part, chunk.Delta)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
+					terminal, streamErr = "persistence_error", err
 					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput, nil
 				}
 				coalescer.Push(event.Event{
@@ -2141,7 +2212,11 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
 	var commandState *commandApprovalState
-	if risk, ok := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs); ok {
+	risk, classified, err := e.classifyToolCall(sessionID, call)
+	if err != nil {
+		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
+	}
+	if classified {
 		var approvalDetails map[string]any
 		var approvalDetailsErr error
 		if tool.RequiresApprovalDetails(call.Name) {
@@ -3143,26 +3218,29 @@ func (e *Engine) promoteQueuedForRun(sessionID string) (*store.PromoteQueuedInpu
 	if available, err := e.childSlotAvailable(context.Background(), sessionID); err != nil || !available {
 		return nil, nil, nil
 	}
+	e.mu.Lock()
 	res, err := e.store.PromoteNextQueuedInput(context.Background(), store.PromoteQueuedInputInput{
 		SessionID:     sessionID,
 		TurnID:        store.NewID("turn"),
 		UserMessageID: store.NewID("msg"),
 	})
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrQueueBlocked) || errors.Is(err, store.ErrTurnRunning) {
+		e.mu.Unlock()
 		return nil, nil, nil
 	}
 	if err != nil {
+		e.mu.Unlock()
 		slog.Error("engine: drain queued input", "sessionID", sessionID, "err", err)
 		return nil, nil, nil
 	}
 	if res == nil || res.Turn == nil || res.Input == nil || res.StartedEvent == nil {
+		e.mu.Unlock()
 		return nil, nil, nil
 	}
 
-	runtimeID := e.takeQueuedRuntime(sessionID, res.Input.ClientMessageID)
+	runtimeID := e.takeQueuedRuntimeLocked(sessionID, res.Input.ClientMessageID)
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
 	active := newActiveTurn(res.Turn.ID, cancel)
-	e.mu.Lock()
 	e.running[sessionID] = active
 	e.mu.Unlock()
 	return res, active, turnCtx

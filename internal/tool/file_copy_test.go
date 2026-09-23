@@ -89,12 +89,27 @@ func TestFileCopyRejectsMalformedEndpoints(t *testing.T) {
 		`{"from":{"scope":"temp","path":"a"}}`,
 		`{"from":null,"to":{"scope":"temp","path":"b"}}`,
 		`{"from":{"scope":"temp","path":" "},"to":{"scope":"project","path":"b"}}`,
-		`{"from":{"scope":"temp","path":"a"},"to":{"scope":"app","path":"b"}}`,
 		`{"from":{"scope":"temp","path":"a","typo":1},"to":{"scope":"temp","path":"b"}}`,
 		`{"from":{"scope":"temp","path":"a"},"to":{"scope":"temp","path":"b"}} {}`,
 	} {
 		result := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{Name: FileCopy, Args: json.RawMessage(raw)})
 		if result.Ok || decodeToolResult(t, result)["reason"] != "invalid_arguments" {
+			t.Fatal(result.Content)
+		}
+	}
+}
+
+func TestFileCopyRejectsInvalidEndpointScope(t *testing.T) {
+	for _, field := range []string{"from", "to"} {
+		args := map[string]any{
+			"from": map[string]string{"scope": "temp", "path": "a"},
+			"to":   map[string]string{"scope": "temp", "path": "b"},
+		}
+		args[field] = map[string]string{"scope": "app", "path": "file.txt"}
+		raw, _ := json.Marshal(args)
+		result := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{Name: FileCopy, Args: raw})
+		payload := decodeToolResult(t, result)
+		if result.Ok || payload["reason"] != "invalid_scope" || payload["field"] != field+".scope" {
 			t.Fatal(result.Content)
 		}
 	}

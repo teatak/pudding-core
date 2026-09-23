@@ -118,6 +118,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
+	provider.LogRequest(ctx, c.Name(), "max_output_tokens", body.MaxOutputTokens)
 	return httpReq, nil
 }
 
@@ -220,7 +221,11 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 			return errors.New("openai responses: response failed")
 		case "response.incomplete":
 			if frame.Response.IncompleteDetails.Reason != "" {
-				return errors.New("openai responses: incomplete: " + frame.Response.IncompleteDetails.Reason)
+				message := "openai responses: incomplete: " + frame.Response.IncompleteDetails.Reason
+				if frame.Response.IncompleteDetails.Reason == "max_output_tokens" {
+					return &provider.OutputLimitError{Message: message}
+				}
+				return errors.New(message)
 			}
 			return errors.New("openai responses: response incomplete")
 		case "error":

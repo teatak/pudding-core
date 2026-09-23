@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 type backgroundProcessPayload struct {
 	OK            bool                           `json:"ok"`
 	ProcessID     string                         `json:"processID"`
+	CWD           string                         `json:"cwd"`
 	Status        string                         `json:"status"`
 	Running       bool                           `json:"running"`
 	ExitCode      *int                           `json:"exitCode"`
@@ -27,6 +30,114 @@ type backgroundProcessPayload struct {
 	SandboxDenied bool                           `json:"sandboxDenied"`
 	TTY           bool                           `json:"tty"`
 	BytesWritten  int                            `json:"bytesWritten"`
+}
+
+func TestBackgroundProcessListFindsProcessesForPollAndStop(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	finished := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_list", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
+	}))
+	running := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_list", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("stdin-line"),
+	}))
+	other := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_other", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
+	}))
+	if !finished.OK || !running.OK || !other.OK {
+		t.Fatalf("start list fixtures: finished=%+v running=%+v other=%+v", finished, running, other)
+	}
+	if stop := backgroundToolCall(runner, "sess_list", root, CommandSession, map[string]any{"action": "stop", "process_id": finished.ProcessID}); !stop.Ok {
+		t.Fatalf("stop retained process: %+v", stop)
+	}
+
+	list := runner.Call(context.Background(), Call{
+		SessionID: "sess_list",
+		CallID:    "call_list_without_project",
+		Name:      CommandSession,
+		Args:      json.RawMessage(`{"action":"list"}`),
+	})
+	processes := decodeBackgroundProcessList(t, list)
+	if len(processes) != 2 || processes[0].ProcessID != running.ProcessID || !processes[0].Running || processes[1].ProcessID != finished.ProcessID || processes[1].Status != "stopped" {
+		t.Fatalf("list must return only this session with running processes first: %+v", processes)
+	}
+	if processes[0].Command != commandHelperCommand("stdin-line") || processes[0].CWD != running.CWD || processes[0].TurnID != "turn_background" {
+		t.Fatalf("list lost process discovery metadata: %+v", processes[0])
+	}
+	if strings.Contains(list.Content, `"output":`) {
+		t.Fatalf("list must not include process output: %s", list.Content)
+	}
+	otherProcesses := decodeBackgroundProcessList(t, backgroundToolCall(runner, "sess_other", root, CommandSession, map[string]any{"action": "list"}))
+	if len(otherProcesses) != 1 || otherProcesses[0].ProcessID != other.ProcessID {
+		t.Fatalf("other session list is not isolated: %+v", otherProcesses)
+	}
+
+	discoveredID := processes[0].ProcessID
+	poll := backgroundToolCall(runner, "sess_list", root, CommandSession, map[string]any{"action": "poll", "process_id": discoveredID})
+	polled := decodeBackgroundProcessPayload(t, poll)
+	if !poll.Ok || polled.ProcessID != discoveredID || !polled.Running {
+		t.Fatalf("poll discovered process: result=%+v payload=%+v", poll, polled)
+	}
+	stop := backgroundToolCall(runner, "sess_list", root, CommandSession, map[string]any{"action": "stop", "process_id": discoveredID})
+	stopped := decodeBackgroundProcessPayload(t, stop)
+	if !stop.Ok || stopped.Running || stopped.Status != "stopped" {
+		t.Fatalf("stop discovered process: result=%+v payload=%+v", stop, stopped)
+	}
+}
+
+func TestBackgroundProcessListEmptySession(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	result := runner.Call(context.Background(), Call{
+		SessionID: "sess_empty",
+		Name:      CommandSession,
+		Args:      json.RawMessage(`{"action":"list"}`),
+	})
+	if processes := decodeBackgroundProcessList(t, result); processes == nil || len(processes) != 0 {
+		t.Fatalf("empty session must return an empty array: %s", result.Content)
+	}
+	missingSession := runner.Call(context.Background(), Call{Name: CommandSession, Args: json.RawMessage(`{"action":"list"}`)})
+	if missingSession.Ok || !strings.Contains(missingSession.Content, `"reason":"session_required"`) {
+		t.Fatalf("list must require a session: %+v", missingSession)
+	}
+}
+
+func TestBackgroundProcessListRejectsInapplicableArguments(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	for _, raw := range []string{
+		`{"action":"list","process_id":"proc_test"}`,
+		`{"action":"list","process_id":""}`,
+		`{"action":"list","offset":0}`,
+		`{"action":"list","max_bytes":0}`,
+		`{"action":"list","wait_ms":0}`,
+		`{"action":"list","data":""}`,
+		`{"action":"list","limit":1}`,
+		`{"action":"list"} {}`,
+		`[{"action":"list"}]`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			result := runner.Call(context.Background(), Call{SessionID: "sess_list", Name: CommandSession, Args: json.RawMessage(raw)})
+			if result.Ok || !strings.Contains(result.Content, `"reason":"invalid_arguments"`) {
+				t.Fatalf("list must reject incompatible arguments: %+v", result)
+			}
+		})
+	}
+	for _, raw := range []string{
+		`{"action":"poll","process_id":"proc_test","unknown":true}`,
+		`{"action":"write","process_id":"proc_test","data":"test","unknown":true}`,
+		`{"action":"stop","process_id":"proc_test","unknown":true}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := decodeCommandSessionArgs(json.RawMessage(raw)); err == nil {
+				t.Fatal("command session must reject unknown arguments")
+			}
+		})
+	}
 }
 
 func TestBackgroundProcessStartPollStop(t *testing.T) {
@@ -410,14 +521,24 @@ func TestBackgroundProcessStartUsesForegroundRiskRules(t *testing.T) {
 func TestBackgroundProcessApprovalShowsCommandWithoutEnvironmentValues(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	cwd := filepath.Join(root, "web")
+	if err := os.Mkdir(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolvedCWD, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	details, err := runner.ApprovalDetails(context.Background(), Call{
-		Name: CommandRun,
-		Args: json.RawMessage(`{"scope":"project","command":"npm run dev","cwd":"web","env":{"PORT":"5173"},"background":true}`),
+		Name:        CommandRun,
+		Args:        json.RawMessage(`{"scope":"project","command":"npm run dev","cwd":"web","env":{"PORT":"5173"},"background":true}`),
+		ProjectDirs: []string{root},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if details["command"] != "npm run dev" || details["cwd"] != "web" {
+	if details["command"] != "npm run dev" || details["cwd"] != resolvedCWD {
 		t.Fatalf("approval command details are incomplete: %+v", details)
 	}
 	keys, ok := details["envKeys"].([]string)
@@ -462,6 +583,21 @@ func decodeBackgroundProcessPayload(t *testing.T, result Result) backgroundProce
 		t.Fatalf("decode background process result: %v content=%q", err, result.Content)
 	}
 	return payload
+}
+
+func decodeBackgroundProcessList(t *testing.T, result Result) []BackgroundProcessSnapshot {
+	t.Helper()
+	var payload struct {
+		OK        bool                        `json:"ok"`
+		Processes []BackgroundProcessSnapshot `json:"processes"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &payload); err != nil || !result.Ok || !payload.OK {
+		t.Fatalf("decode process list: err=%v result=%+v", err, result)
+	}
+	if result.SummaryKind != SummaryReturnedItems || result.SummaryCount != len(payload.Processes) {
+		t.Fatalf("list summary does not match process count: %+v", result)
+	}
+	return payload.Processes
 }
 
 func backgroundOutputText(chunks []backgroundProcessOutputChunk) string {

@@ -81,6 +81,26 @@ func TestRedactAttrRemovesCredentialsAndUserText(t *testing.T) {
 	}
 }
 
+func TestRedactAttrPreservesOnlyKnownIntegerTokenCounts(t *testing.T) {
+	for _, key := range []string{
+		"maxOutputTokens", "estimatedInputTokens", "inputUncachedTokens",
+		"inputCachedTokens", "cacheCreationTokens", "outputContentTokens", "outputReasoningTokens",
+	} {
+		got := redactAttr(nil, slog.Int(key, 1234))
+		if got.Value.Kind() != slog.KindInt64 || got.Value.Int64() != 1234 {
+			t.Errorf("%s count was redacted: %v", key, got.Value)
+		}
+		if got := redactAttr(nil, slog.String(key, "private")).Value.String(); got != "[REDACTED]" {
+			t.Errorf("%s string was not redacted: %q", key, got)
+		}
+	}
+	for _, key := range []string{"token", "accessToken", "secretTokenCount", "unknownTokens"} {
+		if got := redactAttr(nil, slog.Int(key, 1234)).Value.String(); got != "[REDACTED]" {
+			t.Errorf("%s should remain redacted: %q", key, got)
+		}
+	}
+}
+
 func assertFileContains(t *testing.T, path, want string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

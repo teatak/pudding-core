@@ -47,26 +47,19 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, err := decodeCommandRunArgs(call.Args)
 	if err != nil {
+		var scopeErr *invalidScopeError
+		if errors.As(err, &scopeErr) {
+			return filePathError(out, args.Scope, err)
+		}
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	if args.Background {
 		return r.commandStart(call, args)
 	}
 
-	cwd := strings.TrimSpace(args.CWD)
-	if cwd == "" {
-		cwd = "."
-	}
-	_, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
+	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
-		return filePathError(out, args.Scope, err)
-	}
-	info, err := os.Stat(resolvedCWD)
-	if err != nil {
-		return toolJSONError(out, "cwd_unavailable", err.Error())
-	}
-	if !info.IsDir() {
-		return toolJSONError(out, "cwd_not_directory", "command cwd must be a directory")
+		return commandCWDFailure(out, err)
 	}
 
 	timeout, err := commandTimeout(args.TimeoutMS)
@@ -89,6 +82,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 		shell = "sh"
 	}
 	execution, err := r.commands.Prepare(commandSpec{
+		SessionID:   call.SessionID,
 		Executable:  executable,
 		Args:        commandArgs,
 		CWD:         resolvedCWD,
@@ -159,7 +153,7 @@ func decodeCommandRunArgs(raw json.RawMessage) (commandRunArgs, error) {
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	if args.Scope != managedScopeProject {
-		return args, errors.New("command scope must be project")
+		return args, &invalidScopeError{Field: "scope", Allowed: []string{managedScopeProject}}
 	}
 	args.Execution = CommandExecutionMode(strings.ToLower(strings.TrimSpace(string(args.Execution))))
 	if args.Execution == "" {
@@ -179,14 +173,43 @@ func commandInvocation(args commandRunArgs) (string, []string, string) {
 	return "/bin/sh", []string{"-c", args.Command}, "sh"
 }
 
+var errCommandCWDNotDirectory = errors.New("command cwd must be a directory")
+
+func resolveCommandCWD(projectDirs []string, cwd string) (string, error) {
+	_, resolved, _, err := resolveProjectPath(projectDirs, cwd, true, false)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", errCommandCWDNotDirectory
+	}
+	return resolved, nil
+}
+
+func commandCWDFailure(out Result, err error) Result {
+	if errors.Is(err, errCommandCWDNotDirectory) {
+		return toolJSONError(out, "cwd_not_directory", err.Error())
+	}
+	return filePathError(out, managedScopeProject, err)
+}
+
 func commandApprovalDetails(call Call) (map[string]any, error) {
 	args, err := decodeCommandRunArgs(call.Args)
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
 		return nil, err
 	}
 	details := map[string]any{
 		"command":   args.Command,
 		"execution": string(args.Execution),
+		"cwd":       cwd,
 	}
 	if args.HostAccessReason != "" {
 		details["hostAccessReason"] = args.HostAccessReason
@@ -196,9 +219,6 @@ func commandApprovalDetails(call Call) (map[string]any, error) {
 	}
 	if args.TTY {
 		details["tty"] = true
-	}
-	if cwd := strings.TrimSpace(args.CWD); cwd != "" {
-		details["cwd"] = cwd
 	}
 	if len(args.Env) > 0 {
 		keys := make([]string, 0, len(args.Env))

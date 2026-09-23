@@ -168,6 +168,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUs
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
+	provider.LogRequest(ctx, c.Name(), "max_completion_tokens", body.MaxCompletionTokens)
 	return httpReq, nil
 }
 
@@ -329,10 +330,10 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 	}
 	var payload struct {
 		Data []struct {
-			ID              string   `json:"id"`
-			Name            string   `json:"name"`
-			ContextLength   int      `json:"context_length"`
-			MaxOutputTokens int      `json:"max_output_tokens"`
+			ID              string             `json:"id"`
+			Name            string             `json:"name"`
+			ContextLength   int                `json:"context_length"`
+			MaxOutputTokens int                `json:"max_output_tokens"`
 			CostMultiplier  *float64           `json:"cost_multiplier"`
 			Pricing         *openRouterPricing `json:"pricing"`
 			Capabilities    struct {

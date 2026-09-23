@@ -55,6 +55,7 @@ type gitCommitApprovalSnapshot struct {
 type gitWriteError struct {
 	reason string
 	detail string
+	path   error
 }
 
 func (e *gitWriteError) Error() string { return e.detail }
@@ -332,7 +333,7 @@ func resolveGitWriteRepository(ctx context.Context, call Call, scope, cwd string
 	repo, failed := resolveGitRepository(ctx, call, scope, cwd)
 	if failed != nil {
 		if failed.path != nil {
-			return gitWriteRepository{}, newGitWriteError(patchPathReason(failed.path), failed.path.Error())
+			return gitWriteRepository{}, &gitWriteError{path: failed.path, detail: failed.path.Error()}
 		}
 		return gitWriteRepository{}, newGitWriteError(failed.reason, failed.detail)
 	}
@@ -675,6 +676,9 @@ func gitApprovalKey(sessionID, callID string) string {
 func gitWriteFailure(out Result, err error) Result {
 	var writeErr *gitWriteError
 	if errors.As(err, &writeErr) {
+		if writeErr.path != nil {
+			return filePathError(out, managedScopeProject, writeErr.path)
+		}
 		return toolJSONError(out, writeErr.reason, writeErr.detail)
 	}
 	return toolJSONError(out, "git_write_failed", fmt.Sprint(err))

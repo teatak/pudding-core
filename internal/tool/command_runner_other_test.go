@@ -2,13 +2,19 @@
 
 package tool
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestUnsupportedCommandSandboxFailsClosed(t *testing.T) {
 	runner := newPlatformCommandRunner(t.TempDir())
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	spec := commandSpec{
-		Executable: "go",
-		Args:       []string{"version"},
+		Executable: executable,
 		CWD:        t.TempDir(),
 	}
 	if _, err := runner.Prepare(spec); err == nil {

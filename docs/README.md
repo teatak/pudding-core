@@ -29,6 +29,7 @@
 | [session-collaboration-plan.md](session-collaboration-plan.md) | 协作 App、父子调度、底部卡片、右侧完整会话及统一审批；首版已实现 |
 | [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
 | [code-cli-sandbox-design.md](code-cli-sandbox-design.md) | Code CLI 沙箱与审批规则 |
+| [agent-tool-contracts.md](agent-tool-contracts.md) | 多 root 路径、临时附件、后台命令发现、搜索行号与参数诊断契约 |
 | [context-working-set.md](context-working-set.md) | 模型工具结果去重、受限预览与 canonical 分页回读 |
 | [context-compaction.md](context-compaction.md) | 压缩预算、工具循环内触发、并发边界和回归入口 |
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |

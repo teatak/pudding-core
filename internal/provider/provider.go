@@ -317,6 +317,13 @@ const (
 	FinishToolCalls FinishReason = "tool_calls"
 )
 
+// OutputLimitError identifies incomplete output rejected by a provider as an
+// error. It preserves the original error text and remains a failed stream,
+// distinct from a successful stream ending with FinishLength.
+type OutputLimitError struct{ Message string }
+
+func (e *OutputLimitError) Error() string { return e.Message }
+
 type ToolCallChunk struct {
 	Index     int
 	CallID    string

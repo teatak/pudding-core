@@ -346,7 +346,7 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 		t.Fatalf("sandbox-managed temporary script should remain low risk: %+v ok=%v", tempScriptRisk, ok)
 	}
 
-	systemInputRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat < /etc/ssl/cert.pem"}`), []string{root})
+	systemInputRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat < /private/etc/ssl/cert.pem"}`), []string{root})
 	if !ok || !systemInputRisk.LowRisk || len(systemInputRisk.requiredProjectPaths) != 0 {
 		t.Fatalf("sandbox-readable input redirection should remain low risk: %+v ok=%v", systemInputRisk, ok)
 	}
@@ -382,7 +382,7 @@ func TestClassifyToolCallCommandSeparatesApprovalFromExecutionBoundary(t *testin
 		{name: "outside script", command: "python3 " + quoteShellArg(outsideScript), outside: true},
 		{name: "outside destructive path", command: "rm -rf " + quoteShellArg(outside), outside: true},
 		{name: "outside PATH", command: "my-tool --check", outside: true},
-		{name: "sandbox runtime read", command: "cat /etc/ssl/cert.pem"},
+		{name: "sandbox runtime read", command: "cat /private/etc/ssl/cert.pem"},
 		{name: "absolute regex is not a path", command: `sed -n '/Users/p' README.md`},
 		{name: "absolute search pattern is not a path", command: `rg '/Users' .`},
 	}
@@ -426,6 +426,31 @@ func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
 	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{aliasRoot})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("read-only find through canonical project alias should be low risk: %+v ok=%v", risk, ok)
+	}
+}
+
+func TestClassifyToolCallCommandAcceptsAncestorAndRootAliases(t *testing.T) {
+	base := projectContractDir(t)
+	canonicalParent := filepath.Join(base, "private", "var")
+	canonicalRoot := filepath.Join(canonicalParent, "real")
+	if err := os.MkdirAll(canonicalRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ancestorAlias := filepath.Join(base, "var")
+	if err := os.Symlink(canonicalParent, ancestorAlias); err != nil {
+		t.Fatal(err)
+	}
+	realSpelling := filepath.Join(ancestorAlias, "real")
+	rootAlias := filepath.Join(ancestorAlias, "alias")
+	if err := os.Symlink(realSpelling, rootAlias); err != nil {
+		t.Fatal(err)
+	}
+	for _, authorized := range []string{realSpelling, rootAlias, canonicalRoot} {
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"find", realSpelling, "-type", "f"})})
+		risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{authorized})
+		if !ok || !risk.LowRisk || len(risk.requiredProjectPaths) != 0 {
+			t.Errorf("authorized=%q: %+v ok=%v", authorized, risk, ok)
+		}
 	}
 }
 

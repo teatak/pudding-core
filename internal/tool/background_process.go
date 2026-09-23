@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -28,6 +27,7 @@ const (
 	backgroundProcessPollWaitMax     = 10 * time.Minute
 	backgroundProcessRetentionTTL    = 30 * time.Minute
 	backgroundProcessStopWait        = 2 * time.Second
+	backgroundProcessPTYDrainTimeout = time.Second
 	backgroundProcessInputMax        = 64 << 10
 	backgroundProcessInputTimeout    = 5 * time.Second
 	backgroundProcessTTYColumns      = 100
@@ -120,7 +120,8 @@ type backgroundProcess struct {
 	sandboxKind string
 	tty         bool
 	stdin       io.WriteCloser
-	pty         io.ReadWriteCloser
+	pty         backgroundProcessPTY
+	ptyReadDone chan struct{}
 	inputMu     sync.Mutex
 
 	mu                   sync.Mutex
@@ -154,6 +155,11 @@ type backgroundProcessWriter struct {
 	stream  string
 }
 
+type backgroundProcessPTY interface {
+	io.ReadWriteCloser
+	SetReadDeadline(time.Time) error
+}
+
 func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandRunner) *backgroundProcessManager {
 	if retentionTTL <= 0 {
 		retentionTTL = backgroundProcessRetentionTTL
@@ -176,20 +182,9 @@ func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
 		return toolJSONError(out, "session_required", "background processes require a session")
 	}
 
-	cwd := strings.TrimSpace(args.CWD)
-	if cwd == "" {
-		cwd = "."
-	}
-	_, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
+	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
-		return filePathError(out, args.Scope, err)
-	}
-	info, err := os.Stat(resolvedCWD)
-	if err != nil {
-		return toolJSONError(out, "cwd_unavailable", err.Error())
-	}
-	if !info.IsDir() {
-		return toolJSONError(out, "cwd_not_directory", "command cwd must be a directory")
+		return commandCWDFailure(out, err)
 	}
 	env, err := commandEnvironment(args.Env)
 	if err != nil {
@@ -213,6 +208,13 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	args, err := decodeCommandSessionArgs(call.Args)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.Action == "list" {
+		if strings.TrimSpace(call.SessionID) == "" {
+			return toolJSONError(out, "session_required", "background processes require a session")
+		}
+		processes := r.processes.List(call.SessionID)
+		return withResultSummary(toolJSON(out, true, map[string]any{"ok": true, "processes": processes}), SummaryReturnedItems, len(processes))
 	}
 	process := r.processes.Get(call.SessionID, args.ProcessID)
 	if process == nil {
@@ -250,13 +252,32 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 
 func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	var args commandSessionArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+	trimmed := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(trimmed, "{") {
 		return args, errors.New("command session arguments must be a JSON object")
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return args, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return args, errors.New("command session arguments must contain exactly one JSON object")
 	}
 	args.Action = strings.TrimSpace(args.Action)
 	args.ProcessID = strings.TrimSpace(args.ProcessID)
+	if args.Action == "list" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return args, err
+		}
+		if len(fields) != 1 || fields["action"] == nil {
+			return args, errors.New("list accepts only action")
+		}
+		return args, nil
+	}
 	if args.Action != "poll" && args.Action != "write" && args.Action != "stop" {
-		return args, errors.New("action must be poll, write, or stop")
+		return args, errors.New("action must be list, poll, write, or stop")
 	}
 	if args.ProcessID == "" {
 		return args, errors.New("process_id is required")
@@ -303,6 +324,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		Args:        invocationArgs,
 		CWD:         cwd,
 		Env:         env,
+		SessionID:   sessionID,
 		ProjectDirs: projectDirs,
 		SandboxMode: sandboxMode,
 		StateKey:    stateKey,
@@ -363,8 +385,14 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		configureCommandPTY(cmd)
 		ptmx, startErr := pty.StartWithSize(cmd, &pty.Winsize{Cols: backgroundProcessTTYColumns, Rows: backgroundProcessTTYRows})
 		if startErr == nil {
-			process.stdin = ptmx
-			process.pty = ptmx
+			ptmx, startErr = prepareBackgroundProcessPTY(ptmx)
+			if startErr != nil {
+				_ = terminateCommandProcess(cmd)
+				_ = cmd.Wait()
+			} else {
+				process.stdin = ptmx
+				process.pty = ptmx
+			}
 		}
 		err = startErr
 	} else {
@@ -388,6 +416,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 	}
 	m.emit(sessionID, BackgroundProcessStarted, process.snapshot())
 	if tty {
+		process.ptyReadDone = make(chan struct{})
 		go process.readPTYOutput()
 	}
 	go process.wait()
@@ -583,6 +612,21 @@ func (m *backgroundProcessManager) emit(sessionID, phase string, process Backgro
 
 func (p *backgroundProcess) wait() {
 	waitErr := p.cmd.Wait()
+	if p.ptyReadDone != nil {
+		// exec.Cmd joins its pipe writers, but the PTY reader is ours. Drain
+		// it before closing the master or publishing the final output/state.
+		// A descendant may retain the slave after this command exits, so the
+		// pollable master bounds the drain and makes Close interrupt its Read.
+		p.inputMu.Lock()
+		terminal := p.pty
+		p.inputMu.Unlock()
+		if terminal != nil {
+			if err := terminal.SetReadDeadline(time.Now().Add(backgroundProcessPTYDrainTimeout)); err != nil {
+				p.closeInput()
+			}
+		}
+		<-p.ptyReadDone
+	}
 	p.closeInput()
 	exitCode := -1
 	if p.cmd.ProcessState != nil {
@@ -621,6 +665,7 @@ func (p *backgroundProcess) wait() {
 }
 
 func (p *backgroundProcess) readPTYOutput() {
+	defer close(p.ptyReadDone)
 	buffer := make([]byte, 32<<10)
 	writer := backgroundProcessWriter{process: p, stream: ProgressStdout}
 	for {
