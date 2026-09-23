@@ -622,7 +622,7 @@ func (p *backgroundProcess) wait() {
 		// reused between observing exit and signalling the remaining children.
 		waitErr = waitForBackgroundProcessExit(p.cmd)
 		p.signalMu.Lock()
-		waitErr = errors.Join(waitErr, terminateCommandProcess(p.cmd))
+		waitErr = errors.Join(waitErr, terminateBackgroundProcessGroup(p.cmd, waitErr == nil))
 		p.signalsDone = true
 		p.signalMu.Unlock()
 	}
