@@ -86,25 +86,17 @@ type patchError struct {
 	reason   string
 	detail   string
 	recovery *patchHunkRecovery
+	path     error
 }
 
 type patchLimitError struct {
 	reason string
 	detail string
-	count  int
-	limit  int
+	metric string
+	unit   string
+	actual int64
+	limit  int64
 }
-
-type patchArgumentError struct {
-	kind     string
-	detail   string
-	hint     string
-	field    string
-	expected string
-	offset   int64
-}
-
-func (e *patchArgumentError) Error() string { return e.detail }
 
 func (e *patchError) Error() string {
 	return e.detail
@@ -118,140 +110,19 @@ func newPatchError(reason, detail string) error {
 	return &patchError{reason: reason, detail: detail}
 }
 
-func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *patchArgumentError) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return filePatchArgs{}, &patchArgumentError{
-			kind:   "missing_arguments",
-			detail: "patch arguments are empty",
-			hint:   "Pass one JSON object with scope and files fields.",
-		}
-	}
-	if trimmed[0] != '{' {
-		var value any
-		if err := json.Unmarshal(trimmed, &value); err != nil {
-			return filePatchArgs{}, patchJSONArgumentError(err)
-		}
-		hint := "Pass one JSON object with scope and files fields."
-		if trimmed[0] == '"' {
-			hint = "Pass the object directly instead of a JSON-encoded string."
-		}
-		return filePatchArgs{}, &patchArgumentError{
-			kind:     "expected_object",
-			detail:   "patch arguments must be a JSON object",
-			hint:     hint,
-			expected: "object",
-		}
-	}
+func newPatchLimitError(reason, detail, metric, unit string, actual, limit int64) *patchLimitError {
+	return &patchLimitError{reason: reason, detail: detail, metric: metric, unit: unit, actual: actual, limit: limit}
+}
 
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &fields); err != nil {
-		return filePatchArgs{}, patchJSONArgumentError(err)
-	}
-	for _, field := range []string{"scope", "files"} {
-		if _, ok := fields[field]; !ok {
-			return filePatchArgs{}, &patchArgumentError{
-				kind:     "missing_field",
-				detail:   "required field is missing: " + field,
-				hint:     "Add the required " + field + " field and retry.",
-				field:    field,
-				expected: patchArgumentExpectedType(field),
-			}
-		}
-	}
-
+func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError) {
 	var args filePatchArgs
-	decoder := json.NewDecoder(bytes.NewReader(trimmed))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
-		return filePatchArgs{}, patchJSONArgumentError(err)
-	}
-	return args, nil
+	err := decodeToolArgumentObject(raw, &args, toolArgumentField{"scope", "string"}, toolArgumentField{"files", "array"})
+	return args, err
 }
 
-func patchJSONArgumentError(err error) *patchArgumentError {
-	if strings.HasPrefix(err.Error(), "json: unknown field ") {
-		return &patchArgumentError{
-			kind:   "unknown_field",
-			detail: err.Error(),
-			hint:   "Remove the unsupported field and use the current patch schema.",
-		}
-	}
-	var syntaxErr *json.SyntaxError
-	if errors.As(err, &syntaxErr) {
-		kind := "invalid_json"
-		hint := "Correct the JSON syntax near the reported byte offset and retry."
-		if strings.Contains(strings.ToLower(syntaxErr.Error()), "unexpected end") {
-			kind = "truncated_json"
-			hint = "The arguments appear truncated; resend the complete JSON object, or split a large change into smaller logical batches."
-		}
-		return &patchArgumentError{
-			kind:   kind,
-			detail: syntaxErr.Error(),
-			hint:   hint,
-			offset: syntaxErr.Offset,
-		}
-	}
-	var typeErr *json.UnmarshalTypeError
-	if errors.As(err, &typeErr) {
-		field := typeErr.Field
-		return &patchArgumentError{
-			kind:     "invalid_type",
-			detail:   typeErr.Error(),
-			hint:     "Use the JSON type required by the tool schema and retry.",
-			field:    field,
-			expected: patchArgumentExpectedType(field),
-			offset:   typeErr.Offset,
-		}
-	}
-	return &patchArgumentError{
-		kind:   "invalid_json",
-		detail: err.Error(),
-		hint:   "Pass one valid JSON object matching the patch schema.",
-	}
-}
-
-func patchArgumentExpectedType(field string) string {
-	switch {
-	case field == "scope", strings.HasSuffix(field, ".path"), strings.HasSuffix(field, ".action"), strings.HasSuffix(field, ".content"):
-		return "string"
-	case field == "files", strings.HasSuffix(field, ".hunks"), strings.HasSuffix(field, ".old_lines"), strings.HasSuffix(field, ".new_lines"):
-		return "array"
-	case strings.HasSuffix(field, ".start_line"):
-		return "integer"
-	default:
-		return "schema-compatible value"
-	}
-}
-
-func patchArgumentFailure(out Result, argumentErr *patchArgumentError) Result {
-	payload := map[string]any{
-		"ok":        false,
-		"reason":    "invalid_arguments",
-		"errorKind": argumentErr.kind,
-		"detail":    argumentErr.detail,
-	}
-	if argumentErr.hint != "" {
-		payload["hint"] = argumentErr.hint
-	}
-	if argumentErr.field != "" {
-		payload["field"] = argumentErr.field
-	}
-	if argumentErr.expected != "" {
-		payload["expected"] = argumentErr.expected
-	}
-	if argumentErr.offset > 0 {
-		payload["offset"] = argumentErr.offset
-	}
-	out.Content = jsonString(payload)
-	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = len(payload)
-	return out
-}
-
-func validateFilePatchArgs(args filePatchArgs) *patchArgumentError {
+func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 	if strings.TrimSpace(args.Scope) != managedScopeProject {
-		return &patchArgumentError{
+		return &toolArgumentError{
 			kind:     "invalid_scope",
 			detail:   "scope must be project",
 			hint:     "Set scope to project and retry.",
@@ -260,7 +131,7 @@ func validateFilePatchArgs(args filePatchArgs) *patchArgumentError {
 		}
 	}
 	if len(args.Files) == 0 {
-		return &patchArgumentError{
+		return &toolArgumentError{
 			kind:     "empty_files",
 			detail:   "files must contain at least one entry",
 			hint:     "Add at least one file change and retry.",
@@ -271,47 +142,47 @@ func validateFilePatchArgs(args filePatchArgs) *patchArgumentError {
 	for index, file := range args.Files {
 		fieldPrefix := "files[" + strconv.Itoa(index) + "]"
 		if strings.TrimSpace(file.Path) == "" {
-			return &patchArgumentError{kind: "path_required", detail: "patch file path is required", hint: "Set a project file path and retry.", field: fieldPrefix + ".path", expected: "non-empty string"}
+			return &toolArgumentError{kind: "path_required", detail: "patch file path is required", hint: "Set a project file path and retry.", field: fieldPrefix + ".path", expected: "non-empty string"}
 		}
 		action := strings.TrimSpace(file.Action)
 		switch action {
 		case "create", "replace":
 			if file.Content == nil || len(file.Hunks) > 0 {
-				return &patchArgumentError{kind: "invalid_file_operation", detail: "action=" + action + " requires content and does not accept hunks", hint: "Provide content only for this file action.", field: fieldPrefix, expected: "content without hunks"}
+				return &toolArgumentError{kind: "invalid_file_operation", detail: "action=" + action + " requires content and does not accept hunks", hint: "Provide content only for this file action.", field: fieldPrefix, expected: "content without hunks"}
 			}
 		case "edit":
 			if file.Content != nil || len(file.Hunks) == 0 {
-				return &patchArgumentError{kind: "invalid_file_operation", detail: "action=edit requires hunks and does not accept content", hint: "Provide one or more hunks and omit content.", field: fieldPrefix, expected: "non-empty hunks without content"}
+				return &toolArgumentError{kind: "invalid_file_operation", detail: "action=edit requires hunks and does not accept content", hint: "Provide one or more hunks and omit content.", field: fieldPrefix, expected: "non-empty hunks without content"}
 			}
 			for hunkIndex, hunk := range file.Hunks {
 				hunkField := fieldPrefix + ".hunks[" + strconv.Itoa(hunkIndex) + "]"
 				if hunk.StartLine < 1 {
-					return &patchArgumentError{kind: "hunk_line_invalid", detail: "hunk start_line must be at least 1", hint: "Use a one-based line number from the original file.", field: hunkField + ".start_line", expected: "integer >= 1"}
+					return &toolArgumentError{kind: "hunk_line_invalid", detail: "hunk start_line must be at least 1", hint: "Use a one-based line number from the original file.", field: hunkField + ".start_line", expected: "integer >= 1"}
 				}
 				if hunk.NewLines == nil {
-					return &patchArgumentError{kind: "hunk_new_lines_required", detail: "hunk new_lines is required", hint: "Provide replacement lines, or an empty array to delete old_lines.", field: hunkField + ".new_lines", expected: "array"}
+					return &toolArgumentError{kind: "hunk_new_lines_required", detail: "hunk new_lines is required", hint: "Provide replacement lines, or an empty array to delete old_lines.", field: hunkField + ".new_lines", expected: "array"}
 				}
 				if hunk.OldLines == nil {
-					return &patchArgumentError{kind: "hunk_old_lines_required", detail: "hunk old_lines is required", hint: "Provide exact original lines, or an empty array to insert new_lines.", field: hunkField + ".old_lines", expected: "array"}
+					return &toolArgumentError{kind: "hunk_old_lines_required", detail: "hunk old_lines is required", hint: "Provide exact original lines, or an empty array to insert new_lines.", field: hunkField + ".old_lines", expected: "array"}
 				}
 				if len(*hunk.OldLines) == 0 && len(*hunk.NewLines) == 0 {
-					return &patchArgumentError{kind: "empty_hunk", detail: "hunk old_lines and new_lines cannot both be empty", hint: "Provide old lines to remove or new lines to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
+					return &toolArgumentError{kind: "empty_hunk", detail: "hunk old_lines and new_lines cannot both be empty", hint: "Provide old lines to remove or new lines to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
 				}
 				for _, line := range append(append([]string(nil), (*hunk.OldLines)...), (*hunk.NewLines)...) {
 					if strings.ContainsAny(line, "\r\n") {
-						return &patchArgumentError{kind: "hunk_line_contains_newline", detail: "hunk line entries must not contain newline characters", hint: "Put each logical line in a separate array element.", field: hunkField, expected: "line arrays without newline characters"}
+						return &toolArgumentError{kind: "hunk_line_contains_newline", detail: "hunk line entries must not contain newline characters", hint: "Put each logical line in a separate array element.", field: hunkField, expected: "line arrays without newline characters"}
 					}
 					if !isToolText([]byte(line)) {
-						return &patchArgumentError{kind: "binary_file", detail: "hunk lines must be UTF-8 text without NUL bytes", hint: "Use text line values only.", field: hunkField, expected: "UTF-8 text lines"}
+						return &toolArgumentError{kind: "binary_file", detail: "hunk lines must be UTF-8 text without NUL bytes", hint: "Use text line values only.", field: hunkField, expected: "UTF-8 text lines"}
 					}
 				}
 			}
 		case "delete":
 			if file.Content != nil || len(file.Hunks) > 0 {
-				return &patchArgumentError{kind: "invalid_file_operation", detail: "action=delete does not accept content or hunks", hint: "Remove content and hunks from this file entry.", field: fieldPrefix, expected: "path and action only"}
+				return &toolArgumentError{kind: "invalid_file_operation", detail: "action=delete does not accept content or hunks", hint: "Remove content and hunks from this file entry.", field: fieldPrefix, expected: "path and action only"}
 			}
 		default:
-			return &patchArgumentError{kind: "invalid_action", detail: "patch action must be create, replace, edit, or delete", hint: "Set a supported action and retry.", field: fieldPrefix + ".action", expected: "create, replace, edit, or delete"}
+			return &toolArgumentError{kind: "invalid_action", detail: "patch action must be create, replace, edit, or delete", hint: "Set a supported action and retry.", field: fieldPrefix + ".action", expected: "create, replace, edit, or delete"}
 		}
 	}
 	return nil
@@ -319,18 +190,14 @@ func validateFilePatchArgs(args filePatchArgs) *patchArgumentError {
 
 func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 	if argumentErr := validateFilePatchArgs(args); argumentErr != nil {
+		argumentErr.receivedBytes = len(call.Args)
 		return nil, argumentErr
 	}
 	if strings.TrimSpace(call.SessionID) == "" {
 		return nil, newPatchError("session_required", "session id is required for project patches")
 	}
 	if len(args.Files) > patchMaxFiles {
-		return nil, &patchLimitError{
-			reason: "too_many_files",
-			detail: "patches support at most 16 files; split the change into smaller batches",
-			count:  len(args.Files),
-			limit:  patchMaxFiles,
-		}
+		return nil, newPatchLimitError("too_many_files", "patches support at most 16 files; split the change into smaller batches", "files", "files", int64(len(args.Files)), patchMaxFiles)
 	}
 
 	patch := &preparedPatch{
@@ -362,7 +229,7 @@ func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 		}
 		totalBytes += len(file.OldText) + len(file.NewText)
 		if totalBytes > patchMaxTotalBytes {
-			return nil, newPatchError("patch_too_large", "patch source and destination text exceeds 2 MiB")
+			return nil, newPatchLimitError("patch_too_large", "patch source and destination text exceeds 2 MiB", "combined_source_destination_bytes", "bytes", int64(totalBytes), patchMaxTotalBytes)
 		}
 		fileDiff, additions, deletions, err := buildUnifiedFileDiff(file)
 		if err != nil {
@@ -372,7 +239,7 @@ func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 		file.Deletions = deletions
 		diffs.WriteString(fileDiff)
 		if diffs.Len() > patchMaxDiffBytes {
-			return nil, newPatchError("patch_diff_too_large", "review diff exceeds 256 KiB; split the change into smaller batches")
+			return nil, newPatchLimitError("patch_diff_too_large", "review diff exceeds 256 KiB; split the change into smaller batches", "review_diff_bytes", "bytes", int64(diffs.Len()), patchMaxDiffBytes)
 		}
 		patch.Files = append(patch.Files, file)
 		patch.Additions += additions
@@ -392,11 +259,11 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 	}
 	action := strings.TrimSpace(requested.Action)
 	if len(requested.Hunks) > patchMaxHunksPerFile {
-		return preparedPatchFile{}, "", newPatchError("too_many_hunks", "patch files support at most 64 hunks: "+path)
+		return preparedPatchFile{}, "", newPatchLimitError("too_many_hunks", "patch files support at most 64 hunks: "+path, "hunks", "hunks", int64(len(requested.Hunks)), patchMaxHunksPerFile)
 	}
 	root, target, rel, err := resolveProjectPath(projectDirs, path, false, true)
 	if err != nil {
-		return preparedPatchFile{}, "", &patchError{reason: patchPathReason(err), detail: err.Error()}
+		return preparedPatchFile{}, "", &patchError{reason: patchPathReason(err), detail: err.Error(), path: err}
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -416,7 +283,7 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 			return preparedPatchFile{}, "", newPatchError("regular_file_required", "patch path must be a regular file: "+file.Path)
 		}
 		if info.Size() > patchMaxFileBytes {
-			return preparedPatchFile{}, "", newPatchError("file_too_large", "patch files must not exceed 512 KiB: "+file.Path)
+			return preparedPatchFile{}, "", newPatchLimitError("file_too_large", "patch files must not exceed 512 KiB: "+file.Path, "source_file_bytes", "bytes", info.Size(), patchMaxFileBytes)
 		}
 		data, err := os.ReadFile(target)
 		if err != nil {
@@ -455,7 +322,7 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 	} else {
 		file.NewText = *requested.Content
 		if len(file.NewText) > patchMaxFileBytes {
-			return preparedPatchFile{}, "", newPatchError("file_too_large", "patched file text must not exceed 512 KiB: "+file.Path)
+			return preparedPatchFile{}, "", newPatchLimitError("file_too_large", "patched file text must not exceed 512 KiB: "+file.Path, "destination_file_bytes", "bytes", int64(len(file.NewText)), patchMaxFileBytes)
 		}
 		if !isToolText([]byte(file.NewText)) {
 			return preparedPatchFile{}, "", newPatchError("binary_file", "patched file content must be UTF-8 text without NUL bytes: "+file.Path)
@@ -544,13 +411,17 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, er
 		next = append(next, lines[hunk.end:]...)
 		lines = next
 	}
+	var nextBytes int64
+	for _, line := range lines {
+		nextBytes += int64(len(line.text)) + int64(len(line.ending))
+	}
+	if nextBytes > patchMaxFileBytes {
+		return "", newPatchLimitError("file_too_large", "edited file text must not exceed 512 KiB: "+filePath, "destination_file_bytes", "bytes", nextBytes, patchMaxFileBytes)
+	}
 	var next strings.Builder
 	for _, line := range lines {
 		next.WriteString(line.text)
 		next.WriteString(line.ending)
-		if next.Len() > patchMaxFileBytes {
-			return "", newPatchError("file_too_large", "edited file text must not exceed 512 KiB: "+filePath)
-		}
 	}
 	return next.String(), nil
 }
@@ -591,13 +462,14 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, argumentErr := decodeFilePatchArgs(call.Args)
 	if argumentErr != nil {
-		return patchArgumentFailure(out, argumentErr)
+		return toolArgumentFailure(out, argumentErr)
 	}
 	if argumentErr := validateFilePatchArgs(args); argumentErr != nil {
-		return patchArgumentFailure(out, argumentErr)
+		argumentErr.receivedBytes = len(call.Args)
+		return toolArgumentFailure(out, argumentErr)
 	}
 	if len(args.Files) > patchMaxFiles {
-		return patchLimitFailure(out, "too_many_files", "patches support at most 16 files; split the change into smaller batches", len(args.Files), patchMaxFiles)
+		return patchLimitFailure(out, newPatchLimitError("too_many_files", "patches support at most 16 files; split the change into smaller batches", "files", "files", int64(len(args.Files)), patchMaxFiles))
 	}
 	patch, err := r.takePreparedPatch(call)
 	if err != nil {
@@ -619,14 +491,23 @@ func applyPreparedPatchResult(out Result, projectDirs []string, patch *preparedP
 	return withResultSummary(toolJSON(out, true, payload), SummaryChangedLines, patch.Additions+patch.Deletions)
 }
 
-func patchLimitFailure(out Result, reason, detail string, count, limit int) Result {
+func patchLimitFailure(out Result, limitErr *patchLimitError) Result {
+	hint := "Split independent changes into smaller logical batches and retry."
+	if limitErr.metric == "source_file_bytes" || limitErr.metric == "destination_file_bytes" {
+		hint = "Each source and destination file must fit within the per-file limit."
+	}
 	payload := map[string]any{
 		"ok":     false,
-		"reason": reason,
-		"detail": detail,
-		"count":  count,
-		"limit":  limit,
-		"hint":   "Split the change into smaller logical batches and retry.",
+		"reason": limitErr.reason,
+		"detail": limitErr.detail,
+		"metric": limitErr.metric,
+		"actual": limitErr.actual,
+		"limit":  limitErr.limit,
+		"unit":   limitErr.unit,
+		"hint":   hint,
+	}
+	if limitErr.unit == "files" || limitErr.unit == "hunks" {
+		payload["count"] = limitErr.actual
 	}
 	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedFields
@@ -658,6 +539,7 @@ func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[str
 		return nil, argumentErr
 	}
 	if argumentErr := validateFilePatchArgs(args); argumentErr != nil {
+		argumentErr.receivedBytes = len(call.Args)
 		return nil, argumentErr
 	}
 	patch, err := preparePatch(call, args)
@@ -762,17 +644,21 @@ func patchPayload(patch *preparedPatch) map[string]any {
 }
 
 func patchFailure(out Result, err error) Result {
-	var argumentErr *patchArgumentError
+	var argumentErr *toolArgumentError
 	if errors.As(err, &argumentErr) {
-		return patchArgumentFailure(out, argumentErr)
+		return toolArgumentFailure(out, argumentErr)
 	}
 	var limitErr *patchLimitError
 	if errors.As(err, &limitErr) {
-		return patchLimitFailure(out, limitErr.reason, limitErr.detail, limitErr.count, limitErr.limit)
+		return patchLimitFailure(out, limitErr)
 	}
 	var patchErr *patchError
 	if errors.As(err, &patchErr) {
 		payload := map[string]any{"ok": false, "reason": patchErr.reason, "detail": patchErr.detail}
+		if patchErr.path != nil {
+			payload = projectPathErrorPayload(patchErr.path)
+			payload["reason"] = patchErr.reason
+		}
 		if patchErr.recovery != nil {
 			payload["recovery"] = patchErr.recovery
 			payload["hint"] = patchErr.recovery.hint()
@@ -786,14 +672,10 @@ func patchFailure(out Result, err error) Result {
 }
 
 func patchPathReason(err error) string {
-	switch {
-	case errors.Is(err, errProjectDirsRequired):
-		return "project_dirs_required"
-	case errors.Is(err, errProjectFilePathRequired):
+	if errors.Is(err, errProjectFilePathRequired) {
 		return "path_required"
-	default:
-		return "path_not_authorized"
 	}
+	return projectPathErrorReason(err)
 }
 
 func patchContentHash(data []byte) string {
@@ -889,9 +771,20 @@ func (c patchDiffChunk) Content() string            { return c.content }
 func (c patchDiffChunk) Type() formatdiff.Operation { return c.operation }
 
 func ApprovalDetailsFailure(call Call, err error) Result {
+	if call.Name == CommandRun {
+		out := Result{CallID: call.CallID, Name: call.Name}
+		if _, argumentErr := decodeCommandRunArgs(call.Args); argumentErr != nil {
+			var scopeErr *invalidScopeError
+			if errors.As(argumentErr, &scopeErr) {
+				return filePathError(out, managedScopeProject, argumentErr)
+			}
+			return toolJSONError(out, "invalid_arguments", argumentErr.Error())
+		}
+		return commandCWDFailure(out, err)
+	}
 	var writeErr *gitWriteError
 	if errors.As(err, &writeErr) {
-		return toolJSONError(Result{CallID: call.CallID, Name: call.Name}, writeErr.reason, writeErr.detail)
+		return gitWriteFailure(Result{CallID: call.CallID, Name: call.Name}, writeErr)
 	}
 	return patchFailure(Result{CallID: call.CallID, Name: call.Name}, err)
 }

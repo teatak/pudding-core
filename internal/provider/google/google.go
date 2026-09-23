@@ -209,6 +209,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if c.apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", c.apiKey)
 	}
+	provider.LogRequest(ctx, c.Name(), "generationConfig.maxOutputTokens", gen.MaxOutputTokens)
 	return httpReq, nil
 }
 

@@ -5,6 +5,8 @@
 > 断代：本文件是 [`code-agent-tooling-report.md`](code-agent-tooling-report.md)（2026-09-12 样本）之后的又一次同类样本，编号独立，不覆盖前一份结论。
 > 视角：本次样本从**工具调用失败**入手——每条都给出原始返回、失败原因（区分平台/契约与使用侧）和可落地建议。
 
+> 后续实现：工具侧当前行为见 [Agent 工具调用契约](agent-tool-contracts.md)。本文件保留原始样本与当时建议；F1 的 `unknown scope` 具体来源和 F3 的 provider 截断来源仍未由该样本证明。当前实现统一多 root 显式路径并补充请求诊断，没有将“JSON 未闭合”认定为工具入参体积超限，也没有采用自动 clamp、模糊补丁或候选自动重放。UI 观测回路属于独立的 desktop 工作。
+
 ## 0. 样本与方法
 
 一次 Code 模式下的**前端时序排障会话**：目标是定位并修复 `pudding-desktop` 中“打开工作区拖动中间分隔线时会话区跳动 / 贴底内容先溢出再被拉回”的问题。项目有 3 个授权 root（`pudding-core`、`pudding`、`pudding-desktop`）。

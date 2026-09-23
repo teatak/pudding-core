@@ -11,23 +11,23 @@ import (
 )
 
 func TestFileWriteRejectsInvalidArgumentsWithoutChangingFiles(t *testing.T) {
-	for _, input := range []string{
-		`{"scope":"project","path":"sample.txt"}`,
-		`{"scope":"project","path":"sample.txt","content":null}`,
-		`{"scope":"project","path":"sample.txt","contents":"replacement"}`,
-		`{"scope":"project","path":"sample.txt","content":"replacement","extra":true}`,
-		`{"scope":"project","path":"sample.txt","content":12}`,
-		`{"scope":"project","path":"sample.txt","content":[]}`,
-		`{"scope":"project","path":"sample.txt","content":"replacement"} {}`,
-		`{"scope":"project","path":"sample.txt","content":"replacement"} invalid`,
-		`{"scope":"project","path":"sample.txt","content":"unfinished`,
-		`{"path":"sample.txt","content":"replacement"}`,
-		`{"scope":"project","content":"replacement"}`,
-		`{"scope":"project","path":" ","content":"replacement"}`,
-		`null`,
-		``,
+	for _, tc := range []struct{ input, kind, field string }{
+		{`{"scope":"project","path":"sample.txt"}`, "missing_field", "content"},
+		{`{"scope":"project","path":"sample.txt","content":null}`, "invalid_type", "content"},
+		{`{"scope":"project","path":"sample.txt","contents":"replacement"}`, "missing_field", "content"},
+		{`{"scope":"project","path":"sample.txt","content":"replacement","extra":true}`, "unknown_field", "extra"},
+		{`{"scope":"project","path":"sample.txt","content":12}`, "invalid_type", "content"},
+		{`{"scope":"project","path":"sample.txt","content":[]}`, "invalid_type", "content"},
+		{`{"scope":"project","path":"sample.txt","content":"replacement"} {}`, "invalid_json", ""},
+		{`{"scope":"project","path":"sample.txt","content":"replacement"} invalid`, "invalid_json", ""},
+		{`{"scope":"project","path":"sample.txt","content":"unfinished`, "truncated_json", ""},
+		{`{"path":"sample.txt","content":"replacement"}`, "missing_field", "scope"},
+		{`{"scope":"project","content":"replacement"}`, "missing_field", "path"},
+		{`{"scope":"project","path":" ","content":"replacement"}`, "invalid_value", "path"},
+		{`null`, "expected_object", ""},
+		{``, "missing_arguments", ""},
 	} {
-		t.Run(input, func(t *testing.T) {
+		t.Run(tc.input, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "sample.txt")
 			const original = "original text\n"
@@ -35,10 +35,15 @@ func TestFileWriteRejectsInvalidArgumentsWithoutChangingFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
-			for _, args := range []string{input, strings.ReplaceAll(input, "sample.txt", "new/dir/sample.txt")} {
+			for _, args := range []string{tc.input, strings.ReplaceAll(tc.input, "sample.txt", "new/dir/sample.txt")} {
 				result := runner.Call(context.Background(), Call{Name: FileWrite, Args: json.RawMessage(args), ProjectDirs: []string{root}})
-				if result.Ok || decodeToolResult(t, result)["reason"] != "invalid_arguments" {
+				payload := decodeToolResult(t, result)
+				if result.Ok || payload["reason"] != "invalid_arguments" {
 					t.Fatalf("invalid input must fail before writing: %+v", result)
+				}
+				field, _ := payload["field"].(string)
+				if payload["errorKind"] != tc.kind || field != tc.field || payload["receivedBytes"] != float64(len(args)) {
+					t.Fatalf("inaccurate argument diagnostic: %+v", payload)
 				}
 			}
 			after, err := os.ReadFile(path)

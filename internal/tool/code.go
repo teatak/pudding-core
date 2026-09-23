@@ -491,7 +491,7 @@ func (r *BuiltinRunner) codeTarget(out Result, call Call, path, language string,
 		result := codeUnavailableError(out, unavailable)
 		return resolvedCodeTarget{}, &result
 	}
-	if errors.Is(err, errProjectDirsRequired) || errors.Is(err, errProjectPathNotAllowed) || errors.Is(err, errProjectFilePathRequired) {
+	if errors.Is(err, errProjectDirsRequired) || errors.Is(err, errProjectAbsolutePathRequired) || errors.Is(err, errProjectPathNotAllowed) || errors.Is(err, errProjectFilePathRequired) || errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
 		result := filePathError(out, managedScopeProject, err)
 		return resolvedCodeTarget{}, &result
 	}

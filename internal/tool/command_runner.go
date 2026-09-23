@@ -5,6 +5,7 @@ import "os/exec"
 // commandSpec is shared by foreground and background command tools. A runner
 // may wrap the executable, while the caller continues to own its lifecycle.
 type commandSpec struct {
+	SessionID   string
 	Executable  string
 	Args        []string
 	CWD         string

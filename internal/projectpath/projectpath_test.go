@@ -1,10 +1,71 @@
 package projectpath
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestResolveMultiRootNeverChoosesByExistence(t *testing.T) {
+	first, second := canonicalTestDir(t), canonicalTestDir(t)
+	if err := os.WriteFile(filepath.Join(second, "same.txt"), []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, populateFirst := range []bool{false, true} {
+		if populateFirst {
+			if err := os.WriteFile(filepath.Join(first, "same.txt"), []byte("first"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, allowMissing := range []bool{false, true} {
+			for _, path := range []string{"same.txt", "new.txt", ".", ""} {
+				_, _, _, err := Resolve([]string{first, second}, path, true, allowMissing)
+				if !errors.Is(err, ErrAbsolutePathRequired) {
+					t.Fatalf("path=%q allowMissing=%v firstExists=%v: %v", path, allowMissing, populateFirst, err)
+				}
+			}
+		}
+	}
+	root, target, _, err := Resolve([]string{first, second}, filepath.Join(second, "same.txt"), false, false)
+	if err != nil || root != second || target != filepath.Join(second, "same.txt") {
+		t.Fatalf("explicit second root: root=%q target=%q err=%v", root, target, err)
+	}
+}
+
+func TestResolveDistinguishesMissingFromUnauthorized(t *testing.T) {
+	root, outside := canonicalTestDir(t), canonicalTestDir(t)
+	missing := filepath.Join(root, "new", "file.txt")
+	if _, _, _, err := Resolve([]string{root}, missing, false, false); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing authorized target: %v", err)
+	}
+	if _, target, _, err := Resolve([]string{root}, "new/file.txt", false, true); err != nil || target != missing {
+		t.Fatalf("relative create target=%q err=%v", target, err)
+	}
+	for _, allowMissing := range []bool{false, true} {
+		if _, _, _, err := Resolve([]string{root}, filepath.Join(outside, "missing.txt"), false, allowMissing); !errors.Is(err, ErrPathNotAllowed) {
+			t.Fatalf("outside missing target allowMissing=%v: %v", allowMissing, err)
+		}
+	}
+}
+
+func TestResolveRejectsSymlinkCreationEscape(t *testing.T) {
+	root, outside := canonicalTestDir(t), canonicalTestDir(t)
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, _, _, err := Resolve([]string{root}, "escape/new.txt", false, true); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("missing file under escaping symlink: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "not-created"), filepath.Join(root, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"dangling", "dangling/file.txt"} {
+		if _, _, _, err := Resolve([]string{root}, path, false, true); err == nil {
+			t.Fatalf("dangling symlink accepted as a creatable path: %s", path)
+		}
+	}
+}
 
 func TestResolveAcceptsCanonicalSpellingOfAuthorizedSymlinkRoot(t *testing.T) {
 	base := t.TempDir()
@@ -72,4 +133,13 @@ func TestResolveCanonicalSpellingStillRejectsSymlinkEscape(t *testing.T) {
 	if _, _, _, err := Resolve([]string{aliasRoot}, filepath.Join(realRoot, "escape", "secret.txt"), false, false); err != ErrPathNotAllowed {
 		t.Fatalf("symlink escape error = %v, want %v", err, ErrPathNotAllowed)
 	}
+}
+
+func canonicalTestDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }

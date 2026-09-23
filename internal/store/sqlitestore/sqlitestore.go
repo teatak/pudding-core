@@ -534,39 +534,43 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 		} else if parentID != "" {
 			return store.ErrInvalidSessionRelation
 		}
-		now := time.Now()
-		res, err := tx.ExecContext(ctx,
-			`UPDATE sessions SET archived_at=?,updated_at=? WHERE id=? AND archived_at=0`,
-			unixMS(now), unixMS(now), id,
-		)
-		if err != nil {
+		if _, err := getSessionTx(ctx, tx, id); err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
+		if err := archiveSessionGroupTx(ctx, tx, id, time.Now()); err != nil {
 			return err
 		}
-		if n == 0 {
-			return store.ErrNotFound
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=?,updated_at=?
-			WHERE id IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, unixMS(now), unixMS(now), id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE queued_inputs SET status=?,updated_at=? WHERE (session_id=? OR session_id IN
-			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)) AND status IN (?,?)`,
-			store.QueuedInputCancelled, unixMS(now), id, id, store.QueuedInputQueued, store.QueuedInputEditing,
-		); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE scheduled_tasks SET enabled=0,revision=revision+1,updated_at=? WHERE session_id=? AND deleted=0`, unixMS(now), id); err != nil {
-			return err
-		}
+		var err error
 		out, err = getSessionAnyTx(ctx, tx, id)
 		return err
 	})
 	return out, err
+}
+
+func (s *Store) PrepareSessionDeletion(ctx context.Context, id string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionAnyTx(ctx, tx, id); err != nil {
+			return err
+		}
+		return archiveSessionGroupTx(ctx, tx, id, time.Now())
+	})
+}
+
+func archiveSessionGroupTx(ctx context.Context, tx *sql.Tx, id string, now time.Time) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=?,updated_at=?
+		WHERE archived_at=0 AND (id=? OR id IN
+		(SELECT child_session_id FROM session_children WHERE parent_session_id=?))`, unixMS(now), unixMS(now), id, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE queued_inputs SET status=?,updated_at=? WHERE (session_id=? OR session_id IN
+		(SELECT child_session_id FROM session_children WHERE parent_session_id=?)) AND status IN (?,?)`,
+		store.QueuedInputCancelled, unixMS(now), id, id, store.QueuedInputQueued, store.QueuedInputEditing,
+	); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE scheduled_tasks SET enabled=0,revision=revision+1,updated_at=? WHERE session_id=? AND deleted=0`, unixMS(now), id)
+	return err
 }
 
 func (s *Store) RestoreSession(ctx context.Context, id string) (*store.Session, error) {

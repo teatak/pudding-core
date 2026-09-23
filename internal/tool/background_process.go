@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -176,20 +175,9 @@ func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
 		return toolJSONError(out, "session_required", "background processes require a session")
 	}
 
-	cwd := strings.TrimSpace(args.CWD)
-	if cwd == "" {
-		cwd = "."
-	}
-	_, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
+	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
-		return filePathError(out, args.Scope, err)
-	}
-	info, err := os.Stat(resolvedCWD)
-	if err != nil {
-		return toolJSONError(out, "cwd_unavailable", err.Error())
-	}
-	if !info.IsDir() {
-		return toolJSONError(out, "cwd_not_directory", "command cwd must be a directory")
+		return commandCWDFailure(out, err)
 	}
 	env, err := commandEnvironment(args.Env)
 	if err != nil {
@@ -213,6 +201,13 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	args, err := decodeCommandSessionArgs(call.Args)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.Action == "list" {
+		if strings.TrimSpace(call.SessionID) == "" {
+			return toolJSONError(out, "session_required", "background processes require a session")
+		}
+		processes := r.processes.List(call.SessionID)
+		return withResultSummary(toolJSON(out, true, map[string]any{"ok": true, "processes": processes}), SummaryReturnedItems, len(processes))
 	}
 	process := r.processes.Get(call.SessionID, args.ProcessID)
 	if process == nil {
@@ -250,13 +245,32 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 
 func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	var args commandSessionArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+	trimmed := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(trimmed, "{") {
 		return args, errors.New("command session arguments must be a JSON object")
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return args, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return args, errors.New("command session arguments must contain exactly one JSON object")
 	}
 	args.Action = strings.TrimSpace(args.Action)
 	args.ProcessID = strings.TrimSpace(args.ProcessID)
+	if args.Action == "list" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return args, err
+		}
+		if len(fields) != 1 || fields["action"] == nil {
+			return args, errors.New("list accepts only action")
+		}
+		return args, nil
+	}
 	if args.Action != "poll" && args.Action != "write" && args.Action != "stop" {
-		return args, errors.New("action must be poll, write, or stop")
+		return args, errors.New("action must be list, poll, write, or stop")
 	}
 	if args.ProcessID == "" {
 		return args, errors.New("process_id is required")
@@ -303,6 +317,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		Args:        invocationArgs,
 		CWD:         cwd,
 		Env:         env,
+		SessionID:   sessionID,
 		ProjectDirs: projectDirs,
 		SandboxMode: sandboxMode,
 		StateKey:    stateKey,

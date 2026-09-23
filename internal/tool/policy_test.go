@@ -346,7 +346,7 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 		t.Fatalf("sandbox-managed temporary script should remain low risk: %+v ok=%v", tempScriptRisk, ok)
 	}
 
-	systemInputRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat < /etc/ssl/cert.pem"}`), []string{root})
+	systemInputRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat < /private/etc/ssl/cert.pem"}`), []string{root})
 	if !ok || !systemInputRisk.LowRisk || len(systemInputRisk.requiredProjectPaths) != 0 {
 		t.Fatalf("sandbox-readable input redirection should remain low risk: %+v ok=%v", systemInputRisk, ok)
 	}
@@ -382,7 +382,7 @@ func TestClassifyToolCallCommandSeparatesApprovalFromExecutionBoundary(t *testin
 		{name: "outside script", command: "python3 " + quoteShellArg(outsideScript), outside: true},
 		{name: "outside destructive path", command: "rm -rf " + quoteShellArg(outside), outside: true},
 		{name: "outside PATH", command: "my-tool --check", outside: true},
-		{name: "sandbox runtime read", command: "cat /etc/ssl/cert.pem"},
+		{name: "sandbox runtime read", command: "cat /private/etc/ssl/cert.pem"},
 		{name: "absolute regex is not a path", command: `sed -n '/Users/p' README.md`},
 		{name: "absolute search pattern is not a path", command: `rg '/Users' .`},
 	}

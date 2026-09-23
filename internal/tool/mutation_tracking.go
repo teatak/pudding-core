@@ -129,11 +129,7 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		// intentionally POSIX-shell based.
 		return observation, true
 	}
-	cwd := strings.TrimSpace(args.CWD)
-	if cwd == "" {
-		cwd = "."
-	}
-	_, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
+	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
 		return ProjectMutationTracking{}, false
 	}

@@ -2410,6 +2410,10 @@ type Store interface {
 	ArchiveSession(ctx context.Context, id string) (*Session, error)
 	RestoreSession(ctx context.Context, id string) (*Session, error)
 	ListExpiredArchivedSessionIDs(ctx context.Context, cutoff time.Time) ([]string, error)
+	// PrepareSessionDeletion closes turn/queue admission before runtime cleanup.
+	// Roots include their children; a child affects only itself. Existing
+	// archived sessions are accepted, and no running turn is removed yet.
+	PrepareSessionDeletion(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
 	HasComputerAppGrant(ctx context.Context, sessionID, appID string) (bool, error)
 	GrantComputerApp(ctx context.Context, sessionID, appID string) error

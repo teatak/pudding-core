@@ -130,7 +130,7 @@ func TestBuiltinFileRejectsUnknownManagedScope(t *testing.T) {
 		t.Fatalf("unknown scope should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["reason"] != "path_not_allowed" {
+	if payload["reason"] != "invalid_scope" {
 		t.Fatalf("unexpected reason: %+v", payload)
 	}
 }

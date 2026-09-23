@@ -82,6 +82,7 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	maxEntries := args.MaxEntries
 	if maxEntries <= 0 {
 		maxEntries = defaultFileListMax
@@ -192,6 +193,7 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, true)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
@@ -252,6 +254,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	caseSensitive := true
 	if args.CaseSensitive != nil {
 		caseSensitive = *args.CaseSensitive
@@ -331,6 +334,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
@@ -435,6 +439,7 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
@@ -505,16 +510,25 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 		Path    string  `json:"path"`
 		Content *string `json:"content"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(call.Args))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args,
+		toolArgumentField{"scope", "string"}, toolArgumentField{"path", "string"}, toolArgumentField{"content", "string"}); err != nil {
+		return toolArgumentFailure(out, err)
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return toolJSONError(out, "invalid_arguments", "file write arguments must contain exactly one JSON object")
+	args.Scope = strings.TrimSpace(args.Scope)
+	args.Path = strings.TrimSpace(args.Path)
+	for _, field := range []struct{ name, value string }{{"scope", args.Scope}, {"path", args.Path}} {
+		if field.value == "" {
+			return toolArgumentFailure(out, &toolArgumentError{
+				kind: "invalid_value", detail: field.name + " must be a non-empty string", field: field.name,
+				expected: "non-empty string", hint: "Set the required " + field.name + " field and retry.", receivedBytes: len(call.Args),
+			})
+		}
 	}
-	if strings.TrimSpace(args.Scope) == "" || strings.TrimSpace(args.Path) == "" || args.Content == nil {
-		return toolJSONError(out, "invalid_arguments", "scope, path, and string content are required; content may be an explicit empty string")
+	if args.Content == nil {
+		return toolArgumentFailure(out, &toolArgumentError{
+			kind: "invalid_type", detail: "content must be a string, not null", field: "content", expected: "string",
+			hint: "Pass the complete replacement text; an explicit empty string intentionally clears the file.", receivedBytes: len(call.Args),
+		})
 	}
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
@@ -543,6 +557,7 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
@@ -582,6 +597,7 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	args.Scope = strings.TrimSpace(args.Scope)
 	fromResolved, err := r.resolveFilePath(call, args.Scope, args.FromPath, true, false, false)
 	if err != nil {
 		return filePathErrorWithReason(out, args.Scope, "from_path_not_allowed", err)
@@ -641,10 +657,13 @@ func decodeFileCopyArgs(raw json.RawMessage) (fileCopyArgs, error) {
 	}{{"from", &args.From}, {"to", &args.To}} {
 		endpoint.value.Scope = strings.TrimSpace(endpoint.value.Scope)
 		endpoint.value.Path = strings.TrimSpace(endpoint.value.Path)
+		if endpoint.value.Scope == "" {
+			return args, errors.New(endpoint.name + ".scope is required")
+		}
 		switch endpoint.value.Scope {
 		case managedScopeTemp, managedScopeSkill, managedScopeProject:
 		default:
-			return args, errors.New(endpoint.name + ".scope must be temp, skill or project")
+			return args, &invalidScopeError{Field: endpoint.name + ".scope", Allowed: []string{managedScopeTemp, managedScopeSkill, managedScopeProject}}
 		}
 		if endpoint.value.Path == "" {
 			return args, errors.New(endpoint.name + ".path is required")
@@ -657,6 +676,10 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, err := decodeFileCopyArgs(call.Args)
 	if err != nil {
+		var scopeErr *invalidScopeError
+		if errors.As(err, &scopeErr) {
+			return filePathError(out, "", err)
+		}
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	fromResolved, err := r.resolveFilePath(call, args.From.Scope, args.From.Path, false, false, false)
@@ -856,6 +879,7 @@ func copyFileDir(src, dst string) error {
 }
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
+	scope = strings.TrimSpace(scope)
 	if isProjectFileScope(scope) {
 		root, target, rel, err := resolveProjectPath(call.ProjectDirs, rawPath, allowRoot, allowMissing)
 		if err != nil {
@@ -875,23 +899,43 @@ func filePathError(out Result, scope string, err error) Result {
 }
 
 func filePathErrorWithReason(out Result, scope, fallbackReason string, err error) Result {
+	var scopeErr *invalidScopeError
+	if errors.As(err, &scopeErr) {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_scope", "detail": err.Error(), "field": scopeErr.Field, "allowedScopes": scopeErr.Allowed})
+	}
 	if !isProjectFileScope(scope) {
+		if errors.Is(err, os.ErrNotExist) {
+			return toolJSONError(out, "path_not_found", err.Error())
+		}
 		return toolJSONError(out, fallbackReason, err.Error())
 	}
-	reason := "path_not_authorized"
-	hint := "The path is outside authorized project directories. Use request_capability with targetMode=code and projectDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
-	if errors.Is(err, errProjectDirsRequired) {
-		reason = "project_dirs_required"
+	payload := projectPathErrorPayload(err)
+	out = toolJSON(out, false, payload)
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = len(payload)
+	return out
+}
+
+func projectPathErrorPayload(err error) map[string]any {
+	reason := projectPathErrorReason(err)
+	hint := "Inspect the filesystem error for the selected path."
+	switch reason {
+	case "path_not_authorized":
+		hint = "The path is outside authorized project directories. Request access only if this is the intended target."
+	case "project_dirs_required":
 		hint = "No project directories are authorized. Use request_capability with targetMode=code and projectDirs, then ask the user to approve it for this turn if temporary access is enough."
-	} else if errors.Is(err, errProjectFilePathRequired) {
-		reason = "path_not_allowed"
+	case "absolute_path_required":
+		hint = "Select one authorized project root and pass an absolute path or cwd. file_list with scope=project and path=. lists the roots."
+	case "path_not_found":
+		hint = "The selected authorized path does not exist. Check the path or use file_stat to test existence; additional project access is not required."
+	case "path_not_allowed":
 		hint = "A file path is required for this tool."
 	}
-	out.Ok = false
-	out.Content = jsonString(map[string]any{"ok": false, "reason": reason, "detail": err.Error(), "hint": hint})
-	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 4
-	return out
+	payload := map[string]any{"ok": false, "reason": reason, "detail": err.Error(), "hint": hint}
+	if roots := projectPathErrorRoots(err); len(roots) > 0 {
+		payload["projectRoots"] = roots
+	}
+	return payload
 }
 
 func isProjectFileScope(scope string) bool {
@@ -899,6 +943,10 @@ func isProjectFileScope(scope string) bool {
 }
 
 func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
+	scope = strings.TrimSpace(scope)
+	if scope != managedScopeApp && scope != managedScopeSkill && scope != managedScopeTemp {
+		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopeApp, managedScopeSkill, managedScopeTemp, managedScopeProject}}
+	}
 	if strings.TrimSpace(r.homeDir) == "" {
 		return "", false, errors.New("home directory is not configured")
 	}
@@ -910,11 +958,12 @@ func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
 	case managedScopeTemp:
 		return home.TempPath(r.homeDir), true, nil
 	default:
-		return "", false, errors.New("unknown scope")
+		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopeApp, managedScopeSkill, managedScopeTemp, managedScopeProject}}
 	}
 }
 
 func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritable, allowRoot bool) (string, string, string, error) {
+	scope = strings.TrimSpace(scope)
 	root, writable, err := r.managedRoot(scope)
 	if err != nil {
 		return "", "", "", err

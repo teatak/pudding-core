@@ -194,6 +194,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if c.apiKey != "" {
 		httpReq.Header.Set("x-api-key", c.apiKey)
 	}
+	provider.LogRequest(ctx, c.Name(), "max_tokens", &body.MaxTokens)
 	return httpReq, nil
 }
 

@@ -15,7 +15,10 @@ import (
 func (e *Engine) acquireToolResources(ctx context.Context, call tool.Call) (func(), error) {
 	var keys []string
 	// Computer Use already serializes native mutations in computer.Manager.
-	risk, classified := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs)
+	risk, classified, err := e.classifyToolCall(call.SessionID, call)
+	if err != nil {
+		return nil, err
+	}
 	_, mutation := tool.MutationTrackingForCall(call)
 	if mutation || call.Name == tool.CommandRun || classified && risk.Class != tool.RiskClassRead && risk.Scope != "computer" {
 		for _, dir := range call.ProjectDirs {

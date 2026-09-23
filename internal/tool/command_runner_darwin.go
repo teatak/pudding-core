@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/teatak/pudding-core/internal/home"
 )
 
 const (
@@ -64,12 +66,26 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 
 	readRoots := append([]string(nil), projectRoots...)
 	readRoots = append(readRoots, stateRoot)
+	artifactRoot, hasArtifacts, err := home.ExistingSessionArtifacts(r.homeDir, spec.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve session artifacts: %w", err)
+	}
+	if hasArtifacts {
+		readRoots = append(readRoots, artifactRoot)
+	}
 	readRoots = append(readRoots, sandboxStaticReadRoots()...)
 	readRoots = append(readRoots, sandboxKnownReadRoots()...)
 	readRoots = append(readRoots, toolchainRoot)
 	readRoots = sandboxUniquePaths(readRoots)
 	writeRoots := sandboxUniquePaths(append(projectRoots, stateRoot))
-	profile, definitions := sandboxProfile(readRoots, writeRoots)
+	if hasArtifacts {
+		writeRoots = sandboxUniquePaths(append(writeRoots, artifactRoot))
+	}
+	inheritedEnv, err := commandEnvironment(nil)
+	if err != nil {
+		return nil, err
+	}
+	profile, definitions := sandboxProfile(readRoots, writeRoots, inheritedGitIgnoreFiles(inheritedEnv, spec.Env))
 
 	args := []string{"-p", profile}
 	for _, definition := range definitions {
@@ -301,14 +317,21 @@ type sandboxDefinition struct {
 	path string
 }
 
-func sandboxProfile(readRoots, writeRoots []string) (string, []sandboxDefinition) {
+func sandboxProfile(readRoots, writeRoots []string, readFiles []sandboxReadFile) (string, []sandboxDefinition) {
 	var policy strings.Builder
 	policy.WriteString(macOSCommandSandboxBasePolicy)
 	policy.WriteString("\n; Per-command filesystem grants.\n")
 	ancestorRoots := append([]string(nil), readRoots...)
 	ancestorRoots = append(ancestorRoots, writeRoots...)
+	var filePaths, lookupPaths []string
+	for _, file := range readFiles {
+		filePaths = append(filePaths, file.path)
+		lookupPaths = append(lookupPaths, file.lookup)
+		ancestorRoots = append(ancestorRoots, file.path, file.lookup)
+	}
 	ancestors := sandboxAncestorPaths(ancestorRoots)
-	definitions := make([]sandboxDefinition, 0, len(ancestors)+len(readRoots)+len(writeRoots))
+	ancestors = sandboxUniquePaths(append(ancestors, lookupPaths...))
+	definitions := make([]sandboxDefinition, 0, len(ancestors)+len(readRoots)+len(writeRoots)+len(readFiles))
 	writeRule := func(operation, prefix, filter string, paths []string) {
 		if len(paths) == 0 {
 			return
@@ -323,6 +346,7 @@ func sandboxProfile(readRoots, writeRoots []string) (string, []sandboxDefinition
 	}
 	writeRule("file-read-metadata file-test-existence", "ANCESTOR", "literal", ancestors)
 	writeRule("file-read* file-test-existence file-map-executable", "READ_ROOT", "subpath", readRoots)
+	writeRule("file-read* file-test-existence", "READ_FILE", "literal", filePaths)
 	writeRule("file-write*", "WRITE_ROOT", "subpath", writeRoots)
 	return policy.String(), definitions
 }
