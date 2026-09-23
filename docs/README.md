@@ -34,6 +34,7 @@
 | [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
 | [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
 | [code-agent-tooling-report.md](code-agent-tooling-report.md) | core 工具与沙箱改进记录；桌面问题样本按文首跨仓路径约定读取 |
+| [agent-tooling-issues-2026-09-23.md](agent-tooling-issues-2026-09-23.md) | 一次 UI 时序排障会话的工具调用失败记录（原文、原因、建议）与 UI 观测回路缺口 |
 
 ## 待实施设计
 
