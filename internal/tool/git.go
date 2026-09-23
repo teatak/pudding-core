@@ -205,7 +205,8 @@ func resolveGitRepository(ctx context.Context, call Call, scope, cwd string) (gi
 	}
 	rootResult := runGit(ctx, resolvedCWD, 4096, "rev-parse", "--show-toplevel")
 	if rootResult.err != nil {
-		return gitRepository{}, &gitRepositoryError{reason: gitFailureReason(ctx, rootResult.err, "not_git_repository"), detail: gitExecDetail(rootResult)}
+		err := projectgit.DiscoveryError(ctx, rootResult.err, rootResult.stderr.String())
+		return gitRepository{}, &gitRepositoryError{reason: projectgit.ErrorCode(err), detail: gitExecDetail(rootResult)}
 	}
 	if rootResult.stdout.Truncated() {
 		return gitRepository{}, &gitRepositoryError{reason: "git_output_too_large", detail: "git repository path exceeded the safety limit"}
@@ -247,7 +248,7 @@ func runGitInput(ctx context.Context, dir string, stdoutLimit int, input []byte,
 	gitArgs = append(gitArgs, args...)
 	stdout := newTruncatingBuffer(stdoutLimit)
 	stderr := newTruncatingBuffer(gitStderrLimitBytes)
-	env, err := commandEnvironment(map[string]string{
+	gitEnv := map[string]string{
 		"GIT_ATTR_NOSYSTEM":   "1",
 		"GIT_OPTIONAL_LOCKS":  "0",
 		"GIT_PAGER":           "cat",
@@ -256,13 +257,17 @@ func runGitInput(ctx context.Context, dir string, stdoutLimit int, input []byte,
 		"LC_ALL":              "C",
 		"NO_COLOR":            "1",
 		"PAGER":               "cat",
-	})
+	}
+	for key, value := range projectgit.ConfigEnvironment() {
+		gitEnv[key] = value
+	}
+	env, err := commandEnvironment(gitEnv)
 	if err != nil {
 		return gitExecResult{stdout: stdout, stderr: stderr, err: err}
 	}
 	executable, err := resolveExecutableFromEnv("git", dir, env)
 	if err != nil {
-		return gitExecResult{stdout: stdout, stderr: stderr, err: err}
+		return gitExecResult{stdout: stdout, stderr: stderr, err: errors.Join(err, exec.ErrNotFound)}
 	}
 	cmd := exec.CommandContext(ctx, executable, gitArgs...)
 	cmd.Dir = dir

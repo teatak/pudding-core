@@ -134,6 +134,9 @@ func gitEnvironment() []string {
 			values[strings.ToUpper(key)] = key + "=" + value
 		}
 	}
+	for key, value := range ConfigEnvironment() {
+		values[key] = key + "=" + value
+	}
 	for key, value := range map[string]string{
 		"GIT_ATTR_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat",
 		"GIT_TERMINAL_PROMPT": "0", "LANG": "C", "LC_ALL": "C", "NO_COLOR": "1", "PAGER": "cat",
@@ -148,6 +151,19 @@ func gitEnvironment() []string {
 	env := make([]string, 0, len(keys))
 	for _, key := range keys {
 		env = append(env, values[key])
+	}
+	return env
+}
+
+// ConfigEnvironment preserves explicit Git configuration selection without
+// inheriting repository redirects or arbitrary Git configuration injection.
+// Absent controls stay absent so host Git keeps its usual configuration lookup.
+func ConfigEnvironment() map[string]string {
+	env := make(map[string]string)
+	for _, key := range []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "XDG_CONFIG_HOME"} {
+		if value, ok := os.LookupEnv(key); ok {
+			env[key] = value
+		}
 	}
 	return env
 }
@@ -172,8 +188,10 @@ func execDetail(result execResult) string {
 
 func commandError(ctx context.Context, fallback string, result execResult) error {
 	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return newError(CodeTimedOut, "Git command timed out", ctx.Err())
+	case errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(result.err, context.DeadlineExceeded):
+		return newError(CodeTimedOut, "Git command timed out", context.DeadlineExceeded)
+	case errors.Is(ctx.Err(), context.Canceled), errors.Is(result.err, context.Canceled):
+		return newError(CodeCancelled, "Git command cancelled", context.Canceled)
 	case errors.Is(result.err, exec.ErrNotFound):
 		return newError(CodeGitUnavailable, "Git executable is unavailable", result.err)
 	default:
