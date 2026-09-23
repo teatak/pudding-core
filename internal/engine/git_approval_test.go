@@ -16,6 +16,12 @@ import (
 
 func TestStructuredGitWorkflowApprovalModes(t *testing.T) {
 	// No real user Git config, repositories, hooks, or credentials are used.
+	userHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(userHome, ".gitconfig"), []byte("[invalid config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", userHome)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, mode := range []store.ApprovalMode{store.ApprovalAuto, store.ApprovalAsk, store.ApprovalFull} {

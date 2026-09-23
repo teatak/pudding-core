@@ -146,3 +146,17 @@ macOS、Linux 和 BSD 的后台命令退出时先清理原进程组的剩余成�
 这不会扫描整个项目，也不将后台进程的变更归入当前 turn。
 
 实现：[命令变更追踪](../internal/tool/mutation_tracking.go)。
+
+## 8. Git 仓库探测与配置隔离
+
+项目 Git API 与结构化 Git 工具共用仓库探测错误分类。只有 Git 明确报告非仓库，才返回
+`not_git_repository`；配置、权限等导致的探测失败返回 `git_discovery_failed`，工具保留
+错误详情。Git 不可用、超时和取消分别保留 `git_unavailable`、`timed_out`、`cancelled`。
+Git status API 仅对明确非仓库返回 `available=false`；探测执行失败返回错误响应。
+
+Git 子进程保留调用方显式设置的 `GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、
+`GIT_CONFIG_NOSYSTEM` 和 `XDG_CONFIG_HOME`，使沙箱和测试的配置隔离在后续调用中继续
+生效。未设置时使用既有 host 配置行为；其他 Git 环境覆盖不因此加入继承白名单。
+
+实现：[Git 仓库探测](../internal/projectgit/repository.go)、
+[Git 环境](../internal/projectgit/exec.go)、[结构化 Git 工具](../internal/tool/git.go)。
