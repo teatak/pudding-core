@@ -138,35 +138,25 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		return observation, true
 	}
 
-	rawTargets := make([]string, 0, len(analysis.Redirections))
-	for _, redirect := range analysis.Redirections {
-		if redirect.Writes && !isSafeDeviceRedirection(redirect.Path) {
-			rawTargets = append(rawTargets, redirect.Path)
+	var targets []string
+	seen := make(map[string]struct{})
+	overflow := false
+	collectShellMutationTargets(analysis.file, resolvedCWD, args.Env, func(cwd, raw string) {
+		if overflow {
+			return
 		}
-	}
-	if !analysis.Dynamic {
-		for _, argv := range analysis.Commands {
-			rawTargets = append(rawTargets, commandMutationPaths(argv)...)
-		}
-	}
-
-	targets := make([]string, 0, len(rawTargets))
-	seen := make(map[string]struct{}, len(rawTargets))
-	for _, raw := range rawTargets {
-		if len(targets) >= maxCommandMutationTargets {
-			return observation, true
-		}
-		target, ok := resolveCommandMutationTarget(call.ProjectDirs, resolvedCWD, raw)
+		target, ok := resolveCommandMutationTarget(call.ProjectDirs, cwd, raw)
 		if !ok {
-			continue
+			return
 		}
 		if _, duplicate := seen[target]; duplicate {
-			continue
+			return
 		}
 		seen[target] = struct{}{}
 		targets = append(targets, target)
-	}
-	if len(targets) == 0 {
+		overflow = len(targets) > maxCommandMutationTargets
+	})
+	if overflow || len(targets) == 0 {
 		return observation, true
 	}
 	sort.Strings(targets)
@@ -183,7 +173,17 @@ func resolveCommandMutationTarget(roots []string, cwd, raw string) (string, bool
 	}
 	target := raw
 	if !filepath.IsAbs(target) {
-		target = filepath.Join(cwd, target)
+		if cwd == "" {
+			return "", false
+		}
+		// cd uses a logical PWD, but relative file operands use the kernel's
+		// physical cwd. Resolve it before joining .., which would otherwise
+		// erase a symlink component and select a different project file.
+		_, physicalCWD, _, err := resolveProjectPath(roots, cwd, true, true)
+		if err != nil {
+			return "", false
+		}
+		target = filepath.Join(physicalCWD, target)
 	}
 	_, resolved, relative, err := resolveProjectPath(roots, target, true, true)
 	if err != nil || relative == "." {

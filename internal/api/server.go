@@ -714,6 +714,8 @@ func (s *Server) archiveSession(c *cart.Context) error {
 	defer unlock()
 	// Archive first closes admission and cancels queued inputs atomically. A
 	// finishing turn therefore cannot promote another input while cleanup runs.
+	// The store accepts an existing archive so a cancelled request can retry
+	// joining work and releasing resources under the same lifecycle lock.
 	session, err := s.store.ArchiveSession(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)

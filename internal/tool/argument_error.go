@@ -63,8 +63,76 @@ func decodeToolArgumentObject(raw json.RawMessage, target any, required ...toolA
 		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	decoder.UseNumber()
+	if err := validateToolArgumentValue(decoder, reflect.TypeOf(target), ""); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return classifyToolArgumentError(err)
+	}
+	return nil
+}
+
+// encoding/json accepts case-insensitive field names and null scalar values.
+// Inspect every raw value against the target's JSON tags before decoding so
+// neither can silently replace a requested mutation with a zero value.
+func validateToolArgumentValue(decoder *json.Decoder, valueType reflect.Type, field string) *toolArgumentError {
+	for valueType.Kind() == reflect.Pointer {
+		valueType = valueType.Elem()
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return classifyToolArgumentError(err)
+	}
+	typeError := func(value string) *toolArgumentError {
+		return classifyToolArgumentError(&json.UnmarshalTypeError{Value: value, Type: valueType, Field: field, Offset: decoder.InputOffset()})
+	}
+	switch token {
+	case nil:
+		return typeError("null")
+	case json.Delim('{'):
+		if valueType.Kind() != reflect.Struct {
+			return typeError("object")
+		}
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return classifyToolArgumentError(err)
+			}
+			name := key.(string)
+			var fieldType reflect.Type
+			for index := 0; index < valueType.NumField(); index++ {
+				declared := valueType.Field(index)
+				jsonName, _, _ := strings.Cut(declared.Tag.Get("json"), ",")
+				if declared.IsExported() && jsonName != "-" && jsonName == name {
+					fieldType = declared.Type
+					break
+				}
+			}
+			if fieldType == nil {
+				return classifyToolArgumentError(errors.New("json: unknown field " + strconv.Quote(name)))
+			}
+			childField := name
+			if field != "" {
+				childField = field + "." + name
+			}
+			if err := validateToolArgumentValue(decoder, fieldType, childField); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+	case json.Delim('['):
+		if valueType.Kind() != reflect.Array && valueType.Kind() != reflect.Slice {
+			return typeError("array")
+		}
+		for index := 0; decoder.More(); index++ {
+			if err := validateToolArgumentValue(decoder, valueType.Elem(), field+"["+strconv.Itoa(index)+"]"); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+	}
+	if err != nil {
 		return classifyToolArgumentError(err)
 	}
 	return nil

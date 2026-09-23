@@ -486,11 +486,16 @@ func (m *Memstore) ArchiveSession(_ context.Context, id string) (*store.Session,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session, ok := m.sessions[id]
-	if !ok || session.ArchivedAt != nil {
+	if !ok {
 		return nil, store.ErrNotFound
 	}
 	if m.parents[id] != "" {
 		return nil, store.ErrInvalidSessionRelation
+	}
+	// A cancelled archive request can retry resource cleanup without changing
+	// the archived snapshot or pausing scheduled tasks a second time.
+	if session.ArchivedAt != nil {
+		return cloneSession(session), nil
 	}
 	m.archiveSessionGroupLocked(id, time.Now())
 	return cloneSession(session), nil

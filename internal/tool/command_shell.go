@@ -10,6 +10,7 @@ import (
 )
 
 type shellCommandAnalysis struct {
+	file         *syntax.File
 	Commands     [][]string
 	Redirections []shellRedirection
 	Dynamic      bool
@@ -30,7 +31,7 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 		return shellCommandAnalysis{}, errors.New("command is required")
 	}
 
-	analysis := shellCommandAnalysis{}
+	analysis := shellCommandAnalysis{file: file}
 	syntax.Walk(file, func(node syntax.Node) bool {
 		switch node := node.(type) {
 		case *syntax.Stmt:

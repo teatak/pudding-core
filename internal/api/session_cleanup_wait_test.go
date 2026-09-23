@@ -143,20 +143,54 @@ func waitCleanupSignal(t *testing.T, signal <-chan struct{}, label string) {
 	}
 }
 
+type cleanupArchiveStore struct {
+	store.Store
+	archived chan struct{}
+}
+
+func (s *cleanupArchiveStore) ArchiveSession(ctx context.Context, id string) (*store.Session, error) {
+	session, err := s.Store.ArchiveSession(ctx, id)
+	close(s.archived)
+	return session, err
+}
+
 func TestSessionCleanupWaitsForParentAndChildTools(t *testing.T) {
-	for _, archive := range []bool{false, true} {
-		name, method, path, status := "purge", http.MethodDelete, "/sessions/parent", http.StatusNoContent
+	for _, name := range []string{"purge", "archive", "archive_retry"} {
+		archive := name != "purge"
+		method, path, status := http.MethodDelete, "/sessions/parent", http.StatusNoContent
 		if archive {
-			name, method, path, status = "archive", http.MethodPost, "/sessions/parent/archive", http.StatusOK
+			method, path, status = http.MethodPost, "/sessions/parent/archive", http.StatusOK
 		}
 		t.Run(name, func(t *testing.T) {
 			srv, ms, runner := newCleanupWaitServer(t)
+			handler := srv.Handler(testToken, nil)
+			if name == "archive_retry" {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				firstRequest := httptest.NewRequest(method, path, nil).WithContext(ctx)
+				firstRequest.Header.Set("Authorization", "Bearer "+testToken)
+				firstRecorder := httptest.NewRecorder()
+				firstReturned := make(chan struct{})
+				go func() { handler.ServeHTTP(firstRecorder, firstRequest); close(firstReturned) }()
+				waitCleanupSignal(t, runner.gates["parent"].cancelled, "parent cancellation before retry")
+				cancel()
+				waitCleanupSignal(t, firstReturned, "cancelled archive before retry")
+				if firstRecorder.Code != http.StatusInternalServerError {
+					t.Fatalf("cancelled archive status = %d: %s", firstRecorder.Code, firstRecorder.Body.String())
+				}
+			}
+			archived := make(chan struct{})
+			if archive {
+				srv.store = &cleanupArchiveStore{Store: ms, archived: archived}
+			}
 			request := httptest.NewRequest(method, path, nil)
 			request.Header.Set("Authorization", "Bearer "+testToken)
 			recorder := httptest.NewRecorder()
 			returned := make(chan struct{})
-			handler := srv.Handler(testToken, nil)
 			go func() { handler.ServeHTTP(recorder, request); close(returned) }()
+			if archive {
+				waitCleanupSignal(t, archived, "archive holding the lifecycle lock")
+			}
 			for _, id := range []string{"parent", "child"} {
 				waitCleanupSignal(t, runner.gates[id].cancelled, id+" cancellation")
 			}
@@ -273,6 +307,71 @@ func TestSessionCleanupCancelledWaitKeepsResources(t *testing.T) {
 	}
 	if _, exists, err := home.ExistingSessionArtifacts(runner.home, "parent"); err != nil || !exists {
 		t.Fatalf("cancelled wait removed artifact area: exists=%v err=%v", exists, err)
+	}
+	assertNoSessionLifecycleEntries(t, srv)
+}
+
+func TestSessionArchiveCancelledWaitCanRetryCleanup(t *testing.T) {
+	srv, ms, runner := newCleanupWaitServer(t)
+	handler := srv.Handler(testToken, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request := httptest.NewRequest(http.MethodPost, "/sessions/parent/archive", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	first := httptest.NewRecorder()
+	returned := make(chan struct{})
+	go func() { handler.ServeHTTP(first, request); close(returned) }()
+	for _, id := range []string{"parent", "child"} {
+		waitCleanupSignal(t, runner.gates[id].cancelled, id+" cancellation")
+	}
+	cancel()
+	waitCleanupSignal(t, returned, "cancelled archive request")
+	if first.Code != http.StatusInternalServerError {
+		t.Fatalf("cancelled archive status = %d: %s", first.Code, first.Body.String())
+	}
+	if _, err := ms.GetSession(context.Background(), "parent"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("archive was not committed: %v", err)
+	}
+	select {
+	case cleanup := <-runner.cleaned:
+		t.Fatalf("cancelled wait released resources: %+v", cleanup)
+	default:
+	}
+	assertNoSessionLifecycleEntries(t, srv)
+	for _, id := range []string{"parent", "child"} {
+		runner.gates[id].unblock()
+		waitCleanupSignal(t, runner.gates[id].finished, id+" tool finish")
+		waitCtx, stopWaiting := context.WithTimeout(context.Background(), time.Second)
+		err := srv.engine.WaitSession(waitCtx, id)
+		stopWaiting()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	retry := httptest.NewRequest(http.MethodPost, "/sessions/parent/archive", nil)
+	retry.Header.Set("Authorization", "Bearer "+testToken)
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, retry)
+	if second.Code != http.StatusOK {
+		t.Fatalf("archive retry status = %d: %s", second.Code, second.Body.String())
+	}
+	for _, id := range []string{"parent", "child"} {
+		select {
+		case cleanup := <-runner.cleaned:
+			if cleanup.sessionID != id || cleanup.premature {
+				t.Fatalf("retry resource cleanup = %+v, want %s after its tool finished", cleanup, id)
+			}
+		default:
+			t.Fatalf("archive retry did not release %s resources", id)
+		}
+		if _, exists, err := home.ExistingSessionArtifacts(runner.home, id); err != nil || !exists {
+			t.Fatalf("archive retry removed %s artifacts: exists=%v err=%v", id, exists, err)
+		}
+	}
+	select {
+	case <-runner.gates["unrelated"].cancelled:
+		t.Fatal("archive retry cancelled an unrelated session")
+	default:
 	}
 	assertNoSessionLifecycleEntries(t, srv)
 }
