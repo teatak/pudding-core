@@ -55,7 +55,11 @@ func TestBuiltinAttachmentExportWritesAuthorizedProjectFile(t *testing.T) {
 func TestBuiltinAttachmentExportTempRoundTrip(t *testing.T) {
 	for _, withProject := range []bool{false, true} {
 		t.Run(fmt.Sprint("project=", withProject), func(t *testing.T) {
-			homeDir := t.TempDir()
+			// Match macOS's /var -> /private/var alias on every test platform.
+			homeDir := filepath.Join(t.TempDir(), "home-alias")
+			if err := os.Symlink(t.TempDir(), homeDir); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
 			var projects []string
 			if withProject {
 				projects = []string{t.TempDir(), t.TempDir()}
@@ -92,8 +96,21 @@ func TestBuiltinAttachmentExportTempRoundTrip(t *testing.T) {
 			}
 			invoke("turn-b", FileStat, map[string]any{"scope": "temp", "path": path})
 			media := invoke("turn-b", MediaRead, map[string]any{"source": "file", "scope": "temp", "path": path})
-			if len(media.ContextAttachments) != 1 || media.ContextAttachments[0].SourcePath != absolute {
+			if len(media.ContextAttachments) != 1 {
 				t.Fatalf("media could not reuse exported path: %+v", media)
+			}
+			mediaAttachment := media.ContextAttachments[0]
+			exportedInfo, exportStatErr := os.Stat(absolute)
+			sourceInfo, sourceStatErr := os.Stat(mediaAttachment.SourcePath)
+			if exportStatErr != nil || sourceStatErr != nil || !os.SameFile(exportedInfo, sourceInfo) {
+				t.Fatalf("media source is not the exported file: export=%q source=%q exportErr=%v sourceErr=%v", absolute, mediaAttachment.SourcePath, exportStatErr, sourceStatErr)
+			}
+			mediaPath, owned, err := attachment.NewService(homeDir).Path("session-a", mediaAttachment.AttachmentKey)
+			if err != nil || !owned {
+				t.Fatalf("media attachment is not owned by this session: %+v %v", mediaAttachment, err)
+			}
+			if got, err := os.ReadFile(mediaPath); err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("media changed exported content: %x %v", got, err)
 			}
 			copyPath := filepath.Join(filepath.Dir(path), "analysis-copy.png")
 			invoke("turn-b", FileCopy, map[string]any{"from": map[string]any{"scope": "temp", "path": path}, "to": map[string]any{"scope": "temp", "path": copyPath}})

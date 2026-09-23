@@ -45,7 +45,8 @@ func NormalizeRoots(roots []string) []string {
 // Resolve returns the authorized root, resolved target and slash-separated
 // relative path. A relative target requires exactly one root. Target selection
 // never depends on whether a file exists or whether the caller may create it.
-// Existing symlinks may only resolve inside the selected root.
+// Existing symlinks must resolve inside an authorized root. Authorization uses
+// canonical paths so aliases of a root or its ancestors have the same identity.
 func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
 	roots = NormalizeRoots(roots)
 	if len(roots) == 0 {
@@ -70,19 +71,9 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 			}
 			continue
 		}
-		// Accept both the authorized spelling and the canonical spelling of a
-		// symlink root, without treating an unrelated path as an authorized alias.
-		if !Inside(candidate, root) && !Inside(candidate, resolvedRoot) {
-			continue
-		}
 		resolvedCandidate, resolveErr := filepath.EvalSymlinks(candidate)
 		if resolveErr != nil {
 			if !errors.Is(resolveErr, os.ErrNotExist) {
-				return "", "", "", resolveErr
-			}
-			// A dangling symlink is not a new file: following it while writing
-			// could leave the authorized root.
-			if info, err := os.Lstat(candidate); err == nil && info.Mode()&os.ModeSymlink != 0 {
 				return "", "", "", resolveErr
 			}
 			rawParent, resolvedParent, err := resolveExistingParent(candidate)
@@ -90,7 +81,12 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 				return "", "", "", err
 			}
 			if !Inside(resolvedParent, resolvedRoot) {
-				return "", "", "", ErrPathNotAllowed
+				continue
+			}
+			// A dangling symlink is not a new file: following it while writing
+			// could leave the authorized root.
+			if info, err := os.Lstat(candidate); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return "", "", "", resolveErr
 			}
 			missingSuffix, err := filepath.Rel(rawParent, candidate)
 			if err != nil {
@@ -99,7 +95,7 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 			resolvedCandidate = filepath.Join(resolvedParent, missingSuffix)
 		}
 		if !Inside(resolvedCandidate, resolvedRoot) {
-			return "", "", "", ErrPathNotAllowed
+			continue
 		}
 		rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
 		if err != nil {

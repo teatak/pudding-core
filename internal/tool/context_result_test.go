@@ -12,7 +12,18 @@ import (
 )
 
 func TestModelSearchNumbersCanonicalContextWithoutDuplicatingText(t *testing.T) {
-	root := t.TempDir()
+	base := t.TempDir()
+	realBase := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(realBase, "project"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedBase := filepath.Join(base, "linked")
+	if err := os.Symlink(realBase, linkedBase); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise an aliased ancestor on every platform, including /var versus
+	// /private/var on macOS. The projection must preserve canonical positions.
+	root := filepath.Join(linkedBase, "project")
 	path := filepath.Join(root, "context.txt")
 	if err := os.WriteFile(path, []byte("\r\n before\r\nneedle\r\n\r\n末尾\r\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -33,7 +44,7 @@ func TestModelSearchNumbersCanonicalContextWithoutDuplicatingText(t *testing.T) 
 			if contextLines == 2 {
 				want = "1: \n2:  before\n3: needle\n4: \n5: 末尾"
 			}
-			if match["numberedExcerpt"] != want || match["path"] != path || match["line"] != float64(3) || match["truncated"] != false || fields["matchCount"] != float64(1) {
+			if match["numberedExcerpt"] != want || match["line"] != float64(3) || match["truncated"] != false || fields["matchCount"] != float64(1) {
 				t.Fatalf("numbered context lost source coordinates: %s", got)
 			}
 			if _, exists := match["text"]; exists {
@@ -42,7 +53,18 @@ func TestModelSearchNumbersCanonicalContextWithoutDuplicatingText(t *testing.T) 
 			if _, exists := match["excerpt"]; exists {
 				t.Fatalf("numbered context duplicated excerpt: %s", got)
 			}
-			canonical := decodeToolResult(t, result)["matches"].([]any)[0].(map[string]any)
+			canonicalFields := decodeToolResult(t, result)
+			canonical := canonicalFields["matches"].([]any)[0].(map[string]any)
+			for _, key := range []string{"path", "line", "lineStart", "lineEnd", "truncated"} {
+				if match[key] != canonical[key] {
+					t.Fatalf("projection changed canonical match %s: got=%v want=%v", key, match[key], canonical[key])
+				}
+			}
+			for _, key := range []string{"scope", "path", "root", "relativePath"} {
+				if fields[key] != canonicalFields[key] {
+					t.Fatalf("projection changed canonical search %s: got=%v want=%v", key, fields[key], canonicalFields[key])
+				}
+			}
 			if canonical["text"] != "needle" || canonical["excerpt"] == nil || canonical["numberedExcerpt"] != nil {
 				t.Fatal("model projection changed canonical search content")
 			}

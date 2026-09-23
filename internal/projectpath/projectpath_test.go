@@ -135,6 +135,63 @@ func TestResolveCanonicalSpellingStillRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestResolveAncestorAndRootSymlinkSpellings(t *testing.T) {
+	base := canonicalTestDir(t)
+	canonicalParent := filepath.Join(base, "private", "var")
+	canonicalRoot := filepath.Join(canonicalParent, "real")
+	if err := os.MkdirAll(canonicalRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ancestorAlias := filepath.Join(base, "var")
+	if err := os.Symlink(canonicalParent, ancestorAlias); err != nil {
+		t.Fatal(err)
+	}
+	realSpelling := filepath.Join(ancestorAlias, "real")
+	rootAlias := filepath.Join(ancestorAlias, "alias")
+	if err := os.Symlink(realSpelling, rootAlias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalRoot, "existing.txt"), []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spellings := []string{rootAlias, realSpelling, canonicalRoot}
+	for _, authorized := range spellings {
+		for _, spelling := range spellings {
+			for _, name := range []string{"existing.txt", "nested/new.txt"} {
+				for _, allowMissing := range []bool{false, true} {
+					root, target, relative, err := Resolve([]string{authorized}, filepath.Join(spelling, name), false, allowMissing)
+					if name == "nested/new.txt" && !allowMissing {
+						if !errors.Is(err, os.ErrNotExist) {
+							t.Errorf("authorized=%q spelling=%q missing read: %v", authorized, spelling, err)
+						}
+						continue
+					}
+					if err != nil || root != authorized || target != filepath.Join(canonicalRoot, name) || relative != name {
+						t.Errorf("authorized=%q spelling=%q missing=%v: root=%q target=%q relative=%q err=%v", authorized, spelling, allowMissing, root, target, relative, err)
+					}
+				}
+			}
+		}
+	}
+	outside := filepath.Join(canonicalParent, "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "existing.txt"), []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(canonicalRoot, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range spellings {
+		for _, name := range []string{"existing.txt", "new.txt"} {
+			if _, _, _, err := Resolve([]string{rootAlias}, filepath.Join(spelling, "escape", name), false, true); !errors.Is(err, ErrPathNotAllowed) {
+				t.Errorf("spelling=%q name=%q escape accepted: %v", spelling, name, err)
+			}
+		}
+	}
+}
+
 func canonicalTestDir(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())

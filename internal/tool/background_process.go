@@ -27,6 +27,7 @@ const (
 	backgroundProcessPollWaitMax     = 10 * time.Minute
 	backgroundProcessRetentionTTL    = 30 * time.Minute
 	backgroundProcessStopWait        = 2 * time.Second
+	backgroundProcessPTYDrainTimeout = time.Second
 	backgroundProcessInputMax        = 64 << 10
 	backgroundProcessInputTimeout    = 5 * time.Second
 	backgroundProcessTTYColumns      = 100
@@ -119,7 +120,8 @@ type backgroundProcess struct {
 	sandboxKind string
 	tty         bool
 	stdin       io.WriteCloser
-	pty         io.ReadWriteCloser
+	pty         backgroundProcessPTY
+	ptyReadDone chan struct{}
 	inputMu     sync.Mutex
 
 	mu                   sync.Mutex
@@ -151,6 +153,11 @@ type backgroundProcessOutputBuffer struct {
 type backgroundProcessWriter struct {
 	process *backgroundProcess
 	stream  string
+}
+
+type backgroundProcessPTY interface {
+	io.ReadWriteCloser
+	SetReadDeadline(time.Time) error
 }
 
 func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandRunner) *backgroundProcessManager {
@@ -378,8 +385,14 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		configureCommandPTY(cmd)
 		ptmx, startErr := pty.StartWithSize(cmd, &pty.Winsize{Cols: backgroundProcessTTYColumns, Rows: backgroundProcessTTYRows})
 		if startErr == nil {
-			process.stdin = ptmx
-			process.pty = ptmx
+			ptmx, startErr = prepareBackgroundProcessPTY(ptmx)
+			if startErr != nil {
+				_ = terminateCommandProcess(cmd)
+				_ = cmd.Wait()
+			} else {
+				process.stdin = ptmx
+				process.pty = ptmx
+			}
 		}
 		err = startErr
 	} else {
@@ -403,6 +416,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 	}
 	m.emit(sessionID, BackgroundProcessStarted, process.snapshot())
 	if tty {
+		process.ptyReadDone = make(chan struct{})
 		go process.readPTYOutput()
 	}
 	go process.wait()
@@ -598,6 +612,21 @@ func (m *backgroundProcessManager) emit(sessionID, phase string, process Backgro
 
 func (p *backgroundProcess) wait() {
 	waitErr := p.cmd.Wait()
+	if p.ptyReadDone != nil {
+		// exec.Cmd joins its pipe writers, but the PTY reader is ours. Drain
+		// it before closing the master or publishing the final output/state.
+		// A descendant may retain the slave after this command exits, so the
+		// pollable master bounds the drain and makes Close interrupt its Read.
+		p.inputMu.Lock()
+		terminal := p.pty
+		p.inputMu.Unlock()
+		if terminal != nil {
+			if err := terminal.SetReadDeadline(time.Now().Add(backgroundProcessPTYDrainTimeout)); err != nil {
+				p.closeInput()
+			}
+		}
+		<-p.ptyReadDone
+	}
 	p.closeInput()
 	exitCode := -1
 	if p.cmd.ProcessState != nil {
@@ -636,6 +665,7 @@ func (p *backgroundProcess) wait() {
 }
 
 func (p *backgroundProcess) readPTYOutput() {
+	defer close(p.ptyReadDone)
 	buffer := make([]byte, 32<<10)
 	writer := backgroundProcessWriter{process: p, stream: ProgressStdout}
 	for {

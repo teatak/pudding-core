@@ -429,6 +429,31 @@ func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
 	}
 }
 
+func TestClassifyToolCallCommandAcceptsAncestorAndRootAliases(t *testing.T) {
+	base := projectContractDir(t)
+	canonicalParent := filepath.Join(base, "private", "var")
+	canonicalRoot := filepath.Join(canonicalParent, "real")
+	if err := os.MkdirAll(canonicalRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ancestorAlias := filepath.Join(base, "var")
+	if err := os.Symlink(canonicalParent, ancestorAlias); err != nil {
+		t.Fatal(err)
+	}
+	realSpelling := filepath.Join(ancestorAlias, "real")
+	rootAlias := filepath.Join(ancestorAlias, "alias")
+	if err := os.Symlink(realSpelling, rootAlias); err != nil {
+		t.Fatal(err)
+	}
+	for _, authorized := range []string{realSpelling, rootAlias, canonicalRoot} {
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"find", realSpelling, "-type", "f"})})
+		risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{authorized})
+		if !ok || !risk.LowRisk || len(risk.requiredProjectPaths) != 0 {
+			t.Errorf("authorized=%q: %+v ok=%v", authorized, risk, ok)
+		}
+	}
+}
+
 func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
 	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"/tmp/go test ./..."}`))
 	if !ok || risk.LowRisk {
