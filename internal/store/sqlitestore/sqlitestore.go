@@ -534,13 +534,19 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 		} else if parentID != "" {
 			return store.ErrInvalidSessionRelation
 		}
-		if _, err := getSessionTx(ctx, tx, id); err != nil {
+		session, err := getSessionAnyTx(ctx, tx, id)
+		if err != nil {
 			return err
+		}
+		// Retry cleanup against the existing archive without refreshing its
+		// timestamps or changing scheduled task revisions again.
+		if session.ArchivedAt != nil {
+			out = session
+			return nil
 		}
 		if err := archiveSessionGroupTx(ctx, tx, id, time.Now()); err != nil {
 			return err
 		}
-		var err error
 		out, err = getSessionAnyTx(ctx, tx, id)
 		return err
 	})

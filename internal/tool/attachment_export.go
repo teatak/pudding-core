@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -11,13 +12,14 @@ import (
 
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 const attachmentExportToolHint = "Use builtin_attachment_export in Code mode with this attachmentKey: scope=temp allocates an analysis file, or scope=project requires an authorized destination path. Reuse the returned scope/path for file and media tools, or absolutePath for commands; do not guess the attachment's internal filesystem path."
 
 var errAttachmentExportNotRegular = errors.New("attachment is not a regular file")
 
-func (r *BuiltinRunner) attachmentExport(call Call) Result {
+func (r *BuiltinRunner) attachmentExport(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
 		Scope         string          `json:"scope"`
@@ -60,7 +62,7 @@ func (r *BuiltinRunner) attachmentExport(call Call) Result {
 	if attachmentKey == "" {
 		return toolJSONError(out, "attachment_required", "attachmentKey is required")
 	}
-	source, ok, err := attachment.NewService(r.homeDir).Path(call.SessionID, attachmentKey)
+	source, ok, err := r.attachmentExportSource(ctx, call.SessionID, attachmentKey)
 	if err != nil {
 		return toolJSONError(out, "attachment_resolve_failed", err.Error())
 	}
@@ -145,6 +147,50 @@ func (r *BuiltinRunner) attachmentExport(call Call) Result {
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = len(payload)
 	return out
+}
+
+type attachmentExportMessageSource interface {
+	ListMessages(context.Context, string, int) ([]*store.Message, error)
+}
+
+func (r *BuiltinRunner) attachmentExportSource(ctx context.Context, sessionID, key string) (string, bool, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	service := attachment.NewService(r.homeDir)
+	const draftPrefix = "sessions/" + attachment.DraftSessionID + "/blobs/"
+	if !strings.HasPrefix(key, draftPrefix) && sessionID != attachment.DraftSessionID {
+		return service.Path(sessionID, key)
+	}
+	name, draft := strings.CutPrefix(key, draftPrefix)
+	if !draft || name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", false, nil
+	}
+	// A draft blob has no session in its key. Its current canonical reference,
+	// including the temp origin, is the authority to export it for this session.
+	history, ok := r.history.(attachmentExportMessageSource)
+	if !ok {
+		return "", false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	messages, err := history.ListMessages(ctx, sessionID, 0)
+	if err != nil {
+		return "", false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	for _, message := range messages {
+		if message == nil || message.SessionID != sessionID {
+			continue
+		}
+		for _, item := range store.AttachmentsFromParts(message.Parts) {
+			if item.Origin == attachment.OriginTemp && item.AttachmentKey == key {
+				return service.Path(attachment.DraftSessionID, key)
+			}
+		}
+	}
+	return "", false, nil
 }
 
 // Open the owned attachment through a confined root and reject symlinks at any

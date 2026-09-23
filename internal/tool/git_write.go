@@ -337,22 +337,22 @@ func resolveGitWriteRepository(ctx context.Context, call Call, scope, cwd string
 		}
 		return gitWriteRepository{}, newGitWriteError(failed.reason, failed.detail)
 	}
-	gitDir, err := resolveGitAdminPath(ctx, repo, "--absolute-git-dir", false)
+	gitDir, err := resolveGitAdminPath(ctx, repo, call.ProjectDirs, "--absolute-git-dir", false)
 	if err != nil {
 		return gitWriteRepository{}, err
 	}
-	commonDir, err := resolveGitAdminPath(ctx, repo, "--git-common-dir", false)
+	commonDir, err := resolveGitAdminPath(ctx, repo, call.ProjectDirs, "--git-common-dir", false)
 	if err != nil {
 		return gitWriteRepository{}, err
 	}
-	indexPath, err := resolveGitAdminPath(ctx, repo, "--git-path", true, "index")
+	indexPath, err := resolveGitAdminPath(ctx, repo, call.ProjectDirs, "--git-path", true, "index")
 	if err != nil {
 		return gitWriteRepository{}, err
 	}
 	return gitWriteRepository{gitRepository: repo, GitDir: gitDir, CommonDir: commonDir, IndexPath: indexPath}, nil
 }
 
-func resolveGitAdminPath(ctx context.Context, repo gitRepository, flag string, allowMissing bool, extra ...string) (string, error) {
+func resolveGitAdminPath(ctx context.Context, repo gitRepository, roots []string, flag string, allowMissing bool, extra ...string) (string, error) {
 	args := []string{"rev-parse", flag}
 	args = append(args, extra...)
 	result := runGit(ctx, repo.Root, 4096, args...)
@@ -363,20 +363,14 @@ func resolveGitAdminPath(ctx context.Context, repo gitRepository, flag string, a
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(repo.Root, path)
 	}
-	path = filepath.Clean(path)
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		if !allowMissing || !errors.Is(err, os.ErrNotExist) {
-			return "", newGitWriteError("git_metadata_unavailable", err.Error())
-		}
-		parent, parentErr := resolveExistingParent(path)
-		if parentErr != nil || !pathInsideRoot(parent, repo.ProjectRoot) {
-			return "", newGitWriteError("git_metadata_outside_project", "Git metadata path is outside the authorized project directory")
-		}
-		resolved = path
+	// Worktrees may keep Git metadata in another authorized directory. Each
+	// admin path needs its own grant, independent of which grant matched cwd.
+	_, resolved, _, err := resolveProjectPath(roots, path, true, allowMissing)
+	if errors.Is(err, errProjectPathNotAllowed) {
+		return "", newGitWriteError("git_metadata_outside_project", "Git metadata path is outside the authorized project directories")
 	}
-	if !pathInsideRoot(resolved, repo.ProjectRoot) {
-		return "", newGitWriteError("git_metadata_outside_project", "Git metadata path is outside the authorized project directory")
+	if err != nil {
+		return "", newGitWriteError("git_metadata_unavailable", err.Error())
 	}
 	return resolved, nil
 }
@@ -394,8 +388,16 @@ func normalizeGitWritePaths(repo gitWriteRepository, rawPaths []string) ([]strin
 			candidate = filepath.Join(repo.Root, filepath.FromSlash(candidate))
 		}
 		candidate = filepath.Clean(candidate)
-		if !pathInsideRoot(candidate, repo.Root) {
-			return nil, newGitWriteError("path_not_authorized", "Git write path is outside the repository: "+raw)
+		if candidate != repo.Root {
+			// Canonicalize parents so root/ancestor aliases share repository
+			// identity, including deleted paths whose parents no longer exist.
+			// Keep the final component literal: Git stages a symlink itself,
+			// including a dangling link, rather than the link's target.
+			_, parent, _, err := resolveProjectPath([]string{repo.Root}, filepath.Dir(candidate), true, true)
+			if err != nil {
+				return nil, newGitWriteError("path_not_authorized", "Git write path resolves outside the repository: "+raw)
+			}
+			candidate = filepath.Join(parent, filepath.Base(candidate))
 		}
 		rel, err := filepath.Rel(repo.Root, candidate)
 		if err != nil || rel == "." {
@@ -404,10 +406,6 @@ func normalizeGitWritePaths(repo gitWriteRepository, rawPaths []string) ([]strin
 		first := strings.Split(filepath.ToSlash(rel), "/")[0]
 		if strings.EqualFold(first, ".git") {
 			return nil, newGitWriteError("git_metadata_forbidden", "Git metadata paths cannot be staged or unstaged")
-		}
-		resolvedParent, err := resolveExistingParent(candidate)
-		if err != nil || !pathInsideRoot(resolvedParent, repo.Root) {
-			return nil, newGitWriteError("path_not_authorized", "Git write path resolves outside the repository: "+raw)
 		}
 		if info, err := os.Lstat(candidate); err == nil {
 			if info.IsDir() {

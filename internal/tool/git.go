@@ -192,7 +192,7 @@ func resolveGitRepository(ctx context.Context, call Call, scope, cwd string) (gi
 	if strings.TrimSpace(cwd) == "" {
 		cwd = "."
 	}
-	authorizedRoot, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
+	_, resolvedCWD, _, err := resolveProjectPath(call.ProjectDirs, cwd, true, false)
 	if err != nil {
 		return gitRepository{}, &gitRepositoryError{path: err}
 	}
@@ -215,12 +215,18 @@ func resolveGitRepository(ctx context.Context, call Call, scope, cwd string) (gi
 	if err != nil {
 		return gitRepository{}, &gitRepositoryError{reason: "repository_unavailable", detail: err.Error()}
 	}
-	resolvedAuthorizedRoot, err := filepath.EvalSymlinks(authorizedRoot)
+	// The root that contains cwd may be a narrower, overlapping grant. Authorize
+	// the repository itself against every grant before choosing its boundary.
+	authorizedRoot, _, _, err := resolveProjectPath(call.ProjectDirs, resolvedRepoRoot, true, false)
+	if errors.Is(err, errProjectPathNotAllowed) {
+		return gitRepository{}, &gitRepositoryError{reason: "repository_outside_project", detail: "git repository root is outside the authorized project directory"}
+	}
 	if err != nil {
 		return gitRepository{}, &gitRepositoryError{reason: "project_root_unavailable", detail: err.Error()}
 	}
-	if !pathInsideRoot(resolvedRepoRoot, resolvedAuthorizedRoot) {
-		return gitRepository{}, &gitRepositoryError{reason: "repository_outside_project", detail: "git repository root is outside the authorized project directory"}
+	resolvedAuthorizedRoot, err := filepath.EvalSymlinks(authorizedRoot)
+	if err != nil {
+		return gitRepository{}, &gitRepositoryError{reason: "project_root_unavailable", detail: err.Error()}
 	}
 	return gitRepository{CWD: resolvedCWD, Root: resolvedRepoRoot, ProjectRoot: resolvedAuthorizedRoot}, nil
 }

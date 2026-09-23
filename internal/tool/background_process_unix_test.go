@@ -5,12 +5,11 @@ package tool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -91,22 +90,154 @@ func TestBackgroundProcessPTYDrainDoesNotWaitForDescendant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The descendant deliberately ignores the terminal hangup. Reap it by
-	// process group even after the tracked shell has already finished.
-	t.Cleanup(func() { _ = terminateCommandProcess(process.cmd) })
+	// Emergency cleanup on a failed assertion must not replace the normal
+	// process-group cleanup performed before process.done is closed.
+	t.Cleanup(func() { process.signalStop(true) })
 	waitBackgroundProcessSignal(t, process.done, "bounded PTY drain with a surviving descendant")
 	text := backgroundOutputText(process.logSnapshot(0, backgroundProcessPollDefault, 0).Output)
-	var holder int
-	if _, err := fmt.Sscanf(strings.TrimSpace(text), "holder:%d", &holder); err != nil {
-		t.Fatalf("missing descendant PID in drained output %q: %v", text, err)
-	}
-	if err := syscall.Kill(holder, 0); err != nil {
-		t.Fatalf("descendant did not retain the slave through command completion: %v", err)
+	if !strings.Contains(text, "holder:") {
+		t.Fatalf("missing descendant PID in drained output %q", text)
 	}
 	select {
 	case <-process.ptyReadDone:
 	default:
 		t.Fatal("bounded drain left the PTY reader running")
+	}
+}
+
+func TestBackgroundProcessCompletionCleansDescendants(t *testing.T) {
+	for _, mode := range []struct {
+		name      string
+		tty       bool
+		redirects string
+	}{
+		{name: "PTY", tty: true},
+		{name: "pipes"},
+		{name: "closed_pipes", redirects: ">/dev/null 2>&1"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			manager := newBackgroundProcessManager(time.Hour)
+			root := t.TempDir()
+			gate := filepath.Join(root, "release")
+			marker := filepath.Join(root, "survived")
+			env := append(os.Environ(), "PUDDING_TEST_GATE="+gate, "PUDDING_TEST_MARKER="+marker)
+			command := `trap '' HUP TERM; (while [ ! -e "$PUDDING_TEST_GATE" ]; do sleep 0.02; done; printf survived > "$PUDDING_TEST_MARKER"; sleep 30) ` + mode.redirects + ` & printf 'child:%s\n' "$!"`
+			process, err := manager.Start("descendant", "", "", root, []string{root}, CommandSandboxBypass, "", env, "/bin/sh", []string{"-c", command}, command, "sh", mode.tty)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { process.signalStop(true); _ = manager.Close() })
+			waitBackgroundProcessSignal(t, process.done, "completion and descendant cleanup")
+			if err := process.stop("stopped"); err != nil {
+				t.Fatal(err)
+			}
+			manager.CloseSession("descendant")
+			if err := os.WriteFile(gate, []byte("go"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(200 * time.Millisecond)
+			for time.Now().Before(deadline) {
+				if content, err := os.ReadFile(marker); err == nil {
+					t.Fatalf("descendant ran after completion, stop and CloseSession: %q", content)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestBackgroundProcessWaitObservesExitWithoutReaping(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 7")
+	configureCommandProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	// Also exercise registration after a very short-lived child has exited.
+	time.Sleep(20 * time.Millisecond)
+	if err := waitForBackgroundProcessExit(cmd); err != nil {
+		t.Fatal(err)
+	}
+	err := cmd.Wait()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("exit observer reaped or changed the child's status: %v", err)
+	}
+}
+
+func TestBackgroundProcessFinishedSignalCannotReachReusedGroup(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	configureCommandProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	defer func() { _ = terminateCommandProcess(cmd); <-waited }()
+	// Simulate a retained record whose old group ID now identifies a new job.
+	// signalsDone closes ownership before Wait can release the original PID.
+	process := &backgroundProcess{cmd: cmd, running: true, signalsDone: true, done: make(chan struct{})}
+	close(process.done)
+	if err := process.stop("stopped"); err != nil {
+		t.Fatal(err)
+	}
+	process.signalStop(true)
+	select {
+	case err := <-waited:
+		waited <- err
+		t.Fatalf("a signal escaped the closed ownership interval: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestBackgroundProcessCloseSessionHoldsQuotaUntilCompletion(t *testing.T) {
+	manager := newBackgroundProcessManager(time.Hour)
+	t.Cleanup(func() { _ = manager.Close() })
+	root := t.TempDir()
+	gate := filepath.Join(root, "exit")
+	env := append(os.Environ(), "PUDDING_TEST_GATE="+gate)
+	command := `trap '' TERM; printf ready; while [ ! -e "$PUDDING_TEST_GATE" ]; do sleep 0.02; done`
+	process, err := manager.Start("quota", "", "", root, []string{root}, CommandSandboxBypass, "", env, "/bin/sh", []string{"-c", command}, command, "sh", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !strings.Contains(backgroundOutputText(process.logSnapshot(0, backgroundProcessPollDefault, 0).Output), "ready") {
+		if time.Now().After(deadline) {
+			t.Fatal("shell did not install its stop handler")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	closed := make(chan struct{})
+	go func() { manager.CloseSession("quota"); close(closed) }()
+	defer func() { _ = os.WriteFile(gate, nil, 0600); <-closed }()
+	for {
+		process.mu.Lock()
+		stopping := process.requestedStopReason != ""
+		process.mu.Unlock()
+		if stopping {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session cleanup did not begin")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	manager.mu.Lock()
+	count := manager.runningTotal
+	manager.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("closing session released quota while its process still runs: %d", count)
+	}
+	if err := os.WriteFile(gate, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitBackgroundProcessSignal(t, closed, "session cleanup")
+	manager.mu.Lock()
+	count = manager.runningTotal
+	manager.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("completed cleanup retained quota: %d", count)
 	}
 }
 

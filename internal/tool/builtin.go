@@ -701,7 +701,7 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 	case MediaRead:
 		return r.mediaRead(call)
 	case AttachmentExport:
-		return r.attachmentExport(call)
+		return r.attachmentExport(ctx, call)
 	case FileStat:
 		return r.fileStat(call)
 	case FileSearch:

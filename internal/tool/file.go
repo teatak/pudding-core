@@ -524,12 +524,6 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 			})
 		}
 	}
-	if args.Content == nil {
-		return toolArgumentFailure(out, &toolArgumentError{
-			kind: "invalid_type", detail: "content must be a string, not null", field: "content", expected: "string",
-			hint: "Pass the complete replacement text; an explicit empty string intentionally clears the file.", receivedBytes: len(call.Args),
-		})
-	}
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
@@ -983,10 +977,6 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
 		return "", "", "", errors.New("managed scope root must be a directory, not a symlink")
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", "", "", err
-	}
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		rawPath = "."
@@ -1001,43 +991,29 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", "", "", errors.New("parent traversal is not allowed")
 	}
-	if (scope == managedScopeSkill || scope == managedScopeApp || scope == managedScopeTemp) && hasHiddenPathComponent(cleaned) {
-		return "", "", "", errors.New("path is reserved")
+	if err := validateManagedRelativePath(scope, cleaned, requireWritable); err != nil {
+		return "", "", "", err
 	}
-	if requireWritable && scope == managedScopeSkill && skill.IsBuiltinID(firstPathComponent(cleaned)) {
-		return "", "", "", errors.New("builtin Skill paths are read-only")
-	}
-	target := filepath.Join(root, cleaned)
-	if !pathInsideRoot(target, root) {
-		return "", "", "", errors.New("path escapes scope")
-	}
-	if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(target)
-		if err != nil {
-			return "", "", "", err
-		}
-		if !pathInsideRoot(resolved, resolvedRoot) {
-			return "", "", "", errors.New("symlink escapes scope")
-		}
-		target = resolved
-	}
-	if cleaned != "." {
-		resolvedParent, err := resolveExistingParent(target)
-		if err != nil {
-			return "", "", "", err
-		}
-		if !pathInsideRoot(resolvedParent, resolvedRoot) {
-			return "", "", "", errors.New("parent escapes scope")
-		}
-	}
-	rel, err := filepath.Rel(root, target)
+	_, target, rel, err := resolveProjectPath([]string{root}, cleaned, allowRoot, true)
 	if err != nil {
 		return "", "", "", err
 	}
-	if rel == "" {
-		rel = "."
+	// The lexical name may be a visible symlink into a reserved directory.
+	// Apply the same policy to the canonical target, including missing suffixes.
+	if err := validateManagedRelativePath(scope, rel, requireWritable); err != nil {
+		return "", "", "", err
 	}
-	return root, target, filepath.ToSlash(rel), nil
+	return root, target, rel, nil
+}
+
+func validateManagedRelativePath(scope, path string, requireWritable bool) error {
+	if hasHiddenPathComponent(path) {
+		return errors.New("path is reserved")
+	}
+	if requireWritable && scope == managedScopeSkill && skill.IsBuiltinID(firstPathComponent(path)) {
+		return errors.New("builtin Skill paths are read-only")
+	}
+	return nil
 }
 
 func firstPathComponent(cleaned string) string {

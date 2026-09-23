@@ -123,6 +123,8 @@ type backgroundProcess struct {
 	pty         backgroundProcessPTY
 	ptyReadDone chan struct{}
 	inputMu     sync.Mutex
+	signalMu    sync.Mutex
+	signalsDone bool // guarded by signalMu; never signal this command again
 
 	mu                   sync.Mutex
 	running              bool
@@ -148,6 +150,7 @@ type backgroundProcessOutputBuffer struct {
 	baseOffset int64
 	nextOffset int64
 	bytes      int
+	pending    map[string][]byte
 }
 
 type backgroundProcessWriter struct {
@@ -350,16 +353,6 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		running:     true,
 		startedAt:   time.Now(),
 	}
-	if !tty {
-		stdin, stdinErr := cmd.StdinPipe()
-		if stdinErr != nil {
-			return nil, stdinErr
-		}
-		process.stdin = stdin
-		cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
-		cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
-	}
-
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -375,6 +368,18 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		m.mu.Unlock()
 		process.closeInput()
 		return nil, errors.New("global background process limit reached")
+	}
+	// Rejected commands never reach exec.Cmd.Start, which owns closing the
+	// child side of StdinPipe. Allocate it only after admission succeeds.
+	if !tty {
+		stdin, stdinErr := cmd.StdinPipe()
+		if stdinErr != nil {
+			m.mu.Unlock()
+			return nil, stdinErr
+		}
+		process.stdin = stdin
+		cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
+		cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
 	}
 	evicted := m.evictFinishedLocked()
 	process.counted = true
@@ -520,7 +525,8 @@ func (m *backgroundProcessManager) closeMatching(match func(*backgroundProcess) 
 		}
 		processes = append(processes, process)
 		delete(m.processes, id)
-		m.releaseCountLocked(process)
+		// wait() releases the quota after process-group and output cleanup,
+		// even though this process is no longer listed for the closed session.
 	}
 	m.mu.Unlock()
 	var wg sync.WaitGroup
@@ -572,9 +578,7 @@ func (m *backgroundProcessManager) evictFinishedLocked() []*backgroundProcess {
 func (m *backgroundProcessManager) markFinished(process *backgroundProcess) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.processes[process.id] == process {
-		m.releaseCountLocked(process)
-	}
+	m.releaseCountLocked(process)
 }
 
 func (m *backgroundProcessManager) remove(process *backgroundProcess) bool {
@@ -611,7 +615,21 @@ func (m *backgroundProcessManager) emit(sessionID, phase string, process Backgro
 }
 
 func (p *backgroundProcess) wait() {
-	waitErr := p.cmd.Wait()
+	var waitErr error
+	if backgroundProcessOwnsGroup {
+		// Keep the exited leader unreaped until its process group has been
+		// terminated. Its PID still belongs to us, so the group ID cannot be
+		// reused between observing exit and signalling the remaining children.
+		waitErr = waitForBackgroundProcessExit(p.cmd)
+		p.signalMu.Lock()
+		waitErr = errors.Join(waitErr, terminateCommandProcess(p.cmd))
+		p.signalsDone = true
+		p.signalMu.Unlock()
+	}
+	waitErr = errors.Join(waitErr, p.cmd.Wait())
+	p.signalMu.Lock()
+	p.signalsDone = true
+	p.signalMu.Unlock()
 	if p.ptyReadDone != nil {
 		// exec.Cmd joins its pipe writers, but the PTY reader is ours. Drain
 		// it before closing the master or publishing the final output/state.
@@ -634,6 +652,9 @@ func (p *backgroundProcess) wait() {
 	}
 	now := time.Now()
 	p.mu.Lock()
+	// Both exec's pipe writers and our PTY reader have reached EOF (or the
+	// bounded drain deadline); incomplete final runes can now be replaced.
+	p.output.Finish()
 	p.running = false
 	p.exitCode = &exitCode
 	p.finishedAt = now
@@ -731,22 +752,34 @@ func (p *backgroundProcess) stop(reason string) error {
 	if p.requestedStopReason == "" {
 		p.requestedStopReason = reason
 	}
-	cmd := p.cmd
 	done := p.done
 	p.mu.Unlock()
 
-	_ = requestCommandProcessStop(cmd)
+	p.signalStop(false)
 	select {
 	case <-done:
 		return nil
 	case <-time.After(backgroundProcessStopWait):
 	}
-	_ = terminateCommandProcess(cmd)
+	p.signalStop(true)
 	select {
 	case <-done:
 		return nil
 	case <-time.After(backgroundProcessStopWait):
 		return errors.New("background process did not stop in time")
+	}
+}
+
+func (p *backgroundProcess) signalStop(force bool) {
+	p.signalMu.Lock()
+	defer p.signalMu.Unlock()
+	if p.signalsDone {
+		return
+	}
+	if force {
+		_ = terminateCommandProcess(p.cmd)
+	} else {
+		_ = requestCommandProcessStop(p.cmd)
 	}
 }
 
@@ -936,7 +969,38 @@ func (b *backgroundProcessOutputBuffer) Append(stream string, data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	content := strings.ToValidUTF8(string(data), "�")
+	if tail := b.pending[stream]; len(tail) != 0 {
+		data = append(tail, data...)
+		delete(b.pending, stream)
+	}
+	end := 0
+	for end < len(data) && utf8.FullRune(data[end:]) {
+		_, size := utf8.DecodeRune(data[end:])
+		end += size
+	}
+	if end < len(data) {
+		if b.pending == nil {
+			b.pending = make(map[string][]byte)
+		}
+		// Copy at most three bytes; the writer may reuse its read buffer.
+		b.pending[stream] = append([]byte(nil), data[end:]...)
+	}
+	b.appendContent(stream, strings.ToValidUTF8(string(data[:end]), "�"))
+}
+
+func (b *backgroundProcessOutputBuffer) Finish() {
+	streams := make([]string, 0, len(b.pending))
+	for stream := range b.pending {
+		streams = append(streams, stream)
+	}
+	sort.Strings(streams)
+	for _, stream := range streams {
+		b.appendContent(stream, "�")
+	}
+	b.pending = nil
+}
+
+func (b *backgroundProcessOutputBuffer) appendContent(stream, content string) {
 	if content == "" {
 		return
 	}
