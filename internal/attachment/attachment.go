@@ -224,6 +224,22 @@ func (s *Service) CopyToSession(sourceSessionID, targetSessionID string, item st
 	if key == "" {
 		return store.Attachment{}, errors.New("attachment: key is required")
 	}
+	if targetSessionID == DraftSessionID {
+		source, err := os.Open(sourcePath)
+		if err != nil {
+			return store.Attachment{}, err
+		}
+		defer source.Close()
+		// Temp files keep their scope, but a branch needs its own independently named blob.
+		copied, err := s.StoreReader(DraftSessionID, item.Name, item.MIME, source)
+		if err != nil {
+			return store.Attachment{}, err
+		}
+		out := item
+		out.AttachmentKey = copied.AttachmentKey
+		out.URL = copied.URL
+		return out, nil
+	}
 	targetKey := filepath.ToSlash(filepath.Join(sessionDirName, targetSessionID, blobDirName, filepath.Base(key)))
 	root, err := s.root()
 	if err != nil {
