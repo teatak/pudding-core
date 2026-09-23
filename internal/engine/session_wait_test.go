@@ -217,9 +217,9 @@ func TestCancelCannotMissTurnBeingRegistered(t *testing.T) {
 		eng.Wait()
 	})
 	waitSessionSignal(t, st.began, "canonical turn creation before runtime registration")
-	if _, err := ms.ArchiveSession(ctx, "session"); err != nil {
-		t.Fatal(err)
-	}
+	// Keep the session active so the delayed provider holds the turn until
+	// Cancel. Archiving here could fail context building and finish the turn
+	// before Cancel runs, obscuring the registration window being tested.
 	cancelled := make(chan error, 1)
 	go func() { cancelled <- eng.Cancel("session") }()
 	select {
