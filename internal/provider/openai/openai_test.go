@@ -462,6 +462,80 @@ func TestStreamFinishWithoutDoneEmitsErr(t *testing.T) {
 	}
 }
 
+func TestStreamContentFilter(t *testing.T) {
+	const textFrame = `data: {"choices":[{"delta":{"content":"partial response"}}]}`
+	const filterFrame = `data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}`
+	const usageFrame = `data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20}}`
+	for _, tc := range []struct {
+		name      string
+		frames    []string
+		text      string
+		filtered  bool
+		wantUsage bool
+	}{
+		{name: "empty", frames: []string{filterFrame, "data: [DONE]"}, filtered: true},
+		{
+			name:   "text_in_final_chunk",
+			frames: []string{`data: {"choices":[{"delta":{"content":"response omitted"},"finish_reason":"content_filter"}]}`, "data: [DONE]"},
+			text:   "response omitted", filtered: true,
+		},
+		{
+			name:   "partial_text_and_usage",
+			frames: []string{textFrame, filterFrame, usageFrame, "data: [DONE]"},
+			text:   "partial response", filtered: true, wantUsage: true,
+		},
+		{
+			name:   "without_done",
+			frames: []string{textFrame, filterFrame},
+			text:   "partial response", filtered: true,
+		},
+		{
+			name:   "ordinary_text_with_stop",
+			frames: []string{`data: {"choices":[{"delta":{"content":"response omitted"},"finish_reason":"stop"}]}`, "data: [DONE]"},
+			text:   "response omitted",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, frame := range tc.frames {
+					fmt.Fprint(w, frame+"\n\n")
+				}
+			}))
+			defer srv.Close()
+
+			chunks := collect(t, streamForTest(t, srv.URL, provider.Request{Model: "m"}))
+			if got := chunksText(chunks); got != tc.text {
+				t.Fatalf("text = %q, want %q", got, tc.text)
+			}
+			last := chunks[len(chunks)-1]
+			if tc.filtered {
+				if last.Err == nil || !strings.Contains(last.Err.Error(), "content_filter") {
+					t.Fatalf("want content_filter error, got %+v", last)
+				}
+				for _, chunk := range chunks {
+					if chunk.Done || chunk.Continuation != nil {
+						t.Fatalf("filtered response completed successfully: %+v", chunk)
+					}
+				}
+			} else if last.Err != nil || !last.Done || last.Finish != provider.FinishStop {
+				t.Fatalf("ordinary text should finish normally: %+v", last)
+			}
+			if tc.wantUsage {
+				var usage *provider.UsageInfo
+				for _, chunk := range chunks {
+					if chunk.Usage != nil {
+						usage = chunk.Usage
+					}
+				}
+				if usage == nil || usage.InputUncachedTokens != 100 || usage.OutputContentTokens != 20 {
+					t.Fatalf("trailing usage was lost: %+v", usage)
+				}
+			}
+		})
+	}
+}
+
 func TestStreamOptionsUnsupportedRetriesWithoutUsage(t *testing.T) {
 	var requests []chatRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
