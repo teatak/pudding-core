@@ -176,6 +176,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	finish := provider.FinishStop
+	var finishErr error
 	continuation := chatMessage{Role: "assistant"}
 	var responseText strings.Builder
 	var responseReasoning strings.Builder
@@ -188,6 +189,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			if finishErr != nil {
+				return finishErr
+			}
 			continuation.Content = responseText.String()
 			continuation.Reasoning = responseReasoning.String()
 			continuation.ReasoningContent = responseReasoningContent.String()
@@ -264,6 +268,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 					finish = provider.FinishToolCalls
 				} else if choice.FinishReason == "length" {
 					finish = provider.FinishLength
+				} else if choice.FinishReason == "content_filter" {
+					// Keep reading: usage can follow the terminal choice in a separate frame.
+					finishErr = errors.New("openai: response filtered (finish_reason=content_filter)")
 				}
 			}
 		}
@@ -276,6 +283,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if finishErr != nil {
+		return finishErr
 	}
 	return errors.New("openai: stream ended without [DONE]")
 }
