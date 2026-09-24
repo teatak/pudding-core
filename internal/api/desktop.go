@@ -115,34 +115,34 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 	}
 
 	sections := []desktopAboutSection{
-		aboutSection("version", "版本", aboutRows(
+		aboutSection("version", "Version", aboutRows(
 			"pudding", buildinfo.Channel(),
 			"go", runtime.Version(),
 			"platform", runtime.GOOS+"/"+runtime.GOARCH,
 		)),
-		aboutSection("service", "服务", aboutRows(
+		aboutSection("service", "Service", aboutRows(
 			"endpoint", requestBaseURL(c.Request),
 			"phase", "active",
 			"home", s.home,
 		)),
-		aboutSection("health", "健康自检", aboutRows(
+		aboutSection("health", "Health", aboutRows(
 			"capture", enabledText(audioCfg.ASREnabled() && strings.EqualFold(audioCfg.Driver.Type, "portaudio")),
 		)),
-		aboutSection("audio_bindings", "语音绑定", aboutRows(
+		aboutSection("audio_bindings", "Audio Bindings", aboutRows(
 			"input_owner", bindings["input_owner"],
 			"input_mode", bindings["input_mode"],
 		)),
-		aboutSection("audio_config", "语音配置文件", aboutRows(
+		aboutSection("audio_config", "Audio Configuration", aboutRows(
 			"path", filepath.Join(s.home, "config", "audio.yaml"),
 		)),
-		aboutSection("driver", "驱动 (Driver)", aboutRows(
+		aboutSection("driver", "Driver", aboutRows(
 			"type", audioCfg.Driver.Type,
 			"capture_sample_rate", intText(audioCfg.Driver.CaptureSampleRate),
 			"playback_sample_rate", intText(audioCfg.Driver.PlaybackSampleRate),
 			"channels", intText(audioCfg.Driver.Channels),
 			"period_millis", intText(audioCfg.Driver.PeriodMillis),
 		)),
-		aboutSection("asr", "语音识别 (ASR)", aboutRows(
+		aboutSection("asr", "Speech Recognition (ASR)", aboutRows(
 			"enabled", onOff(audioCfg.ASREnabled()),
 			"save_audio", onOff(audioCfg.ASRSaveAudio()),
 			"engine", audioCfg.ASR.Engine,
@@ -153,7 +153,7 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			"provider", audioCfg.ASR.Provider,
 			"use_itn", onOff(audioCfg.ASRUseITN()),
 		)),
-		aboutSection("asr_vad", "ASR 内置切句 VAD", aboutRows(
+		aboutSection("asr_vad", "ASR Built-in VAD", aboutRows(
 			"model_path", baseNameOrDash(audioCfg.ASR.VAD.ModelPath),
 			"threshold", floatText(audioCfg.ASR.VAD.Threshold),
 			"min_energy", floatText(audioCfg.ASR.VAD.MinEnergy),
@@ -162,11 +162,11 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			"window_size", intText(audioCfg.ASR.VAD.WindowSize),
 			"preroll_millis", intText(audioCfg.ASR.VAD.PrerollMillis),
 		)),
-		aboutSection("aec", "回声消除 (AEC)", aboutRows(
+		aboutSection("aec", "Acoustic Echo Cancellation (AEC)", aboutRows(
 			"enabled", onOff(audioCfg.AECEnabled()),
 			"model", audioCfg.AEC.Model,
 		)),
-		aboutSection("ns", "噪声抑制 (NS)", aboutRows(
+		aboutSection("ns", "Noise Suppression (NS)", aboutRows(
 			"enabled", onOff(audioCfg.NSEnabled()),
 			"model", audioCfg.NS.Model,
 			"level", audioCfg.NS.Level,
