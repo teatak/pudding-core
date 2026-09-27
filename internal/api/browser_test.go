@@ -688,14 +688,7 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("open b status=%d tab=%+v", resp.StatusCode, tabB)
 	}
-	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
-		ID:             "note_sess_a",
-		ActorSessionID: "sess_a",
-		Kind:           "note",
-		Title:          "Note",
-		Item:           []byte(`{"kind":"note"}`),
-		Window:         []byte(`{}`),
-	}); err != nil {
+	if _, err := seedCanvasMount(st, "sess_a", "note_sess_a", "Note"); err != nil {
 		t.Fatal(err)
 	}
 

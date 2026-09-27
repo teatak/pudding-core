@@ -21,7 +21,6 @@ func cloneWorkbench(w *store.Workbench) *store.Workbench {
 }
 func cloneWorkbenchRevision(r *store.WorkbenchRevision) *store.WorkbenchRevision {
 	copy := *r
-	copy.Content = append(json.RawMessage(nil), r.Content...)
 	copy.BuildReceipt = append(json.RawMessage(nil), r.BuildReceipt...)
 	return &copy
 }
@@ -80,7 +79,7 @@ func (m *Memstore) UpdateWorkbench(_ context.Context, w *store.Workbench, expect
 	}
 	if w.ActiveRevision != "" {
 		r := m.workbenchRevisions[w.ID+"/"+w.ActiveRevision]
-		if r == nil || (len(r.BuildReceipt) == 0 && len(r.Content) == 0) {
+		if r == nil || len(r.BuildReceipt) == 0 {
 			return nil, store.ErrWorkbenchConflict
 		}
 	}
@@ -124,14 +123,7 @@ func (m *Memstore) saveCanvasRevisionLocked(r *store.WorkbenchRevision, expected
 		m.workbenchRevisions[key] = copy
 	}
 	m.workbenchSaves[requestKey] = r.Hash
-	if len(r.Content) > 0 {
-		var content store.CanvasContent
-		if err := json.Unmarshal(r.Content, &content); err != nil {
-			return nil, err
-		}
-		w.ActiveRevision = r.Hash
-		w.Name = content.Title
-	}
+
 	w.HeadRevision = r.Hash
 	w.Revision++
 	w.UpdatedAt = r.CreatedAt

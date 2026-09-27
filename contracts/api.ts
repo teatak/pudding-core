@@ -291,14 +291,11 @@ export const saveProjectFileRequest = z.object({
 export const canvasItem = z.object({
   id: z.string(),
   sessionID: z.string(),
-  canvasID: z.string(),
   sourceSessionID: z.string().optional(),
   createdBySessionID: z.string().optional(),
   updatedBySessionID: z.string().optional(),
-  kind: z.string(),
+  kind: z.literal("app"),
   title: z.string().optional(),
-  item: z.unknown(),
-  window: z.unknown().optional(),
   resourceID: z.string(),
   revision: z.number().int(),
   visible: z.boolean(),
@@ -325,20 +322,6 @@ export const putLibraryFavoriteRequest = z.discriminatedUnion("kind", [
  z.object({kind: z.literal("web"), url: z.string().url(), title: z.string().optional()}),
 ]);
 export type LibraryFavoriteInput = z.infer<typeof putLibraryFavoriteRequest>;
-export const putCanvasItemRequest = z.object({
-  expectedRevision: z.number().int().nonnegative(),
-  id: z.string().optional(),
-  sourceSessionID: z.string().optional(),
-  kind: z.string().min(1),
-  title: z.string().optional(),
-  item: z.unknown(),
-  window: z.unknown().optional(),
-});
-
-export const patchCanvasItemRequest = z.object({
-  window: z.unknown(),
-});
-
 export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),

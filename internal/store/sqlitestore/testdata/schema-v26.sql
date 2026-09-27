@@ -173,6 +173,7 @@ CREATE TABLE canvas_mounts (
  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  id TEXT NOT NULL,
  resource_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ window_json TEXT NOT NULL DEFAULT '',
  visible INTEGER NOT NULL DEFAULT 1,
  created_at INTEGER NOT NULL,
  PRIMARY KEY(session_id,id),
@@ -344,6 +345,7 @@ CREATE TABLE canvas_revisions (
     client_request_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     build_receipt TEXT NOT NULL,
+    content_json TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(workbench_id, hash),
     UNIQUE(workbench_id, client_request_id)
 );

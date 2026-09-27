@@ -2438,8 +2438,6 @@ func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
 		return nil
 	}
 	cp := *item
-	cp.Item = append([]byte(nil), item.Item...)
-	cp.Window = append([]byte(nil), item.Window...)
 	return &cp
 }
 

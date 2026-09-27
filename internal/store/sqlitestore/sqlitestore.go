@@ -25,7 +25,10 @@ type Store struct {
 	mu sync.Mutex
 }
 
-func Open(path string) (*Store, error) {
+func Open(path string) (*Store, error) { return OpenWithHome(path, filepath.Dir(path)) }
+
+// OpenWithHome locates offline archives in the same dev/release home as the daemon.
+func OpenWithHome(path, archiveHome string) (*Store, error) {
 	if err := searchtext.Prepare(); err != nil {
 		return nil, fmt.Errorf("sqlite: prepare search tokenizer: %w", err)
 	}
@@ -50,7 +53,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: enable wal: %w", err)
 	}
-	if err := prepareSchema(db, path); err != nil {
+	if err := prepareSchemaWithHome(db, path, archiveHome); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

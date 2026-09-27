@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 26
+	currentSchemaVersion       = 27
 )
 
 var (
@@ -33,6 +33,7 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	27: retireLegacyCanvasSchema,
 	26: migrateUnifiedCanvases,
 	25: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
@@ -644,6 +645,9 @@ func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
 }
 
 func prepareSchema(db *sql.DB, path string) error {
+	return prepareSchemaWithHome(db, path, filepath.Dir(path))
+}
+func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
 	version, err := schemaVersion(db)
 	if err != nil {
 		return err
@@ -667,6 +671,11 @@ func prepareSchema(db *sql.DB, path string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV26Contract); err == nil {
+				if err := setSchemaVersion(db, 26); err != nil {
+					return err
+				}
+				version = 26
 			} else if err := validateSchema(db, schemaV25Contract); err == nil {
 				// Version 9 is data-only and cannot be inferred from the schema.
 				// Stamp the latest identifiable layout so migration 9 still runs.
@@ -719,7 +728,16 @@ func prepareSchema(db *sql.DB, path string) error {
 			if next <= version {
 				continue
 			}
-			if err := runSchemaMigration(db, next, schemaMigrations[next]); err != nil {
+			migration := schemaMigrations[next]
+			if next == 27 {
+				migration = func(tx *sql.Tx) error {
+					if err := archiveLegacyCanvases(tx, archiveHome); err != nil {
+						return err
+					}
+					return retireLegacyCanvasSchema(tx)
+				}
+			}
+			if err := runSchemaMigration(db, next, migration); err != nil {
 				return err
 			}
 		}
@@ -983,7 +1001,7 @@ var schemaV25Contract = func() schemaContract {
 	return out
 }()
 
-var currentSchemaContract = func() schemaContract {
+var schemaV26Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
@@ -1021,6 +1039,14 @@ var currentSchemaContract = func() schemaContract {
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
 	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches"}
+	return out
+}()
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV26Contract, nil)
+	out.tables["canvas_revisions"] = slices.DeleteFunc(out.tables["canvas_revisions"], func(v string) bool { return v == "content_json" })
+	out.tables["canvas_mounts"] = slices.DeleteFunc(out.tables["canvas_mounts"], func(v string) bool { return v == "window_json" })
+	out.forbiddenTables = append([]string(nil), schemaV26Contract.forbiddenTables...)
 	return out
 }()
 

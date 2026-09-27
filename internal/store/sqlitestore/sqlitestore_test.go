@@ -306,14 +306,7 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 	createTestSession(t, st, "sess_left")
 	createTestSession(t, st, "sess_right")
 
-	item, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
-		ID:             "canvas_1",
-		ActorSessionID: "sess_left",
-		Kind:           "markdown",
-		Title:          "Note",
-		Item:           []byte(`{"kind":"markdown","content":"hello"}`),
-		Window:         []byte(`{"x":1,"y":2,"w":300,"h":200,"z":1}`),
-	})
+	item, err := seedCanvasMount(st, "sess_left", "canvas_1", "Note")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,11 +322,7 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 		t.Fatalf("right session should not see left canvas item: %+v", visible)
 	}
 
-	_, err = st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
-		ActorSessionID: "sess_right",
-		ItemID:         "canvas_1",
-		Window:         []byte(`{"x":9,"y":8,"w":320,"h":240,"z":2}`),
-	})
+	err = st.DeleteCanvasItem(ctx, "sess_right", "canvas_1")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("right session update error = %v, want not found", err)
 	}
@@ -363,49 +352,6 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 	}
 	if len(visible) != 0 {
 		t.Fatalf("deleted session canvas item persisted: %+v", visible)
-	}
-}
-
-func TestCanvasItemListOrderIgnoresWindowUpdates(t *testing.T) {
-	st, _ := openTestStore(t)
-	ctx := context.Background()
-	createTestSession(t, st, "sess_canvas_order")
-
-	for _, id := range []string{"canvas_a", "canvas_b"} {
-		if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
-			ID:             id,
-			ActorSessionID: "sess_canvas_order",
-			Kind:           "markdown",
-			Title:          id,
-			Item:           []byte(`{"kind":"markdown","content":"hello"}`),
-			Window:         []byte(`{"x":1,"y":2,"w":300,"h":200,"z":1}`),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(time.Millisecond)
-	}
-
-	visible, err := st.ListCanvasItems(ctx, "sess_canvas_order")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(visible) != 2 || visible[0].ID != "canvas_a" || visible[1].ID != "canvas_b" {
-		t.Fatalf("canvas items should use stable created order: %+v", visible)
-	}
-
-	if _, err := st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
-		ActorSessionID: "sess_canvas_order",
-		ItemID:         "canvas_b",
-		Window:         []byte(`{"x":9,"y":8,"w":320,"h":240,"z":99}`),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	visible, err = st.ListCanvasItems(ctx, "sess_canvas_order")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(visible) != 2 || visible[0].ID != "canvas_a" || visible[1].ID != "canvas_b" {
-		t.Fatalf("window updates should not reorder canvas items: %+v", visible)
 	}
 }
 

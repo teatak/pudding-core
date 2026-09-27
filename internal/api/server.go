@@ -145,6 +145,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
 	"/canvases",
+	"/canvas-archives",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
@@ -174,6 +175,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
+	app.Route("/canvas-archives").GET(s.listCanvasArchives).DELETE(s.removeCanvasArchives)
+	app.Route("/canvas-archives/:archiveID/preview").GET(s.previewCanvasArchive)
+	app.Route("/canvas-archives/:archiveID/export").GET(s.exportCanvasArchive)
 	app.Route("/canvases").GET(s.listWorkbenches).POST(s.createWorkbench)
 	app.Route("/canvases/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
 	app.Route("/canvases/:workbenchID/revisions").GET(s.listWorkbenchRevisions).POST(s.saveWorkbenchRevision)
@@ -259,8 +263,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/library/favorites").POST(s.putLibraryFavorite)
 	app.Route("/sessions/:id/library/favorites/:favoriteID").DELETE(s.deleteLibraryFavorite)
 	app.Route("/sessions/:id/canvases/:canvasID/open").POST(s.openCanvasResource)
-	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
-	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
+	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems)
+	app.Route("/sessions/:id/canvas/items/:itemID").DELETE(s.deleteCanvasItem)
 	app.Route("/sessions/:id/project/search").GET(s.searchProjectFiles)
 	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
 	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)

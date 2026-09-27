@@ -3,8 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"testing"
-
-	"github.com/teatak/pudding-core/internal/store"
 )
 
 func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
@@ -37,26 +35,10 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
+	if len(items) != 0 {
 		t.Fatalf("retained items: %+v", items)
 	}
-	var closed *store.CanvasItem
-	for _, item := range items {
-		if item.ID == "same-id" {
-			if item.Title != "retain-a" || item.ResourceID != store.CanvasResourceID("retain-a", "same-id") {
-				t.Fatalf("canonical or saved identity overwritten: %+v", item)
-			}
-		} else {
-			closed = item
-		}
-	}
-	if closed == nil || closed.ID != "closed-id" || closed.Visible || closed.Title != "Recover me" || closed.UpdatedAt.UnixMilli() != 300 || string(closed.Window) != `{"x":20}` {
-		t.Fatalf("closed snapshot not retained with initial closed state: %+v", closed)
-	}
-	others, err := reopened.ListCanvasItems(ctx, "retain-b")
-	if err != nil || len(others) != 2 {
-		t.Fatalf("session isolation: items=%+v err=%v", others, err)
-	}
+	assertArchivesContain(t, path, "current", "Recover me", "Other session", "closed-id")
 	var oldTables int
 	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='canvas_closed_items'`).Scan(&oldTables); err != nil || oldTables != 0 {
 		t.Fatalf("old content source still exists: %d, %v", oldTables, err)
@@ -71,15 +53,8 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	}
 	defer again.Close()
 	items, err = again.ListCanvasItems(ctx, "retain-a")
-	if err != nil || len(items) != 2 {
+	if err != nil || len(items) != 0 {
 		t.Fatalf("restart lost retained content: %+v %v", items, err)
 	}
-	// Only an explicit deletion removes the working content; saved versions stay.
-	if err := again.DeleteCanvasItem(ctx, "retain-a", "same-id"); err != nil {
-		t.Fatal(err)
-	}
-	resource, err := again.GetWorkbench(ctx, store.CanvasResourceID("retain-a", "same-id"))
-	if err != nil || resource.Name != "retain-a" {
-		t.Fatalf("close removed resource: %+v %v", resource, err)
-	}
+	assertArchivesContain(t, path, "current", "Recover me", "Other session")
 }

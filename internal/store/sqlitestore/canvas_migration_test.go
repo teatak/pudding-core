@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/canvasarchive"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -57,27 +58,33 @@ func TestUnifiedCanvasMigrationPreservesIdentityContentAndAppState(t *testing.T)
 			t.Fatal(err)
 		}
 		resources, err := st.ListWorkbenches(ctx)
-		if err != nil || len(resources) != 4 {
+		if err != nil || len(resources) != 1 {
 			t.Fatalf("resources %+v %v", resources, err)
 		}
-		views, err := st.ListCanvasItems(ctx, "a")
-		if err != nil || len(views) != 2 {
-			t.Fatalf("mounts %+v %v", views, err)
+		archives, err := canvasarchive.List(filepath.Dir(path))
+		if err != nil || len(archives) != 3 {
+			t.Fatalf("archives %+v %v", archives, err)
 		}
-		for _, v := range views {
-			if v.ID == "dirty" && (v.ResourceID == "saved" || string(v.Item) != `{"content":"unsaved"}` || string(v.Window) != `{"x":20}`) {
-				t.Fatalf("dirty edit overwritten %+v", v)
+		var contents string
+		for _, entry := range archives {
+			b, e := os.ReadFile(filepath.Join(entry.Path, "original.json"))
+			if e != nil {
+				t.Fatal(e)
 			}
+			contents += string(b)
 		}
-		clean, err := st.ListCanvasItems(ctx, "b")
-		if err != nil || len(clean) != 1 || clean[0].ResourceID != "saved" || clean[0].Revision != 3 {
-			t.Fatalf("clean reference changed %+v %v", clean, err)
+		if !strings.Contains(contents, "unsaved") || !strings.Contains(contents, "saved") {
+			t.Fatal("lost dirty or saved content")
+		}
+		views, err := st.ListCanvasItems(ctx, "a")
+		if err != nil || len(views) != 0 {
+			t.Fatalf("legacy mounts remain: %+v %v", views, err)
 		}
 		app, err := st.GetWorkbench(ctx, "app")
 		if err != nil || app.Revision != 7 || app.HeadRevision != "hash" || app.Bindings["mail"] != "account" {
 			t.Fatalf("App changed %+v %v", app, err)
 		}
-		for _, check := range [][2]string{{"SELECT loaded_app_ids FROM sessions WHERE id='a'", `["browser","canvas"]`}, {"SELECT state FROM canvas_actions WHERE id='action'", "succeeded"}, {"SELECT id FROM canvas_links WHERE id='link'", "link"}, {"SELECT canvas_item_id FROM library_recent_opens WHERE id='recent'", "dirty"}, {"SELECT saved_item_id FROM library_favorites WHERE id='canvas:saved'", "saved"}, {"SELECT COUNT(*) FROM pragma_foreign_key_check", "0"}, {"SELECT COUNT(*) FROM sqlite_master WHERE name IN ('canvas_saved_items','canvas_items','workbenches')", "0"}} {
+		for _, check := range [][2]string{{"SELECT loaded_app_ids FROM sessions WHERE id='a'", `["browser","canvas"]`}, {"SELECT state FROM canvas_actions WHERE id='action'", "succeeded"}, {"SELECT id FROM canvas_links WHERE id='link'", "link"}, {"SELECT COUNT(*) FROM library_recent_opens", "0"}, {"SELECT COUNT(*) FROM library_favorites", "0"}, {"SELECT COUNT(*) FROM pragma_foreign_key_check", "0"}, {"SELECT COUNT(*) FROM sqlite_master WHERE name IN ('canvas_saved_items','canvas_items','workbenches')", "0"}} {
 			assertWorkspaceMigrationValue(t, st.db, check[0], check[1])
 		}
 		st.Close()
@@ -108,7 +115,7 @@ func TestUnifiedCanvasMigrationFailureRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.GetWorkbench(context.Background(), store.CanvasResourceID("a", "dirty")); err != nil {
+	if _, err := st.GetWorkbench(context.Background(), store.CanvasResourceID("a", "dirty")); err == nil {
 		t.Fatal(err)
 	}
 }

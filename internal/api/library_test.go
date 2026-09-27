@@ -62,7 +62,7 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "actor", Title: "Source", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "actor", ID: "c", Kind: "table", Title: "Report", Item: []byte(`{"rows":[1]}`)})
+	initial, err := seedCanvasMount(st, "actor", "c", "Report")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,11 +83,11 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 		t.Fatal("unstarred saved version not discoverable")
 	}
 	e := view.Entries[0]
-	if e.FavoriteID != "" || e.Revision != 2 || e.SavedItemID != resourceID || e.SourceSessionTitle != "Source" || e.CanvasKind != "table" {
+	if e.FavoriteID != "" || e.Revision != 2 || e.SavedItemID != resourceID || e.SourceSessionTitle != "Source" || e.CanvasKind != "app" {
 		t.Fatalf("lost metadata: %+v", e)
 	}
 	item := decodeJSON[store.CanvasItem](t, req(t, "POST", srv.URL+"/sessions/actor/canvases/"+resourceID+"/open", nil))
-	if item.ID != "c" || string(item.Item) != `{"rows":[1]}` {
+	if item.ID != "c" || item.ResourceID != resourceID {
 		t.Fatal("opening version changed content or identity")
 	}
 	r = req(t, "POST", srv.URL+"/sessions/actor/library/favorites", map[string]any{"kind": "canvas", "savedItemID": resourceID})
@@ -111,7 +111,7 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	initial, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "source", ID: "canvas", Kind: "markdown", Title: "Reusable", Item: []byte(`{"markdown":"keep"}`)})
+	initial, err := seedCanvasMount(st, "source", "canvas", "Reusable")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	}
 	first := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
 	second := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
-	if first.SessionID != "reader" || second.ID != first.ID || string(first.Item) != `{"markdown":"keep"}` {
+	if first.SessionID != "reader" || second.ID != first.ID || first.ResourceID != resourceID {
 		t.Fatal("opening favorite must reuse reader's working copy")
 	}
 	r := req(t, "DELETE", endpoint+"/library/favorites/canvas:"+resourceID, nil)
@@ -152,4 +152,16 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	if r.StatusCode != http.StatusNotFound {
 		t.Fatal("retired recent-file API still available")
 	}
+}
+
+func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasItem, error) {
+	ctx := context.Background()
+	w, err := st.CreateWorkbench(ctx, &store.Workbench{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
+	if err != nil {
+		return nil, err
+	}
+	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, w.Revision); err != nil {
+		return nil, err
+	}
+	return st.OpenCanvasResource(ctx, session, w.ID, id)
 }

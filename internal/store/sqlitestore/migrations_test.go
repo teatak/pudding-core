@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints are immutable. A schema change must bump
 	// currentSchemaVersion, add a migration, and append a new fingerprint.
 	releasedFingerprints := map[int]string{
+		27: "947f0a5809ec49b3c12b3d81acb7f055f92006fbdfe46e6482a8739dcd69125a",
 		26: "062f41cc8376d4d210122e2c4203e67721b144c002ae070f86854cb4e9030eb5",
 		25: "9ac7648b15cc883652f8deb4a2a9b28d5ad9bee51ab956309eed11646309cde0",
 		// v24 repairs the early v23 layout; the canonical schema is unchanged.
@@ -623,16 +624,11 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 2 || active[0].ID != "active_keep" || active[1].ID != "old_keep" || active[1].Visible || active[1].UpdatedAt.UnixMilli() != 5 {
-		t.Fatalf("session canvas after migration = %+v", active)
+	if len(active) != 0 {
+		t.Fatalf("legacy canvas remains: %+v", active)
 	}
-	saved, err := reopened.ListWorkbenches(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(saved) != 4 || saved[0].ID != "legacy_closed_closed_orphan" {
-		t.Fatalf("orphan canvas after migration = %+v", saved)
-	}
+	assertArchivesContain(t, path, "active_keep", "old_keep", "active_orphan", "legacy_closed_closed_orphan")
+
 }
 
 func TestOpenRejectsUnsupportedUnversionedSchema(t *testing.T) {

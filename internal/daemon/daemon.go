@@ -117,7 +117,7 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, err
 	}
 
-	st, err := sqlitestore.Open(home.DBPath(dir))
+	st, err := sqlitestore.OpenWithHome(home.DBPath(dir), dir)
 	if err != nil {
 		return nil, err
 	}

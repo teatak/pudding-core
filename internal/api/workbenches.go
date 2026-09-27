@@ -114,10 +114,6 @@ func (s *Server) getWorkbenchRevision(c *cart.Context) error {
 	if err != nil {
 		return s.workbenchError(c, err)
 	}
-	if len(r.Content) > 0 {
-		c.JSON(http.StatusOK, map[string]any{"kind": "structured", "revision": r, "content": r.Content})
-		return nil
-	}
 	p, err := workbench.ReadPackage(s.home, id, hash)
 	if err != nil {
 		return s.workbenchError(c, err)
@@ -132,10 +128,9 @@ func (s *Server) getWorkbenchRevision(c *cart.Context) error {
 func (s *Server) saveWorkbenchRevision(c *cart.Context) error {
 	id, _ := c.Param("workbenchID")
 	var req struct {
-		ExpectedRevision int64                `json:"expectedRevision"`
-		ClientRequestID  string               `json:"clientRequestID"`
-		Package          *workbench.Package   `json:"package"`
-		Content          *store.CanvasContent `json:"content"`
+		ExpectedRevision int64              `json:"expectedRevision"`
+		ClientRequestID  string             `json:"clientRequestID"`
+		Package          *workbench.Package `json:"package"`
 	}
 	if err := decodeWorkbench(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -147,23 +142,18 @@ func (s *Server) saveWorkbenchRevision(c *cart.Context) error {
 		return s.workbenchError(c, err)
 	}
 	var hash string
-	var content json.RawMessage
 	var err error
-	if (req.Package == nil) == (req.Content == nil) {
-		return badRequest(c, "provide exactly one of package or content")
+	if req.Package == nil {
+		return badRequest(c, "package required")
 	}
-	if req.Content != nil {
-		content, hash, err = req.Content.Encode()
-	} else {
-		if _, _, err := req.Package.Validate(); err != nil {
-			return badRequest(c, err.Error())
-		}
-		hash, err = workbench.WritePackage(s.home, id, *req.Package)
+	if _, _, err := req.Package.Validate(); err != nil {
+		return badRequest(c, err.Error())
 	}
+	hash, err = workbench.WritePackage(s.home, id, *req.Package)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.SaveWorkbenchRevision(c.Request.Context(), &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, Content: content, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, req.ExpectedRevision)
+	w, err := s.store.SaveWorkbenchRevision(c.Request.Context(), &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, req.ExpectedRevision)
 	if err != nil {
 		return s.workbenchError(c, err)
 	}
@@ -214,20 +204,8 @@ func (s *Server) activateWorkbench(c *cart.Context) error {
 	if err != nil {
 		return s.workbenchError(c, err)
 	}
-	r, err := s.store.GetWorkbenchRevision(c.Request.Context(), id, req.RevisionHash)
-	if err != nil {
+	if _, err := workbench.ReadPackage(s.home, id, req.RevisionHash); err != nil {
 		return s.workbenchError(c, err)
-	}
-	if len(r.Content) == 0 {
-		if _, err := workbench.ReadPackage(s.home, id, req.RevisionHash); err != nil {
-			return s.workbenchError(c, err)
-		}
-	} else {
-		var content store.CanvasContent
-		if err := json.Unmarshal(r.Content, &content); err != nil {
-			return s.workbenchError(c, err)
-		}
-		w.Name = content.Title
 	}
 	w.ActiveRevision = req.RevisionHash
 	w, err = s.store.UpdateWorkbench(c.Request.Context(), w, req.ExpectedRevision)

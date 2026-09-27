@@ -27,7 +27,6 @@ var (
 	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrQueueChanged             = errors.New("store: queued inputs changed")
-	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
 	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
 	ErrInvalidComputerAppGrant  = errors.New("store: invalid Computer Use app grant")
@@ -2143,43 +2142,19 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 	return s.CumulativeInputTokens() + s.CumulativeOutputTokens()
 }
 
-const DefaultCanvasID = "default"
-
 type CanvasItem struct {
-	ID                 string          `json:"id"`
-	SessionID          string          `json:"sessionID"`
-	CanvasID           string          `json:"canvasID"`
-	SourceSessionID    string          `json:"sourceSessionID,omitempty"`
-	CreatedBySessionID string          `json:"createdBySessionID,omitempty"`
-	UpdatedBySessionID string          `json:"updatedBySessionID,omitempty"`
-	Kind               string          `json:"kind"`
-	Title              string          `json:"title,omitempty"`
-	Item               json.RawMessage `json:"item"`
-	Window             json.RawMessage `json:"window,omitempty"`
-	ResourceID         string          `json:"resourceID"`
-	Revision           int64           `json:"revision"`
-	Visible            bool            `json:"visible"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
-}
-
-type CanvasItemInput struct {
-	ID               string
-	CanvasID         string
-	ActorSessionID   string
-	SourceSessionID  string
-	Kind             string
-	Title            string
-	Item             json.RawMessage
-	Window           json.RawMessage
-	ExpectedRevision int64
-}
-
-type CanvasItemWindowPatch struct {
-	CanvasID       string
-	ActorSessionID string
-	ItemID         string
-	Window         json.RawMessage
+	ID                 string    `json:"id"`
+	SessionID          string    `json:"sessionID"`
+	SourceSessionID    string    `json:"sourceSessionID,omitempty"`
+	CreatedBySessionID string    `json:"createdBySessionID,omitempty"`
+	UpdatedBySessionID string    `json:"updatedBySessionID,omitempty"`
+	Kind               string    `json:"kind"`
+	Title              string    `json:"title,omitempty"`
+	ResourceID         string    `json:"resourceID"`
+	Revision           int64     `json:"revision"`
+	Visible            bool      `json:"visible"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 // LibraryFavorite refers to one canonical canvas resource or a web bookmark.
@@ -2234,41 +2209,6 @@ type BrowserHistoryInput struct {
 	Title      string
 	FaviconURL string
 	VisitedAt  time.Time
-}
-
-func NormalizeCanvasItemInput(in *CanvasItemInput) error {
-	if in == nil {
-		return ErrInvalidCanvas
-	}
-	in.ID = strings.TrimSpace(in.ID)
-	in.CanvasID = normalizeCanvasID(in.CanvasID)
-	in.ActorSessionID = strings.TrimSpace(in.ActorSessionID)
-	in.SourceSessionID = strings.TrimSpace(in.SourceSessionID)
-	in.Kind = strings.TrimSpace(in.Kind)
-	in.Title = strings.TrimSpace(in.Title)
-	if in.ID == "" || in.ActorSessionID == "" || in.Kind == "" || in.ExpectedRevision < 0 || len(in.Item) == 0 || !json.Valid(in.Item) {
-		return ErrInvalidCanvas
-	}
-	if len(in.Window) > 0 && !json.Valid(in.Window) {
-		return ErrInvalidCanvas
-	}
-	in.Item = append(json.RawMessage(nil), in.Item...)
-	in.Window = append(json.RawMessage(nil), in.Window...)
-	return nil
-}
-
-func NormalizeCanvasItemWindowPatch(patch *CanvasItemWindowPatch) error {
-	if patch == nil {
-		return ErrInvalidCanvas
-	}
-	patch.CanvasID = normalizeCanvasID(patch.CanvasID)
-	patch.ActorSessionID = strings.TrimSpace(patch.ActorSessionID)
-	patch.ItemID = strings.TrimSpace(patch.ItemID)
-	if patch.ActorSessionID == "" || patch.ItemID == "" || len(patch.Window) == 0 || !json.Valid(patch.Window) {
-		return ErrInvalidCanvas
-	}
-	patch.Window = append(json.RawMessage(nil), patch.Window...)
-	return nil
 }
 
 func NormalizeBrowserStateInput(in *BrowserStateInput) error {
@@ -2343,14 +2283,6 @@ func browserHistoryVisibleURL(rawURL string) string {
 		visible += "#" + parsed.Fragment
 	}
 	return visible
-}
-
-func normalizeCanvasID(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return DefaultCanvasID
-	}
-	return id
 }
 
 // Store 的每个方法是一个完整事务。BeginTurn 与 FinishTurn 内部必须把
@@ -2475,8 +2407,6 @@ type Store interface {
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 
 	ListCanvasItems(ctx context.Context, actorSessionID string) ([]*CanvasItem, error)
-	PutCanvasItem(ctx context.Context, in CanvasItemInput) (*CanvasItem, error)
-	UpdateCanvasItemWindow(ctx context.Context, patch CanvasItemWindowPatch) (*CanvasItem, error)
 	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
 	ListLibraryFavorites(ctx context.Context, actorSessionID string) ([]*LibraryFavorite, error)
 	PutLibraryFavorite(ctx context.Context, actorSessionID string, favorite LibraryFavorite) error
