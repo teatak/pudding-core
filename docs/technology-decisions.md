@@ -1,7 +1,7 @@
 # 技术选型与当前架构
 
 > 核对日期：2026-09-27，依据两仓当前源码与公共契约。保留原章节编号，供源码注释引用。
-> 第一阶段的范围、估算和旧方案见[历史决策](archive/plans/technology-decisions-phase-1.md)；未完成事项只维护在[跨仓待办](backlog.md)。
+> 第一阶段的范围、估算和旧方案见[历史决策](archive/plans/technology-decisions-phase-1.md)；本文只描述当前架构与技术边界。
 
 ## 1. 产品定位
 
@@ -134,7 +134,7 @@ home 解析顺序为 `--home`、`PUDDING_HOME`、构建通道默认值。本地�
 
 ## 13. 历史范围与未完成事项
 
-第一阶段的“暂不上 Electron”“后续增加 Gemini/Anthropic/Responses”“压缩先定形不实现”已过期，保留于[历史决策](archive/plans/technology-decisions-phase-1.md)。当前需要推进的重点只更新 [backlog.md](backlog.md)；历史设想不自动成为待办。
+第一阶段的“暂不上 Electron”“后续增加 Gemini/Anthropic/Responses”“压缩先定形不实现”已过期，保留于[历史决策](archive/plans/technology-decisions-phase-1.md)。历史设想不自动成为当前待办。
 
 ## 14. 并发与中断
 

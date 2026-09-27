@@ -40,7 +40,7 @@ Optional language servers can be prepared with `make language-servers`, which al
 See the [API quickstart](docs/api-quickstart.md) for standalone usage examples,
 [contracts](contracts/README.md) for protocol definitions and client validation schemas,
 and the [documentation index](docs/README.md) for current design and feature documentation.
-Unfinished work across Core and Desktop is tracked in the single [cross-repository backlog](docs/backlog.md).
+This public repository documents core behavior, architecture, and contracts. Desktop product planning and cross-repository delivery work are maintained in the desktop repository.
 
 ## Optional UI Hosting
 
