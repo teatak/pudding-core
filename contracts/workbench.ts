@@ -126,13 +126,13 @@ export const workbenchRevision = z.object({
     })
     .optional(),
 });
-export const workbenchRevisionResponse = z.object({
-  revision: workbenchRevision,
-  package: workbenchPackage,
-  manifest: workbenchManifest,
-});
+export const canvasContent = z.object({kind:z.string().min(1),title:z.string(),item:z.unknown()});
+export const workbenchRevisionResponse = z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("app"),revision:workbenchRevision,package:workbenchPackage,manifest:workbenchManifest}),
+ z.object({kind:z.literal("structured"),revision:workbenchRevision,content:canvasContent}),
+]);
 export const workbenchesResponse = z.object({
-  workbenches: z.array(workbench),
+  canvases: z.array(workbench),
 });
 export const workbenchRevisionsResponse = z.object({
   revisions: z.array(workbenchRevision),

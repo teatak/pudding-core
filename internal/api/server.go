@@ -144,7 +144,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
-	"/workbenches",
+	"/canvases",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
@@ -174,21 +174,21 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
-	app.Route("/workbenches").GET(s.listWorkbenches).POST(s.createWorkbench)
-	app.Route("/workbenches/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
-	app.Route("/workbenches/:workbenchID/revisions").GET(s.listWorkbenchRevisions).POST(s.saveWorkbenchRevision)
-	app.Route("/workbenches/:workbenchID/revisions/:hash").GET(s.getWorkbenchRevision)
-	app.Route("/workbenches/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
-	app.Route("/workbenches/:workbenchID/activate").POST(s.activateWorkbench)
-	app.Route("/workbenches/:workbenchID/bindings").PUT(s.bindWorkbench)
-	app.Route("/workbenches/:workbenchID/grants").POST(s.grantWorkbenchQuery)
-	app.Route("/workbenches/:workbenchID/grants/:operationID").DELETE(s.revokeWorkbenchQuery)
-	app.Route("/workbenches/:workbenchID/queries/:operationID").POST(s.queryWorkbench)
-	app.Route("/workbenches/:workbenchID/actions/:operationID/prepare").POST(s.prepareWorkbenchAction)
-	app.Route("/workbenches/:workbenchID/actions").GET(s.listWorkbenchActions)
-	app.Route("/workbenches/:workbenchID/links").GET(s.listWorkbenchLinks).POST(s.putWorkbenchLink)
-	app.Route("/workbenches/:workbenchID/links/:linkID").DELETE(s.deleteWorkbenchLink)
-	app.Route("/workbenches/:workbenchID/action-runs/:actionID/execute").POST(s.executeWorkbenchAction)
+	app.Route("/canvases").GET(s.listWorkbenches).POST(s.createWorkbench)
+	app.Route("/canvases/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
+	app.Route("/canvases/:workbenchID/revisions").GET(s.listWorkbenchRevisions).POST(s.saveWorkbenchRevision)
+	app.Route("/canvases/:workbenchID/revisions/:hash").GET(s.getWorkbenchRevision)
+	app.Route("/canvases/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
+	app.Route("/canvases/:workbenchID/activate").POST(s.activateWorkbench)
+	app.Route("/canvases/:workbenchID/bindings").PUT(s.bindWorkbench)
+	app.Route("/canvases/:workbenchID/grants").POST(s.grantWorkbenchQuery)
+	app.Route("/canvases/:workbenchID/grants/:operationID").DELETE(s.revokeWorkbenchQuery)
+	app.Route("/canvases/:workbenchID/queries/:operationID").POST(s.queryWorkbench)
+	app.Route("/canvases/:workbenchID/actions/:operationID/prepare").POST(s.prepareWorkbenchAction)
+	app.Route("/canvases/:workbenchID/actions").GET(s.listWorkbenchActions)
+	app.Route("/canvases/:workbenchID/links").GET(s.listWorkbenchLinks).POST(s.putWorkbenchLink)
+	app.Route("/canvases/:workbenchID/links/:linkID").DELETE(s.deleteWorkbenchLink)
+	app.Route("/canvases/:workbenchID/action-runs/:actionID/execute").POST(s.executeWorkbenchAction)
 
 	app.Route("/scheduled-tasks").GET(s.listScheduledTasks).POST(s.createScheduledTask)
 	app.Route("/scheduled-tasks/:taskID").GET(s.getScheduledTask).PATCH(s.updateScheduledTask).DELETE(s.updateScheduledTask)
@@ -258,12 +258,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/library").GET(s.listLibrary)
 	app.Route("/sessions/:id/library/favorites").POST(s.putLibraryFavorite)
 	app.Route("/sessions/:id/library/favorites/:favoriteID").DELETE(s.deleteLibraryFavorite)
+	app.Route("/sessions/:id/canvases/:canvasID/open").POST(s.openCanvasResource)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
 	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
-	app.Route("/sessions/:id/canvas/items/:itemID/save").POST(s.saveCanvasItem)
-	app.Route("/sessions/:id/canvas/saved").GET(s.listSavedCanvasItems)
-	app.Route("/sessions/:id/canvas/saved/:savedID/open").POST(s.openSavedCanvasItem)
-	app.Route("/sessions/:id/canvas/saved/:savedID").DELETE(s.deleteSavedCanvasItem)
 	app.Route("/sessions/:id/project/search").GET(s.searchProjectFiles)
 	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
 	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)

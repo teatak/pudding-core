@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints are immutable. A schema change must bump
 	// currentSchemaVersion, add a migration, and append a new fingerprint.
 	releasedFingerprints := map[int]string{
+		26: "062f41cc8376d4d210122e2c4203e67721b144c002ae070f86854cb4e9030eb5",
 		25: "9ac7648b15cc883652f8deb4a2a9b28d5ad9bee51ab956309eed11646309cde0",
 		// v24 repairs the early v23 layout; the canonical schema is unchanged.
 		24: "03c3bff523a3b796998107413c902cb92b70b1af57792f8cbb9c4fca46f25c28",
@@ -85,6 +86,7 @@ func TestOpenMigratesVersionTenComputerAppGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP TABLE computer_app_grants;
 		PRAGMA user_version = 10;
@@ -125,6 +127,7 @@ func TestOpenMigratesVersionElevenTurnFileReplaySnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP TABLE turn_file_change_states;
 		ALTER TABLE turn_file_changes DROP COLUMN snapshot_version;
@@ -174,6 +177,7 @@ func TestOpenMigratesVersionTwelveSessionCalibration(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		ALTER TABLE session_usage DROP COLUMN last_provider;
 		ALTER TABLE session_usage DROP COLUMN last_model;
@@ -227,6 +231,7 @@ func TestOpenMigratesVersionThreeBrowserHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP INDEX browser_history_visited_at;
 		DROP TABLE browser_history;
@@ -262,6 +267,7 @@ func TestOpenMigratesVersionFourToSessionCalibration(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP TABLE IF EXISTS usage_calibrations;
 		PRAGMA user_version = 4;
@@ -308,6 +314,7 @@ func TestOpenMigratesVersionFiveFileChangeOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		ALTER TABLE turn_file_changes DROP COLUMN origin;
 		PRAGMA user_version = 5;
@@ -358,6 +365,7 @@ func TestOpenMigratesVersionSevenRemovesProjectAppBindings(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -428,6 +436,7 @@ func TestOpenMigratesVersionEightRemovedBuiltinLoadedAppIDs(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`PRAGMA user_version = 8`); err != nil {
 		t.Fatal(err)
 	}
@@ -466,6 +475,7 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`PRAGMA user_version = 0`); err != nil {
 		t.Fatal(err)
 	}
@@ -510,6 +520,7 @@ func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP TABLE IF EXISTS usage_calibrations;
 		DROP TABLE turn_file_changes;
@@ -569,6 +580,7 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	}
 
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`
 		DROP TABLE IF EXISTS usage_calibrations;
 		DROP TABLE IF EXISTS library_recent_opens;
@@ -614,11 +626,11 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	if len(active) != 2 || active[0].ID != "active_keep" || active[1].ID != "old_keep" || active[1].Visible || active[1].UpdatedAt.UnixMilli() != 5 {
 		t.Fatalf("session canvas after migration = %+v", active)
 	}
-	saved, err := reopened.ListSavedCanvasItems(context.Background(), "sess_keep")
+	saved, err := reopened.ListWorkbenches(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved) != 2 || saved[0].ID != "legacy_closed_closed_orphan" || saved[1].ID != "active_orphan" {
+	if len(saved) != 4 || saved[0].ID != "legacy_closed_closed_orphan" {
 		t.Fatalf("orphan canvas after migration = %+v", saved)
 	}
 }
@@ -736,6 +748,7 @@ func TestOpenCleansOldBackupsAfterMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
+	useV25CanvasFixture(t, db)
 	if _, err := db.Exec(`PRAGMA user_version = 8`); err != nil {
 		t.Fatal(err)
 	}

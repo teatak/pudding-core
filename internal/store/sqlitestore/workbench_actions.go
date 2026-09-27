@@ -33,7 +33,7 @@ func scanWorkbenchAction(row messageScanner) (*store.WorkbenchAction, error) {
 func (s *Store) CreateWorkbenchAction(ctx context.Context, a *store.WorkbenchAction) (*store.WorkbenchAction, error) {
 	var out *store.WorkbenchAction
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		old, err := scanWorkbenchAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM workbench_actions WHERE workbench_id=? AND client_request_id=?`, a.WorkbenchID, a.ClientRequestID))
+		old, err := scanWorkbenchAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND client_request_id=?`, a.WorkbenchID, a.ClientRequestID))
 		if err == nil {
 			if old.RequestHash != a.RequestHash {
 				return store.ErrWorkbenchConflict
@@ -48,7 +48,7 @@ func (s *Store) CreateWorkbenchAction(ctx context.Context, a *store.WorkbenchAct
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO workbench_actions(id,workbench_id,client_request_id,request_hash,state,spec,created_at) VALUES(?,?,?,?,'prepared',?,?)`, a.ID, a.WorkbenchID, a.ClientRequestID, a.RequestHash, string(spec), unixMS(a.CreatedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_actions(id,workbench_id,client_request_id,request_hash,state,spec,created_at) VALUES(?,?,?,?,'prepared',?,?)`, a.ID, a.WorkbenchID, a.ClientRequestID, a.RequestHash, string(spec), unixMS(a.CreatedAt))
 		out = a
 		return err
 	})
@@ -57,12 +57,12 @@ func (s *Store) CreateWorkbenchAction(ctx context.Context, a *store.WorkbenchAct
 func (s *Store) GetWorkbenchAction(ctx context.Context, wid, id string) (*store.WorkbenchAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanWorkbenchAction(s.db.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM workbench_actions WHERE workbench_id=? AND id=?`, wid, id))
+	return scanWorkbenchAction(s.db.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND id=?`, wid, id))
 }
 func (s *Store) ListWorkbenchActions(ctx context.Context, wid string) ([]*store.WorkbenchAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+actionColumns+` FROM workbench_actions WHERE workbench_id=? ORDER BY created_at DESC LIMIT 100`, wid)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? ORDER BY created_at DESC LIMIT 100`, wid)
 	if err != nil {
 		return nil, err
 	}
@@ -79,18 +79,18 @@ func (s *Store) ListWorkbenchActions(ctx context.Context, wid string) ([]*store.
 }
 func (s *Store) ClaimWorkbenchAction(ctx context.Context, wid, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		a, err := scanWorkbenchAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM workbench_actions WHERE workbench_id=? AND id=?`, wid, id))
+		a, err := scanWorkbenchAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND id=?`, wid, id))
 		if err != nil {
 			return err
 		}
-		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM workbenches WHERE id=? AND deleted=0`, wid))
+		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, wid))
 		if err != nil {
 			return err
 		}
 		if a.State != "prepared" || w.Revision != a.Spec.ResourceRevision || w.BindingVersion != a.Spec.BindingVersion || w.ActiveRevision != a.Spec.RevisionHash {
 			return store.ErrWorkbenchConflict
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE workbench_actions SET state='executing' WHERE id=?`, id)
+		_, err = tx.ExecContext(ctx, `UPDATE canvas_actions SET state='executing' WHERE id=?`, id)
 		return err
 	})
 }
@@ -99,7 +99,7 @@ func (s *Store) FinishWorkbenchAction(ctx context.Context, wid, id, state string
 		return store.ErrWorkbenchConflict
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		r, err := tx.ExecContext(ctx, `UPDATE workbench_actions SET state=?,result=? WHERE workbench_id=? AND id=? AND state='executing'`, state, string(result), wid, id)
+		r, err := tx.ExecContext(ctx, `UPDATE canvas_actions SET state=?,result=? WHERE workbench_id=? AND id=? AND state='executing'`, state, string(result), wid, id)
 		if err != nil {
 			return err
 		}

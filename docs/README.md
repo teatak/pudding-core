@@ -42,4 +42,4 @@
 
 ## 工作台
 
-[Workbench 资源契约](workbenches.md)：独立资源、版本、App 查询授权、确认操作与实体关联；产品操作与验收由 Desktop 文档维护。
+[Canvas 资源契约](canvases.md)：统一资源、结构化／App 版本、迁移、App 查询授权、确认操作与实体关联；产品操作与验收由 Desktop 文档维护。

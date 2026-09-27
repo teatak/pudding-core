@@ -62,13 +62,16 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "actor", Title: "Source", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "actor", ID: "c", Kind: "table", Title: "Report", Item: []byte(`{"rows":[1]}`)}); err != nil {
+	initial, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "actor", ID: "c", Kind: "table", Title: "Report", Item: []byte(`{"rows":[1]}`)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SaveCanvasItem(ctx, "actor", "c", "s"); err != nil {
+	resourceID := initial.ResourceID
+	if err := st.PutLibraryFavorite(ctx, "actor", store.LibraryFavorite{ID: "canvas:" + resourceID, Kind: "canvas", SavedItemID: resourceID}); err != nil {
 		t.Fatal(err)
 	}
-	r := req(t, "DELETE", srv.URL+"/sessions/actor/library/favorites/canvas:s", nil)
+
+	r := req(t, "DELETE", srv.URL+"/sessions/actor/library/favorites/canvas:"+resourceID, nil)
 	r.Body.Close()
 	if r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
@@ -80,14 +83,14 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 		t.Fatal("unstarred saved version not discoverable")
 	}
 	e := view.Entries[0]
-	if e.FavoriteID != "" || e.Revision != 1 || e.SavedItemID != "s" || e.SourceSessionTitle != "Source" || e.CanvasKind != "table" {
+	if e.FavoriteID != "" || e.Revision != 2 || e.SavedItemID != resourceID || e.SourceSessionTitle != "Source" || e.CanvasKind != "table" {
 		t.Fatalf("lost metadata: %+v", e)
 	}
-	item := decodeJSON[store.CanvasItem](t, req(t, "POST", srv.URL+"/sessions/actor/canvas/saved/s/open", nil))
+	item := decodeJSON[store.CanvasItem](t, req(t, "POST", srv.URL+"/sessions/actor/canvases/"+resourceID+"/open", nil))
 	if item.ID != "c" || string(item.Item) != `{"rows":[1]}` {
 		t.Fatal("opening version changed content or identity")
 	}
-	r = req(t, "POST", srv.URL+"/sessions/actor/library/favorites", map[string]any{"kind": "canvas", "savedItemID": "s"})
+	r = req(t, "POST", srv.URL+"/sessions/actor/library/favorites", map[string]any{"kind": "canvas", "savedItemID": resourceID})
 	r.Body.Close()
 	if r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
@@ -95,7 +98,7 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 	view = decodeJSON[struct {
 		Entries []libraryEntry `json:"entries"`
 	}](t, req(t, "GET", srv.URL+"/sessions/actor/library", nil))
-	if view.Entries[0].FavoriteID != "canvas:s" {
+	if view.Entries[0].FavoriteID != "canvas:"+resourceID {
 		t.Fatal("could not re-favorite saved content")
 	}
 }
@@ -108,12 +111,15 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "source", ID: "canvas", Kind: "markdown", Title: "Reusable", Item: []byte(`{"markdown":"keep"}`)}); err != nil {
+	initial, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ActorSessionID: "source", ID: "canvas", Kind: "markdown", Title: "Reusable", Item: []byte(`{"markdown":"keep"}`)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SaveCanvasItem(ctx, "source", "canvas", "saved"); err != nil {
+	resourceID := initial.ResourceID
+	if err := st.PutLibraryFavorite(ctx, "source", store.LibraryFavorite{ID: "canvas:" + resourceID, Kind: "canvas", SavedItemID: resourceID}); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := st.DeleteSession(ctx, "source"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +130,12 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	if len(view.Entries) != 1 || view.Entries[0].FavoriteID == "" || !view.Entries[0].Available || view.Entries[0].SourceSessionAvailable {
 		t.Fatalf("global favorite lost: %+v", view)
 	}
-	first := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvas/saved/saved/open", nil))
-	second := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvas/saved/saved/open", nil))
+	first := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
+	second := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
 	if first.SessionID != "reader" || second.ID != first.ID || string(first.Item) != `{"markdown":"keep"}` {
 		t.Fatal("opening favorite must reuse reader's working copy")
 	}
-	r := req(t, "DELETE", endpoint+"/library/favorites/canvas:saved", nil)
+	r := req(t, "DELETE", endpoint+"/library/favorites/canvas:"+resourceID, nil)
 	r.Body.Close()
 	view = decodeJSON[struct {
 		Entries []libraryEntry `json:"entries"`

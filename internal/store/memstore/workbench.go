@@ -21,6 +21,7 @@ func cloneWorkbench(w *store.Workbench) *store.Workbench {
 }
 func cloneWorkbenchRevision(r *store.WorkbenchRevision) *store.WorkbenchRevision {
 	copy := *r
+	copy.Content = append(json.RawMessage(nil), r.Content...)
 	copy.BuildReceipt = append(json.RawMessage(nil), r.BuildReceipt...)
 	return &copy
 }
@@ -79,7 +80,7 @@ func (m *Memstore) UpdateWorkbench(_ context.Context, w *store.Workbench, expect
 	}
 	if w.ActiveRevision != "" {
 		r := m.workbenchRevisions[w.ID+"/"+w.ActiveRevision]
-		if r == nil || len(r.BuildReceipt) == 0 {
+		if r == nil || (len(r.BuildReceipt) == 0 && len(r.Content) == 0) {
 			return nil, store.ErrWorkbenchConflict
 		}
 	}
@@ -87,11 +88,21 @@ func (m *Memstore) UpdateWorkbench(_ context.Context, w *store.Workbench, expect
 	copy.Revision = expected + 1
 	copy.UpdatedAt = time.Now().UTC()
 	m.workbenches[w.ID] = copy
+	if copy.Deleted {
+		for key, mount := range m.canvas {
+			if mount.ResourceID == w.ID {
+				delete(m.canvas, key)
+			}
+		}
+	}
 	return cloneWorkbench(copy), nil
 }
 func (m *Memstore) SaveWorkbenchRevision(_ context.Context, r *store.WorkbenchRevision, expected int64) (*store.Workbench, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.saveCanvasRevisionLocked(r, expected)
+}
+func (m *Memstore) saveCanvasRevisionLocked(r *store.WorkbenchRevision, expected int64) (*store.Workbench, error) {
 	w := m.workbenches[r.WorkbenchID]
 	if w == nil || w.Deleted {
 		return nil, store.ErrNotFound
@@ -113,6 +124,14 @@ func (m *Memstore) SaveWorkbenchRevision(_ context.Context, r *store.WorkbenchRe
 		m.workbenchRevisions[key] = copy
 	}
 	m.workbenchSaves[requestKey] = r.Hash
+	if len(r.Content) > 0 {
+		var content store.CanvasContent
+		if err := json.Unmarshal(r.Content, &content); err != nil {
+			return nil, err
+		}
+		w.ActiveRevision = r.Hash
+		w.Name = content.Title
+	}
 	w.HeadRevision = r.Hash
 	w.Revision++
 	w.UpdatedAt = r.CreatedAt

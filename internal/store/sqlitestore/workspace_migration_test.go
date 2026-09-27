@@ -75,9 +75,9 @@ func TestWorkspaceMigrationFromPublishedV13(t *testing.T) {
 			{"SELECT app_id FROM computer_app_grants WHERE session_id='s'", "com.apple.calculator"},
 			{"SELECT title FROM browser_history WHERE id='h'", "Keep history"},
 			{"SELECT title FROM session_browser_tabs WHERE tab_id='b'", "Keep tab"},
-			{"SELECT item_json||':'||source_saved_item_id||':'||base_saved_revision||':'||saved_dirty FROM canvas_items WHERE id='current'", `{"content":"working"}:saved:3:1`},
-			{"SELECT item_json||':'||revision FROM canvas_saved_items WHERE id='saved'", `{"content":"saved"}:3`},
-			{"SELECT item_json||':'||visible FROM canvas_items WHERE id='closed-item'", `{"content":"closed"}:0`},
+			{"SELECT json_extract(r.content_json,'$.item.content') FROM canvas_mounts m JOIN canvas_resources w ON w.id=m.resource_id JOIN canvas_revisions r ON r.workbench_id=w.id AND r.hash=w.head_revision WHERE m.id='current'", "working"},
+			{"SELECT json_extract(r.content_json,'$.item.content')||':'||w.revision FROM canvas_resources w JOIN canvas_revisions r ON r.workbench_id=w.id AND r.hash=w.head_revision WHERE w.id='saved'", "saved:3"},
+			{"SELECT json_extract(r.content_json,'$.item.content')||':'||m.visible FROM canvas_mounts m JOIN canvas_resources w ON w.id=m.resource_id JOIN canvas_revisions r ON r.workbench_id=w.id AND r.hash=w.head_revision WHERE m.id='closed-item'", "closed:0"},
 			{"SELECT COUNT(*) FROM library_favorites WHERE saved_item_id='saved'", "1"},
 			{"SELECT COUNT(*) FROM sqlite_master WHERE name='canvas_closed_items'", "0"},
 			{"SELECT COUNT(*) FROM library_recent_opens", "0"},
@@ -135,7 +135,7 @@ func TestWorkspaceMigrationFailureRollsBackWholeUpgrade(t *testing.T) {
 	}
 	defer st.Close()
 	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
-	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_items WHERE id='closed-item'", "1")
+	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_mounts WHERE id='closed-item'", "1")
 }
 
 func TestWorkspaceMigrationRejectsUnregisteredVersionsWithoutChanges(t *testing.T) {

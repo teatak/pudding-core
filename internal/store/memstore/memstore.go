@@ -4,7 +4,6 @@
 package memstore
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"sort"
@@ -41,7 +40,6 @@ type Memstore struct {
 	susage             map[string]*store.SessionUsageStat  // sessionID → session stats
 	canvas             map[string]*store.CanvasItem        // sessionID/itemID → session canvas item
 	favorites          map[string]*store.LibraryFavorite
-	savedCanvas        map[string]*store.SavedCanvasItem         // id → globally saved canvas item
 	browser            map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
 	browserHistory     map[string]*store.BrowserHistoryEntry     // id → global browser history
 	computerGrants     map[string]map[string]struct{}            // sessionID → approved app IDs
@@ -71,7 +69,6 @@ func New() *Memstore {
 		usage:              make(map[usageKey]*store.UsageHourlyStat),
 		susage:             make(map[string]*store.SessionUsageStat),
 		canvas:             make(map[string]*store.CanvasItem),
-		savedCanvas:        make(map[string]*store.SavedCanvasItem),
 		favorites:          make(map[string]*store.LibraryFavorite),
 		browser:            make(map[string]map[string]*store.BrowserState),
 		browserHistory:     make(map[string]*store.BrowserHistoryEntry),
@@ -1603,230 +1600,6 @@ func (m *Memstore) SessionUsage(_ context.Context, sessionID string) (*store.Ses
 	return cloneSessionUsageStat(stat), nil
 }
 
-func (m *Memstore) ListCanvasItems(_ context.Context, actorSessionID string) ([]*store.CanvasItem, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	out := make([]*store.CanvasItem, 0, len(m.canvas))
-	for _, item := range m.canvas {
-		if item.SessionID == actorSessionID {
-			out = append(out, cloneCanvasItem(item))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].CreatedAt.Before(out[j].CreatedAt)
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
-}
-
-func (m *Memstore) PutCanvasItem(_ context.Context, in store.CanvasItemInput) (*store.CanvasItem, error) {
-	if err := store.NormalizeCanvasItemInput(&in); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[in.ActorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	now := time.Now()
-	sourceSessionID := in.SourceSessionID
-	if sourceSessionID == "" {
-		sourceSessionID = in.ActorSessionID
-	}
-	item := &store.CanvasItem{
-		ID:                 in.ID,
-		SessionID:          in.ActorSessionID,
-		CanvasID:           in.CanvasID,
-		SourceSessionID:    sourceSessionID,
-		CreatedBySessionID: in.ActorSessionID,
-		UpdatedBySessionID: in.ActorSessionID,
-		Kind:               in.Kind,
-		Title:              in.Title,
-		Item:               append([]byte(nil), in.Item...),
-		Window:             append([]byte(nil), in.Window...),
-		SourceSavedItemID:  in.SourceSavedItemID,
-		BaseSavedRevision:  in.BaseSavedRevision,
-		Visible:            true,
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-	key := canvasMapKey(in.ActorSessionID, in.ID)
-	if existing := m.canvas[key]; existing != nil {
-		item.SourceSessionID = existing.SourceSessionID
-		item.CreatedBySessionID = existing.CreatedBySessionID
-		item.SourceSavedItemID = existing.SourceSavedItemID
-		item.BaseSavedRevision = existing.BaseSavedRevision
-		item.SavedDirty = existing.SavedDirty || (existing.SourceSavedItemID != "" && (existing.Kind != in.Kind || existing.Title != in.Title ||
-			!bytes.Equal(existing.Item, in.Item) || !bytes.Equal(existing.Window, in.Window)))
-		item.CreatedAt = existing.CreatedAt
-	}
-	m.canvas[key] = item
-	return cloneCanvasItem(item), nil
-}
-
-func (m *Memstore) UpdateCanvasItemWindow(_ context.Context, patch store.CanvasItemWindowPatch) (*store.CanvasItem, error) {
-	if err := store.NormalizeCanvasItemWindowPatch(&patch); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[patch.ActorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	item := m.canvas[canvasMapKey(patch.ActorSessionID, patch.ItemID)]
-	if item == nil {
-		return nil, store.ErrNotFound
-	}
-	item.Window = append([]byte(nil), patch.Window...)
-	item.UpdatedBySessionID = patch.ActorSessionID
-	if item.SourceSavedItemID != "" {
-		item.SavedDirty = true
-	}
-	item.UpdatedAt = time.Now()
-	return cloneCanvasItem(item), nil
-}
-
-func (m *Memstore) DeleteCanvasItem(_ context.Context, actorSessionID, itemID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return store.ErrNotFound
-	}
-	key := canvasMapKey(actorSessionID, itemID)
-	if _, ok := m.canvas[key]; !ok {
-		return store.ErrNotFound
-	}
-	delete(m.canvas, key)
-
-	return nil
-}
-
-func (m *Memstore) ListSavedCanvasItems(_ context.Context, actorSessionID string) ([]*store.SavedCanvasItem, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	out := make([]*store.SavedCanvasItem, 0, len(m.savedCanvas))
-	for _, item := range m.savedCanvas {
-		out = append(out, cloneSavedCanvasItem(item))
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
-			return out[i].UpdatedAt.After(out[j].UpdatedAt)
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
-}
-
-func (m *Memstore) SaveCanvasItem(_ context.Context, actorSessionID, itemID, savedItemID string) (*store.CanvasSaveResult, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	item := m.canvas[canvasMapKey(actorSessionID, itemID)]
-	if item == nil {
-		return nil, store.ErrNotFound
-	}
-	now := time.Now()
-	targetID := item.SourceSavedItemID
-	var saved *store.SavedCanvasItem
-	if targetID == "" {
-		if strings.TrimSpace(savedItemID) == "" {
-			return nil, store.ErrInvalidCanvas
-		}
-		targetID = savedItemID
-		if m.savedCanvas[targetID] != nil {
-			return nil, store.ErrCanvasConflict
-		}
-		saved = &store.SavedCanvasItem{
-			ID: targetID, SourceSessionID: actorSessionID, SourceItemID: item.ID,
-			Kind: item.Kind, Title: item.Title, Item: append([]byte(nil), item.Item...), Window: append([]byte(nil), item.Window...),
-			Revision: 1, CreatedAt: now, UpdatedAt: now,
-		}
-		m.savedCanvas[targetID] = saved
-		m.favorites["canvas:"+targetID] = &store.LibraryFavorite{ID: "canvas:" + targetID, Kind: "canvas", SavedItemID: targetID, CreatedAt: now}
-	} else {
-		saved = m.savedCanvas[targetID]
-		if saved == nil {
-			return nil, store.ErrNotFound
-		}
-		if item.SavedDirty {
-			if saved.Revision != item.BaseSavedRevision {
-				return nil, store.ErrCanvasConflict
-			}
-			saved.Kind = item.Kind
-			saved.Title = item.Title
-			saved.Item = append([]byte(nil), item.Item...)
-			saved.Window = append([]byte(nil), item.Window...)
-			saved.Revision++
-			saved.UpdatedAt = now
-		}
-	}
-	item.SourceSavedItemID = targetID
-	item.BaseSavedRevision = saved.Revision
-	item.SavedDirty = false
-	item.UpdatedAt = now
-	return &store.CanvasSaveResult{Item: cloneCanvasItem(item), SavedItem: cloneSavedCanvasItem(saved)}, nil
-}
-
-func (m *Memstore) OpenSavedCanvasItem(_ context.Context, actorSessionID, savedItemID, itemID string) (*store.CanvasItem, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	saved := m.savedCanvas[savedItemID]
-	if saved == nil {
-		return nil, store.ErrNotFound
-	}
-	for _, item := range m.canvas {
-		if item.SessionID == actorSessionID && item.SourceSavedItemID == savedItemID {
-			return cloneCanvasItem(item), nil
-		}
-	}
-	if strings.TrimSpace(itemID) == "" {
-		return nil, store.ErrInvalidCanvas
-	}
-	now := time.Now()
-	item := &store.CanvasItem{
-		ID: itemID, SessionID: actorSessionID, CanvasID: store.DefaultCanvasID,
-		SourceSessionID: actorSessionID, CreatedBySessionID: actorSessionID, UpdatedBySessionID: actorSessionID,
-		Kind: saved.Kind, Title: saved.Title, Item: append([]byte(nil), saved.Item...), Window: append([]byte(nil), saved.Window...),
-		SourceSavedItemID: saved.ID, BaseSavedRevision: saved.Revision, Visible: true, CreatedAt: now, UpdatedAt: now,
-	}
-	m.canvas[canvasMapKey(actorSessionID, itemID)] = item
-	return cloneCanvasItem(item), nil
-}
-
-func (m *Memstore) DeleteSavedCanvasItem(_ context.Context, actorSessionID, savedItemID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[actorSessionID]; !ok {
-		return store.ErrNotFound
-	}
-	if m.savedCanvas[savedItemID] == nil {
-		return store.ErrNotFound
-	}
-	delete(m.savedCanvas, savedItemID)
-	delete(m.favorites, "canvas:"+savedItemID)
-	for _, item := range m.canvas {
-		if item.SourceSavedItemID == savedItemID {
-			item.SourceSavedItemID = ""
-			item.BaseSavedRevision = 0
-			item.SavedDirty = false
-		}
-	}
-	return nil
-}
-
 func (m *Memstore) GetBrowserState(_ context.Context, sessionID string) (*store.BrowserState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -2661,16 +2434,6 @@ func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat
 }
 
 func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
-	if item == nil {
-		return nil
-	}
-	cp := *item
-	cp.Item = append([]byte(nil), item.Item...)
-	cp.Window = append([]byte(nil), item.Window...)
-	return &cp
-}
-
-func cloneSavedCanvasItem(item *store.SavedCanvasItem) *store.SavedCanvasItem {
 	if item == nil {
 		return nil
 	}

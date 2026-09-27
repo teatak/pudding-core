@@ -12,12 +12,13 @@ import (
 )
 
 type canvasItemRequest struct {
-	ID              string          `json:"id"`
-	SourceSessionID string          `json:"sourceSessionID"`
-	Kind            string          `json:"kind"`
-	Title           string          `json:"title"`
-	Item            json.RawMessage `json:"item"`
-	Window          json.RawMessage `json:"window"`
+	ID               string          `json:"id"`
+	ExpectedRevision int64           `json:"expectedRevision"`
+	SourceSessionID  string          `json:"sourceSessionID"`
+	Kind             string          `json:"kind"`
+	Title            string          `json:"title"`
+	Item             json.RawMessage `json:"item"`
+	Window           json.RawMessage `json:"window"`
 }
 
 type canvasItemWindowRequest struct {
@@ -44,13 +45,14 @@ func (s *Server) createCanvasItem(c *cart.Context) error {
 		req.ID = store.NewID("canvas")
 	}
 	item, err := s.store.PutCanvasItem(c.Request.Context(), store.CanvasItemInput{
-		ID:              req.ID,
-		ActorSessionID:  sessionID,
-		SourceSessionID: req.SourceSessionID,
-		Kind:            req.Kind,
-		Title:           req.Title,
-		Item:            req.Item,
-		Window:          req.Window,
+		ID:               req.ID,
+		ExpectedRevision: req.ExpectedRevision,
+		ActorSessionID:   sessionID,
+		SourceSessionID:  req.SourceSessionID,
+		Kind:             req.Kind,
+		Title:            req.Title,
+		Item:             req.Item,
+		Window:           req.Window,
 	})
 	if err != nil {
 		return canvasStoreError(c, s, err)
@@ -73,13 +75,14 @@ func (s *Server) putCanvasItem(c *cart.Context) error {
 		return badRequest(c, "item id mismatch")
 	}
 	item, err := s.store.PutCanvasItem(c.Request.Context(), store.CanvasItemInput{
-		ID:              req.ID,
-		ActorSessionID:  sessionID,
-		SourceSessionID: req.SourceSessionID,
-		Kind:            req.Kind,
-		Title:           req.Title,
-		Item:            req.Item,
-		Window:          req.Window,
+		ID:               req.ID,
+		ExpectedRevision: req.ExpectedRevision,
+		ActorSessionID:   sessionID,
+		SourceSessionID:  req.SourceSessionID,
+		Kind:             req.Kind,
+		Title:            req.Title,
+		Item:             req.Item,
+		Window:           req.Window,
 	})
 	if err != nil {
 		return canvasStoreError(c, s, err)
@@ -117,31 +120,10 @@ func (s *Server) deleteCanvasItem(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) listSavedCanvasItems(c *cart.Context) error {
+func (s *Server) openCanvasResource(c *cart.Context) error {
 	sessionID, _ := c.Param("id")
-	items, err := s.store.ListSavedCanvasItems(c.Request.Context(), sessionID)
-	if err != nil {
-		return s.fail(c, err)
-	}
-	c.JSON(http.StatusOK, map[string]any{"items": items})
-	return nil
-}
-
-func (s *Server) saveCanvasItem(c *cart.Context) error {
-	sessionID, _ := c.Param("id")
-	itemID, _ := c.Param("itemID")
-	result, err := s.store.SaveCanvasItem(c.Request.Context(), sessionID, itemID, store.NewID("saved_canvas"))
-	if err != nil {
-		return canvasStoreError(c, s, err)
-	}
-	c.JSON(http.StatusOK, result)
-	return nil
-}
-
-func (s *Server) openSavedCanvasItem(c *cart.Context) error {
-	sessionID, _ := c.Param("id")
-	savedID, _ := c.Param("savedID")
-	item, err := s.store.OpenSavedCanvasItem(c.Request.Context(), sessionID, savedID, store.NewID("canvas"))
+	resourceID, _ := c.Param("canvasID")
+	item, err := s.store.OpenCanvasResource(c.Request.Context(), sessionID, resourceID, store.NewID("canvas"))
 	if err != nil {
 		return canvasStoreError(c, s, err)
 	}
@@ -149,19 +131,9 @@ func (s *Server) openSavedCanvasItem(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) deleteSavedCanvasItem(c *cart.Context) error {
-	sessionID, _ := c.Param("id")
-	savedID, _ := c.Param("savedID")
-	if err := s.store.DeleteSavedCanvasItem(c.Request.Context(), sessionID, savedID); err != nil {
-		return canvasStoreError(c, s, err)
-	}
-	c.Response.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
 func canvasStoreError(c *cart.Context, s *Server, err error) error {
-	if errors.Is(err, store.ErrCanvasConflict) {
-		c.JSON(http.StatusConflict, map[string]string{"error": "saved_canvas_conflict"})
+	if errors.Is(err, store.ErrWorkbenchConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "revision_conflict"})
 		return nil
 	}
 	if errors.Is(err, store.ErrInvalidCanvas) {

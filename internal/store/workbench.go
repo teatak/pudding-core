@@ -36,6 +36,7 @@ type WorkbenchRevision struct {
 	ParentRevision  string          `json:"parentRevision"`
 	ClientRequestID string          `json:"clientRequestID"`
 	CreatedAt       time.Time       `json:"createdAt"`
+	Content         json.RawMessage `json:"content,omitempty"`
 	BuildReceipt    json.RawMessage `json:"buildReceipt,omitempty"`
 }
 type WorkbenchStore interface {

@@ -1,98 +1,108 @@
 package sqlitestore
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const canvasItemColumns = `session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,kind,title,item_json,window_json,source_saved_item_id,base_saved_revision,saved_dirty,visible,created_at,updated_at`
-const savedCanvasItemColumns = `id,source_session_id,source_item_id,kind,title,item_json,window_json,revision,created_at,updated_at`
+const canvasMountSelect = `SELECT m.session_id,m.id,m.resource_id,m.window_json,m.visible,m.created_at,
+ w.name,coalesce(w.source_session_id,''),w.revision,w.updated_at,coalesce(r.content_json,'')
+ FROM canvas_mounts m JOIN canvas_resources w ON w.id=m.resource_id AND w.deleted=0
+ LEFT JOIN canvas_revisions r ON r.workbench_id=w.id AND r.hash=CASE WHEN w.active_revision<>'' THEN w.active_revision ELSE w.head_revision END`
 
-func (s *Store) ListCanvasItems(ctx context.Context, actorSessionID string) ([]*store.CanvasItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, actorSessionID); err != nil {
+func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
+	m := &store.CanvasItem{CanvasID: store.DefaultCanvasID}
+	w := &store.Workbench{}
+	r := &store.WorkbenchRevision{}
+	var created, updated int64
+	var window, content string
+	if err := row.Scan(&m.SessionID, &m.ID, &m.ResourceID, &window, &m.Visible, &created, &w.Name, &w.SourceSessionID, &w.Revision, &updated, &content); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+canvasItemColumns+` FROM canvas_items WHERE session_id=? ORDER BY created_at ASC, id ASC`,
-		actorSessionID,
-	)
+	m.CreatedAt = timeFromMS(created)
+	m.CreatedBySessionID = m.SessionID
+	m.UpdatedBySessionID = m.SessionID
+	if window != "" {
+		m.Window = json.RawMessage(window)
+	}
+	w.ID = m.ResourceID
+	w.UpdatedAt = timeFromMS(updated)
+	if content != "" {
+		r.Content = json.RawMessage(content)
+	}
+	return store.ProjectCanvasItem(m, w, r)
+}
+func getCanvasItemTx(ctx context.Context, tx *sql.Tx, session, id string) (*store.CanvasItem, error) {
+	return scanCanvasItem(tx.QueryRowContext(ctx, canvasMountSelect+` WHERE m.session_id=? AND m.id=?`, session, id))
+}
+func (s *Store) ListCanvasItems(ctx context.Context, session string) ([]*store.CanvasItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.getSessionDB(ctx, session); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, canvasMountSelect+` WHERE m.session_id=? ORDER BY m.created_at,m.id`, session)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]*store.CanvasItem, 0)
+	out := []*store.CanvasItem{}
 	for rows.Next() {
-		item, err := scanCanvasItem(rows)
+		v, err := scanCanvasItem(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, item)
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }
-
 func (s *Store) PutCanvasItem(ctx context.Context, in store.CanvasItemInput) (*store.CanvasItem, error) {
 	if err := store.NormalizeCanvasItemInput(&in); err != nil {
 		return nil, err
 	}
+	content, hash, err := (store.CanvasContent{Kind: in.Kind, Title: in.Title, Item: in.Item}).Encode()
+	if err != nil {
+		return nil, err
+	}
 	var out *store.CanvasItem
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.ActorSessionID); err != nil {
 			return err
 		}
-		now := time.Now()
-		created := unixMS(now)
-		createdBy := in.ActorSessionID
-		sourceSessionID := in.SourceSessionID
-		if sourceSessionID == "" {
-			sourceSessionID = in.ActorSessionID
-		}
-		sourceSavedItemID := in.SourceSavedItemID
-		baseSavedRevision := in.BaseSavedRevision
-		savedDirty := false
-		existing, err := getCanvasItemTx(ctx, tx, in.ActorSessionID, in.ID)
-		switch {
-		case err == nil:
-			created = unixMS(existing.CreatedAt)
-			createdBy = existing.CreatedBySessionID
-			sourceSessionID = existing.SourceSessionID
-			sourceSavedItemID = existing.SourceSavedItemID
-			baseSavedRevision = existing.BaseSavedRevision
-			savedDirty = existing.SavedDirty || (sourceSavedItemID != "" && (existing.Kind != in.Kind || existing.Title != in.Title ||
-				!bytes.Equal(existing.Item, in.Item) || !bytes.Equal(existing.Window, in.Window)))
-		case errors.Is(err, store.ErrNotFound):
-		case err != nil:
+		now := time.Now().UTC()
+		id := store.NewID("canvas")
+		expected := in.ExpectedRevision
+		old, err := getCanvasItemTx(ctx, tx, in.ActorSessionID, in.ID)
+		if err == nil {
+			id = old.ResourceID
+			if expected != old.Revision {
+				return store.ErrWorkbenchConflict
+			}
+		} else if errors.Is(err, store.ErrNotFound) {
+			if expected != 0 {
+				return store.ErrWorkbenchConflict
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO canvas_resources(id,name,source_session_id,revision,head_revision,active_revision,bindings,grants,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,1,'','','{}','{}',1,0,?,?)`, id, in.Title, in.ActorSessionID, unixMS(now), unixMS(now))
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO canvas_mounts(session_id,id,resource_id,window_json,visible,created_at) VALUES(?,?,?,?,1,?)`, in.ActorSessionID, in.ID, id, string(in.Window), unixMS(now))
+			if err != nil {
+				return err
+			}
+			expected = 1
+		} else {
 			return err
 		}
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO canvas_items(
-				session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,kind,title,item_json,window_json,
-				source_saved_item_id,base_saved_revision,saved_dirty,visible,created_at,updated_at
-			 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-			 ON CONFLICT(session_id,id) DO UPDATE SET
-			   canvas_id=excluded.canvas_id,
-			   updated_by_session_id=excluded.updated_by_session_id,
-			   kind=excluded.kind,
-			   title=excluded.title,
-			   item_json=excluded.item_json,
-			   window_json=excluded.window_json,
-			   source_saved_item_id=excluded.source_saved_item_id,
-			   base_saved_revision=excluded.base_saved_revision,
-			   saved_dirty=excluded.saved_dirty,
-			   visible=1,
-			   updated_at=excluded.updated_at`,
-			in.ActorSessionID, in.ID, in.CanvasID, sourceSessionID, createdBy, in.ActorSessionID, in.Kind, in.Title,
-			string(in.Item), string(in.Window), sourceSavedItemID, baseSavedRevision, boolInt(savedDirty), 1, created, unixMS(now),
-		)
-		if err != nil {
+		if err := saveCanvasRevisionTx(ctx, tx, &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, Content: content, ClientRequestID: store.NewID("edit"), CreatedAt: now}, expected); err != nil {
 			return err
 		}
 		out, err = getCanvasItemTx(ctx, tx, in.ActorSessionID, in.ID)
@@ -100,43 +110,32 @@ func (s *Store) PutCanvasItem(ctx context.Context, in store.CanvasItemInput) (*s
 	})
 	return out, err
 }
-
-func (s *Store) UpdateCanvasItemWindow(ctx context.Context, patch store.CanvasItemWindowPatch) (*store.CanvasItem, error) {
-	if err := store.NormalizeCanvasItemWindowPatch(&patch); err != nil {
+func (s *Store) UpdateCanvasItemWindow(ctx context.Context, p store.CanvasItemWindowPatch) (*store.CanvasItem, error) {
+	if err := store.NormalizeCanvasItemWindowPatch(&p); err != nil {
 		return nil, err
 	}
 	var out *store.CanvasItem
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, patch.ActorSessionID); err != nil {
+		if _, err := getSessionTx(ctx, tx, p.ActorSessionID); err != nil {
 			return err
 		}
-		now := time.Now()
-		res, err := tx.ExecContext(ctx,
-			`UPDATE canvas_items SET window_json=?, updated_by_session_id=?, saved_dirty=CASE WHEN source_saved_item_id<>'' THEN 1 ELSE saved_dirty END, updated_at=? WHERE session_id=? AND id=?`,
-			string(patch.Window), patch.ActorSessionID, unixMS(now), patch.ActorSessionID, patch.ItemID,
-		)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE canvas_mounts SET window_json=? WHERE session_id=? AND id=?`, string(p.Window), p.ActorSessionID, p.ItemID); err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return store.ErrNotFound
-		}
-		out, err = getCanvasItemTx(ctx, tx, patch.ActorSessionID, patch.ItemID)
+		var err error
+		out, err = getCanvasItemTx(ctx, tx, p.ActorSessionID, p.ItemID)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error {
+// Removing a session mount closes that view; the independent resource survives.
+func (s *Store) DeleteCanvasItem(ctx context.Context, session, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
+		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM canvas_items WHERE session_id=? AND id=?`, actorSessionID, itemID)
+		res, err := tx.ExecContext(ctx, `DELETE FROM canvas_mounts WHERE session_id=? AND id=?`, session, id)
 		if err != nil {
 			return err
 		}
@@ -150,247 +149,21 @@ func (s *Store) DeleteCanvasItem(ctx context.Context, actorSessionID, itemID str
 		return nil
 	})
 }
-
-func (s *Store) ListSavedCanvasItems(ctx context.Context, actorSessionID string) ([]*store.SavedCanvasItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, actorSessionID); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+savedCanvasItemColumns+` FROM canvas_saved_items ORDER BY updated_at DESC,id ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]*store.SavedCanvasItem, 0)
-	for rows.Next() {
-		item, err := scanSavedCanvasItem(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) SaveCanvasItem(ctx context.Context, actorSessionID, itemID, savedItemID string) (*store.CanvasSaveResult, error) {
-	actorSessionID = strings.TrimSpace(actorSessionID)
-	itemID = strings.TrimSpace(itemID)
-	savedItemID = strings.TrimSpace(savedItemID)
-	if actorSessionID == "" || itemID == "" {
-		return nil, store.ErrInvalidCanvas
-	}
-	var out *store.CanvasSaveResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
-			return err
-		}
-		item, err := getCanvasItemTx(ctx, tx, actorSessionID, itemID)
-		if err != nil {
-			return err
-		}
-		now := unixMS(time.Now())
-		targetID := item.SourceSavedItemID
-		if targetID == "" {
-			if savedItemID == "" {
-				return store.ErrInvalidCanvas
-			}
-			targetID = savedItemID
-			_, err = tx.ExecContext(ctx,
-				`INSERT INTO canvas_saved_items(id,source_session_id,source_item_id,kind,title,item_json,window_json,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-				targetID, actorSessionID, item.ID, item.Kind, item.Title, string(item.Item), string(item.Window), 1, now, now,
-			)
-			if err != nil {
-				return err
-			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO library_favorites(id,kind,saved_item_id,created_at) VALUES(?,?,?,?)`, "canvas:"+targetID, "canvas", targetID, now); err != nil {
-				return err
-			}
-		} else if item.SavedDirty {
-			res, err := tx.ExecContext(ctx,
-				`UPDATE canvas_saved_items SET kind=?,title=?,item_json=?,window_json=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?`,
-				item.Kind, item.Title, string(item.Item), string(item.Window), now, targetID, item.BaseSavedRevision,
-			)
-			if err != nil {
-				return err
-			}
-			n, err := res.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if n == 0 {
-				return store.ErrCanvasConflict
-			}
-		}
-		saved, err := getSavedCanvasItemTx(ctx, tx, targetID)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE canvas_items SET source_saved_item_id=?,base_saved_revision=?,saved_dirty=0,updated_at=? WHERE session_id=? AND id=?`,
-			targetID, saved.Revision, now, actorSessionID, itemID,
-		); err != nil {
-			return err
-		}
-		item, err = getCanvasItemTx(ctx, tx, actorSessionID, itemID)
-		if err != nil {
-			return err
-		}
-		out = &store.CanvasSaveResult{Item: item, SavedItem: saved}
-		return nil
-	})
-	return out, err
-}
-
-func (s *Store) OpenSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID, itemID string) (*store.CanvasItem, error) {
-	actorSessionID = strings.TrimSpace(actorSessionID)
-	savedItemID = strings.TrimSpace(savedItemID)
-	itemID = strings.TrimSpace(itemID)
-	if actorSessionID == "" || savedItemID == "" || itemID == "" {
-		return nil, store.ErrInvalidCanvas
-	}
+func (s *Store) OpenCanvasResource(ctx context.Context, session, id, itemID string) (*store.CanvasItem, error) {
 	var out *store.CanvasItem
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
+		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
-		existing, err := scanCanvasItem(tx.QueryRowContext(ctx,
-			`SELECT `+canvasItemColumns+` FROM canvas_items WHERE session_id=? AND source_saved_item_id=?`, actorSessionID, savedItemID,
-		))
-		if err == nil {
-			out = existing
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if _, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, id)); err != nil {
 			return err
 		}
-		saved, err := getSavedCanvasItemTx(ctx, tx, savedItemID)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_mounts(session_id,id,resource_id,created_at) VALUES(?,?,?,?) ON CONFLICT(session_id,resource_id) DO UPDATE SET visible=1`, session, itemID, id, unixMS(time.Now())); err != nil {
 			return err
 		}
-		now := unixMS(time.Now())
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO canvas_items(session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,kind,title,item_json,window_json,source_saved_item_id,base_saved_revision,saved_dirty,visible,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			actorSessionID, itemID, store.DefaultCanvasID, actorSessionID, actorSessionID, actorSessionID,
-			saved.Kind, saved.Title, string(saved.Item), string(saved.Window), saved.ID, saved.Revision, 0, 1, now, now,
-		)
-		if err != nil {
-			return err
-		}
-		out, err = getCanvasItemTx(ctx, tx, actorSessionID, itemID)
+		var err error
+		out, err = scanCanvasItem(tx.QueryRowContext(ctx, canvasMountSelect+` WHERE m.session_id=? AND m.resource_id=?`, session, id))
 		return err
 	})
 	return out, err
-}
-
-func (s *Store) DeleteSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID string) error {
-	actorSessionID = strings.TrimSpace(actorSessionID)
-	savedItemID = strings.TrimSpace(savedItemID)
-	if actorSessionID == "" || savedItemID == "" {
-		return store.ErrInvalidCanvas
-	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE canvas_items SET source_saved_item_id='',base_saved_revision=0,saved_dirty=0 WHERE source_saved_item_id=?`, savedItemID); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM canvas_saved_items WHERE id=?`, savedItemID)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return store.ErrNotFound
-		}
-		return nil
-	})
-}
-
-func getCanvasItemTx(ctx context.Context, tx *sql.Tx, sessionID, itemID string) (*store.CanvasItem, error) {
-	item, err := scanCanvasItem(tx.QueryRowContext(ctx,
-		`SELECT `+canvasItemColumns+` FROM canvas_items WHERE session_id=? AND id=?`,
-		sessionID, itemID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return item, err
-}
-
-func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
-	var item store.CanvasItem
-	var itemJSON, windowJSON string
-	var savedDirty, visible int
-	var created, updated int64
-	if err := row.Scan(
-		&item.SessionID,
-		&item.ID,
-		&item.CanvasID,
-		&item.SourceSessionID,
-		&item.CreatedBySessionID,
-		&item.UpdatedBySessionID,
-		&item.Kind,
-		&item.Title,
-		&itemJSON,
-		&windowJSON,
-		&item.SourceSavedItemID,
-		&item.BaseSavedRevision,
-		&savedDirty,
-		&visible,
-		&created,
-		&updated,
-	); err != nil {
-		return nil, err
-	}
-	item.Item = []byte(itemJSON)
-	if windowJSON != "" {
-		item.Window = []byte(windowJSON)
-	}
-	item.Visible = visible != 0
-	item.SavedDirty = savedDirty != 0
-	item.CreatedAt = timeFromMS(created)
-	item.UpdatedAt = timeFromMS(updated)
-	return &item, nil
-}
-
-func getSavedCanvasItemTx(ctx context.Context, tx *sql.Tx, id string) (*store.SavedCanvasItem, error) {
-	item, err := scanSavedCanvasItem(tx.QueryRowContext(ctx,
-		`SELECT `+savedCanvasItemColumns+` FROM canvas_saved_items WHERE id=?`, id,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return item, err
-}
-
-func scanSavedCanvasItem(row messageScanner) (*store.SavedCanvasItem, error) {
-	var item store.SavedCanvasItem
-	var itemJSON, windowJSON string
-	var created, updated int64
-	if err := row.Scan(
-		&item.ID,
-		&item.SourceSessionID,
-		&item.SourceItemID,
-		&item.Kind,
-		&item.Title,
-		&itemJSON,
-		&windowJSON,
-		&item.Revision,
-		&created,
-		&updated,
-	); err != nil {
-		return nil, err
-	}
-	item.Item = []byte(itemJSON)
-	if windowJSON != "" {
-		item.Window = []byte(windowJSON)
-	}
-	item.CreatedAt = timeFromMS(created)
-	item.UpdatedAt = timeFromMS(updated)
-	return &item, nil
 }

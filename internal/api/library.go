@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -29,7 +30,7 @@ func (s *Server) listLibrary(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	saved, err := s.store.ListSavedCanvasItems(ctx, actor)
+	saved, err := s.store.ListWorkbenches(ctx)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -45,9 +46,28 @@ func (s *Server) listLibrary(c *cart.Context) error {
 		entries = append(entries, entry)
 	}
 	for _, item := range saved {
+		kind := "app"
+		hash := item.ActiveRevision
+		if hash == "" {
+			hash = item.HeadRevision
+		}
+		if hash != "" {
+			r, err := s.store.GetWorkbenchRevision(ctx, item.ID, hash)
+			if err != nil {
+				return s.fail(c, err)
+			}
+			if len(r.Content) > 0 {
+				var content store.CanvasContent
+				if err := json.Unmarshal(r.Content, &content); err != nil {
+					return s.fail(c, err)
+				}
+				kind = content.Kind
+			}
+		}
+
 		entries = append(entries, libraryEntry{
-			LibraryFavorite: store.LibraryFavorite{ID: "canvas:" + item.ID, Kind: "canvas", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Title, CreatedAt: item.CreatedAt},
-			FavoriteID:      savedFavorites[item.ID], CanvasKind: item.Kind, Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
+			LibraryFavorite: store.LibraryFavorite{ID: "canvas:" + item.ID, Kind: "canvas", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Name, CreatedAt: item.CreatedAt},
+			FavoriteID:      savedFavorites[item.ID], CanvasKind: kind, Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
 		})
 	}
 	ids := make([]string, 0, len(entries))

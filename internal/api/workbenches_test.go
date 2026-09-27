@@ -63,15 +63,15 @@ func TestWorkbenchQueryRequiresExactGrantAndConnection(t *testing.T) {
 		return w.Body.Bytes()
 	}
 	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest("GET", "/workbenches", nil))
+	handler.ServeHTTP(unauthorized, httptest.NewRequest("GET", "/canvases", nil))
 	if unauthorized.Code != 401 {
 		t.Fatal("missing token accepted")
 	}
 	var w store.Workbench
-	if err := json.Unmarshal(call("POST", "/workbenches", map[string]any{"name": "Fixture"}, 201), &w); err != nil {
+	if err := json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Fixture"}, 201), &w); err != nil {
 		t.Fatal(err)
 	}
-	base := "/workbenches/" + w.ID
+	base := "/canvases/" + w.ID
 	pkg := workbench.Package{Files: map[string]string{
 		"src/App.tsx":    "export default ()=> <p>Fixture</p>",
 		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"primary","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"status":{"type":"string","enum":["open","closed"]}},"required":["status"],"additionalProperties":false},"request":{"method":"GET","path":"/items","query":{"status":{"$input":"/status"}}},"result":{"rows":"/items","total":"/total"}}}}`,
@@ -141,8 +141,8 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 		return out.Body.Bytes()
 	}
 	var w store.Workbench
-	_ = json.Unmarshal(call("POST", "/workbenches", map[string]any{"name": "Actions"}, 201), &w)
-	base := "/workbenches/" + w.ID
+	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Actions"}, 201), &w)
+	base := "/canvases/" + w.ID
 	pkg := workbench.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
 	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"expectedRevision": w.Revision, "clientRequestID": "save", "package": pkg}, 200), &w)
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)

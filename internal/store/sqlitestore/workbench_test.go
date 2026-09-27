@@ -91,6 +91,7 @@ func TestWorkbenchMigrationFailureRollsBackAndPreservesOldData(t *testing.T) {
 		t.Fatal(err)
 	}
 	createTestSession(t, s, "old_session")
+	useV25CanvasFixture(t, s.db)
 	if _, err = s.db.Exec(`DROP TABLE workbench_saves; DROP TABLE workbench_revisions; DROP TABLE workbenches; PRAGMA user_version=24;`); err != nil {
 		t.Fatal(err)
 	}

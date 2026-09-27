@@ -299,9 +299,8 @@ export const canvasItem = z.object({
   title: z.string().optional(),
   item: z.unknown(),
   window: z.unknown().optional(),
-  sourceSavedItemID: z.string().optional(),
-  baseSavedRevision: z.number().int().optional(),
-  savedDirty: z.boolean().optional(),
+  resourceID: z.string(),
+  revision: z.number().int(),
   visible: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -311,20 +310,6 @@ export type CanvasItem = z.infer<typeof canvasItem>;
 export const listCanvasItemsResponse = z.object({
   items: z.array(canvasItem),
 });
-
-export const savedCanvasItem = z.object({
-  id: z.string(),
-  sourceSessionID: z.string().optional(),
-  sourceItemID: z.string().optional(),
-  kind: z.string(),
-  title: z.string().optional(),
-  item: z.unknown(),
-  window: z.unknown().optional(),
-  revision: z.number().int(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type SavedCanvasItem = z.infer<typeof savedCanvasItem>;
 
 export const libraryEntry = z.object({
  id: z.string(), kind: z.enum(["canvas", "web"]), sourceSessionID: z.string(),
@@ -340,13 +325,8 @@ export const putLibraryFavoriteRequest = z.discriminatedUnion("kind", [
  z.object({kind: z.literal("web"), url: z.string().url(), title: z.string().optional()}),
 ]);
 export type LibraryFavoriteInput = z.infer<typeof putLibraryFavoriteRequest>;
-export const canvasSaveResult = z.object({
-  item: canvasItem,
-  savedItem: savedCanvasItem,
-});
-export type CanvasSaveResult = z.infer<typeof canvasSaveResult>;
-
 export const putCanvasItemRequest = z.object({
+  expectedRevision: z.number().int().nonnegative(),
   id: z.string().optional(),
   sourceSessionID: z.string().optional(),
   kind: z.string().min(1),

@@ -8,30 +8,15 @@ import (
 )
 
 func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
-	st, path := openTestStore(t)
+	db, path := openWorkspaceV13Database(t)
 	ctx := context.Background()
-	createTestSession(t, st, "retain-a")
-	createTestSession(t, st, "retain-b")
-	for _, sessionID := range []string{"retain-a", "retain-b"} {
-		if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{ID: "same-id", ActorSessionID: sessionID, Kind: "markdown", Title: sessionID, Item: []byte(`{"content":"current"}`)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	saved, err := st.SaveCanvasItem(ctx, "retain-a", "same-id", "saved-retained")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`
-  CREATE TABLE canvas_closed_items (
-   session_id TEXT NOT NULL, id TEXT NOT NULL, source_item_id TEXT NOT NULL,
-   actor_session_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, title TEXT NOT NULL,
-   item_json TEXT NOT NULL, window_json TEXT NOT NULL DEFAULT '', closed_at INTEGER NOT NULL,
-   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(session_id,id)
-  );
+ INSERT INTO sessions(id,title,provider,model,created_at,updated_at,last_activity_at) VALUES('retain-a','A','mock','mock',1,1,1),('retain-b','B','mock','mock',1,1,1);
+ INSERT INTO canvas_items(session_id,id,kind,title,item_json,created_at,updated_at) VALUES('retain-a','same-id','markdown','retain-a','{"content":"current"}',100,200),('retain-b','same-id','markdown','retain-b','{"content":"current"}',100,200);
+ `); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
   INSERT INTO canvas_closed_items VALUES
    ('retain-a','old-a','same-id','retain-a','markdown','stale snapshot','{"content":"stale"}','',200,100,200),
    ('retain-a','old-b','closed-id','retain-a','table','Recover me','{"rows":[1,2]}','{"x":20}',300,150,300),
@@ -58,7 +43,7 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	var closed *store.CanvasItem
 	for _, item := range items {
 		if item.ID == "same-id" {
-			if item.Title != "retain-a" || item.SourceSavedItemID != saved.SavedItem.ID || item.BaseSavedRevision != 1 || item.SavedDirty {
+			if item.Title != "retain-a" || item.ResourceID != store.CanvasResourceID("retain-a", "same-id") {
 				t.Fatalf("canonical or saved identity overwritten: %+v", item)
 			}
 		} else {
@@ -69,7 +54,7 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 		t.Fatalf("closed snapshot not retained with initial closed state: %+v", closed)
 	}
 	others, err := reopened.ListCanvasItems(ctx, "retain-b")
-	if err != nil || len(others) != 2 || others[0].Title != "Other session" {
+	if err != nil || len(others) != 2 {
 		t.Fatalf("session isolation: items=%+v err=%v", others, err)
 	}
 	var oldTables int
@@ -93,8 +78,8 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	if err := again.DeleteCanvasItem(ctx, "retain-a", "same-id"); err != nil {
 		t.Fatal(err)
 	}
-	favorites, err := again.ListSavedCanvasItems(ctx, "retain-a")
-	if err != nil || len(favorites) != 1 || favorites[0].Revision != 1 {
-		t.Fatalf("deletion changed saved version: %+v %v", favorites, err)
+	resource, err := again.GetWorkbench(ctx, store.CanvasResourceID("retain-a", "same-id"))
+	if err != nil || resource.Name != "retain-a" {
+		t.Fatalf("close removed resource: %+v %v", resource, err)
 	}
 }

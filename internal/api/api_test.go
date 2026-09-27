@@ -1379,70 +1379,44 @@ func TestCanvasItemsAPIIsSessionScopedAndSavedWidgetsAreGlobal(t *testing.T) {
 		t.Fatalf("cross-session patch status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items/canvas_api/save", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save status = %d", resp.StatusCode)
-	}
-	savedResult := decodeJSON[store.CanvasSaveResult](t, resp)
-	resp.Body.Close()
-	if savedResult.Item.SourceSavedItemID == "" || savedResult.Item.SavedDirty || savedResult.SavedItem.Revision != 1 {
-		t.Fatalf("unexpected save result: %+v", savedResult)
-	}
-
-	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/canvas/saved", nil)
-	savedList := decodeJSON[struct {
-		Items []store.SavedCanvasItem `json:"items"`
+	resp = req(t, http.MethodGet, srv.URL+"/canvases", nil)
+	resources := decodeJSON[struct {
+		Canvases []store.Workbench `json:"canvases"`
 	}](t, resp)
 	resp.Body.Close()
-	if len(savedList.Items) != 1 || savedList.Items[0].ID != savedResult.SavedItem.ID {
-		t.Fatalf("saved widget should be global: %+v", savedList.Items)
+	if len(resources.Canvases) != 1 || resources.Canvases[0].ID != item.ResourceID {
+		t.Fatalf("missing canonical canvas: %+v", resources)
 	}
-
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvas/saved/"+savedResult.SavedItem.ID+"/open", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("open saved status = %d", resp.StatusCode)
-	}
-	rightItem := decodeJSON[store.CanvasItem](t, resp)
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvases/"+item.ResourceID+"/open", nil)
+	right := decodeJSON[store.CanvasItem](t, resp)
 	resp.Body.Close()
-	if rightItem.SessionID != "sess_right" || rightItem.SourceSavedItemID != savedResult.SavedItem.ID || rightItem.SavedDirty {
-		t.Fatalf("unexpected opened item: %+v", rightItem)
+	if right.ResourceID != item.ResourceID || right.Revision != item.Revision {
+		t.Fatal("open copied content")
 	}
-
-	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_right/canvas/items/"+rightItem.ID, map[string]any{
-		"id": rightItem.ID, "kind": "markdown", "title": "Right edited",
-		"item": map[string]any{"kind": "markdown", "content": "changed"},
-	})
+	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_right/canvas/items/"+right.ID, map[string]any{"kind": "markdown", "title": "Changed", "item": map[string]any{"content": "changed"}, "expectedRevision": right.Revision})
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("edit opened status = %d", resp.StatusCode)
+		t.Fatalf("update: %d", resp.StatusCode)
 	}
-	rightItem = decodeJSON[store.CanvasItem](t, resp)
 	resp.Body.Close()
-	if !rightItem.SavedDirty {
-		t.Fatalf("edited saved widget should be dirty: %+v", rightItem)
-	}
-
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvas/items/"+rightItem.ID+"/save", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save edited status = %d", resp.StatusCode)
-	}
-	savedResult = decodeJSON[store.CanvasSaveResult](t, resp)
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_left/canvas/items", nil)
+	list = decodeJSON[struct {
+		Items []store.CanvasItem `json:"items"`
+	}](t, resp)
 	resp.Body.Close()
-	if savedResult.SavedItem.Revision != 2 || savedResult.Item.SavedDirty {
-		t.Fatalf("unexpected updated saved result: %+v", savedResult)
+	if list.Items[0].Title != "Changed" || list.Items[0].Revision <= item.Revision {
+		t.Fatal("other session has stale copy")
 	}
-
-	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_left/canvas/items/canvas_api", map[string]any{
-		"id": "canvas_api", "kind": "markdown", "title": "Conflicting edit",
-		"item": map[string]any{"kind": "markdown", "content": "stale"},
-	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("edit stale item status = %d", resp.StatusCode)
-	}
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items/canvas_api/save", nil)
+	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_left/canvas/items/canvas_api", map[string]any{"kind": "markdown", "title": "Stale", "item": map[string]any{"content": "stale"}, "expectedRevision": item.Revision})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("stale save status = %d", resp.StatusCode)
+		t.Fatalf("stale update: %d", resp.StatusCode)
+	}
+	for _, path := range []string{"/workbenches", "/sessions/sess_left/canvas/saved", "/sessions/sess_left/canvas/items/canvas_api/save"} {
+		resp = req(t, http.MethodPost, srv.URL+path, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("old API remains: %s %d", path, resp.StatusCode)
+		}
 	}
 }
 

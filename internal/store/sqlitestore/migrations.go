@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 25
+	currentSchemaVersion       = 26
 )
 
 var (
@@ -33,6 +33,7 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	26: migrateUnifiedCanvases,
 	25: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
 CREATE TABLE IF NOT EXISTS workbench_links (
@@ -662,6 +663,11 @@ func prepareSchema(db *sql.DB, path string) error {
 			version = currentSchemaVersion
 		} else {
 			if err := validateSchema(db, currentSchemaContract); err == nil {
+				if err := setSchemaVersion(db, currentSchemaVersion); err != nil {
+					return err
+				}
+				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV25Contract); err == nil {
 				// Version 9 is data-only and cannot be inferred from the schema.
 				// Stamp the latest identifiable layout so migration 9 still runs.
 				if err := setSchemaVersion(db, currentSchemaLayoutVersion); err != nil {
@@ -940,7 +946,7 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 	"usage_calibrations": {"provider", "model", "sample_count", "input_ratio_ewma", "last_estimated_input_tokens", "last_actual_input_tokens", "updated_at"},
 })
 
-var currentSchemaContract = func() schemaContract {
+var schemaV25Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
@@ -974,6 +980,47 @@ var currentSchemaContract = func() schemaContract {
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
 	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}
+	return out
+}()
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"session_children":     {"child_session_id", "parent_session_id"},
+		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
+		"collaboration_stops":  {"parent_turn_id"},
+		"canvas_resources":     {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "grants", "binding_version", "deleted", "created_at", "updated_at"},
+		"canvas_revisions":     {"workbench_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content_json"},
+		"canvas_links":         {"id", "workbench_id", "left_entity", "right_entity", "created_at"},
+		"canvas_actions":       {"id", "workbench_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
+		"canvas_saves":         {"workbench_id", "client_request_id", "hash"},
+		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
+		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
+		"computer_app_grants":  {"session_id", "app_id", "created_at"},
+		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
+		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
+	})
+	delete(out.tables, "canvas_items")
+	delete(out.tables, "canvas_saved_items")
+	out.tables["canvas_mounts"] = []string{"session_id", "id", "resource_id", "window_json", "visible", "created_at"}
+	out.indexes = slices.DeleteFunc(out.indexes, func(v string) bool { return strings.HasPrefix(v, "canvas_") })
+	delete(out.tables, "usage_calibrations")
+	delete(out.tables, "canvas_closed_items")
+	for i, index := range out.indexes {
+		if index == "canvas_closed_items_closed_at" {
+			out.indexes = append(out.indexes[:i], out.indexes[i+1:]...)
+			break
+		}
+	}
+	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
+	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
+	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
+	out.tables["projects"] = append(out.tables["projects"], "last_activity_at")
+	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
+	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
+	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
+	out.indexes = append(out.indexes, "session_children_parent")
+	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
+	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches"}
 	return out
 }()
 

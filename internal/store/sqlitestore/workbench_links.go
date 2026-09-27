@@ -11,7 +11,7 @@ import (
 func (s *Store) ListWorkbenchLinks(ctx context.Context, wid string) ([]*store.WorkbenchLink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,left_entity,right_entity,created_at FROM workbench_links WHERE workbench_id=? ORDER BY created_at DESC`, wid)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,left_entity,right_entity,created_at FROM canvas_links WHERE workbench_id=? ORDER BY created_at DESC`, wid)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func (s *Store) ListWorkbenchLinks(ctx context.Context, wid string) ([]*store.Wo
 }
 func (s *Store) PutWorkbenchLink(ctx context.Context, l *store.WorkbenchLink, expected int64) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM workbenches WHERE id=? AND deleted=0`, l.WorkbenchID))
+		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, l.WorkbenchID))
 		if err != nil {
 			return err
 		}
@@ -46,20 +46,20 @@ func (s *Store) PutWorkbenchLink(ctx context.Context, l *store.WorkbenchLink, ex
 		}
 		left, _ := json.Marshal(l.Left)
 		right, _ := json.Marshal(l.Right)
-		_, err = tx.ExecContext(ctx, `INSERT INTO workbench_links(id,workbench_id,left_entity,right_entity,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workbench_id,left_entity,right_entity) DO NOTHING`, l.ID, l.WorkbenchID, string(left), string(right), unixMS(l.CreatedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_links(id,workbench_id,left_entity,right_entity,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workbench_id,left_entity,right_entity) DO NOTHING`, l.ID, l.WorkbenchID, string(left), string(right), unixMS(l.CreatedAt))
 		return err
 	})
 }
 func (s *Store) DeleteWorkbenchLink(ctx context.Context, wid, id string, expected int64) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM workbenches WHERE id=? AND deleted=0`, wid))
+		w, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, wid))
 		if err != nil {
 			return err
 		}
 		if w.Revision != expected {
 			return store.ErrWorkbenchConflict
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM workbench_links WHERE workbench_id=? AND id=?`, wid, id)
+		_, err = tx.ExecContext(ctx, `DELETE FROM canvas_links WHERE workbench_id=? AND id=?`, wid, id)
 		return err
 	})
 }
