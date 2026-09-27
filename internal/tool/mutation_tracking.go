@@ -94,6 +94,16 @@ func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 		}
 		return structuredMutationTracking([]string{from, to})
 	case FileCopy:
+		if plan := call.FileCopyGrant; plan != nil {
+			if !plan.to.resolved.project {
+				return ProjectMutationTracking{}, false
+			}
+			target, ok := resolveMutationTarget(call.ProjectDirs, plan.To.Path, true)
+			if !ok || target != plan.To.Path {
+				return ProjectMutationTracking{}, false
+			}
+			return structuredMutationTracking([]string{target})
+		}
 		args, err := decodeFileCopyArgs(call.Args)
 		if err != nil || !isProjectFileScope(args.To.Scope) {
 			return ProjectMutationTracking{}, false

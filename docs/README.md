@@ -1,83 +1,41 @@
-# Pudding 文档索引
+# Core 文档索引
 
-本文是 `docs/` 的统一入口。判断当前行为时，优先级依次为:
+本仓维护 daemon、公共协议、数据和工具执行。桌面 UI、Electron、Swift Helper 与应用发布见 [desktop 文档](https://github.com/teatak/pudding-desktop/blob/main/docs/README.md)。
 
-1. `AGENTS.md` 的架构硬约束。
-2. 当前代码、契约和测试。
-3. 下方“当前参考”文档。
-4. 已完成设计记录与历史文档。
-
-## 文档归属与路径
-
-本仓维护 daemon、公共协议、数据与工具执行的文档。纯桌面 UI、原生交互和应用发布文档归属
-`pudding-desktop`。涉及前后端协作的文档保留一个版本，并在文首标明路径归属。
-
-跨仓文档中的 `internal/`、`cmd/`、`contracts/` 相对 core 根目录；`web/`、`electron/`、
-`native/` 相对 desktop 根目录。历史文档中的文件名和行号对应记录时的版本，不保证仍存在。
+判断当前行为以 [AGENTS.md](../AGENTS.md)、当前源码／契约／测试为准；当前参考用于说明，归档用于追溯。源码与硬约束冲突时需明确记录，不能以历史方案覆盖。
 
 ## 当前参考
 
-| 文档 | 用途 |
+| 文档 | 内容 |
 | --- | --- |
-| [api-quickstart.md](api-quickstart.md) | 独立 daemon 的会话、提交、取消与 SSE 示例 |
-| [technology-decisions.md](technology-decisions.md) | 产品定位、后端边界、状态所有权和通信架构 |
-| [contracts-checklist.md](contracts-checklist.md) | REST、SSE、消息和工具契约对照 |
-| [provider-presets.md](provider-presets.md) | 模型预设更新依据、能力边界与 DeepSeek Responses 接入 |
-| [user-input-flow.md](user-input-flow.md) | 跨仓契约：core 的模型等待与答复路由，以及 desktop 的提问面板 |
-| [apps.md](apps.md) | App 包、连接字段与 MCP App 配置 |
-| [builtin-apps-design.md](builtin-apps-design.md) | 内置 App、动态加载和 runtime-provided App |
-| [session-collaboration-plan.md](session-collaboration-plan.md) | 协作 App、父子调度、底部卡片、右侧完整会话及统一审批；首版已实现 |
-| [agent-modes-design.md](agent-modes-design.md) | Chat / Work / Code 能力边界 |
-| [code-cli-sandbox-design.md](code-cli-sandbox-design.md) | Code CLI 沙箱与审批规则 |
-| [agent-tool-contracts.md](agent-tool-contracts.md) | 多 root 路径、临时附件、后台命令发现、搜索行号与参数诊断契约 |
-| [context-working-set.md](context-working-set.md) | 模型工具结果去重、受限预览与 canonical 分页回读 |
-| [context-compaction.md](context-compaction.md) | 压缩预算、工具循环内触发、并发边界和回归入口 |
-| [agent-eval.md](agent-eval.md) | Agent Eval 使用方法 |
-| [tool-usage-report.md](tool-usage-report.md) | 本地工具使用率报告 |
-| [code-agent-tooling-report.md](code-agent-tooling-report.md) | core 工具与沙箱改进记录；桌面问题样本按文首跨仓路径约定读取 |
-| [agent-tooling-issues-2026-09-23.md](agent-tooling-issues-2026-09-23.md) | 一次 UI 时序排障会话的工具调用失败记录（原文、原因、建议）与 UI 观测回路缺口 |
+| [技术选型与当前架构](technology-decisions.md) | 仓库边界、状态所有权、Provider、存储、API 与 SSE |
+| [API 快速开始](api-quickstart.md) | 临时 daemon 的创建会话、提交、取消与续传 |
+| [公共契约](../contracts/README.md)／[字段对照](contracts-checklist.md) | runtime、REST、SSE、消息与工具协议 |
+| [模型预设](provider-presets.md) | 模板与运行配置的边界、provider 适配记录 |
+| [Apps](apps.md)／[内置 App](builtin-apps-design.md) | 包、连接、动态加载与 runtime-provided App |
+| [Chat / Work / Code](agent-modes-design.md) | 模式与工具能力边界 |
+| [CLI 沙箱](code-cli-sandbox-design.md) | Ask / Auto / Full、host 和授权复用 |
+| [Agent 工具契约](agent-tool-contracts.md) | 路径、临时附件、后台命令、搜索与参数诊断 |
+| [工具结果按需读取](context-working-set.md)／[上下文压缩](context-compaction.md) | canonical 历史、结果投影与上下文预算 |
+| [用户问题收集](user-input-flow.md) | 等待、补答、canonical 数据与桌面面板 |
+| [会话协作](session-collaboration-plan.md) | 父子调度、结果回收、任务卡片与统一审批 |
+| [定时任务](scheduled-tasks-plan.md) | 规则、持久化、调度、执行记录与通知 |
+| [Agent Eval](agent-eval.md)／[工具使用率报告](tool-usage-report.md) | 开发验证和本地统计入口 |
 
-## 待实施设计
+协作与定时任务文档保留原文件名供现有引用使用；首版已有实现和发布记录，其历史实施段落不作为新的任务清单。
 
-| 文档 | 当前状态 |
-| --- | --- |
-| [scheduled-tasks-plan.md](scheduled-tasks-plan.md) | 定时任务首版：独立菜单、新建或绑定会话、一次性／每天／每周调度、执行记录与通知；首版已实现，含边界、验证记录与发布回归清单 |
-| [approval-optimization-design.md](approval-optimization-design.md) | 减少无谓审批：低风险豁免、首期授权复用、合并确认与临时目录归属；保留项目沙箱现有便利，重新规划，尚未实现 |
+## 未完成事项
 
-## 已完成设计记录
+[Core / Desktop 重点待办](backlog.md) 是两仓唯一待办来源，当前保留合并审批复用与临时授权上下文问题；不收录可选扩展或常规验收清单。
 
-这些文档用于解释决策过程，不作为待办列表:
+## 历史归档
 
-- [desktop-repository-split-plan.md](desktop-repository-split-plan.md)：工程拆分和 preview 发布已完成；core 采用 Apache-2.0，保留完整 Git 历史。
-- [phase-1-plan.md](phase-1-plan.md)
-- [code-capabilities-plan.md](code-capabilities-plan.md)
-- [code-refactor-design.md](code-refactor-design.md)
-- [code-lsp-design.md](code-lsp-design.md)
-- [code-cli-first-consolidation-plan.md](code-cli-first-consolidation-plan.md)
-- [code-cli-eval-report.md](code-cli-eval-report.md)
-- [browser-cdp-unification-plan.md](browser-cdp-unification-plan.md)
-- [turn-file-changes-design.md](turn-file-changes-design.md)
-- [transcript-scroll-plan.md](https://github.com/teatak/pudding-desktop/blob/main/docs/transcript-scroll-plan.md)
-- [computer-use-codex-comparison-2026-09-08.md](https://github.com/teatak/pudding-desktop/blob/main/docs/computer-use-codex-comparison-2026-09-08.md)：Codex 京东/镜像实测、后台输入差距与优化建议；非已实现能力清单。
+[归档索引](archive/README.md) 收录已完成／被取代的计划和问题样本：
 
-## [历史与已取代文档](archive/README.md)
+- `archive/plans/`：第一阶段、Code/LSP、浏览器、拆仓与审批等原方案。
+- `archive/reports/`：工具问题样本、CLI Eval 等阶段报告。
+- `archive/` 原有历史文件：旧架构、移动端概念和早期进度，不恢复主线。
 
-以下文档保留用于追溯，不代表当前实现:
+## 跨仓路径
 
-| 文档 | 取代原因 |
-| --- | --- |
-| [tasks-design.md](tasks-design.md) | 旧任务／A2A 综合草案；当前定时任务以 scheduled-tasks-plan.md 为准，外部 Agent、审查与 callback 不在本轮范围 |
-| [progress.md](archive/progress.md) | 2026-07-09 的项目快照，已不再维护 |
-| [tool-migration-status.md](archive/tool-migration-status.md) | 仍使用旧 workspace 模式和旧工具归属 |
-| [design-tools.md](archive/design-tools.md) | 早期工具/MCP 分阶段草案，已由当前契约和 App 架构取代 |
-| [discuss-model-config.md](archive/discuss-model-config.md) | 模型配置讨论已落地为 YAML 配置体系 |
-| [browser-automation-plan.md](archive/browser-automation-plan.md) | 旧可见 Chrome MVP 路线 |
-| [browser-lifecycle-refactor.md](archive/browser-lifecycle-refactor.md) | 旧 screencast/WebSocket 路线 |
-| [pudding-mobile-v1-scope.md](archive/pudding-mobile-v1-scope.md) | Pudding 当前只支持 Electron Desktop |
-| [unicorn-ai-mobile-modular-design.md](archive/unicorn-ai-mobile-modular-design.md) | 外部 Mobile 概念稿，不属于当前 Pudding 主线 |
-| [ui-improvements-and-tooling-feedback.md](archive/ui-improvements-and-tooling-feedback.md) | 单次体验反馈快照，事项可能已经实现或被后续设计取代 |
-
-## 桌面与发布记录
-
-桌面设计、Computer Use 原生实现及历史发布记录已迁入
-[pudding-desktop 文档](https://github.com/teatak/pudding-desktop/tree/main/docs)。core 的完整 Git 历史保留原文件。
+`internal/`、`cmd/`、`contracts/` 相对 core；`web/`、`electron/`、`native/` 相对 desktop。历史文件中的路径、行号、版本和临时证据目录对应记录时基线。公共契约由 core 维护，desktop 的 `web/contracts/` 为生成文件，不手改、不提交。

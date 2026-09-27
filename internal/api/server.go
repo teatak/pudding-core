@@ -65,6 +65,10 @@ type Server struct {
 
 	providerSyncs singleflight.Group
 
+	// attachmentMu serializes API attachment writes (including pre-insert clones)
+	// with reclamation. SQLite remains the authority for session existence.
+	attachmentMu sync.Mutex
+
 	sessionLifecycleMu sync.Mutex
 	sessionLifecycles  map[string]chan struct{}
 }
@@ -655,7 +659,7 @@ func (s *Server) patchSession(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if projectChanged {
+	if projectChanged || (upd.ActiveMode != nil && *upd.ActiveMode != store.ModeCode) {
 		s.engine.RevokeCommandApprovals(id)
 	}
 	if upd.ProjectID != nil {
@@ -766,11 +770,19 @@ func (s *Server) purgeSession(ctx context.Context, id string) error {
 	if err := s.store.DeleteSession(ctx, id); err != nil {
 		return err
 	}
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	svc := attachment.NewService(s.home)
+	cleanupErr := svc.DeleteSession(id)
 	s.releaseSessionResources(ctx, id, true)
 	for _, child := range children {
 		s.releaseSessionResources(ctx, child.ID, true)
+		cleanupErr = errors.Join(cleanupErr, svc.DeleteSession(child.ID))
 	}
-	return nil
+	if cleanupErr != nil {
+		slog.Warn("remove session attachments failed; janitor will retry", "sessionID", id, "err", cleanupErr)
+	}
+	return cleanupErr
 }
 
 func (s *Server) cancelSessionWork(ctx context.Context, id string) ([]*store.Session, error) {
@@ -822,6 +834,9 @@ func (s *Server) RunSessionArchiveJanitor(ctx context.Context) {
 		if err := s.purgeExpiredSessionArchives(ctx, time.Now()); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("purge expired session archives failed", "err", err)
 		}
+		if err := s.reclaimOrphanAttachments(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("reclaim orphan attachments failed", "err", err)
+		}
 	}
 	cleanup()
 	ticker := time.NewTicker(sessionArchiveCleanupInterval)
@@ -867,7 +882,7 @@ func (s *Server) submit(c *cart.Context) error {
 	parts := store.NormalizeContentParts(req.Parts)
 	if req.Kind != "system" {
 		parts = store.UserInputParts(req.Text, req.Parts)
-		attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+		attachments, err := s.normalizeSubmitAttachments(c.Request.Context(), id, store.AttachmentsFromParts(parts))
 		if errors.Is(err, errAttachmentHomeUnavailable) {
 			c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
 			return nil
@@ -919,7 +934,7 @@ func (s *Server) steerTurn(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	parts := store.UserInputParts(req.Text, req.Parts)
-	attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+	attachments, err := s.normalizeSubmitAttachments(c.Request.Context(), id, store.AttachmentsFromParts(parts))
 	if errors.Is(err, errAttachmentHomeUnavailable) {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
 		return nil
@@ -991,7 +1006,7 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 			return badRequest(c, "text is required with parts")
 		}
 		parts := store.UserInputParts(*text, *req.Parts)
-		attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+		attachments, err := s.normalizeSubmitAttachments(c.Request.Context(), id, store.AttachmentsFromParts(parts))
 		if errors.Is(err, errInvalidAttachment) {
 			return badRequest(c, "invalid attachments")
 		}
@@ -1232,12 +1247,13 @@ func (s *Server) approveApproval(c *cart.Context) error {
 	}
 	sess, err := s.engine.ApproveApprovalWithSession(c.Request.Context(), id, approvalID, scope, req.ProjectDirs)
 	if err != nil {
+		if errors.Is(err, engine.ErrApprovalContextChanged) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "approval_context_changed"})
+			return nil
+		}
 		if errors.Is(err, engine.ErrApprovalNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 			return nil
-		}
-		if errors.Is(err, engine.ErrProjectDirsRequired) {
-			return badRequest(c, "project_dirs_required")
 		}
 		return s.fail(c, err)
 	}

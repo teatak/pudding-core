@@ -28,6 +28,8 @@ func (s *Server) cloneSession(c *cart.Context) error {
 		return badRequest(c, "titleSuffix is required")
 	}
 
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
 	messages, err := s.store.ListMessages(c.Request.Context(), sourceSessionID, 0)
 	if err != nil {
 		return s.fail(c, err)

@@ -195,7 +195,7 @@ func TestChildSnapshotUsesLatestRetry(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			var payload struct {
-				Children []childSessionView `json:"children"`
+				Children []engine.ChildSessionView `json:"children"`
 			}
 			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 				t.Fatal(err)

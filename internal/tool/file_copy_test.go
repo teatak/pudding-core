@@ -184,7 +184,7 @@ func TestFileCopyPolicyAndTrackingUseDestination(t *testing.T) {
 			risk, classified := ClassifyToolCall(FileCopy, raw)
 			tracking, tracked := MutationTrackingForCall(Call{Name: FileCopy, Args: raw, ProjectDirs: []string{root}})
 			want := destinationScope == "project"
-			if classified != want || tracked != want {
+			if !classified || risk.Scope != destinationScope || tracked != want {
 				t.Fatalf("%s -> %s: risk=%+v tracking=%+v", sourceScope, destinationScope, risk, tracking)
 			}
 			if want && (risk.Class != RiskClassWrite || !risk.LowRisk || len(risk.Paths) != 1 || risk.Paths[0] != "target.txt" || len(tracking.Targets) != 1 || tracking.Targets[0] != filepath.Join(resolved, "target.txt")) {

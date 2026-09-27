@@ -1,4 +1,4 @@
-package api
+package engine
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func (s *Server) setChildTask(ctx context.Context, view *childSessionView, page *store.TurnPage) error {
+func (e *Engine) setChildTask(ctx context.Context, view *ChildSessionView, page *store.TurnPage) error {
 	for len(page.Turns) > 0 {
 		for i := len(page.Turns) - 1; i >= 0; i-- {
 			messages := page.Turns[i].Messages
@@ -25,7 +25,7 @@ func (s *Server) setChildTask(ctx context.Context, view *childSessionView, page 
 		// A form reply or system continuation is not a new task. Read back to
 		// the actual task input rather than restoring the first session title.
 		var err error
-		page, err = s.store.ListTurnsPage(ctx, view.Session.ID, page.Turns[0].ID, 1)
+		page, err = e.store.ListTurnsPage(ctx, view.Session.ID, page.Turns[0].ID, 1)
 		if err != nil {
 			return err
 		}
@@ -36,7 +36,7 @@ func (s *Server) setChildTask(ctx context.Context, view *childSessionView, page 
 // Task labels are read-only projections of canonical input, never a second
 // mutable task record. The first task retains its explicitly dispatched title;
 // a reused conversation describes its current task instead of that old title.
-func (view *childSessionView) setTask(text string, reused bool) {
+func (view *ChildSessionView) setTask(text string, reused bool) {
 	view.Summary = childTextExcerpt(text, 96)
 	if reused {
 		title := view.Summary

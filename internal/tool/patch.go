@@ -519,6 +519,8 @@ func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[str
 	switch call.Name {
 	case CommandRun:
 		return commandApprovalDetails(call)
+	case FileCopy:
+		return r.fileCopyApprovalDetails(call)
 	case GitStage, GitUnstage, GitCommit:
 		return r.gitWriteApprovalDetails(ctx, call)
 	case FilePatch:
@@ -771,6 +773,9 @@ func (c patchDiffChunk) Content() string            { return c.content }
 func (c patchDiffChunk) Type() formatdiff.Operation { return c.operation }
 
 func ApprovalDetailsFailure(call Call, err error) Result {
+	if call.Name == FileCopy {
+		return fileCopyFailure(Result{CallID: call.CallID, Name: call.Name}, err)
+	}
 	if call.Name == CommandRun {
 		out := Result{CallID: call.CallID, Name: call.Name}
 		if _, argumentErr := decodeCommandRunArgs(call.Args); argumentErr != nil {

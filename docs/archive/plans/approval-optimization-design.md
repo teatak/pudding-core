@@ -1,5 +1,7 @@
 # Code 审批优化方案：减少无谓确认
 
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
 > 更新：2026-09-20。状态：Auto 已改为授权项目沙箱内自主执行，动态语法不再单独触发确认；保留已识别风险、扩权审批及固定命令会话复用。其余分期目标未实施。
 > 规划核对基线：`c42eb7d7`。当前优先减少命令执行误报，不引入额外 LLM 自动审核；目录合并审批暂缓。
 > 用户目标：最大限度减少无谓审批，同时保留真正的越权、高风险操作确认。
@@ -41,7 +43,7 @@
 | Code 的 session 目录批准会绑定或扩展持久 Project | 临时目录授权与项目组织分离，避免授权影响其他会话 |
 | 沙箱拒绝检测部分依赖输出文本 | 保留原始错误；仅在确有证据时给出权限原因，不猜 TLS、路径或网络问题 |
 
-入口：[policy.go](../internal/tool/policy.go)、[command.go](../internal/tool/command.go)、[command_grant.go](../internal/tool/command_grant.go)、[approval.go](../internal/engine/approval.go)、[command_runner_darwin.go](../internal/tool/command_runner_darwin.go)。
+入口：[policy.go](../../../internal/tool/policy.go)、[command.go](../../../internal/tool/command.go)、[command_grant.go](../../../internal/tool/command_grant.go)、[approval.go](../../../internal/engine/approval.go)、[command_runner_darwin.go](../../../internal/tool/command_runner_darwin.go)。
 
 已有 Git branch/tag 选项、变量展开、路径及真实副作用回归均保留。参数“看起来是查询”不自动证明无副作用；负向规则也不能证明任意脚本不会删除文件或外发数据。Auto 的便利建立在现有明确资源范围和风险接受程度上，不宣传为完全防破坏或防外发。
 
@@ -177,4 +179,4 @@ Chrome 用途识别可保留为通用复用机制的一种规则，但删除其�
 
 记录任务完成率、弹窗数、重复请求数、沙箱失败数和总耗时；在同一模式与任务集比较。常规任务审批数不得因本方案整体增加。高风险确认不计作“无谓”，不能用隐藏失败或默认 Full 达标。
 
-完整方案涉及 `internal/tool`、`internal/engine`、`internal/api`、审批 UI/i18n 和提示词，按 [AGENTS.md](../AGENTS.md) 分期验证。以文首实现范围为准，未完成的整体规划不作为现有行为。固定命令复用覆盖边界/漂移/撤销测试；桌面验收使用独立临时 daemon、真实 provider 协议、审批 UI 与沙箱执行。
+完整方案涉及 `internal/tool`、`internal/engine`、`internal/api`、审批 UI/i18n 和提示词，按 [AGENTS.md](../../../AGENTS.md) 分期验证。以文首实现范围为准，未完成的整体规划不作为现有行为。固定命令复用覆盖边界/漂移/撤销测试；桌面验收使用独立临时 daemon、真实 provider 协议、审批 UI 与沙箱执行。

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -65,6 +67,13 @@ func (s *Server) uploadAttachment(c *cart.Context) error {
 	mimeType := header.Header.Get("Content-Type")
 	if cleaned, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = cleaned
+	}
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	if sessionID != attachment.DraftSessionID {
+		if _, err := s.store.GetSession(c.Request.Context(), sessionID); err != nil {
+			return s.fail(c, err)
+		}
 	}
 	stored, err := attachment.NewService(s.home).StoreReader(sessionID, header.Filename, mimeType, file)
 	if errors.Is(err, attachment.ErrTooLarge) {
@@ -158,9 +167,14 @@ func (s *Server) getAttachment(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) normalizeSubmitAttachments(sessionID string, values []store.Attachment) ([]store.Attachment, error) {
+func (s *Server) normalizeSubmitAttachments(ctx context.Context, sessionID string, values []store.Attachment) ([]store.Attachment, error) {
 	if len(values) == 0 {
 		return nil, nil
+	}
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	if _, err := s.store.GetSession(ctx, sessionID); err != nil {
+		return nil, err
 	}
 	attachments := store.NormalizeAttachments(values)
 	if len(attachments) != len(values) {
@@ -240,4 +254,33 @@ func attachmentFileExists(svc *attachment.Service, sessionID, key string) (bool,
 		return false, nil
 	}
 	return true, nil
+}
+
+// Reconcile after a failed cleanup or daemon restart without a second deletion
+// ledger. The same lock protects cloning before its target session is inserted.
+func (s *Server) reclaimOrphanAttachments(ctx context.Context) error {
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	svc := attachment.NewService(s.home)
+	ids, err := svc.SessionIDs()
+	if err != nil {
+		return err
+	}
+	var cleanupErr error
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(cleanupErr, err)
+		}
+		// Lifecycle lookup includes archived parents and children. GetSession
+		// intentionally hides archives and cannot establish physical absence.
+		_, err := s.store.ParentSessionID(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			if err := svc.DeleteSession(id); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("session %s: %w", id, err))
+			}
+		} else if err != nil {
+			return errors.Join(cleanupErr, err)
+		}
+	}
+	return cleanupErr
 }

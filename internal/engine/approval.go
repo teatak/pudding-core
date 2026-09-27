@@ -14,7 +14,7 @@ import (
 )
 
 var ErrApprovalNotFound = errors.New("engine: approval not found")
-var ErrProjectDirsRequired = errors.New("engine: project dirs required")
+var ErrApprovalContextChanged = errors.New("engine: approval context changed")
 var ErrApprovalUnsupported = errors.New("engine: approval unsupported")
 
 const (
@@ -52,10 +52,13 @@ type approvalDecision struct {
 }
 
 type ProjectAccessGrant struct {
-	RootDirs []string
+	SessionID string
+	ProjectID string
+	RootDirs  []string
 }
 
 type pendingApproval struct {
+	projectAccess   *projectAccessState
 	req             ApprovalRequest
 	ch              chan approvalDecision
 	resolving       bool
@@ -127,36 +130,13 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 		} else {
 			projectDirs = nil
 		}
-		if scope == ApprovalScopeSession {
-			mode := p.req.TargetMode
-			lease := store.ModeLeaseSession
-			upd := store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}
-			if p.req.TargetMode == store.ModeCode {
-				if len(projectDirs) > 0 {
-					project, err := e.bindSessionProject(ctx, sessionID, projectDirs)
-					if err != nil {
-						return nil, err
-					}
-					upd.ProjectID = &project.ID
-				}
-			}
-			wasRunning := sess.Running
-			projectChanged := upd.ProjectID != nil && *upd.ProjectID != sess.ProjectID
-			sess, err = e.store.UpdateSession(ctx, sessionID, upd)
+		if p.req.TargetMode == store.ModeCode {
+			projectDirs, err = approvedDirectories(projectDirs)
 			if err != nil {
 				return nil, err
 			}
-			if projectChanged {
-				e.RevokeCommandApprovals(sessionID)
-			}
-			sess.Running = wasRunning
-		} else if p.req.TargetMode == store.ModeCode && len(projectDirs) > 0 {
-			e.mu.Lock()
-			grant := e.turnProjectAccess[p.req.TurnID]
-			grant.RootDirs = store.NormalizeProjectDirs(append(grant.RootDirs, projectDirs...))
-			e.turnProjectAccess[p.req.TurnID] = grant
-			e.mu.Unlock()
 		}
+
 	case ApprovalKindToolCall:
 		computerAppID = computerAppIDFromApprovalPayload(p.req.Payload)
 		if computerAppID != "" {
@@ -175,7 +155,7 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 			return nil, err
 		}
 	}
-	if err := e.completePendingApproval(sessionID, approvalID, p, commandGrantKey); err != nil {
+	if err := e.completePendingApproval(ctx, sess, sessionID, approvalID, p, commandGrantKey, scope, projectDirs); err != nil {
 		return nil, err
 	}
 	claimed = false
@@ -193,74 +173,7 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 	return sess, nil
 }
 
-func (e *Engine) bindSessionProject(ctx context.Context, sessionID string, rootDirs []string) (*store.Project, error) {
-	rootDirs = store.NormalizeProjectDirs(rootDirs)
-	if len(rootDirs) == 0 {
-		return nil, ErrProjectDirsRequired
-	}
-	sess, err := e.store.GetSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if sess.ProjectID != "" {
-		project, err := e.store.GetProject(ctx, sess.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		merged := store.NormalizeProjectDirs(append(project.RootDirs, rootDirs...))
-		if !sameStringList(project.RootDirs, merged) {
-			project, err = e.store.UpdateProject(ctx, project.ID, store.ProjectUpdate{RootDirs: &merged})
-			if err != nil {
-				return nil, err
-			}
-			e.RevokeProjectCommandApprovals(project.ID)
-		}
-		return project, nil
-	}
-	return e.projectForRootDirs(ctx, rootDirs)
-}
-
-func (e *Engine) projectForRootDirs(ctx context.Context, rootDirs []string) (*store.Project, error) {
-	rootDirs = store.NormalizeProjectDirs(rootDirs)
-	if len(rootDirs) == 0 {
-		return nil, ErrProjectDirsRequired
-	}
-	projects, err := e.store.ListProjects(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, project := range projects {
-		if project == nil {
-			continue
-		}
-		if sameStringList(project.RootDirs, rootDirs) {
-			return project, nil
-		}
-	}
-	project := &store.Project{
-		ID:           store.NewID("proj"),
-		RootDirs:     rootDirs,
-		ApprovalMode: store.ApprovalAuto,
-	}
-	if err := e.store.CreateProject(ctx, project); err != nil {
-		return nil, err
-	}
-	return project, nil
-}
-
-func sameStringList(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func (e *Engine) DenyApproval(_ context.Context, sessionID, approvalID, reason string) error {
+func (e *Engine) DenyApproval(ctx context.Context, sessionID, approvalID, reason string) error {
 	p, err := e.claimPendingApproval(sessionID, approvalID)
 	if err != nil {
 		return err
@@ -271,7 +184,7 @@ func (e *Engine) DenyApproval(_ context.Context, sessionID, approvalID, reason s
 			e.releasePendingApprovalClaim(sessionID, approvalID, p)
 		}
 	}()
-	if err := e.completePendingApproval(sessionID, approvalID, p, ""); err != nil {
+	if err := e.completePendingApproval(ctx, nil, sessionID, approvalID, p, "", "", nil); err != nil {
 		return err
 	}
 	claimed = false
@@ -300,11 +213,41 @@ func (e *Engine) claimPendingApproval(sessionID, approvalID string) (*pendingApp
 	return p, nil
 }
 
-func (e *Engine) completePendingApproval(sessionID, approvalID string, p *pendingApproval, commandGrantKey string) error {
+func (e *Engine) completePendingApproval(ctx context.Context, session *store.Session, sessionID, approvalID string, p *pendingApproval, commandGrantKey string, scope ApprovalScope, dirs []string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.approvals[approvalID] != p || p.req.SessionID != sessionID || !p.resolving {
 		return ErrApprovalNotFound
+	}
+	if p.req.Kind == ApprovalKindCapability && scope != "" {
+		current, err := e.store.GetSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if p.projectAccess == nil || e.sessionProjectAccess[sessionID] != p.projectAccess || p.abandoned || current.ProjectID != p.projectAccess.projectID {
+			delete(e.approvals, approvalID)
+			e.hub.Publish(event.Event{SessionID: sessionID, Kind: event.ApprovalResolved, TurnID: p.req.TurnID, CallID: p.req.CallID, ApprovalID: approvalID, ApprovalKind: p.req.Kind, Status: "denied", Reason: "approval_context_changed"})
+			p.ch <- approvalDecision{approved: false, reason: "approval_context_changed"}
+			return ErrApprovalContextChanged
+		}
+		// Mode persistence and directory leases are completed under the same
+		// engine lock as revocation; an expired prompt cannot restore a lease.
+		if scope == ApprovalScopeSession {
+			mode, lease := p.req.TargetMode, store.ModeLeaseSession
+			running := current.Running
+			current, err = e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease})
+			if err != nil {
+				return err
+			}
+			current.Running = running
+			p.projectAccess.dirs = store.NormalizeProjectDirs(append(p.projectAccess.dirs, dirs...))
+		} else if len(dirs) > 0 {
+			grant := e.turnProjectAccess[p.req.TurnID]
+			grant.SessionID, grant.ProjectID = sessionID, p.projectAccess.projectID
+			grant.RootDirs = store.NormalizeProjectDirs(append(grant.RootDirs, dirs...))
+			e.turnProjectAccess[p.req.TurnID] = grant
+		}
+		*session = *current
 	}
 	delete(e.approvals, approvalID)
 	if commandGrantKey != "" && e.commandGrants[sessionID] == p.commandState && p.commandState != nil {
@@ -367,6 +310,23 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 			"message":     "Work capability is already included in Code; the current mode remains Code. Load the Work App directly.",
 		}), currentMode, false
 	}
+	if req.TargetMode == store.ModeCode && len(req.ProjectDirs) > 0 {
+		dirs, err := approvedDirectories(req.ProjectDirs)
+		if err != nil {
+			return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "invalid_project_dirs", "error": err.Error()}), currentMode, false
+		}
+		req.ProjectDirs = dirs
+		if currentMode == store.ModeCode {
+			available, err := e.projectRootDirsForToolCall(ctx, sessionID, turnID, currentMode)
+			if err != nil {
+				return capabilityToolResult(call, false, map[string]any{"ok": false, "error": err.Error()}), currentMode, false
+			}
+			req.ProjectDirs = directoriesOutside(dirs, available)
+			if len(req.ProjectDirs) == 0 {
+				req.NeedsProjectDir = false
+			}
+		}
+	}
 	if currentMode == store.ModeCode && req.TargetMode == store.ModeCode && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
 		return capabilityToolResult(call, true, map[string]any{
 			"ok":     true,
@@ -391,7 +351,11 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 		Payload:     payload,
 		CreatedAt:   time.Now(),
 	}
-	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1)}
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return capabilityToolResult(call, false, map[string]any{"ok": false, "error": err.Error()}), currentMode, false
+	}
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), projectAccess: e.projectAccessState(sessionID, sess.ProjectID)}
 	e.mu.Lock()
 	e.approvals[approval.ID] = pending
 	e.mu.Unlock()
@@ -512,6 +476,14 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 	if err != nil {
 		return nil, false, err
 	}
+	if copyPlan := tool.FileCopyPlanFromDetails(details); copyPlan != nil {
+		if copyPlan.ExternalAccess {
+			return project, true, nil
+		}
+		if copyPlan.To.Scope != "project" {
+			return project, false, nil
+		}
+	}
 	if risk.Scope == "computer" {
 		appID := computerAppIDFromDetails(details)
 		if appID == "" {
@@ -570,6 +542,14 @@ func commandSandboxModeForProject(project *store.Project) tool.CommandSandboxMod
 }
 
 func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) tool.ToolRisk {
+	if plan := tool.FileCopyPlanFromDetails(details); name == tool.FileCopy && plan != nil {
+		risk.Scope = plan.To.Scope
+		risk.Paths = []string{plan.From.Path, plan.To.Path}
+		if plan.ExternalAccess {
+			risk.LowRisk = false
+			risk.Summary = "Allow this copy to read its source and write its destination outside the authorized directories. No directory access is retained."
+		}
+	}
 	if name == tool.FilePatch {
 		if destructive, _ := details["destructive"].(bool); destructive {
 			risk.Class = tool.RiskClassDestructive

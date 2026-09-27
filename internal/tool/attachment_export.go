@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -87,6 +88,7 @@ func (r *BuiltinRunner) attachmentExport(ctx context.Context, call Call) Result 
 	}
 	var destinationRoot *os.Root
 	var relativePath, cleanupPath string
+	replaceTarget := false
 	if args.Scope == managedScopeTemp {
 		var artifactPath string
 		destinationRoot, artifactPath, err = home.OpenSessionArtifacts(r.homeDir, call.SessionID)
@@ -115,17 +117,32 @@ func (r *BuiltinRunner) attachmentExport(ctx context.Context, call Call) Result 
 		}
 		defer destinationRoot.Close()
 		relativePath = destination.rel
+		if _, err := destinationRoot.Lstat(relativePath); err == nil {
+			if !overwrite {
+				return fileCopyDestinationError(out, destination.outputPath(), errFileCopyDestinationExists)
+			}
+			replaceTarget = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return toolJSONError(out, "attachment_export_failed", err.Error())
+		}
 		payload = destination.payload(payload)
 		payload["absolutePath"] = destination.target
 	}
-	outputPath := filepath.Join(filepath.Dir(relativePath), ".export-"+rand.Text())
+	stagingPath := filepath.Join(filepath.Dir(relativePath), ".export-"+rand.Text())
+	outputPath, backupPath := filepath.Join(stagingPath, "new"), filepath.Join(stagingPath, "previous")
 	complete := false
 	defer func() {
-		if !complete {
-			_ = destinationRoot.Remove(outputPath)
-			if cleanupPath != "" {
-				_ = destinationRoot.RemoveAll(cleanupPath)
-			}
+		if !complete && cleanupPath != "" {
+			_ = destinationRoot.RemoveAll(cleanupPath)
+		}
+	}()
+	if err := destinationRoot.Mkdir(stagingPath, 0o700); err != nil {
+		return toolJSONError(out, "attachment_export_failed", err.Error())
+	}
+	defer func() {
+		// Retain the original destination if rollback or backup cleanup fails.
+		if _, err := destinationRoot.Lstat(backupPath); errors.Is(err, os.ErrNotExist) {
+			_ = destinationRoot.RemoveAll(stagingPath)
 		}
 	}()
 	output, err := destinationRoot.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
@@ -137,10 +154,13 @@ func (r *BuiltinRunner) attachmentExport(ctx context.Context, call Call) Result 
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		return toolJSONError(out, "attachment_export_failed", err.Error())
 	}
-	if err := destinationRoot.Rename(outputPath, relativePath); err != nil {
+	if err := installFileCopy(destinationRoot, outputPath, relativePath, backupPath, replaceTarget); err != nil {
 		return toolJSONError(out, "attachment_export_failed", err.Error())
 	}
 	complete = true
+	if err := destinationRoot.RemoveAll(backupPath); err != nil {
+		payload["warnings"] = []string{fmt.Sprintf("export completed; backup cleanup failed at %s: %v", filepath.Join(destinationRoot.Name(), backupPath), err)}
+	}
 	payload["bytes"] = written
 	out.Ok = true
 	out.Content = jsonString(payload)

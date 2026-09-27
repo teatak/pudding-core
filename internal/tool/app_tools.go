@@ -3,6 +3,7 @@ package tool
 import "github.com/teatak/pudding-core/internal/app"
 
 var builtinAppTools = map[string]string{
+	CollaborationList:     app.BuiltinCollaborationID,
 	CollaborationDispatch: app.BuiltinCollaborationID,
 	CollaborationSend:     app.BuiltinCollaborationID,
 	CollaborationWait:     app.BuiltinCollaborationID,

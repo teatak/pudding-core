@@ -1,10 +1,12 @@
 # Pudding Code 能力设计与计划
 
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
 > 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10、C10.4 与 C11 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 > 注:第 1 节记录立项时基线;CLI-first 收敛后的当前事实见
-> `docs/code-cli-first-consolidation-plan.md`。
+> `docs/archive/plans/code-cli-first-consolidation-plan.md`。
 
 ## 0. 结论
 
@@ -754,7 +756,7 @@ Code turn 构建 provider 请求时,根据 session 的 `ProjectID` 读取 Projec
 
 状态:已完成(2026-07-10),总进度 100%。
 
-详细设计见 [Pudding LSP 语言智能设计](./code-lsp-design.md)。
+详细设计见 [Pudding LSP 语言智能设计](code-lsp-design.md)。
 
 首版范围:
 
@@ -789,7 +791,7 @@ Code turn 构建 provider 请求时,根据 session 的 `ProjectID` 读取 Projec
 
 状态:已完成(2026-07-10),总进度 100%。
 
-详细设计见 [Pudding 安全语义重构设计](./code-refactor-design.md)。
+详细设计见 [Pudding 安全语义重构设计](code-refactor-design.md)。
 
 首版只增加统一 `builtin_code_rename`,把 Go 与 TypeScript / JavaScript language
 server 返回的 `WorkspaceEdit` 全量验证并转换成同一原子 Patch 结构,然后直接走

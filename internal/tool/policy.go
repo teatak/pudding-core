@@ -115,14 +115,14 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 	}
 	if name == FileCopy {
 		args, err := decodeFileCopyArgs(raw)
-		if err != nil || !isProjectFileScope(args.To.Scope) {
+		if err != nil {
 			return ToolRisk{}, false
 		}
 		summary := "Copy a file or directory into the project."
 		if args.Overwrite {
 			summary = "Copy a file or directory into the project and replace the destination."
 		}
-		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: managedScopeProject,
+		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: args.To.Scope,
 			Paths: compactRiskPaths(args.To.Path), Summary: summary, LowRisk: true}, true
 	}
 	if name == GitStatus || name == GitDiff || name == GitLog {

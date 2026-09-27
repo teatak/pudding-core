@@ -20,6 +20,7 @@ type Call struct {
 	CommandSandbox  CommandSandboxMode
 	CommandStateKey string
 	CommandGrant    *CommandSessionGrant // Engine-owned prepared invocation, never tool input.
+	FileCopyGrant   *FileCopyPlan        // Engine-approved exact endpoints; never tool input.
 }
 
 type CommandSandboxMode string

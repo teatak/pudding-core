@@ -1,5 +1,5 @@
 // Package mock 按脚本回放模型流,延迟、失败、cancel 时序可注入
-// (docs/phase-1-plan.md 第 4 节)。engine 单测与 puddingd --mock 共用。
+// (docs/archive/plans/phase-1-plan.md 第 4 节)。engine 单测与 puddingd --mock 共用。
 package mock
 
 import (

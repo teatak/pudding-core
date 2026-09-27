@@ -1,5 +1,7 @@
 # Browser CDP Unification Plan
 
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
 > 状态:Implemented
 > 日期:2026-07-13
 > 范围:Electron `<webview>` 路径与 Go browser manager 路径。

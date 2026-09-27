@@ -1146,6 +1146,7 @@ func TestProjectChangesRevokeLiveBrowserFileAccess(t *testing.T) {
 }
 
 type fakeBrowserService struct {
+	releaseError             error
 	recoverErrors            map[string]error
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
@@ -1290,6 +1291,9 @@ func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint b
 }
 
 func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID string) error {
+	if f.releaseError != nil {
+		return f.releaseError
+	}
 	tab, ok := f.tabs[tabID]
 	if !ok || tab.SessionID != sessionID {
 		return browser.ErrTabNotFound
@@ -1395,3 +1399,27 @@ func (f *fakeBrowserService) Scroll(_ context.Context, sessionID, tabID string, 
 }
 
 func (f *fakeBrowserService) Close() error { return nil }
+
+func TestFailedBrowserClosePreservesStateAndSyncAdmission(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	response := req(t, http.MethodPost, srv.URL+"/sessions/s/browser/open", map[string]string{"url": "https://example.com/form"})
+	tab := decodeJSON[browser.TabSnapshot](t, response)
+	browserSvc.releaseError = errors.New("close refused")
+	response = req(t, http.MethodPost, srv.URL+"/sessions/s/browser/tabs/"+tab.ID+"/release", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("close status %d", response.StatusCode)
+	}
+	if _, err := st.GetBrowserState(ctx, "s"); err != nil {
+		t.Fatal(err)
+	}
+	response = req(t, http.MethodPost, srv.URL+"/sessions/s/browser/tabs/"+tab.ID+"/sync", map[string]string{"url": "https://example.com/form", "title": "Unsaved"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("failed close blocked surviving tab: %d", response.StatusCode)
+	}
+}

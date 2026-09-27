@@ -39,7 +39,8 @@ Optional language servers can be prepared with `make language-servers`, which al
 
 See the [API quickstart](docs/api-quickstart.md) for standalone usage examples,
 [contracts](contracts/README.md) for protocol definitions and client validation schemas,
-and the [documentation index](docs/README.md) for design and feature documentation.
+and the [documentation index](docs/README.md) for current design and feature documentation.
+Unfinished work across Core and Desktop is tracked in the single [cross-repository backlog](docs/backlog.md).
 
 ## Optional UI Hosting
 

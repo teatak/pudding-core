@@ -1,6 +1,6 @@
 # 当前会话内的子会话协作：设计与实施计划
 
-> 日期：2026-09-21。状态：首版开发及本地验收完成，尚未发布。
+> 首版日期：2026-09-21；2026-09-27 核对：首版已随 [Desktop 0.3.7](https://github.com/teatak/pudding-desktop/blob/main/docs/archive/releases/release-report-0.3.7.md) 发布。本文含当前源码的协作列表增量；desktop 的准确 core 依赖由 `core.lock.json` 定义，具体发布范围以对应发布报告为准。
 > 本文是跨仓唯一实施文档：core 负责关系、调度、权限与协议；desktop 负责会话和工作区交互。
 > `internal/`、`contracts/` 相对 pudding-core；`web/`、`electron/` 相对 pudding-desktop。
 > 以下记录首版行为及边界；验证范围和实施记录见第 9 节。
@@ -138,7 +138,11 @@ App 只承载能力入口及工具说明。底部子任务组件、右侧完整�
 4. 子会话提交输出后，engine 通过持久化轮次和消息引用回收结果；主模型判断是否整合、补充要求或重试。
 5. 主会话最终向用户交付汇总及验证结果。子会话全文保留在右侧，不自动逐条复制进主消息流。
 
-已交付四个工具：`builtin_collaboration_dispatch(title, prompt)`、`builtin_collaboration_send(session_id, prompt)`、`builtin_collaboration_wait()`、`builtin_collaboration_stop()`。工具名称包含简中、繁中和英文显示文案。
+协作提供五个工具：`builtin_collaboration_list()`、`builtin_collaboration_dispatch(title, prompt)`、`builtin_collaboration_send(session_id, prompt)`、`builtin_collaboration_wait()`、`builtin_collaboration_stop()`。工具名称包含简中、繁中和英文显示文案。
+
+`list` 只读取当前主会话的子任务，返回 `children` 数组（无任务时为空数组），包含 `session_id`、原始 `title`、当前 `task_title`、最新轮次 `status` / `latest_turn_id`、`summary`、`pending_approvals`、`pending_user_inputs`、`background_process_count` 和 `result_collected`。摘要在完成前描述当前任务，完成后描述最新结果；排队的新任务不沿用旧结果。其中 `status` 表示最新轮次状态，已完成的轮次仍可能有未答复问题；`pending_user_inputs` 从正式提问记录和进行中的请求派生，已排队或提交的答复不计入，超时但未答复的问题仍计入。基础任务信息与桌面 `/sessions/{id}/children` 复用同一查询，不新增任务状态表；不接受目标会话参数、不跨主会话访问、不等待执行，也不主动回收结果。
+
+提示词建议优先使用 `send` 将相关新任务、补充或修改交给合适的已有子会话，需要选择时可先用 `list` 查询。优先空闲且上下文相关的子会话，但这是建议：需要独立职责、新上下文或有效并行时仍可 `dispatch`，不设置累计数量限制或强制复用规则。复用保留子会话历史，主会话必须等待本轮结果后再使用；原有审批和排队规则继续适用。
 
 ### 5.2 停止语义
 
@@ -155,7 +159,7 @@ App 只承载能力入口及工具说明。底部子任务组件、右侧完整�
 - 同项目工具写操作和无法确定副作用的命令串行执行；并发模型推理不等于可以同时改同一文件。
 - 桌面键鼠等机器资源按 daemon 互斥管理；浏览器与其他 Session 资源保持其现有归属。
 - 长命令和后台进程的资源占用持续到其真正退出或释放，不能在工具返回句柄时提前解除占用。
-- 隔离工作目录、自动合并结果是后续扩展，首版不能把提示词“不要冲突”当作隔离机制。
+- 首版不提供隔离工作目录或自动合并结果，不能把提示词“不要冲突”当作隔离机制；扩展统一见[跨仓待办](backlog.md)。
 
 ## 6. API、事件和桌面接入
 
@@ -202,6 +206,8 @@ desktop 的 Router 仍定位主会话；右侧当前子会话是本地工作区�
 验证入口：局部 Go 使用 `go test -tags 'sqlite_fts5 webrtcaec' ./internal/<相关包>`；跨模块使用 `make test`；持久化变化使用 `make schema-check`；前端使用 desktop 的 `npm --prefix web test`、`npm --prefix web run build`，交互变化补真实 Electron 验证。每批结束执行 `git diff --check`。
 
 ## 9. 实施记录
+
+以下按发生日期保留，当时的“未完成／未发布”不是当前状态；首版发布状态见文首，现存收尾和未实现扩展只维护在[跨仓待办](backlog.md)。
 
 ### 2026-09-21：M1 数据基础完成
 

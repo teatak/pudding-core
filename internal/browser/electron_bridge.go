@@ -513,7 +513,15 @@ func (s *ElectronBridgeService) post(ctx context.Context, path string, in any, o
 	}
 	req.Header.Set("Authorization", "Bearer "+s.token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
+	client := s.client
+	if path == "/browser/tabs/close" {
+		// A user may leave the native confirmation open longer than the normal
+		// operation deadline. Request cancellation still follows ctx.
+		copy := *client
+		copy.Timeout = 0
+		client = &copy
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

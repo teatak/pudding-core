@@ -1,7 +1,9 @@
 # 第一阶段开发规划
 
-> 范围:[technology-decisions.md](technology-decisions.md) 第一阶段(文本多会话)。  
-> 验收:technology-decisions.md 第 12 节全部通过。  
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
+> 范围:[technology-decisions.md](../../technology-decisions.md) 第一阶段(文本多会话)。
+> 验收:technology-decisions.md 第 12 节全部通过。
 > **状态:已完成(2026-06-11)。** 后端项由 `go test -race` 与 smoke 钉死,
 > 前端项经真实浏览器验收(含双 session 并行、offline 重连、双击幂等)。
 > 超出原计划交付:settings 驱动的 provider 配置(免重启生效)、events retention、

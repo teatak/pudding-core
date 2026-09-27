@@ -38,11 +38,35 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
+	var input any = &args
+	if call.Name == tool.CollaborationList {
+		input = &struct{}{}
+	}
+	if err := decoder.Decode(input); err != nil {
 		return fail(err)
 	}
 	var payload any
 	switch call.Name {
+	case tool.CollaborationList:
+		children, err := e.ListChildSessions(ctx, sessionID)
+		if err != nil {
+			return fail(err)
+		}
+		items := make([]collaborationListItem, 0, len(children))
+		for _, child := range children {
+			pendingInputs, err := e.childPendingUserInputs(ctx, child.Session.ID)
+			if err != nil {
+				return fail(err)
+			}
+			items = append(items, collaborationListItem{
+				SessionID: child.Session.ID, Title: child.Session.Title, TaskTitle: child.TaskTitle,
+				Status: child.Status, LatestTurnID: child.LatestTurnID, Summary: child.Summary,
+				PendingApprovals: child.PendingApprovals, BackgroundProcessCount: child.Session.BackgroundProcessCount,
+				PendingUserInputs: pendingInputs,
+				ResultCollected:   child.ResultCollected,
+			})
+		}
+		payload = map[string]any{"children": items}
 	case tool.CollaborationDispatch:
 		if strings.TrimSpace(args.Title) == "" || utf8.RuneCountInString(args.Title) > 100 || strings.TrimSpace(args.Prompt) == "" {
 			return fail(ErrEmptyInput)

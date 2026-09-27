@@ -238,4 +238,69 @@ func TestBuiltinAttachmentExportRejectsOtherSessionAndExistingDestination(t *tes
 	if existing.Ok || decodeToolResult(t, existing)["reason"] != "to_exists" {
 		t.Fatalf("existing destination must require overwrite: %+v", existing)
 	}
+	overwritten := runner.Call(context.Background(), Call{
+		SessionID:   "sess_source",
+		Name:        AttachmentExport,
+		ProjectDirs: []string{project},
+		Args:        json.RawMessage(`{"scope":"project","attachmentKey":"` + stored.AttachmentKey + `","path":"capture.png","overwrite":true}`),
+	})
+	if !overwritten.Ok {
+		t.Fatal(overwritten.Content)
+	}
+	data, err := os.ReadFile(destination)
+	if err != nil || string(data) != "image" {
+		t.Fatalf("staged attachment replacement failed: %v %q", err, data)
+	}
+}
+
+func TestBuiltinAttachmentExportOverwritesDirectory(t *testing.T) {
+	for _, populated := range []bool{false, true} {
+		name := "empty"
+		if populated {
+			name = "populated"
+		}
+		t.Run(name, func(t *testing.T) {
+			homeDir, project := t.TempDir(), t.TempDir()
+			stored, err := attachment.NewService(homeDir).StoreReader("session", "capture.png", "image/png", bytes.NewReader([]byte("image")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(project, "capture.png")
+			if err := os.Mkdir(target, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if populated {
+				writeCopyFixture(t, filepath.Join(target, "nested", "old"), "original")
+			}
+			runner := NewBuiltinRunner(WithHomeDir(homeDir))
+			t.Cleanup(func() { _ = runner.Close() })
+			args := map[string]any{"scope": "project", "attachmentKey": stored.AttachmentKey, "path": "capture.png"}
+			call := Call{SessionID: "session", Name: AttachmentExport, ProjectDirs: []string{project}}
+			call.Args, _ = json.Marshal(args)
+			result := runner.Call(context.Background(), call)
+			if result.Ok || decodeToolResult(t, result)["reason"] != "to_exists" {
+				t.Fatalf("directory replaced without overwrite: %s", result.Content)
+			}
+			if populated {
+				data, err := os.ReadFile(filepath.Join(target, "nested", "old"))
+				if err != nil || string(data) != "original" {
+					t.Fatalf("rejected export changed original: %q %v", data, err)
+				}
+			}
+			args["overwrite"] = true
+			call.Args, _ = json.Marshal(args)
+			result = runner.Call(context.Background(), call)
+			if !result.Ok {
+				t.Fatal(result.Content)
+			}
+			data, err := os.ReadFile(target)
+			if err != nil || string(data) != "image" {
+				t.Fatalf("wrong replacement: %q %v", data, err)
+			}
+			entries, err := os.ReadDir(project)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "capture.png" {
+				t.Fatalf("export retained staging or backup: %+v %v", entries, err)
+			}
+		})
+	}
 }

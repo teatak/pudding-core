@@ -19,6 +19,7 @@ type commandApprovalState struct {
 }
 
 type CommandApprovalStatus struct {
+	ProjectDirs     []string       `json:"projectDirs"`
 	GrantCount      int            `json:"grantCount"`
 	ApprovalReasons map[string]int `json:"approvalReasons"`
 	ReusedCount     int            `json:"reusedCount"`
@@ -66,7 +67,10 @@ func (e *Engine) commandApprovalStillCurrent(ctx context.Context, sessionID, tur
 func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	result := CommandApprovalStatus{ApprovalReasons: make(map[string]int)}
+	result := CommandApprovalStatus{ApprovalReasons: make(map[string]int), ProjectDirs: []string{}}
+	if state := e.sessionProjectAccess[sessionID]; state != nil {
+		result.ProjectDirs = append(result.ProjectDirs, state.dirs...)
+	}
 	if state := e.commandGrants[sessionID]; state != nil {
 		result.GrantCount, result.ReusedCount = len(state.grants), state.reused
 		for reason, count := range state.reasons {
@@ -76,16 +80,33 @@ func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 	return result
 }
 
+// This endpoint revokes both temporary directory and command permissions.
 // Revocation affects future dispatches only, not already-running processes.
 func (e *Engine) RevokeCommandApprovals(sessionID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.commandGrants, sessionID)
+	delete(e.sessionProjectAccess, sessionID)
+	for id, grant := range e.turnProjectAccess {
+		if grant.SessionID == sessionID {
+			delete(e.turnProjectAccess, id)
+		}
+	}
 }
 
 func (e *Engine) RevokeProjectCommandApprovals(projectID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	for id, state := range e.sessionProjectAccess {
+		if state.projectID == projectID {
+			delete(e.sessionProjectAccess, id)
+		}
+	}
+	for id, grant := range e.turnProjectAccess {
+		if grant.ProjectID == projectID {
+			delete(e.turnProjectAccess, id)
+		}
+	}
 	for id, state := range e.commandGrants {
 		if state.projectID == projectID {
 			delete(e.commandGrants, id)

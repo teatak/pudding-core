@@ -1,5 +1,5 @@
 // Package engine 实现 per-session turn 状态机,是 messages 的唯一写入方
-// (docs/phase-1-plan.md 第 6 节)。turn lifecycle 事件全部由本包生成,
+// (docs/archive/plans/phase-1-plan.md 第 6 节)。turn lifecycle 事件全部由本包生成,
 // provider 只供模型流(AGENTS.md 硬约束 17)。
 package engine
 
@@ -109,20 +109,21 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
-	collaborationMu   sync.Mutex
-	resourceMu        sync.Mutex
-	resourceLocks     map[string]chan struct{}
-	mu                sync.Mutex
-	running           map[string]*activeTurn // sessionID → 当前 turn
-	approvals         map[string]*pendingApproval
-	commandGrants     map[string]*commandApprovalState // session-scoped, process-lifetime command leases
-	inputRequests     map[string]*pendingUserInput
-	inputAnswerMu     sync.Mutex                    // serialize answer deduplication across steer/submit boundaries
-	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
-	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
-	wg                sync.WaitGroup
-	compacting        map[string]bool // guarded by mu; independent session compactions
-	toolCloseOnce     sync.Once
+	collaborationMu      sync.Mutex
+	resourceMu           sync.Mutex
+	resourceLocks        map[string]chan struct{}
+	mu                   sync.Mutex
+	running              map[string]*activeTurn // sessionID → 当前 turn
+	approvals            map[string]*pendingApproval
+	commandGrants        map[string]*commandApprovalState // session-scoped, process-lifetime command leases
+	inputRequests        map[string]*pendingUserInput
+	inputAnswerMu        sync.Mutex // serialize answer deduplication across steer/submit boundaries
+	sessionProjectAccess map[string]*projectAccessState
+	turnProjectAccess    map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
+	queuedRuntimeIDs     map[string]string             // queued input → originating UI runtime
+	wg                   sync.WaitGroup
+	compacting           map[string]bool // guarded by mu; independent session compactions
+	toolCloseOnce        sync.Once
 }
 
 type activeTurn struct {
@@ -219,21 +220,22 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		scheduledRuntimeIDs: make(map[string]string),
-		store:               s,
-		config:              cfg,
-		hub:                 hub,
-		resolver:            resolver,
-		builder:             contextbuilder.New(s, nil),
-		auxCtx:              auxCtx,
-		auxCancel:           auxCancel,
-		running:             make(map[string]*activeTurn),
-		approvals:           make(map[string]*pendingApproval),
-		commandGrants:       make(map[string]*commandApprovalState),
-		turnProjectAccess:   make(map[string]ProjectAccessGrant),
-		queuedRuntimeIDs:    make(map[string]string),
-		compacting:          make(map[string]bool),
-		turnFiles:           turnfiles.New(),
+		scheduledRuntimeIDs:  make(map[string]string),
+		store:                s,
+		config:               cfg,
+		hub:                  hub,
+		resolver:             resolver,
+		builder:              contextbuilder.New(s, nil),
+		auxCtx:               auxCtx,
+		auxCancel:            auxCancel,
+		running:              make(map[string]*activeTurn),
+		approvals:            make(map[string]*pendingApproval),
+		commandGrants:        make(map[string]*commandApprovalState),
+		sessionProjectAccess: make(map[string]*projectAccessState),
+		turnProjectAccess:    make(map[string]ProjectAccessGrant),
+		queuedRuntimeIDs:     make(map[string]string),
+		compacting:           make(map[string]bool),
+		turnFiles:            turnfiles.New(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -256,9 +258,9 @@ func (e *Engine) Stop() {
 
 func (e *Engine) ReleaseSessionResources(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
+	e.RevokeCommandApprovals(sessionID)
 	e.mu.Lock()
 	delete(e.scheduledRuntimeIDs, sessionID)
-	delete(e.commandGrants, sessionID)
 	for key := range e.queuedRuntimeIDs {
 		if strings.HasPrefix(key, sessionID+"\x00") {
 			delete(e.queuedRuntimeIDs, key)
@@ -2212,11 +2214,24 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
 	var commandState *commandApprovalState
+	var commandAccess *tool.CommandProjectAccess
 	risk, classified, err := e.classifyToolCall(sessionID, call)
 	if err != nil {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
 	}
 	if classified {
+		if call.Name == tool.CommandRun {
+			project, policyErr := e.projectForToolCallPolicy(ctx, sessionID)
+			if policyErr != nil {
+				return tool.ApprovalDetailsFailure(call, policyErr)
+			}
+			if commandSandboxModeForProject(project) == tool.CommandSandboxEnforce {
+				commandAccess, call, err = tool.PrepareCommandProjectAccess(call, risk, e.attachmentHome)
+			}
+			if err != nil {
+				return tool.ApprovalDetailsFailure(call, err)
+			}
+		}
 		var approvalDetails map[string]any
 		var approvalDetailsErr error
 		if tool.RequiresApprovalDetails(call.Name) {
@@ -2226,24 +2241,37 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 				approvalDetailsErr = errors.New("tool approval details unavailable")
 			}
 		}
+		if commandAccess != nil {
+			if approvalDetails == nil {
+				approvalDetails = make(map[string]any)
+			}
+			approvalDetails["additionalProjectDirs"] = commandAccess.Dirs
+			approvalDetails["directoryScope"] = "call"
+		}
 		risk = refineToolRisk(call.Name, risk, approvalDetails)
 		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk, approvalDetails)
+		if commandAccess != nil {
+			required = true
+		}
 		call.CommandSandbox = commandSandboxModeForProject(project)
+		if commandAccess != nil {
+			call.CommandSandbox = tool.CommandSandboxEnforce
+		}
 		call.CommandStateKey = commandSandboxStateKey(project, sessionID)
 		if call.Name == tool.CommandRun && err == nil && required {
-			commandState = e.commandApprovalState(sessionID, project, call.ProjectDirs)
+			commandState = e.commandApprovalState(sessionID, project, projectDirs)
 		}
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)
 		} else if err != nil {
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("approval policy: %v", err)}
-		} else if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce {
+		} else if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce && commandAccess == nil {
 			if boundaryFailure, failed := tool.CommandBoundaryFailure(call, risk); failed {
 				result = boundaryFailure
 			}
 		}
 		commandGrantKey := ""
-		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun {
+		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun && commandAccess == nil {
 			if grant := tool.CommandSessionGrantForCall(call); grant != nil {
 				call.CommandGrant = grant
 				commandGrantKey = commandSandboxStateKey(project, sessionID) + ":" + grant.Key
@@ -2278,10 +2306,18 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 				}
 			}
 		}
+		if call.Name == tool.FileCopy && result.CallID == "" && result.Name == "" {
+			call.FileCopyGrant = tool.FileCopyPlanFromDetails(approvalDetails)
+		}
 	}
 	if result.CallID == "" && result.Name == "" {
 		if commandState != nil && !e.commandApprovalStillCurrent(ctx, sessionID, turnID, mode, commandState) {
 			return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "approval_context_changed", "detail": "Command permissions or project changed; submit the command again."})
+		}
+		if commandAccess != nil {
+			if err := commandAccess.Validate(); err != nil {
+				return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "approval_context_changed", "detail": err.Error()})
+			}
 		}
 		result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 	}
@@ -2593,10 +2629,11 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 		return nil, err
 	}
 	dirs := append([]string(nil), workspace.RootDirs...)
-	e.mu.Lock()
-	grant := e.turnProjectAccess[turnID]
-	e.mu.Unlock()
-	dirs = append(dirs, grant.RootDirs...)
+	temporary, err := e.temporaryProjectDirs(ctx, sessionID, turnID)
+	if err != nil {
+		return nil, err
+	}
+	dirs = append(dirs, temporary...)
 	dirs = store.NormalizeProjectDirs(dirs)
 	if len(dirs) > 0 || store.NormalizeAgentMode(mode) != store.ModeCode {
 		return dirs, nil

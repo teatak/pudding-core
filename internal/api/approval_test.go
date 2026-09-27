@@ -16,7 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func TestApproveApprovalReturnsAuthoritativeSessionProject(t *testing.T) {
+func TestApproveApprovalReturnsSessionWithoutPersistingDirectories(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -88,19 +88,20 @@ func TestApproveApprovalReturnsAuthoritativeSessionProject(t *testing.T) {
 	if payload.Status != "approved" {
 		t.Fatalf("status = %q, want approved", payload.Status)
 	}
-	if payload.Session.ID != sessionID || payload.Session.ProjectID == "" {
+	if payload.Session.ID != sessionID || payload.Session.ProjectID != "" {
 		t.Fatalf("session response is not authoritative: %+v", payload.Session)
 	}
 	if !payload.Session.Running {
 		t.Fatalf("session response lost derived running state: %+v", payload.Session)
 	}
 
-	project, err := ms.GetProject(ctx, payload.Session.ProjectID)
-	if err != nil {
-		t.Fatal(err)
+	projects, err := ms.ListProjects(ctx)
+	if err != nil || len(projects) != 0 {
+		t.Fatalf("temporary approval created project: %v %v", projects, err)
 	}
-	if len(project.RootDirs) != 1 || project.RootDirs[0] != projectDir {
-		t.Fatalf("project roots = %+v, want %q", project.RootDirs, projectDir)
+	status := eng.CommandApprovals(sessionID)
+	if len(status.ProjectDirs) != 1 {
+		t.Fatalf("missing session directory grant: %+v", status)
 	}
 }
 

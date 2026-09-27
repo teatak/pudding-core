@@ -1,5 +1,7 @@
 # Pudding CLI-first Code 工具收敛计划
 
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
 > 状态:M5 已完成,总进度 100%
 > 决策日期:2026-07-12
 > 目标工期:9-13 个工作日
@@ -327,7 +329,7 @@ Provider adapter 不需要新的协议;OpenAI、Anthropic、Google 继续消费�
 
 ### M3:CLI 优先与 Code Eval,1.5-2 天
 
-状态:已完成(2026-07-12)。结果见 `docs/code-cli-eval-report.md`。
+状态:已完成(2026-07-12)。结果见 `docs/archive/reports/code-cli-eval-report.md`。
 
 - Code prompt 改为 CLI-first。
 - 运行固定任务并记录基线。

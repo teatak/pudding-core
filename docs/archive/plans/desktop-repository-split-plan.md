@@ -1,5 +1,7 @@
 # Pudding Core / Desktop 拆仓准备方案
 
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
 > 状态：工程拆分完成；core 已采用 Apache-2.0 并公开。`0.3.5-beta.1` 已由用户下架；[0.3.5 正式版](https://github.com/teatak/pudding/releases/tag/v0.3.5) 已发布并设为 Latest。
 > 日期：2026-09-20；实际迁移来源：`846ed125`。
 > core 拆分分支已合并并推送到 `main`，desktop 使用已有 `main`；两仓历史均保持原样。
@@ -63,14 +65,14 @@ Core 的独立使用入口是 API。提供最小请求示例用于创建会话�
 | --- | --- |
 | core 内嵌 Web UI | 删除 `internal/webui` 与 `embed` 构建；core 默认只提供 API，可通过 `-ui-dir` 挂载绝对路径下的外置前端 |
 | Electron 页面与 API origin | desktop 将 `web/dist` 放入应用的 `Resources/app/web/dist`，Electron 启动 daemon 时传入；沿用原 loopback origin、preload 信任边界和浏览器存储 |
-| 浏览器限额与握手版本 | [contracts/runtime.json](../contracts/runtime.json) 是唯一来源，协议版本为 2，避免连接旧启动契约的 daemon |
-| TypeScript API / SSE 契约 | [contracts/api.ts](../contracts/api.ts)、[contracts/events.ts](../contracts/events.ts) 属于 core；desktop 从选定 core 生成被忽略的 `web/contracts/` |
-| Go / Swift / 语言服务构建 | core 的 [build-runtime.sh](../scripts/build-runtime.sh) 构建 Go runtime 与语言服务；desktop 负责 Swift helper、资源装配与签名 |
+| 浏览器限额与握手版本 | [contracts/runtime.json](../../../contracts/runtime.json) 是唯一来源，协议版本为 2，避免连接旧启动契约的 daemon |
+| TypeScript API / SSE 契约 | [contracts/api.ts](../../../contracts/api.ts)、[contracts/events.ts](../../../contracts/events.ts) 属于 core；desktop 从选定 core 生成被忽略的 `web/contracts/` |
+| Go / Swift / 语言服务构建 | core 的 [build-runtime.sh](../../../scripts/build-runtime.sh) 构建 Go runtime 与语言服务；desktop 负责 Swift helper、资源装配与签名 |
 | core 依赖 | desktop 的 `core.lock.json` 锁定完整 SHA；默认自动检出，开发可显式指定 `PUDDING_CORE_DIR`，打包要求其提交匹配且工作区干净 |
 | 发布溯源 | 新发布清单同时记录 desktop 提交和 core SHA；安装包仍发布到 `teatak/pudding`，历史发布记录不重写 |
 | 移动兼容 | 删除 MobileAccessBridge、配对 API、设备 token、设置界面和 Worker 移动回调；daemon 拒绝非 loopback 地址 |
 
-协议和状态约束继续遵循 [AGENTS.md](../AGENTS.md)：session scope、`clientMessageID`、单调事件序号、可取消流、canonical message、事务收尾、loopback 与 token 均不得因拆仓改变。无需为拆仓把 Go `internal` 改成供 desktop 直接导入的 SDK，也不新增第三个协议仓库。
+协议和状态约束继续遵循 [AGENTS.md](../../../AGENTS.md)：session scope、`clientMessageID`、单调事件序号、可取消流、canonical message、事务收尾、loopback 与 token 均不得因拆仓改变。无需为拆仓把 Go `internal` 改成供 desktop 直接导入的 SDK，也不新增第三个协议仓库。
 
 ## 5. 开发、依赖与发布
 
@@ -140,7 +142,7 @@ core 保留 `make test`、`make schema-check` 与独立 daemon 构建入口，�
 - [ ] 核对许可证、第三方声明和历史分发版本的授权安排；不将私有仓库可见性等同于许可证。
 - [ ] 检查两个仓库的 diff、新文件与旧路径残留，确认完整回归结果后完成公开准备。
 
-桌面实际验证记录见私有 desktop 的 `docs/repository-split-verification.md`；core 开源结果见下文。未勾选的实际升级与外部服务回归仍未完成。
+桌面实际验证记录见私有 desktop 的 `docs/archive/reports/repository-split-verification.md`；core 开源结果见下文。未勾选的实际升级与外部服务回归仍未完成。
 
 ## 7. 规模与工作量
 
@@ -167,7 +169,7 @@ desktop 约包含 Web 8.1 万行、Electron 9400 行、Swift 5800 行。OAuth Wo
 
 ## 8. 决策与剩余事项
 
-1. **Core 许可证（已确认）。** 用户选择 [Apache-2.0](../LICENSE)，当前 core 及后续默认贡献采用该协议；第三方依赖保留原条款。历史提交、tag 和已发布安装包不重写，原有 AGPL 授权不撤回。desktop 需要锁定本次变更后的 core 提交并同步第三方声明；desktop 自身的许可证不随 core 自动变更。
+1. **Core 许可证（已确认）。** 用户选择 [Apache-2.0](../../../LICENSE)，当前 core 及后续默认贡献采用该协议；第三方依赖保留原条款。历史提交、tag 和已发布安装包不重写，原有 AGPL 授权不撤回。desktop 需要锁定本次变更后的 core 提交并同步第三方声明；desktop 自身的许可证不随 core 自动变更。
 2. **OAuth Worker / 官网（已确认）。** 随 desktop 迁移，保持原部署与 URL；本次没有触发部署。core 本地构建不依赖这部分私有源码。
 3. **core 版本命名（已采用）。** 首期用完整 SHA 锁定，不急于增加单独的二进制发布系统；之后采用独立版本 tag 时，须避免改写已有应用历史 tag。
 

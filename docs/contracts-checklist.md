@@ -1,6 +1,6 @@
 # 契约字段对照 checklist
 
-> 用途:事件协议与 REST payload 的 Go ↔ TS 字段对照(docs/phase-1-plan.md 第 2 节)。  
+> 用途：当前事件协议与 REST payload 的 Go ↔ TS 字段对照；早期契约先行过程见[第一阶段计划](archive/plans/phase-1-plan.md)。
 > 来源:Go = `internal/event/types.go` / `internal/store/store.go`;TS = `contracts/`（desktop 生成到 `web/contracts/`）。
 > 规则:改任何一边必须同步另一边并更新本表,契约改动单独提交。
 
@@ -77,7 +77,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, inputLevel}}` | 404 / 503 |
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照；主会话包含所有子会话请求及 `sourceTitle?`，按创建时间／ID 排序，保留真实子 `sessionID` | 404 |
-| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status, session}` | 404 |
+| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status, session}`；目录授权不修改 `session.projectID` | 404 / 409（授权上下文已变化） |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
@@ -206,16 +206,20 @@ backup + rename 提交,失败时逆序回滚。修改完成后由 Turn 文件 Di
 ```json
 {
   "from": {"scope": "temp", "path": "page.html"},
-  "to": {"scope": "project", "path": "page.html"},
+  "to": {"path": "/project/page.html"},
   "overwrite": false
 }
 ```
 
-- 两端分别校验 `scope/path`；`temp/skill` 只接受区内相对路径，`project` 接受已授权根内的绝对或相对路径。支持跨 scope 和已授权项目根，不隐式扩大权限。
+- 两端分别解析：绝对路径可省略 `scope`，服务端按真实路径识别托管区、项目或外部文件；相对路径必须有 `scope`，多项目根必须用绝对路径。显式 `temp/skill` 仍只接受区内相对路径；托管区只读与保留目录规则不能通过绝对路径绕过。
+- 当前会话已授权的 Code scratch 按工作目录处理，支持绝对路径与撤销记录；不放行其他会话或未授权的 `.code` 路径。
+- 任一绝对路径超出已有范围，原调用合并展示源读取、目标写入和覆盖信息，请求一次审批（包含 Full 模式）。批准只放行这次复制，不扩展 Project/turn/session 目录权限；拒绝、取消或审批期间路径/文件身份变化均不执行复制。相对路径越界仍拒绝。
 - `to.path` 是完整目标路径，不是容纳文件的目录；目录复制需 `recursive=true`，覆盖需 `overwrite=true`。
 - 禁止同路径／同文件及源目标目录相互包含；递归源中的符号链接或特殊文件会在替换目标前拒绝。
+- 覆盖先在目标文件系统生成完整临时副本，再备份旧目标并 rename 提交；提交失败恢复旧目标，恢复失败保留备份并报告路径，不提前删除原文件。审批与提交前均核对子目录及文件的身份、权限、大小、修改时间；发生增删改时拒绝覆盖。
 - 结果包含 `fromScope/toScope`、`from/to`，项目端各自附带 `fromRoot/fromRelativePath` 或 `toRoot/toRelativePath`。
-- 项目写审批与 Turn 文件变更追踪以目标端为准；复制到项目适用已有 Ask/Auto 策略，撤销只作用于目标，不修改源。
+- 项目内复制适用已有 Ask/Auto 策略，托管区内复制保留原有策略。Turn 文件变更追踪仍只记录项目目标；撤销只作用于目标，不修改源。项目外目标不进入项目撤销/重做，单次复制批准不能用于之后的文件操作。
+- 审批 payload 的 `fileCopy` 包含解析后的 `from/to`（`path/scope/external`）、`recursive`、`overwrite`、`replacesTarget`、`externalAccess`；临时批准仅在引擎内绑定原始参数、session/turn/call 和文件身份，不从工具输入或 JSON 授权。
 - 工具定义由 Core 下发；desktop 的复制摘要和文件操作分组同步读取嵌套参数。`file_move` 参数未变。
 
 ## settings 约定键
@@ -247,3 +251,9 @@ submit 时 engine 解析成 effective model config,随 turn 写入 `turns.model_
 
 改 settings 即时生效,不需要重启 daemon;provider 未配置时 submit 会以
 `turn.failed` 提示。events 表每 session 保留最近 1000 条 lifecycle 事件。
+
+## 临时目录与命令授权
+
+`GET /sessions/{id}/command-approvals` 返回 `{projectDirs, grantCount, reusedCount, approvalReasons}`。`projectDirs` 为当前会话的临时目录租约；固定命令授权计数仍为 `grantCount`。对应的撤销接口清除本会话临时目录（含当前轮）及固定命令授权，不终止已运行进程。
+
+命令审批 payload 可含 `additionalProjectDirs` 与 `directoryScope: "call"`，表示仅该次调用的沙箱目录扩展。该范围由后端准备，审批请求不能通过传入 `projectDirs` 扩大它。

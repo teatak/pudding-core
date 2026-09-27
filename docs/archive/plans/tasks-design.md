@@ -1,6 +1,8 @@
 # 任务：定时执行与 Agent-to-Agent 协作
 
-> 历史方案（2026-09-21）：本轮定时任务以 [定时任务首版实施计划](scheduled-tasks-plan.md) 为唯一实施依据。以下保留原始草案用于追溯，不作为待办。
+> 归档（2026-09-27）：保留记录时的设计、状态与验证证据，不作为当前行为或待办。当前入口见 [文档索引](../../README.md)，剩余事项统一见 [跨仓待办](../../backlog.md)。
+
+> 历史方案（2026-09-21）：本轮定时任务以 [定时任务首版实施计划](../../scheduled-tasks-plan.md) 为唯一实施依据。以下保留原始草案用于追溯，不作为待办。
 > 本轮采用独立菜单管理、绑定原会话执行；下文每次运行新建 Session、外部 Agent、结果审查、callback、审批持久化及 worktree 等设计均不属于当前实施范围。
 
 > 归属：跨仓设计草案；core 维护任务调度、数据与 API 设计，desktop 承载任务视图。
@@ -33,19 +35,19 @@
 
 | 能力 | 当前事实与实施含义 |
 | --- | --- |
-| 会话执行 | [API](../internal/api/server.go) 已有会话创建、submit、cancel、turn 和消息读取；[engine](../internal/engine/engine.go) 已有 `clientMessageID` 幂等。复用这些业务语义 |
-| 执行完成与事件 | [事件契约](../internal/event/types.go) 已有 turn lifecycle；[SSE](../internal/api/sse.go) 支持 session seq 和 `Last-Event-ID`。没有续传位点时从尾部开始，外部接入不能依赖连接后才看到完成事件 |
-| 审批 | [approval.go](../internal/engine/approval.go) 使用内存 map 和 channel 等待；批准、拒绝已有 REST 接口。审批请求与决定事件目前不持久化 |
+| 会话执行 | [API](../../../internal/api/server.go) 已有会话创建、submit、cancel、turn 和消息读取；[engine](../../../internal/engine/engine.go) 已有 `clientMessageID` 幂等。复用这些业务语义 |
+| 执行完成与事件 | [事件契约](../../../internal/event/types.go) 已有 turn lifecycle；[SSE](../../../internal/api/sse.go) 支持 session seq 和 `Last-Event-ID`。没有续传位点时从尾部开始，外部接入不能依赖连接后才看到完成事件 |
+| 审批 | [approval.go](../../../internal/engine/approval.go) 使用内存 map 和 channel 等待；批准、拒绝已有 REST 接口。审批请求与决定事件目前不持久化 |
 | 重启恢复 | `Engine.Recover` 将遗留 running turn 收尾为 failed，原因是 daemon restart。当前不能恢复原 Go 调用栈或待审批命令 |
-| 用户问题 | [用户问题收集](user-input-flow.md) 已有提问、等待、补答、幂等与 canonical 恢复；不能再建另一套答案事实源 |
-| 用量与结果读取 | 已有会话用量和 [工具结果按需读取](context-working-set.md)。任务视图引用这些记录，不另建 token 计数器或完整日志副本 |
+| 用户问题 | [用户问题收集](../../user-input-flow.md) 已有提问、等待、补答、幂等与 canonical 恢复；不能再建另一套答案事实源 |
+| 用量与结果读取 | 已有会话用量和 [工具结果按需读取](../../context-working-set.md)。任务视图引用这些记录，不另建 token 计数器或完整日志副本 |
 | 桌面界面 | [RailPanel](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/session-rail/RailPanel.tsx) 按项目组织会话；[Conversation](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/Conversation.tsx) 复用 Transcript / Composer；[WorkspacePane](https://github.com/teatak/pudding-desktop/blob/main/web/src/components/workspace/WorkspacePane.tsx) 管理项目、网页和产物 |
 | 任务系统 | 本轮代码核对未发现本文所需的任务定义、定时调度、A2A 委派或业务结果 callback 主链路，需要新增 |
 
 界面以当前代码和用户提供的 Pudding 截图为基线。[旧设计底座](https://github.com/teatak/pudding-desktop/blob/main/docs/design.md) 中部分导航、品牌和消息展示描述已与当前界面不同，不能照其旧布局重建工作台。实际样式沿用 [styles.css](https://github.com/teatak/pudding-desktop/blob/main/web/src/styles.css)。
 
 鉴权基线更新（2026-09-20）：拆仓已删除 mobile device token 与移动配对路径。外部接入仍须遵守
-[AGENTS.md](../AGENTS.md) 的 loopback 与启动 token 边界，不得恢复移动端配对或把 daemon 暴露到公网。
+[AGENTS.md](../../../AGENTS.md) 的 loopback 与启动 token 边界，不得恢复移动端配对或把 daemon 暴露到公网。
 
 ## 3. 用户界面
 
@@ -246,7 +248,7 @@ SSE 消费者保留最后确认的 seq；首次连接先结合 Run 快照和返�
 
 ### 9.1 正常审批
 
-触发方式不改变审批规则。沿用项目 `ask / auto / full`、能力授权和 [CLI 沙箱](code-cli-sandbox-design.md) 的既有边界。任务配置及外部调用权限可以收紧，不能静默扩大这些权限。
+触发方式不改变审批规则。沿用项目 `ask / auto / full`、能力授权和 [CLI 沙箱](../../code-cli-sandbox-design.md) 的既有边界。任务配置及外部调用权限可以收紧，不能静默扩大这些权限。
 
 未获授权的操作先形成持久化 Approval，再暂停相关执行。界面显示“待审批”，程序等待并通知用户或指定接收方，不启动新的模型推理来询问进展。审批等待不停止其他无关会话。
 

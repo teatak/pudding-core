@@ -2,7 +2,7 @@
 
 归属：`pudding-core`。本文说明文件定位、附件分析、后台命令与参数诊断的当前行为。
 工具名称和 JSON schema 以 [`internal/tool/builtin.go`](../internal/tool/builtin.go) 为准。
-相关样本见 [2026-09-23 问题记录](agent-tooling-issues-2026-09-23.md)。
+相关样本见 [2026-09-23 问题记录](archive/reports/agent-tooling-issues-2026-09-23.md)。
 
 ## 1. 项目路径
 

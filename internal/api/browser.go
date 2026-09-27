@@ -934,12 +934,12 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	s.rememberClosedBrowserTab(sessionID, tabID)
 	if err := s.browser.ReleaseTab(c.Request.Context(), sessionID, tabID); err != nil {
 		if !errors.Is(err, browser.ErrTabNotFound) {
 			return s.browserError(c, err)
 		}
 	}
+	s.rememberClosedBrowserTab(sessionID, tabID)
 	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -1218,6 +1218,9 @@ func writeJSONError(w http.ResponseWriter, status int, code string) {
 
 func (s *Server) browserError(c *cart.Context, err error) error {
 	switch {
+	case browser.ErrorCode(err) == "browser_close_cancelled":
+		c.JSON(http.StatusConflict, map[string]string{"error": "browser_close_cancelled"})
+		return nil
 	case errors.Is(err, browser.ErrFileURLNotAllowed):
 		c.JSON(http.StatusForbidden, map[string]string{"error": "file_url_not_allowed"})
 		return nil

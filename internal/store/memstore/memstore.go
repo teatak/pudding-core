@@ -1,5 +1,5 @@
-// Package memstore 是 store.Store 的内存实现,服务 M0 wiring 与 engine 单测;
-// 持久化的 SQLite 实现由轨道 A 交付后在 main 中替换(docs/phase-1-plan.md 第 3 节)。
+// Package memstore 是 store.Store 的内存实现,用于隔离测试;
+// daemon 持久化使用 sqlitestore。早期接线过程见 docs/archive/plans/phase-1-plan.md 第 3 节。
 // 语义以 store 接口注释与 schema.sql 为准,两个实现必须可互换。
 package memstore
 

@@ -2474,22 +2474,6 @@ func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T)
 	}
 }
 
-func TestBindSessionProjectDoesNotCreateProjectForMissingSession(t *testing.T) {
-	ctx := context.Background()
-	ms := memstore.New()
-	eng := New(ms, event.NewHub(), mapResolver{}, ms)
-	if _, err := eng.bindSessionProject(ctx, "sess_missing", []string{t.TempDir()}); err == nil {
-		t.Fatal("missing Session should reject Project binding")
-	}
-	projects, err := ms.ListProjects(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(projects) != 0 {
-		t.Fatalf("failed Project binding created orphan records: %+v", projects)
-	}
-}
-
 func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
 	ms := memstore.New()
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
@@ -2592,6 +2576,7 @@ func TestCodeCapabilityAdditionalDirectoryStillRequiresApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	additionalDir := t.TempDir()
+	additionalDir, _ = filepath.EvalSymlinks(additionalDir)
 	sub, unsub := hub.Subscribe(sid)
 	defer unsub()
 
@@ -2711,7 +2696,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	}
 }
 
-func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
+func TestProjectApprovalSessionScopeDoesNotPersistProject(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	dir := t.TempDir()
@@ -2763,15 +2748,17 @@ func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	if sess.ActiveMode != store.ModeCode || sess.ModeLease != store.ModeLeaseSession {
 		t.Fatalf("session mode not upgraded: %+v", sess)
 	}
-	if sess.ProjectID == "" {
-		t.Fatalf("session project not bound: %+v", sess)
+	if sess.ProjectID != "" {
+		t.Fatalf("temporary approval bound project: %+v", sess)
 	}
-	project, err := ms.GetProject(ctx, sess.ProjectID)
-	if err != nil {
-		t.Fatal(err)
+	projects, err := ms.ListProjects(ctx)
+	if err != nil || len(projects) != 0 {
+		t.Fatalf("temporary approval created projects: %+v %v", projects, err)
 	}
-	if got := project.RootDirs; len(got) != 1 || got[0] != dir {
-		t.Fatalf("project dirs not stored: %+v", got)
+	dirs, err := eng.projectRootDirsForToolCall(ctx, sid, "next-turn", store.ModeCode)
+	resolvedDir, _ := filepath.EvalSymlinks(dir)
+	if err != nil || len(dirs) != 1 || dirs[0] != resolvedDir {
+		t.Fatalf("session lease not applied: %+v %v", dirs, err)
 	}
 	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileRead) || !hasToolDef(client.requests[1].Tools, tool.CommandRun) || !hasToolDef(client.requests[1].Tools, tool.FileList) {
 		t.Fatalf("default project tools wrong after approval: %+v", client.requests)
@@ -2782,6 +2769,7 @@ func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	dir := t.TempDir()
+	dir, _ = filepath.EvalSymlinks(dir)
 	client := &projectDirGrantClient{dir: dir}
 	runner := &recordingToolRunner{
 		defs:   tool.BuiltinDefinitions(),
@@ -3484,7 +3472,7 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 	}
 }
 
-func TestSandboxCommandReportsBoundaryRequirementWithoutApproval(t *testing.T) {
+func TestSandboxCommandReportsHostBoundaryWithoutApproval(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -3500,10 +3488,6 @@ func TestSandboxCommandReportsBoundaryRequirementWithoutApproval(t *testing.T) {
 	calls := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
 	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
 	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner))
-	outsideRaw, err := json.Marshal(map[string]any{"scope": "project", "command": "cat " + filepath.Join(t.TempDir(), "report.txt")})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	tests := []struct {
 		name   string
@@ -3511,7 +3495,6 @@ func TestSandboxCommandReportsBoundaryRequirementWithoutApproval(t *testing.T) {
 		reason string
 	}{
 		{name: "host service", raw: json.RawMessage(`{"scope":"project","command":"brew install mysql-client"}`), reason: "host_access_required"},
-		{name: "outside path", raw: outsideRaw, reason: "additional_project_access_required"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
