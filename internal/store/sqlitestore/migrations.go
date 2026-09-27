@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 24
+	currentSchemaVersion       = 25
 )
 
 var (
@@ -33,6 +33,61 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	25: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+CREATE TABLE IF NOT EXISTS workbench_links (
+ id TEXT PRIMARY KEY,
+ workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+ left_entity TEXT NOT NULL,
+ right_entity TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ UNIQUE(workbench_id,left_entity,right_entity)
+);
+CREATE TABLE IF NOT EXISTS workbench_actions (
+ id TEXT PRIMARY KEY,
+ workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+ client_request_id TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
+ spec TEXT NOT NULL,
+ result TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ UNIQUE(workbench_id,client_request_id)
+);
+CREATE TABLE IF NOT EXISTS workbenches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    revision INTEGER NOT NULL,
+    head_revision TEXT NOT NULL,
+    active_revision TEXT NOT NULL,
+    bindings TEXT NOT NULL,
+    grants TEXT NOT NULL,
+    binding_version INTEGER NOT NULL,
+    deleted INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workbench_revisions (
+    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL,
+    parent_revision TEXT NOT NULL,
+    client_request_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    build_receipt TEXT NOT NULL,
+    PRIMARY KEY(workbench_id, hash),
+    UNIQUE(workbench_id, client_request_id)
+);
+CREATE TABLE IF NOT EXISTS workbench_saves (
+    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+    client_request_id TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    PRIMARY KEY(workbench_id, client_request_id)
+);
+
+`)
+		return err
+	},
 	24: func(tx *sql.Tx) error {
 		// Early development v23 databases were opened before run snapshots
 		// were added. Keep the completed v23 layout and its snapshots intact.
@@ -890,6 +945,11 @@ var currentSchemaContract = func() schemaContract {
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":  {"parent_turn_id"},
+		"workbenches":          {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "grants", "binding_version", "deleted", "created_at", "updated_at"},
+		"workbench_revisions":  {"workbench_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
+		"workbench_links":      {"id", "workbench_id", "left_entity", "right_entity", "created_at"},
+		"workbench_actions":    {"id", "workbench_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
+		"workbench_saves":      {"workbench_id", "client_request_id", "hash"},
 		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
 		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
 		"computer_app_grants":  {"session_id", "app_id", "created_at"},

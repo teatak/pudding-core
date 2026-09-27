@@ -18,6 +18,11 @@ import (
 )
 
 type Memstore struct {
+	workbenchLinks     map[string]*store.WorkbenchLink
+	workbenchActions   map[string]*store.WorkbenchAction
+	workbenches        map[string]*store.Workbench
+	workbenchRevisions map[string]*store.WorkbenchRevision
+	workbenchSaves     map[string]string
 	scheduledTasks     map[string]*store.ScheduledTask
 	scheduledRuns      map[string]*store.ScheduledTaskRun
 	scheduledRunOrder  []string
@@ -48,6 +53,9 @@ type Memstore struct {
 
 func New() *Memstore {
 	return &Memstore{
+		workbenches:        make(map[string]*store.Workbench),
+		workbenchRevisions: make(map[string]*store.WorkbenchRevision),
+		workbenchSaves:     make(map[string]string),
 		scheduledTasks:     make(map[string]*store.ScheduledTask),
 		scheduledRuns:      make(map[string]*store.ScheduledTaskRun),
 		sessions:           make(map[string]*store.Session),
@@ -601,6 +609,11 @@ func (m *Memstore) deleteSessionLocked(id string) {
 	delete(m.parents, id)
 	delete(m.dispatches, id)
 	delete(m.sessions, id)
+	for _, w := range m.workbenches {
+		if w.SourceSessionID == id {
+			w.SourceSessionID = ""
+		}
+	}
 	delete(m.messages, id)
 	delete(m.queued, id)
 	delete(m.susage, id)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -312,7 +313,7 @@ func TestAppMCPStdioServerHelper(t *testing.T) {
 }
 
 func TestApplyEndpointConnectionEnvDoesNotOverrideEndpointEnv(t *testing.T) {
-	got, err := applyEndpointConnectionEnv(
+	got, err := appexec.ApplyEndpointConnectionEnv(
 		map[string]string{"FAKE_MCP_TOKEN": "custom", "BASE_ONLY": "base"},
 		map[string]string{"apiKey": "connection", "extra": "extra-value"},
 		[]app.ConnectionField{{

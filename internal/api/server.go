@@ -20,6 +20,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
@@ -38,6 +39,7 @@ import (
 )
 
 type Server struct {
+	appHTTP    *appexec.Executor
 	engine     *engine.Engine
 	store      store.Store
 	turnFiles  *turnfiles.Replayer
@@ -63,7 +65,9 @@ type Server struct {
 	oauthBroker       *oauthbroker.Client
 	github            *githubapp.Client
 
-	providerSyncs singleflight.Group
+	workbenchMu     sync.Mutex
+	workbenchBudget map[string]*workbenchRequestBudget
+	providerSyncs   singleflight.Group
 
 	// attachmentMu serializes API attachment writes (including pre-insert clones)
 	// with reclamation. SQLite remains the authority for session existence.
@@ -81,7 +85,7 @@ type voiceController interface {
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
+	return &Server{appHTTP: appexec.New(nil), engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
 }
 
 func (s *Server) WithOAuthBroker(client *oauthbroker.Client) *Server {
@@ -140,6 +144,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
+	"/workbenches",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
@@ -168,6 +173,22 @@ type browserMCPService interface {
 func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
+
+	app.Route("/workbenches").GET(s.listWorkbenches).POST(s.createWorkbench)
+	app.Route("/workbenches/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
+	app.Route("/workbenches/:workbenchID/revisions").GET(s.listWorkbenchRevisions).POST(s.saveWorkbenchRevision)
+	app.Route("/workbenches/:workbenchID/revisions/:hash").GET(s.getWorkbenchRevision)
+	app.Route("/workbenches/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
+	app.Route("/workbenches/:workbenchID/activate").POST(s.activateWorkbench)
+	app.Route("/workbenches/:workbenchID/bindings").PUT(s.bindWorkbench)
+	app.Route("/workbenches/:workbenchID/grants").POST(s.grantWorkbenchQuery)
+	app.Route("/workbenches/:workbenchID/grants/:operationID").DELETE(s.revokeWorkbenchQuery)
+	app.Route("/workbenches/:workbenchID/queries/:operationID").POST(s.queryWorkbench)
+	app.Route("/workbenches/:workbenchID/actions/:operationID/prepare").POST(s.prepareWorkbenchAction)
+	app.Route("/workbenches/:workbenchID/actions").GET(s.listWorkbenchActions)
+	app.Route("/workbenches/:workbenchID/links").GET(s.listWorkbenchLinks).POST(s.putWorkbenchLink)
+	app.Route("/workbenches/:workbenchID/links/:linkID").DELETE(s.deleteWorkbenchLink)
+	app.Route("/workbenches/:workbenchID/action-runs/:actionID/execute").POST(s.executeWorkbenchAction)
 
 	app.Route("/scheduled-tasks").GET(s.listScheduledTasks).POST(s.createScheduledTask)
 	app.Route("/scheduled-tasks/:taskID").GET(s.getScheduledTask).PATCH(s.updateScheduledTask).DELETE(s.updateScheduledTask)

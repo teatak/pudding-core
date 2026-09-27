@@ -10,3 +10,5 @@ Clients reject incompatible daemon handshakes rather than attaching to an older 
 The generated client files must not be edited or committed in desktop.
 
 Protocol 3 adds scheduled task definitions, run history, and daemon scheduling. Desktop requires these routes; the handshake rejects older daemons rather than presenting a management page backed by missing endpoints.
+
+Protocol 4 adds independent workbench resources, immutable source revisions, App bindings/query grants, action runs and cross-App links. `workbench.json` owns runtime limits and `workbench.ts` the client schemas. Old daemons are rejected at handshake. Installed App endpoints must explicitly set `workbench_writes: true` to enable confirmed workbench actions; the default is disabled.

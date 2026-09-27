@@ -1,0 +1,39 @@
+package workbench
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestImmutablePackageIntegrity(t *testing.T) {
+	home := t.TempDir()
+	p := fixturePackage(t)
+	hash, err := WritePackage(home, "wb_test", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = WritePackage(home, "wb_test", p); err != nil {
+		t.Fatalf("repeated save failed: %v", err)
+	}
+	got, err := ReadPackage(home, "wb_test", hash)
+	if err != nil || got.Files["src/App.tsx"] != p.Files["src/App.tsx"] {
+		t.Fatalf("%+v %v", got, err)
+	}
+	file := filepath.Join(home, "workbenches", "wb_test", "revisions", hash, "src", "App.tsx")
+	if err = os.WriteFile(file, []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadPackage(home, "wb_test", hash); err == nil {
+		t.Fatal("corrupt source accepted")
+	}
+	if err = os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(filepath.Join(home, "outside"), file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadPackage(home, "wb_test", hash); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}

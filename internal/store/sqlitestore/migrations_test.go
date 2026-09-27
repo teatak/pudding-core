@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints are immutable. A schema change must bump
 	// currentSchemaVersion, add a migration, and append a new fingerprint.
 	releasedFingerprints := map[int]string{
+		25: "9ac7648b15cc883652f8deb4a2a9b28d5ad9bee51ab956309eed11646309cde0",
 		// v24 repairs the early v23 layout; the canonical schema is unchanged.
 		24: "03c3bff523a3b796998107413c902cb92b70b1af57792f8cbb9c4fca46f25c28",
 		23: "03c3bff523a3b796998107413c902cb92b70b1af57792f8cbb9c4fca46f25c28",

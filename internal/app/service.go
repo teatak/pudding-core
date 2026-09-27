@@ -707,6 +707,52 @@ func (s *Service) ReadyConnection(ctx context.Context, id string) (*Connection, 
 	return s.refreshConnectionIfNeeded(ctx, connection)
 }
 
+// ResolveBoundEndpoint resolves an exact resource binding, without borrowing a
+// session's loaded Apps or choosing another account by display name.
+func (s *Service) ResolveBoundEndpoint(ctx context.Context, appID, endpointName, connectionID string) (*EndpointBinding, string, error) {
+	defs, err := s.ListDefinitions(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, def := range defs {
+		if def == nil || def.ID != appID || !def.Enabled {
+			continue
+		}
+		endpoint, ok := def.Endpoints[endpointName]
+		if !ok || (endpoint.Kind != EndpointKindREST && endpoint.Kind != EndpointKindGraphQL) {
+			return nil, "", ErrNotFound
+		}
+		if connectionID == "" {
+			binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint)
+			if !ok {
+				return nil, "", errors.New("connection required")
+			}
+			revision, _ := json.Marshal(struct {
+				Definition *Definition
+				Endpoint   Endpoint
+			}{def, binding.Endpoint})
+			return binding, string(revision), nil
+		}
+		connection, err := s.ReadyConnection(ctx, connectionID)
+		if err != nil {
+			return nil, "", err
+		}
+		if connection.AppID != appID || connection.ID != connectionID {
+			return nil, "", errors.New("connection does not belong to App")
+		}
+		binding := endpointBindingForConnection(def, endpointName, endpoint, connection)
+		// Connection timestamps change on edits and authorization refresh. A
+		// changed authorization context requires a new explicit workbench grant.
+		revision, _ := json.Marshal(struct {
+			Definition *Definition
+			Endpoint   Endpoint
+			Connection ConnectionView
+		}{def, binding.Endpoint, ViewConnection(connection)})
+		return binding, string(revision), nil
+	}
+	return nil, "", ErrNotFound
+}
+
 func (s *Service) readyEndpointBinding(ctx context.Context, binding *EndpointBinding) (*EndpointBinding, error) {
 	if binding == nil || binding.ConnectionID == "" || s.connectionStore == nil {
 		return binding, nil

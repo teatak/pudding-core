@@ -21,6 +21,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/api"
 	appsvc "github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/appexec"
 	audioasr "github.com/teatak/pudding-core/internal/audio/asr"
 	sherpaasr "github.com/teatak/pudding-core/internal/audio/asr/sherpa"
 	audiodriver "github.com/teatak/pudding-core/internal/audio/driver"
@@ -183,8 +184,9 @@ func Start(opts Options) (*Daemon, error) {
 			Payload:   payload,
 		})
 	}
+	appHTTP := appexec.New(nil)
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithAppExecutor(appHTTP), tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)
@@ -217,7 +219,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithAppExecutor(appHTTP).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"io"
 	"net/http"
 	"sort"
@@ -441,27 +442,27 @@ func (r *BuiltinRunner) doGraphQLSchemaQuery(ctx context.Context, binding *app.E
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "encode_error", err.Error())
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, endpointRequestTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, appexec.EndpointRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, binding.Endpoint.URL, bytes.NewReader(body))
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "request_error", err.Error())
 	}
-	resolvedAuth, err := r.resolveEndpointAuth(reqCtx, binding.AppID, binding.ConnectionID, binding.Auth, binding.AuthMethod, binding.ConnectionFields)
+	resolvedAuth, err := r.appHTTP.ResolveEndpointAuth(reqCtx, binding.AppID, binding.ConnectionID, binding.Auth, binding.AuthMethod, binding.ConnectionFields)
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "token_exchange_failed", err.Error())
 	}
-	if err := applyEndpointAuth(req.Header, resolvedAuth); err != nil {
+	if err := appexec.ApplyEndpointAuth(req.Header, resolvedAuth); err != nil {
 		return nil, graphQLSchemaError(binding, "auth_config_error", err.Error())
 	}
-	if err := applyEndpointConnectionHeaders(req.Header, http.MethodPost, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
+	if err := appexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
 		return nil, graphQLSchemaError(binding, "connection_field_error", err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.webHTTPClient.Do(req)
 	if err != nil {
-		return nil, graphQLSchemaError(binding, endpointNetworkReason(err), err.Error())
+		return nil, graphQLSchemaError(binding, appexec.EndpointNetworkReason(err), err.Error())
 	}
 	defer resp.Body.Close()
 	data, truncated, err := readGraphQLSchemaBody(resp.Body)

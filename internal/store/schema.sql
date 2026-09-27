@@ -355,3 +355,55 @@ CREATE TABLE IF NOT EXISTS scheduled_task_runs (
 );
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_task ON scheduled_task_runs(task_id, accepted_at);
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(handoff, accepted_at);
+
+CREATE TABLE workbenches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    revision INTEGER NOT NULL,
+    head_revision TEXT NOT NULL,
+    active_revision TEXT NOT NULL,
+    bindings TEXT NOT NULL,
+    grants TEXT NOT NULL,
+    binding_version INTEGER NOT NULL,
+    deleted INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE workbench_revisions (
+    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL,
+    parent_revision TEXT NOT NULL,
+    client_request_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    build_receipt TEXT NOT NULL,
+    PRIMARY KEY(workbench_id, hash),
+    UNIQUE(workbench_id, client_request_id)
+);
+CREATE TABLE workbench_saves (
+    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+    client_request_id TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    PRIMARY KEY(workbench_id, client_request_id)
+);
+
+CREATE TABLE workbench_actions (
+ id TEXT PRIMARY KEY,
+ workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+ client_request_id TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
+ spec TEXT NOT NULL,
+ result TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ UNIQUE(workbench_id,client_request_id)
+);
+
+CREATE TABLE workbench_links (
+ id TEXT PRIMARY KEY,
+ workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
+ left_entity TEXT NOT NULL,
+ right_entity TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ UNIQUE(workbench_id,left_entity,right_entity)
+);

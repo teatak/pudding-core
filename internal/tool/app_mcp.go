@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"hash/fnv"
 	"io"
 	"log/slog"
@@ -536,10 +537,10 @@ func (c *appMCPHTTPClient) post(ctx context.Context, msg appMCPRPCMessage, id st
 	if err := applyAppMCPHeaders(req.Header, c.binding.Endpoint.Headers); err != nil {
 		return nil, err
 	}
-	if err := applyEndpointAuth(req.Header, c.binding.Auth); err != nil {
+	if err := appexec.ApplyEndpointAuth(req.Header, c.binding.Auth); err != nil {
 		return nil, err
 	}
-	if err := applyEndpointConnectionHeaders(req.Header, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
+	if err := appexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
 		return nil, err
 	}
 	resp, err := c.client.Do(req)
@@ -582,7 +583,7 @@ func (c *appMCPHTTPClient) requestURL() (*url.URL, error) {
 	if target.Host == "" {
 		return nil, errors.New("mcp endpoint url missing host")
 	}
-	if err := applyEndpointConnectionQuery(target, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
+	if err := appexec.ApplyEndpointConnectionQuery(target, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
 		return nil, err
 	}
 	return target, nil
@@ -701,7 +702,7 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	if command == "" {
 		return errors.New("stdio mcp endpoint command is required")
 	}
-	extraEnv, err := applyEndpointConnectionEnv(c.binding.Endpoint.Env, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs)
+	extraEnv, err := appexec.ApplyEndpointConnectionEnv(c.binding.Endpoint.Env, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs)
 	if err != nil {
 		return err
 	}

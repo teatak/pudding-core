@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/lsp"
@@ -149,8 +150,7 @@ type BuiltinRunner struct {
 	weatherCache             map[string]weatherCacheEntry
 	graphqlSchemaMu          sync.Mutex
 	graphqlSchemas           map[string]*graphqlSchemaCache
-	appTokenMu               sync.Mutex
-	appTokens                map[string]endpointAuthTokenCacheEntry
+	appHTTP                  *appexec.Executor
 	patchMu                  sync.Mutex
 	preparedPatches          map[string]*preparedPatch
 	gitApprovalMu            sync.Mutex
@@ -168,7 +168,6 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		weatherEndpoint: weatherDefaultEndpoint,
 		weatherCache:    map[string]weatherCacheEntry{},
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
-		appTokens:       map[string]endpointAuthTokenCacheEntry{},
 		preparedPatches: map[string]*preparedPatch{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
 		commands:        commands,
@@ -176,6 +175,9 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if r.appHTTP == nil {
+		r.appHTTP = appexec.New(r.webHTTPClient)
 	}
 	return r
 }
@@ -830,4 +832,8 @@ func currentTime(call Call) Result {
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = len(payload)
 	return out
+}
+
+func WithAppExecutor(executor *appexec.Executor) BuiltinOption {
+	return func(r *BuiltinRunner) { r.appHTTP = executor }
 }

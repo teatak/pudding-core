@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"github.com/teatak/pudding-core/internal/appexec"
 	"io"
 	"net/http"
 	"strings"
@@ -363,7 +364,7 @@ func TestGraphQLSearchFindsSchemaFields(t *testing.T) {
 
 func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	t.Run("auth", func(t *testing.T) {
-		err := applyEndpointAuth(http.Header{}, app.Auth{
+		err := appexec.ApplyEndpointAuth(http.Header{}, app.Auth{
 			Type:  app.AuthTypeBearer,
 			Token: "secret\r\nX-Injected: true",
 		})
@@ -373,7 +374,7 @@ func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	})
 
 	t.Run("connection header", func(t *testing.T) {
-		err := applyEndpointConnectionHeaders(
+		err := appexec.ApplyEndpointConnectionHeaders(
 			http.Header{},
 			http.MethodGet,
 			map[string]string{"credential": "secret\r\nX-Injected: true"},
@@ -391,7 +392,7 @@ func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	})
 
 	t.Run("endpoint env", func(t *testing.T) {
-		_, err := applyEndpointConnectionEnv(map[string]string{"APP_TOKEN": "secret\x00suffix"}, nil, nil)
+		_, err := appexec.ApplyEndpointConnectionEnv(map[string]string{"APP_TOKEN": "secret\x00suffix"}, nil, nil)
 		if err == nil {
 			t.Fatal("invalid endpoint env value should be rejected")
 		}

@@ -123,6 +123,9 @@ type ConnectionFieldInject struct {
 }
 
 type Endpoint struct {
+	// Generated workbenches cannot write unless the installed App explicitly opts in.
+	WorkbenchWrites bool `json:"workbenchWrites,omitempty" yaml:"workbench_writes,omitempty"`
+
 	Kind        string                              `json:"kind" yaml:"kind"`
 	Transport   string                              `json:"transport,omitempty" yaml:"transport,omitempty"`
 	URL         string                              `json:"url,omitempty" yaml:"url,omitempty"`

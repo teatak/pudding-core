@@ -54,6 +54,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// A process exit cannot establish whether a dispatched remote write committed.
+	if _, err := db.Exec(`UPDATE workbench_actions SET state='unknown' WHERE state='executing'`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := ensureHistorySearch(db); err != nil {
 		_ = db.Close()
 		return nil, err

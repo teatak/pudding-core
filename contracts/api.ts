@@ -1136,6 +1136,7 @@ export const appEndpointURLConfig = z.object({
 });
 
 export const appEndpoint = z.object({
+  workbenchWrites:z.boolean().optional(),
   kind: z.enum(["rest", "graphql", "mcp"]),
   transport: z.enum(["stdio", "streamable_http"]).optional(),
   url: z.string().optional(),

@@ -39,3 +39,7 @@
 ## 跨仓路径
 
 `internal/`、`cmd/`、`contracts/` 相对 core；`web/`、`electron/`、`native/` 相对 desktop。历史文件中的路径、行号、版本和临时证据目录对应记录时基线。公共契约由 core 维护，desktop 的 `web/contracts/` 为生成文件，不手改、不提交。
+
+## 工作台
+
+[Workbench 资源契约](workbenches.md)：独立资源、版本、App 查询授权、确认操作与实体关联；产品操作与验收由 Desktop 文档维护。

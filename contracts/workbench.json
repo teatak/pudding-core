@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "1",
+  "maxFiles": 32,
+  "maxPackageBytes": 2097152,
+  "maxFileBytes": 524288,
+  "maxSources": 8,
+  "maxOperations": 32,
+  "maxRequestBytes": 1048576,
+  "maxResponseBytes": 2097152,
+  "maxConcurrentRequests": 4,
+  "requestTimeoutMS": 15000,
+  "buildTimeoutMS": 30000,
+  "minRefreshMS": 30000,
+  "maxSchemaDepth": 16,
+  "maxDiagnostics": 50,
+  "maxRequestsPerMinute": 120
+}
