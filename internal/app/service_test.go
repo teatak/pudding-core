@@ -164,6 +164,9 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		!strings.Contains(computerSkill.Content, "Semantic actions may run in the background") ||
 		!strings.Contains(computerSkill.Content, "do not repeat it or automatically reactivate") ||
 		!strings.Contains(computerSkill.Content, "Do not repeatedly retry activation/raise failures") ||
+		!strings.Contains(computerSkill.Content, "current host process and the Computer Use helper itself") ||
+		!strings.Contains(computerSkill.Content, "Independent Pudding release and development instances may operate each other") ||
+		strings.Contains(computerSkill.Content, "Never operate Pudding itself") ||
 		strings.Contains(computerSkill.Content, "First call builtin_computer_use_app with foreground=true") ||
 		!strings.Contains(computerSkill.Content, "Never use builtin_command_run") {
 		t.Fatalf("unexpected Computer Use skill: detail=%+v err=%v", computerSkill, err)
