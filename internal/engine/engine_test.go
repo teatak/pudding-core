@@ -1301,11 +1301,13 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if hasToolDef(chatDefs, tool.BrowserOpen) {
 		t.Fatal("mode downgrade must hide loaded browser tools")
 	}
+	apps.mu.Lock()
 	for _, definition := range apps.defs {
 		if definition.ID == app.BuiltinBrowserID {
 			definition.Enabled = false
 		}
 	}
+	apps.mu.Unlock()
 	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
@@ -4454,6 +4456,7 @@ func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan 
 }
 
 type mutableAppSource struct {
+	mu           sync.RWMutex
 	defs         []*app.Definition
 	endpointApps map[string]string
 }
@@ -4475,7 +4478,9 @@ func (c *runtimeAppSnapshotClient) Stream(_ context.Context, req provider.Reques
 	case 2:
 		// The App registry may disappear while the provider is deciding which of
 		// the tools it was offered to call. Execution must use that offered set.
+		c.apps.mu.Lock()
 		c.apps.defs = nil
+		c.apps.mu.Unlock()
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index: 0, CallID: "call_canvas_table", Name: "canvas_table", ArgsDelta: `{}`,
 		}}
@@ -4489,6 +4494,8 @@ func (c *runtimeAppSnapshotClient) Stream(_ context.Context, req provider.Reques
 }
 
 func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	out := make([]*app.Definition, 0, len(s.defs))
 	for _, definition := range s.defs {
 		out = append(out, app.CloneDefinition(definition))
@@ -4497,6 +4504,8 @@ func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, 
 }
 
 func (s *mutableAppSource) ReadSkill(_ context.Context, appID, skillID string) (*app.SkillDetail, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if detail, ok := app.ReadBuiltinSkill(appID, skillID); ok {
 		return detail, nil
 	}
