@@ -21,6 +21,7 @@ import (
 var identifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,79}$`)
 var sourceFileName = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
 var revisionID = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var graphqlUnsafeOperation = regexp.MustCompile(`\b(mutation|subscription)\b`)
 
 type Source struct {
 	AppID    string `json:"appID"`
@@ -209,6 +210,22 @@ func validateRelativePath(value string) error {
 }
 
 func (o Operation) Hash() string { b, _ := json.Marshal(o); return fmt.Sprintf("%x", sha256.Sum256(b)) }
+
+// SafeRead permits automatic refresh only for requests whose transport has
+// read semantics. effectHint is generated source and cannot authorize a write.
+func (o Operation) SafeRead() bool {
+	if o.EffectHint != "read" {
+		return false
+	}
+	if o.Kind == "rest" {
+		return o.Request.Method == "GET" && o.Request.Body == nil
+	}
+	if o.Kind != "graphql" {
+		return false
+	}
+	document := strings.TrimSpace(o.Request.Document)
+	return (strings.HasPrefix(document, "query ") || strings.HasPrefix(document, "query\n") || strings.HasPrefix(document, "query(") || strings.HasPrefix(document, "{") || document == "query") && !graphqlUnsafeOperation.MatchString(document)
+}
 
 // ResolveRequest only substitutes declared values; it never evaluates expressions.
 func (o Operation) ResolveRequest(input map[string]any) (Request, error) {

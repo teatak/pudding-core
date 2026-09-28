@@ -10,26 +10,19 @@ import (
 var ErrWorkbenchConflict = errors.New("workbench revision conflict")
 
 type Workbench struct {
-	ID              string                    `json:"id"`
-	Name            string                    `json:"name"`
-	SourceSessionID string                    `json:"sourceSessionID,omitempty"`
-	Revision        int64                     `json:"revision"`
-	HeadRevision    string                    `json:"headRevision"`
-	ActiveRevision  string                    `json:"activeRevision"`
-	Bindings        map[string]string         `json:"bindings"`
-	Grants          map[string]WorkbenchGrant `json:"grants"`
-	BindingVersion  int64                     `json:"bindingVersion"`
-	Deleted         bool                      `json:"deleted"`
-	CreatedAt       time.Time                 `json:"createdAt"`
-	UpdatedAt       time.Time                 `json:"updatedAt"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	SourceSessionID string            `json:"sourceSessionID,omitempty"`
+	Revision        int64             `json:"revision"`
+	HeadRevision    string            `json:"headRevision"`
+	ActiveRevision  string            `json:"activeRevision"`
+	Bindings        map[string]string `json:"bindings"`
+	BindingVersion  int64             `json:"bindingVersion"`
+	Deleted         bool              `json:"deleted"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
 }
 
-type WorkbenchGrant struct {
-	OperationHash      string    `json:"operationHash"`
-	BindingFingerprint string    `json:"bindingFingerprint"`
-	ConnectionID       string    `json:"connectionID"`
-	GrantedAt          time.Time `json:"grantedAt"`
-}
 type WorkbenchRevision struct {
 	WorkbenchID     string          `json:"workbenchID"`
 	Hash            string          `json:"hash"`

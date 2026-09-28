@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -21,6 +22,12 @@ import (
 type workbenchEndpointResolver interface {
 	ResolveBoundEndpoint(context.Context, string, string, string) (*app.EndpointBinding, string, error)
 }
+
+type workbenchEndpointLister interface {
+	ListEndpointBindings(context.Context, string) ([]*app.EndpointBinding, error)
+}
+
+var errWorkbenchConnectionSelectionRequired = errors.New("connection selection required")
 
 func (s *Server) WithAppExecutor(executor *appexec.Executor) *Server { s.appHTTP = executor; return s }
 
@@ -68,7 +75,6 @@ func (s *Server) bindWorkbench(c *cart.Context) error {
 	if !reflect.DeepEqual(w.Bindings, req.Bindings) {
 		w.Bindings = req.Bindings
 		w.BindingVersion++
-		w.Grants = map[string]store.WorkbenchGrant{}
 	}
 	w, err = s.store.UpdateWorkbench(c.Request.Context(), w, req.ExpectedRevision)
 	if err != nil {
@@ -98,74 +104,48 @@ func (s *Server) workbenchOperation(ctx context.Context, id, hash, operationID s
 	if !ok {
 		return nil, op, nil, "", store.ErrNotFound
 	}
-	connectionID, ok := w.Bindings[op.Source]
-	if !ok {
-		return nil, op, nil, "", fmt.Errorf("binding_unavailable")
-	}
-	resolver, ok := s.apps.(workbenchEndpointResolver)
-	if !ok {
-		return nil, op, nil, "", fmt.Errorf("App connections unavailable")
-	}
 	source := m.Sources[op.Source]
-	binding, identity, err := resolver.ResolveBoundEndpoint(ctx, source.AppID, source.Endpoint, connectionID)
+	binding, fingerprint, err := s.resolveWorkbenchSource(ctx, w, op.Source, source, op.Kind)
 	if err != nil {
 		return nil, op, nil, "", err
 	}
 	if binding.Endpoint.Kind != op.Kind {
 		return nil, op, nil, "", fmt.Errorf("endpoint kind changed")
 	}
-	return w, op, binding, fmt.Sprintf("%x", sha256.Sum256([]byte(identity))), nil
+	return w, op, binding, fingerprint, nil
 }
 
-func (s *Server) grantWorkbenchQuery(c *cart.Context) error {
-	id, _ := c.Param("workbenchID")
-	var req struct {
-		ExpectedRevision int64  `json:"expectedRevision"`
-		RevisionHash     string `json:"revisionHash"`
-		OperationID      string `json:"operationID"`
-		ConfirmRead      bool   `json:"confirmRead"`
+func (s *Server) resolveWorkbenchSource(ctx context.Context, w *store.Workbench, slot string, source workbench.Source, kind string) (*app.EndpointBinding, string, error) {
+	resolver, ok := s.apps.(workbenchEndpointResolver)
+	if !ok {
+		return nil, "", fmt.Errorf("App connections unavailable")
 	}
-	if err := decodeWorkbench(c, &req); err != nil {
-		return badRequest(c, err.Error())
+	connectionID, bound := w.Bindings[slot]
+	if !bound {
+		lister, ok := s.apps.(workbenchEndpointLister)
+		if !ok {
+			return nil, "", fmt.Errorf("binding_unavailable")
+		}
+		available, err := lister.ListEndpointBindings(ctx, kind)
+		if err != nil {
+			return nil, "", err
+		}
+		matches := 0
+		for _, candidate := range available {
+			if candidate.AppID == source.AppID && candidate.EndpointName == source.Endpoint {
+				connectionID = candidate.ConnectionID
+				matches++
+			}
+		}
+		if matches != 1 {
+			return nil, "", errWorkbenchConnectionSelectionRequired
+		}
 	}
-	if !req.ConfirmRead {
-		return badRequest(c, "explicit read confirmation required")
-	}
-	w, op, binding, fingerprint, err := s.workbenchOperation(c.Request.Context(), id, req.RevisionHash, req.OperationID)
+	binding, identity, err := resolver.ResolveBoundEndpoint(ctx, source.AppID, source.Endpoint, connectionID)
 	if err != nil {
-		return s.workbenchError(c, err)
+		return nil, "", err
 	}
-	if op.EffectHint == "write" {
-		return badRequest(c, "write operation cannot receive a query grant")
-	}
-	w.Grants[req.OperationID] = store.WorkbenchGrant{OperationHash: op.Hash(), BindingFingerprint: fingerprint, ConnectionID: binding.ConnectionID, GrantedAt: time.Now().UTC()}
-	w, err = s.store.UpdateWorkbench(c.Request.Context(), w, req.ExpectedRevision)
-	if err != nil {
-		return s.workbenchError(c, err)
-	}
-	c.JSON(http.StatusOK, w)
-	return nil
-}
-func (s *Server) revokeWorkbenchQuery(c *cart.Context) error {
-	id, _ := c.Param("workbenchID")
-	operationID, _ := c.Param("operationID")
-	var req struct {
-		ExpectedRevision int64 `json:"expectedRevision"`
-	}
-	if err := decodeWorkbench(c, &req); err != nil {
-		return badRequest(c, err.Error())
-	}
-	w, err := s.store.GetWorkbench(c.Request.Context(), id)
-	if err != nil {
-		return s.workbenchError(c, err)
-	}
-	delete(w.Grants, operationID)
-	w, err = s.store.UpdateWorkbench(c.Request.Context(), w, req.ExpectedRevision)
-	if err != nil {
-		return s.workbenchError(c, err)
-	}
-	c.JSON(http.StatusOK, w)
-	return nil
+	return binding, fmt.Sprintf("%x", sha256.Sum256([]byte(identity))), nil
 }
 
 func (s *Server) queryWorkbench(c *cart.Context) error {
@@ -179,17 +159,16 @@ func (s *Server) queryWorkbench(c *cart.Context) error {
 	if err := decodeWorkbench(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, op, binding, fingerprint, err := s.workbenchOperation(c.Request.Context(), id, req.RevisionHash, operationID)
+	w, op, binding, _, err := s.workbenchOperation(c.Request.Context(), id, req.RevisionHash, operationID)
 	if err != nil {
 		return s.workbenchError(c, err)
 	}
+	if !op.SafeRead() {
+		c.JSON(http.StatusForbidden, map[string]string{"error": "operation_requires_confirmation"})
+		return nil
+	}
 	if w.BindingVersion != req.BindingVersion {
 		return s.workbenchError(c, store.ErrWorkbenchConflict)
-	}
-	grant, ok := w.Grants[operationID]
-	if !ok || grant.OperationHash != op.Hash() || grant.BindingFingerprint != fingerprint || grant.ConnectionID != binding.ConnectionID {
-		c.JSON(http.StatusForbidden, map[string]string{"error": "permission_required"})
-		return nil
 	}
 	resolved, err := op.ResolveRequest(req.Params)
 	if err != nil {

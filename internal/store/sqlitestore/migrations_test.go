@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints are immutable. A schema change must bump
 	// currentSchemaVersion, add a migration, and append a new fingerprint.
 	releasedFingerprints := map[int]string{
+		28: "e4409814b4a521bb2d14da5f859ca304a643d768f91163bfd0c9b2bb1f7dbf9e",
 		27: "947f0a5809ec49b3c12b3d81acb7f055f92006fbdfe46e6482a8739dcd69125a",
 		26: "062f41cc8376d4d210122e2c4203e67721b144c002ae070f86854cb4e9030eb5",
 		25: "9ac7648b15cc883652f8deb4a2a9b28d5ad9bee51ab956309eed11646309cde0",
@@ -73,6 +74,58 @@ func TestOpenCreatesVersionedSchema(t *testing.T) {
 	}
 	if version != currentSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+func TestCanvasGrantRemovalMigratesAndRetriesAfterFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		ALTER TABLE canvas_resources ADD COLUMN grants TEXT NOT NULL DEFAULT '{}';
+		INSERT INTO canvas_resources(id,name,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,grants)
+		VALUES('kept','Canvas',4,'','','{"github":"account"}',3,0,1,2,'{"read":{"operationHash":"old"}}');
+		CREATE VIEW legacy_canvas_grants AS SELECT grants FROM canvas_resources;
+		PRAGMA user_version = 27;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := Open(path); err == nil {
+		st.Close()
+		t.Fatal("expected dependent view to abort migration")
+	}
+	db = openMigrationTestDB(t, path)
+	assertWorkspaceMigrationValue(t, db, "PRAGMA user_version", "27")
+	assertWorkspaceMigrationValue(t, db, "SELECT count(*) FROM pragma_table_info('canvas_resources') WHERE name='grants'", "1")
+	if _, err := db.Exec(`DROP VIEW legacy_canvas_grants`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		st, err = Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "28")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_resources') WHERE name='grants'", "0")
+		canvas, err := st.GetWorkbench(context.Background(), "kept")
+		if err != nil || canvas.Bindings["github"] != "account" || canvas.BindingVersion != 3 || canvas.Revision != 4 {
+			t.Fatalf("canvas data changed: %+v %v", canvas, err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

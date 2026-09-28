@@ -741,8 +741,8 @@ func (s *Service) ResolveBoundEndpoint(ctx context.Context, appID, endpointName,
 			return nil, "", errors.New("connection does not belong to App")
 		}
 		binding := endpointBindingForConnection(def, endpointName, endpoint, connection)
-		// Connection timestamps change on edits and authorization refresh. A
-		// changed authorization context requires a new explicit workbench grant.
+		// Connection timestamps change on edits and authorization refresh.
+		// The fingerprint invalidates prepared canvas actions when that happens.
 		revision, _ := json.Marshal(struct {
 			Definition *Definition
 			Endpoint   Endpoint

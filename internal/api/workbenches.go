@@ -29,6 +29,10 @@ func decodeWorkbench(c *cart.Context, target any) error {
 	return workbench.DecodeStrict(data, target)
 }
 func (s *Server) workbenchError(c *cart.Context, err error) error {
+	if errors.Is(err, errWorkbenchConnectionSelectionRequired) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "connection_selection_required"})
+		return nil
+	}
 	if errors.Is(err, store.ErrWorkbenchConflict) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "revision_conflict"})
 		return nil

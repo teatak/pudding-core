@@ -98,15 +98,6 @@ export const workbench = z.object({
   activeRevision: z.string(),
   bindings: z.record(z.string(), z.string()),
   bindingVersion: z.number().int(),
-  grants: z.record(
-    z.string(),
-    z.object({
-      operationHash: z.string(),
-      bindingFingerprint: z.string(),
-      connectionID: z.string(),
-      grantedAt: z.string(),
-    }),
-  ),
   deleted: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),

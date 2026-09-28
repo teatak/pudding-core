@@ -331,7 +331,6 @@ CREATE TABLE canvas_resources (
     head_revision TEXT NOT NULL,
     active_revision TEXT NOT NULL,
     bindings TEXT NOT NULL,
-    grants TEXT NOT NULL,
     binding_version INTEGER NOT NULL,
     deleted INTEGER NOT NULL,
     created_at INTEGER NOT NULL,

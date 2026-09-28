@@ -22,20 +22,32 @@ type workbenchFixtureApps struct {
 	appService
 	identity string
 	writes   bool
+	multiple bool
 }
 
 func (a *workbenchFixtureApps) ResolveBoundEndpoint(_ context.Context, appID, endpoint, connection string) (*app.EndpointBinding, string, error) {
-	if appID != "fixture" || endpoint != "rest" || connection != "account-1" {
+	if appID != "fixture" || endpoint != "rest" || (connection != "account-1" && !(a.multiple && connection == "account-2")) {
 		return nil, "", fmt.Errorf("wrong connection")
 	}
 	return &app.EndpointBinding{AppID: appID, EndpointName: endpoint, ConnectionID: connection, Endpoint: app.Endpoint{WorkbenchWrites: a.writes, Kind: "rest", URL: "https://fixture.test/api"}, Auth: app.Auth{Type: app.AuthTypeBearer, Token: "fixture-secret"}}, a.identity, nil
+}
+
+func (a *workbenchFixtureApps) ListEndpointBindings(_ context.Context, kind string) ([]*app.EndpointBinding, error) {
+	if kind != "" && kind != "rest" {
+		return nil, nil
+	}
+	bindings := []*app.EndpointBinding{{AppID: "fixture", EndpointName: "rest", ConnectionID: "account-1"}}
+	if a.multiple {
+		bindings = append(bindings, &app.EndpointBinding{AppID: "fixture", EndpointName: "rest", ConnectionID: "account-2"})
+	}
+	return bindings, nil
 }
 
 type workbenchRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f workbenchRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestWorkbenchQueryRequiresExactGrantAndConnection(t *testing.T) {
+func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 	st := memstore.New()
 	apps := &workbenchFixtureApps{identity: "authorization-1"}
 	calls := 0
@@ -81,20 +93,7 @@ func TestWorkbenchQueryRequiresExactGrantAndConnection(t *testing.T) {
 	}
 	hash := w.HeadRevision
 	call("POST", base+"/activate", map[string]any{"expectedRevision": w.Revision, "revisionHash": hash}, 409)
-	if err := json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": hash, "bindings": map[string]string{"primary": "account-1"}}, 200), &w); err != nil {
-		t.Fatal(err)
-	}
 	query := map[string]any{"revisionHash": hash, "bindingVersion": w.BindingVersion, "params": map[string]any{"status": "open"}}
-	call("POST", base+"/queries/items", query, 403)
-	if calls != 0 {
-		t.Fatal("unauthorized request reached App")
-	}
-	grant := map[string]any{"expectedRevision": w.Revision, "revisionHash": hash, "operationID": "items", "confirmRead": false}
-	call("POST", base+"/grants", grant, 400)
-	grant["confirmRead"] = true
-	if err := json.Unmarshal(call("POST", base+"/grants", grant, 200), &w); err != nil {
-		t.Fatal(err)
-	}
 	body := call("POST", base+"/queries/items", query, 200)
 	if calls != 1 || bytes.Contains(body, []byte("fixture-secret")) {
 		t.Fatalf("wrong calls or exposed credential: %d %s", calls, body)
@@ -106,9 +105,22 @@ func TestWorkbenchQueryRequiresExactGrantAndConnection(t *testing.T) {
 	}
 	query["params"] = map[string]any{"status": "open"}
 	apps.identity = "authorization-2"
-	call("POST", base+"/queries/items", query, 403)
-	if calls != 1 {
-		t.Fatal("stale connection authorization reused")
+	call("POST", base+"/queries/items", query, 200)
+	if calls != 2 {
+		t.Fatal("authorized App connection was not reused")
+	}
+	apps.multiple = true
+	call("POST", base+"/queries/items", query, 409)
+	if calls != 2 {
+		t.Fatal("ambiguous App connection reached upstream")
+	}
+	if err := json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": hash, "bindings": map[string]string{"primary": "account-1"}}, 200), &w); err != nil {
+		t.Fatal(err)
+	}
+	query["bindingVersion"] = w.BindingVersion
+	call("POST", base+"/queries/items", query, 200)
+	if calls != 3 {
+		t.Fatal("selected App account was not used")
 	}
 }
 
@@ -148,6 +160,10 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)
 	_ = json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision, "bindings": map[string]string{"primary": "account-1"}}, 200), &w)
 	_ = json.Unmarshal(call("POST", base+"/activate", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision}, 200), &w)
+	call("POST", base+"/queries/save", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "params": map[string]any{"id": "one"}}, 403)
+	if calls != 0 {
+		t.Fatal("write operation ran through automatic query")
+	}
 	prepare := func(key string, status int) store.WorkbenchAction {
 		t.Helper()
 		var a store.WorkbenchAction

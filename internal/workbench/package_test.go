@@ -87,3 +87,21 @@ func TestPointerDoesNotInventMissingData(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeReadRequiresReadTransport(t *testing.T) {
+	for _, tc := range []struct {
+		op   Operation
+		want bool
+	}{
+		{Operation{Kind: "rest", EffectHint: "read", Request: Request{Method: "GET", Path: "/items"}}, true},
+		{Operation{Kind: "rest", EffectHint: "read", Request: Request{Method: "POST", Path: "/items"}}, false},
+		{Operation{Kind: "rest", EffectHint: "write", Request: Request{Method: "GET", Path: "/items"}}, false},
+		{Operation{Kind: "graphql", EffectHint: "read", Request: Request{Document: "query Dashboard { viewer { login } }"}}, true},
+		{Operation{Kind: "graphql", EffectHint: "read", Request: Request{Document: "mutation Update { updateThing { id } }"}}, false},
+		{Operation{Kind: "graphql", EffectHint: "read", Request: Request{Document: "query Dashboard { viewer { login } } mutation Update { updateThing { id } }"}}, false},
+	} {
+		if got := tc.op.SafeRead(); got != tc.want {
+			t.Errorf("SafeRead(%+v) = %v, want %v", tc.op, got, tc.want)
+		}
+	}
+}

@@ -185,8 +185,6 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/canvases/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
 	app.Route("/canvases/:workbenchID/activate").POST(s.activateWorkbench)
 	app.Route("/canvases/:workbenchID/bindings").PUT(s.bindWorkbench)
-	app.Route("/canvases/:workbenchID/grants").POST(s.grantWorkbenchQuery)
-	app.Route("/canvases/:workbenchID/grants/:operationID").DELETE(s.revokeWorkbenchQuery)
 	app.Route("/canvases/:workbenchID/queries/:operationID").POST(s.queryWorkbench)
 	app.Route("/canvases/:workbenchID/actions/:operationID/prepare").POST(s.prepareWorkbenchAction)
 	app.Route("/canvases/:workbenchID/actions").GET(s.listWorkbenchActions)

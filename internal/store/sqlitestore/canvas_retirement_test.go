@@ -77,7 +77,7 @@ func TestCanvasRetirementPreservesVersionsAppBindingsAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pair := range [][2]string{{"PRAGMA user_version", "27"}, {"SELECT count(*) FROM canvas_resources", "2"}, {"SELECT count(*) FROM canvas_mounts", "2"}, {"SELECT count(*) FROM library_favorites", "1"}, {"SELECT count(*) FROM canvas_actions", "1"}, {"SELECT count(*) FROM canvas_links", "1"}, {"SELECT count(*) FROM pragma_foreign_key_check", "0"}, {"SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='content_json'", "0"}, {"SELECT count(*) FROM pragma_table_info('canvas_mounts') WHERE name='window_json'", "0"}} {
+	for _, pair := range [][2]string{{"PRAGMA user_version", "28"}, {"SELECT count(*) FROM canvas_resources", "2"}, {"SELECT count(*) FROM canvas_mounts", "2"}, {"SELECT count(*) FROM library_favorites", "1"}, {"SELECT count(*) FROM canvas_actions", "1"}, {"SELECT count(*) FROM canvas_links", "1"}, {"SELECT count(*) FROM pragma_foreign_key_check", "0"}, {"SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='content_json'", "0"}, {"SELECT count(*) FROM pragma_table_info('canvas_mounts') WHERE name='window_json'", "0"}, {"SELECT count(*) FROM pragma_table_info('canvas_resources') WHERE name='grants'", "0"}} {
 		assertWorkspaceMigrationValue(t, st.db, pair[0], pair[1])
 	}
 	ctx := context.Background()

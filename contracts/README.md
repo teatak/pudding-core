@@ -12,3 +12,5 @@ The generated client files must not be edited or committed in desktop.
 Protocol 3 adds scheduled task definitions, run history, and daemon scheduling. Desktop requires these routes; the handshake rejects older daemons rather than presenting a management page backed by missing endpoints.
 
 Protocol 4 adds independent workbench resources, immutable source revisions, App bindings/query grants, action runs and cross-App links. `workbench.json` owns runtime limits and `workbench.ts` the client schemas. Old daemons are rejected at handshake. Installed App endpoints must explicitly set `workbench_writes: true` to enable confirmed workbench actions; the default is disabled.
+
+Protocol 7 removes canvas query grants and their routes. Canvas queries reuse installed App connections; ambiguous accounts require an explicit source binding. Automatic reads are limited to REST GET without body and GraphQL queries. Schema v28 drops the old grants data.

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 27
+	currentSchemaVersion       = 28
 )
 
 var (
@@ -33,6 +33,10 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	28: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE canvas_resources DROP COLUMN grants`)
+		return err
+	},
 	27: retireLegacyCanvasSchema,
 	26: migrateUnifiedCanvases,
 	25: func(tx *sql.Tx) error {
@@ -666,11 +670,16 @@ func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
 			}
 			version = currentSchemaVersion
 		} else {
-			if err := validateSchema(db, currentSchemaContract); err == nil {
+			if err := validateCurrentSchema(db); err == nil {
 				if err := setSchemaVersion(db, currentSchemaVersion); err != nil {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV27Contract); err == nil {
+				if err := setSchemaVersion(db, 27); err != nil {
+					return err
+				}
+				version = 27
 			} else if err := validateSchema(db, schemaV26Contract); err == nil {
 				if err := setSchemaVersion(db, 26); err != nil {
 					return err
@@ -1042,11 +1051,17 @@ var schemaV26Contract = func() schemaContract {
 	return out
 }()
 
-var currentSchemaContract = func() schemaContract {
+var schemaV27Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV26Contract, nil)
 	out.tables["canvas_revisions"] = slices.DeleteFunc(out.tables["canvas_revisions"], func(v string) bool { return v == "content_json" })
 	out.tables["canvas_mounts"] = slices.DeleteFunc(out.tables["canvas_mounts"], func(v string) bool { return v == "window_json" })
 	out.forbiddenTables = append([]string(nil), schemaV26Contract.forbiddenTables...)
+	return out
+}()
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV27Contract, nil)
+	out.tables["canvas_resources"] = slices.DeleteFunc(out.tables["canvas_resources"], func(v string) bool { return v == "grants" })
 	return out
 }()
 
@@ -1063,7 +1078,17 @@ func extendSchemaContract(base schemaContract, tables map[string][]string, index
 }
 
 func validateCurrentSchema(db *sql.DB) error {
-	return validateSchema(db, currentSchemaContract)
+	if err := validateSchema(db, currentSchemaContract); err != nil {
+		return err
+	}
+	columns, err := tableColumns(db, "canvas_resources")
+	if err != nil {
+		return err
+	}
+	if _, ok := columns["grants"]; ok {
+		return fmt.Errorf("retired canvas grants column remains")
+	}
+	return nil
 }
 
 func validateSchema(db *sql.DB, contract schemaContract) error {

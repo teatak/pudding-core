@@ -10,22 +10,19 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const workbenchColumns = `id,name,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,grants,binding_version,deleted,created_at,updated_at`
+const workbenchColumns = `id,name,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at`
 
 func scanWorkbench(row messageScanner) (*store.Workbench, error) {
 	w := &store.Workbench{}
-	var bindings, grants string
+	var bindings string
 	var created, updated int64
-	if err := row.Scan(&w.ID, &w.Name, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &grants, &w.BindingVersion, &w.Deleted, &created, &updated); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(bindings), &w.Bindings); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(grants), &w.Grants); err != nil {
 		return nil, err
 	}
 	w.CreatedAt, w.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
@@ -63,7 +60,7 @@ func (s *Store) CreateWorkbench(ctx context.Context, w *store.Workbench) (*store
 			}
 			session = w.SourceSessionID
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO canvas_resources(id,name,source_session_id,revision,head_revision,active_revision,bindings,grants,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,1,'','','{}','{}',1,0,?,?)`, w.ID, w.Name, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
+		_, err := tx.ExecContext(ctx, `INSERT INTO canvas_resources(id,name,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Name, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
 		return err
 	})
 	if err != nil {
@@ -82,15 +79,11 @@ func (s *Store) UpdateWorkbench(ctx context.Context, w *store.Workbench, expecte
 				return store.ErrWorkbenchConflict
 			}
 		}
-		grants, err := json.Marshal(w.Grants)
-		if err != nil {
-			return err
-		}
 		bindings, err := json.Marshal(w.Bindings)
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,active_revision=?,bindings=?,grants=?,binding_version=?,deleted=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND deleted=0`, w.Name, w.ActiveRevision, string(bindings), string(grants), w.BindingVersion, w.Deleted, unixMS(time.Now()), w.ID, expected)
+		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND deleted=0`, w.Name, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, unixMS(time.Now()), w.ID, expected)
 		if err != nil {
 			return err
 		}

@@ -59,18 +59,14 @@ func (s *Server) putWorkbenchLink(c *cart.Context) error {
 	}
 	resolve := func(input workbenchEntityInput) (store.WorkbenchEntity, error) {
 		source, ok := m.Sources[input.Source]
-		connection, bound := w.Bindings[input.Source]
-		if !ok || !bound || input.EntityType == "" || len(input.EntityType) > 100 || input.EntityID == "" || len(input.EntityID) > 500 {
+		if !ok || input.EntityType == "" || len(input.EntityType) > 100 || input.EntityID == "" || len(input.EntityID) > 500 {
 			return store.WorkbenchEntity{}, fmt.Errorf("invalid entity reference")
 		}
-		resolver, ok := s.apps.(workbenchEndpointResolver)
-		if !ok {
-			return store.WorkbenchEntity{}, fmt.Errorf("Apps unavailable")
-		}
-		if _, _, err := resolver.ResolveBoundEndpoint(c.Request.Context(), source.AppID, source.Endpoint, connection); err != nil {
+		binding, _, err := s.resolveWorkbenchSource(c.Request.Context(), w, input.Source, source, "")
+		if err != nil {
 			return store.WorkbenchEntity{}, err
 		}
-		return store.WorkbenchEntity{AppID: source.AppID, ConnectionID: connection, EntityType: input.EntityType, EntityID: input.EntityID}, nil
+		return store.WorkbenchEntity{AppID: source.AppID, ConnectionID: binding.ConnectionID, EntityType: input.EntityType, EntityID: input.EntityID}, nil
 	}
 	left, err := resolve(req.Left)
 	if err != nil {

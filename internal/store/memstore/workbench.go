@@ -16,7 +16,6 @@ func cloneWorkbench(w *store.Workbench) *store.Workbench {
 	}
 	copy := *w
 	copy.Bindings = maps.Clone(w.Bindings)
-	copy.Grants = maps.Clone(w.Grants)
 	return &copy
 }
 func cloneWorkbenchRevision(r *store.WorkbenchRevision) *store.WorkbenchRevision {
@@ -63,7 +62,6 @@ func (m *Memstore) CreateWorkbench(_ context.Context, w *store.Workbench) (*stor
 	copy.Revision = 1
 	copy.BindingVersion = 1
 	copy.Bindings = map[string]string{}
-	copy.Grants = map[string]store.WorkbenchGrant{}
 	m.workbenches[w.ID] = copy
 	return cloneWorkbench(copy), nil
 }
