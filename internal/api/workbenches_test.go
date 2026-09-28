@@ -47,6 +47,72 @@ type workbenchRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f workbenchRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T) {
+	st := memstore.New()
+	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("fixture-token", nil)
+	call := func(method, path string, input any, status int) []byte {
+		t.Helper()
+		body, _ := json.Marshal(input)
+		r := httptest.NewRequest(method, path, bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer fixture-token")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, r)
+		if out.Code != status {
+			t.Fatalf("%s %s: %d %s want %d", method, path, out.Code, out.Body.String(), status)
+		}
+		return out.Body.Bytes()
+	}
+	var w store.Workbench
+	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Report"}, 201), &w)
+	base := "/canvases/" + w.ID
+	files := map[string]any{
+		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`,
+		"src/App.tsx":    "export default function App(){return <p>Before</p>}",
+		"src/unused.ts":  "export const unused = true",
+	}
+	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "initial", "changes": files}, 200), &w)
+	first := w.HeadRevision
+	// Metadata changes the resource revision without changing source content.
+	w.Name = "Renamed report"
+	updatedWorkbench, err := st.UpdateWorkbench(context.Background(), &w, w.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = *updatedWorkbench
+	updated := "export default function App(){return <p>After</p>}"
+	changes := map[string]any{"src/App.tsx": updated, "src/unused.ts": nil}
+	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "edit", "changes": changes}, 200), &w)
+	if w.HeadRevision == first {
+		t.Fatal("edited source did not create a new revision")
+	}
+	var source struct {
+		Package workbench.Package `json:"package"`
+	}
+	_ = json.Unmarshal(call("GET", base+"/revisions/"+w.HeadRevision, nil, 200), &source)
+	if source.Package.Files["src/App.tsx"] != updated || source.Package.Files["workbench.json"] != files["workbench.json"] {
+		t.Fatal("unchanged files were not retained")
+	}
+	if _, exists := source.Package.Files["src/unused.ts"]; exists {
+		t.Fatal("deleted file remained in source")
+	}
+	_ = json.Unmarshal(call("GET", base+"/revisions/"+first, nil, 200), &source)
+	if source.Package.Files["src/unused.ts"] == "" {
+		t.Fatal("immutable base revision was modified")
+	}
+	// A repeated request is idempotent even though its base is no longer head.
+	call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "edit", "changes": changes}, 200)
+	var conflict struct {
+		Error               string `json:"error"`
+		CurrentRevision     int64  `json:"currentRevision"`
+		CurrentHeadRevision string `json:"currentHeadRevision"`
+	}
+	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "stale", "changes": map[string]any{"src/App.tsx": "stale"}}, 409), &conflict)
+	if conflict.Error != "revision_conflict" || conflict.CurrentRevision != w.Revision || conflict.CurrentHeadRevision != w.HeadRevision {
+		t.Fatalf("missing current revision in conflict: %+v", conflict)
+	}
+	call("POST", base+"/revisions", map[string]any{"baseRevisionHash": w.HeadRevision, "clientRequestID": "invalid", "changes": map[string]any{"workbench.json": nil}}, 400)
+}
+
 func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 	st := memstore.New()
 	apps := &workbenchFixtureApps{identity: "authorization-1"}
@@ -88,7 +154,7 @@ func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 		"src/App.tsx":    "export default ()=> <p>Fixture</p>",
 		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"primary","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"status":{"type":"string","enum":["open","closed"]}},"required":["status"],"additionalProperties":false},"request":{"method":"GET","path":"/items","query":{"status":{"$input":"/status"}}},"result":{"rows":"/items","total":"/total"}}}}`,
 	}}
-	if err := json.Unmarshal(call("POST", base+"/revisions", map[string]any{"expectedRevision": w.Revision, "clientRequestID": "save-1", "package": pkg}, 200), &w); err != nil {
+	if err := json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "save-1", "changes": pkg.Files}, 200), &w); err != nil {
 		t.Fatal(err)
 	}
 	hash := w.HeadRevision
@@ -156,7 +222,7 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Actions"}, 201), &w)
 	base := "/canvases/" + w.ID
 	pkg := workbench.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
-	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"expectedRevision": w.Revision, "clientRequestID": "save", "package": pkg}, 200), &w)
+	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "save", "changes": pkg.Files}, 200), &w)
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)
 	_ = json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision, "bindings": map[string]string{"primary": "account-1"}}, 200), &w)
 	_ = json.Unmarshal(call("POST", base+"/activate", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision}, 200), &w)

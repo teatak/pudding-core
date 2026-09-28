@@ -34,7 +34,14 @@ func (s *Server) workbenchError(c *cart.Context, err error) error {
 		return nil
 	}
 	if errors.Is(err, store.ErrWorkbenchConflict) {
-		c.JSON(http.StatusConflict, map[string]string{"error": "revision_conflict"})
+		response := map[string]any{"error": "revision_conflict"}
+		if id, ok := c.Param("workbenchID"); ok {
+			if current, getErr := s.store.GetWorkbench(c.Request.Context(), id); getErr == nil {
+				response["currentRevision"] = current.Revision
+				response["currentHeadRevision"] = current.HeadRevision
+			}
+		}
+		c.JSON(http.StatusConflict, response)
 		return nil
 	}
 	return s.fail(c, err)
@@ -132,9 +139,9 @@ func (s *Server) getWorkbenchRevision(c *cart.Context) error {
 func (s *Server) saveWorkbenchRevision(c *cart.Context) error {
 	id, _ := c.Param("workbenchID")
 	var req struct {
-		ExpectedRevision int64              `json:"expectedRevision"`
+		BaseRevisionHash string             `json:"baseRevisionHash"`
 		ClientRequestID  string             `json:"clientRequestID"`
-		Package          *workbench.Package `json:"package"`
+		Changes          map[string]*string `json:"changes"`
 	}
 	if err := decodeWorkbench(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -145,19 +152,35 @@ func (s *Server) saveWorkbenchRevision(c *cart.Context) error {
 	if _, err := s.store.GetWorkbench(c.Request.Context(), id); err != nil {
 		return s.workbenchError(c, err)
 	}
-	var hash string
-	var err error
-	if req.Package == nil {
-		return badRequest(c, "package required")
+	if len(req.Changes) == 0 || len(req.Changes) > contracts.Workbench().MaxFiles {
+		return badRequest(c, "changes required (up to maxFiles)")
 	}
-	if _, _, err := req.Package.Validate(); err != nil {
+	pkg := workbench.Package{Files: make(map[string]string)}
+	if req.BaseRevisionHash != "" {
+		base, err := workbench.ReadPackage(s.home, id, req.BaseRevisionHash)
+		if err != nil {
+			return badRequest(c, "invalid baseRevisionHash")
+		}
+		pkg = base
+	}
+	for name, content := range req.Changes {
+		if !workbench.ValidFilePath(name) || (content != nil && strings.HasPrefix(name, "fixtures/")) {
+			return badRequest(c, "invalid changed source path")
+		}
+		if content == nil {
+			delete(pkg.Files, name)
+		} else {
+			pkg.Files[name] = *content
+		}
+	}
+	if _, _, err := pkg.Validate(); err != nil {
 		return badRequest(c, err.Error())
 	}
-	hash, err = workbench.WritePackage(s.home, id, *req.Package)
+	hash, err := workbench.WritePackage(s.home, id, pkg)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.SaveWorkbenchRevision(c.Request.Context(), &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, req.ExpectedRevision)
+	w, err := s.store.SaveWorkbenchRevision(c.Request.Context(), &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, req.BaseRevisionHash)
 	if err != nil {
 		return s.workbenchError(c, err)
 	}

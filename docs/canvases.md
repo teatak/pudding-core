@@ -13,7 +13,7 @@ Archive membership comes from filesystem manifests, not a database flag. Listing
 Routes (all require the existing loopback startup token):
 
 - `GET/POST /canvases`, `GET/DELETE /canvases/{id}`.
-- `GET/POST /canvases/{id}/revisions`, `GET /canvases/{id}/revisions/{hash}`.
+- `GET/POST /canvases/{id}/revisions`, `GET /canvases/{id}/revisions/{hash}`. Saving takes `baseRevisionHash`, `clientRequestID` and `changes` (path to contents, or `null` to delete); creation uses an empty base and a complete initial package. Core merges changes with the immutable base package, validates the result and atomically checks that the source head still matches the base. A conflict returns `currentRevision` and `currentHeadRevision` for reconciliation. Unrelated resource revision changes do not conflict with source saves.
 - `POST /canvases/{id}/build-receipts`, `POST /canvases/{id}/activate`.
 - `PUT /canvases/{id}/bindings`.
 - `POST /canvases/{id}/queries/{operationID}`.

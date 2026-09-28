@@ -27,23 +27,23 @@ func TestWorkbenchVersionsSurviveSessionDeletionAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "hash_a", ClientRequestID: "save_a", CreatedAt: now}
-	w, err = s.SaveWorkbenchRevision(ctx, r, w.Revision)
+	w, err = s.SaveWorkbenchRevision(ctx, r, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SaveWorkbenchRevision(ctx, r, 1); err != nil {
+	if _, err = s.SaveWorkbenchRevision(ctx, r, ""); err != nil {
 		t.Fatalf("idempotent retry: %v", err)
 	}
 	r.ClientRequestID = "save_b"
-	w, err = s.SaveWorkbenchRevision(ctx, r, w.Revision)
+	w, err = s.SaveWorkbenchRevision(ctx, r, w.HeadRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SaveWorkbenchRevision(ctx, r, w.Revision-1); err != nil {
+	if _, err = s.SaveWorkbenchRevision(ctx, r, ""); err != nil {
 		t.Fatalf("same package new request retry: %v", err)
 	}
 	r.Hash = "hash_b"
-	if _, err = s.SaveWorkbenchRevision(ctx, r, w.Revision); !errors.Is(err, store.ErrWorkbenchConflict) {
+	if _, err = s.SaveWorkbenchRevision(ctx, r, w.HeadRevision); !errors.Is(err, store.ErrWorkbenchConflict) {
 		t.Fatalf("request ID reused for other source: %v", err)
 	}
 	w.ActiveRevision = "hash_a"
@@ -81,6 +81,36 @@ func TestWorkbenchVersionsSurviveSessionDeletionAndRestart(t *testing.T) {
 	versions, err := s.ListWorkbenchRevisions(ctx, w.ID)
 	if err != nil || len(versions) != 1 {
 		t.Fatalf("duplicate source versions: %+v %v", versions, err)
+	}
+}
+
+func TestSaveWorkbenchRevisionIgnoresMetadataRevision(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "canvas.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	w, err := s.CreateWorkbench(ctx, &store.Workbench{ID: "canvas_metadata", Name: "First", CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err = s.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "save-first", CreatedAt: now}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Name = "Renamed"
+	w, err = s.UpdateWorkbench(ctx, w, w.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err = s.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "second", ClientRequestID: "save-second", CreatedAt: now}, "first")
+	if err != nil || w.HeadRevision != "second" || w.Name != "Renamed" {
+		t.Fatalf("source save conflicted with metadata change: %+v %v", w, err)
+	}
+	if _, err = s.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "stale", ClientRequestID: "save-stale", CreatedAt: now}, "first"); !errors.Is(err, store.ErrWorkbenchConflict) {
+		t.Fatalf("stale source base was accepted: %v", err)
 	}
 }
 
@@ -140,7 +170,7 @@ func TestWorkbenchActionClaimAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := strings.Repeat("a", 64)
-	w, err = s.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: hash, ClientRequestID: "save", CreatedAt: now}, w.Revision)
+	w, err = s.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: hash, ClientRequestID: "save", CreatedAt: now}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

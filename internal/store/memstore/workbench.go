@@ -94,12 +94,12 @@ func (m *Memstore) UpdateWorkbench(_ context.Context, w *store.Workbench, expect
 	}
 	return cloneWorkbench(copy), nil
 }
-func (m *Memstore) SaveWorkbenchRevision(_ context.Context, r *store.WorkbenchRevision, expected int64) (*store.Workbench, error) {
+func (m *Memstore) SaveWorkbenchRevision(_ context.Context, r *store.WorkbenchRevision, baseHash string) (*store.Workbench, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.saveCanvasRevisionLocked(r, expected)
+	return m.saveCanvasRevisionLocked(r, baseHash)
 }
-func (m *Memstore) saveCanvasRevisionLocked(r *store.WorkbenchRevision, expected int64) (*store.Workbench, error) {
+func (m *Memstore) saveCanvasRevisionLocked(r *store.WorkbenchRevision, baseHash string) (*store.Workbench, error) {
 	w := m.workbenches[r.WorkbenchID]
 	if w == nil || w.Deleted {
 		return nil, store.ErrNotFound
@@ -111,7 +111,7 @@ func (m *Memstore) saveCanvasRevisionLocked(r *store.WorkbenchRevision, expected
 		}
 		return cloneWorkbench(w), nil
 	}
-	if w.Revision != expected {
+	if w.HeadRevision != baseHash {
 		return nil, store.ErrWorkbenchConflict
 	}
 	key := r.WorkbenchID + "/" + r.Hash

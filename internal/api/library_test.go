@@ -160,7 +160,7 @@ func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasIte
 	if err != nil {
 		return nil, err
 	}
-	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, w.Revision); err != nil {
+	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
 		return nil, err
 	}
 	return st.OpenCanvasResource(ctx, session, w.ID, id)

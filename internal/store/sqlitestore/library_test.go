@@ -33,11 +33,11 @@ func TestCanvasesShareContentRetainHistoryAndFavorites(t *testing.T) {
 				t.Fatal(err)
 			}
 			w0, _ := st.GetWorkbench(ctx, first.ResourceID)
-			changed, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "second", ClientRequestID: "second"}, w0.Revision)
+			changed, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "second", ClientRequestID: "second"}, w0.HeadRevision)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "stale", ClientRequestID: "stale"}, other.Revision); !errors.Is(err, store.ErrWorkbenchConflict) {
+			if _, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "stale", ClientRequestID: "stale"}, w0.HeadRevision); !errors.Is(err, store.ErrWorkbenchConflict) {
 				t.Fatalf("stale write accepted: %v", err)
 			}
 			views, err := st.ListCanvasItems(ctx, "b")
@@ -151,7 +151,7 @@ func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasIte
 	if err != nil {
 		return nil, err
 	}
-	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, w.Revision); err != nil {
+	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
 		return nil, err
 	}
 	return st.OpenCanvasResource(ctx, session, w.ID, id)

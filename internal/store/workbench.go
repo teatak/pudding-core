@@ -46,7 +46,7 @@ type WorkbenchStore interface {
 	GetWorkbench(context.Context, string) (*Workbench, error)
 	CreateWorkbench(context.Context, *Workbench) (*Workbench, error)
 	UpdateWorkbench(context.Context, *Workbench, int64) (*Workbench, error)
-	SaveWorkbenchRevision(context.Context, *WorkbenchRevision, int64) (*Workbench, error)
+	SaveWorkbenchRevision(context.Context, *WorkbenchRevision, string) (*Workbench, error)
 	ListWorkbenchRevisions(context.Context, string) ([]*WorkbenchRevision, error)
 	GetWorkbenchRevision(context.Context, string, string) (*WorkbenchRevision, error)
 	PutWorkbenchBuildReceipt(context.Context, string, string, json.RawMessage) error

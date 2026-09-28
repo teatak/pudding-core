@@ -27,7 +27,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	first := ""
 	base := srv.URL + "/canvases/" + resource.ID
 	pkg := workbench.Package{Files: map[string]string{"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
-	response := req(t, "POST", base+"/revisions", map[string]any{"expectedRevision": resource.Revision, "clientRequestID": "upgrade", "package": pkg})
+	response := req(t, "POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "upgrade", "changes": pkg.Files})
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}

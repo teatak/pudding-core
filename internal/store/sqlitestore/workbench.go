@@ -108,14 +108,14 @@ func (s *Store) UpdateWorkbench(ctx context.Context, w *store.Workbench, expecte
 	}
 	return s.GetWorkbench(ctx, w.ID)
 }
-func (s *Store) SaveWorkbenchRevision(ctx context.Context, r *store.WorkbenchRevision, expected int64) (*store.Workbench, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error { return saveCanvasRevisionTx(ctx, tx, r, expected) })
+func (s *Store) SaveWorkbenchRevision(ctx context.Context, r *store.WorkbenchRevision, baseHash string) (*store.Workbench, error) {
+	err := s.tx(ctx, func(tx *sql.Tx) error { return saveCanvasRevisionTx(ctx, tx, r, baseHash) })
 	if err != nil {
 		return nil, err
 	}
 	return s.GetWorkbench(ctx, r.WorkbenchID)
 }
-func saveCanvasRevisionTx(ctx context.Context, tx *sql.Tx, r *store.WorkbenchRevision, expected int64) error {
+func saveCanvasRevisionTx(ctx context.Context, tx *sql.Tx, r *store.WorkbenchRevision, baseHash string) error {
 	current, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, r.WorkbenchID))
 	if err != nil {
 		return err
@@ -131,7 +131,7 @@ func saveCanvasRevisionTx(ctx context.Context, tx *sql.Tx, r *store.WorkbenchRev
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if current.Revision != expected {
+	if current.HeadRevision != baseHash {
 		return store.ErrWorkbenchConflict
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_saves(workbench_id,client_request_id,hash) VALUES(?,?,?)`, r.WorkbenchID, r.ClientRequestID, r.Hash); err != nil {
