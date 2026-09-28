@@ -13,7 +13,7 @@ Archive membership comes from filesystem manifests, not a database flag. Listing
 Routes (all require the existing loopback startup token):
 
 - `GET/POST /canvases`, `GET/DELETE /canvases/{id}`.
-- `GET/POST /canvases/{id}/revisions`, `GET /canvases/{id}/revisions/{hash}`. Saving takes `baseRevisionHash`, `clientRequestID` and `changes` (path to contents, or `null` to delete); creation uses an empty base and a complete initial package. Core merges changes with the immutable base package, validates the result and atomically checks that the source head still matches the base. A conflict returns `currentRevision` and `currentHeadRevision` for reconciliation. Unrelated resource revision changes do not conflict with source saves.
+- `POST/GET /canvases/{id}/draft` starts or reads the persistent working copy, initialized from the current source head. `GET/PUT /canvases/{id}/draft/file` reads or edits one file; writes require the previous `draftHash`, and `null` deletes. An incomplete draft is allowed. `POST /canvases/{id}/draft/commit` validates the complete package, publishes one immutable revision and advances the source head only when it still matches the draft's base. Draft conflicts return `currentDraftHash`; source conflicts return `currentRevision` and `currentHeadRevision`. `GET /canvases/{id}/revisions` and `GET /canvases/{id}/revisions/{hash}` expose committed versions. No database migration is needed; drafts live under `<home>/workbenches/<id>/draft`.
 - `POST /canvases/{id}/build-receipts`, `POST /canvases/{id}/activate`.
 - `PUT /canvases/{id}/bindings`.
 - `POST /canvases/{id}/queries/{operationID}`.

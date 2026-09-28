@@ -27,7 +27,25 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	first := ""
 	base := srv.URL + "/canvases/" + resource.ID
 	pkg := workbench.Package{Files: map[string]string{"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
-	response := req(t, "POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "upgrade", "changes": pkg.Files})
+	response := req(t, "POST", base+"/draft", map[string]any{})
+	if response.StatusCode != 200 {
+		t.Fatal(response.StatusCode)
+	}
+	draft := decodeJSON[struct {
+		DraftHash string `json:"draftHash"`
+	}](t, response)
+	response.Body.Close()
+	for path, content := range pkg.Files {
+		response = req(t, "PUT", base+"/draft/file", map[string]any{"path": path, "content": content, "expectedDraftHash": draft.DraftHash})
+		if response.StatusCode != 200 {
+			t.Fatal(response.StatusCode)
+		}
+		draft = decodeJSON[struct {
+			DraftHash string `json:"draftHash"`
+		}](t, response)
+		response.Body.Close()
+	}
+	response = req(t, "POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draft.DraftHash, "clientRequestID": "upgrade"})
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}

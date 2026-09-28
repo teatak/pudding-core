@@ -16,9 +16,6 @@ import (
 
 func decodeWorkbench(c *cart.Context, target any) error {
 	limit := contracts.Workbench().MaxRequestBytes
-	if c.Request.Method == http.MethodPost && strings.HasSuffix(c.Request.URL.Path, "/revisions") {
-		limit = contracts.Workbench().MaxPackageBytes*6 + 65536
-	}
 	data, err := io.ReadAll(io.LimitReader(c.Request.Body, int64(limit+1)))
 	if err != nil {
 		return err
@@ -134,57 +131,6 @@ func (s *Server) getWorkbenchRevision(c *cart.Context) error {
 		return s.workbenchError(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]any{"kind": "app", "revision": r, "package": p, "manifest": m})
-	return nil
-}
-func (s *Server) saveWorkbenchRevision(c *cart.Context) error {
-	id, _ := c.Param("workbenchID")
-	var req struct {
-		BaseRevisionHash string             `json:"baseRevisionHash"`
-		ClientRequestID  string             `json:"clientRequestID"`
-		Changes          map[string]*string `json:"changes"`
-	}
-	if err := decodeWorkbench(c, &req); err != nil {
-		return badRequest(c, err.Error())
-	}
-	if req.ClientRequestID == "" || len(req.ClientRequestID) > 100 {
-		return badRequest(c, "clientRequestID required")
-	}
-	if _, err := s.store.GetWorkbench(c.Request.Context(), id); err != nil {
-		return s.workbenchError(c, err)
-	}
-	if len(req.Changes) == 0 || len(req.Changes) > contracts.Workbench().MaxFiles {
-		return badRequest(c, "changes required (up to maxFiles)")
-	}
-	pkg := workbench.Package{Files: make(map[string]string)}
-	if req.BaseRevisionHash != "" {
-		base, err := workbench.ReadPackage(s.home, id, req.BaseRevisionHash)
-		if err != nil {
-			return badRequest(c, "invalid baseRevisionHash")
-		}
-		pkg = base
-	}
-	for name, content := range req.Changes {
-		if !workbench.ValidFilePath(name) || (content != nil && strings.HasPrefix(name, "fixtures/")) {
-			return badRequest(c, "invalid changed source path")
-		}
-		if content == nil {
-			delete(pkg.Files, name)
-		} else {
-			pkg.Files[name] = *content
-		}
-	}
-	if _, _, err := pkg.Validate(); err != nil {
-		return badRequest(c, err.Error())
-	}
-	hash, err := workbench.WritePackage(s.home, id, pkg)
-	if err != nil {
-		return badRequest(c, err.Error())
-	}
-	w, err := s.store.SaveWorkbenchRevision(c.Request.Context(), &store.WorkbenchRevision{WorkbenchID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, req.BaseRevisionHash)
-	if err != nil {
-		return s.workbenchError(c, err)
-	}
-	c.JSON(http.StatusOK, w)
 	return nil
 }
 

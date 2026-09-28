@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/appexec"
@@ -47,9 +48,43 @@ type workbenchRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f workbenchRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+type canvasTestCall func(string, string, any, int) []byte
+
+func startCanvasTestDraft(t *testing.T, call canvasTestCall, base string) string {
+	t.Helper()
+	var draft struct {
+		DraftHash string `json:"draftHash"`
+	}
+	if err := json.Unmarshal(call("POST", base+"/draft", map[string]any{}, 200), &draft); err != nil {
+		t.Fatal(err)
+	}
+	return draft.DraftHash
+}
+
+func writeCanvasTestDraft(t *testing.T, call canvasTestCall, base, hash, path string, content any) string {
+	t.Helper()
+	var draft struct {
+		DraftHash string `json:"draftHash"`
+	}
+	if err := json.Unmarshal(call("PUT", base+"/draft/file", map[string]any{"expectedDraftHash": hash, "path": path, "content": content}, 200), &draft); err != nil {
+		t.Fatal(err)
+	}
+	return draft.DraftHash
+}
+
+func saveCanvasTestFiles(t *testing.T, call canvasTestCall, base, requestID string, files map[string]string) []byte {
+	t.Helper()
+	hash := startCanvasTestDraft(t, call, base)
+	for path, content := range files {
+		hash = writeCanvasTestDraft(t, call, base, hash, path, content)
+	}
+	return call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": hash, "clientRequestID": requestID}, 200)
+}
+
 func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T) {
 	st := memstore.New()
-	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("fixture-token", nil)
+	home := t.TempDir()
+	handler := New(nil, st, st, nil).WithHome(home).Handler("fixture-token", nil)
 	call := func(method, path string, input any, status int) []byte {
 		t.Helper()
 		body, _ := json.Marshal(input)
@@ -65,12 +100,17 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	var w store.Workbench
 	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Report"}, 201), &w)
 	base := "/canvases/" + w.ID
-	files := map[string]any{
+	files := map[string]string{
 		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`,
 		"src/App.tsx":    "export default function App(){return <p>Before</p>}",
 		"src/unused.ts":  "export const unused = true",
 	}
-	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "initial", "changes": files}, 200), &w)
+	draftHash := startCanvasTestDraft(t, call, base)
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "workbench.json", files["workbench.json"])
+	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "incomplete"}, 400)
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", files["src/App.tsx"])
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/unused.ts", files["src/unused.ts"])
+	_ = json.Unmarshal(call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "initial"}, 200), &w)
 	first := w.HeadRevision
 	// Metadata changes the resource revision without changing source content.
 	w.Name = "Renamed report"
@@ -80,8 +120,17 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	}
 	w = *updatedWorkbench
 	updated := "export default function App(){return <p>After</p>}"
-	changes := map[string]any{"src/App.tsx": updated, "src/unused.ts": nil}
-	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "edit", "changes": changes}, 200), &w)
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", updated)
+	var draftConflict struct {
+		Error            string `json:"error"`
+		CurrentDraftHash string `json:"currentDraftHash"`
+	}
+	_ = json.Unmarshal(call("PUT", base+"/draft/file", map[string]any{"expectedDraftHash": first, "path": "src/unused.ts", "content": nil}, 409), &draftConflict)
+	if draftConflict.Error != "draft_conflict" || draftConflict.CurrentDraftHash != draftHash {
+		t.Fatalf("missing current draft hash: %+v", draftConflict)
+	}
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/unused.ts", nil)
+	_ = json.Unmarshal(call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "edit"}, 200), &w)
 	if w.HeadRevision == first {
 		t.Fatal("edited source did not create a new revision")
 	}
@@ -99,18 +148,31 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	if source.Package.Files["src/unused.ts"] == "" {
 		t.Fatal("immutable base revision was modified")
 	}
-	// A repeated request is idempotent even though its base is no longer head.
-	call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "edit", "changes": changes}, 200)
+	// A repeated commit is a no-op even though its base is now the new head.
+	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "edit"}, 200)
+	// Simulate a second writer publishing a new source while this draft is open.
+	other := workbench.Package{Files: map[string]string{"workbench.json": files["workbench.json"], "src/App.tsx": "export default function App(){return <p>Other</p>}"}}
+	otherHash, err := workbench.WritePackage(home, w.ID, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherWorkbench, err := st.SaveWorkbenchRevision(context.Background(), &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: otherHash, ClientRequestID: "other", CreatedAt: time.Now().UTC()}, w.HeadRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = *otherWorkbench
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", "export default function App(){return <p>Mine</p>}")
 	var conflict struct {
 		Error               string `json:"error"`
 		CurrentRevision     int64  `json:"currentRevision"`
 		CurrentHeadRevision string `json:"currentHeadRevision"`
 	}
-	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": first, "clientRequestID": "stale", "changes": map[string]any{"src/App.tsx": "stale"}}, 409), &conflict)
+	_ = json.Unmarshal(call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "stale"}, 409), &conflict)
 	if conflict.Error != "revision_conflict" || conflict.CurrentRevision != w.Revision || conflict.CurrentHeadRevision != w.HeadRevision {
 		t.Fatalf("missing current revision in conflict: %+v", conflict)
 	}
-	call("POST", base+"/revisions", map[string]any{"baseRevisionHash": w.HeadRevision, "clientRequestID": "invalid", "changes": map[string]any{"workbench.json": nil}}, 400)
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "workbench.json", nil)
+	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "invalid"}, 400)
 }
 
 func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
@@ -154,7 +216,7 @@ func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 		"src/App.tsx":    "export default ()=> <p>Fixture</p>",
 		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"primary","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"status":{"type":"string","enum":["open","closed"]}},"required":["status"],"additionalProperties":false},"request":{"method":"GET","path":"/items","query":{"status":{"$input":"/status"}}},"result":{"rows":"/items","total":"/total"}}}}`,
 	}}
-	if err := json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "save-1", "changes": pkg.Files}, 200), &w); err != nil {
+	if err := json.Unmarshal(saveCanvasTestFiles(t, call, base, "save-1", pkg.Files), &w); err != nil {
 		t.Fatal(err)
 	}
 	hash := w.HeadRevision
@@ -222,7 +284,7 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Actions"}, 201), &w)
 	base := "/canvases/" + w.ID
 	pkg := workbench.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
-	_ = json.Unmarshal(call("POST", base+"/revisions", map[string]any{"baseRevisionHash": "", "clientRequestID": "save", "changes": pkg.Files}, 200), &w)
+	_ = json.Unmarshal(saveCanvasTestFiles(t, call, base, "save", pkg.Files), &w)
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)
 	_ = json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision, "bindings": map[string]string{"primary": "account-1"}}, 200), &w)
 	_ = json.Unmarshal(call("POST", base+"/activate", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision}, 200), &w)

@@ -65,9 +65,10 @@ type Server struct {
 	oauthBroker       *oauthbroker.Client
 	github            *githubapp.Client
 
-	workbenchMu     sync.Mutex
-	workbenchBudget map[string]*workbenchRequestBudget
-	providerSyncs   singleflight.Group
+	workbenchMu      sync.Mutex
+	workbenchBudget  map[string]*workbenchRequestBudget
+	workbenchDraftMu sync.Mutex
+	providerSyncs    singleflight.Group
 
 	// attachmentMu serializes API attachment writes (including pre-insert clones)
 	// with reclamation. SQLite remains the authority for session existence.
@@ -180,8 +181,11 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/canvas-archives/:archiveID/export").GET(s.exportCanvasArchive)
 	app.Route("/canvases").GET(s.listWorkbenches).POST(s.createWorkbench)
 	app.Route("/canvases/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
-	app.Route("/canvases/:workbenchID/revisions").GET(s.listWorkbenchRevisions).POST(s.saveWorkbenchRevision)
+	app.Route("/canvases/:workbenchID/revisions").GET(s.listWorkbenchRevisions)
 	app.Route("/canvases/:workbenchID/revisions/:hash").GET(s.getWorkbenchRevision)
+	app.Route("/canvases/:workbenchID/draft").GET(s.getWorkbenchDraft).POST(s.startWorkbenchDraft)
+	app.Route("/canvases/:workbenchID/draft/file").GET(s.getWorkbenchDraftFile).PUT(s.putWorkbenchDraftFile)
+	app.Route("/canvases/:workbenchID/draft/commit").POST(s.commitWorkbenchDraft)
 	app.Route("/canvases/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
 	app.Route("/canvases/:workbenchID/activate").POST(s.activateWorkbench)
 	app.Route("/canvases/:workbenchID/bindings").PUT(s.bindWorkbench)
