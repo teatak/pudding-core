@@ -88,8 +88,8 @@ CREATE TABLE canvas_links (
 	return err
 }
 
-// One transaction preserves resources, dirty working copies, mounts, favorites and
-// recent-open references. Immutable App packages and their hashes stay in place.
+// Build temporary resource snapshots from the v24 structured canvas tables so
+// the archive includes dirty copies, mounts, favorites and recent references.
 func migrateUnifiedCanvases(tx *sql.Tx) error {
 	if _, err := tx.Exec(`
  ALTER TABLE canvas_revisions ADD COLUMN content_json TEXT NOT NULL DEFAULT '';
@@ -148,7 +148,7 @@ func migrateUnifiedCanvases(tx *sql.Tx) error {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(`INSERT INTO canvas_revisions(canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt,content_json) VALUES(?,?,'','migration-v26',?,'',?)`, id, hash, v.updated, string(b))
+		_, err = tx.Exec(`INSERT INTO canvas_revisions(canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt,content_json) VALUES(?,?,'','migration-v25',?,'',?)`, id, hash, v.updated, string(b))
 		return err
 	}
 	for _, v := range saved {

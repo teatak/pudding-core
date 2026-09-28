@@ -72,8 +72,8 @@ func TestFinalCanvasMigrationArchivesReleaseDataAndRestart(t *testing.T) {
 			}
 			contents += string(b)
 		}
-		if !strings.Contains(contents, "unsaved") || !strings.Contains(contents, "saved") {
-			t.Fatal("lost dirty or saved content")
+		if !strings.Contains(contents, "unsaved") || !strings.Contains(contents, "saved") || !strings.Contains(contents, "migration-v25") {
+			t.Fatal("lost release content or final migration identity")
 		}
 		st.Close()
 	}
