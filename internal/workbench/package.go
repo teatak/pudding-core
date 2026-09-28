@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -242,9 +244,20 @@ func (o Operation) ResolveRequest(input map[string]any) (Request, error) {
 		return r, err
 	}
 	for key, value := range r.PathParams {
-		text, ok := value.(string)
-		if !ok || text == "" || text == "." || text == ".." {
-			return r, errors.New("path parameters must be nonempty strings without dot segments")
+		var text string
+		switch v := value.(type) {
+		case string:
+			text = v
+		case float64:
+			if math.Trunc(v) != v || math.Abs(v) > 1<<53-1 {
+				return r, errors.New("path parameters must be nonempty strings or safe integers without dot segments")
+			}
+			text = strconv.FormatFloat(v, 'f', 0, 64)
+		default:
+			return r, errors.New("path parameters must be nonempty strings or safe integers without dot segments")
+		}
+		if text == "" || text == "." || text == ".." {
+			return r, errors.New("path parameters must be nonempty strings or safe integers without dot segments")
 		}
 		r.Path = strings.ReplaceAll(r.Path, "{"+key+"}", url.PathEscape(text))
 	}

@@ -40,6 +40,27 @@ func TestPackageHashAndRequest(t *testing.T) {
 	}
 }
 
+func TestResolveRequestIntegerPathParameter(t *testing.T) {
+	op := Operation{
+		Kind: "rest",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{"installationId": map[string]any{"type": "integer"}},
+			"required":             []any{"installationId"},
+			"additionalProperties": false,
+		},
+		Request: Request{
+			Method:     "GET",
+			Path:       "/user/installations/{installationId}/repositories",
+			PathParams: map[string]any{"installationId": map[string]any{"$input": "/installationId"}},
+		},
+	}
+	r, err := op.ResolveRequest(map[string]any{"installationId": float64(123456)})
+	if err != nil || r.Path != "/user/installations/123456/repositories" {
+		t.Fatalf("path = %q, error = %v", r.Path, err)
+	}
+}
+
 func TestPackageRejectsUnsafeAndUnknownDefinitions(t *testing.T) {
 	for _, name := range []string{"../escape.ts", "src/../../escape.ts", "/src/App.tsx", "src\\evil.ts", "src/../App.tsx", "package.json", "src/script.sh"} {
 		p := fixturePackage(t)
