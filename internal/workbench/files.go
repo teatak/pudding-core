@@ -3,6 +3,7 @@ package workbench
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -83,6 +84,9 @@ func ReadPackage(home, id, hash string) (Package, error) {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("symlinks are not allowed in packages")
 		}
+		if skipFinderMetadata(entry) {
+			return nil
+		}
 		if entry.IsDir() {
 			return nil
 		}
@@ -121,4 +125,9 @@ func ReadPackage(home, id, hash string) (Package, error) {
 		return p, fmt.Errorf("source integrity mismatch: %s", hash)
 	}
 	return p, nil
+}
+
+// Finder may add .DS_Store after a package is published. It is not source.
+func skipFinderMetadata(entry fs.DirEntry) bool {
+	return entry.Name() == ".DS_Store" && entry.Type().IsRegular()
 }

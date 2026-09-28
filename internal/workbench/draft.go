@@ -52,6 +52,9 @@ func ReadDraft(home, id string) (Draft, error) {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("symlinks are not allowed in drafts")
 		}
+		if skipFinderMetadata(entry) {
+			return nil
+		}
 		if entry.IsDir() || file == filepath.Join(root, ".base") {
 			return nil
 		}

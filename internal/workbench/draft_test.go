@@ -34,6 +34,11 @@ func TestDraftFilesPersistUntilExplicitCommit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "workbenches", id, "draft", "src", "App.tsx")); err != nil {
 		t.Fatalf("working copy is not a real source directory: %v", err)
 	}
+	for _, name := range []string{".DS_Store", "src/.DS_Store"} {
+		if err := os.WriteFile(filepath.Join(home, "workbenches", id, "draft", name), []byte("Finder metadata"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	reopened, err := StartDraft(home, id, "")
 	if err != nil || reopened.DraftHash != d.DraftHash || reopened.Files["src/App.tsx"] != app {
 		t.Fatalf("draft did not survive reopening: %+v %v", reopened, err)
