@@ -16,6 +16,7 @@
 | Git 已选定 `cwd` 后的 `paths` | 仍是仓库内路径，不要求每个 Git operand 都是绝对路径 |
 | 命令已选定 `cwd` 后的相对文件参数 | 仍相对该 `cwd`，经过现有命令权限检查 |
 | `app`、`skill`、`temp` | 保留各自文件区的相对路径语义 |
+| `canvas` | Code 会话以显式 `canvas_id` 读取已打开草稿中的 `canvas.json`、`src/`、`assets/`；`builtin_file_patch` 每次只编辑一个源码文件并检查 `expectedDraftHash`，返回新的 `draftHash`。隐藏 `.base`、`fixtures/`，不扩大命令或 Git 权限。|
 
 多 root 不根据“哪个目录里恰好存在这个文件”选择目标，也不默认向首个 root 写入。
 预审、执行与项目文件变更追踪共用项目路径解析。

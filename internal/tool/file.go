@@ -29,6 +29,7 @@ const (
 	managedScopeSkill   = "skill"
 	managedScopeTemp    = "temp"
 	managedScopeProject = "project"
+	managedScopeCanvas  = "canvas"
 
 	defaultFileReadMaxChars       = 20000
 	maxFileReadChars              = 100000
@@ -50,10 +51,12 @@ const (
 )
 
 type resolvedFilePath struct {
-	root    string
-	target  string
-	rel     string
-	project bool
+	root      string
+	target    string
+	rel       string
+	project   bool
+	canvasID  string
+	draftHash string
 }
 
 func (p resolvedFilePath) outputPath() string {
@@ -68,6 +71,10 @@ func (p resolvedFilePath) payload(base map[string]any) map[string]any {
 	if p.project {
 		base["root"] = p.root
 		base["relativePath"] = p.rel
+	}
+	if p.canvasID != "" {
+		base["canvasID"] = p.canvasID
+		base["draftHash"] = p.draftHash
 	}
 	return base
 }
@@ -103,10 +110,10 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "read_dir_failed", err.Error())
 	}
-	if args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp {
+	if args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp || args.Scope == managedScopeCanvas {
 		visible := entries[:0]
 		for _, entry := range entries {
-			if !strings.HasPrefix(entry.Name(), ".") {
+			if !strings.HasPrefix(entry.Name(), ".") && (args.Scope != managedScopeCanvas || canvasVisiblePath(filepath.ToSlash(filepath.Join(resolved.rel, entry.Name())), entry.IsDir())) {
 				visible = append(visible, entry)
 			}
 		}
@@ -263,16 +270,23 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
+	excludeGlobs := args.ExcludeGlobs
+	if args.Scope == managedScopeCanvas {
+		if len(excludeGlobs) >= maxFileSearchGlobs {
+			return toolJSONError(out, "too_many_globs", "canvas search reserves one exclude glob for private draft files")
+		}
+		excludeGlobs = append(append([]string(nil), excludeGlobs...), "fixtures/**")
+	}
 	result, err := SearchTextFiles(ctx, resolved.target, TextFileSearchOptions{
 		BaseRoot:      resolved.root,
 		CaseSensitive: caseSensitive,
 		ContextLines:  args.ContextLines,
-		ExcludeGlobs:  args.ExcludeGlobs,
+		ExcludeGlobs:  excludeGlobs,
 		IncludeGlobs:  args.IncludeGlobs,
 		MaxResults:    args.MaxResults,
 		Mode:          args.Mode,
 		Query:         args.Query,
-		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp,
+		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp || args.Scope == managedScopeCanvas,
 	})
 	if err != nil {
 		var searchErr *TextFileSearchError
@@ -288,6 +302,9 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 			if rel, err := filepath.Rel(resolved.root, match.Path); err == nil {
 				path = filepath.ToSlash(rel)
 			}
+		}
+		if args.Scope == managedScopeCanvas && !canvasVisiblePath(path, false) {
+			continue
 		}
 		items = append(items, map[string]any{
 			"path":      path,
@@ -826,6 +843,9 @@ func copyFileDir(src, dst string) error {
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
 	scope = strings.TrimSpace(scope)
+	if scope == managedScopeCanvas {
+		return r.resolveCanvasFilePath(call, rawPath, requireWritable, allowRoot, allowMissing)
+	}
 	if isProjectFileScope(scope) {
 		root, target, rel, err := resolveProjectPath(call.ProjectDirs, rawPath, allowRoot, allowMissing)
 		if err != nil {

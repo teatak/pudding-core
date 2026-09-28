@@ -186,7 +186,7 @@ func Start(opts Options) (*Daemon, error) {
 	}
 	appHTTP := appexec.New(nil)
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithAppExecutor(appHTTP), tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithAppExecutor(appHTTP), tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithCanvasResources(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)

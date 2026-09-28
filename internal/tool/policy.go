@@ -140,8 +140,12 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 			LowRisk:   true,
 		}
 		args, argumentErr := decodeFilePatchArgs(raw)
-		if argumentErr != nil || strings.TrimSpace(args.Scope) != managedScopeProject || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
+		if argumentErr != nil || (strings.TrimSpace(args.Scope) != managedScopeProject && strings.TrimSpace(args.Scope) != managedScopeCanvas) || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
 			return baseRisk, true
+		}
+		if args.Scope == managedScopeCanvas {
+			baseRisk.Scope = managedScopeCanvas
+			baseRisk.Summary = "Edit one canvas draft source file."
 		}
 		paths := make([]string, 0, len(args.Files))
 		destructive := false
@@ -154,12 +158,16 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 			destructive = destructive || strings.TrimSpace(file.Action) == "delete"
 		}
 		if destructive {
+			summary := "Apply a multi-file patch that deletes project files."
+			if args.Scope == managedScopeCanvas {
+				summary = "Delete one canvas draft source file."
+			}
 			return ToolRisk{
 				Class:     RiskClassDestructive,
 				Operation: "file_patch",
-				Scope:     managedScopeProject,
+				Scope:     args.Scope,
 				Paths:     compactRiskPaths(paths...),
-				Summary:   "Apply a multi-file patch that deletes project files.",
+				Summary:   summary,
 			}, true
 		}
 		baseRisk.Paths = compactRiskPaths(paths...)

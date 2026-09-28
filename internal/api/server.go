@@ -67,7 +67,6 @@ type Server struct {
 
 	canvasMu      sync.Mutex
 	canvasBudget  map[string]*canvasRequestBudget
-	canvasDraftMu sync.Mutex
 	providerSyncs singleflight.Group
 
 	// attachmentMu serializes API attachment writes (including pre-insert clones)

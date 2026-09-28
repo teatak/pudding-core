@@ -44,8 +44,8 @@ func (s *Server) draftError(c *cart.Context, err error) error {
 
 func (s *Server) startCanvasDraft(c *cart.Context) error {
 	id, _ := c.Param("canvasID")
-	s.canvasDraftMu.Lock()
-	defer s.canvasDraftMu.Unlock()
+	canvas.DraftMu.Lock()
+	defer canvas.DraftMu.Unlock()
 	w, err := s.store.GetCanvas(c.Request.Context(), id)
 	if err != nil {
 		return s.canvasError(c, err)
@@ -60,8 +60,8 @@ func (s *Server) startCanvasDraft(c *cart.Context) error {
 
 func (s *Server) getCanvasDraft(c *cart.Context) error {
 	id, _ := c.Param("canvasID")
-	s.canvasDraftMu.Lock()
-	defer s.canvasDraftMu.Unlock()
+	canvas.DraftMu.Lock()
+	defer canvas.DraftMu.Unlock()
 	d, err := s.readCanvasDraft(c, id)
 	if err != nil {
 		return s.draftError(c, err)
@@ -76,8 +76,8 @@ func (s *Server) getCanvasDraftFile(c *cart.Context) error {
 	if !canvas.ValidFilePath(name) {
 		return badRequest(c, "invalid draft source path")
 	}
-	s.canvasDraftMu.Lock()
-	defer s.canvasDraftMu.Unlock()
+	canvas.DraftMu.Lock()
+	defer canvas.DraftMu.Unlock()
 	d, err := s.readCanvasDraft(c, id)
 	if err != nil {
 		return s.draftError(c, err)
@@ -112,8 +112,8 @@ func (s *Server) putCanvasDraftFile(c *cart.Context) error {
 		}
 		content = &value
 	}
-	s.canvasDraftMu.Lock()
-	defer s.canvasDraftMu.Unlock()
+	canvas.DraftMu.Lock()
+	defer canvas.DraftMu.Unlock()
 	if _, err := s.store.GetCanvas(c.Request.Context(), id); err != nil {
 		return s.canvasError(c, err)
 	}
@@ -144,8 +144,8 @@ func (s *Server) commitCanvasDraft(c *cart.Context) error {
 	if req.ExpectedDraftHash == "" || req.ClientRequestID == "" || len(req.ClientRequestID) > 100 {
 		return badRequest(c, "expectedDraftHash and clientRequestID are required")
 	}
-	s.canvasDraftMu.Lock()
-	defer s.canvasDraftMu.Unlock()
+	canvas.DraftMu.Lock()
+	defer canvas.DraftMu.Unlock()
 	d, err := s.readCanvasDraft(c, id)
 	if err != nil {
 		return s.draftError(c, err)

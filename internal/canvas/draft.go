@@ -9,12 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/contracts"
 )
 
 var ErrDraftConflict = errors.New("canvas draft changed")
+
+// DraftMu serializes draft edits and commits within the daemon. A tool edit
+// must not race the HTTP draft/commit path after checking expectedDraftHash.
+var DraftMu sync.Mutex
 
 // Draft is the mutable working copy. Only a committed revision is usable by the runtime.
 type Draft struct {
@@ -23,7 +28,7 @@ type Draft struct {
 	Files            map[string]string `json:"-"`
 }
 
-func draftRoot(home, id string) (string, error) {
+func DraftRoot(home, id string) (string, error) {
 	if home == "" || !identifier.MatchString(id) {
 		return "", errors.New("invalid canvas draft reference")
 	}
@@ -32,7 +37,7 @@ func draftRoot(home, id string) (string, error) {
 
 func ReadDraft(home, id string) (Draft, error) {
 	d := Draft{Files: map[string]string{}}
-	root, err := draftRoot(home, id)
+	root, err := DraftRoot(home, id)
 	if err != nil {
 		return d, err
 	}
@@ -98,7 +103,7 @@ func draftHash(files map[string]string) string {
 }
 
 func StartDraft(home, id, baseHash string) (Draft, error) {
-	root, err := draftRoot(home, id)
+	root, err := DraftRoot(home, id)
 	if err != nil {
 		return Draft{}, err
 	}
@@ -169,7 +174,7 @@ func WriteDraftFile(home, id, name string, content *string, expectedHash string)
 			return d, errors.New("draft exceeds source limits")
 		}
 	}
-	root, _ := draftRoot(home, id)
+	root, _ := DraftRoot(home, id)
 	file := filepath.Join(root, filepath.FromSlash(name))
 	if content == nil {
 		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -190,7 +195,7 @@ func SetDraftBase(home, id, baseHash string) (Draft, error) {
 	if !revisionID.MatchString(baseHash) {
 		return Draft{}, errors.New("invalid draft base revision")
 	}
-	root, err := draftRoot(home, id)
+	root, err := DraftRoot(home, id)
 	if err != nil {
 		return Draft{}, err
 	}

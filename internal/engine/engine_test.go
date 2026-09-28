@@ -3572,6 +3572,10 @@ func TestRefineToolRiskKeepsPatchDeletionProtected(t *testing.T) {
 	if destructive.Class != tool.RiskClassDestructive || destructive.LowRisk {
 		t.Fatalf("patch deletion should require approval: %+v", destructive)
 	}
+	canvasDeletion := refineToolRisk(tool.FilePatch, tool.ToolRisk{Scope: "canvas", Class: tool.RiskClassWrite, LowRisk: true}, map[string]any{"destructive": true})
+	if canvasDeletion.Class != tool.RiskClassDestructive || canvasDeletion.LowRisk || canvasDeletion.Summary != "Delete one canvas draft source file." {
+		t.Fatalf("canvas deletion should be described and protected: %+v", canvasDeletion)
+	}
 }
 
 func TestCompletedOutputPersistsBeforeTurnFinish(t *testing.T) {
