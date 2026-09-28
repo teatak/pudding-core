@@ -3,8 +3,33 @@ package attachment
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestSessionIDsExcludesDraft(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewService(dir)
+	for _, id := range []string{DraftSessionID, "live"} {
+		if _, err := svc.StoreReader(id, "file.txt", "text/plain", strings.NewReader(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacyDraft := filepath.Join(dir, "attachments", "sessions", DraftSessionID, "blobs")
+	if err := os.MkdirAll(legacyDraft, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := svc.SessionIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "live" {
+		t.Fatalf("session IDs = %v, want [live]", ids)
+	}
+	if _, err := os.Stat(legacyDraft); err != nil {
+		t.Fatalf("legacy draft attachments were removed: %v", err)
+	}
+}
 
 func TestSessionCleanupDoesNotFollowSymlinks(t *testing.T) {
 	dir, outside := t.TempDir(), t.TempDir()

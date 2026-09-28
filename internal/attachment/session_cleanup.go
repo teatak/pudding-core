@@ -30,6 +30,9 @@ func (s *Service) SessionIDs() ([]string, error) {
 	}
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
+		if entry.Name() == DraftSessionID {
+			continue
+		}
 		ids = append(ids, entry.Name())
 	}
 	return ids, nil

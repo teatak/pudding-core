@@ -84,6 +84,10 @@ func TestOrphanAttachmentCleanupRetriesAfterRestartAndPreservesArchives(t *testi
 		t.Fatal(err)
 	}
 	base := filepath.Join(dir, "attachments", "sessions")
+	legacyDraft := filepath.Join(base, attachment.DraftSessionID, "blobs")
+	if err := os.MkdirAll(legacyDraft, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(base, 0500); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +107,7 @@ func TestOrphanAttachmentCleanupRetriesAfterRestartAndPreservesArchives(t *testi
 	if _, err := os.Stat(filepath.Join(base, "orphan")); !os.IsNotExist(err) {
 		t.Fatalf("orphan survived retry: %v", err)
 	}
-	for _, path := range []string{filepath.Join(base, "live"), filepath.Join(base, "archived"), filepath.Join(dir, "temp", "attachments")} {
+	for _, path := range []string{filepath.Join(base, "live"), filepath.Join(base, "archived"), legacyDraft, filepath.Join(dir, "temp", "attachments")} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("retained attachments removed: %v", err)
 		}
