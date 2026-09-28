@@ -65,10 +65,10 @@ type Server struct {
 	oauthBroker       *oauthbroker.Client
 	github            *githubapp.Client
 
-	workbenchMu      sync.Mutex
-	workbenchBudget  map[string]*workbenchRequestBudget
-	workbenchDraftMu sync.Mutex
-	providerSyncs    singleflight.Group
+	canvasMu      sync.Mutex
+	canvasBudget  map[string]*canvasRequestBudget
+	canvasDraftMu sync.Mutex
+	providerSyncs singleflight.Group
 
 	// attachmentMu serializes API attachment writes (including pre-insert clones)
 	// with reclamation. SQLite remains the authority for session existence.
@@ -179,22 +179,22 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/canvas-archives").GET(s.listCanvasArchives).DELETE(s.removeCanvasArchives)
 	app.Route("/canvas-archives/:archiveID/preview").GET(s.previewCanvasArchive)
 	app.Route("/canvas-archives/:archiveID/export").GET(s.exportCanvasArchive)
-	app.Route("/canvases").GET(s.listWorkbenches).POST(s.createWorkbench)
-	app.Route("/canvases/:workbenchID").GET(s.getWorkbench).DELETE(s.deleteWorkbench)
-	app.Route("/canvases/:workbenchID/revisions").GET(s.listWorkbenchRevisions)
-	app.Route("/canvases/:workbenchID/revisions/:hash").GET(s.getWorkbenchRevision)
-	app.Route("/canvases/:workbenchID/draft").GET(s.getWorkbenchDraft).POST(s.startWorkbenchDraft)
-	app.Route("/canvases/:workbenchID/draft/file").GET(s.getWorkbenchDraftFile).PUT(s.putWorkbenchDraftFile)
-	app.Route("/canvases/:workbenchID/draft/commit").POST(s.commitWorkbenchDraft)
-	app.Route("/canvases/:workbenchID/build-receipts").POST(s.workbenchBuildReceipt)
-	app.Route("/canvases/:workbenchID/activate").POST(s.activateWorkbench)
-	app.Route("/canvases/:workbenchID/bindings").PUT(s.bindWorkbench)
-	app.Route("/canvases/:workbenchID/queries/:operationID").POST(s.queryWorkbench)
-	app.Route("/canvases/:workbenchID/actions/:operationID/prepare").POST(s.prepareWorkbenchAction)
-	app.Route("/canvases/:workbenchID/actions").GET(s.listWorkbenchActions)
-	app.Route("/canvases/:workbenchID/links").GET(s.listWorkbenchLinks).POST(s.putWorkbenchLink)
-	app.Route("/canvases/:workbenchID/links/:linkID").DELETE(s.deleteWorkbenchLink)
-	app.Route("/canvases/:workbenchID/action-runs/:actionID/execute").POST(s.executeWorkbenchAction)
+	app.Route("/canvases").GET(s.listCanvases).POST(s.createCanvas)
+	app.Route("/canvases/:canvasID").GET(s.getCanvas).DELETE(s.deleteCanvas)
+	app.Route("/canvases/:canvasID/revisions").GET(s.listCanvasRevisions)
+	app.Route("/canvases/:canvasID/revisions/:hash").GET(s.getCanvasRevision)
+	app.Route("/canvases/:canvasID/draft").GET(s.getCanvasDraft).POST(s.startCanvasDraft)
+	app.Route("/canvases/:canvasID/draft/file").GET(s.getCanvasDraftFile).PUT(s.putCanvasDraftFile)
+	app.Route("/canvases/:canvasID/draft/commit").POST(s.commitCanvasDraft)
+	app.Route("/canvases/:canvasID/build-receipts").POST(s.canvasBuildReceipt)
+	app.Route("/canvases/:canvasID/activate").POST(s.activateCanvas)
+	app.Route("/canvases/:canvasID/bindings").PUT(s.bindCanvas)
+	app.Route("/canvases/:canvasID/queries/:operationID").POST(s.queryCanvas)
+	app.Route("/canvases/:canvasID/actions/:operationID/prepare").POST(s.prepareCanvasAction)
+	app.Route("/canvases/:canvasID/actions").GET(s.listCanvasActions)
+	app.Route("/canvases/:canvasID/links").GET(s.listCanvasLinks).POST(s.putCanvasLink)
+	app.Route("/canvases/:canvasID/links/:linkID").DELETE(s.deleteCanvasLink)
+	app.Route("/canvases/:canvasID/action-runs/:actionID/execute").POST(s.executeCanvasAction)
 
 	app.Route("/scheduled-tasks").GET(s.listScheduledTasks).POST(s.createScheduledTask)
 	app.Route("/scheduled-tasks/:taskID").GET(s.getScheduledTask).PATCH(s.updateScheduledTask).DELETE(s.updateScheduledTask)

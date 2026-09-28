@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/workbench"
 )
 
 func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
@@ -16,7 +16,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "author", Provider: "mock", Model: "m"}); err != nil {
 		t.Fatal(err)
 	}
-	resource, err := st.CreateWorkbench(ctx, &store.Workbench{ID: "canvas", Name: "Report", SourceSessionID: "author"})
+	resource, err := st.CreateCanvas(ctx, &store.Canvas{ID: "canvas", Name: "Report", SourceSessionID: "author"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	}
 	first := ""
 	base := srv.URL + "/canvases/" + resource.ID
-	pkg := workbench.Package{Files: map[string]string{"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
+	pkg := canvas.Package{Files: map[string]string{"canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
 	response := req(t, "POST", base+"/draft", map[string]any{})
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
@@ -49,7 +49,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}
-	resourcePtr := decodeJSON[store.Workbench](t, response)
+	resourcePtr := decodeJSON[store.Canvas](t, response)
 	response.Body.Close()
 	resource = &resourcePtr
 	if resource.ActiveRevision != first {
@@ -64,7 +64,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}
-	resourcePtr = decodeJSON[store.Workbench](t, response)
+	resourcePtr = decodeJSON[store.Canvas](t, response)
 	response.Body.Close()
 	resource = &resourcePtr
 	views, err := st.ListCanvasItems(ctx, "author")

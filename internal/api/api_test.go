@@ -1374,7 +1374,7 @@ func TestCanvasItemsAPIIsSessionScopedAndSavedWidgetsAreGlobal(t *testing.T) {
 
 	resp = req(t, http.MethodGet, srv.URL+"/canvases", nil)
 	resources := decodeJSON[struct {
-		Canvases []store.Workbench `json:"canvases"`
+		Canvases []store.Canvas `json:"canvases"`
 	}](t, resp)
 	resp.Body.Close()
 	if len(resources.Canvases) != 1 || resources.Canvases[0].ID != item.ResourceID {

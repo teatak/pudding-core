@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 )
 
-//go:embed workbench.json
-var workbenchJSON []byte
+//go:embed canvas.json
+var canvasJSON []byte
 
-// WorkbenchPolicy is shared by Core validation and the Desktop compiler/bridge.
-type WorkbenchPolicy struct {
+// CanvasPolicy is shared by Core validation and the Desktop compiler/bridge.
+type CanvasPolicy struct {
 	SchemaVersion         int    `json:"schemaVersion"`
 	SDKVersion            string `json:"sdkVersion"`
 	MaxFiles              int    `json:"maxFiles"`
@@ -28,15 +28,15 @@ type WorkbenchPolicy struct {
 	MaxDiagnostics        int    `json:"maxDiagnostics"`
 }
 
-var workbenchPolicy = func() WorkbenchPolicy {
-	var p WorkbenchPolicy
-	if err := json.Unmarshal(workbenchJSON, &p); err != nil {
+var canvasPolicy = func() CanvasPolicy {
+	var p CanvasPolicy
+	if err := json.Unmarshal(canvasJSON, &p); err != nil {
 		panic(err)
 	}
 	if p.SchemaVersion < 1 || p.MaxFiles < 1 || p.MaxPackageBytes < p.MaxFileBytes || p.MaxConcurrentRequests < 1 {
-		panic("invalid workbench policy")
+		panic("invalid canvas policy")
 	}
 	return p
 }()
 
-func Workbench() WorkbenchPolicy { return workbenchPolicy }
+func Canvas() CanvasPolicy { return canvasPolicy }

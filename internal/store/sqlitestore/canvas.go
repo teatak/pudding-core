@@ -15,7 +15,7 @@ const canvasMountSelect = `SELECT m.session_id,m.id,m.resource_id,m.visible,m.cr
 
 func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
 	m := &store.CanvasItem{}
-	w := &store.Workbench{}
+	w := &store.Canvas{}
 	var created, updated int64
 
 	if err := row.Scan(&m.SessionID, &m.ID, &m.ResourceID, &m.Visible, &created, &w.Name, &w.SourceSessionID, &w.Revision, &updated); err != nil {
@@ -82,7 +82,7 @@ func (s *Store) OpenCanvasResource(ctx context.Context, session, id, itemID stri
 		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
-		if _, err := scanWorkbench(tx.QueryRowContext(ctx, `SELECT `+workbenchColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, id)); err != nil {
+		if _, err := scanCanvas(tx.QueryRowContext(ctx, `SELECT `+canvasColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, id)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_mounts(session_id,id,resource_id,created_at) VALUES(?,?,?,?) ON CONFLICT(session_id,resource_id) DO UPDATE SET visible=1`, session, itemID, id, unixMS(time.Now())); err != nil {

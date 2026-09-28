@@ -29,7 +29,7 @@ func (s *Server) listLibrary(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	saved, err := s.store.ListWorkbenches(ctx)
+	saved, err := s.store.ListCanvases(ctx)
 	if err != nil {
 		return s.fail(c, err)
 	}

@@ -119,7 +119,7 @@ func TestCanvasGrantRemovalMigratesAndRetriesAfterFailure(t *testing.T) {
 		}
 		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "28")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_resources') WHERE name='grants'", "0")
-		canvas, err := st.GetWorkbench(context.Background(), "kept")
+		canvas, err := st.GetCanvas(context.Background(), "kept")
 		if err != nil || canvas.Bindings["github"] != "account" || canvas.BindingVersion != 3 || canvas.Revision != 4 {
 			t.Fatalf("canvas data changed: %+v %v", canvas, err)
 		}

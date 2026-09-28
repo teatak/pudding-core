@@ -15,48 +15,48 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/workbench"
 )
 
-type workbenchEndpointResolver interface {
+type canvasEndpointResolver interface {
 	ResolveBoundEndpoint(context.Context, string, string, string) (*app.EndpointBinding, string, error)
 }
 
-type workbenchEndpointLister interface {
+type canvasEndpointLister interface {
 	ListEndpointBindings(context.Context, string) ([]*app.EndpointBinding, error)
 }
 
-var errWorkbenchConnectionSelectionRequired = errors.New("connection selection required")
+var errCanvasConnectionSelectionRequired = errors.New("connection selection required")
 
 func (s *Server) WithAppExecutor(executor *appexec.Executor) *Server { s.appHTTP = executor; return s }
 
-func (s *Server) bindWorkbench(c *cart.Context) error {
-	id, _ := c.Param("workbenchID")
+func (s *Server) bindCanvas(c *cart.Context) error {
+	id, _ := c.Param("canvasID")
 	var req struct {
 		ExpectedRevision int64             `json:"expectedRevision"`
 		RevisionHash     string            `json:"revisionHash"`
 		Bindings         map[string]string `json:"bindings"`
 	}
-	if err := decodeWorkbench(c, &req); err != nil {
+	if err := decodeCanvas(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.GetWorkbench(c.Request.Context(), id)
+	w, err := s.store.GetCanvas(c.Request.Context(), id)
 	if err != nil {
-		return s.workbenchError(c, err)
+		return s.canvasError(c, err)
 	}
-	if _, err = s.store.GetWorkbenchRevision(c.Request.Context(), id, req.RevisionHash); err != nil {
-		return s.workbenchError(c, err)
+	if _, err = s.store.GetCanvasRevision(c.Request.Context(), id, req.RevisionHash); err != nil {
+		return s.canvasError(c, err)
 	}
-	p, err := workbench.ReadPackage(s.home, id, req.RevisionHash)
+	p, err := canvas.ReadPackage(s.home, id, req.RevisionHash)
 	if err != nil {
-		return s.workbenchError(c, err)
+		return s.canvasError(c, err)
 	}
 	m, _, err := p.Validate()
 	if err != nil {
-		return s.workbenchError(c, err)
+		return s.canvasError(c, err)
 	}
-	resolver, ok := s.apps.(workbenchEndpointResolver)
+	resolver, ok := s.apps.(canvasEndpointResolver)
 	if !ok {
 		return badRequest(c, "App connections unavailable")
 	}
@@ -76,36 +76,36 @@ func (s *Server) bindWorkbench(c *cart.Context) error {
 		w.Bindings = req.Bindings
 		w.BindingVersion++
 	}
-	w, err = s.store.UpdateWorkbench(c.Request.Context(), w, req.ExpectedRevision)
+	w, err = s.store.UpdateCanvas(c.Request.Context(), w, req.ExpectedRevision)
 	if err != nil {
-		return s.workbenchError(c, err)
+		return s.canvasError(c, err)
 	}
 	c.JSON(http.StatusOK, w)
 	return nil
 }
 
-func (s *Server) workbenchOperation(ctx context.Context, id, hash, operationID string) (*store.Workbench, workbench.Operation, *app.EndpointBinding, string, error) {
-	w, err := s.store.GetWorkbench(ctx, id)
+func (s *Server) canvasOperation(ctx context.Context, id, hash, operationID string) (*store.Canvas, canvas.Operation, *app.EndpointBinding, string, error) {
+	w, err := s.store.GetCanvas(ctx, id)
 	if err != nil {
-		return nil, workbench.Operation{}, nil, "", err
+		return nil, canvas.Operation{}, nil, "", err
 	}
-	if _, err = s.store.GetWorkbenchRevision(ctx, id, hash); err != nil {
-		return nil, workbench.Operation{}, nil, "", err
+	if _, err = s.store.GetCanvasRevision(ctx, id, hash); err != nil {
+		return nil, canvas.Operation{}, nil, "", err
 	}
-	p, err := workbench.ReadPackage(s.home, id, hash)
+	p, err := canvas.ReadPackage(s.home, id, hash)
 	if err != nil {
-		return nil, workbench.Operation{}, nil, "", err
+		return nil, canvas.Operation{}, nil, "", err
 	}
 	m, _, err := p.Validate()
 	if err != nil {
-		return nil, workbench.Operation{}, nil, "", err
+		return nil, canvas.Operation{}, nil, "", err
 	}
 	op, ok := m.Operations[operationID]
 	if !ok {
 		return nil, op, nil, "", store.ErrNotFound
 	}
 	source := m.Sources[op.Source]
-	binding, fingerprint, err := s.resolveWorkbenchSource(ctx, w, op.Source, source, op.Kind)
+	binding, fingerprint, err := s.resolveCanvasSource(ctx, w, op.Source, source, op.Kind)
 	if err != nil {
 		return nil, op, nil, "", err
 	}
@@ -115,14 +115,14 @@ func (s *Server) workbenchOperation(ctx context.Context, id, hash, operationID s
 	return w, op, binding, fingerprint, nil
 }
 
-func (s *Server) resolveWorkbenchSource(ctx context.Context, w *store.Workbench, slot string, source workbench.Source, kind string) (*app.EndpointBinding, string, error) {
-	resolver, ok := s.apps.(workbenchEndpointResolver)
+func (s *Server) resolveCanvasSource(ctx context.Context, w *store.Canvas, slot string, source canvas.Source, kind string) (*app.EndpointBinding, string, error) {
+	resolver, ok := s.apps.(canvasEndpointResolver)
 	if !ok {
 		return nil, "", fmt.Errorf("App connections unavailable")
 	}
 	connectionID, bound := w.Bindings[slot]
 	if !bound {
-		lister, ok := s.apps.(workbenchEndpointLister)
+		lister, ok := s.apps.(canvasEndpointLister)
 		if !ok {
 			return nil, "", fmt.Errorf("binding_unavailable")
 		}
@@ -138,7 +138,7 @@ func (s *Server) resolveWorkbenchSource(ctx context.Context, w *store.Workbench,
 			}
 		}
 		if matches != 1 {
-			return nil, "", errWorkbenchConnectionSelectionRequired
+			return nil, "", errCanvasConnectionSelectionRequired
 		}
 	}
 	binding, identity, err := resolver.ResolveBoundEndpoint(ctx, source.AppID, source.Endpoint, connectionID)
@@ -148,27 +148,27 @@ func (s *Server) resolveWorkbenchSource(ctx context.Context, w *store.Workbench,
 	return binding, fmt.Sprintf("%x", sha256.Sum256([]byte(identity))), nil
 }
 
-func (s *Server) queryWorkbench(c *cart.Context) error {
-	id, _ := c.Param("workbenchID")
+func (s *Server) queryCanvas(c *cart.Context) error {
+	id, _ := c.Param("canvasID")
 	operationID, _ := c.Param("operationID")
 	var req struct {
 		RevisionHash   string         `json:"revisionHash"`
 		BindingVersion int64          `json:"bindingVersion"`
 		Params         map[string]any `json:"params"`
 	}
-	if err := decodeWorkbench(c, &req); err != nil {
+	if err := decodeCanvas(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, op, binding, _, err := s.workbenchOperation(c.Request.Context(), id, req.RevisionHash, operationID)
+	w, op, binding, _, err := s.canvasOperation(c.Request.Context(), id, req.RevisionHash, operationID)
 	if err != nil {
-		return s.workbenchError(c, err)
+		return s.canvasError(c, err)
 	}
 	if !op.SafeRead() {
 		c.JSON(http.StatusForbidden, map[string]string{"error": "operation_requires_confirmation"})
 		return nil
 	}
 	if w.BindingVersion != req.BindingVersion {
-		return s.workbenchError(c, store.ErrWorkbenchConflict)
+		return s.canvasError(c, store.ErrCanvasConflict)
 	}
 	resolved, err := op.ResolveRequest(req.Params)
 	if err != nil {
@@ -177,15 +177,15 @@ func (s *Server) queryWorkbench(c *cart.Context) error {
 	if err = appexec.ValidateBoundRequest(binding, resolved.Method, resolved.Query, resolved.Body); err != nil {
 		return badRequest(c, err.Error())
 	}
-	release, ok := s.acquireWorkbenchRequest(id)
+	release, ok := s.acquireCanvasRequest(id)
 	if !ok {
 		c.Header("Retry-After", "30")
 		c.JSON(http.StatusTooManyRequests, map[string]any{"error": "request_limit", "retryAfterMS": 30000})
 		return nil
 	}
 	defer release()
-	response := s.executeWorkbenchRequest(c.Request.Context(), binding, op, resolved)
-	data, err := workbenchResponseData(op, response)
+	response := s.executeCanvasRequest(c.Request.Context(), binding, op, resolved)
+	data, err := canvasResponseData(op, response)
 	if status, _ := response["status"].(int); status == http.StatusTooManyRequests {
 		retry := 30 * time.Second
 		if headers, ok := response["response_headers"].(map[string]any); ok {
@@ -215,7 +215,7 @@ func (s *Server) queryWorkbench(c *cart.Context) error {
 	return nil
 }
 
-func workbenchResponseData(op workbench.Operation, response map[string]any) (any, error) {
+func canvasResponseData(op canvas.Operation, response map[string]any) (any, error) {
 	if response["ok"] != true {
 		return nil, fmt.Errorf("App request failed: %v", response["reason"])
 	}
@@ -240,19 +240,19 @@ func workbenchResponseData(op workbench.Operation, response map[string]any) (any
 		}
 	}
 	if len(op.Result.Schema) > 0 {
-		if err := workbench.ValidateInput(op.Result.Schema, data); err != nil {
+		if err := canvas.ValidateInput(op.Result.Schema, data); err != nil {
 			return nil, fmt.Errorf("response_schema_mismatch: %w", err)
 		}
 	}
 	for _, p := range []string{op.Result.Rows, op.Result.Total, op.Result.Cursor} {
 		if p != "" {
-			if _, err := workbench.Pointer(data, p); err != nil {
+			if _, err := canvas.Pointer(data, p); err != nil {
 				return nil, fmt.Errorf("response_schema_mismatch: %w", err)
 			}
 		}
 	}
 	if condition := op.Result.Success; condition != nil {
-		value, err := workbench.Pointer(data, condition.Pointer)
+		value, err := canvas.Pointer(data, condition.Pointer)
 		if err != nil || !reflect.DeepEqual(value, condition.Equals) {
 			return nil, fmt.Errorf("App business success condition failed")
 		}
@@ -260,36 +260,36 @@ func workbenchResponseData(op workbench.Operation, response map[string]any) (any
 	return data, nil
 }
 
-func (s *Server) executeWorkbenchRequest(ctx context.Context, binding *app.EndpointBinding, op workbench.Operation, r workbench.Request) map[string]any {
-	limit := contracts.Workbench().MaxResponseBytes
+func (s *Server) executeCanvasRequest(ctx context.Context, binding *app.EndpointBinding, op canvas.Operation, r canvas.Request) map[string]any {
+	limit := contracts.Canvas().MaxResponseBytes
 	if op.Kind == "rest" {
 		return s.appHTTP.REST(ctx, binding, map[string]any{"method": r.Method, "path": r.Path, "query": r.Query, "body_json": r.Body}, limit)
 	}
 	return s.appHTTP.GraphQL(ctx, binding, map[string]any{"query": r.Document, "operationName": r.OperationName, "variables": r.Variables}, limit)
 }
 
-type workbenchRequestBudget struct {
+type canvasRequestBudget struct {
 	window        time.Time
 	count, active int
 }
 
-func (s *Server) acquireWorkbenchRequest(id string) (func(), bool) {
-	s.workbenchMu.Lock()
-	defer s.workbenchMu.Unlock()
+func (s *Server) acquireCanvasRequest(id string) (func(), bool) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
 	now := time.Now()
-	policy := contracts.Workbench()
-	if s.workbenchBudget == nil {
-		s.workbenchBudget = map[string]*workbenchRequestBudget{}
+	policy := contracts.Canvas()
+	if s.canvasBudget == nil {
+		s.canvasBudget = map[string]*canvasRequestBudget{}
 	}
-	for key, b := range s.workbenchBudget {
+	for key, b := range s.canvasBudget {
 		if b.active == 0 && now.Sub(b.window) >= time.Minute {
-			delete(s.workbenchBudget, key)
+			delete(s.canvasBudget, key)
 		}
 	}
-	b := s.workbenchBudget[id]
+	b := s.canvasBudget[id]
 	if b == nil {
-		b = &workbenchRequestBudget{window: now}
-		s.workbenchBudget[id] = b
+		b = &canvasRequestBudget{window: now}
+		s.canvasBudget[id] = b
 	}
 	if now.Sub(b.window) >= time.Minute {
 		b.window = now
@@ -300,5 +300,5 @@ func (s *Server) acquireWorkbenchRequest(id string) (func(), bool) {
 	}
 	b.active++
 	b.count++
-	return func() { s.workbenchMu.Lock(); defer s.workbenchMu.Unlock(); b.active-- }, true
+	return func() { s.canvasMu.Lock(); defer s.canvasMu.Unlock(); b.active-- }, true
 }

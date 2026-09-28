@@ -21,7 +21,7 @@ func CanvasResourceID(sessionID, itemID string) string {
 
 // ProjectCanvasItem resolves a session mount against the canonical resource.
 // The mount never owns another copy of the content.
-func ProjectCanvasItem(mount *CanvasItem, w *Workbench) *CanvasItem {
+func ProjectCanvasItem(mount *CanvasItem, w *Canvas) *CanvasItem {
 	out := *mount
 	out.ResourceID, out.Revision = w.ID, w.Revision
 	out.Title, out.SourceSessionID, out.UpdatedAt = w.Name, w.SourceSessionID, w.UpdatedAt

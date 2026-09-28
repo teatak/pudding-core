@@ -1,6 +1,6 @@
-// Package workbench validates immutable, generated workbench source packages.
+// Package canvas validates immutable, generated canvas source packages.
 // Generated code is never evaluated by Core.
-package workbench
+package canvas
 
 import (
 	"bytes"
@@ -84,7 +84,7 @@ func DecodeStrict(data []byte, target any) error {
 
 func (p Package) Validate() (Manifest, string, error) {
 	var m Manifest
-	policy := contracts.Workbench()
+	policy := contracts.Canvas()
 	if len(p.Files) == 0 || len(p.Files) > policy.MaxFiles {
 		return m, "", errors.New("invalid package file count")
 	}
@@ -98,11 +98,11 @@ func (p Package) Validate() (Manifest, string, error) {
 			return m, "", errors.New("package exceeds size limit")
 		}
 	}
-	if err := DecodeStrict([]byte(p.Files["workbench.json"]), &m); err != nil {
-		return m, "", fmt.Errorf("workbench.json: %w", err)
+	if err := DecodeStrict([]byte(p.Files["canvas.json"]), &m); err != nil {
+		return m, "", fmt.Errorf("canvas.json: %w", err)
 	}
 	if m.SchemaVersion != policy.SchemaVersion || m.SDKVersion != policy.SDKVersion {
-		return m, "", errors.New("unsupported workbench or SDK version")
+		return m, "", errors.New("unsupported canvas or SDK version")
 	}
 	if !strings.HasPrefix(m.Entry, "src/") || !strings.HasSuffix(m.Entry, ".tsx") || p.Files[m.Entry] == "" {
 		return m, "", errors.New("entry must reference an existing src/*.tsx file")
@@ -137,7 +137,7 @@ func ValidFilePath(name string) bool {
 	if !sourceFileName.MatchString(name) || len(name) > 240 || strings.ContainsAny(name, "\\\x00") || path.Clean(name) != name || strings.HasPrefix(name, "/") {
 		return false
 	}
-	if name == "workbench.json" {
+	if name == "canvas.json" {
 		return true
 	}
 	if !strings.HasPrefix(name, "src/") && !strings.HasPrefix(name, "fixtures/") && !strings.HasPrefix(name, "assets/") {
@@ -285,7 +285,7 @@ func transform(request Request, input map[string]any, validate bool) (any, error
 }
 
 func transformValue(value any, input map[string]any, validate bool, depth int) (any, error) {
-	if depth > contracts.Workbench().MaxSchemaDepth {
+	if depth > contracts.Canvas().MaxSchemaDepth {
 		return nil, errors.New("request template too deep")
 	}
 	switch v := value.(type) {

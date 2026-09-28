@@ -37,7 +37,7 @@ func (m *Memstore) PutLibraryFavorite(_ context.Context, actor string, f store.L
 	if f.Kind != "canvas" && f.Kind != "web" {
 		return errors.New("invalid favorite kind")
 	}
-	if f.Kind == "canvas" && (m.workbenches[f.SavedItemID] == nil || m.workbenches[f.SavedItemID].Deleted) {
+	if f.Kind == "canvas" && (m.canvases[f.SavedItemID] == nil || m.canvases[f.SavedItemID].Deleted) {
 		return store.ErrNotFound
 	}
 	for _, v := range m.favorites {

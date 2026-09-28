@@ -14,26 +14,26 @@ import (
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
-	"github.com/teatak/pudding-core/internal/workbench"
 )
 
-type workbenchFixtureApps struct {
+type canvasFixtureApps struct {
 	appService
 	identity string
 	writes   bool
 	multiple bool
 }
 
-func (a *workbenchFixtureApps) ResolveBoundEndpoint(_ context.Context, appID, endpoint, connection string) (*app.EndpointBinding, string, error) {
+func (a *canvasFixtureApps) ResolveBoundEndpoint(_ context.Context, appID, endpoint, connection string) (*app.EndpointBinding, string, error) {
 	if appID != "fixture" || endpoint != "rest" || (connection != "account-1" && !(a.multiple && connection == "account-2")) {
 		return nil, "", fmt.Errorf("wrong connection")
 	}
-	return &app.EndpointBinding{AppID: appID, EndpointName: endpoint, ConnectionID: connection, Endpoint: app.Endpoint{WorkbenchWrites: a.writes, Kind: "rest", URL: "https://fixture.test/api"}, Auth: app.Auth{Type: app.AuthTypeBearer, Token: "fixture-secret"}}, a.identity, nil
+	return &app.EndpointBinding{AppID: appID, EndpointName: endpoint, ConnectionID: connection, Endpoint: app.Endpoint{CanvasWrites: a.writes, Kind: "rest", URL: "https://fixture.test/api"}, Auth: app.Auth{Type: app.AuthTypeBearer, Token: "fixture-secret"}}, a.identity, nil
 }
 
-func (a *workbenchFixtureApps) ListEndpointBindings(_ context.Context, kind string) ([]*app.EndpointBinding, error) {
+func (a *canvasFixtureApps) ListEndpointBindings(_ context.Context, kind string) ([]*app.EndpointBinding, error) {
 	if kind != "" && kind != "rest" {
 		return nil, nil
 	}
@@ -44,9 +44,9 @@ func (a *workbenchFixtureApps) ListEndpointBindings(_ context.Context, kind stri
 	return bindings, nil
 }
 
-type workbenchRoundTrip func(*http.Request) (*http.Response, error)
+type canvasRoundTrip func(*http.Request) (*http.Response, error)
 
-func (f workbenchRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func (f canvasRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type canvasTestCall func(string, string, any, int) []byte
 
@@ -81,7 +81,7 @@ func saveCanvasTestFiles(t *testing.T, call canvasTestCall, base, requestID stri
 	return call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": hash, "clientRequestID": requestID}, 200)
 }
 
-func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T) {
+func TestCanvasRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T) {
 	st := memstore.New()
 	home := t.TempDir()
 	handler := New(nil, st, st, nil).WithHome(home).Handler("fixture-token", nil)
@@ -97,16 +97,16 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 		}
 		return out.Body.Bytes()
 	}
-	var w store.Workbench
+	var w store.Canvas
 	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Report"}, 201), &w)
 	base := "/canvases/" + w.ID
 	files := map[string]string{
-		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`,
-		"src/App.tsx":    "export default function App(){return <p>Before</p>}",
-		"src/unused.ts":  "export const unused = true",
+		"canvas.json":   `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`,
+		"src/App.tsx":   "export default function App(){return <p>Before</p>}",
+		"src/unused.ts": "export const unused = true",
 	}
 	draftHash := startCanvasTestDraft(t, call, base)
-	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "workbench.json", files["workbench.json"])
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "canvas.json", files["canvas.json"])
 	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "incomplete"}, 400)
 	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", files["src/App.tsx"])
 	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/unused.ts", files["src/unused.ts"])
@@ -114,11 +114,11 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	first := w.HeadRevision
 	// Metadata changes the resource revision without changing source content.
 	w.Name = "Renamed report"
-	updatedWorkbench, err := st.UpdateWorkbench(context.Background(), &w, w.Revision)
+	updatedCanvas, err := st.UpdateCanvas(context.Background(), &w, w.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w = *updatedWorkbench
+	w = *updatedCanvas
 	updated := "export default function App(){return <p>After</p>}"
 	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", updated)
 	var draftConflict struct {
@@ -135,10 +135,10 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 		t.Fatal("edited source did not create a new revision")
 	}
 	var source struct {
-		Package workbench.Package `json:"package"`
+		Package canvas.Package `json:"package"`
 	}
 	_ = json.Unmarshal(call("GET", base+"/revisions/"+w.HeadRevision, nil, 200), &source)
-	if source.Package.Files["src/App.tsx"] != updated || source.Package.Files["workbench.json"] != files["workbench.json"] {
+	if source.Package.Files["src/App.tsx"] != updated || source.Package.Files["canvas.json"] != files["canvas.json"] {
 		t.Fatal("unchanged files were not retained")
 	}
 	if _, exists := source.Package.Files["src/unused.ts"]; exists {
@@ -151,16 +151,16 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	// A repeated commit is a no-op even though its base is now the new head.
 	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "edit"}, 200)
 	// Simulate a second writer publishing a new source while this draft is open.
-	other := workbench.Package{Files: map[string]string{"workbench.json": files["workbench.json"], "src/App.tsx": "export default function App(){return <p>Other</p>}"}}
-	otherHash, err := workbench.WritePackage(home, w.ID, other)
+	other := canvas.Package{Files: map[string]string{"canvas.json": files["canvas.json"], "src/App.tsx": "export default function App(){return <p>Other</p>}"}}
+	otherHash, err := canvas.WritePackage(home, w.ID, other)
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherWorkbench, err := st.SaveWorkbenchRevision(context.Background(), &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: otherHash, ClientRequestID: "other", CreatedAt: time.Now().UTC()}, w.HeadRevision)
+	otherCanvas, err := st.SaveCanvasRevision(context.Background(), &store.CanvasRevision{CanvasID: w.ID, Hash: otherHash, ClientRequestID: "other", CreatedAt: time.Now().UTC()}, w.HeadRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w = *otherWorkbench
+	w = *otherCanvas
 	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "src/App.tsx", "export default function App(){return <p>Mine</p>}")
 	var conflict struct {
 		Error               string `json:"error"`
@@ -171,15 +171,15 @@ func TestWorkbenchRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing
 	if conflict.Error != "revision_conflict" || conflict.CurrentRevision != w.Revision || conflict.CurrentHeadRevision != w.HeadRevision {
 		t.Fatalf("missing current revision in conflict: %+v", conflict)
 	}
-	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "workbench.json", nil)
+	draftHash = writeCanvasTestDraft(t, call, base, draftHash, "canvas.json", nil)
 	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": draftHash, "clientRequestID": "invalid"}, 400)
 }
 
-func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
+func TestCanvasQueryUsesAuthorizedAppConnection(t *testing.T) {
 	st := memstore.New()
-	apps := &workbenchFixtureApps{identity: "authorization-1"}
+	apps := &canvasFixtureApps{identity: "authorization-1"}
 	calls := 0
-	client := &http.Client{Transport: workbenchRoundTrip(func(r *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: canvasRoundTrip(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.URL.String() != "https://fixture.test/api/items?status=open" || r.Header.Get("Authorization") != "Bearer fixture-secret" {
 			t.Fatalf("wrong request: %s %+v", r.URL, r.Header)
@@ -207,14 +207,14 @@ func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 	if unauthorized.Code != 401 {
 		t.Fatal("missing token accepted")
 	}
-	var w store.Workbench
+	var w store.Canvas
 	if err := json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Fixture"}, 201), &w); err != nil {
 		t.Fatal(err)
 	}
 	base := "/canvases/" + w.ID
-	pkg := workbench.Package{Files: map[string]string{
-		"src/App.tsx":    "export default ()=> <p>Fixture</p>",
-		"workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"primary","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"status":{"type":"string","enum":["open","closed"]}},"required":["status"],"additionalProperties":false},"request":{"method":"GET","path":"/items","query":{"status":{"$input":"/status"}}},"result":{"rows":"/items","total":"/total"}}}}`,
+	pkg := canvas.Package{Files: map[string]string{
+		"src/App.tsx": "export default ()=> <p>Fixture</p>",
+		"canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"primary","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"status":{"type":"string","enum":["open","closed"]}},"required":["status"],"additionalProperties":false},"request":{"method":"GET","path":"/items","query":{"status":{"$input":"/status"}}},"result":{"rows":"/items","total":"/total"}}}}`,
 	}}
 	if err := json.Unmarshal(saveCanvasTestFiles(t, call, base, "save-1", pkg.Files), &w); err != nil {
 		t.Fatal(err)
@@ -252,12 +252,12 @@ func TestWorkbenchQueryUsesAuthorizedAppConnection(t *testing.T) {
 	}
 }
 
-func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
+func TestCanvasActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	st := memstore.New()
-	apps := &workbenchFixtureApps{identity: "authorization-1", writes: true}
+	apps := &canvasFixtureApps{identity: "authorization-1", writes: true}
 	calls := 0
 	failTransport := false
-	client := &http.Client{Transport: workbenchRoundTrip(func(r *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: canvasRoundTrip(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if failTransport {
 			return nil, fmt.Errorf("connection interrupted after dispatch")
@@ -280,10 +280,10 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 		}
 		return out.Body.Bytes()
 	}
-	var w store.Workbench
+	var w store.Canvas
 	_ = json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Actions"}, 201), &w)
 	base := "/canvases/" + w.ID
-	pkg := workbench.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "workbench.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
+	pkg := canvas.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"appID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
 	_ = json.Unmarshal(saveCanvasTestFiles(t, call, base, "save", pkg.Files), &w)
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)
 	_ = json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision, "bindings": map[string]string{"primary": "account-1"}}, 200), &w)
@@ -292,9 +292,9 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("write operation ran through automatic query")
 	}
-	prepare := func(key string, status int) store.WorkbenchAction {
+	prepare := func(key string, status int) store.CanvasAction {
 		t.Helper()
-		var a store.WorkbenchAction
+		var a store.CanvasAction
 		_ = json.Unmarshal(call("POST", base+"/actions/save/prepare", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "clientRequestID": key, "params": map[string]any{"id": "one"}}, status), &a)
 		return a
 	}
@@ -310,7 +310,7 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("unconfirmed action dispatched")
 	}
-	var done store.WorkbenchAction
+	var done store.CanvasAction
 	_ = json.Unmarshal(call("POST", path, map[string]any{"confirm": true}, 200), &done)
 	if done.State != "succeeded" || calls != 1 {
 		t.Fatalf("result %+v calls %d", done, calls)
@@ -343,8 +343,8 @@ func TestWorkbenchActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	}
 }
 
-func TestWorkbenchResponseFailuresAndBudget(t *testing.T) {
-	rest := workbench.Operation{Kind: "rest", Result: workbench.Result{Rows: "/items", Total: "/total", Success: &workbench.Condition{Pointer: "/success", Equals: true}}}
+func TestCanvasResponseFailuresAndBudget(t *testing.T) {
+	rest := canvas.Operation{Kind: "rest", Result: canvas.Result{Rows: "/items", Total: "/total", Success: &canvas.Condition{Pointer: "/success", Equals: true}}}
 	for _, response := range []map[string]any{
 		{"ok": false, "reason": "timeout"},
 		{"ok": true, "status": 500, "body_json": map[string]any{}},
@@ -352,42 +352,42 @@ func TestWorkbenchResponseFailuresAndBudget(t *testing.T) {
 		{"ok": true, "status": 200, "body_json": map[string]any{"items": []any{}, "total": float64(42), "success": false}},
 		{"ok": true, "status": 200, "body_json": map[string]any{"items": []any{}, "success": true}},
 	} {
-		if _, err := workbenchResponseData(rest, response); err == nil {
+		if _, err := canvasResponseData(rest, response); err == nil {
 			t.Fatalf("false success for %+v", response)
 		}
 	}
-	graph := workbench.Operation{Kind: "graphql"}
-	if _, err := workbenchResponseData(graph, map[string]any{"ok": true, "status": 200, "data": map[string]any{}, "errors": []any{map[string]any{"message": "partial failure"}}}); err == nil {
+	graph := canvas.Operation{Kind: "graphql"}
+	if _, err := canvasResponseData(graph, map[string]any{"ok": true, "status": 200, "data": map[string]any{}, "errors": []any{map[string]any{"message": "partial failure"}}}); err == nil {
 		t.Fatal("GraphQL errors accepted")
 	}
 	response := map[string]any{"ok": true, "status": 200, "body_json": map[string]any{"items": []any{map[string]any{"id": "one"}}, "total": float64(42), "success": true}}
-	data, err := workbenchResponseData(rest, response)
+	data, err := canvasResponseData(rest, response)
 	if err != nil || data.(map[string]any)["total"] != float64(42) {
 		t.Fatalf("source total changed %+v %v", data, err)
 	}
 	s := &Server{}
 	var releases []func()
 	for i := 0; i < 4; i++ {
-		release, ok := s.acquireWorkbenchRequest("one")
+		release, ok := s.acquireCanvasRequest("one")
 		if !ok {
 			t.Fatal("early concurrency limit")
 		}
 		releases = append(releases, release)
 	}
-	if _, ok := s.acquireWorkbenchRequest("one"); ok {
+	if _, ok := s.acquireCanvasRequest("one"); ok {
 		t.Fatal("unbounded concurrent requests")
 	}
 	for _, release := range releases {
 		release()
 	}
 	for i := 4; i < 120; i++ {
-		release, ok := s.acquireWorkbenchRequest("one")
+		release, ok := s.acquireCanvasRequest("one")
 		if !ok {
 			t.Fatal("early rate limit")
 		}
 		release()
 	}
-	if _, ok := s.acquireWorkbenchRequest("one"); ok {
+	if _, ok := s.acquireCanvasRequest("one"); ok {
 		t.Fatal("unbounded request rate")
 	}
 }

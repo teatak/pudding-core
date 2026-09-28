@@ -45,7 +45,7 @@ func (s *Server) removeCanvasArchives(c *cart.Context) error {
 		IDs     []string `json:"ids"`
 		Confirm bool     `json:"confirm"`
 	}
-	if err := decodeWorkbench(c, &req); err != nil {
+	if err := decodeCanvas(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
 	if !req.Confirm || len(req.IDs) == 0 || len(req.IDs) > 10000 {

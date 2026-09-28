@@ -156,11 +156,11 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 
 func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasItem, error) {
 	ctx := context.Background()
-	w, err := st.CreateWorkbench(ctx, &store.Workbench{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
+	w, err := st.CreateCanvas(ctx, &store.Canvas{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
 	if err != nil {
 		return nil, err
 	}
-	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
+	if _, err = st.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
 		return nil, err
 	}
 	return st.OpenCanvasResource(ctx, session, w.ID, id)

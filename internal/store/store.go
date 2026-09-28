@@ -2290,7 +2290,7 @@ func browserHistoryVisibleURL(rawURL string) string {
 // 事件 seq 由 Store 在事务内按 session 单调分配。
 // SQLite 实现要求 WAL + 单 writer;schema 契约见 schema.sql。
 type Store interface {
-	WorkbenchStore
+	CanvasStore
 	ScheduledTaskStore
 	CreateProject(ctx context.Context, p *Project) error
 	GetProject(ctx context.Context, id string) (*Project, error)

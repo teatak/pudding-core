@@ -57,7 +57,7 @@ func TestUnifiedCanvasMigrationPreservesIdentityContentAndAppState(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resources, err := st.ListWorkbenches(ctx)
+		resources, err := st.ListCanvases(ctx)
 		if err != nil || len(resources) != 1 {
 			t.Fatalf("resources %+v %v", resources, err)
 		}
@@ -80,7 +80,7 @@ func TestUnifiedCanvasMigrationPreservesIdentityContentAndAppState(t *testing.T)
 		if err != nil || len(views) != 0 {
 			t.Fatalf("legacy mounts remain: %+v %v", views, err)
 		}
-		app, err := st.GetWorkbench(ctx, "app")
+		app, err := st.GetCanvas(ctx, "app")
 		if err != nil || app.Revision != 7 || app.HeadRevision != "hash" || app.Bindings["mail"] != "account" {
 			t.Fatalf("App changed %+v %v", app, err)
 		}
@@ -115,7 +115,7 @@ func TestUnifiedCanvasMigrationFailureRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.GetWorkbench(context.Background(), store.CanvasResourceID("a", "dirty")); err == nil {
+	if _, err := st.GetCanvas(context.Background(), store.CanvasResourceID("a", "dirty")); err == nil {
 		t.Fatal(err)
 	}
 }

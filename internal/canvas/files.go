@@ -1,4 +1,4 @@
-package workbench
+package canvas
 
 import (
 	"errors"
@@ -17,9 +17,9 @@ func WritePackage(home, id string, p Package) (string, error) {
 		return "", err
 	}
 	if home == "" || !identifier.MatchString(id) {
-		return "", errors.New("invalid workbench home or ID")
+		return "", errors.New("invalid canvas home or ID")
 	}
-	parent := filepath.Join(home, "workbenches", id, "revisions")
+	parent := filepath.Join(home, "canvases", id, "revisions")
 	if err = os.MkdirAll(parent, 0700); err != nil {
 		return "", err
 	}
@@ -73,9 +73,9 @@ func WritePackage(home, id string, p Package) (string, error) {
 func ReadPackage(home, id, hash string) (Package, error) {
 	p := Package{Files: map[string]string{}}
 	if home == "" || !identifier.MatchString(id) || !revisionID.MatchString(hash) {
-		return p, errors.New("invalid workbench package reference")
+		return p, errors.New("invalid canvas package reference")
 	}
-	root := filepath.Join(home, "workbenches", id, "revisions", hash)
+	root := filepath.Join(home, "canvases", id, "revisions", hash)
 	total := int64(0)
 	err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -103,7 +103,7 @@ func ReadPackage(home, id, hash string) (Package, error) {
 			return err
 		}
 		total += info.Size()
-		policy := contracts.Workbench()
+		policy := contracts.Canvas()
 		if !info.Mode().IsRegular() || info.Size() > int64(policy.MaxFileBytes) || total > int64(policy.MaxPackageBytes) || len(p.Files) >= policy.MaxFiles {
 			return errors.New("stored package exceeds limits")
 		}

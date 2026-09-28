@@ -9,7 +9,7 @@ import (
 )
 
 func (m *Memstore) canvasProjection(v *store.CanvasItem) (*store.CanvasItem, error) {
-	w := m.workbenches[v.ResourceID]
+	w := m.canvases[v.ResourceID]
 	if w == nil || w.Deleted {
 		return nil, store.ErrNotFound
 	}
@@ -24,7 +24,7 @@ func (m *Memstore) ListCanvasItems(_ context.Context, session string) ([]*store.
 	out := []*store.CanvasItem{}
 	for _, v := range m.canvas {
 		if v.SessionID == session {
-			if w := m.workbenches[v.ResourceID]; w != nil && !w.Deleted {
+			if w := m.canvases[v.ResourceID]; w != nil && !w.Deleted {
 				item, err := m.canvasProjection(v)
 				if err != nil {
 					return nil, err
@@ -60,7 +60,7 @@ func (m *Memstore) OpenCanvasResource(_ context.Context, session, id, itemID str
 	if m.sessions[session] == nil {
 		return nil, store.ErrNotFound
 	}
-	w := m.workbenches[id]
+	w := m.canvases[id]
 	if w == nil || w.Deleted {
 		return nil, store.ErrNotFound
 	}
@@ -72,7 +72,7 @@ func (m *Memstore) OpenCanvasResource(_ context.Context, session, id, itemID str
 	}
 	key := canvasMapKey(session, itemID)
 	if m.canvas[key] != nil {
-		return nil, store.ErrWorkbenchConflict
+		return nil, store.ErrCanvasConflict
 	}
 	v := &store.CanvasItem{ID: itemID, SessionID: session, ResourceID: id, Visible: true, CreatedAt: time.Now().UTC()}
 	m.canvas[key] = v

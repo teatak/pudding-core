@@ -966,7 +966,7 @@ func responseBytes(limits []int) int {
 	return endpointMaxResponseBytes
 }
 
-// ValidateBoundRequest prevents generated workbenches from overriding fields
+// ValidateBoundRequest prevents generated canvases from overriding fields
 // owned by the selected connection. Chat tools retain their explicit-call rules.
 func ValidateBoundRequest(binding *app.EndpointBinding, method string, query map[string]any, rawBody any) error {
 	body, _ := rawBody.(map[string]any)
@@ -985,7 +985,7 @@ func ValidateBoundRequest(binding *app.EndpointBinding, method string, query map
 				continue
 			}
 			if _, exists := values[connectionFieldInjectName(field, rule)]; exists {
-				return fmt.Errorf("connection-owned field %q cannot be supplied by a workbench", field.ID)
+				return fmt.Errorf("connection-owned field %q cannot be supplied by a canvas", field.ID)
 			}
 		}
 	}

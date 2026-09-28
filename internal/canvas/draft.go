@@ -1,4 +1,4 @@
-package workbench
+package canvas
 
 import (
 	"crypto/sha256"
@@ -27,7 +27,7 @@ func draftRoot(home, id string) (string, error) {
 	if home == "" || !identifier.MatchString(id) {
 		return "", errors.New("invalid canvas draft reference")
 	}
-	return filepath.Join(home, "workbenches", id, "draft"), nil
+	return filepath.Join(home, "canvases", id, "draft"), nil
 }
 
 func ReadDraft(home, id string) (Draft, error) {
@@ -70,7 +70,7 @@ func ReadDraft(home, id string) (Draft, error) {
 		if err != nil {
 			return err
 		}
-		policy := contracts.Workbench()
+		policy := contracts.Canvas()
 		total += int(info.Size())
 		if !info.Mode().IsRegular() || info.Size() > int64(policy.MaxFileBytes) || total > policy.MaxPackageBytes || len(d.Files) >= policy.MaxFiles {
 			return errors.New("draft exceeds file limits")
@@ -158,7 +158,7 @@ func WriteDraftFile(home, id, name string, content *string, expectedHash string)
 	} else {
 		d.Files[name] = *content
 	}
-	policy := contracts.Workbench()
+	policy := contracts.Canvas()
 	if len(d.Files) > policy.MaxFiles {
 		return d, errors.New("draft exceeds file count")
 	}

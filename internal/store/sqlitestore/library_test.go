@@ -32,12 +32,12 @@ func TestCanvasesShareContentRetainHistoryAndFavorites(t *testing.T) {
 			if err := st.DeleteLibraryFavorite(ctx, "b", favorite.ID); err != nil {
 				t.Fatal(err)
 			}
-			w0, _ := st.GetWorkbench(ctx, first.ResourceID)
-			changed, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "second", ClientRequestID: "second"}, w0.HeadRevision)
+			w0, _ := st.GetCanvas(ctx, first.ResourceID)
+			changed, err := st.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w0.ID, Hash: "second", ClientRequestID: "second"}, w0.HeadRevision)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w0.ID, Hash: "stale", ClientRequestID: "stale"}, w0.HeadRevision); !errors.Is(err, store.ErrWorkbenchConflict) {
+			if _, err := st.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w0.ID, Hash: "stale", ClientRequestID: "stale"}, w0.HeadRevision); !errors.Is(err, store.ErrCanvasConflict) {
 				t.Fatalf("stale write accepted: %v", err)
 			}
 			views, err := st.ListCanvasItems(ctx, "b")
@@ -49,21 +49,21 @@ func TestCanvasesShareContentRetainHistoryAndFavorites(t *testing.T) {
 			if err != nil || len(favorites) != 0 {
 				t.Fatal("edit re-starred resource")
 			}
-			versions, err := st.ListWorkbenchRevisions(ctx, first.ResourceID)
+			versions, err := st.ListCanvasRevisions(ctx, first.ResourceID)
 			if err != nil || len(versions) != 2 {
 				t.Fatalf("missing versions: %+v %v", versions, err)
 			}
 			if err := st.DeleteSession(ctx, "a"); err != nil {
 				t.Fatal(err)
 			}
-			w, err := st.GetWorkbench(ctx, first.ResourceID)
+			w, err := st.GetCanvas(ctx, first.ResourceID)
 			if err != nil || w.SourceSessionID != "" {
 				t.Fatalf("source deletion removed resource: %+v %v", w, err)
 			}
 			if err := st.DeleteCanvasItem(ctx, "b", other.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.GetWorkbench(ctx, first.ResourceID); err != nil {
+			if _, err := st.GetCanvas(ctx, first.ResourceID); err != nil {
 				t.Fatal("closing view deleted resource")
 			}
 			reopened, err := st.OpenCanvasResource(ctx, "b", first.ResourceID, "reopened")
@@ -74,7 +74,7 @@ func TestCanvasesShareContentRetainHistoryAndFavorites(t *testing.T) {
 				t.Fatal(err)
 			}
 			w.Deleted = true
-			if _, err := st.UpdateWorkbench(ctx, w, w.Revision); err != nil {
+			if _, err := st.UpdateCanvas(ctx, w, w.Revision); err != nil {
 				t.Fatal(err)
 			}
 			views, err = st.ListCanvasItems(ctx, "b")
@@ -147,11 +147,11 @@ func TestRemovedCanvasLocalIDCanBeReusedWithoutOverwritingResource(t *testing.T)
 
 func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasItem, error) {
 	ctx := context.Background()
-	w, err := st.CreateWorkbench(ctx, &store.Workbench{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
+	w, err := st.CreateCanvas(ctx, &store.Canvas{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
 	if err != nil {
 		return nil, err
 	}
-	if _, err = st.SaveWorkbenchRevision(ctx, &store.WorkbenchRevision{WorkbenchID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
+	if _, err = st.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
 		return nil, err
 	}
 	return st.OpenCanvasResource(ctx, session, w.ID, id)

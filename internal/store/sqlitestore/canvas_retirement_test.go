@@ -81,11 +81,11 @@ func TestCanvasRetirementPreservesVersionsAppBindingsAndRestart(t *testing.T) {
 		assertWorkspaceMigrationValue(t, st.db, pair[0], pair[1])
 	}
 	ctx := context.Background()
-	app, err := st.GetWorkbench(ctx, "app")
+	app, err := st.GetCanvas(ctx, "app")
 	if err != nil || app.Revision != 8 || app.Bindings["mail"] != "account" || app.BindingVersion != 4 {
 		t.Fatalf("App changed: %+v %v", app, err)
 	}
-	mixed, err := st.GetWorkbench(ctx, "mixed")
+	mixed, err := st.GetCanvas(ctx, "mixed")
 	if err != nil || mixed.HeadRevision != "newcode" || mixed.ActiveRevision != "source" || mixed.Revision != 8 {
 		t.Fatalf("mixed canvas: %+v %v", mixed, err)
 	}

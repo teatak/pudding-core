@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-export const workbenchHash = z.string().regex(/^[a-f0-9]{64}$/);
-export const workbenchPackage = z
+export const canvasHash = z.string().regex(/^[a-f0-9]{64}$/);
+export const canvasPackage = z
   .object({ files: z.record(z.string(), z.string()) })
   .strict();
-export const workbenchSource = z
+export const canvasSource = z
   .object({ appID: z.string(), endpoint: z.string() })
   .strict();
-export const workbenchOperation = z
+export const canvasOperation = z
   .object({
     source: z.string(),
     kind: z.enum(["rest", "graphql"]),
@@ -41,21 +41,21 @@ export const workbenchOperation = z
       .optional(),
   })
   .strict();
-export const workbenchManifest = z
+export const canvasManifest = z
   .object({
     schemaVersion: z.literal(1),
     sdkVersion: z.literal("1"),
     entry: z.string(),
-    sources: z.record(z.string(), workbenchSource),
-    operations: z.record(z.string(), workbenchOperation),
+    sources: z.record(z.string(), canvasSource),
+    operations: z.record(z.string(), canvasOperation),
   })
   .strict();
-export type WorkbenchPackage = z.infer<typeof workbenchPackage>;
-export type WorkbenchManifest = z.infer<typeof workbenchManifest>;
-export type WorkbenchOperation = z.infer<typeof workbenchOperation>;
+export type CanvasPackage = z.infer<typeof canvasPackage>;
+export type CanvasManifest = z.infer<typeof canvasManifest>;
+export type CanvasOperation = z.infer<typeof canvasOperation>;
 
-export const workbenchBuildResult = z.object({
-  revisionHash: workbenchHash,
+export const canvasBuildResult = z.object({
+  revisionHash: canvasHash,
   sdkVersion: z.string(),
   compilerVersion: z.string(),
   dependencyHash: z.string(),
@@ -69,9 +69,9 @@ export const workbenchBuildResult = z.object({
     }),
   ),
 });
-export type WorkbenchBuildResult = z.infer<typeof workbenchBuildResult>;
+export type CanvasBuildResult = z.infer<typeof canvasBuildResult>;
 
-export const workbenchBridgeRequest = z
+export const canvasBridgeRequest = z
   .object({
     id: z.string().min(1).max(100),
     method: z.enum([
@@ -89,7 +89,7 @@ export const workbenchBridgeRequest = z
   })
   .strict();
 
-export const workbench = z.object({
+export const canvas = z.object({
   id: z.string(),
   name: z.string(),
   sourceSessionID: z.string().optional(),
@@ -102,15 +102,15 @@ export const workbench = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-export const workbenchRevision = z.object({
-  workbenchID: z.string(),
-  hash: workbenchHash,
+export const canvasRevision = z.object({
+  canvasID: z.string(),
+  hash: canvasHash,
   parentRevision: z.string(),
   clientRequestID: z.string(),
   createdAt: z.string(),
   buildReceipt: z
     .object({
-      revisionHash: workbenchHash,
+      revisionHash: canvasHash,
       sdkVersion: z.string(),
       compilerVersion: z.string(),
       dependencyHash: z.string(),
@@ -118,11 +118,11 @@ export const workbenchRevision = z.object({
     })
     .optional(),
 });
-export const workbenchRevisionResponse = z.object({
+export const canvasRevisionResponse = z.object({
   kind: z.literal("app"),
-  revision: workbenchRevision,
-  package: workbenchPackage,
-  manifest: workbenchManifest,
+  revision: canvasRevision,
+  package: canvasPackage,
+  manifest: canvasManifest,
 });
 export const canvasArchiveEntry = z.object({
   id: z.string(),
@@ -137,24 +137,24 @@ export const canvasArchivesResponse = z.object({
   archives: z.array(canvasArchiveEntry),
 });
 export type CanvasArchiveEntry = z.infer<typeof canvasArchiveEntry>;
-export const workbenchesResponse = z.object({
-  canvases: z.array(workbench),
+export const canvasesResponse = z.object({
+  canvases: z.array(canvas),
 });
-export const workbenchRevisionsResponse = z.object({
-  revisions: z.array(workbenchRevision),
+export const canvasRevisionsResponse = z.object({
+  revisions: z.array(canvasRevision),
 });
-export type Workbench = z.infer<typeof workbench>;
-export type WorkbenchRevision = z.infer<typeof workbenchRevision>;
-export const workbenchQueryResult = z.object({
+export type Canvas = z.infer<typeof canvas>;
+export type CanvasRevision = z.infer<typeof canvasRevision>;
+export const canvasQueryResult = z.object({
   data: z.unknown(),
   requestID: z.string(),
-  revisionHash: workbenchHash,
+  revisionHash: canvasHash,
   bindingVersion: z.number().int(),
   fetchedAt: z.string(),
 });
-export const workbenchAction = z.object({
+export const canvasAction = z.object({
   id: z.string(),
-  workbenchID: z.string(),
+  canvasID: z.string(),
   clientRequestID: z.string(),
   requestHash: z.string(),
   state: z.enum(["prepared", "executing", "succeeded", "failed", "unknown"]),
@@ -174,35 +174,35 @@ export const workbenchAction = z.object({
   }),
   result: z.unknown().optional(),
 });
-export const workbenchActionsResponse = z.object({
-  actions: z.array(workbenchAction),
+export const canvasActionsResponse = z.object({
+  actions: z.array(canvasAction),
 });
-export type WorkbenchAction = z.infer<typeof workbenchAction>;
+export type CanvasAction = z.infer<typeof canvasAction>;
 
-export const workbenchEntity = z.object({
+export const canvasEntity = z.object({
   appID: z.string(),
   connectionID: z.string(),
   entityType: z.string(),
   entityID: z.string(),
 });
-export const workbenchLink = z.object({
+export const canvasLink = z.object({
   id: z.string(),
-  workbenchID: z.string(),
-  left: workbenchEntity,
-  right: workbenchEntity,
+  canvasID: z.string(),
+  left: canvasEntity,
+  right: canvasEntity,
   createdAt: z.string(),
 });
-export const workbenchLinksResponse = z.object({
-  links: z.array(workbenchLink),
+export const canvasLinksResponse = z.object({
+  links: z.array(canvasLink),
 });
-export const workbenchEntityInput = z
+export const canvasEntityInput = z
   .object({
     source: z.string().min(1),
     entityType: z.string().min(1).max(100),
     entityID: z.string().min(1).max(500),
   })
   .strict();
-export const workbenchLinkInput = z
-  .object({ left: workbenchEntityInput, right: workbenchEntityInput })
+export const canvasLinkInput = z
+  .object({ left: canvasEntityInput, right: canvasEntityInput })
   .strict();
-export type WorkbenchLinkInput = z.infer<typeof workbenchLinkInput>;
+export type CanvasLinkInput = z.infer<typeof canvasLinkInput>;

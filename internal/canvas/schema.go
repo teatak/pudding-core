@@ -1,4 +1,4 @@
-package workbench
+package canvas
 
 import (
 	"encoding/json"
@@ -60,7 +60,7 @@ func Pointer(value any, pointer string) (any, error) {
 func ValidateSchema(schema map[string]any) error { return validateSchema(schema, 0) }
 
 func validateSchema(s map[string]any, depth int) error {
-	if depth > contracts.Workbench().MaxSchemaDepth {
+	if depth > contracts.Canvas().MaxSchemaDepth {
 		return errors.New("schema too deep")
 	}
 	t, _ := s["type"].(string)
@@ -157,7 +157,7 @@ func ValidateInput(schema map[string]any, value any) error {
 }
 
 func validateValue(s map[string]any, value any, at string, depth int) error {
-	if depth > contracts.Workbench().MaxSchemaDepth {
+	if depth > contracts.Canvas().MaxSchemaDepth {
 		return errors.New("input too deep")
 	}
 	if items, ok := s["enum"].([]any); ok {
