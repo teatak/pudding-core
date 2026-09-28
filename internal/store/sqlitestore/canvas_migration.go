@@ -20,20 +20,78 @@ const canvasMountSchema = `CREATE TABLE canvas_mounts (
  UNIQUE(session_id,resource_id)
 );`
 
+// v24 is the shipped release layout. Build and retire the old structured canvas
+// data in one transaction, leaving only the final source-canvas schema.
+func migrateFinalCanvases(tx *sql.Tx, archiveHome string) error {
+	if _, err := tx.Exec(`
+CREATE TABLE canvas_resources (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+ revision INTEGER NOT NULL,
+ head_revision TEXT NOT NULL,
+ active_revision TEXT NOT NULL,
+ bindings TEXT NOT NULL,
+ grants TEXT NOT NULL,
+ binding_version INTEGER NOT NULL,
+ deleted INTEGER NOT NULL,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+CREATE TABLE canvas_revisions (
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ hash TEXT NOT NULL,
+ parent_revision TEXT NOT NULL,
+ client_request_id TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ build_receipt TEXT NOT NULL,
+ PRIMARY KEY(canvas_id,hash),
+ UNIQUE(canvas_id,client_request_id)
+);
+CREATE TABLE canvas_saves (
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ client_request_id TEXT NOT NULL,
+ hash TEXT NOT NULL,
+ PRIMARY KEY(canvas_id,client_request_id)
+);
+CREATE TABLE canvas_actions (
+ id TEXT PRIMARY KEY,
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ client_request_id TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
+ spec TEXT NOT NULL,
+ result TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ UNIQUE(canvas_id,client_request_id)
+);
+CREATE TABLE canvas_links (
+ id TEXT PRIMARY KEY,
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ left_entity TEXT NOT NULL,
+ right_entity TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ UNIQUE(canvas_id,left_entity,right_entity)
+);`); err != nil {
+		return err
+	}
+	if err := migrateUnifiedCanvases(tx); err != nil {
+		return err
+	}
+	if err := archiveLegacyCanvases(tx, archiveHome); err != nil {
+		return err
+	}
+	if err := retireLegacyCanvasSchema(tx); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`ALTER TABLE canvas_resources DROP COLUMN grants`)
+	return err
+}
+
 // One transaction preserves resources, dirty working copies, mounts, favorites and
 // recent-open references. Immutable App packages and their hashes stay in place.
 func migrateUnifiedCanvases(tx *sql.Tx) error {
 	if _, err := tx.Exec(`
- UPDATE sessions SET loaded_app_ids=(
- SELECT json_group_array(app_id) FROM (
- SELECT CASE WHEN value='workbench-authoring' THEN 'canvas' ELSE value END AS app_id
- FROM json_each(sessions.loaded_app_ids) GROUP BY app_id ORDER BY MIN(CAST(key AS INTEGER))
- )) WHERE EXISTS(SELECT 1 FROM json_each(sessions.loaded_app_ids) WHERE value='workbench-authoring');
- ALTER TABLE workbenches RENAME TO canvas_resources;
- ALTER TABLE workbench_revisions RENAME TO canvas_revisions;
- ALTER TABLE workbench_saves RENAME TO canvas_saves;
- ALTER TABLE workbench_actions RENAME TO canvas_actions;
- ALTER TABLE workbench_links RENAME TO canvas_links;
  ALTER TABLE canvas_revisions ADD COLUMN content_json TEXT NOT NULL DEFAULT '';
  ` + canvasMountSchema); err != nil {
 		return err
@@ -90,7 +148,7 @@ func migrateUnifiedCanvases(tx *sql.Tx) error {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(`INSERT INTO canvas_revisions(workbench_id,hash,parent_revision,client_request_id,created_at,build_receipt,content_json) VALUES(?,?,'','migration-v26',?,'',?)`, id, hash, v.updated, string(b))
+		_, err = tx.Exec(`INSERT INTO canvas_revisions(canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt,content_json) VALUES(?,?,'','migration-v26',?,'',?)`, id, hash, v.updated, string(b))
 		return err
 	}
 	for _, v := range saved {

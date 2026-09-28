@@ -72,7 +72,7 @@ func (s *Store) UpdateCanvas(ctx context.Context, w *store.Canvas, expected int6
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		if w.ActiveRevision != "" {
 			var receipt string
-			if err := tx.QueryRowContext(ctx, `SELECT build_receipt FROM canvas_revisions WHERE workbench_id=? AND hash=?`, w.ID, w.ActiveRevision).Scan(&receipt); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT build_receipt FROM canvas_revisions WHERE canvas_id=? AND hash=?`, w.ID, w.ActiveRevision).Scan(&receipt); err != nil {
 				return err
 			}
 			if receipt == "" {
@@ -121,7 +121,7 @@ func saveCanvasRevisionTx(ctx context.Context, tx *sql.Tx, r *store.CanvasRevisi
 		return err
 	}
 	var hash string
-	err = tx.QueryRowContext(ctx, `SELECT hash FROM canvas_saves WHERE workbench_id=? AND client_request_id=?`, r.CanvasID, r.ClientRequestID).Scan(&hash)
+	err = tx.QueryRowContext(ctx, `SELECT hash FROM canvas_saves WHERE canvas_id=? AND client_request_id=?`, r.CanvasID, r.ClientRequestID).Scan(&hash)
 	if err == nil {
 		if hash != r.Hash {
 			return store.ErrCanvasConflict
@@ -134,11 +134,11 @@ func saveCanvasRevisionTx(ctx context.Context, tx *sql.Tx, r *store.CanvasRevisi
 	if current.HeadRevision != baseHash {
 		return store.ErrCanvasConflict
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_saves(workbench_id,client_request_id,hash) VALUES(?,?,?)`, r.CanvasID, r.ClientRequestID, r.Hash); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_saves(canvas_id,client_request_id,hash) VALUES(?,?,?)`, r.CanvasID, r.ClientRequestID, r.Hash); err != nil {
 		return err
 	}
 	// A source hash names one immutable package; saving it again reuses that version.
-	_, err = tx.ExecContext(ctx, `INSERT INTO canvas_revisions(workbench_id,hash,parent_revision,client_request_id,created_at,build_receipt) VALUES(?,?,?,?,?,'') ON CONFLICT(workbench_id,hash) DO NOTHING`, r.CanvasID, r.Hash, current.HeadRevision, r.ClientRequestID, unixMS(r.CreatedAt))
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvas_revisions(canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt) VALUES(?,?,?,?,?,'') ON CONFLICT(canvas_id,hash) DO NOTHING`, r.CanvasID, r.Hash, current.HeadRevision, r.ClientRequestID, unixMS(r.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func scanCanvasRevision(row messageScanner) (*store.CanvasRevision, error) {
 func (s *Store) ListCanvasRevisions(ctx context.Context, id string) ([]*store.CanvasRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT workbench_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM canvas_revisions WHERE workbench_id=? ORDER BY created_at DESC,hash`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM canvas_revisions WHERE canvas_id=? ORDER BY created_at DESC,hash`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +188,11 @@ func (s *Store) ListCanvasRevisions(ctx context.Context, id string) ([]*store.Ca
 func (s *Store) GetCanvasRevision(ctx context.Context, id, hash string) (*store.CanvasRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanCanvasRevision(s.db.QueryRowContext(ctx, `SELECT workbench_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM canvas_revisions WHERE workbench_id=? AND hash=?`, id, hash))
+	return scanCanvasRevision(s.db.QueryRowContext(ctx, `SELECT canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM canvas_revisions WHERE canvas_id=? AND hash=?`, id, hash))
 }
 func (s *Store) PutCanvasBuildReceipt(ctx context.Context, id, hash string, receipt json.RawMessage) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE canvas_revisions SET build_receipt=? WHERE workbench_id=? AND hash=?`, string(receipt), id, hash)
+		result, err := tx.ExecContext(ctx, `UPDATE canvas_revisions SET build_receipt=? WHERE canvas_id=? AND hash=?`, string(receipt), id, hash)
 		if err != nil {
 			return err
 		}

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const actionColumns = `id,workbench_id,client_request_id,request_hash,state,spec,result,created_at`
+const actionColumns = `id,canvas_id,client_request_id,request_hash,state,spec,result,created_at`
 
 func scanCanvasAction(row messageScanner) (*store.CanvasAction, error) {
 	a := &store.CanvasAction{}
@@ -33,7 +33,7 @@ func scanCanvasAction(row messageScanner) (*store.CanvasAction, error) {
 func (s *Store) CreateCanvasAction(ctx context.Context, a *store.CanvasAction) (*store.CanvasAction, error) {
 	var out *store.CanvasAction
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		old, err := scanCanvasAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND client_request_id=?`, a.CanvasID, a.ClientRequestID))
+		old, err := scanCanvasAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE canvas_id=? AND client_request_id=?`, a.CanvasID, a.ClientRequestID))
 		if err == nil {
 			if old.RequestHash != a.RequestHash {
 				return store.ErrCanvasConflict
@@ -48,7 +48,7 @@ func (s *Store) CreateCanvasAction(ctx context.Context, a *store.CanvasAction) (
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_actions(id,workbench_id,client_request_id,request_hash,state,spec,created_at) VALUES(?,?,?,?,'prepared',?,?)`, a.ID, a.CanvasID, a.ClientRequestID, a.RequestHash, string(spec), unixMS(a.CreatedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_actions(id,canvas_id,client_request_id,request_hash,state,spec,created_at) VALUES(?,?,?,?,'prepared',?,?)`, a.ID, a.CanvasID, a.ClientRequestID, a.RequestHash, string(spec), unixMS(a.CreatedAt))
 		out = a
 		return err
 	})
@@ -57,12 +57,12 @@ func (s *Store) CreateCanvasAction(ctx context.Context, a *store.CanvasAction) (
 func (s *Store) GetCanvasAction(ctx context.Context, wid, id string) (*store.CanvasAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanCanvasAction(s.db.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND id=?`, wid, id))
+	return scanCanvasAction(s.db.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE canvas_id=? AND id=?`, wid, id))
 }
 func (s *Store) ListCanvasActions(ctx context.Context, wid string) ([]*store.CanvasAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? ORDER BY created_at DESC LIMIT 100`, wid)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE canvas_id=? ORDER BY created_at DESC LIMIT 100`, wid)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (s *Store) ListCanvasActions(ctx context.Context, wid string) ([]*store.Can
 }
 func (s *Store) ClaimCanvasAction(ctx context.Context, wid, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		a, err := scanCanvasAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE workbench_id=? AND id=?`, wid, id))
+		a, err := scanCanvasAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM canvas_actions WHERE canvas_id=? AND id=?`, wid, id))
 		if err != nil {
 			return err
 		}
@@ -99,7 +99,7 @@ func (s *Store) FinishCanvasAction(ctx context.Context, wid, id, state string, r
 		return store.ErrCanvasConflict
 	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		r, err := tx.ExecContext(ctx, `UPDATE canvas_actions SET state=?,result=? WHERE workbench_id=? AND id=? AND state='executing'`, state, string(result), wid, id)
+		r, err := tx.ExecContext(ctx, `UPDATE canvas_actions SET state=?,result=? WHERE canvas_id=? AND id=? AND state='executing'`, state, string(result), wid, id)
 		if err != nil {
 			return err
 		}

@@ -21,7 +21,7 @@ func TestRetryMigrationPreservesDataAndRollsBack(t *testing.T) {
 	}
 	st.Close()
 	db := openMigrationTestDB(t, path)
-	useV25CanvasFixture(t, db)
+	useV24CanvasFixture(t, db)
 	if _, err := db.Exec(`DROP INDEX turns_one_retry; ALTER TABLE turns DROP COLUMN retry_of_turn_id; PRAGMA user_version=19;`); err != nil {
 		t.Fatal(err)
 	}

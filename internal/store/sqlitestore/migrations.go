@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 28
+	currentSchemaVersion       = 25
 )
 
 var (
@@ -33,67 +33,7 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
-	28: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`ALTER TABLE canvas_resources DROP COLUMN grants`)
-		return err
-	},
-	27: retireLegacyCanvasSchema,
-	26: migrateUnifiedCanvases,
-	25: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`
-CREATE TABLE IF NOT EXISTS workbench_links (
- id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
- left_entity TEXT NOT NULL,
- right_entity TEXT NOT NULL,
- created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,left_entity,right_entity)
-);
-CREATE TABLE IF NOT EXISTS workbench_actions (
- id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
- client_request_id TEXT NOT NULL,
- request_hash TEXT NOT NULL,
- state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
- spec TEXT NOT NULL,
- result TEXT NOT NULL DEFAULT '',
- created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,client_request_id)
-);
-CREATE TABLE IF NOT EXISTS workbenches (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
-    revision INTEGER NOT NULL,
-    head_revision TEXT NOT NULL,
-    active_revision TEXT NOT NULL,
-    bindings TEXT NOT NULL,
-    grants TEXT NOT NULL,
-    binding_version INTEGER NOT NULL,
-    deleted INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS workbench_revisions (
-    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
-    hash TEXT NOT NULL,
-    parent_revision TEXT NOT NULL,
-    client_request_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    build_receipt TEXT NOT NULL,
-    PRIMARY KEY(workbench_id, hash),
-    UNIQUE(workbench_id, client_request_id)
-);
-CREATE TABLE IF NOT EXISTS workbench_saves (
-    workbench_id TEXT NOT NULL REFERENCES workbenches(id) ON DELETE CASCADE,
-    client_request_id TEXT NOT NULL,
-    hash TEXT NOT NULL,
-    PRIMARY KEY(workbench_id, client_request_id)
-);
-
-`)
-		return err
-	},
+	25: func(tx *sql.Tx) error { return migrateFinalCanvases(tx, "") },
 	24: func(tx *sql.Tx) error {
 		// Early development v23 databases were opened before run snapshots
 		// were added. Keep the completed v23 layout and its snapshots intact.
@@ -675,19 +615,8 @@ func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
 					return err
 				}
 				version = currentSchemaVersion
-			} else if err := validateSchema(db, schemaV27Contract); err == nil {
-				if err := setSchemaVersion(db, 27); err != nil {
-					return err
-				}
-				version = 27
-			} else if err := validateSchema(db, schemaV26Contract); err == nil {
-				if err := setSchemaVersion(db, 26); err != nil {
-					return err
-				}
-				version = 26
-			} else if err := validateSchema(db, schemaV25Contract); err == nil {
-				// Version 9 is data-only and cannot be inferred from the schema.
-				// Stamp the latest identifiable layout so migration 9 still runs.
+			} else if err := validateSchema(db, schemaV24Contract); err == nil {
+				// Unversioned layouts still need the data-only v9 cleanup.
 				if err := setSchemaVersion(db, currentSchemaLayoutVersion); err != nil {
 					return err
 				}
@@ -738,13 +667,8 @@ func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
 				continue
 			}
 			migration := schemaMigrations[next]
-			if next == 27 {
-				migration = func(tx *sql.Tx) error {
-					if err := archiveLegacyCanvases(tx, archiveHome); err != nil {
-						return err
-					}
-					return retireLegacyCanvasSchema(tx)
-				}
+			if next == 25 {
+				migration = func(tx *sql.Tx) error { return migrateFinalCanvases(tx, archiveHome) }
 			}
 			if err := runSchemaMigration(db, next, migration); err != nil {
 				return err
@@ -973,53 +897,26 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 	"usage_calibrations": {"provider", "model", "sample_count", "input_ratio_ewma", "last_estimated_input_tokens", "last_actual_input_tokens", "updated_at"},
 })
 
-var schemaV25Contract = func() schemaContract {
-	out := extendSchemaContract(schemaV5Contract, map[string][]string{
-		"session_children":     {"child_session_id", "parent_session_id"},
-		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
-		"collaboration_stops":  {"parent_turn_id"},
-		"workbenches":          {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "grants", "binding_version", "deleted", "created_at", "updated_at"},
-		"workbench_revisions":  {"workbench_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
-		"workbench_links":      {"id", "workbench_id", "left_entity", "right_entity", "created_at"},
-		"workbench_actions":    {"id", "workbench_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
-		"workbench_saves":      {"workbench_id", "client_request_id", "hash"},
-		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
-		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
-		"computer_app_grants":  {"session_id", "app_id", "created_at"},
-		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
-		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
-	})
-	delete(out.tables, "usage_calibrations")
-	delete(out.tables, "canvas_closed_items")
-	for i, index := range out.indexes {
-		if index == "canvas_closed_items_closed_at" {
-			out.indexes = append(out.indexes[:i], out.indexes[i+1:]...)
-			break
-		}
-	}
-	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
-	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
-	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
-	out.tables["projects"] = append(out.tables["projects"], "last_activity_at")
-	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
-	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
-	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
-	out.indexes = append(out.indexes, "session_children_parent")
-	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
-	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items"}
-	return out
-}()
+// The shipped v24 layout is also recognized when an existing database has a
+// missing user_version. The development-only v25–v28 layouts are not inferred.
+var schemaV24Contract = schemaContract{tables: map[string][]string{
+	"canvas_items":        {"session_id", "id", "item_json", "source_saved_item_id", "saved_dirty"},
+	"canvas_saved_items":  {"id", "item_json", "window_json"},
+	"scheduled_task_runs": {"id", "task_id", "schedule"},
+	"session_dispatches":  {"child_session_id", "parent_turn_id"},
+	"library_favorites":   {"id", "kind", "saved_item_id"},
+}}
 
-var schemaV26Contract = func() schemaContract {
+var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":  {"parent_turn_id"},
-		"canvas_resources":     {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "grants", "binding_version", "deleted", "created_at", "updated_at"},
-		"canvas_revisions":     {"workbench_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content_json"},
-		"canvas_links":         {"id", "workbench_id", "left_entity", "right_entity", "created_at"},
-		"canvas_actions":       {"id", "workbench_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
-		"canvas_saves":         {"workbench_id", "client_request_id", "hash"},
+		"canvas_resources":     {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
+		"canvas_revisions":     {"canvas_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
+		"canvas_links":         {"id", "canvas_id", "left_entity", "right_entity", "created_at"},
+		"canvas_actions":       {"id", "canvas_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
+		"canvas_saves":         {"canvas_id", "client_request_id", "hash"},
 		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
 		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
 		"computer_app_grants":  {"session_id", "app_id", "created_at"},
@@ -1028,7 +925,7 @@ var schemaV26Contract = func() schemaContract {
 	})
 	delete(out.tables, "canvas_items")
 	delete(out.tables, "canvas_saved_items")
-	out.tables["canvas_mounts"] = []string{"session_id", "id", "resource_id", "window_json", "visible", "created_at"}
+	out.tables["canvas_mounts"] = []string{"session_id", "id", "resource_id", "visible", "created_at"}
 	out.indexes = slices.DeleteFunc(out.indexes, func(v string) bool { return strings.HasPrefix(v, "canvas_") })
 	delete(out.tables, "usage_calibrations")
 	delete(out.tables, "canvas_closed_items")
@@ -1051,20 +948,6 @@ var schemaV26Contract = func() schemaContract {
 	return out
 }()
 
-var schemaV27Contract = func() schemaContract {
-	out := extendSchemaContract(schemaV26Contract, nil)
-	out.tables["canvas_revisions"] = slices.DeleteFunc(out.tables["canvas_revisions"], func(v string) bool { return v == "content_json" })
-	out.tables["canvas_mounts"] = slices.DeleteFunc(out.tables["canvas_mounts"], func(v string) bool { return v == "window_json" })
-	out.forbiddenTables = append([]string(nil), schemaV26Contract.forbiddenTables...)
-	return out
-}()
-
-var currentSchemaContract = func() schemaContract {
-	out := extendSchemaContract(schemaV27Contract, nil)
-	out.tables["canvas_resources"] = slices.DeleteFunc(out.tables["canvas_resources"], func(v string) bool { return v == "grants" })
-	return out
-}()
-
 func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
 	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}
 	for name, columns := range base.tables {
@@ -1081,12 +964,23 @@ func validateCurrentSchema(db *sql.DB) error {
 	if err := validateSchema(db, currentSchemaContract); err != nil {
 		return err
 	}
-	columns, err := tableColumns(db, "canvas_resources")
-	if err != nil {
-		return err
-	}
-	if _, ok := columns["grants"]; ok {
-		return fmt.Errorf("retired canvas grants column remains")
+	for table, retired := range map[string][]string{
+		"canvas_resources": {"grants"},
+		"canvas_revisions": {"workbench_id", "content_json"},
+		"canvas_saves":     {"workbench_id"},
+		"canvas_actions":   {"workbench_id"},
+		"canvas_links":     {"workbench_id"},
+		"canvas_mounts":    {"window_json"},
+	} {
+		columns, err := tableColumns(db, table)
+		if err != nil {
+			return err
+		}
+		for _, column := range retired {
+			if _, ok := columns[column]; ok {
+				return fmt.Errorf("retired column %s.%s remains", table, column)
+			}
+		}
 	}
 	return nil
 }

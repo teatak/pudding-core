@@ -10,7 +10,7 @@ import (
 
 func archiveLegacyCanvases(tx *sql.Tx, home string) error {
 	rows, err := tx.Query(`SELECT w.id,w.name,coalesce(w.source_session_id,''),coalesce(s.title,''),w.active_revision,w.head_revision,w.revision,w.deleted,w.created_at,w.updated_at
- FROM canvas_resources w LEFT JOIN sessions s ON s.id=w.source_session_id WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.workbench_id=w.id AND r.content_json<>'') ORDER BY w.id`)
+ FROM canvas_resources w LEFT JOIN sessions s ON s.id=w.source_session_id WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.canvas_id=w.id AND r.content_json<>'') ORDER BY w.id`)
 	if err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func archiveLegacyCanvases(tx *sql.Tx, home string) error {
 		return err
 	}
 	for _, s := range snapshots {
-		versions, err := tx.Query(`SELECT hash,parent_revision,client_request_id,created_at,content_json FROM canvas_revisions WHERE workbench_id=? AND content_json<>'' ORDER BY created_at,hash`, s.ID)
+		versions, err := tx.Query(`SELECT hash,parent_revision,client_request_id,created_at,content_json FROM canvas_revisions WHERE canvas_id=? AND content_json<>'' ORDER BY created_at,hash`, s.ID)
 		if err != nil {
 			return err
 		}
@@ -101,15 +101,15 @@ func archiveRows(tx *sql.Tx, query, id string) ([]map[string]any, error) {
 }
 func retireLegacyCanvasSchema(tx *sql.Tx) error {
 	_, err := tx.Exec(`
- DELETE FROM canvas_resources WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json<>'') AND NOT EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json='');
+ DELETE FROM canvas_resources WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json<>'') AND NOT EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json='');
  UPDATE canvas_resources SET
- head_revision=coalesce((SELECT hash FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json='' ORDER BY created_at DESC,hash DESC LIMIT 1),''),
- active_revision=CASE WHEN active_revision IN(SELECT hash FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json<>'') THEN coalesce((SELECT hash FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json='' AND r.build_receipt<>'' ORDER BY created_at DESC,hash DESC LIMIT 1),'') ELSE active_revision END,
+ head_revision=coalesce((SELECT hash FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json='' ORDER BY created_at DESC,hash DESC LIMIT 1),''),
+ active_revision=CASE WHEN active_revision IN(SELECT hash FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json<>'') THEN coalesce((SELECT hash FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json='' AND r.build_receipt<>'' ORDER BY created_at DESC,hash DESC LIMIT 1),'') ELSE active_revision END,
  revision=revision+1
- WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.workbench_id=canvas_resources.id AND r.content_json<>'');
- DELETE FROM canvas_saves WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.workbench_id=canvas_saves.workbench_id AND r.hash=canvas_saves.hash AND r.content_json<>'');
+ WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.canvas_id=canvas_resources.id AND r.content_json<>'');
+ DELETE FROM canvas_saves WHERE EXISTS(SELECT 1 FROM canvas_revisions r WHERE r.canvas_id=canvas_saves.canvas_id AND r.hash=canvas_saves.hash AND r.content_json<>'');
  DELETE FROM canvas_revisions WHERE content_json<>'';
- UPDATE canvas_revisions SET parent_revision='' WHERE parent_revision<>'' AND NOT EXISTS(SELECT 1 FROM canvas_revisions p WHERE p.workbench_id=canvas_revisions.workbench_id AND p.hash=canvas_revisions.parent_revision);
+ UPDATE canvas_revisions SET parent_revision='' WHERE parent_revision<>'' AND NOT EXISTS(SELECT 1 FROM canvas_revisions p WHERE p.canvas_id=canvas_revisions.canvas_id AND p.hash=canvas_revisions.parent_revision);
  ALTER TABLE canvas_revisions DROP COLUMN content_json;
  ALTER TABLE canvas_mounts DROP COLUMN window_json;
  `)

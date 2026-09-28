@@ -169,16 +169,48 @@ CREATE TABLE IF NOT EXISTS session_usage (
     updated_at                         INTEGER NOT NULL
 );
 
-CREATE TABLE canvas_mounts (
- session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
- id TEXT NOT NULL,
- resource_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
- window_json TEXT NOT NULL DEFAULT '',
- visible INTEGER NOT NULL DEFAULT 1,
- created_at INTEGER NOT NULL,
- PRIMARY KEY(session_id,id),
- UNIQUE(session_id,resource_id)
+CREATE TABLE IF NOT EXISTS canvas_items (
+    session_id            TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    id                    TEXT    NOT NULL,
+    canvas_id             TEXT    NOT NULL DEFAULT 'default',
+    source_session_id     TEXT    NOT NULL DEFAULT '',
+    created_by_session_id TEXT    NOT NULL DEFAULT '',
+    updated_by_session_id TEXT    NOT NULL DEFAULT '',
+    kind                  TEXT    NOT NULL DEFAULT '',
+    title                 TEXT    NOT NULL DEFAULT '',
+    item_json             TEXT    NOT NULL,
+    window_json           TEXT    NOT NULL DEFAULT '',
+    source_saved_item_id  TEXT    NOT NULL DEFAULT '',
+    base_saved_revision   INTEGER NOT NULL DEFAULT 0,
+    saved_dirty           INTEGER NOT NULL DEFAULT 0,
+    visible               INTEGER NOT NULL DEFAULT 1,
+    created_at            INTEGER NOT NULL,
+    updated_at            INTEGER NOT NULL,
+    PRIMARY KEY (session_id, id)
 );
+
+CREATE INDEX IF NOT EXISTS canvas_items_canvas_visible_updated
+    ON canvas_items(session_id, visible, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS canvas_items_session_saved
+    ON canvas_items(session_id, source_saved_item_id)
+    WHERE source_saved_item_id <> '';
+
+CREATE TABLE IF NOT EXISTS canvas_saved_items (
+    id                TEXT    PRIMARY KEY,
+    source_session_id TEXT    NOT NULL DEFAULT '',
+    source_item_id    TEXT    NOT NULL DEFAULT '',
+    kind              TEXT    NOT NULL DEFAULT '',
+    title             TEXT    NOT NULL DEFAULT '',
+    item_json         TEXT    NOT NULL,
+    window_json       TEXT    NOT NULL DEFAULT '',
+    revision          INTEGER NOT NULL DEFAULT 1,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS canvas_saved_items_updated_at
+    ON canvas_saved_items(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS session_browser_tabs (
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -249,7 +281,7 @@ CREATE TABLE IF NOT EXISTS library_favorites (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK(kind IN ('canvas','web')),
     source_session_id TEXT NOT NULL DEFAULT '',
-    saved_item_id TEXT REFERENCES canvas_resources(id) ON DELETE CASCADE,
+    saved_item_id TEXT REFERENCES canvas_saved_items(id) ON DELETE CASCADE,
     url TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
@@ -267,7 +299,7 @@ CREATE TABLE IF NOT EXISTS library_recent_opens (
     root_path TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     opened_at INTEGER NOT NULL,
-    FOREIGN KEY(source_session_id,canvas_item_id) REFERENCES canvas_mounts(session_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(source_session_id,canvas_item_id) REFERENCES canvas_items(session_id,id) ON DELETE CASCADE,
     CHECK ((kind='canvas' AND canvas_item_id IS NOT NULL AND root_path='' AND path='')
         OR (kind='file' AND canvas_item_id IS NULL AND root_path<>'' AND path<>''))
 );
@@ -323,56 +355,3 @@ CREATE TABLE IF NOT EXISTS scheduled_task_runs (
 );
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_task ON scheduled_task_runs(task_id, accepted_at);
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(handoff, accepted_at);
-
-CREATE TABLE canvas_resources (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
-    revision INTEGER NOT NULL,
-    head_revision TEXT NOT NULL,
-    active_revision TEXT NOT NULL,
-    bindings TEXT NOT NULL,
-    grants TEXT NOT NULL,
-    binding_version INTEGER NOT NULL,
-    deleted INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-CREATE TABLE canvas_revisions (
-    workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
-    hash TEXT NOT NULL,
-    parent_revision TEXT NOT NULL,
-    client_request_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    build_receipt TEXT NOT NULL,
-    content_json TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(workbench_id, hash),
-    UNIQUE(workbench_id, client_request_id)
-);
-CREATE TABLE canvas_saves (
-    workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
-    client_request_id TEXT NOT NULL,
-    hash TEXT NOT NULL,
-    PRIMARY KEY(workbench_id, client_request_id)
-);
-
-CREATE TABLE canvas_actions (
- id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
- client_request_id TEXT NOT NULL,
- request_hash TEXT NOT NULL,
- state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
- spec TEXT NOT NULL,
- result TEXT NOT NULL DEFAULT '',
- created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,client_request_id)
-);
-
-CREATE TABLE canvas_links (
- id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
- left_entity TEXT NOT NULL,
- right_entity TEXT NOT NULL,
- created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,left_entity,right_entity)
-);

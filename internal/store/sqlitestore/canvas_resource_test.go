@@ -2,7 +2,6 @@ package sqlitestore
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -111,49 +110,6 @@ func TestSaveCanvasRevisionIgnoresMetadataRevision(t *testing.T) {
 	}
 	if _, err = s.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w.ID, Hash: "stale", ClientRequestID: "save-stale", CreatedAt: now}, "first"); !errors.Is(err, store.ErrCanvasConflict) {
 		t.Fatalf("stale source base was accepted: %v", err)
-	}
-}
-
-func TestCanvasMigrationFailureRollsBackAndPreservesOldData(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "v24.db")
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	createTestSession(t, s, "old_session")
-	useV25CanvasFixture(t, s.db)
-	if _, err = s.db.Exec(`DROP TABLE workbench_saves; DROP TABLE workbench_revisions; DROP TABLE workbenches; PRAGMA user_version=24;`); err != nil {
-		t.Fatal(err)
-	}
-	s.Close()
-	migration := schemaMigrations[25]
-	schemaMigrations[25] = func(tx *sql.Tx) error {
-		if err := migration(tx); err != nil {
-			return err
-		}
-		return errors.New("injected migration failure")
-	}
-	_, err = Open(dbPath)
-	schemaMigrations[25] = migration
-	if err == nil {
-		t.Fatal("migration failure swallowed")
-	}
-	db := openMigrationTestDB(t, dbPath)
-	var version, count int
-	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 24 {
-		t.Fatalf("failed migration advanced version: %d %v", version, err)
-	}
-	if err = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='canvases'`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("partial migration remained: %d %v", count, err)
-	}
-	db.Close()
-	s, err = Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	if _, err = s.GetSession(context.Background(), "old_session"); err != nil {
-		t.Fatalf("old session lost: %v", err)
 	}
 }
 

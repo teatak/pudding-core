@@ -129,7 +129,7 @@ func TestQueuedReorderRollback(t *testing.T) {
 func TestQueuedOrderMigrationFromV17(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "s")
-	useV25CanvasFixture(t, st.db)
+	useV24CanvasFixture(t, st.db)
 	if _, err := st.db.Exec(`DROP INDEX queued_inputs_session_active;
 ALTER TABLE queued_inputs DROP COLUMN sort_order;
 CREATE INDEX queued_inputs_session_active ON queued_inputs(session_id,created_at) WHERE status IN ('queued','editing','cancelled');

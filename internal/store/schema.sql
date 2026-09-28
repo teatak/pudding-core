@@ -337,39 +337,39 @@ CREATE TABLE canvas_resources (
     updated_at INTEGER NOT NULL
 );
 CREATE TABLE canvas_revisions (
-    workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+    canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
     hash TEXT NOT NULL,
     parent_revision TEXT NOT NULL,
     client_request_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     build_receipt TEXT NOT NULL,
-    PRIMARY KEY(workbench_id, hash),
-    UNIQUE(workbench_id, client_request_id)
+    PRIMARY KEY(canvas_id, hash),
+    UNIQUE(canvas_id, client_request_id)
 );
 CREATE TABLE canvas_saves (
-    workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+    canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
     client_request_id TEXT NOT NULL,
     hash TEXT NOT NULL,
-    PRIMARY KEY(workbench_id, client_request_id)
+    PRIMARY KEY(canvas_id, client_request_id)
 );
 
 CREATE TABLE canvas_actions (
  id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
  client_request_id TEXT NOT NULL,
  request_hash TEXT NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
  spec TEXT NOT NULL,
  result TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,client_request_id)
+ UNIQUE(canvas_id,client_request_id)
 );
 
 CREATE TABLE canvas_links (
  id TEXT PRIMARY KEY,
- workbench_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
  left_entity TEXT NOT NULL,
  right_entity TEXT NOT NULL,
  created_at INTEGER NOT NULL,
- UNIQUE(workbench_id,left_entity,right_entity)
+ UNIQUE(canvas_id,left_entity,right_entity)
 );

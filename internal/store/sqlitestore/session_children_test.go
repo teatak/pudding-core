@@ -26,7 +26,7 @@ func TestChildSessionMigrationRollbackAndRestart(t *testing.T) {
 	}
 	st.Close()
 	db := openMigrationTestDB(t, path)
-	useV25CanvasFixture(t, db)
+	useV24CanvasFixture(t, db)
 	if _, err := db.Exec(`DROP TABLE session_dispatches; DROP TABLE collaboration_stops; DROP TABLE session_children; PRAGMA user_version=20;`); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestCollaborationMigrationRollbackPreservesChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
-	useV25CanvasFixture(t, db)
+	useV24CanvasFixture(t, db)
 	if _, err := db.Exec(`DROP TABLE session_dispatches; DROP TABLE collaboration_stops; PRAGMA user_version=21;`); err != nil {
 		t.Fatal(err)
 	}

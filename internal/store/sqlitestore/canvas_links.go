@@ -11,7 +11,7 @@ import (
 func (s *Store) ListCanvasLinks(ctx context.Context, wid string) ([]*store.CanvasLink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,left_entity,right_entity,created_at FROM canvas_links WHERE workbench_id=? ORDER BY created_at DESC`, wid)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,left_entity,right_entity,created_at FROM canvas_links WHERE canvas_id=? ORDER BY created_at DESC`, wid)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (s *Store) PutCanvasLink(ctx context.Context, l *store.CanvasLink, expected
 		}
 		left, _ := json.Marshal(l.Left)
 		right, _ := json.Marshal(l.Right)
-		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_links(id,workbench_id,left_entity,right_entity,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workbench_id,left_entity,right_entity) DO NOTHING`, l.ID, l.CanvasID, string(left), string(right), unixMS(l.CreatedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO canvas_links(id,canvas_id,left_entity,right_entity,created_at) VALUES(?,?,?,?,?) ON CONFLICT(canvas_id,left_entity,right_entity) DO NOTHING`, l.ID, l.CanvasID, string(left), string(right), unixMS(l.CreatedAt))
 		return err
 	})
 }
@@ -59,7 +59,7 @@ func (s *Store) DeleteCanvasLink(ctx context.Context, wid, id string, expected i
 		if w.Revision != expected {
 			return store.ErrCanvasConflict
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM canvas_links WHERE workbench_id=? AND id=?`, wid, id)
+		_, err = tx.ExecContext(ctx, `DELETE FROM canvas_links WHERE canvas_id=? AND id=?`, wid, id)
 		return err
 	})
 }

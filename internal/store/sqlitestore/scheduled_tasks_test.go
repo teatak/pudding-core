@@ -87,7 +87,7 @@ func TestScheduledTasksMigrationArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	createTestSession(t, st, "old-session")
-	useV25CanvasFixture(t, st.db)
+	useV24CanvasFixture(t, st.db)
 	if _, err = st.db.Exec(`DROP TABLE scheduled_task_runs; DROP TABLE scheduled_tasks; PRAGMA user_version=22;`); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestScheduledRunsVersion23Migration(t *testing.T) {
 			} else if _, err := st.db.Exec(`ALTER TABLE scheduled_task_runs DROP COLUMN schedule`); err != nil {
 				t.Fatal(err)
 			}
-			useV25CanvasFixture(t, st.db)
+			useV24CanvasFixture(t, st.db)
 			if _, err := st.db.Exec(`PRAGMA user_version=23`); err != nil {
 				t.Fatal(err)
 			}

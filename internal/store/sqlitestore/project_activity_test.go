@@ -203,7 +203,7 @@ func TestProjectActivityTransactionRollback(t *testing.T) {
 
 func TestProjectActivityMigrationFromV18(t *testing.T) {
 	st, path := openTestStore(t)
-	useV25CanvasFixture(t, st.db)
+	useV24CanvasFixture(t, st.db)
 	if _, err := st.db.Exec(`ALTER TABLE projects DROP COLUMN last_activity_at;
 INSERT INTO projects(id,name,created_at,updated_at) VALUES('p','Keep project',10,999),('empty','Empty',20,999),('new','New',200,999);
 INSERT INTO sessions(id,provider,model,project_id,created_at,updated_at,last_activity_at,archived_at)
