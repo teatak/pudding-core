@@ -2,21 +2,58 @@ package tool
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/attachment"
 )
+
+func TestBrowserToolResultPreservesCanvasScreenshot(t *testing.T) {
+	home := t.TempDir()
+	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'E', 'N', 'D'}
+	raw, err := json.Marshal(map[string]any{"content": []any{
+		map[string]any{"type": "text", "text": `{"runtime":{"text":"Canvas ready"}}`},
+		map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(imageBytes)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "canvas_inspect"}, raw, home)
+	if !result.Ok || len(result.Attachments) != 1 || len(result.ContextAttachments) != 1 {
+		t.Fatalf("canvas inspection lost screenshot: %+v", result)
+	}
+	if result.ContextAttachments[0].AttachmentKey != result.Attachments[0].AttachmentKey || result.Attachments[0].Origin != attachment.OriginTool {
+		t.Fatalf("screenshot not routed to model: %+v", result)
+	}
+	path, ok, err := attachment.NewService(home).Path("sess_canvas", result.Attachments[0].AttachmentKey)
+	if err != nil || !ok {
+		t.Fatalf("stored screenshot missing: ok=%v err=%v", ok, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != string(imageBytes) {
+		t.Fatalf("stored screenshot changed: err=%v", err)
+	}
+}
+
+func TestBrowserToolResultRejectsInspectionWithoutScreenshot(t *testing.T) {
+	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "canvas_inspect"}, json.RawMessage(`{"content":[{"type":"text","text":"{}"}]}`), t.TempDir())
+	if result.Ok || !strings.Contains(result.Content, "canvas_screenshot_missing") {
+		t.Fatalf("missing screenshot must be explicit: %+v", result)
+	}
+}
 
 func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	runner := NewBrowserMCPRunner()
+	runner := NewBrowserMCPRunner(t.TempDir())
 	srv := httptest.NewServer(runner)
 	defer srv.Close()
 
@@ -88,7 +125,7 @@ func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	runner := NewBrowserMCPRunner()
+	runner := NewBrowserMCPRunner(t.TempDir())
 	srv := httptest.NewServer(runner)
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")

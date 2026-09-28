@@ -1,7 +1,9 @@
 package tool
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,11 +17,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
 type BrowserMCPRunner struct {
+	homeDir  string
 	mu       sync.Mutex
 	nextID   atomic.Int64
 	sessions []*browserMCPSession
@@ -42,8 +46,8 @@ type BrowserMCPToolSnapshot struct {
 	AppID       string          `json:"appID,omitempty"`
 }
 
-func NewBrowserMCPRunner() *BrowserMCPRunner {
-	return &BrowserMCPRunner{}
+func NewBrowserMCPRunner(homeDir string) *BrowserMCPRunner {
+	return &BrowserMCPRunner{homeDir: homeDir}
 }
 
 func (r *BrowserMCPRunner) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -52,7 +56,8 @@ func (r *BrowserMCPRunner) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		slog.Warn("browser mcp: accept failed", "err", err)
 		return
 	}
-	conn.SetReadLimit(1 << 20)
+	// Tool results can include a PNG screenshot; keep the wire frame bounded.
+	conn.SetReadLimit(16 << 20)
 	session := &browserMCPSession{
 		id:          store.NewID("mcp"),
 		connectedAt: time.Now(),
@@ -139,7 +144,7 @@ func (r *BrowserMCPRunner) Call(ctx context.Context, call Call) Result {
 	if err != nil {
 		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
 	}
-	return browserToolResult(call, raw)
+	return browserToolResult(call, raw, r.homeDir)
 }
 
 func (r *BrowserMCPRunner) addSession(session *browserMCPSession) {
@@ -542,25 +547,49 @@ func sessionScopedBrowserTool(name string) bool {
 	return strings.HasPrefix(name, "canvas_") || name == RequestUserInput
 }
 
-func browserToolResult(call Call, raw json.RawMessage) Result {
+func browserToolResult(call Call, raw json.RawMessage, homeDir string) Result {
 	out := Result{CallID: call.CallID, Name: call.Name, Ok: true}
 	var decoded struct {
 		IsError bool `json:"isError"`
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Data     string `json:"data"`
+			MimeType string `json:"mimeType"`
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err == nil && len(decoded.Content) > 0 {
 		var parts []string
 		for _, item := range decoded.Content {
-			if item.Text != "" {
+			if item.Type == "text" && item.Text != "" {
 				parts = append(parts, item.Text)
+			}
+			if item.Type == "image" && !decoded.IsError {
+				if item.MimeType != "image/png" || item.Data == "" {
+					return toolJSONError(out, "invalid_tool_image", "Browser MCP screenshot must be a nonempty PNG")
+				}
+				data, err := base64.StdEncoding.DecodeString(item.Data)
+				if err != nil {
+					return toolJSONError(out, "invalid_tool_image", err.Error())
+				}
+				stored, err := attachment.NewService(homeDir).StoreReader(call.SessionID, "canvas-inspection.png", item.MimeType, bytes.NewReader(data))
+				if err != nil {
+					return toolJSONError(out, "attachment_store_failed", err.Error())
+				}
+				stored.Origin = attachment.OriginTool
+				out.Attachments = append(out.Attachments, stored)
+				out.ContextAttachments = append(out.ContextAttachments, stored)
 			}
 		}
 		out.Ok = !decoded.IsError
 		out.Content = strings.Join(parts, "\n")
+		if call.Name == "canvas_inspect" && out.Ok && len(out.ContextAttachments) == 0 {
+			return toolJSONError(out, "canvas_screenshot_missing", "Canvas inspection returned no screenshot")
+		}
 		return out
+	}
+	if call.Name == "canvas_inspect" {
+		return toolJSONError(out, "canvas_screenshot_missing", "Canvas inspection returned no screenshot")
 	}
 	if len(raw) > 0 {
 		out.Content = string(raw)

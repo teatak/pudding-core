@@ -155,7 +155,7 @@ func Start(opts Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, err
 	}
-	browserMCP := tool.NewBrowserMCPRunner()
+	browserMCP := tool.NewBrowserMCPRunner(dir)
 	apps.WithRuntimeSource(browserMCP)
 	appMCP := tool.NewAppMCPRunner(apps)
 	camera := desktopcamera.New()
