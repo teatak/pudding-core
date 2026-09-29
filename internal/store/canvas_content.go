@@ -25,6 +25,7 @@ func ProjectCanvasItem(mount *CanvasItem, w *Canvas) *CanvasItem {
 	out := *mount
 	out.ResourceID, out.Revision = w.ID, w.Revision
 	out.Title, out.SourceSessionID, out.UpdatedAt = w.Name, w.SourceSessionID, w.UpdatedAt
+	out.Icon, out.IconColor = w.Icon, w.IconColor
 	out.Kind = "app"
 	return &out
 }

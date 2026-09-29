@@ -12,6 +12,8 @@ var ErrCanvasConflict = errors.New("canvas revision conflict")
 type Canvas struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
+	Icon            string            `json:"icon,omitempty"`
+	IconColor       string            `json:"iconColor,omitempty"`
 	SourceSessionID string            `json:"sourceSessionID,omitempty"`
 	Revision        int64             `json:"revision"`
 	HeadRevision    string            `json:"headRevision"`

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 25
+	currentSchemaVersion       = 26
 )
 
 var (
@@ -33,6 +33,11 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	26: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE canvas_resources ADD COLUMN icon TEXT NOT NULL DEFAULT '';
+ALTER TABLE canvas_resources ADD COLUMN icon_color TEXT NOT NULL DEFAULT '';`)
+		return err
+	},
 	25: func(tx *sql.Tx) error { return migrateFinalCanvases(tx, "") },
 	24: func(tx *sql.Tx) error {
 		// Early development v23 databases were opened before run snapshots
@@ -912,7 +917,7 @@ var currentSchemaContract = func() schemaContract {
 		"session_children":     {"child_session_id", "parent_session_id"},
 		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":  {"parent_turn_id"},
-		"canvas_resources":     {"id", "name", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
+		"canvas_resources":     {"id", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
 		"canvas_revisions":     {"canvas_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
 		"canvas_links":         {"id", "canvas_id", "left_entity", "right_entity", "created_at"},
 		"canvas_actions":       {"id", "canvas_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},

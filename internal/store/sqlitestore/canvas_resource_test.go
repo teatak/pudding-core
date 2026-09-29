@@ -83,6 +83,45 @@ func TestCanvasVersionsSurviveSessionDeletionAndRestart(t *testing.T) {
 	}
 }
 
+func TestCanvasAppearanceSurvivesMountAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "canvas.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, s, "origin")
+	w, err := s.CreateCanvas(ctx, &store.Canvas{ID: "appearance", Name: "Weather", Icon: "cloud-sun", IconColor: "blue", SourceSessionID: "origin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Icon, w.IconColor = "chart-column", "teal"
+	w, err = s.UpdateCanvas(ctx, w, w.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := s.OpenCanvasResource(ctx, "origin", w.ID, "view")
+	if err != nil || item.Icon != "chart-column" || item.IconColor != "teal" {
+		t.Fatalf("mount appearance: %+v %v", item, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	w, err = s.GetCanvas(ctx, "appearance")
+	if err != nil || w.Icon != "chart-column" || w.IconColor != "teal" {
+		t.Fatalf("reopened appearance: %+v %v", w, err)
+	}
+	items, err := s.ListCanvasItems(ctx, "origin")
+	if err != nil || len(items) != 1 || items[0].Icon != w.Icon || items[0].IconColor != w.IconColor {
+		t.Fatalf("reopened mounts: %+v %v", items, err)
+	}
+}
+
 func TestSaveCanvasRevisionIgnoresMetadataRevision(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(filepath.Join(t.TempDir(), "canvas.db"))

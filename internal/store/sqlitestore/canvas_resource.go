@@ -10,13 +10,13 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const canvasColumns = `id,name,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at`
+const canvasColumns = `id,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at`
 
 func scanCanvas(row messageScanner) (*store.Canvas, error) {
 	w := &store.Canvas{}
 	var bindings string
 	var created, updated int64
-	if err := row.Scan(&w.ID, &w.Name, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -60,7 +60,7 @@ func (s *Store) CreateCanvas(ctx context.Context, w *store.Canvas) (*store.Canva
 			}
 			session = w.SourceSessionID
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO canvas_resources(id,name,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Name, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
+		_, err := tx.ExecContext(ctx, `INSERT INTO canvas_resources(id,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Name, w.Icon, w.IconColor, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
 		return err
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *Store) UpdateCanvas(ctx context.Context, w *store.Canvas, expected int6
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND deleted=0`, w.Name, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, unixMS(time.Now()), w.ID, expected)
+		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND deleted=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, unixMS(time.Now()), w.ID, expected)
 		if err != nil {
 			return err
 		}

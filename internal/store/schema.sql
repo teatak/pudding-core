@@ -326,6 +326,8 @@ CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(ha
 CREATE TABLE canvas_resources (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '',
+    icon_color TEXT NOT NULL DEFAULT '',
     source_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
     revision INTEGER NOT NULL,
     head_revision TEXT NOT NULL,

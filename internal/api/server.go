@@ -180,6 +180,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/canvas-archives/:archiveID/export").GET(s.exportCanvasArchive)
 	app.Route("/canvases").GET(s.listCanvases).POST(s.createCanvas)
 	app.Route("/canvases/:canvasID").GET(s.getCanvas).DELETE(s.deleteCanvas)
+	app.Route("/canvases/:canvasID/appearance").PATCH(s.patchCanvasAppearance)
 	app.Route("/canvases/:canvasID/revisions").GET(s.listCanvasRevisions)
 	app.Route("/canvases/:canvasID/revisions/:hash").GET(s.getCanvasRevision)
 	app.Route("/canvases/:canvasID/draft").GET(s.getCanvasDraft).POST(s.startCanvasDraft)

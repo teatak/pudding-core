@@ -92,6 +92,8 @@ export const canvasBridgeRequest = z
 export const canvas = z.object({
   id: z.string(),
   name: z.string(),
+  icon: z.string().optional(),
+  iconColor: z.string().optional(),
   sourceSessionID: z.string().optional(),
   revision: z.number().int(),
   headRevision: z.string(),

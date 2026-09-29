@@ -15,6 +15,8 @@ import (
 type libraryEntry struct {
 	store.LibraryFavorite
 	FavoriteID string    `json:"favoriteID,omitempty"`
+	Icon       string    `json:"icon,omitempty"`
+	IconColor  string    `json:"iconColor,omitempty"`
 	CanvasKind string    `json:"canvasKind,omitempty"`
 	Revision   int64     `json:"revision,omitempty"`
 	UpdatedAt  time.Time `json:"updatedAt"`
@@ -48,7 +50,8 @@ func (s *Server) listLibrary(c *cart.Context) error {
 
 		entries = append(entries, libraryEntry{
 			LibraryFavorite: store.LibraryFavorite{ID: "canvas:" + item.ID, Kind: "canvas", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Name, CreatedAt: item.CreatedAt},
-			FavoriteID:      savedFavorites[item.ID], CanvasKind: "app", Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
+			Icon:            item.Icon, IconColor: item.IconColor,
+			FavoriteID: savedFavorites[item.ID], CanvasKind: "app", Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
 		})
 	}
 	ids := make([]string, 0, len(entries))

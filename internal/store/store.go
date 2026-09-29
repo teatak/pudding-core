@@ -2150,6 +2150,8 @@ type CanvasItem struct {
 	UpdatedBySessionID string    `json:"updatedBySessionID,omitempty"`
 	Kind               string    `json:"kind"`
 	Title              string    `json:"title,omitempty"`
+	Icon               string    `json:"icon,omitempty"`
+	IconColor          string    `json:"iconColor,omitempty"`
 	ResourceID         string    `json:"resourceID"`
 	Revision           int64     `json:"revision"`
 	Visible            bool      `json:"visible"`

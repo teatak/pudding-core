@@ -10,7 +10,7 @@ import (
 )
 
 const canvasMountSelect = `SELECT m.session_id,m.id,m.resource_id,m.visible,m.created_at,
- w.name,coalesce(w.source_session_id,''),w.revision,w.updated_at
+ w.name,w.icon,w.icon_color,coalesce(w.source_session_id,''),w.revision,w.updated_at
  FROM canvas_mounts m JOIN canvas_resources w ON w.id=m.resource_id AND w.deleted=0`
 
 func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
@@ -18,7 +18,7 @@ func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
 	w := &store.Canvas{}
 	var created, updated int64
 
-	if err := row.Scan(&m.SessionID, &m.ID, &m.ResourceID, &m.Visible, &created, &w.Name, &w.SourceSessionID, &w.Revision, &updated); err != nil {
+	if err := row.Scan(&m.SessionID, &m.ID, &m.ResourceID, &m.Visible, &created, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}

@@ -296,6 +296,8 @@ export const canvasItem = z.object({
   updatedBySessionID: z.string().optional(),
   kind: z.literal("app"),
   title: z.string().optional(),
+  icon: z.string().optional(),
+  iconColor: z.string().optional(),
   resourceID: z.string(),
   revision: z.number().int(),
   visible: z.boolean(),
@@ -312,6 +314,7 @@ export const libraryEntry = z.object({
  id: z.string(), kind: z.enum(["canvas", "web"]), sourceSessionID: z.string(),
  savedItemID: z.string().optional(), url: z.string().optional(),
  title: z.string().optional(), createdAt: z.string(), updatedAt: z.string(), favoriteID: z.string().optional(),
+ icon: z.string().optional(), iconColor: z.string().optional(),
  canvasKind: z.string().optional(), revision: z.number().optional(), sourceSessionTitle: z.string().optional(), sourceSessionAvailable: z.boolean(),
  sourceProjectName: z.string().optional(), available: z.boolean(),
 });

@@ -50,6 +50,49 @@ func (f canvasRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { re
 
 type canvasTestCall func(string, string, any, int) []byte
 
+func TestCanvasAppearanceCanBeCreatedAndChanged(t *testing.T) {
+	st := memstore.New()
+	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("fixture-token", nil)
+	call := func(method, path string, input any, status int) []byte {
+		t.Helper()
+		body, _ := json.Marshal(input)
+		r := httptest.NewRequest(method, path, bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer fixture-token")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, r)
+		if out.Code != status {
+			t.Fatalf("%s %s: %d %s want %d", method, path, out.Code, out.Body.String(), status)
+		}
+		return out.Body.Bytes()
+	}
+	call("POST", "/canvases", map[string]any{"name": "Invalid", "icon": "Bad/Icon"}, 400)
+	var resource store.Canvas
+	if err := json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Weather", "icon": "cloud-sun", "iconColor": "blue"}, 201), &resource); err != nil {
+		t.Fatal(err)
+	}
+	if resource.Icon != "cloud-sun" || resource.IconColor != "blue" {
+		t.Fatalf("create appearance: %+v", resource)
+	}
+	path := "/canvases/" + resource.ID
+	call("PATCH", path+"/appearance", map[string]any{"expectedRevision": resource.Revision, "icon": "cloud-sun", "iconColor": "invalid"}, 400)
+	call("PATCH", path+"/appearance", map[string]any{"expectedRevision": resource.Revision - 1, "icon": "chart-column", "iconColor": "teal"}, 409)
+	if err := json.Unmarshal(call("PATCH", path+"/appearance", map[string]any{"expectedRevision": resource.Revision, "icon": "chart-column", "iconColor": "teal"}, 200), &resource); err != nil {
+		t.Fatal(err)
+	}
+	if resource.Icon != "chart-column" || resource.IconColor != "teal" {
+		t.Fatalf("patched appearance: %+v", resource)
+	}
+	var listed struct {
+		Canvases []store.Canvas `json:"canvases"`
+	}
+	if err := json.Unmarshal(call("GET", "/canvases", nil, 200), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Canvases) != 1 || listed.Canvases[0].Icon != resource.Icon || listed.Canvases[0].IconColor != resource.IconColor {
+		t.Fatalf("listed appearance: %+v", listed.Canvases)
+	}
+}
+
 func startCanvasTestDraft(t *testing.T, call canvasTestCall, base string) string {
 	t.Helper()
 	var draft struct {
