@@ -162,6 +162,48 @@ func TestResponsesRequestShapeWithToolHistory(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestDropsInterruptedToolHistory(t *testing.T) {
+	client := NewResponses(Config{BaseURL: "http://example.test"})
+	httpReq, err := client.newRequest(context.Background(), provider.Request{
+		Model: "model-a",
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "completed", Name: "lookup", Args: json.RawMessage(`{}`)},
+				{Type: provider.PartToolResult, CallID: "completed", Name: "lookup", Ok: true, Content: `{"ok":true}`},
+				{Type: provider.PartToolUse, CallID: "interrupted", Name: "builtin_file_patch", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: provider.RoleUser, Text: "continue"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpReq.Body.Close()
+	var body responsesRequest
+	if err := json.NewDecoder(httpReq.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Input) != 3 || body.Input[0].Type != "function_call" || body.Input[0].CallID != "completed" ||
+		body.Input[1].Type != "function_call_output" || body.Input[1].CallID != "completed" ||
+		body.Input[2].Role != "user" || body.Input[2].Content != "continue" {
+		t.Fatalf("unpaired call should not be replayed: %+v", body.Input)
+	}
+}
+
+func TestResponsesRequestDropsUnpairedNativeContinuation(t *testing.T) {
+	inputs := []responsesInputMessage{
+		{Raw: `{"type":"function_call","call_id":"interrupted","name":"lookup","arguments":"{}"}`},
+		{Raw: `{"type":"function_call","call_id":"completed","name":"lookup","arguments":"{}"}`},
+		{Type: "function_call_output", CallID: "completed", Output: `{"ok":true}`},
+		{Type: "function_call_output", CallID: "orphan", Output: `{"ok":false}`},
+		{Role: "user", Content: "continue"},
+	}
+	got := sanitizeResponsesToolInputs(inputs)
+	if len(got) != 3 || got[0] != inputs[1] || got[1] != inputs[2] || got[2] != inputs[4] {
+		t.Fatalf("unexpected sanitized inputs: %+v", got)
+	}
+}
+
 func TestResponsesContinuationReplaysNativeOutputItems(t *testing.T) {
 	out := make(chan provider.Chunk, 8)
 	err := readResponsesSSE(context.Background(), strings.NewReader(

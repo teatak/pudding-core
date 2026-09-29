@@ -537,6 +537,8 @@ type chatToolFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	// Keep false on the wire: upstream gateways may otherwise require optional fields.
+	Strict bool `json:"strict"`
 }
 
 type chatToolCall struct {

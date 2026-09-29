@@ -93,6 +93,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 	for _, msg := range req.Messages {
 		body.Input = append(body.Input, responsesInputsFor(msg)...)
 	}
+	body.Input = sanitizeResponsesToolInputs(body.Input)
 	if len(req.Tools) > 0 {
 		body.Tools = make([]responsesTool, 0, len(req.Tools))
 		for _, tool := range req.Tools {
@@ -305,6 +306,8 @@ type responsesTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	// Pudding schemas contain optional fields; omitted strict can normalize them to required.
+	Strict bool `json:"strict"`
 }
 
 type responsesStreamFrame struct {
@@ -363,6 +366,52 @@ func responsesUsageInfo(u responsesUsage) provider.UsageInfo {
 		OutputContentTokens:   output,
 		OutputReasoningTokens: reasoning,
 	}
+}
+
+// Interrupted turns can leave a canonical tool call without a result. Responses
+// requires every replayed function_call to have a matching output.
+func sanitizeResponsesToolInputs(inputs []responsesInputMessage) []responsesInputMessage {
+	type pair struct {
+		calls   int
+		outputs int
+	}
+	pairs := make(map[string]pair)
+	itemTypes := make([]string, len(inputs))
+	callIDs := make([]string, len(inputs))
+	for i, item := range inputs {
+		itemTypes[i], callIDs[i] = item.Type, item.CallID
+		if item.Raw != "" {
+			var raw struct {
+				Type   string `json:"type"`
+				CallID string `json:"call_id"`
+			}
+			if json.Unmarshal([]byte(item.Raw), &raw) == nil {
+				itemTypes[i], callIDs[i] = raw.Type, raw.CallID
+			}
+		}
+		count := pairs[callIDs[i]]
+		switch itemTypes[i] {
+		case "function_call":
+			count.calls++
+		case "function_call_output":
+			count.outputs++
+		default:
+			continue
+		}
+		pairs[callIDs[i]] = count
+	}
+	out := make([]responsesInputMessage, 0, len(inputs))
+	for i, item := range inputs {
+		switch itemTypes[i] {
+		case "function_call", "function_call_output":
+			count := pairs[callIDs[i]]
+			if callIDs[i] == "" || count.calls != 1 || count.outputs != 1 {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func responsesInputsFor(msg provider.Message) []responsesInputMessage {
