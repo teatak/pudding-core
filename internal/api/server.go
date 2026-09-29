@@ -145,7 +145,6 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
 	"/canvases",
-	"/canvas-archives",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
@@ -175,9 +174,6 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
-	app.Route("/canvas-archives").GET(s.listCanvasArchives).DELETE(s.removeCanvasArchives)
-	app.Route("/canvas-archives/:archiveID/preview").GET(s.previewCanvasArchive)
-	app.Route("/canvas-archives/:archiveID/export").GET(s.exportCanvasArchive)
 	app.Route("/canvases").GET(s.listCanvases).POST(s.createCanvas)
 	app.Route("/canvases/:canvasID").GET(s.getCanvas).DELETE(s.deleteCanvas)
 	app.Route("/canvases/:canvasID/revisions").GET(s.listCanvasRevisions)

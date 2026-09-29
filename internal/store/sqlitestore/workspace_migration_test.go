@@ -75,7 +75,7 @@ func TestWorkspaceMigrationFromPublishedV13(t *testing.T) {
 			{"SELECT app_id FROM computer_app_grants WHERE session_id='s'", "com.apple.calculator"},
 			{"SELECT title FROM browser_history WHERE id='h'", "Keep history"},
 			{"SELECT title FROM session_browser_tabs WHERE tab_id='b'", "Keep tab"},
-			{"SELECT COUNT(*) FROM library_favorites WHERE saved_item_id='saved'", "0"},
+			{"SELECT COUNT(*) FROM library_favorites WHERE saved_item_id='saved'", "1"},
 			{"SELECT COUNT(*) FROM sqlite_master WHERE name='canvas_closed_items'", "0"},
 			{"SELECT COUNT(*) FROM library_recent_opens", "0"},
 			{"SELECT COUNT(*) FROM pragma_table_info('library_favorites') WHERE name IN ('root_path','path')", "0"},
@@ -84,7 +84,7 @@ func TestWorkspaceMigrationFromPublishedV13(t *testing.T) {
 		} {
 			assertWorkspaceMigrationValue(t, st.db, check[0], check[1])
 		}
-		assertArchivesContain(t, path, "working", "saved", "closed")
+		assertConvertedCanvasesContain(t, path, "working", "saved", "closed")
 		if err := st.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func TestWorkspaceMigrationFailureRollsBackWholeUpgrade(t *testing.T) {
 	}
 	defer st.Close()
 	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
-	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_mounts WHERE id='closed-item'", "0")
+	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_mounts WHERE id='closed-item'", "1")
 }
 
 func TestWorkspaceMigrationRejectsUnregisteredVersionsWithoutChanges(t *testing.T) {

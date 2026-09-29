@@ -591,7 +591,7 @@ func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
 func prepareSchema(db *sql.DB, path string) error {
 	return prepareSchemaWithHome(db, path, filepath.Dir(path))
 }
-func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
+func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 	version, err := schemaVersion(db)
 	if err != nil {
 		return err
@@ -668,7 +668,7 @@ func prepareSchemaWithHome(db *sql.DB, path, archiveHome string) error {
 			}
 			migration := schemaMigrations[next]
 			if next == 25 {
-				migration = func(tx *sql.Tx) error { return migrateFinalCanvases(tx, archiveHome) }
+				migration = func(tx *sql.Tx) error { return migrateFinalCanvases(tx, sourceHome) }
 			}
 			if err := runSchemaMigration(db, next, migration); err != nil {
 				return err

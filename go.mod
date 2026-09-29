@@ -30,4 +30,5 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
+	github.com/yuin/goldmark v1.7.16
 )

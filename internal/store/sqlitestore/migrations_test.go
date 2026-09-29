@@ -622,10 +622,10 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 0 {
-		t.Fatalf("legacy canvas remains: %+v", active)
+	if len(active) != 2 {
+		t.Fatalf("migrated canvases missing: %+v", active)
 	}
-	assertArchivesContain(t, path, "active_keep", "old_keep", "active_orphan", "legacy_closed_closed_orphan")
+	assertConvertedCanvasesContain(t, path, "active_keep", "old_keep", "active_orphan", "legacy_closed_closed_orphan")
 
 }
 

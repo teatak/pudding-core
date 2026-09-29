@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/canvasarchive"
+	"github.com/teatak/pudding-core/internal/canvas"
 )
 
 func releaseV24Schema(t *testing.T) string {
@@ -48,7 +48,7 @@ func canvasV24Fixture(t *testing.T) string {
 	return path
 }
 
-func TestFinalCanvasMigrationArchivesReleaseDataAndRestart(t *testing.T) {
+func TestFinalCanvasMigrationConvertsReleaseDataAndRestart(t *testing.T) {
 	path := canvasV24Fixture(t)
 	for i := 0; i < 2; i++ {
 		st, err := Open(path)
@@ -56,25 +56,24 @@ func TestFinalCanvasMigrationArchivesReleaseDataAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "25")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources", "0")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources", "3")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='canvas_id'", "1")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='workbench_id'", "0")
-		archives, err := canvasarchive.List(filepath.Dir(path))
-		if err != nil || len(archives) != 3 {
-			t.Fatalf("archives %+v %v", archives, err)
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_mounts", "3")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM library_favorites", "1")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM library_recent_opens", "1")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources WHERE active_revision=head_revision AND active_revision<>''", "3")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_revisions WHERE build_receipt<>''", "0")
+		var hash string
+		if err := st.db.QueryRow("SELECT head_revision FROM canvas_resources WHERE id='saved'").Scan(&hash); err != nil {
+			t.Fatal(err)
 		}
-		var contents string
-		for _, entry := range archives {
-			b, err := os.ReadFile(filepath.Join(entry.Path, "original.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			contents += string(b)
+		pkg, err := canvas.ReadPackage(filepath.Dir(path), "saved", hash)
+		if err != nil || !strings.Contains(pkg.Files["src/App.tsx"], "saved") {
+			t.Fatal(pkg, err)
 		}
-		if !strings.Contains(contents, "unsaved") || !strings.Contains(contents, "saved") || !strings.Contains(contents, "migration-v25") {
-			t.Fatal("lost release content or final migration identity")
-		}
+		assertConvertedCanvasesContain(t, path, "unsaved", "saved", "migration-v25")
 		st.Close()
 	}
 }

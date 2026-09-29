@@ -27,8 +27,8 @@ type Store struct {
 
 func Open(path string) (*Store, error) { return OpenWithHome(path, filepath.Dir(path)) }
 
-// OpenWithHome locates offline archives in the same dev/release home as the daemon.
-func OpenWithHome(path, archiveHome string) (*Store, error) {
+// OpenWithHome locates migrated source packages in the same dev/release home as the daemon.
+func OpenWithHome(path, sourceHome string) (*Store, error) {
 	if err := searchtext.Prepare(); err != nil {
 		return nil, fmt.Errorf("sqlite: prepare search tokenizer: %w", err)
 	}
@@ -53,7 +53,7 @@ func OpenWithHome(path, archiveHome string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: enable wal: %w", err)
 	}
-	if err := prepareSchemaWithHome(db, path, archiveHome); err != nil {
+	if err := prepareSchemaWithHome(db, path, sourceHome); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

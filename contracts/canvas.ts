@@ -124,19 +124,6 @@ export const canvasRevisionResponse = z.object({
   package: canvasPackage,
   manifest: canvasManifest,
 });
-export const canvasArchiveEntry = z.object({
-  id: z.string(),
-  canvasID: z.string(),
-  name: z.string(),
-  archivedAt: z.string(),
-  versionCount: z.number().int(),
-  path: z.string(),
-  warnings: z.array(z.string()),
-});
-export const canvasArchivesResponse = z.object({
-  archives: z.array(canvasArchiveEntry),
-});
-export type CanvasArchiveEntry = z.infer<typeof canvasArchiveEntry>;
 export const canvasesResponse = z.object({
   canvases: z.array(canvas),
 });

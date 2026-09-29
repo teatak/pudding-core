@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 )
 
-// CanvasContent is retained only for the immutable v26 migration and offline archival.
+// CanvasContent is retained only for the v24-to-v25 source conversion.
 type CanvasContent struct {
 	Kind  string          `json:"kind"`
 	Title string          `json:"title"`

@@ -20,9 +20,9 @@ const canvasMountSchema = `CREATE TABLE canvas_mounts (
  UNIQUE(session_id,resource_id)
 );`
 
-// v24 is the shipped release layout. Build and retire the old structured canvas
-// data in one transaction, leaving only the final source-canvas schema.
-func migrateFinalCanvases(tx *sql.Tx, archiveHome string) error {
+// v24 is the shipped release layout. Convert the old structured canvas
+// data to source packages in one transaction, leaving only the final source-canvas schema.
+func migrateFinalCanvases(tx *sql.Tx, sourceHome string) error {
 	if _, err := tx.Exec(`
 CREATE TABLE canvas_resources (
  id TEXT PRIMARY KEY,
@@ -78,10 +78,7 @@ CREATE TABLE canvas_links (
 	if err := migrateUnifiedCanvases(tx); err != nil {
 		return err
 	}
-	if err := archiveLegacyCanvases(tx, archiveHome); err != nil {
-		return err
-	}
-	if err := retireLegacyCanvasSchema(tx); err != nil {
+	if err := convertLegacyCanvases(tx, sourceHome); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`ALTER TABLE canvas_resources DROP COLUMN grants`)
@@ -89,7 +86,7 @@ CREATE TABLE canvas_links (
 }
 
 // Build temporary resource snapshots from the v24 structured canvas tables so
-// the archive includes dirty copies, mounts, favorites and recent references.
+// conversion preserves dirty copies, mounts, favorites and recent references.
 func migrateUnifiedCanvases(tx *sql.Tx) error {
 	if _, err := tx.Exec(`
  ALTER TABLE canvas_revisions ADD COLUMN content_json TEXT NOT NULL DEFAULT '';
@@ -133,7 +130,7 @@ func migrateUnifiedCanvases(tx *sql.Tx) error {
 	}
 	resources := map[string]bool{}
 	insert := func(id string, v legacy) error {
-		// Preserve historical payloads exactly; new edits validate supported renderers.
+		// Keep the payload intact until source conversion; conversion errors roll back the upgrade.
 		b, err := json.Marshal(store.CanvasContent{Kind: v.kind, Title: v.title, Item: json.RawMessage(v.item)})
 		if err != nil {
 			return err

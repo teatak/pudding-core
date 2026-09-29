@@ -35,10 +35,10 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 0 {
+	if len(items) != 2 {
 		t.Fatalf("retained items: %+v", items)
 	}
-	assertArchivesContain(t, path, "current", "Recover me", "Other session", "closed-id")
+	assertConvertedCanvasesContain(t, path, "current", "Recover me", "Other session", "closed-id")
 	var oldTables int
 	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='canvas_closed_items'`).Scan(&oldTables); err != nil || oldTables != 0 {
 		t.Fatalf("old content source still exists: %d, %v", oldTables, err)
@@ -53,8 +53,8 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 	}
 	defer again.Close()
 	items, err = again.ListCanvasItems(ctx, "retain-a")
-	if err != nil || len(items) != 0 {
+	if err != nil || len(items) != 2 {
 		t.Fatalf("restart lost retained content: %+v %v", items, err)
 	}
-	assertArchivesContain(t, path, "current", "Recover me", "Other session")
+	assertConvertedCanvasesContain(t, path, "current", "Recover me", "Other session")
 }
