@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,20 @@ import (
 	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
 )
+
+var canvasIconID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
+
+func validCanvasAppearance(icon, color string) bool {
+	if icon != "" && !canvasIconID.MatchString(icon) {
+		return false
+	}
+	switch color {
+	case "", "violet", "blue", "teal", "green", "amber", "rose", "slate":
+		return true
+	default:
+		return false
+	}
+}
 
 func decodeCanvas(c *cart.Context, target any) error {
 	limit := contracts.Canvas().MaxRequestBytes
@@ -55,6 +70,8 @@ func (s *Server) createCanvas(c *cart.Context) error {
 	var req struct {
 		Name            string `json:"name"`
 		SourceSessionID string `json:"sourceSessionID,omitempty"`
+		Icon            string `json:"icon,omitempty"`
+		IconColor       string `json:"iconColor,omitempty"`
 	}
 	if err := decodeCanvas(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -63,8 +80,11 @@ func (s *Server) createCanvas(c *cart.Context) error {
 	if req.Name == "" || len(req.Name) > 200 {
 		return badRequest(c, "name is required (max 200 bytes)")
 	}
+	if !validCanvasAppearance(req.Icon, req.IconColor) {
+		return badRequest(c, "invalid canvas appearance")
+	}
 	now := time.Now().UTC()
-	w, err := s.store.CreateCanvas(c.Request.Context(), &store.Canvas{ID: store.NewID("canvas"), Name: req.Name, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now})
+	w, err := s.store.CreateCanvas(c.Request.Context(), &store.Canvas{ID: store.NewID("canvas"), Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		return s.canvasError(c, err)
 	}
@@ -78,6 +98,32 @@ func (s *Server) getCanvas(c *cart.Context) error {
 		return s.canvasError(c, err)
 	}
 	c.JSON(http.StatusOK, w)
+	return nil
+}
+
+func (s *Server) patchCanvasAppearance(c *cart.Context) error {
+	id, _ := c.Param("canvasID")
+	var req struct {
+		ExpectedRevision int64   `json:"expectedRevision"`
+		Icon             *string `json:"icon"`
+		IconColor        *string `json:"iconColor"`
+	}
+	if err := decodeCanvas(c, &req); err != nil {
+		return badRequest(c, err.Error())
+	}
+	if req.Icon == nil || req.IconColor == nil || !validCanvasAppearance(*req.Icon, *req.IconColor) {
+		return badRequest(c, "invalid canvas appearance")
+	}
+	w, err := s.store.GetCanvas(c.Request.Context(), id)
+	if err != nil {
+		return s.canvasError(c, err)
+	}
+	w.Icon, w.IconColor = *req.Icon, *req.IconColor
+	updated, err := s.store.UpdateCanvas(c.Request.Context(), w, req.ExpectedRevision)
+	if err != nil {
+		return s.canvasError(c, err)
+	}
+	c.JSON(http.StatusOK, updated)
 	return nil
 }
 func (s *Server) deleteCanvas(c *cart.Context) error {

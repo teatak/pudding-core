@@ -39,7 +39,7 @@ func main() {
 	}
 }
 func run() error {
-	home := flag.String("home", "", "target home (requires an existing schema 25 database)")
+	home := flag.String("home", "", "target home (requires an existing schema 26 database)")
 	archives := flag.String("archives", "", "legacy archive directory")
 	assets := flag.String("asset-home", "", "home containing referenced attachments")
 	flag.Parse()
@@ -59,8 +59,8 @@ func restore(home, archives, assets string) error {
 	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version != 25 {
-		return fmt.Errorf("expected schema 25, got %d", version)
+	if version != 26 {
+		return fmt.Errorf("expected schema 26, got %d", version)
 	}
 	tx, err := db.Begin()
 	if err != nil {

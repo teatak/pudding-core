@@ -1,6 +1,7 @@
 package sqlitestore
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
@@ -10,7 +11,70 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/canvas"
+	"github.com/teatak/pudding-core/internal/store"
 )
+
+func canvasV25AppearanceFixture(t *testing.T, keepColorColumn bool) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "canvas.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateCanvas(context.Background(), &store.Canvas{ID: "old", Name: "Existing canvas"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`ALTER TABLE canvas_resources DROP COLUMN icon`); err != nil {
+		t.Fatal(err)
+	}
+	if !keepColorColumn {
+		if _, err := db.Exec(`ALTER TABLE canvas_resources DROP COLUMN icon_color`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version=25`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCanvasAppearanceMigrationPreservesResourcesAndRestarts(t *testing.T) {
+	path := canvasV25AppearanceFixture(t, false)
+	for range 2 {
+		st, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resource, err := st.GetCanvas(context.Background(), "old")
+		if err != nil || resource.Name != "Existing canvas" || resource.Icon != "" || resource.IconColor != "" {
+			t.Fatalf("migrated resource: %+v %v", resource, err)
+		}
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCanvasAppearanceMigrationFailureRollsBack(t *testing.T) {
+	path := canvasV25AppearanceFixture(t, true)
+	if st, err := Open(path); err == nil {
+		st.Close()
+		t.Fatal("duplicate icon_color column did not fail migration")
+	}
+	db := openMigrationTestDB(t, path)
+	defer db.Close()
+	assertWorkspaceMigrationValue(t, db, "PRAGMA user_version", "25")
+	assertWorkspaceMigrationValue(t, db, "SELECT count(*) FROM pragma_table_info('canvas_resources') WHERE name='icon'", "0")
+	assertWorkspaceMigrationValue(t, db, "SELECT name FROM canvas_resources WHERE id='old'", "Existing canvas")
+}
 
 func releaseV24Schema(t *testing.T) string {
 	t.Helper()
@@ -55,7 +119,7 @@ func TestFinalCanvasMigrationConvertsReleaseDataAndRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "25")
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources", "3")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='canvas_id'", "1")
