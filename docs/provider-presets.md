@@ -47,8 +47,9 @@ Astra 的工具调用要求 Responses，所以仅加入 Responses 模板。MiMo 
 | 显示名 | 模型 ID | 类型 |
 | --- | --- | --- |
 | Free | `openrouter/free` | 免费自动路由 |
-| GPT 5.6 Sol | `openai/gpt-5.6-sol` | 付费 |
-| Claude Sonnet 5 | `anthropic/claude-sonnet-5` | 付费 |
+| GPT 6.1 Sol | `openai/gpt-6.1-sol` | 付费 |
+| Claude Sonnet 5.5 | `anthropic/claude-sonnet-5.5` | 付费 |
+| Claude Opus 5.5 | `anthropic/claude-opus-5.5` | 付费 |
 | Gemini 3.8 Flash | `google/gemini-3.8-flash` | 付费 |
 | DeepSeek V4.1 Flash | `deepseek/deepseek-v4.1-flash` | 付费 |
 | Qwen3.8 Flash | `qwen/qwen3.8-flash` | 付费 |

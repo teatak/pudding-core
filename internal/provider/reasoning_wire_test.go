@@ -30,8 +30,8 @@ func TestFiveLevelReasoningWireRequests(t *testing.T) {
 		{[]string{"gpt-5.5", "gpt-5.5-2026-04-23", "gpt-5.4", "gpt-5.4-2026-03-05", "gpt-5.4-mini", "gpt-5.4-mini-2026-03-17", "gpt-5.4-nano", "gpt-5.4-nano-2026-03-17"}, []string{"low", "medium", "high", "xhigh", "xhigh"}, false},
 		{[]string{"claude-opus-4-5", "claude-opus-4-5-20251101"}, []string{"low", "medium", "high", "high", "high"}, true},
 		{[]string{"claude-opus-4-6", "claude-sonnet-4-6", "claude-mythos-preview"}, []string{"low", "medium", "high", "max", "max"}, true},
-		{[]string{"deepseek-flash", "deepseek-v4-pro", "claude-opus-5"}, levels, true},
-		{[]string{"gpt-6-astra", "gpt-5.6-terra", "custom-model", "mimo-custom", "mimo-vnext", "mimo-v2.5-tts", "mimo-v2.5-asr", "custom/mimo-v2.6-flash", "gpt-5.5-custom", "gemini-custom"}, levels, false},
+		{[]string{"deepseek-flash", "deepseek-v4-pro", "claude-opus-5", "claude-opus-5.5", "claude-sonnet-5.5"}, levels, true},
+		{[]string{"gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "custom-model", "mimo-custom", "mimo-vnext", "mimo-v2.5-tts", "mimo-v2.5-asr", "custom/mimo-v2.6-flash", "gpt-5.5-custom", "gemini-custom"}, levels, false},
 	}
 	for _, tt := range tests {
 		protocols := []string{"chat", "responses"}
