@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestRetryEndpointScopesAndDeduplicates(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRetryEndpointScopesAndDeduplicates(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "retry", Title: "test", Provider: "mock", Model: "model"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.(*memstore.Memstore).PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible", BaseURL: "http://example.invalid", Models: []store.ProviderModel{{ID: "model"}}}); err != nil {
+	if err := st.(*storetest.Store).PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible", BaseURL: "http://example.invalid", Models: []store.ProviderModel{{ID: "model"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: "retry", TurnID: "failed", ClientMessageID: "user", UserMessageID: "user-message", UserText: "original"}); err != nil {

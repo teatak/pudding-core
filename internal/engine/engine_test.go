@@ -24,13 +24,13 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memstore, *event.Hub, string) {
+func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *storetest.Store, *event.Hub, string) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, registry.Static(mock.New(opts...)), ms)
 	sess := &store.Session{ID: "sess_1", Provider: "mock", Model: "mock-model"}
@@ -174,7 +174,7 @@ func TestAudioInputSupportedUsesResolvedModelCapability(t *testing.T) {
 }
 
 func TestSubmitFallsBackWhenSessionProviderDeleted(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}))), ms)
 	ctx := context.Background()
@@ -293,7 +293,7 @@ func TestSubmitHappyPath(t *testing.T) {
 
 func TestSteerContinuesCurrentTurnWithCanonicalUserInput(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &steerClient{
 		firstStarted: make(chan struct{}),
@@ -391,7 +391,7 @@ func TestSteerContinuesCurrentTurnWithCanonicalUserInput(t *testing.T) {
 }
 
 func TestSystemSubmitDoesNotCreateUserMessage(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
 	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
@@ -878,7 +878,7 @@ func TestSubmitPersistsThoughtParts(t *testing.T) {
 }
 
 func TestSubmitRunsToolLoop(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &toolLoopClient{}
 	runner := &recordingToolRunner{
@@ -1005,7 +1005,7 @@ doneDrain:
 }
 
 func TestSubmitPreservesStateOnlyContinuationAfterToolResult(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &stateOnlyToolLoopClient{}
 	runner := &recordingToolRunner{
@@ -1096,7 +1096,7 @@ func TestSubmitPreservesStateOnlyContinuationAfterToolResult(t *testing.T) {
 
 func TestEngineReleasesToolResources(t *testing.T) {
 	runner := &recordingToolRunner{}
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_resources", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1120,7 +1120,7 @@ func TestEngineReleasesToolResources(t *testing.T) {
 
 func TestComputerToolApprovalGrantsSessionApp(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	const sessionID = "sess_computer_grant"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -1181,7 +1181,7 @@ func (s *blockingComputerGrantStore) GrantComputerApp(ctx context.Context, sessi
 
 func TestComputerToolApprovalHasSingleResolutionWinner(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	const sessionID = "sess_computer_approval_race"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -1237,7 +1237,7 @@ func TestComputerToolApprovalHasSingleResolutionWinner(t *testing.T) {
 }
 
 func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &appLoadClient{}
 	runner := &recordingToolRunner{
@@ -1349,7 +1349,7 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 
 func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	apps := app.NewService(t.TempDir(), nil)
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithApps(apps))
 	sid := "sess_app_load_atomic"
@@ -1401,7 +1401,7 @@ func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 
 func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	apps := &mutableAppSource{defs: []*app.Definition{{
 		ID:           "tool-only",
 		Name:         "Tool Only",
@@ -1435,7 +1435,7 @@ func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 }
 
 func TestProjectAndCodeToolsAreCodeCore(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
 	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
@@ -1491,7 +1491,7 @@ func TestProjectAndCodeToolsAreCodeCore(t *testing.T) {
 }
 
 func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms,
 		WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
@@ -1548,7 +1548,7 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 
 func TestRuntimeAppLoadExposesToolOnNextProviderStep(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	runtimeApp := &app.Definition{
 		ID: "canvas", Name: "Canvas", Enabled: true, RequiredMode: "chat", Runtime: "desktop",
 	}
@@ -1599,7 +1599,7 @@ func TestRuntimeAppLoadExposesToolOnNextProviderStep(t *testing.T) {
 }
 
 func TestInstalledAppToolsAreExposedOnlyWhenLoaded(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	defs := append(tool.BuiltinDefinitions(), provider.ToolDef{
 		Name: "app_mcp__search__hash", Description: "Search GitHub", Capability: store.ModeWork, AppID: "github",
@@ -1645,7 +1645,7 @@ func TestInstalledAppToolsAreExposedOnlyWhenLoaded(t *testing.T) {
 }
 
 func TestLoadedAppCannotCallAnotherAppsEndpoint(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &crossAppAPIClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
@@ -1701,7 +1701,7 @@ func TestLoadedAppCannotCallAnotherAppsEndpoint(t *testing.T) {
 }
 
 func TestMaxToolLoopsResetsAfterAssistantOutput(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &toolOutputResetClient{}
 	runner := &recordingToolRunner{
@@ -1748,7 +1748,7 @@ func TestMaxToolLoopsResetsAfterAssistantOutput(t *testing.T) {
 }
 
 func TestMaxToolLoopsFailsConsecutiveToolOnlyCalls(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &toolOnlyLimitClient{}
 	runner := &recordingToolRunner{
@@ -1796,7 +1796,7 @@ func TestMaxToolLoopsFailsConsecutiveToolOnlyCalls(t *testing.T) {
 }
 
 func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &browserToolLoopClient{}
 	browserSvc := &engineTestBrowser{}
@@ -1866,7 +1866,7 @@ func TestSubmitRoutesMediaReadImageToNextProviderRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &mediaReadImageClient{}
 	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
@@ -1939,7 +1939,7 @@ doneDrain:
 
 func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *testing.T) {
 	home := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &displayAttachmentToolClient{}
 	sid := "sess_display_photo"
@@ -2053,7 +2053,7 @@ func TestSubmitDoesNotRouteMediaReadImageWhenCapabilityUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &mediaReadImageClient{}
 	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
@@ -2107,7 +2107,7 @@ func TestSubmitDoesNotRouteMediaReadImageWhenCapabilityUnknown(t *testing.T) {
 }
 
 func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &unauthorizedFileClient{}
 	runner := &recordingToolRunner{
@@ -2169,7 +2169,7 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 }
 
 func TestSubmitMarksUnknownTool(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &unknownToolClient{}
 	runner := &recordingToolRunner{
@@ -2233,7 +2233,7 @@ func TestNormalizeCapabilityTargetModeRejectsLegacyWorkspace(t *testing.T) {
 }
 
 func TestWorkCapabilityApprovalUpgradesOnlyCurrentTurn(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
@@ -2300,7 +2300,7 @@ func TestWorkCapabilityApprovalUpgradesOnlyCurrentTurn(t *testing.T) {
 }
 
 func TestWorkCapabilityApprovalPersistsForSession(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
@@ -2358,7 +2358,7 @@ func TestWorkCapabilityApprovalPersistsForSession(t *testing.T) {
 
 func TestCodeCapabilityApprovalWithoutProjectUsesSessionScratch(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	homeDir := t.TempDir()
 	eng := New(ms, hub, mapResolver{}, ms, WithAttachmentHome(homeDir))
@@ -2432,7 +2432,7 @@ func TestCodeCapabilityApprovalWithoutProjectUsesSessionScratch(t *testing.T) {
 }
 
 func TestCodeRequestingWorkReportsAlreadyAvailableWithoutDowngrade(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
 	ctx := context.Background()
 	sid := "sess_code_requests_work"
@@ -2462,7 +2462,7 @@ func TestCodeRequestingWorkReportsAlreadyAvailableWithoutDowngrade(t *testing.T)
 
 func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	eng := New(ms, event.NewHub(), mapResolver{}, ms, WithAttachmentHome(homeDir))
 
@@ -2475,7 +2475,7 @@ func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T)
 }
 
 func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
 	ctx := context.Background()
 	sid := "sess_work_dirs"
@@ -2495,7 +2495,7 @@ func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
 }
 
 func TestCodeCapabilityNoopReturnsAlreadyAvailableForAuthorizedProject(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
@@ -2532,7 +2532,7 @@ func TestCodeCapabilityNoopReturnsAlreadyAvailableForAuthorizedProject(t *testin
 }
 
 func TestCodeCapabilityNoopIsAvailableWithoutProject(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
 	ctx := context.Background()
 	sid := "sess_code_without_project"
@@ -2555,7 +2555,7 @@ func TestCodeCapabilityNoopIsAvailableWithoutProject(t *testing.T) {
 }
 
 func TestCodeCapabilityAdditionalDirectoryStillRequiresApproval(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
@@ -2624,7 +2624,7 @@ func TestCodeCapabilityAdditionalDirectoryStillRequiresApproval(t *testing.T) {
 }
 
 func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &capabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
@@ -2697,7 +2697,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 }
 
 func TestProjectApprovalSessionScopeDoesNotPersistProject(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	dir := t.TempDir()
 	client := &projectCapabilityClient{}
@@ -2766,7 +2766,7 @@ func TestProjectApprovalSessionScopeDoesNotPersistProject(t *testing.T) {
 }
 
 func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	dir := t.TempDir()
 	dir, _ = filepath.EvalSymlinks(dir)
@@ -2837,7 +2837,7 @@ func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 }
 
 func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	dir := t.TempDir()
 	project := &store.Project{
@@ -2919,7 +2919,7 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 
 func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "notes.txt")
@@ -2991,7 +2991,7 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 
 func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	dir := t.TempDir()
 	runEngineGitTest(t, dir, "init")
@@ -3067,7 +3067,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 
 func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	project := &store.Project{
 		ID:           "proj_command_policy",
 		Name:         "command policy",
@@ -3234,7 +3234,7 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			ms := memstore.New()
+			ms := storetest.New(t)
 			root := t.TempDir()
 			project := &store.Project{
 				ID:           "proj_sandbox_" + test.name,
@@ -3273,7 +3273,7 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 
 func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	sessionID := "sess_scratch"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -3325,7 +3325,7 @@ func TestCallTrackedToolDoesNotAttributeOpaqueCommandFileChanges(t *testing.T) {
 			}
 		},
 	}
-	eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
+	eng := New(storetest.New(t), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
 	result := eng.callTrackedTool(context.Background(), "sess_changes", "turn_changes", store.ModeCode, tool.Call{
 		CallID: "call_changes", Name: tool.CommandRun, Args: json.RawMessage(`{"scope":"project","command":"printf changed"}`), ProjectDirs: []string{root},
 	})
@@ -3355,7 +3355,7 @@ func TestCallTrackedToolAttributesExplicitCommandTarget(t *testing.T) {
 			}
 		},
 	}
-	eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
+	eng := New(storetest.New(t), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
 	result := eng.callTrackedTool(context.Background(), "sess_changes", "turn_changes", store.ModeCode, tool.Call{
 		CallID: "call_changes", Name: tool.CommandRun,
 		Args: json.RawMessage(`{"scope":"project","command":"printf changed > main.go"}`), ProjectDirs: []string{root},
@@ -3378,7 +3378,7 @@ func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_failed_changes", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
@@ -3411,7 +3411,7 @@ func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
 
 func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
 	project := &store.Project{ID: "proj_brew", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
@@ -3474,7 +3474,7 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 
 func TestSandboxCommandReportsHostBoundaryWithoutApproval(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
 	project := &store.Project{ID: "proj_boundary", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
@@ -3511,7 +3511,7 @@ func TestSandboxCommandReportsHostBoundaryWithoutApproval(t *testing.T) {
 
 func TestApprovedDestructiveCommandRemainsSandboxed(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
 	project := &store.Project{ID: "proj_rm", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
@@ -3579,7 +3579,7 @@ func TestRefineToolRiskKeepsPatchDeletionProtected(t *testing.T) {
 }
 
 func TestCompletedOutputPersistsBeforeTurnFinish(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &capabilityAfterTextClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
@@ -3899,7 +3899,7 @@ func TestProviderErrorFailsTurn(t *testing.T) {
 }
 
 func TestPerSessionProviderRouting(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	resolver := mapResolver{
 		"alpha": mock.New(mock.WithScript([]string{"from-alpha"}), mock.WithDelay(time.Millisecond)),
@@ -3960,7 +3960,7 @@ func TestPerSessionProviderRouting(t *testing.T) {
 }
 
 func TestTurnSnapshotsProviderAndModel(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
 	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
@@ -4038,7 +4038,7 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 }
 
 func TestSubmitUsesSessionReasoningEffort(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
 	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
@@ -4092,7 +4092,7 @@ func TestSubmitUsesSessionReasoningEffort(t *testing.T) {
 }
 
 func TestDeepSeekReasoningEffortPassesStandardOpenAIOption(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
 	eng := New(ms, hub, mapResolver{"capture": capture}, ms)

@@ -13,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/turnfiles"
 )
@@ -29,7 +29,7 @@ func TestFileCopyScratchAbsoluteUndo(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCrossScopeCopyApprovalAndUndo(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			root := t.TempDir()
-			ms, hub := memstore.New(), event.NewHub()
+			ms, hub := storetest.New(t), event.NewHub()
 			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}, ApprovalMode: scenario.mode}); err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +196,7 @@ func TestFileCopyExternalAccessApproval(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			root, external := t.TempDir(), t.TempDir()
-			ms, hub := memstore.New(), event.NewHub()
+			ms, hub := storetest.New(t), event.NewHub()
 			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}, ApprovalMode: tc.mode}); err != nil {
 				t.Fatal(err)
 			}

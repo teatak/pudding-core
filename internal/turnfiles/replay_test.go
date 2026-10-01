@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestReplayerUndoRedoWholeTurn(t *testing.T) {
@@ -136,10 +136,10 @@ func TestReplayerRejectsActionWhileSessionTurnIsRunning(t *testing.T) {
 	assertReplayTestFile(t, root, "file.txt", []byte("new"))
 }
 
-func replayTestStore(t *testing.T, root string, changes []store.TurnFileChangeInput) *memstore.Memstore {
+func replayTestStore(t *testing.T, root string, changes []store.TurnFileChangeInput) *storetest.Store {
 	t.Helper()
 	ctx := context.Background()
-	mem := memstore.New()
+	mem := storetest.New(t)
 	if err := mem.CreateProject(ctx, &store.Project{ID: "project", Name: "project", RootDirs: []string{root}}); err != nil {
 		t.Fatal(err)
 	}

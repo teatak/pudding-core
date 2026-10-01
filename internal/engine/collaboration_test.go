@@ -14,7 +14,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -34,10 +34,10 @@ func (*collaborationApps) ReadSkill(_ context.Context, id, skill string) (*app.S
 	return d, nil
 }
 
-func newCollaborationEngine(t *testing.T, client provider.Client) (*Engine, *memstore.Memstore, *collaborationApps) {
+func newCollaborationEngine(t *testing.T, client provider.Client) (*Engine, *storetest.Store, *collaborationApps) {
 	t.Helper()
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	apps := &collaborationApps{}
 	apps.enabled.Store(true)
 	if err := st.CreateSession(ctx, &store.Session{ID: "root", Title: "Root", Provider: client.Name(), Model: "model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedAppIDs: []string{app.BuiltinCollaborationID}}); err != nil {

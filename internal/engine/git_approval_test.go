@@ -10,7 +10,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -37,7 +37,7 @@ func TestStructuredGitWorkflowApprovalModes(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			ms := memstore.New()
+			ms := storetest.New(t)
 			hub := event.NewHub()
 			project := &store.Project{ID: "proj_git", RootDirs: []string{root}, ApprovalMode: mode}
 			if err := ms.CreateProject(ctx, project); err != nil {

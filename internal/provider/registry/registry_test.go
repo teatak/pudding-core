@@ -9,11 +9,11 @@ import (
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestResolveProfileTypesAndCache(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	r := New(ms)
 	ctx := context.Background()
 
@@ -71,7 +71,7 @@ func TestEmptyNameIsRejected(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ms := memstore.New()
+	ms := storetest.New(t)
 	r := New(ms)
 	ctx := context.Background()
 
@@ -105,7 +105,7 @@ func TestEmptyNameIsRejected(t *testing.T) {
 }
 
 func TestAPIKeyRequirementAllowsOnlyLocalOpenAICompatible(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	r := New(ms)
 	ctx := context.Background()
 

@@ -12,7 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -40,7 +40,7 @@ func (c *canvasPatchClient) Stream(_ context.Context, _ provider.Request) (<-cha
 func TestCodeSessionCanvasPatchRunsThroughEngineApproval(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	project := &store.Project{ID: "proj_canvas_patch", Name: "Canvas patch", RootDirs: []string{t.TempDir()}, ApprovalMode: store.ApprovalAsk}
 	if err := ms.CreateProject(ctx, project); err != nil {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestModelRequestsCarryPuddingAttribution(t *testing.T) {
@@ -53,7 +53,7 @@ func TestModelRequestsCarryPuddingAttribution(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			profiles := memstore.New()
+			profiles := storetest.New(t)
 			// A custom gateway URL must carry attribution just like a direct
 			// OpenRouter endpoint; model names and profile brands are irrelevant.
 			if err := profiles.PutProviderProfile(ctx, &store.ProviderProfile{

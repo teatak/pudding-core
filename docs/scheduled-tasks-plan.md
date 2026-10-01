@@ -120,7 +120,7 @@
 | 能力 | 当前入口与复用边界 |
 | --- | --- |
 | submit／队列／取消 | [engine.go](../internal/engine/engine.go)、[server.go](../internal/api/server.go)：明确 Session ID、clientMessageID；继续复用原执行链 |
-| 持久化 | [store.go](../internal/store/store.go)、[schema.sql](../internal/store/schema.sql)、[sqlitestore](../internal/store/sqlitestore/)；SQLite 与 memstore 保持同语义 |
+| 持久化 | [store.go](../internal/store/store.go)、[schema.sql](../internal/store/schema.sql)、[sqlitestore](../internal/store/sqlitestore/)；测试通过 [storetest](../internal/store/storetest/) 使用同一 SQLite 实现 |
 | 生命周期与续传 | [事件类型](../internal/event/types.go)、[SSE](../internal/api/sse.go)；保留 session 单调 seq 和 Last-Event-ID |
 | 审批／补答 | [approval.go](../internal/engine/approval.go)、[用户问题契约](user-input-flow.md)；不为定时任务重新实现审批 |
 | 失败重试 | [retry.go](../internal/engine/retry.go)：关联原失败轮次，保留 canonical 历史，不直接重放工具 |

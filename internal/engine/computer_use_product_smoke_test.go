@@ -20,7 +20,7 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -196,7 +196,7 @@ func runComputerUseSmoke(t *testing.T, enabledEnv string, scenario computerUseSm
 	manager := computer.NewManager(bridge)
 	runner := tool.NewBuiltinRunner(tool.WithComputer(manager), tool.WithHomeDir(t.TempDir()))
 	client := &computerUseSmokeClient{scenario: scenario}
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	apps := app.NewService(t.TempDir(), nil)
 	providerName := "computer-use-" + scenario.name + "-smoke"
@@ -694,7 +694,7 @@ func smokeElementName(element computer.Element) string {
 	return ""
 }
 
-func waitComputerUseSmokeTurn(t *testing.T, ms *memstore.Memstore, sessionID string) {
+func waitComputerUseSmokeTurn(t *testing.T, ms *storetest.Store, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {

@@ -16,7 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -219,7 +219,7 @@ func TestProviderSyncConcurrentChanges(t *testing.T) {
 				}))
 				defer upstream.Close()
 				defer unblock()
-				ms, hub := memstore.New(), event.NewHub()
+				ms, hub := storetest.New(t), event.NewHub()
 				var cfg engine.ConfigSource = ms
 				if backend == "yaml" {
 					manager := config.NewManager(t.TempDir())
@@ -303,7 +303,7 @@ func TestProviderSyncPreservesClearedModelName(t *testing.T) {
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}
-			ms, hub := memstore.New(), event.NewHub()
+			ms, hub := storetest.New(t), event.NewHub()
 			eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
 			srv := httptest.NewServer(New(eng, ms, cfg, hub).Handler(testToken, nil))
 			defer srv.Close()

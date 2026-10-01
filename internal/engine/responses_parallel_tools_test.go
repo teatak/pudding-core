@@ -15,7 +15,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -81,7 +81,7 @@ func TestResponsesParallelToolsSurviveExecutionAndHistoryReplay(t *testing.T) {
 	defer srv.Close()
 
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Title: "Parallel tools", Provider: "deepseek", Model: "deepseek-flash"}); err != nil {
 		t.Fatal(err)
 	}

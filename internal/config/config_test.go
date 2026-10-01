@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -281,6 +282,17 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	}
 	if string(b) != "short replies" {
 		t.Fatalf("unexpected pudding.md content: %q", b)
+	}
+}
+
+// The system prompt comes from <home>/pudding.md, never from a setting.
+func TestManagerRejectsUnknownSettings(t *testing.T) {
+	m := NewManager(t.TempDir())
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetSettings(context.Background(), map[string]string{"system_prompt": "override"}); !errors.Is(err, ErrInvalidSetting) {
+		t.Fatalf("SetSettings(system_prompt) err = %v, want ErrInvalidSetting", err)
 	}
 }
 

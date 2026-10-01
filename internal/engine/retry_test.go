@@ -13,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -72,7 +72,7 @@ func (c *retryClient) Stream(_ context.Context, req provider.Request) (<-chan pr
 
 func TestRetryUsesCanonicalHistoryWithoutReplayingTools(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	client := &retryClient{}
 	runner := &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.TimeGetCurrent, InputSchema: json.RawMessage(`{"type":"object"}`), Capability: store.ModeChat}}, result: tool.Result{Ok: true, Content: "completed exactly once"}}
 	eng := New(st, event.NewHub(), mapResolver{"retry": client}, st, WithTools(runner))

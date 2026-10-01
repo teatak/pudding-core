@@ -17,7 +17,7 @@ import (
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -30,7 +30,7 @@ func (l *testAppLister) ListDefinitions(context.Context) ([]*app.Definition, err
 }
 
 func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -54,24 +54,13 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	if !strings.Contains(req.System, "You are Pudding") || !strings.Contains(req.System, "请尽量简短。") {
 		t.Fatalf("unexpected system prompt: %q", req.System)
 	}
-
-	if err := ms.SetSettings(ctx, map[string]string{"system_prompt": "你是 Pudding"}); err != nil {
-		t.Fatal(err)
-	}
-	req, err = b.Build(ctx, "s1", "m", string(store.ModeChat))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(req.System, "你是 Pudding") {
-		t.Fatalf("settings system_prompt must not affect contextbuilder prompt: %q", req.System)
-	}
 	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {
 		t.Fatalf("unexpected messages: %+v", req.Messages)
 	}
 }
 
 func TestBuildMarksSessionLoadedAppsInPrompt(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:           "s1",
@@ -113,7 +102,7 @@ func TestBuildMarksSessionLoadedAppsInPrompt(t *testing.T) {
 }
 
 func TestBuildInjectsRootProjectInstructionsForCodeMode(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("follow root guidance\n"), 0o600); err != nil {
@@ -156,7 +145,7 @@ func TestBuildInjectsRootProjectInstructionsForCodeMode(t *testing.T) {
 }
 
 func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	firstRoot := t.TempDir()
 	secondRoot := t.TempDir()
@@ -180,7 +169,7 @@ func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) 
 }
 
 func TestBuildIncludesAttachmentSummary(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -210,7 +199,7 @@ func TestBuildIncludesAttachmentSummary(t *testing.T) {
 }
 
 func TestBuildIncludesLocalFoldersTag(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -246,7 +235,7 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 }
 
 func TestBuildIncludesProjectReferencesTag(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -288,7 +277,7 @@ func TestBuildIncludesProjectReferencesTag(t *testing.T) {
 }
 
 func TestBuildIncludesNeutralUIContext(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -328,7 +317,7 @@ func TestBuildIncludesNeutralUIContext(t *testing.T) {
 }
 
 func TestBuildIncludesAttachmentKeyWhenAvailable(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -362,7 +351,7 @@ func TestBuildIncludesAttachmentKeyWhenAvailable(t *testing.T) {
 }
 
 func TestBuildIncludesTempAttachmentToolScope(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -395,7 +384,7 @@ func TestBuildIncludesTempAttachmentToolScope(t *testing.T) {
 }
 
 func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -467,7 +456,7 @@ func TestImageProviderPartUsesBoundedDerivative(t *testing.T) {
 }
 
 func TestBuildFallsBackWhenImageCapabilityUnknown(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -499,7 +488,7 @@ func TestBuildFallsBackWhenImageCapabilityUnknown(t *testing.T) {
 }
 
 func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -539,7 +528,7 @@ func TestBuildAddsComputerUseScreenshotGuidanceOnlyWithoutImageSupport(t *testin
 		{name: "supported", image: true, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ms := memstore.New()
+			ms := storetest.New(t)
 			ctx := context.Background()
 			if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 				t.Fatal(err)
@@ -564,7 +553,7 @@ func TestBuildAddsComputerUseScreenshotGuidanceOnlyWithoutImageSupport(t *testin
 }
 
 func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -611,7 +600,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 }
 
 func TestBuildReplaysProviderStateOnlyForMatchingProviderAndModel(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:       "s1",
@@ -691,7 +680,7 @@ func TestBuildReplaysProviderStateOnlyForMatchingProviderAndModel(t *testing.T) 
 }
 
 func TestBuildDropsEntireContinuationChainAfterModeDowngrade(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:         "s1",
@@ -771,7 +760,7 @@ func TestBuildDropsEntireContinuationChainAfterModeDowngrade(t *testing.T) {
 }
 
 func TestBuildUsesCurrentToolDefinitionsForProviderStateReplay(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:         "s1",
@@ -860,7 +849,7 @@ func TestBuildUsesCurrentToolDefinitionsForProviderStateReplay(t *testing.T) {
 }
 
 func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -901,7 +890,7 @@ func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
 }
 
 func TestBuildSkipsASRAudioAttachment(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -937,7 +926,7 @@ func TestBuildSkipsASRAudioAttachment(t *testing.T) {
 }
 
 func TestBuildUsesVoiceAudioInsteadOfTranscriptWhenSupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -974,7 +963,7 @@ func TestBuildUsesVoiceAudioInsteadOfTranscriptWhenSupported(t *testing.T) {
 }
 
 func TestBuildFallsBackToVoiceTranscriptWhenAudioUnsupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -1008,7 +997,7 @@ func TestBuildFallsBackToVoiceTranscriptWhenAudioUnsupported(t *testing.T) {
 }
 
 func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	home := t.TempDir()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -1042,7 +1031,7 @@ func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
 }
 
 func TestBuildStripsThoughtParts(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -1081,7 +1070,7 @@ func TestBuildStripsThoughtParts(t *testing.T) {
 }
 
 func TestBuildKeepsToolParts(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -1121,7 +1110,7 @@ func TestBuildKeepsToolParts(t *testing.T) {
 }
 
 func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -1173,7 +1162,7 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 }
 
 func TestBuildUsesLatestCompactBoundary(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)

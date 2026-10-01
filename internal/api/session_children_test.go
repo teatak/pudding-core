@@ -13,12 +13,12 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestChildSessionsHiddenFromListsButIncludedInProjectMaintenance(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	if err := st.CreateProject(ctx, &store.Project{ID: "project", Name: "Project", RootDirs: []string{t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}

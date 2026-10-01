@@ -15,7 +15,7 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -85,7 +85,7 @@ func (c *backgroundEngineController) Act(ctx context.Context, sessionID, appID s
 
 type backgroundEngineHarness struct {
 	engine    *Engine
-	store     *memstore.Memstore
+	store     *storetest.Store
 	hub       *event.Hub
 	runner    *tool.BuiltinRunner
 	apps      *app.Service
@@ -100,7 +100,7 @@ type backgroundEngineHarness struct {
 func newBackgroundEngineHarness(t *testing.T, service computer.Service, clients map[string]provider.Client) *backgroundEngineHarness {
 	t.Helper()
 	controller := &backgroundEngineController{Controller: computer.NewManager(service), entered: make(chan string, 16)}
-	h := &backgroundEngineHarness{store: memstore.New(), hub: event.NewHub(), apps: app.NewService(t.TempDir(), nil),
+	h := &backgroundEngineHarness{store: storetest.New(t), hub: event.NewHub(), apps: app.NewService(t.TempDir(), nil),
 		runner: tool.NewBuiltinRunner(tool.WithComputer(controller), tool.WithHomeDir(t.TempDir())),
 		entry:  controller.entered, terminal: map[string]chan event.Event{}, approvals: map[string]int{}}
 	h.engine = New(h.store, h.hub, mapResolver(clients), h.store, WithTools(h.runner), WithApps(h.apps))

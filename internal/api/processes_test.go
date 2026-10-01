@@ -16,13 +16,13 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestBackgroundProcessAPIListsAndStopsSessionProcess(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	for _, id := range []string{"sess_process", "sess_other"} {
 		if err := ms.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock"}); err != nil {
 			t.Fatal(err)

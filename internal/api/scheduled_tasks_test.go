@@ -12,12 +12,12 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestScheduledTaskHTTPAdmissionScopeAndHistory(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	hub := event.NewHub()
 	for _, id := range []string{"target", "other"} {
 		if err := st.CreateSession(ctx, &store.Session{ID: id, Title: id, Provider: "mock", Model: "model"}); err != nil {

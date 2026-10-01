@@ -21,12 +21,12 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestServiceSubmitsSentenceThroughEngine(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"voice reply"}), mock.WithDelay(time.Millisecond))), ms)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_voice", Title: "Voice", Provider: "mock", Model: "mock"}); err != nil {
@@ -162,7 +162,7 @@ func TestServiceRejectsSentenceWithoutInputOwner(t *testing.T) {
 
 func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	fakeASR := asr.NewFake(4)
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
@@ -470,7 +470,7 @@ func TestBindInputClassifiesCaptureWithoutSignal(t *testing.T) {
 	}
 }
 
-func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sessionID string, want int) []*store.Message {
+func waitMessages(t *testing.T, ctx context.Context, ms *storetest.Store, sessionID string, want int) []*store.Message {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	tick := time.NewTicker(10 * time.Millisecond)

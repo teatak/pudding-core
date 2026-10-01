@@ -13,14 +13,14 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestTemporaryDirectoryApprovalReuseIsolationAndRevocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	root, extra := t.TempDir(), t.TempDir()
 	extra, _ = filepath.EvalSymlinks(extra)
 	if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
@@ -105,7 +105,7 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			ms := memstore.New()
+			ms := storetest.New(t)
 			hub := event.NewHub()
 			root, extra := t.TempDir(), t.TempDir()
 			root, _ = filepath.EvalSymlinks(root)

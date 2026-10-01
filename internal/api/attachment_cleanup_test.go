@@ -17,12 +17,12 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestPurgeSessionRemovesOnlyGroupAttachments(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	for _, id := range []string{"parent", "other"} {
 		if err := ms.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "m"}); err != nil {
 			t.Fatal(err)
@@ -64,7 +64,7 @@ func TestPurgeSessionRemovesOnlyGroupAttachments(t *testing.T) {
 
 func TestOrphanAttachmentCleanupRetriesAfterRestartAndPreservesArchives(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	dir := t.TempDir()
 	svc := attachment.NewService(dir)
 	for _, id := range []string{"live", "archived", "orphan"} {
@@ -129,7 +129,7 @@ func (r *delayedAttachmentBody) Read(p []byte) (int, error) {
 }
 func TestUploadArrivingAfterDeletionDoesNotRecreateAttachments(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)

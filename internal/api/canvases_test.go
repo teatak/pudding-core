@@ -16,7 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/appexec"
 	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 type canvasFixtureApps struct {
@@ -51,7 +51,7 @@ func (f canvasRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { re
 type canvasTestCall func(string, string, any, int) []byte
 
 func TestCanvasAppearanceCanBeCreatedAndChanged(t *testing.T) {
-	st := memstore.New()
+	st := storetest.New(t)
 	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("fixture-token", nil)
 	call := func(method, path string, input any, status int) []byte {
 		t.Helper()
@@ -138,7 +138,7 @@ func saveCanvasTestFiles(t *testing.T, call canvasTestCall, base, requestID stri
 }
 
 func TestCanvasRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T) {
-	st := memstore.New()
+	st := storetest.New(t)
 	home := t.TempDir()
 	handler := New(nil, st, st, nil).WithHome(home).Handler("fixture-token", nil)
 	call := func(method, path string, input any, status int) []byte {
@@ -232,7 +232,7 @@ func TestCanvasRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T)
 }
 
 func TestCanvasQueryUsesAuthorizedAppConnection(t *testing.T) {
-	st := memstore.New()
+	st := storetest.New(t)
 	apps := &canvasFixtureApps{identity: "authorization-1"}
 	calls := 0
 	client := &http.Client{Transport: canvasRoundTrip(func(r *http.Request) (*http.Response, error) {
@@ -309,7 +309,7 @@ func TestCanvasQueryUsesAuthorizedAppConnection(t *testing.T) {
 }
 
 func TestCanvasActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
-	st := memstore.New()
+	st := storetest.New(t)
 	apps := &canvasFixtureApps{identity: "authorization-1", writes: true}
 	calls := 0
 	failTransport := false

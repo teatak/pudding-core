@@ -18,7 +18,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -85,10 +85,10 @@ func (r *cleanupToolRunner) CloseSession(sessionID string) {
 	r.cleaned <- cleanupCall{sessionID: sessionID, premature: premature}
 }
 
-func newCleanupWaitServer(t *testing.T) (*Server, *memstore.Memstore, *cleanupToolRunner) {
+func newCleanupWaitServer(t *testing.T) (*Server, *storetest.Store, *cleanupToolRunner) {
 	t.Helper()
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
 		ID: "mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "m"}},
 	}); err != nil {

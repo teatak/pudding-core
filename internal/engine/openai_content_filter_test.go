@@ -14,7 +14,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -39,7 +39,7 @@ func TestOpenAIContentFilterFailsTurnWithoutExecutingStreamedTools(t *testing.T)
 	defer srv.Close()
 
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	const sessionID = "content-filter-session"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sessionID, Title: "Content filter", Provider: "openai", Model: "test-model",

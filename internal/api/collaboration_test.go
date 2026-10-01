@@ -14,14 +14,14 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestChildApprovalIsListedInMainWithOriginalScope(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(st, hub, approvalResolver{client: collaborationApprovalClient{}}, st, engine.WithTools(tool.NewBuiltinRunner()), engine.WithAttachmentHome(t.TempDir()))
 	t.Cleanup(func() { _ = eng.StopCollaboration(ctx, "main"); eng.Stop(); eng.Wait() })
@@ -162,7 +162,7 @@ func TestChildSnapshotUsesLatestRetry(t *testing.T) {
 	for _, kind := range []string{"memory", "sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
-			var st store.Store = memstore.New()
+			var st store.Store = storetest.New(t)
 			if kind == "sqlite" {
 				db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "test.db"))
 				if err != nil {

@@ -16,13 +16,13 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestAppLoadReturnsSkillReferenceWithoutBody(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestSkillReferencesRefreshBetweenModelStepsWithoutReload(t *testing.T) {
 			return nil, fmt.Errorf("unexpected extra model step %d", step)
 		}
 	}}
-	st := memstore.New()
+	st := storetest.New(t)
 	eng := New(st, event.NewHub(), registry.Static(client), st, WithApps(apps), WithSkills(skills), WithTools(tool.NewBuiltinRunner(tool.WithSkills(skills))))
 	t.Cleanup(eng.Stop)
 	if err := st.CreateSession(ctx, &store.Session{ID: "s", Title: "Reference test", Provider: "mock", Model: "mock", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession}); err != nil {

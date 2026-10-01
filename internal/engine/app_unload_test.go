@@ -10,13 +10,13 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestAppUnloadIsSessionScopedAndIdempotent(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	apps := app.NewService(t.TempDir(), nil)
 	eng := New(ms, event.NewHub(), nil, ms, WithApps(apps))
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -84,7 +84,7 @@ func TestAppUnloadIsSessionScopedAndIdempotent(t *testing.T) {
 
 func TestAppUnloadToolHiddenWithoutLoadedApps(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), nil, ms, WithApps(app.NewService(t.TempDir(), nil)))
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestAppUnloadToolHiddenWithoutLoadedApps(t *testing.T) {
 
 func TestAppUnloadRebuildsNextProviderRequest(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	client := &appUnloadClient{}
 	eng := New(ms, event.NewHub(), mapResolver{"app-unload": client}, ms, WithApps(app.NewService(t.TempDir(), nil)))
 	if err := ms.CreateSession(ctx, &store.Session{

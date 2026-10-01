@@ -13,8 +13,8 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -66,7 +66,7 @@ func referencePart(name, callID, content string) provider.Part {
 
 func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"demo"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T
 
 func TestResolveSkillReferencesSelectsLatestAppSkillAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	_ = st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"demo"}})
 	apps, skills := referenceSources()
 	b := New(st, nil, WithSkillSources(apps, skills))
@@ -139,7 +139,7 @@ func TestResolveSkillReferencesNeverFallsBackToHistoricalBodies(t *testing.T) {
 	for _, scenario := range []string{"unloaded", "disabled", "disconnected", "mode", "missing", "read-error", "global-missing", "invalid"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
-			st := memstore.New()
+			st := storetest.New(t)
 			loaded := []string{"demo"}
 			apps, skills := referenceSources()
 			mode := "work"

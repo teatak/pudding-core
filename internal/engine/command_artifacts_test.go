@@ -16,7 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -36,7 +36,7 @@ func TestSessionArtifactCommandUsesExistingAuthority(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			homeDir, projectDir := t.TempDir(), t.TempDir()
-			ms := memstore.New()
+			ms := storetest.New(t)
 			if projectID != "" {
 				if err := ms.CreateProject(ctx, &store.Project{ID: projectID, RootDirs: []string{projectDir}, ApprovalMode: store.ApprovalAuto}); err != nil {
 					t.Fatal(err)

@@ -39,8 +39,8 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -53,7 +53,7 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 
 func newTestServerWithHome(t *testing.T) (*httptest.Server, store.Store, string) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, engine.WithAttachmentHome(homeDir))
@@ -70,7 +70,7 @@ func TestListProjectsReturnsEmptyArrayForSQLiteStore(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	cfg := memstore.New()
+	cfg := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(st, hub, registry.Static(mock.New()), cfg, engine.WithAttachmentHome(homeDir))
 	handler := New(eng, st, cfg, hub).WithHome(homeDir).Handler(testToken, nil)
@@ -154,7 +154,7 @@ func TestMergeProjectMovesSessionsAndDeletesSource(t *testing.T) {
 }
 
 func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
@@ -209,7 +209,7 @@ func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
 }
 
 func TestUndoRedoTurnFileChanges(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	root := t.TempDir()
 	path := filepath.Join(root, "main.txt")
@@ -260,7 +260,7 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 
 func newConfigTestServerWithGitHub(t *testing.T, github *githubapp.Client) (*httptest.Server, store.Store, *config.Manager) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	cfg := config.NewManager(homeDir)
 	if err := cfg.Prepare(); err != nil {
@@ -280,7 +280,7 @@ func newConfigTestServerWithGitHub(t *testing.T, github *githubapp.Client) (*htt
 
 func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*httptest.Server, store.Store, *config.Manager) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	cfg := config.NewManager(homeDir)
 	if err := cfg.Prepare(); err != nil {
@@ -303,7 +303,7 @@ func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*htt
 
 func newAudioTestServer(t *testing.T) (*httptest.Server, store.Store, *voice.Manager) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
@@ -383,7 +383,7 @@ func TestAudioBindingRequiresExistingSession(t *testing.T) {
 }
 
 func TestAudioBindingErrorDoesNotExposeInternalDetail(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
@@ -409,7 +409,7 @@ func TestAudioBindingErrorDoesNotExposeInternalDetail(t *testing.T) {
 }
 
 func TestAudioBindingReportsUnavailableInputRoute(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
@@ -685,14 +685,27 @@ func TestSettingsResetAPIs(t *testing.T) {
 	}
 }
 
-func TestSettingsResetUnavailable(t *testing.T) {
+func TestSettingsResetRestoresDefaults(t *testing.T) {
 	srv, _ := newTestServer(t)
-	for _, path := range []string{"/settings", "/settings/audio"} {
-		resp := req(t, http.MethodDelete, srv.URL+path, nil)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("DELETE %s status = %d, want 400", path, resp.StatusCode)
-		}
+	defaults := decodeJSON[map[string]map[string]string](t, req(t, http.MethodGet, srv.URL+"/settings", nil))["settings"]
+	changed := map[string]string{config.SettingShowReasoning: "false"}
+	if defaults[config.SettingShowReasoning] == "false" {
+		changed[config.SettingShowReasoning] = "true"
+	}
+	resp := req(t, http.MethodPut, srv.URL+"/settings", changed)
+	resp.Body.Close()
+	current := decodeJSON[map[string]map[string]string](t, req(t, http.MethodGet, srv.URL+"/settings", nil))["settings"]
+	if resp.StatusCode != http.StatusNoContent || current[config.SettingShowReasoning] != changed[config.SettingShowReasoning] {
+		t.Fatalf("PUT /settings status = %d, settings = %+v", resp.StatusCode, current)
+	}
+	reset := decodeJSON[map[string]map[string]string](t, req(t, http.MethodDelete, srv.URL+"/settings", nil))["settings"]
+	if !reflect.DeepEqual(reset, defaults) {
+		t.Fatalf("reset settings = %+v, want defaults %+v", reset, defaults)
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/settings/audio", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /settings/audio status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -1517,7 +1530,7 @@ func req(t *testing.T, method, url string, body any) *http.Response {
 }
 
 func TestSkillsAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1559,7 +1572,7 @@ func TestSkillsAPI(t *testing.T) {
 }
 
 func TestAppAssetAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1582,7 +1595,7 @@ func TestAppAssetAPI(t *testing.T) {
 }
 
 func TestInstallAppRejectsOversizedPackage(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	homeDir := t.TempDir()
@@ -1599,7 +1612,7 @@ func TestInstallAppRejectsOversizedPackage(t *testing.T) {
 }
 
 func TestAppSkillAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1637,7 +1650,7 @@ skills:
 }
 
 func TestAppMCPStatusAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1672,7 +1685,7 @@ func TestAppMCPStatusAPI(t *testing.T) {
 }
 
 func TestAppMCPOverrideAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1739,7 +1752,7 @@ func TestAppMCPOverrideAPI(t *testing.T) {
 }
 
 func TestMCPAppConfigAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1853,7 +1866,7 @@ func TestAPIAppMCPStdioHelper(t *testing.T) {
 }
 
 func TestDeleteAppAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -1882,7 +1895,7 @@ func TestDeleteAppAPI(t *testing.T) {
 }
 
 func TestBuiltinAppEnablementAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
 	cfg := config.NewManager(home)
@@ -1939,7 +1952,7 @@ func TestBuiltinAppToolsHaveDescriptions(t *testing.T) {
 }
 
 func TestDeleteAppRemovesConnections(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
 	cfg := config.NewManager(home)
@@ -2054,7 +2067,7 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 }
 
 func TestDeleteSkillAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -2078,7 +2091,7 @@ func TestDeleteSkillAPI(t *testing.T) {
 }
 
 func TestSkillAssetsAPI(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
@@ -2555,7 +2568,7 @@ func TestDesktopScreenshotStoresMultipleAttachments(t *testing.T) {
 }
 
 func TestDesktopPhotoStoresAttachment(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
@@ -3047,7 +3060,7 @@ func TestListTurnsPagination(t *testing.T) {
 	if !first.HasMore {
 		t.Fatal("recent page should report older turns")
 	}
-	if got, want := turnValueIDs(first.Turns), []string{"turn_3", "turn_4"}; !sameStringValues(got, want) {
+	if got, want := turnValueIDs(first.Turns), []string{"sess_1_turn_3", "sess_1_turn_4"}; !sameStringValues(got, want) {
 		t.Fatalf("unexpected recent page: got %v want %v", got, want)
 	}
 	if got, want := messagePtrValueLabels(first.Turns[0].Messages), []string{"user:user 3", "assistant:assistant 3"}; !sameStringValues(got, want) {
@@ -3062,7 +3075,7 @@ func TestListTurnsPagination(t *testing.T) {
 	if older.HasMore {
 		t.Fatal("older page should be exhausted")
 	}
-	if got, want := turnValueIDs(older.Turns), []string{"turn_1", "turn_2"}; !sameStringValues(got, want) {
+	if got, want := turnValueIDs(older.Turns), []string{"sess_1_turn_1", "sess_1_turn_2"}; !sameStringValues(got, want) {
 		t.Fatalf("unexpected older page: got %v want %v", got, want)
 	}
 }
@@ -3074,12 +3087,12 @@ func TestGetTurn(t *testing.T) {
 	}
 	appendAPITestTurn(t, st, "sess_1", 1)
 
-	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/turns/turn_1", nil)
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/turns/sess_1_turn_1", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	turn := decodeJSON[store.ConversationTurn](t, resp)
-	if turn.ID != "turn_1" {
+	if turn.ID != "sess_1_turn_1" {
 		t.Fatalf("unexpected turn id %q", turn.ID)
 	}
 	if got, want := messagePtrValueLabels(turn.Messages), []string{"user:user 1", "assistant:assistant 1"}; !sameStringValues(got, want) {
@@ -3099,12 +3112,13 @@ type turnPageResponse struct {
 
 func appendAPITestTurn(t *testing.T, st store.Store, sessionID string, index int) {
 	t.Helper()
-	turnID := fmt.Sprintf("turn_%d", index)
+	// IDs are unique across sessions, as the daemon generates them.
+	turnID := fmt.Sprintf("%s_turn_%d", sessionID, index)
 	_, err := st.BeginTurn(context.Background(), store.BeginTurnInput{
 		SessionID:       sessionID,
 		TurnID:          turnID,
-		UserMessageID:   fmt.Sprintf("msg_%d", index),
-		ClientMessageID: fmt.Sprintf("client_%d", index),
+		UserMessageID:   fmt.Sprintf("%s_msg_%d", sessionID, index),
+		ClientMessageID: fmt.Sprintf("%s_client_%d", sessionID, index),
 		UserText:        fmt.Sprintf("user %d", index),
 	})
 	if err != nil {
@@ -3480,7 +3494,7 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 }
 
 func TestCloneSessionAtMessageCopiesPrefixAndAttachment(t *testing.T) {
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
@@ -3719,7 +3733,7 @@ func TestCreateSessionBodyValidation(t *testing.T) {
 func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	// mock 慢流:submit 后 turn 持续 running,delete 必须 cancel 它而非
 	// 留 goroutine 跑到自然结束。
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.PutProviderProfile(context.Background(), &store.ProviderProfile{
 		ID:          "mock",
 		DisplayName: "mock",
@@ -3760,7 +3774,7 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 func TestArchiveSessionHidesRestoresAndExpires(t *testing.T) {
 	ctx := context.Background()
 	homeDir := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
 	server := New(eng, ms, ms, hub).WithHome(homeDir)
@@ -3818,7 +3832,7 @@ func TestArchiveSessionHidesRestoresAndExpires(t *testing.T) {
 
 func TestSteerTurnRequiresExactRunningTurn(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
 		ID:          "mock",
 		DisplayName: "mock",
@@ -3900,7 +3914,7 @@ func TestSteerTurnRequiresExactRunningTurn(t *testing.T) {
 func TestDeleteSessionRemovesCodeScratch(t *testing.T) {
 	ctx := context.Background()
 	homeDir := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
 	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil))

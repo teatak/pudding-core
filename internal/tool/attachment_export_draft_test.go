@@ -12,7 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestAttachmentExportDraftUsesCurrentCanonicalReference(t *testing.T) {
@@ -26,7 +26,7 @@ func TestAttachmentExportDraftUsesCurrentCanonicalReference(t *testing.T) {
 				t.Fatal(err)
 			}
 			stored.Origin = attachment.OriginTemp
-			st := memstore.New()
+			st := storetest.New(t)
 			persistExportDraftReference(t, st, "session-a", []store.ContentPart{store.AttachmentPart(stored)})
 			runner := NewBuiltinRunner(WithHomeDir(homeDir), WithHistorySearch(st))
 			t.Cleanup(func() { _ = runner.Close() })
@@ -92,7 +92,7 @@ func TestAttachmentExportDraftRejectsUnownedReferences(t *testing.T) {
 			}
 			stored.Origin = attachment.OriginTemp
 			key := stored.AttachmentKey
-			st := memstore.New()
+			st := storetest.New(t)
 			var parts []store.ContentPart
 			sessionID := "session-a"
 			switch kind {
@@ -165,7 +165,7 @@ func TestAttachmentExportDraftFollowsForkedCanonicalReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := memstore.New()
+	st := storetest.New(t)
 	persistExportDraftReference(t, st, "source-session", []store.ContentPart{store.AttachmentPart(source)})
 	if _, err := st.CloneSession(ctx, store.CloneSessionInput{SourceSessionID: "source-session", ThroughMessageID: "input-message", TargetSessionID: "fork-session", TitleSuffix: " fork", AttachmentReplacements: map[string]store.Attachment{source.AttachmentKey: copy}}); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestAttachmentExportDraftFollowsForkedCanonicalReference(t *testing.T) {
 	}
 }
 
-func persistExportDraftReference(t *testing.T, st *memstore.Memstore, sessionID string, parts []store.ContentPart) {
+func persistExportDraftReference(t *testing.T, st *storetest.Store, sessionID string, parts []store.ContentPart) {
 	t.Helper()
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
@@ -203,7 +203,7 @@ func persistExportDraftReference(t *testing.T, st *memstore.Memstore, sessionID 
 	}
 }
 
-type failingExportDraftHistory struct{ *memstore.Memstore }
+type failingExportDraftHistory struct{ *storetest.Store }
 
 func (f failingExportDraftHistory) ListMessages(context.Context, string, int) ([]*store.Message, error) {
 	return nil, errors.New("test history read failure")

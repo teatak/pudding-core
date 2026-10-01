@@ -11,14 +11,14 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestSandboxAutonomyApprovalModes(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
 	t.Cleanup(eng.Stop)
 	for _, mode := range []store.ApprovalMode{store.ApprovalAuto, store.ApprovalAsk, store.ApprovalFull} {
@@ -54,7 +54,7 @@ func TestSandboxAutonomyApprovalModes(t *testing.T) {
 func TestAutoDynamicCommandDispatchKeepsSandboxAndScope(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAutoDynamicCommandDispatchKeepsSandboxAndScope(t *testing.T) {
 func TestSandboxSessionCommandApprovals(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	for _, id := range []string{"a", "b"} {
 		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
 			t.Fatal(err)

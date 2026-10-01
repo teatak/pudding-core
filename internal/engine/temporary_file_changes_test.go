@@ -13,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -35,7 +35,7 @@ func TestTurnFileChangesDropCreatedThenDeletedScript(t *testing.T) {
 					t.Fatal(err)
 				}
 			}}
-			eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
+			eng := New(storetest.New(t), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
 			eng.callTrackedTool(context.Background(), "session", "turn", store.ModeCode, tool.Call{
 				CallID: "create", Name: tool.FileWrite, ProjectDirs: []string{root},
 				Args: json.RawMessage(`{"scope":"project","path":"temporary.py","content":"print('temporary')\n"}`),
@@ -62,7 +62,7 @@ func TestTurnFileChangesActualSelfDeletingScript(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}

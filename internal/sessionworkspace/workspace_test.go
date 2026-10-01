@@ -7,12 +7,12 @@ import (
 
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestResolveKeepsScratchAlongsideProjectRoots(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	homeDir := t.TempDir()
 	projectRoot := t.TempDir()
 	const sessionID = "sess_workspace_roots"
@@ -41,7 +41,7 @@ func TestResolveKeepsScratchAlongsideProjectRoots(t *testing.T) {
 
 func TestResolveDoesNotCreateScratchWhileInspecting(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := storetest.New(t)
 	homeDir := t.TempDir()
 	const sessionID = "sess_workspace_empty"
 	if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {

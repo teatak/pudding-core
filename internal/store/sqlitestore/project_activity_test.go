@@ -7,165 +7,157 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 )
 
 func TestProjectActivityContract(t *testing.T) {
-	for _, backend := range []string{"sqlite", "memory"} {
-		t.Run(backend, func(t *testing.T) {
-			var st store.Store = memstore.New()
-			if backend == "sqlite" {
-				st, _ = openTestStore(t)
-			}
-			ctx := context.Background()
-			project := &store.Project{ID: "p", Name: "Project", RootDirs: []string{"/p"}}
-			if err := st.CreateProject(ctx, project); err != nil {
-				t.Fatal(err)
-			}
-			activity := func(id string) time.Time {
-				t.Helper()
-				p, err := st.GetProject(ctx, id)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return p.LastActivityAt
-			}
-			assertActivity := func(id string, want time.Time) {
-				t.Helper()
-				if got := activity(id); got.UnixMilli() != want.UnixMilli() {
-					t.Fatalf("%s activity = %v, want %v", id, got, want)
-				}
-			}
-			assertActivity("p", project.CreatedAt)
-			name := "Renamed"
-			if _, err := st.UpdateProject(ctx, "p", store.ProjectUpdate{Name: &name}); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", project.CreatedAt)
-			session := &store.Session{ID: "s", Provider: "mock", Model: "mock", ProjectID: "p"}
-			if err := st.CreateSession(ctx, session); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", session.LastActivityAt)
-			begin := store.BeginTurnInput{SessionID: "s", TurnID: "t", UserMessageID: "m", ClientMessageID: "cm", UserText: "hello"}
-			advance := func(label string, fn func() error) {
-				t.Helper()
-				before := activity("p")
-				time.Sleep(2 * time.Millisecond) // SQLite timestamps have millisecond precision.
-				if err := fn(); err != nil {
-					t.Fatalf("%s: %v", label, err)
-				}
-				if !activity("p").After(before) {
-					t.Fatalf("%s did not advance project activity", label)
-				}
-				sess, err := st.GetSession(ctx, "s")
-				if err != nil {
-					t.Fatal(err)
-				}
-				assertActivity("p", sess.LastActivityAt)
-			}
-			advance("submit", func() error { _, err := st.BeginTurn(ctx, begin); return err })
-			before := activity("p")
-			if result, err := st.BeginTurn(ctx, begin); err != nil || !result.Duplicate {
-				t.Fatalf("duplicate submit: %+v %v", result, err)
-			}
-			assertActivity("p", before)
-			advance("queue", func() error {
-				_, err := st.QueueInput(ctx, store.QueueInputInput{SessionID: "s", ClientMessageID: "q", Text: "next"})
-				return err
-			})
-			advance("steer queued input", func() error {
-				_, err := st.SteerQueuedInput(ctx, store.SteerQueuedInputInput{SessionID: "s", TurnID: "t", ClientMessageID: "q", UserMessageID: "qm"})
-				return err
-			})
-			advance("append output", func() error {
-				_, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "t", Parts: store.TextPart("reply")})
-				return err
-			})
-			advance("append steer", func() error {
-				_, err := st.AppendTurnSteer(ctx, store.AppendTurnSteerInput{SessionID: "s", TurnID: "t", UserMessageID: "steer", ClientMessageID: "steer", UserText: "clarification"})
-				return err
-			})
-			advance("finish", func() error {
-				_, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "t", Status: store.TurnCompleted})
-				return err
-			})
-			advance("queue next turn", func() error {
-				_, err := st.QueueInput(ctx, store.QueueInputInput{SessionID: "s", ClientMessageID: "q2", Text: "next turn"})
-				return err
-			})
-			advance("promote", func() error {
-				_, err := st.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{SessionID: "s", TurnID: "t2", UserMessageID: "m2"})
-				return err
-			})
-			if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "t2", Status: store.TurnCancelled}); err != nil {
-				t.Fatal(err)
-			}
-			advance("compact", func() error {
-				_, err := st.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{SessionID: "s", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact", ExpectedLastMessageID: "m2", Text: "summary"})
-				return err
-			})
-			advance("system turn", func() error {
-				_, err := st.BeginSystemTurn(ctx, store.BeginSystemTurnInput{SessionID: "s", TurnID: "sys", SystemMessageID: "sys", ClientMessageID: "sys", Text: "system"})
-				return err
-			})
-			if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "sys", Status: store.TurnCompleted}); err != nil {
-				t.Fatal(err)
-			}
-			time.Sleep(2 * time.Millisecond)
-			cloned, err := st.CloneSession(ctx, store.CloneSessionInput{SourceSessionID: "s", TargetSessionID: "clone", ThroughMessageID: "m", TitleSuffix: " copy"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", cloned.LastActivityAt)
-
-			// Moving older content into a newer project must not move its clock backwards.
-			time.Sleep(2 * time.Millisecond)
-			other := &store.Project{ID: "other", RootDirs: []string{"/other"}}
-			if err := st.CreateProject(ctx, other); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := st.UpdateSession(ctx, "s", store.SessionUpdate{ProjectID: &other.ID}); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("other", other.CreatedAt)
-			assertActivity("p", cloned.LastActivityAt)
-			if _, err := st.UpdateSession(ctx, "s", store.SessionUpdate{ProjectID: &project.ID}); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", cloned.LastActivityAt)
-			before = activity("p")
-			effort, model, pinned := "high", "new-model", true
-			if _, err := st.UpdateSession(ctx, "clone", store.SessionUpdate{Title: &name, Model: &model, ReasoningEffort: &effort, Pinned: &pinned}); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", before)
-			if _, err := st.ArchiveSession(ctx, "clone"); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", before)
-			if _, err := st.RestoreSession(ctx, "clone"); err != nil {
-				t.Fatal(err)
-			}
-			assertActivity("p", before)
-			for _, id := range []string{"clone", "s"} {
-				if err := st.DeleteSession(ctx, id); err != nil {
-					t.Fatal(err)
-				}
-				assertActivity("p", before)
-			}
-			projects, err := st.ListProjects(ctx)
-			if err != nil || len(projects) != 2 || projects[0].ID != "other" || projects[1].LastActivityAt.UnixMilli() != before.UnixMilli() {
-				t.Fatalf("project order after deletion: %+v %v", projects, err)
-			}
-			// Merge retains activity even when the source no longer has sessions.
-			merged, err := st.MergeProjects(ctx, "p", "other", store.ProjectUpdate{Name: &name, RootDirs: &other.RootDirs})
-			if err != nil || merged.LastActivityAt.UnixMilli() != other.CreatedAt.UnixMilli() {
-				t.Fatalf("merge lost activity: %+v %v", merged, err)
-			}
-			assertActivity("p", other.CreatedAt)
-		})
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	project := &store.Project{ID: "p", Name: "Project", RootDirs: []string{"/p"}}
+	if err := st.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
 	}
+	activity := func(id string) time.Time {
+		t.Helper()
+		p, err := st.GetProject(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.LastActivityAt
+	}
+	assertActivity := func(id string, want time.Time) {
+		t.Helper()
+		if got := activity(id); got.UnixMilli() != want.UnixMilli() {
+			t.Fatalf("%s activity = %v, want %v", id, got, want)
+		}
+	}
+	assertActivity("p", project.CreatedAt)
+	name := "Renamed"
+	if _, err := st.UpdateProject(ctx, "p", store.ProjectUpdate{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", project.CreatedAt)
+	session := &store.Session{ID: "s", Provider: "mock", Model: "mock", ProjectID: "p"}
+	if err := st.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", session.LastActivityAt)
+	begin := store.BeginTurnInput{SessionID: "s", TurnID: "t", UserMessageID: "m", ClientMessageID: "cm", UserText: "hello"}
+	advance := func(label string, fn func() error) {
+		t.Helper()
+		before := activity("p")
+		time.Sleep(2 * time.Millisecond) // SQLite timestamps have millisecond precision.
+		if err := fn(); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if !activity("p").After(before) {
+			t.Fatalf("%s did not advance project activity", label)
+		}
+		sess, err := st.GetSession(ctx, "s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertActivity("p", sess.LastActivityAt)
+	}
+	advance("submit", func() error { _, err := st.BeginTurn(ctx, begin); return err })
+	before := activity("p")
+	if result, err := st.BeginTurn(ctx, begin); err != nil || !result.Duplicate {
+		t.Fatalf("duplicate submit: %+v %v", result, err)
+	}
+	assertActivity("p", before)
+	advance("queue", func() error {
+		_, err := st.QueueInput(ctx, store.QueueInputInput{SessionID: "s", ClientMessageID: "q", Text: "next"})
+		return err
+	})
+	advance("steer queued input", func() error {
+		_, err := st.SteerQueuedInput(ctx, store.SteerQueuedInputInput{SessionID: "s", TurnID: "t", ClientMessageID: "q", UserMessageID: "qm"})
+		return err
+	})
+	advance("append output", func() error {
+		_, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "t", Parts: store.TextPart("reply")})
+		return err
+	})
+	advance("append steer", func() error {
+		_, err := st.AppendTurnSteer(ctx, store.AppendTurnSteerInput{SessionID: "s", TurnID: "t", UserMessageID: "steer", ClientMessageID: "steer", UserText: "clarification"})
+		return err
+	})
+	advance("finish", func() error {
+		_, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "t", Status: store.TurnCompleted})
+		return err
+	})
+	advance("queue next turn", func() error {
+		_, err := st.QueueInput(ctx, store.QueueInputInput{SessionID: "s", ClientMessageID: "q2", Text: "next turn"})
+		return err
+	})
+	advance("promote", func() error {
+		_, err := st.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{SessionID: "s", TurnID: "t2", UserMessageID: "m2"})
+		return err
+	})
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "t2", Status: store.TurnCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	advance("compact", func() error {
+		_, err := st.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{SessionID: "s", TurnID: "compact", MessageID: "summary", ClientMessageID: "compact", ExpectedLastMessageID: "m2", Text: "summary"})
+		return err
+	})
+	advance("system turn", func() error {
+		_, err := st.BeginSystemTurn(ctx, store.BeginSystemTurnInput{SessionID: "s", TurnID: "sys", SystemMessageID: "sys", ClientMessageID: "sys", Text: "system"})
+		return err
+	})
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "sys", Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	cloned, err := st.CloneSession(ctx, store.CloneSessionInput{SourceSessionID: "s", TargetSessionID: "clone", ThroughMessageID: "m", TitleSuffix: " copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", cloned.LastActivityAt)
+
+	// Moving older content into a newer project must not move its clock backwards.
+	time.Sleep(2 * time.Millisecond)
+	other := &store.Project{ID: "other", RootDirs: []string{"/other"}}
+	if err := st.CreateProject(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateSession(ctx, "s", store.SessionUpdate{ProjectID: &other.ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("other", other.CreatedAt)
+	assertActivity("p", cloned.LastActivityAt)
+	if _, err := st.UpdateSession(ctx, "s", store.SessionUpdate{ProjectID: &project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", cloned.LastActivityAt)
+	before = activity("p")
+	effort, model, pinned := "high", "new-model", true
+	if _, err := st.UpdateSession(ctx, "clone", store.SessionUpdate{Title: &name, Model: &model, ReasoningEffort: &effort, Pinned: &pinned}); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", before)
+	if _, err := st.ArchiveSession(ctx, "clone"); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", before)
+	if _, err := st.RestoreSession(ctx, "clone"); err != nil {
+		t.Fatal(err)
+	}
+	assertActivity("p", before)
+	for _, id := range []string{"clone", "s"} {
+		if err := st.DeleteSession(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		assertActivity("p", before)
+	}
+	projects, err := st.ListProjects(ctx)
+	if err != nil || len(projects) != 2 || projects[0].ID != "other" || projects[1].LastActivityAt.UnixMilli() != before.UnixMilli() {
+		t.Fatalf("project order after deletion: %+v %v", projects, err)
+	}
+	// Merge retains activity even when the source no longer has sessions.
+	merged, err := st.MergeProjects(ctx, "p", "other", store.ProjectUpdate{Name: &name, RootDirs: &other.RootDirs})
+	if err != nil || merged.LastActivityAt.UnixMilli() != other.CreatedAt.UnixMilli() {
+		t.Fatalf("merge lost activity: %+v %v", merged, err)
+	}
+	assertActivity("p", other.CreatedAt)
 }
 
 func TestProjectActivityTransactionRollback(t *testing.T) {

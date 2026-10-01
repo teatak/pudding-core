@@ -12,7 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 type turnRegistrationStore struct {
@@ -193,7 +193,7 @@ func waitSessionSignal(t *testing.T, signal <-chan struct{}, label string) {
 
 func TestCancelCannotMissTurnBeingRegistered(t *testing.T) {
 	ctx := context.Background()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Title: "session", Provider: "mock", Model: "m"}); err != nil {
 		t.Fatal(err)
 	}

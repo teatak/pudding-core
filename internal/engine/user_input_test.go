@@ -15,8 +15,8 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -182,7 +182,7 @@ func TestUserInputModelLoopAndCanonicalRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	config := memstore.New()
+	config := storetest.New(t)
 	runner := &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.RequestUserInput, Capability: store.ModeChat}}, result: tool.Result{Ok: true}, callFunc: func(call tool.Call) { shown <- call }}
 	e := New(st, event.NewHub(), registry.Static(client), config, WithTools(runner))
 	t.Cleanup(func() { e.Wait(); e.Stop() })

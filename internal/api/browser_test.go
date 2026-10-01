@@ -16,12 +16,12 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func newBrowserTestServer(t *testing.T) (*httptest.Server, store.Store, *fakeBrowserService) {
 	t.Helper()
-	ms := memstore.New()
+	ms := storetest.New(t)
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}))), ms, engine.WithAttachmentHome(homeDir))

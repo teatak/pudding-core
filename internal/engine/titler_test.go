@@ -8,7 +8,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestTitlerPromptConstrainsTitleLength(t *testing.T) {
@@ -38,14 +38,14 @@ func TestSanitizeTitle(t *testing.T) {
 
 func TestGenerateTitleIgnoresThoughtChunks(t *testing.T) {
 	eng := New(
-		memstore.New(),
+		storetest.New(t),
 		event.NewHub(),
 		registry.Static(mock.New(mock.WithChunks([]provider.Chunk{
 			{Part: provider.PartThought, Delta: "We need to generate"},
 			{Part: provider.PartText, Delta: "Greeting"},
 			{Done: true, Finish: provider.FinishStop},
 		}))),
-		memstore.New(),
+		storetest.New(t),
 	)
 	got, err := eng.generateTitle("mock", "mock-model", provider.ModelConfig{}, "hi")
 	if err != nil {

@@ -11,15 +11,15 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
 func TestChildPresentationTracksCurrentTaskAndResult(t *testing.T) {
 	for _, kind := range []string{"memory", "sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
-			var st store.Store = memstore.New()
+			var st store.Store = storetest.New(t)
 			if kind == "sqlite" {
 				db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "test.db"))
 				if err != nil {
