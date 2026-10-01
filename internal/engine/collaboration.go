@@ -199,8 +199,8 @@ func (e *Engine) childrenBusy(ctx context.Context, parentID string) (bool, error
 
 func (e *Engine) waitForChildren(ctx context.Context, parentID string) error {
 	ch, unsubscribe := e.hub.Subscribe(parentID)
-	defer unsubscribe()
-	// Hub delivery can be dropped; snapshots periodically repair a missed wakeup.
+	defer func() { unsubscribe() }()
+	// Snapshots periodically repair a missed wakeup.
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -214,7 +214,11 @@ func (e *Engine) waitForChildren(ctx context.Context, parentID string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ch:
+		case _, ok := <-ch:
+			if !ok {
+				// The hub closes a full subscriber; subscribe again for later wakeups.
+				ch, unsubscribe = e.hub.Subscribe(parentID)
+			}
 		case <-ticker.C:
 		}
 	}
