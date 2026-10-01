@@ -45,9 +45,25 @@ func TestConvertContent(t *testing.T) {
 	}
 }
 func TestConversionErrorsAbort(t *testing.T) {
-	for _, c := range []store.CanvasContent{{Kind: "unknown", Item: json.RawMessage(`{}`)}, {Kind: "table", Item: json.RawMessage(`invalid`)}, {Kind: "gallery", Item: json.RawMessage(`{"items":[{"src":"missing.png"}]}`)}} {
+	for _, c := range []store.CanvasContent{{Kind: "unknown", Item: json.RawMessage(`{}`)}, {Kind: "table", Item: json.RawMessage(`invalid`)}} {
 		if _, err := Convert(c, func(string) (string, error) { return "", errors.New("missing image") }); err == nil {
 			t.Fatal("expected conversion failure", c)
+		}
+	}
+}
+func TestUnavailableImagesBecomePlaceholders(t *testing.T) {
+	missing := func(string) (string, error) { return "", errors.New("missing image") }
+	for _, c := range []store.CanvasContent{
+		{Kind: "gallery", Item: json.RawMessage(`{"items":[{"src":"/sessions/deleted/attachments/blobs/photo.jpg","caption":"Kept caption"}]}`)},
+		{Kind: "gallery", Item: json.RawMessage(`{"items":[{"caption":"Kept caption"}]}`)},
+		{Kind: "markdown", Item: json.RawMessage(`{"content":"![Kept caption](https://example.com/gone.png) and text"}`)},
+	} {
+		p, err := Convert(c, missing)
+		if err != nil {
+			t.Fatal(c, err)
+		}
+		if app := p.Files["src/App.tsx"]; !strings.Contains(app, missingImage) || !strings.Contains(app, "Kept caption") {
+			t.Fatal(app)
 		}
 	}
 }

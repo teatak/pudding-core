@@ -5,6 +5,7 @@ package canvaslegacy
 import (
 	"bytes"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -26,6 +27,11 @@ var tableSource string
 
 //go:embed templates/Chart.tsx
 var chartSource string
+
+// missingImage takes the place of a legacy image that can no longer be embedded,
+// such as an attachment of a deleted session or an unreachable URL, so one lost
+// image does not stop the canvas, and the upgrade, from converting.
+var missingImage = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="320" height="240" rx="12" fill="#94a3b8" fill-opacity=".15"/><g transform="translate(136 96)" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="40" height="32" rx="4"/><circle cx="16" cy="19" r="3"/><path d="M4 36l13-11 9 8 6-5 12 10"/><path d="M6 6l36 36"/></g></svg>`))
 
 // Convert preserves content as source, with no requests or executable legacy HTML.
 // Asset resolution is explicit so migration tests never use the network.
@@ -56,6 +62,13 @@ import "./style.css";` + "\n"
 type generator struct {
 	files map[string]string
 	image func(string) (string, error)
+}
+
+func (g *generator) embed(ref string) string {
+	if data, err := g.image(ref); err == nil {
+		return data
+	}
+	return missingImage
 }
 
 func jsonValue(v any) string { b, _ := json.Marshal(v); return string(b) }
@@ -109,23 +122,16 @@ func (g *generator) render(kind string, p map[string]any, depth int) (string, er
 		md := goldmark.New(goldmark.WithExtensions(extension.GFM))
 		doc := md.Parser().Parse(text.NewReader(source))
 		images := map[string]string{}
-		err := ast.Walk(doc, func(n ast.Node, enter bool) (ast.WalkStatus, error) {
+		_ = ast.Walk(doc, func(n ast.Node, enter bool) (ast.WalkStatus, error) {
 			if img, ok := n.(*ast.Image); ok && enter {
-				dest, err := g.image(string(img.Destination))
-				if err != nil {
-					return ast.WalkStop, err
-				}
-				placeholder := fmt.Sprintf("pudding-image-%d", len(images))
-				images[placeholder] = dest
-				img.Destination = []byte(placeholder)
+				key := fmt.Sprintf("pudding-image-%d", len(images))
+				images[key] = g.embed(string(img.Destination))
+				img.Destination = []byte(key)
 			}
 			return ast.WalkContinue, nil
 		})
-		if err != nil {
-			return "", err
-		}
 		var html bytes.Buffer
-		if err = md.Renderer().Render(&html, source, doc); err != nil {
+		if err := md.Renderer().Render(&html, source, doc); err != nil {
 			return "", err
 		}
 		out.WriteString("<article className=\"prose-content\" dangerouslySetInnerHTML={{__html:" + jsonValue(replaceImages(html.String(), images)) + "}} />\n")
@@ -148,14 +154,7 @@ func (g *generator) render(kind string, p map[string]any, depth int) (string, er
 			if src == "" && str(im["data"]) != "" {
 				src = "data:" + first(im["mime"], "image/jpeg") + ";base64," + str(im["data"])
 			}
-			if src == "" {
-				return "", fmt.Errorf("gallery image has no source")
-			}
-			resolved, err := g.image(src)
-			if err != nil {
-				return "", err
-			}
-			out.WriteString("<figure><img src=" + expr(resolved) + " alt=" + expr(first(im["alt"], im["caption"])) + " />")
+			out.WriteString("<figure><img src=" + expr(g.embed(src)) + " alt=" + expr(first(im["alt"], im["caption"])) + " />")
 			if str(im["caption"]) != "" {
 				out.WriteString("<figcaption>" + expr(str(im["caption"])) + "</figcaption>")
 			}

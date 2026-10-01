@@ -53,6 +53,23 @@ func assertConvertedCanvasesContain(t *testing.T, path string, values ...string)
 		}
 	}
 }
+func TestFinalCanvasMigrationReplacesLostImages(t *testing.T) {
+	path := canvasV24Fixture(t)
+	db := openMigrationTestDB(t, path)
+	// The gallery's images were attachments of a session that has since been deleted.
+	if _, err := db.Exec(`INSERT INTO canvas_items(session_id,id,kind,title,item_json,source_saved_item_id,base_saved_revision,saved_dirty,window_json,created_at,updated_at) VALUES
+ ('a','photos','gallery','Photos','{"items":[{"src":"/sessions/deleted/attachments/blobs/photo.jpg","caption":"Beach"}]}','',0,0,'',1,3)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	st, err := OpenWithHome(path, filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
+	st.Close()
+	assertConvertedCanvasesContain(t, path, "Beach", "data:image/svg+xml;base64,")
+}
 func TestFinalCanvasMigrationRetryReusesSourcePackages(t *testing.T) {
 	path := canvasV24Fixture(t)
 	home := filepath.Dir(path)
