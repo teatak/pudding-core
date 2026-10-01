@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"maps"
 	"sort"
-	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -83,7 +82,7 @@ func (m *Memstore) UpdateCanvas(_ context.Context, w *store.Canvas, expected int
 	}
 	copy := cloneCanvas(w)
 	copy.Revision = expected + 1
-	copy.UpdatedAt = time.Now().UTC()
+	copy.UpdatedAt = old.UpdatedAt
 	m.canvases[w.ID] = copy
 	if copy.Deleted {
 		for key, mount := range m.canvas {

@@ -44,9 +44,12 @@ type CanvasStore interface {
 	ClaimCanvasAction(context.Context, string, string) error
 	FinishCanvasAction(context.Context, string, string, string, json.RawMessage) error
 
+	// ListCanvases orders by UpdatedAt, the time of the latest saved revision.
 	ListCanvases(context.Context) ([]*Canvas, error)
 	GetCanvas(context.Context, string) (*Canvas, error)
 	CreateCanvas(context.Context, *Canvas) (*Canvas, error)
+	// UpdateCanvas changes metadata (appearance, bindings, active revision, deletion) and keeps
+	// UpdatedAt: only a new revision is new work, so metadata changes do not reorder the list.
 	UpdateCanvas(context.Context, *Canvas, int64) (*Canvas, error)
 	SaveCanvasRevision(context.Context, *CanvasRevision, string) (*Canvas, error)
 	ListCanvasRevisions(context.Context, string) ([]*CanvasRevision, error)

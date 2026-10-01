@@ -83,7 +83,7 @@ func (s *Store) UpdateCanvas(ctx context.Context, w *store.Canvas, expected int6
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND deleted=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, unixMS(time.Now()), w.ID, expected)
+		result, err := tx.ExecContext(ctx, `UPDATE canvas_resources SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, w.ID, expected)
 		if err != nil {
 			return err
 		}

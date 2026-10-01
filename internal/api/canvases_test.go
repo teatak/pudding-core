@@ -91,6 +91,19 @@ func TestCanvasAppearanceCanBeCreatedAndChanged(t *testing.T) {
 	if len(listed.Canvases) != 1 || listed.Canvases[0].Icon != resource.Icon || listed.Canvases[0].IconColor != resource.IconColor {
 		t.Fatalf("listed appearance: %+v", listed.Canvases)
 	}
+	// Changing the appearance is not new work: a canvas created later stays first.
+	time.Sleep(2 * time.Millisecond)
+	var later store.Canvas
+	if err := json.Unmarshal(call("POST", "/canvases", map[string]any{"name": "Later"}, 201), &later); err != nil {
+		t.Fatal(err)
+	}
+	call("PATCH", path+"/appearance", map[string]any{"expectedRevision": resource.Revision, "icon": "cloud-sun", "iconColor": "blue"}, 200)
+	if err := json.Unmarshal(call("GET", "/canvases", nil, 200), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Canvases) != 2 || listed.Canvases[0].ID != later.ID || !listed.Canvases[1].UpdatedAt.Equal(resource.UpdatedAt) {
+		t.Fatalf("appearance change reordered the list: %+v", listed.Canvases)
+	}
 }
 
 func startCanvasTestDraft(t *testing.T, call canvasTestCall, base string) string {

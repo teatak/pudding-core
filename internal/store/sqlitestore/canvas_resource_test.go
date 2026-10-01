@@ -122,6 +122,49 @@ func TestCanvasAppearanceSurvivesMountAndRestart(t *testing.T) {
 	}
 }
 
+func TestCanvasMetadataChangesKeepListOrder(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "canvas.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	older, err := s.CreateCanvas(ctx, &store.Canvas{ID: "older", Name: "Older", CreatedAt: start, UpdatedAt: start})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateCanvas(ctx, &store.Canvas{ID: "newer", Name: "Newer", CreatedAt: start.Add(time.Minute), UpdatedAt: start.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	order := func() string {
+		t.Helper()
+		list, err := s.ListCanvases(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, w := range list {
+			ids = append(ids, w.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	older.Icon, older.IconColor = "chart-column", "teal"
+	older, err = s.UpdateCanvas(ctx, older, older.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !older.UpdatedAt.Equal(start) || order() != "newer,older" {
+		t.Fatalf("appearance change reordered the list: %s %v", order(), older.UpdatedAt)
+	}
+	if _, err := s.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: "older", Hash: "edit", ClientRequestID: "edit", CreatedAt: start.Add(2 * time.Minute)}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if order() != "older,newer" {
+		t.Fatalf("a new revision did not move the canvas first: %s", order())
+	}
+}
+
 func TestSaveCanvasRevisionIgnoresMetadataRevision(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(filepath.Join(t.TempDir(), "canvas.db"))
