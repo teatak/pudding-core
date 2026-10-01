@@ -1363,12 +1363,20 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	if currentMode == "" {
 		currentMode = store.ModeChat
 	}
+	// A store call or child wait interrupted by this turn's cancellation is a
+	// cancel, not a failure.
+	failed := func(detail string) (store.TurnStatus, string, store.AgentMode) {
+		if ctx.Err() != nil {
+			return store.TurnCancelled, "", currentMode
+		}
+		return store.TurnFailed, detail, currentMode
+	}
 	if _, err := e.collectChildResults(ctx, sessionID); err != nil {
-		return store.TurnFailed, collaborationContextError(err), currentMode
+		return failed(collaborationContextError(err))
 	}
 	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 	if err != nil {
-		return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+		return failed(fmt.Sprintf("build context: %v", err))
 	}
 
 	maxLoops := defaultMaxToolLoops
@@ -1392,7 +1400,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continuations = nil
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
-				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				return failed(fmt.Sprintf("build context: %v", err))
 			}
 		}
 		req := baseReq
@@ -1459,19 +1467,16 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
 			if err := e.waitForChildren(ctx, sessionID); err != nil {
-				if ctx.Err() != nil {
-					return store.TurnCancelled, "", currentMode
-				}
-				return store.TurnFailed, collaborationContextError(err), currentMode
+				return failed(collaborationContextError(err))
 			}
 			if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
-				return store.TurnFailed, collaborationContextError(err), currentMode
+				return failed(collaborationContextError(err))
 			} else if collected {
 				parts.Reset()
 				continuations = nil
 				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 				if err != nil {
-					return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+					return failed(fmt.Sprintf("build context: %v", err))
 				}
 				consecutiveToolOnlyLoops = 0
 				continue
@@ -1484,7 +1489,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				continuations = nil
 				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 				if err != nil {
-					return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+					return failed(fmt.Sprintf("build context: %v", err))
 				}
 				consecutiveToolOnlyLoops = 0
 				continue
@@ -1526,19 +1531,19 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continuations = nil
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
-				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				return failed(fmt.Sprintf("build context: %v", err))
 			}
 			consecutiveToolOnlyLoops = 0
 			continue
 		}
 		if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
-			return store.TurnFailed, collaborationContextError(err), currentMode
+			return failed(collaborationContextError(err))
 		} else if collected {
 			parts.Reset()
 			continuations = nil
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
-				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				return failed(fmt.Sprintf("build context: %v", err))
 			}
 			continue
 		}
@@ -1546,7 +1551,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			messages := baseReq.Messages
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
-				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				return failed(fmt.Sprintf("build context: %v", err))
 			}
 			baseReq.Messages = messages
 		}
