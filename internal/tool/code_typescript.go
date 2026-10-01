@@ -60,7 +60,6 @@ func resolveTypeScriptServer(languageRoot, projectRoot, bundledExecutable string
 	}
 	checked := make([]string, 0)
 	if bundledExecutable != "" {
-		checked = append(checked, "bundled:"+bundledExecutable)
 		return typeScriptServerSpec(bundledExecutable, languageRoot, env)
 	}
 	for _, candidate := range typeScriptServerCandidates(languageRoot, projectRoot) {

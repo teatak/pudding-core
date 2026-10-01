@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -278,43 +277,6 @@ func runGitInput(ctx context.Context, dir string, stdoutLimit int, input []byte,
 		cmd.Stdin = bytes.NewReader(input)
 	}
 	return gitExecResult{stdout: stdout, stderr: stderr, err: cmd.Run()}
-}
-
-func runGitWithoutExternalFilters(ctx context.Context, dir string, stdoutLimit int, args ...string) gitExecResult {
-	configResult := runGit(ctx, dir, gitMetadataLimitBytes, "config", "--name-only", "--get-regexp", `^filter\..*\.(clean|process|required)$`)
-	if configResult.err != nil && gitExitCode(configResult.err) != 1 {
-		return configResult
-	}
-	if configResult.stdout.Truncated() {
-		configResult.err = errors.New("Git filter configuration exceeded the safety limit")
-		return configResult
-	}
-	drivers := make(map[string]bool)
-	for _, key := range strings.Fields(configResult.stdout.String()) {
-		for _, suffix := range []string{".clean", ".process", ".required"} {
-			if strings.HasPrefix(key, "filter.") && strings.HasSuffix(key, suffix) {
-				driver := strings.TrimSuffix(strings.TrimPrefix(key, "filter."), suffix)
-				if driver != "" {
-					drivers[driver] = true
-				}
-			}
-		}
-	}
-	names := make([]string, 0, len(drivers))
-	for driver := range drivers {
-		names = append(names, driver)
-	}
-	sort.Strings(names)
-	safeArgs := make([]string, 0, len(names)*6+len(args))
-	for _, driver := range names {
-		safeArgs = append(safeArgs,
-			"-c", "filter."+driver+".clean=cat",
-			"-c", "filter."+driver+".process=",
-			"-c", "filter."+driver+".required=false",
-		)
-	}
-	safeArgs = append(safeArgs, args...)
-	return runGit(ctx, dir, stdoutLimit, safeArgs...)
 }
 
 func gitExecFailure(out Result, ctx context.Context, result gitExecResult, fallback string) Result {

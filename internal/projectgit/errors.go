@@ -1,9 +1,6 @@
 package projectgit
 
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 
 const (
 	CodeBranchCreateFailed    = "git_branch_create_failed"
@@ -68,9 +65,4 @@ func newError(code, detail string, err error) error {
 		detail = err.Error()
 	}
 	return &Error{Code: code, Detail: detail, Err: err}
-}
-
-func parseError(format string, args ...any) error {
-	detail := fmt.Sprintf(format, args...)
-	return newError(CodeParseFailed, detail, nil)
 }

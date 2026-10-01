@@ -283,7 +283,7 @@ func (m *Manager) OpenNewTab(ctx context.Context, sessionID, rawURL string) (Tab
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	proc, binding, target, err := m.createTab(ctx, sessionID, authorizedURL)
+	proc, binding, _, err := m.createTab(ctx, sessionID, authorizedURL)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
@@ -293,10 +293,9 @@ func (m *Manager) OpenNewTab(ctx context.Context, sessionID, rawURL string) (Tab
 			_ = m.ReleaseTab(context.Background(), sessionID, binding.id)
 		}
 	}()
-	if current, targetErr := proc.target(ctx, m.client, binding.targetID); targetErr == nil {
-		target = current
-	} else {
-		return TabSnapshot{}, targetErr
+	target, err := proc.target(ctx, m.client, binding.targetID)
+	if err != nil {
+		return TabSnapshot{}, err
 	}
 	m.touch(binding.id)
 	succeeded = true
@@ -1151,24 +1150,6 @@ func (m *Manager) actionResult(ctx context.Context, proc *browserProcess, bindin
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	return ActionResult{Tab: m.snapshotFromLiveTarget(ctx, binding, target), Action: action, Result: result}, nil
-}
-
-func numberValue(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case json.Number:
-		n, err := v.Float64()
-		return n, err == nil
-	default:
-		return 0, false
-	}
 }
 
 func firstNonBlank(values ...string) string {

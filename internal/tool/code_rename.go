@@ -471,10 +471,7 @@ func codeLSPPositionByteOffset(text string, position lsp.Position, encoding stri
 	if position.Line+1 < len(lineStarts) {
 		end = lineStarts[position.Line+1] - 1
 	}
-	line := text[start:end]
-	if strings.HasSuffix(line, "\r") {
-		line = strings.TrimSuffix(line, "\r")
-	}
+	line := strings.TrimSuffix(text[start:end], "\r")
 	relative, err := codeLSPCharacterByteOffset(line, position.Character, encoding)
 	if err != nil {
 		return 0, err

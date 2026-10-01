@@ -722,12 +722,6 @@ func (d *Driver) detachPlaybackLocked() *portaudio.Stream {
 	return stream
 }
 
-func (d *Driver) markNeedsRefresh() {
-	d.mu.Lock()
-	d.needsRefresh = true
-	d.mu.Unlock()
-}
-
 func stopDetachedCapture(stream *portaudio.Stream, stop chan struct{}, done chan struct{}, closeStream func()) error {
 	if stop == nil {
 		if closeStream != nil {
@@ -1049,10 +1043,6 @@ func bytesToInt16LE(src []byte, dst []int16) {
 		}
 		dst[i] = int16(uint16(src[base]) | uint16(src[base+1])<<8)
 	}
-}
-
-func isInputOverflow(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "input overflow")
 }
 
 func isOutputUnderflow(err error) bool {

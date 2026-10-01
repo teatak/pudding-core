@@ -939,18 +939,6 @@ func connectionFieldDefs(config *ConnectionConfig) []ConnectionField {
 	return cloneConnectionFields(config.Fields)
 }
 
-func endpointExists(defs []*Definition, endpointName string) bool {
-	for _, def := range defs {
-		if def == nil {
-			continue
-		}
-		if _, ok := def.Endpoints[endpointName]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func connectionMatches(conn *Connection, ref string) bool {
 	if conn == nil {
 		return false

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -1119,27 +1118,6 @@ func browserStateInputFromTab(sessionID string, tab browser.TabSnapshot) (store.
 	return in, true
 }
 
-func browserStateResponse(state *store.BrowserState, recoverable bool, processMode string) browserStateResp {
-	if state == nil {
-		return browserStateResp{}
-	}
-	created := state.CreatedAt
-	updated := state.UpdatedAt
-	return browserStateResp{
-		HasState:    true,
-		SessionID:   state.SessionID,
-		TabID:       state.TabID,
-		URL:         state.URL,
-		Title:       state.Title,
-		FaviconURL:  state.FaviconURL,
-		Mode:        processMode,
-		ProcessMode: processMode,
-		Recoverable: recoverable,
-		CreatedAt:   &created,
-		UpdatedAt:   &updated,
-	}
-}
-
 func browserStateResponseFromTab(tab browser.TabSnapshot) browserStateResp {
 	created := tab.CreatedAt
 	updated := tab.UpdatedAt
@@ -1171,23 +1149,6 @@ func latestBrowserTab(tabs []browser.TabSnapshot) (browser.TabSnapshot, bool, er
 	return latest, true, nil
 }
 
-func writeBrowserHTTPError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, browser.ErrFileURLNotAllowed):
-		writeJSONError(w, http.StatusForbidden, "file_url_not_allowed")
-	case errors.Is(err, browser.ErrUnavailable):
-		writeJSONError(w, http.StatusServiceUnavailable, "browser_unavailable")
-	case errors.Is(err, browser.ErrTabNotFound):
-		writeJSONError(w, http.StatusNotFound, "browser_tab_not_found")
-	case errors.Is(err, browser.ErrTabRequired):
-		writeJSONError(w, http.StatusBadRequest, "browser tab id is required")
-	case errors.Is(err, browser.ErrTabLimit):
-		writeJSONError(w, http.StatusTooManyRequests, "browser_tab_limit_reached")
-	default:
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-	}
-}
-
 func browserStoreError(c *cart.Context, s *Server, err error) error {
 	if errors.Is(err, store.ErrInvalidBrowserState) {
 		return badRequest(c, "invalid browser state")
@@ -1196,24 +1157,6 @@ func browserStoreError(c *cart.Context, s *Server, err error) error {
 		return badRequest(c, "invalid browser history")
 	}
 	return s.fail(c, err)
-}
-
-func writeStoreHTTPError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		writeJSONError(w, http.StatusNotFound, "not_found")
-	case errors.Is(err, store.ErrInvalidSession):
-		writeJSONError(w, http.StatusBadRequest, "no_model")
-	default:
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-	}
-}
-
-func writeJSONError(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	payload, _ := json.Marshal(map[string]string{"error": code})
-	_, _ = w.Write(payload)
 }
 
 func (s *Server) browserError(c *cart.Context, err error) error {

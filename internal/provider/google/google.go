@@ -568,22 +568,6 @@ func emitChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 	}
 }
 
-func messageText(msg provider.Message) string {
-	if len(msg.Parts) == 0 {
-		return msg.Text
-	}
-	var b strings.Builder
-	for _, part := range msg.Parts {
-		if part.Type == "" || part.Type == provider.PartText {
-			b.WriteString(part.Text)
-		}
-	}
-	if b.Len() == 0 {
-		return msg.Text
-	}
-	return b.String()
-}
-
 func contentsForMessages(messages []provider.Message) []content {
 	var out []content
 	registry := newFunctionRegistry()

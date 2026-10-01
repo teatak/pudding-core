@@ -31,9 +31,7 @@ func scanCanvasItem(row messageScanner) (*store.CanvasItem, error) {
 	w.UpdatedAt = timeFromMS(updated)
 	return store.ProjectCanvasItem(m, w), nil
 }
-func getCanvasItemTx(ctx context.Context, tx *sql.Tx, session, id string) (*store.CanvasItem, error) {
-	return scanCanvasItem(tx.QueryRowContext(ctx, canvasMountSelect+` WHERE m.session_id=? AND m.id=?`, session, id))
-}
+
 func (s *Store) ListCanvasItems(ctx context.Context, session string) ([]*store.CanvasItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

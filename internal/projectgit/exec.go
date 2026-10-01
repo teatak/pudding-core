@@ -88,7 +88,7 @@ func runWithoutExternalFilters(ctx context.Context, dir string, stdoutLimit int,
 		return config
 	}
 	if config.truncated {
-		return execResult{err: errors.New("Git filter configuration exceeded the safety limit")}
+		return execResult{err: errors.New("git filter configuration exceeded the safety limit")}
 	}
 	drivers := make(map[string]bool)
 	for _, key := range strings.Fields(config.stdout) {

@@ -593,9 +593,6 @@ func tableColumnExists(tx *sql.Tx, table, column string) (bool, error) {
 	return false, rows.Err()
 }
 
-func prepareSchema(db *sql.DB, path string) error {
-	return prepareSchemaWithHome(db, path, filepath.Dir(path))
-}
 func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 	version, err := schemaVersion(db)
 	if err != nil {
