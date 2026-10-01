@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -334,10 +335,6 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 			mcpAuthed.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == browserTestFormPath {
-			serveBrowserTestForm(w, r)
-			return
-		}
 		if isPublicOAuthPath(r.URL.Path) {
 			public.ServeHTTP(w, r)
 			return
@@ -385,13 +382,7 @@ func validBearerToken(r *http.Request, daemonToken string) bool {
 	if token == "" {
 		token = r.URL.Query().Get("token")
 	}
-	if token == "" {
-		return false
-	}
-	if token == daemonToken {
-		return true
-	}
-	return false
+	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(daemonToken)) == 1
 }
 
 func isPublicOAuthPath(path string) bool {

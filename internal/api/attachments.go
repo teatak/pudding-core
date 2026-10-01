@@ -163,8 +163,23 @@ func (s *Server) getAttachment(c *cart.Context) error {
 	}
 	c.Header("Cache-Control", "private, max-age=300")
 	c.Header("Content-Type", contentType)
+	// Attachments share the daemon origin: a type the browser renders as an
+	// active document must not run scripts there.
+	c.Header("X-Content-Type-Options", "nosniff")
+	if attachmentRendersAsDocument(contentType) {
+		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	}
 	http.ServeContent(c.Response, c.Request, filepath.Base(path), info.ModTime(), file)
 	return nil
+}
+
+func attachmentRendersAsDocument(contentType string) bool {
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	switch mediaType {
+	case "text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "text/xml":
+		return true
+	}
+	return false
 }
 
 func (s *Server) normalizeSubmitAttachments(ctx context.Context, sessionID string, values []store.Attachment) ([]store.Attachment, error) {

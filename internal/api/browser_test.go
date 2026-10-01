@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -1069,19 +1068,6 @@ func TestRecoverBrowserTabRebindsStoredExternalState(t *testing.T) {
 	}
 	if _, ok := browserSvc.tabs["tab_external"]; !ok {
 		t.Fatalf("stored external tab was not rebound")
-	}
-}
-
-func TestBrowserTestFormIsPublic(t *testing.T) {
-	srv, _, _ := newBrowserTestServer(t)
-	resp, err := http.Get(srv.URL + browserTestFormPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `id="test-form"`) {
-		t.Fatalf("status=%d body=%q", resp.StatusCode, string(body))
 	}
 }
 

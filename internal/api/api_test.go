@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -2274,6 +2275,62 @@ func TestCORSRejectsNonLoopbackOrigin(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("want 403, got %d", resp.StatusCode)
+	}
+}
+
+// Attachments are served from the daemon origin, so a document-capable type
+// must be sandboxed while plain files only refuse sniffing.
+func TestAttachmentDocumentsAreSandboxed(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_sandbox", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, mimeType, content string
+		sandboxed               bool
+	}{
+		{"drawing.svg", "image/svg+xml", `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`, true},
+		{"page", "text/html", `<!doctype html><html><script>alert(1)</script></html>`, true},
+		{"feed.xml", "application/xml", `<html xmlns="http://www.w3.org/1999/xhtml"><script>alert(1)</script></html>`, true},
+		{"note.txt", "text/plain", "plain text", false},
+	} {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreatePart(textproto.MIMEHeader{
+			"Content-Disposition": {fmt.Sprintf(`form-data; name="file"; filename=%q`, tc.name)},
+			"Content-Type":        {tc.mimeType},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(tc.content)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		r, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions/sess_sandbox/attachments", &body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+testToken)
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("%s upload status = %d body=%s", tc.name, resp.StatusCode, string(data))
+		}
+		uploaded := decodeJSON[store.Attachment](t, resp)
+		resp = req(t, http.MethodGet, srv.URL+uploaded.URL, nil)
+		resp.Body.Close()
+		csp := resp.Header.Get("Content-Security-Policy")
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Content-Type-Options") != "nosniff" || strings.Contains(csp, "sandbox") != tc.sandboxed {
+			t.Fatalf("%s: status=%d type=%q nosniff=%q csp=%q", tc.name, resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("X-Content-Type-Options"), csp)
+		}
 	}
 }
 
