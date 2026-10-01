@@ -28,6 +28,12 @@ Skill References:
 - `builtin_app_load` and `builtin_skill_read` results with `instructionStatus=current` contain instructions resolved from the current registered skill, even if the original call is historical. Use that current body rather than older instructions quoted in conversation summaries or history lookups.
 - Results marked `superseded`, `unloaded`, `capability_required`, or `unavailable` do not provide active instructions. Do not reconstruct missing instructions from an old body or treat a failed reference as permission to use unavailable tools. Repeating a read is not necessary to refresh current instructions.
 
+User Mentions:
+
+- The user points at a specific item with `@<type>/<id>(<name>)`. Use the exact ID; the parenthesized name is display text only, may be absent, and never replaces the ID.
+- `@app/<app id>` is that App from Available Apps: `builtin_app_load(app_id="<app id>")`. `@skill/<skill id>` is that global skill: `builtin_skill_read(skill_id="<skill id>")`. `@skill/<app id>/<skill id>` is that App's skill: `builtin_app_load(app_id="<app id>", skill_id="<skill id>")`. Capability and connection rules from Available Apps still apply.
+- Other types are defined by the App that provides them, such as `@canvas/<canvas id>` in the Canvas App description.
+
 History Tools:
 
 - Use `builtin_history_search` only when the current context is insufficient and the user asks about prior discussion, or relevant details may have been compacted out of context.

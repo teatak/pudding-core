@@ -30,6 +30,12 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "builtin_history_search") || !strings.Contains(out.SystemInstruction, "builtin_history_get_message") {
 		t.Fatalf("assembled prompt missing history tool guidance:\n%s", out.SystemInstruction)
 	}
+	// The desktop composer inserts every mention as @<type>/<id>(<name>); each built-in type maps to one exact call.
+	for _, want := range []string{"`@<type>/<id>(<name>)`", "`@app/<app id>`", "`@skill/<skill id>`", "`@skill/<app id>/<skill id>`", `builtin_app_load(app_id="<app id>", skill_id="<skill id>")`} {
+		if !strings.Contains(out.SystemInstruction, want) {
+			t.Fatalf("assembled prompt missing mention guidance %q:\n%s", want, out.SystemInstruction)
+		}
+	}
 	if len(out.Segments) != 4 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_chat" || out.Segments[2].ID != "user_system" || out.Segments[3].ID != "runtime_context" {
 		t.Fatalf("unexpected segments: %+v", out.Segments)
 	}
