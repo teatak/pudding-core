@@ -206,6 +206,23 @@ func TestBuiltinBrowserCloseClosesSessionBrowser(t *testing.T) {
 	}
 }
 
+// Without a tabID the tool picks the only tab itself; a failed open there must
+// still fail the call instead of reporting an empty tab.
+func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
+	for _, tabs := range [][]browser.TabSnapshot{nil, {{ID: "tab_only", SessionID: "sess_browser"}}} {
+		fake := &fakeToolBrowser{tabs: tabs, openErr: browser.ErrUnavailable}
+		runner := NewBuiltinRunner(WithBrowser(fake))
+		res := runner.Call(context.Background(), Call{
+			SessionID: "sess_browser",
+			Name:      BrowserOpen,
+			Args:      json.RawMessage(`{"url":"https://blocked.example"}`),
+		})
+		if res.Ok {
+			t.Fatalf("open with %d tabs must report the open failure: %+v", len(tabs), res)
+		}
+	}
+}
+
 type fakeToolBrowser struct {
 	screenshot     browser.ScreenshotResult
 	tabs           []browser.TabSnapshot
@@ -215,6 +232,7 @@ type fakeToolBrowser struct {
 	createdTabs    int
 	blankTabs      int
 	openNewTabURL  string
+	openErr        error
 }
 
 func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
@@ -266,6 +284,9 @@ func (f *fakeToolBrowser) ReleaseSession(context.Context, string) error {
 }
 
 func (f *fakeToolBrowser) Open(_ context.Context, sessionID, tabID, rawURL string) (browser.TabSnapshot, error) {
+	if f.openErr != nil {
+		return browser.TabSnapshot{}, f.openErr
+	}
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: rawURL}, nil
 }
 

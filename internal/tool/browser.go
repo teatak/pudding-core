@@ -33,9 +33,9 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 	if args.NewTab {
 		tab, err = r.browser.OpenNewTab(ctx, call.SessionID, args.URL)
 	} else if strings.TrimSpace(args.TabID) == "" {
-		tabs, err := r.browserTabs(ctx, call.SessionID)
-		if err != nil {
-			return browserToolError(out, err)
+		tabs, tabsErr := r.browserTabs(ctx, call.SessionID)
+		if tabsErr != nil {
+			return browserToolError(out, tabsErr)
 		}
 		switch len(tabs) {
 		case 0:
