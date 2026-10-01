@@ -736,11 +736,11 @@ func TestListModelsOpenRouterPricing(t *testing.T) {
 		t.Fatalf("expected z-ai/glm-5.2:free costMultiplier=0.0, got %+v", glmFree.CostMultiplier)
 	}
 
-	// 3. z-ai/glm-5.3-flash => costMultiplier = 0.1
-	// cost = 0.018 * 0.48 + 0.09 * 0.32 + 0.30 * 0.20 = 0.09744 => 0.1
+	// 3. z-ai/glm-5.3-flash => costMultiplier = 0.09
+	// cost = 0.018 * 0.64 + 0.09 * 0.16 + 0.30 * 0.20 = 0.08592 => 0.09
 	glmFlash, ok := candMap["z-ai/glm-5.3-flash"]
-	if !ok || glmFlash.CostMultiplier == nil || *glmFlash.CostMultiplier != 0.1 {
-		t.Fatalf("expected z-ai/glm-5.3-flash costMultiplier=0.1, got %+v", glmFlash.CostMultiplier)
+	if !ok || glmFlash.CostMultiplier == nil || *glmFlash.CostMultiplier != 0.09 {
+		t.Fatalf("expected z-ai/glm-5.3-flash costMultiplier=0.09, got %+v", glmFlash.CostMultiplier)
 	}
 
 	// 4. BuzzHive model with explicit cost_multiplier => 1.5

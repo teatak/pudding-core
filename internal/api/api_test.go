@@ -3394,7 +3394,8 @@ func TestSyncProviderModelsEndpoint(t *testing.T) {
 	if orSynced.Models[0].ID != "openrouter/free" || orSynced.Models[0].CostMultiplier == nil || *orSynced.Models[0].CostMultiplier != 0 {
 		t.Fatalf("unexpected free model cost multiplier: %+v", orSynced.Models[0])
 	}
-	if orSynced.Models[1].ID != "z-ai/glm-5.3-flash" || orSynced.Models[1].CostMultiplier == nil || *orSynced.Models[1].CostMultiplier != 0.1 {
+	// 0.018*0.64 + 0.09*0.16 + 0.30*0.20 = 0.08592 => 0.09
+	if orSynced.Models[1].ID != "z-ai/glm-5.3-flash" || orSynced.Models[1].CostMultiplier == nil || *orSynced.Models[1].CostMultiplier != 0.09 {
 		t.Fatalf("unexpected glm flash cost multiplier: %+v", orSynced.Models[1])
 	}
 }

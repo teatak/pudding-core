@@ -429,10 +429,10 @@ func calculateOpenRouterCostMultiplier(id string, p *openRouterPricing) *float64
 	completionPerM := completionRate * 1_000_000
 	cachePerM := cacheRate * 1_000_000
 
-	// 综合成本加权 (按照 BuzzHive 1000 积分 = 1 美元基准，即 $1/M tokens = 1.0x 费率倍率)
+	// 综合成本加权 (按照 BuzzHive 1000 积分 = 1 美元基准，即 $1/M tokens = 1.0x 费率倍率，按 80% 缓存命中率)
 	var cost float64
 	if cacheOK && cachePerM > 0 {
-		cost = cachePerM*0.48 + promptPerM*0.32 + completionPerM*0.20
+		cost = cachePerM*0.64 + promptPerM*0.16 + completionPerM*0.20
 	} else {
 		cost = promptPerM*0.80 + completionPerM*0.20
 	}
