@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -43,7 +43,7 @@ type BrowserMCPToolSnapshot struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Capability  store.AgentMode `json:"capability,omitempty"`
-	AppID       string          `json:"appID,omitempty"`
+	PluginID    string          `json:"pluginID,omitempty"`
 }
 
 func NewBrowserMCPRunner(homeDir string) *BrowserMCPRunner {
@@ -82,7 +82,7 @@ func (r *BrowserMCPRunner) BrowserSessions() []BrowserMCPSessionSnapshot {
 	return out
 }
 
-func (r *BrowserMCPRunner) ListRuntimeDefinitions(_ context.Context, runtimeID string) ([]*app.Definition, error) {
+func (r *BrowserMCPRunner) ListRuntimeDefinitions(_ context.Context, runtimeID string) ([]*plugin.Definition, error) {
 	session := r.sessionForRuntime(runtimeID)
 	if session == nil {
 		return nil, nil
@@ -90,30 +90,30 @@ func (r *BrowserMCPRunner) ListRuntimeDefinitions(_ context.Context, runtimeID s
 	return session.runtimeDefinitions(), nil
 }
 
-func (r *BrowserMCPRunner) ReadRuntimeSkill(ctx context.Context, runtimeID, appID, skillID string) (*app.SkillDetail, error) {
+func (r *BrowserMCPRunner) ReadRuntimeSkill(ctx context.Context, runtimeID, pluginID, skillID string) (*plugin.SkillDetail, error) {
 	session := r.sessionForRuntime(runtimeID)
-	if session == nil || !session.hasApp(appID) {
-		return nil, app.ErrNotFound
+	if session == nil || !session.hasPlugin(pluginID) {
+		return nil, plugin.ErrNotFound
 	}
-	raw, err := session.call(ctx, "apps/skills/read", map[string]any{
-		"appID":   strings.TrimSpace(appID),
-		"skillID": strings.TrimSpace(skillID),
+	raw, err := session.call(ctx, "plugins/skills/read", map[string]any{
+		"pluginID": strings.TrimSpace(pluginID),
+		"skillID":  strings.TrimSpace(skillID),
 	})
 	if err != nil {
 		return nil, err
 	}
-	var detail app.SkillDetail
+	var detail plugin.SkillDetail
 	if err := json.Unmarshal(raw, &detail); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(detail.Content) == "" {
-		return nil, app.ErrNotFound
+		return nil, plugin.ErrNotFound
 	}
 	return &detail, nil
 }
 
 func (r *BrowserMCPRunner) Definitions(ctx context.Context, _ string) ([]provider.ToolDef, error) {
-	runtimeID := app.RuntimeIDFromContext(ctx)
+	runtimeID := plugin.RuntimeIDFromContext(ctx)
 	if runtimeID == "" {
 		return nil, nil
 	}
@@ -125,7 +125,7 @@ func (r *BrowserMCPRunner) Definitions(ctx context.Context, _ string) ([]provide
 }
 
 func (r *BrowserMCPRunner) Call(ctx context.Context, call Call) Result {
-	runtimeID := app.RuntimeIDFromContext(ctx)
+	runtimeID := plugin.RuntimeIDFromContext(ctx)
 	if runtimeID == "" {
 		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "UI runtime unavailable for this turn"}
 	}
@@ -193,7 +193,7 @@ type browserMCPSession struct {
 	runtimeID     string
 	runtime       string
 	tools         []provider.ToolDef
-	apps          []*app.Definition
+	plugins       []*plugin.Definition
 	pending       map[string]chan rpcEnvelope
 	done          chan struct{}
 }
@@ -227,8 +227,8 @@ func (s *browserMCPSession) run(parent context.Context) {
 		<-s.done
 		return
 	}
-	if err := s.refreshApps(ctx); err != nil {
-		slog.Warn("browser mcp: apps/list failed", "err", err)
+	if err := s.refreshPlugins(ctx); err != nil {
+		slog.Warn("browser mcp: plugins/list failed", "err", err)
 		_ = s.conn.Close(websocket.StatusProtocolError, err.Error())
 		<-s.done
 		return
@@ -242,20 +242,20 @@ func (s *browserMCPSession) definitions() []provider.ToolDef {
 	return append([]provider.ToolDef(nil), s.tools...)
 }
 
-func (s *browserMCPSession) runtimeDefinitions() []*app.Definition {
+func (s *browserMCPSession) runtimeDefinitions() []*plugin.Definition {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*app.Definition, 0, len(s.apps))
-	for _, definition := range s.apps {
+	out := make([]*plugin.Definition, 0, len(s.plugins))
+	for _, definition := range s.plugins {
 		if definition == nil {
 			continue
 		}
-		cloned := app.CloneDefinition(definition)
+		cloned := plugin.CloneDefinition(definition)
 		cloned.Runtime = s.runtime
 		cloned.Tools = nil
 		for _, def := range s.tools {
-			if def.AppID == cloned.ID {
-				cloned.Tools = append(cloned.Tools, app.ToolRef{Name: def.Name, Description: def.Description})
+			if def.PluginID == cloned.ID {
+				cloned.Tools = append(cloned.Tools, plugin.ToolRef{Name: def.Name, Description: def.Description})
 			}
 		}
 		out = append(out, cloned)
@@ -263,12 +263,12 @@ func (s *browserMCPSession) runtimeDefinitions() []*app.Definition {
 	return out
 }
 
-func (s *browserMCPSession) hasApp(appID string) bool {
-	appID = strings.TrimSpace(appID)
+func (s *browserMCPSession) hasPlugin(pluginID string) bool {
+	pluginID = strings.TrimSpace(pluginID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, definition := range s.apps {
-		if definition != nil && definition.ID == appID {
+	for _, definition := range s.plugins {
+		if definition != nil && definition.ID == pluginID {
 			return true
 		}
 	}
@@ -284,7 +284,7 @@ func (s *browserMCPSession) snapshot() BrowserMCPSessionSnapshot {
 			Name:        def.Name,
 			Description: def.Description,
 			Capability:  def.Capability,
-			AppID:       def.AppID,
+			PluginID:    def.PluginID,
 		})
 	}
 	return BrowserMCPSessionSnapshot{
@@ -354,7 +354,7 @@ func (s *browserMCPSession) refreshTools(ctx context.Context) error {
 			Description string          `json:"description"`
 			InputSchema json.RawMessage `json:"inputSchema"`
 			Capability  store.AgentMode `json:"capability"`
-			AppID       string          `json:"appID"`
+			PluginID    string          `json:"pluginID"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -375,7 +375,7 @@ func (s *browserMCPSession) refreshTools(ctx context.Context) error {
 			Description: tool.Description,
 			InputSchema: tool.InputSchema,
 			Capability:  capability,
-			AppID:       strings.TrimSpace(tool.AppID),
+			PluginID:    strings.TrimSpace(tool.PluginID),
 		})
 	}
 	s.mu.Lock()
@@ -384,26 +384,26 @@ func (s *browserMCPSession) refreshTools(ctx context.Context) error {
 	return nil
 }
 
-func (s *browserMCPSession) refreshApps(ctx context.Context) error {
-	raw, err := s.call(ctx, "apps/list", map[string]any{})
+func (s *browserMCPSession) refreshPlugins(ctx context.Context) error {
+	raw, err := s.call(ctx, "plugins/list", map[string]any{})
 	if err != nil {
 		return err
 	}
 	var out struct {
-		Apps []*app.Definition `json:"apps"`
+		Plugins []*plugin.Definition `json:"plugins"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return err
 	}
-	apps := make([]*app.Definition, 0, len(out.Apps))
-	for _, definition := range out.Apps {
+	plugins := make([]*plugin.Definition, 0, len(out.Plugins))
+	for _, definition := range out.Plugins {
 		if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Name) == "" {
 			continue
 		}
-		apps = append(apps, app.CloneDefinition(definition))
+		plugins = append(plugins, plugin.CloneDefinition(definition))
 	}
 	s.mu.Lock()
-	s.apps = apps
+	s.plugins = plugins
 	s.mu.Unlock()
 	return nil
 }
@@ -482,12 +482,12 @@ func (s *browserMCPSession) readLoop(ctx context.Context) {
 				}
 			}()
 		}
-		if envelope.Method == "notifications/apps/list_changed" {
+		if envelope.Method == "notifications/plugins/list_changed" {
 			go func() {
 				refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if err := s.refreshApps(refreshCtx); err != nil {
-					slog.Warn("browser mcp: refresh apps failed", "err", err)
+				if err := s.refreshPlugins(refreshCtx); err != nil {
+					slog.Warn("browser mcp: refresh plugins failed", "err", err)
 				}
 			}()
 		}
@@ -572,7 +572,7 @@ func browserToolResult(call Call, raw json.RawMessage, homeDir string) Result {
 				if err != nil {
 					return toolJSONError(out, "invalid_tool_image", err.Error())
 				}
-				stored, err := attachment.NewService(homeDir).StoreReader(call.SessionID, "canvas-inspection.png", item.MimeType, bytes.NewReader(data))
+				stored, err := attachment.NewService(homeDir).StoreReader(call.SessionID, "widget-inspection.png", item.MimeType, bytes.NewReader(data))
 				if err != nil {
 					return toolJSONError(out, "attachment_store_failed", err.Error())
 				}
@@ -583,13 +583,13 @@ func browserToolResult(call Call, raw json.RawMessage, homeDir string) Result {
 		}
 		out.Ok = !decoded.IsError
 		out.Content = strings.Join(parts, "\n")
-		if call.Name == "canvas_inspect" && out.Ok && len(out.ContextAttachments) == 0 {
-			return toolJSONError(out, "canvas_screenshot_missing", "Canvas inspection returned no screenshot")
+		if call.Name == "widget_inspect" && out.Ok && len(out.ContextAttachments) == 0 {
+			return toolJSONError(out, "widget_screenshot_missing", "Widget inspection returned no screenshot")
 		}
 		return out
 	}
-	if call.Name == "canvas_inspect" {
-		return toolJSONError(out, "canvas_screenshot_missing", "Canvas inspection returned no screenshot")
+	if call.Name == "widget_inspect" {
+		return toolJSONError(out, "widget_screenshot_missing", "Widget inspection returned no screenshot")
 	}
 	if len(raw) > 0 {
 		out.Content = string(raw)

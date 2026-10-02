@@ -212,7 +212,7 @@ func (r *BuiltinRunner) resolveCopyEndpoint(call Call, endpoint fileCopyEndpoint
 			resolved, err := r.resolveFilePath(call, managedScopeProject, canonical, write, false, write)
 			return copyEndpoint{FileCopyLocation: FileCopyLocation{Path: resolved.target, Scope: managedScopeProject}, resolved: resolved}, err
 		}
-		for _, scope := range []string{managedScopeTemp, managedScopeSkill, managedScopeApp} {
+		for _, scope := range []string{managedScopeTemp, managedScopeSkill, managedScopePlugin} {
 			root, _, err := r.managedRoot(scope)
 			if err != nil {
 				continue

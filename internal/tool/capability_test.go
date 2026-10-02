@@ -56,9 +56,9 @@ func TestRequiredModeForDynamicMCPTools(t *testing.T) {
 		name string
 		want store.AgentMode
 	}{
-		{name: "app_mcp__github__list_issues", want: store.ModeWork},
-		{name: AppLoad, want: store.ModeChat},
-		{name: AppUnload, want: store.ModeChat},
+		{name: "plugin_mcp__github__list_issues", want: store.ModeWork},
+		{name: PluginLoad, want: store.ModeChat},
+		{name: PluginUnload, want: store.ModeChat},
 		{name: "canvas_create", want: store.ModeChat},
 		{name: RequestUserInput, want: store.ModeChat},
 		{name: "unknown_dynamic_tool", want: store.ModeCode},

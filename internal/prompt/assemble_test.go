@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -31,7 +31,7 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 		t.Fatalf("assembled prompt missing history tool guidance:\n%s", out.SystemInstruction)
 	}
 	// The desktop composer inserts every mention as @<type>/<id>(<name>); each built-in type maps to one exact call.
-	for _, want := range []string{"`@<type>/<id>(<name>)`", "`@app/<app id>`", "`@skill/<skill id>`", "`@skill/<app id>/<skill id>`", `builtin_app_load(app_id="<app id>", skill_id="<skill id>")`} {
+	for _, want := range []string{"`@<type>/<id>(<name>)`", "`@plugin/<plugin id>`", "`@skill/<skill id>`", "`@skill/<plugin id>/<skill id>`", `builtin_plugin_load(plugin_id="<plugin id>", skill_id="<skill id>")`} {
 		if !strings.Contains(out.SystemInstruction, want) {
 			t.Fatalf("assembled prompt missing mention guidance %q:\n%s", want, out.SystemInstruction)
 		}
@@ -90,11 +90,11 @@ func TestAssembleDoesNotShowPseudoPathForBuiltinSkill(t *testing.T) {
 	}
 }
 
-func TestAssembleIncludesAppsIndex(t *testing.T) {
-	appPath := filepath.Join(t.TempDir(), "apps", "github", app.AppFileName)
+func TestAssembleIncludesPluginsIndex(t *testing.T) {
+	pluginPath := filepath.Join(t.TempDir(), "plugins", "github", plugin.PluginFileName)
 	out := Assemble(Input{
 		Mode: "work",
-		Apps: []*app.Definition{
+		Plugins: []*plugin.Definition{
 			{
 				ID:             "github",
 				Name:           "GitHub",
@@ -102,14 +102,14 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 				Enabled:        true,
 				RequiredMode:   "work",
 				DefaultSkillID: "github-issues",
-				Path:           appPath,
-				Endpoints: map[string]app.Endpoint{
+				Path:           pluginPath,
+				Endpoints: map[string]plugin.Endpoint{
 					"github_rest": {
-						Kind:        app.EndpointKindREST,
+						Kind:        plugin.EndpointKindREST,
 						Description: "GitHub REST API.",
 					},
 				},
-				Skills: []app.SkillRef{
+				Skills: []plugin.SkillRef{
 					{
 						ID:          "github-issues",
 						Name:        "github-issues",
@@ -120,17 +120,17 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 			},
 		},
 	})
-	if !strings.Contains(out.SystemInstruction, "## Available Apps") {
-		t.Fatalf("assembled prompt missing apps index:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "## Available Plugins") {
+		t.Fatalf("assembled prompt missing plugins index:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "requires Work") {
+	if !strings.Contains(out.SystemInstruction, "Plugin `github`") || !strings.Contains(out.SystemInstruction, "requires Work") {
 		t.Fatalf("assembled prompt missing compact app metadata:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="<app id>")`) {
+	if !strings.Contains(out.SystemInstruction, `builtin_plugin_load(plugin_id="<plugin id>")`) {
 		t.Fatalf("assembled prompt missing explicit app load instruction:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Never use `builtin_skill_read` to load an App") {
-		t.Fatalf("assembled prompt missing App loading boundary:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "Never use `builtin_skill_read` to load a plugin") {
+		t.Fatalf("assembled prompt missing plugin loading boundary:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") {
 		t.Fatalf("assembled prompt missing default app skill:\n%s", out.SystemInstruction)
@@ -143,37 +143,37 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	}
 }
 
-func TestAssembleMarksLoadedApps(t *testing.T) {
+func TestAssembleMarksLoadedPlugins(t *testing.T) {
 	out := Assemble(Input{
-		Mode:         "work",
-		LoadedAppIDs: []string{"github"},
-		Apps: []*app.Definition{{
+		Mode:            "work",
+		LoadedPluginIDs: []string{"github"},
+		Plugins: []*plugin.Definition{{
 			ID:             "github",
 			Name:           "GitHub",
 			Enabled:        true,
 			RequiredMode:   "work",
 			DefaultSkillID: "github-issues",
-			Skills: []app.SkillRef{{
+			Skills: []plugin.SkillRef{{
 				ID:          "github-issues",
 				Description: "Inspect GitHub issues.",
 			}},
 		}},
 	})
 	if !strings.Contains(out.SystemInstruction, "Status: loaded for this session") {
-		t.Fatalf("assembled prompt missing loaded App status:\n%s", out.SystemInstruction)
+		t.Fatalf("assembled prompt missing loaded plugin status:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Do not call `builtin_app_load` again for their default skill") {
+	if !strings.Contains(out.SystemInstruction, "Do not call `builtin_plugin_load` again for their default skill") {
 		t.Fatalf("assembled prompt missing duplicate load guidance:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, `builtin_app_unload(app_id="<loaded app id>")`) {
-		t.Fatalf("assembled prompt missing App unload guidance:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, `builtin_plugin_unload(plugin_id="<loaded plugin id>")`) {
+		t.Fatalf("assembled prompt missing plugin unload guidance:\n%s", out.SystemInstruction)
 	}
 }
 
-func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
+func TestAssembleSummarizesUnconnectedPlugin(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "work",
-		Apps: []*app.Definition{
+		Plugins: []*plugin.Definition{
 			{
 				ID:             "github",
 				Name:           "GitHub",
@@ -181,11 +181,11 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 				Enabled:        true,
 				RequiredMode:   "work",
 				DefaultSkillID: "github-issues",
-				Auth:           &app.AuthConfig{Required: true},
-				Endpoints: map[string]app.Endpoint{
-					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
+				Auth:           &plugin.AuthConfig{Required: true},
+				Endpoints: map[string]plugin.Endpoint{
+					"github_rest": {Kind: plugin.EndpointKindREST, Description: "GitHub REST API."},
 				},
-				Skills: []app.SkillRef{{
+				Skills: []plugin.SkillRef{{
 					ID:          "github-issues",
 					Description: "Inspect GitHub issues.",
 					Path:        "skills/issues/SKILL.md",
@@ -193,8 +193,8 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 			},
 		},
 	})
-	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "Status: not connected") {
-		t.Fatalf("assembled prompt should summarize unconnected app:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "Plugin `github`") || !strings.Contains(out.SystemInstruction, "Status: not connected") {
+		t.Fatalf("assembled prompt should summarize unconnected plugin:\n%s", out.SystemInstruction)
 	}
 	if strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || strings.Contains(out.SystemInstruction, "Skill `github-issues`") {
 		t.Fatalf("unconnected app should not expose endpoints or skills:\n%s", out.SystemInstruction)
@@ -204,10 +204,10 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 	}
 }
 
-func TestAssembleShowsConnectedAppFully(t *testing.T) {
+func TestAssembleShowsConnectedPluginFully(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "work",
-		Apps: []*app.Definition{
+		Plugins: []*plugin.Definition{
 			{
 				ID:             "github",
 				Name:           "GitHub",
@@ -215,26 +215,26 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 				Enabled:        true,
 				RequiredMode:   "work",
 				DefaultSkillID: "github-issues",
-				Auth:           &app.AuthConfig{Required: true},
-				Endpoints: map[string]app.Endpoint{
-					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
+				Auth:           &plugin.AuthConfig{Required: true},
+				Endpoints: map[string]plugin.Endpoint{
+					"github_rest": {Kind: plugin.EndpointKindREST, Description: "GitHub REST API."},
 				},
-				Skills: []app.SkillRef{{
+				Skills: []plugin.SkillRef{{
 					ID:          "github-issues",
 					Description: "Inspect GitHub issues.",
 					Path:        "skills/issues/SKILL.md",
 				}},
 			},
 		},
-		AppConnections: []*app.Connection{
+		PluginConnections: []*plugin.Connection{
 			{
-				ID: "github-main", Name: "GitHub · octocat", AppID: "github",
-				Account: &app.ConnectionAccount{Login: "octocat"},
-				Auth:    app.Auth{MethodID: app.GitHubAppAuthMethodID, Type: app.AuthTypeOAuth2, Variant: app.GitHubAppAuthVariant},
+				ID: "github-main", Name: "GitHub · octocat", PluginID: "github",
+				Account: &plugin.ConnectionAccount{Login: "octocat"},
+				Auth:    plugin.Auth{MethodID: plugin.GitHubAppAuthMethodID, Type: plugin.AuthTypeOAuth2, Variant: plugin.GitHubAppAuthVariant},
 			},
 			{
-				ID: "github-pat", Name: "GitHub PAT", AppID: "github",
-				Auth: app.Auth{MethodID: "github-pat", Type: app.AuthTypeBearer},
+				ID: "github-pat", Name: "GitHub PAT", PluginID: "github",
+				Auth: plugin.Auth{MethodID: "github-pat", Type: plugin.AuthTypeBearer},
 			},
 		},
 	})
@@ -255,13 +255,13 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 func TestAssembleTreatsLegacyGitHubOAuthAsDisconnected(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "work",
-		Apps: []*app.Definition{{
+		Plugins: []*plugin.Definition{{
 			ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work",
-			Auth: &app.AuthConfig{Required: true},
+			Auth: &plugin.AuthConfig{Required: true},
 		}},
-		AppConnections: []*app.Connection{{
-			ID: "github-main", AppID: "github",
-			Auth: app.Auth{MethodID: "github-oauth", Type: app.AuthTypeOAuth2, Variant: app.GitHubAppAuthVariant, AccessToken: "legacy-token"},
+		PluginConnections: []*plugin.Connection{{
+			ID: "github-main", PluginID: "github",
+			Auth: plugin.Auth{MethodID: "github-oauth", Type: plugin.AuthTypeOAuth2, Variant: plugin.GitHubAppAuthVariant, AccessToken: "legacy-token"},
 		}},
 	})
 	if !strings.Contains(out.SystemInstruction, "Status: not connected") {
@@ -269,10 +269,10 @@ func TestAssembleTreatsLegacyGitHubOAuthAsDisconnected(t *testing.T) {
 	}
 }
 
-func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
+func TestAssembleShowsConnectionlessSkillsOnlyPluginFully(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "work",
-		Apps: []*app.Definition{
+		Plugins: []*plugin.Definition{
 			{
 				ID:             "notebook-helper",
 				Name:           "Notebook Helper",
@@ -280,8 +280,8 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 				Enabled:        true,
 				RequiredMode:   "work",
 				DefaultSkillID: "notebook-review",
-				Auth:           &app.AuthConfig{Required: false},
-				Skills: []app.SkillRef{{
+				Auth:           &plugin.AuthConfig{Required: false},
+				Skills: []plugin.SkillRef{{
 					ID:          "notebook-review",
 					Description: "Review a notebook.",
 					Path:        "skills/review/SKILL.md",
@@ -297,44 +297,44 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 	}
 }
 
-func TestAssembleOmitsAppsIndexWhenAllAppsAreDisabled(t *testing.T) {
-	out := Assemble(Input{Mode: "chat", Apps: []*app.Definition{{
+func TestAssembleOmitsPluginsIndexWhenAllPluginsAreDisabled(t *testing.T) {
+	out := Assemble(Input{Mode: "chat", Plugins: []*plugin.Definition{{
 		ID:      "browser",
 		Name:    "Browser",
 		Enabled: false,
 	}}})
-	if strings.Contains(out.SystemInstruction, "## Available Apps") || hasSegment(out.Segments, "apps_index") {
-		t.Fatalf("disabled Apps should not leave an empty prompt index:\n%s", out.SystemInstruction)
+	if strings.Contains(out.SystemInstruction, "## Available Plugins") || hasSegment(out.Segments, "plugins_index") {
+		t.Fatalf("disabled plugins should not leave an empty prompt index:\n%s", out.SystemInstruction)
 	}
-	if strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="browser")`) || strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="capture")`) {
-		t.Fatalf("disabled built-in App left an executable load instruction:\n%s", out.SystemInstruction)
+	if strings.Contains(out.SystemInstruction, `builtin_plugin_load(plugin_id="browser")`) || strings.Contains(out.SystemInstruction, `builtin_plugin_load(plugin_id="capture")`) {
+		t.Fatalf("disabled built-in plugin left an executable load instruction:\n%s", out.SystemInstruction)
 	}
 }
 
-func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
-	apps := []*app.Definition{{ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work"}}
-	chat := Assemble(Input{Mode: "chat", Apps: apps})
-	if !strings.Contains(chat.SystemInstruction, "## Available Apps") || !strings.Contains(chat.SystemInstruction, "requires Work") {
-		t.Fatalf("chat prompt must expose compact app capability metadata:\n%s", chat.SystemInstruction)
+func TestAssembleModeLayersAndAllModesShowPlugins(t *testing.T) {
+	plugins := []*plugin.Definition{{ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work"}}
+	chat := Assemble(Input{Mode: "chat", Plugins: plugins})
+	if !strings.Contains(chat.SystemInstruction, "## Available Plugins") || !strings.Contains(chat.SystemInstruction, "requires Work") {
+		t.Fatalf("chat prompt must expose compact plugin capability metadata:\n%s", chat.SystemInstruction)
 	}
-	if !strings.Contains(chat.SystemInstruction, "Canvas is a runtime-provided App") {
-		t.Fatalf("chat prompt missing conditional Canvas guidance:\n%s", chat.SystemInstruction)
+	if !strings.Contains(chat.SystemInstruction, "Widget Authoring is a runtime-provided plugin") {
+		t.Fatalf("chat prompt missing conditional Widget guidance:\n%s", chat.SystemInstruction)
 	}
-	work := Assemble(Input{Mode: "work", Apps: apps})
-	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !strings.Contains(work.SystemInstruction, "only when it is listed in Available Apps") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
-		t.Fatalf("work prompt missing mode or apps segments: %+v", work.Segments)
+	work := Assemble(Input{Mode: "work", Plugins: plugins})
+	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !strings.Contains(work.SystemInstruction, "only when it is listed in Available Plugins") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "plugins_index") {
+		t.Fatalf("work prompt missing mode or plugins segments: %+v", work.Segments)
 	}
-	code := Assemble(Input{Mode: "code", Apps: apps})
-	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, "builtin_command_session") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
-		t.Fatalf("code prompt missing mode or apps segments: %+v", code.Segments)
+	code := Assemble(Input{Mode: "code", Plugins: plugins})
+	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, "builtin_command_session") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "plugins_index") {
+		t.Fatalf("code prompt missing mode or plugins segments: %+v", code.Segments)
 	}
 	if !strings.Contains(code.SystemInstruction, "Code already includes Work") ||
-		!strings.Contains(code.SystemInstruction, "load the App directly without requesting another capability") ||
+		!strings.Contains(code.SystemInstruction, "load the plugin directly without requesting another capability") ||
 		!strings.Contains(code.SystemInstruction, `request_capability(targetMode="work")`) {
 		t.Fatalf("code prompt missing inherited Work capability guidance:\n%s", code.SystemInstruction)
 	}
-	if strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) {
-		t.Fatalf("code prompt still treats terminal as an App:\n%s", code.SystemInstruction)
+	if strings.Contains(code.SystemInstruction, `builtin_plugin_load(plugin_id="terminal")`) {
+		t.Fatalf("code prompt still treats terminal as a plugin:\n%s", code.SystemInstruction)
 	}
 	if !strings.Contains(code.SystemInstruction, "builtin_file_slice.numberedContent") ||
 		!strings.Contains(code.SystemInstruction, "direct line counting is acceptable") ||
@@ -399,7 +399,7 @@ func TestAssembleGuidesFocusedResultReuseWithoutSkippingVerification(t *testing.
 	}
 }
 
-func TestLoaderListsAuthoringCapabilitiesAsApps(t *testing.T) {
+func TestLoaderListsAuthoringCapabilitiesAsPlugins(t *testing.T) {
 	home := t.TempDir()
 	out, err := NewLoader(home).Prompt(context.Background(), "chat")
 	if err != nil {
@@ -408,9 +408,9 @@ func TestLoaderListsAuthoringCapabilitiesAsApps(t *testing.T) {
 	if strings.Contains(out.SystemInstruction, "## Available Skills") || strings.Contains(out.SystemInstruction, "`skill-creator`") && !strings.Contains(out.SystemInstruction, "Default skill `skill-creator`") {
 		t.Fatalf("loader prompt exposed authoring Skills globally:\n%s", out.SystemInstruction)
 	}
-	for _, appID := range []string{"skill-authoring", "app-authoring"} {
-		if !strings.Contains(out.SystemInstruction, "App `"+appID+"`") {
-			t.Fatalf("loader prompt missing authoring App %s:\n%s", appID, out.SystemInstruction)
+	for _, pluginID := range []string{"skill-authoring", "plugin-authoring"} {
+		if !strings.Contains(out.SystemInstruction, "Plugin `"+pluginID+"`") {
+			t.Fatalf("loader prompt missing authoring plugin %s:\n%s", pluginID, out.SystemInstruction)
 		}
 	}
 }

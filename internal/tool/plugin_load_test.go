@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestDecodeAppLoadRequest(t *testing.T) {
-	request, err := DecodeAppLoadRequest(json.RawMessage(`{"app_id":" canvas ","skill_id":" canvas "}`))
+func TestDecodePluginLoadRequest(t *testing.T) {
+	request, err := DecodePluginLoadRequest(json.RawMessage(`{"plugin_id":" widget-authoring ","skill_id":" widget-authoring "}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.AppID != "canvas" || request.SkillID != "canvas" {
+	if request.PluginID != "widget-authoring" || request.SkillID != "widget-authoring" {
 		t.Fatalf("request = %+v", request)
 	}
-	if _, err := DecodeAppLoadRequest(json.RawMessage(`{"skill_id":"canvas"}`)); err == nil {
-		t.Fatal("missing app_id should fail")
+	if _, err := DecodePluginLoadRequest(json.RawMessage(`{"skill_id":"widget-authoring"}`)); err == nil {
+		t.Fatal("missing plugin_id should fail")
 	}
 }

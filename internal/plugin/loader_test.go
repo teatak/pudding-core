@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"encoding/json"
@@ -12,11 +12,11 @@ import (
 
 func TestLoadUserDefinitions(t *testing.T) {
 	root := t.TempDir()
-	appDir := filepath.Join(root, "github")
-	if err := os.MkdirAll(filepath.Join(appDir, "skills", "issues"), 0o700); err != nil {
+	pluginDir := filepath.Join(root, "github")
+	if err := os.MkdirAll(filepath.Join(pluginDir, "skills", "issues"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: github
 name: GitHub
 description: GitHub API access
@@ -64,7 +64,7 @@ skills:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "skills", "issues", "SKILL.md"), []byte(`---
+	if err := os.WriteFile(filepath.Join(pluginDir, "skills", "issues", "SKILL.md"), []byte(`---
 name: github-issues
 description: Read GitHub issues.
 ---
@@ -79,7 +79,7 @@ Use builtin_rest_request with github_rest.
 		t.Fatal(err)
 	}
 	if len(defs) != 1 {
-		t.Fatalf("expected one app, got %+v", defs)
+		t.Fatalf("expected one plugin, got %+v", defs)
 	}
 	def := defs[0]
 	if def.ID != "github" || def.Endpoints["github_rest"].Kind != EndpointKindREST {
@@ -103,16 +103,16 @@ Use builtin_rest_request with github_rest.
 func TestInstallPackageDefinition(t *testing.T) {
 	root := t.TempDir()
 	pkg := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App: PackageApp{
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin: PackagePlugin{
 			ID:      "github",
 			Name:    "GitHub",
 			Version: "1.0.0",
 		},
 		Files: []PackageFile{
 			{
-				Path: AppFileName,
+				Path: PluginFileName,
 				Content: `
 id: github
 name: GitHub
@@ -155,11 +155,11 @@ Use builtin_rest_request with github_rest.
 		t.Fatal(err)
 	}
 	data = append(data, '\n')
-	installed, err := InstallPackage(root, data, sha256Bytes(data), "https://example.test/apps/registry.json")
+	installed, err := InstallPackage(root, data, sha256Bytes(data), "https://example.test/plugins/registry.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installed.Path != filepath.Join(root, "github", AppFileName) {
+	if installed.Path != filepath.Join(root, "github", PluginFileName) {
 		t.Fatalf("unexpected installed path: %s", installed.Path)
 	}
 	if installed.Version != "1.0.0" || installed.Icon == nil || installed.Icon.SVG != "assets/icon.svg" {
@@ -182,33 +182,33 @@ Use builtin_rest_request with github_rest.
 func TestInstallPackageUpdatePreservesPreviousVersionOnValidationFailure(t *testing.T) {
 	root := t.TempDir()
 	initial := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "1.0.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "1.0.0"},
 		Files: []PackageFile{{
-			Path:    AppFileName,
+			Path:    PluginFileName,
 			Content: "id: example\nname: Original\nversion: 1.0.0\nendpoints:\n  example_rest:\n    kind: rest\n    url: https://example.test\n",
 		}},
 	}
-	if _, err := InstallPackage(root, marshalTestAppPackage(t, initial), "", ""); err != nil {
+	if _, err := InstallPackage(root, marshalTestPluginPackage(t, initial), "", ""); err != nil {
 		t.Fatal(err)
 	}
-	manifestPath := filepath.Join(root, "example", AppFileName)
+	manifestPath := filepath.Join(root, "example", PluginFileName)
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	invalid := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "2.0.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "2.0.0"},
 		Files: []PackageFile{{
-			Path:    AppFileName,
+			Path:    PluginFileName,
 			Content: "id: wrong-id\nname: Broken\nversion: 2.0.0\n",
 		}},
 	}
-	if _, err := InstallPackage(root, marshalTestAppPackage(t, invalid), "", ""); err == nil {
+	if _, err := InstallPackage(root, marshalTestPluginPackage(t, invalid), "", ""); err == nil {
 		t.Fatal("invalid update should fail")
 	}
 	after, err := os.ReadFile(manifestPath)
@@ -216,22 +216,22 @@ func TestInstallPackageUpdatePreservesPreviousVersionOnValidationFailure(t *test
 		t.Fatal(err)
 	}
 	if string(after) != string(before) {
-		t.Fatalf("failed update changed installed App: %q", after)
+		t.Fatalf("failed update changed installed plugin: %q", after)
 	}
 }
 
 func TestInstallPackageUpdatePreservesUnmanagedFilesAndRemovesOldManagedFiles(t *testing.T) {
 	root := t.TempDir()
 	initial := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "1.0.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "1.0.0"},
 		Files: []PackageFile{
-			{Path: AppFileName, Content: "id: example\nname: Example\nversion: 1.0.0\nskills:\n  - skills/old/SKILL.md\n"},
-			{Path: "skills/old/SKILL.md", Content: "---\nname: old\ndescription: Old App instructions.\n---\n\nOld.\n"},
+			{Path: PluginFileName, Content: "id: example\nname: Example\nversion: 1.0.0\nskills:\n  - skills/old/SKILL.md\n"},
+			{Path: "skills/old/SKILL.md", Content: "---\nname: old\ndescription: Old plugin instructions.\n---\n\nOld.\n"},
 		},
 	}
-	if _, err := InstallPackage(root, marshalTestAppPackage(t, initial), "", ""); err != nil {
+	if _, err := InstallPackage(root, marshalTestPluginPackage(t, initial), "", ""); err != nil {
 		t.Fatal(err)
 	}
 	unmanagedPath := filepath.Join(root, "example", "local-notes.txt")
@@ -239,15 +239,15 @@ func TestInstallPackageUpdatePreservesUnmanagedFilesAndRemovesOldManagedFiles(t 
 		t.Fatal(err)
 	}
 	updated := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "2.0.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "2.0.0"},
 		Files: []PackageFile{
-			{Path: AppFileName, Content: "id: example\nname: Example\nversion: 2.0.0\nskills:\n  - skills/new/SKILL.md\n"},
-			{Path: "skills/new/SKILL.md", Content: "---\nname: new\ndescription: New App instructions.\n---\n\nNew.\n"},
+			{Path: PluginFileName, Content: "id: example\nname: Example\nversion: 2.0.0\nskills:\n  - skills/new/SKILL.md\n"},
+			{Path: "skills/new/SKILL.md", Content: "---\nname: new\ndescription: New plugin instructions.\n---\n\nNew.\n"},
 		},
 	}
-	definition, err := InstallPackage(root, marshalTestAppPackage(t, updated), "", "")
+	definition, err := InstallPackage(root, marshalTestPluginPackage(t, updated), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,22 +263,22 @@ func TestInstallPackageUpdatePreservesUnmanagedFilesAndRemovesOldManagedFiles(t 
 }
 
 func TestLoadDefinitionRequiresReferencedIconFile(t *testing.T) {
-	appDir := filepath.Join(t.TempDir(), "example")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(t.TempDir(), "example")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte("id: example\nname: Example\nicon:\n  svg: assets/icon.svg\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte("id: example\nname: Example\nicon:\n  svg: assets/icon.svg\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadDefinitionDir(appDir); err == nil {
+	if _, err := LoadDefinitionDir(pluginDir); err == nil {
 		t.Fatal("expected missing referenced icon to fail validation")
 	}
 }
 
-func TestLoadDefinitionRejectsSkillSymlinkOutsideApp(t *testing.T) {
+func TestLoadDefinitionRejectsSkillSymlinkOutsidePlugin(t *testing.T) {
 	root := t.TempDir()
-	appDir := filepath.Join(root, "example")
-	skillDir := filepath.Join(appDir, "skills", "example")
+	pluginDir := filepath.Join(root, "example")
+	skillDir := filepath.Join(pluginDir, "skills", "example")
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -289,42 +289,42 @@ func TestLoadDefinitionRejectsSkillSymlinkOutsideApp(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(skillDir, "SKILL.md")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte("id: example\nname: Example\nskills:\n  - skills/example/SKILL.md\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte("id: example\nname: Example\nskills:\n  - skills/example/SKILL.md\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadDefinitionDir(appDir); err == nil {
-		t.Fatal("expected skill symlink outside App to be rejected")
+	if _, err := LoadDefinitionDir(pluginDir); err == nil {
+		t.Fatal("expected skill symlink outside plugin to be rejected")
 	}
 }
 
-func TestAppRootSymlinkIsRejected(t *testing.T) {
+func TestPluginRootSymlinkIsRejected(t *testing.T) {
 	parent := t.TempDir()
 	outside := t.TempDir()
-	root := filepath.Join(parent, "apps")
+	root := filepath.Join(parent, "plugins")
 	if err := os.Symlink(outside, root); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	if _, err := LoadUserDefinitions(root); err == nil {
-		t.Fatal("symlinked App root should not be loaded")
+		t.Fatal("symlinked plugin root should not be loaded")
 	}
 	pkg := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "1.0.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "1.0.0"},
 		Files: []PackageFile{{
-			Path:    AppFileName,
+			Path:    PluginFileName,
 			Content: "id: example\nname: Example\nversion: 1.0.0\n",
 		}},
 	}
-	if _, err := InstallPackage(root, marshalTestAppPackage(t, pkg), "", ""); err == nil {
-		t.Fatal("package install through symlinked App root should fail")
+	if _, err := InstallPackage(root, marshalTestPluginPackage(t, pkg), "", ""); err == nil {
+		t.Fatal("package install through symlinked plugin root should fail")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "example")); !os.IsNotExist(err) {
-		t.Fatalf("package escaped App root: %v", err)
+		t.Fatalf("package escaped plugin root: %v", err)
 	}
 }
 
-func marshalTestAppPackage(t *testing.T, pkg Package) []byte {
+func marshalTestPluginPackage(t *testing.T, pkg Package) []byte {
 	t.Helper()
 	data, err := json.Marshal(pkg)
 	if err != nil {
@@ -333,15 +333,15 @@ func marshalTestAppPackage(t *testing.T, pkg Package) []byte {
 	return data
 }
 
-func TestLoadMCPAppEndpoints(t *testing.T) {
+func TestLoadMCPPluginEndpoints(t *testing.T) {
 	root := t.TempDir()
-	appDir := filepath.Join(root, "mcpapp")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(root, "mcpapp")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: mcpapp
-name: MCP App
+name: MCP plugin
 endpoints:
   remote_mcp:
     kind: mcp
@@ -362,7 +362,7 @@ endpoints:
 		t.Fatal(err)
 	}
 	if len(defs) != 1 {
-		t.Fatalf("expected one app, got %+v", defs)
+		t.Fatalf("expected one plugin, got %+v", defs)
 	}
 	remote := defs[0].Endpoints["remote_mcp"]
 	if remote.Kind != EndpointKindMCP || remote.Transport != EndpointTransportStreamableHTTP || remote.URL != "https://example.test/mcp" {

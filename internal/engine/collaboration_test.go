@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
@@ -18,42 +18,42 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-type collaborationApps struct{ enabled atomic.Bool }
+type collaborationPlugins struct{ enabled atomic.Bool }
 
-func (a *collaborationApps) ListDefinitions(context.Context) ([]*app.Definition, error) {
-	defs := app.BuiltinDefinitions()
+func (a *collaborationPlugins) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
+	defs := plugin.BuiltinDefinitions()
 	for _, d := range defs {
-		if d.ID == app.BuiltinCollaborationID {
+		if d.ID == plugin.BuiltinCollaborationID {
 			d.Enabled = a.enabled.Load()
 		}
 	}
 	return defs, nil
 }
-func (*collaborationApps) ReadSkill(_ context.Context, id, skill string) (*app.SkillDetail, error) {
-	d, _ := app.ReadBuiltinSkill(id, skill)
+func (*collaborationPlugins) ReadSkill(_ context.Context, id, skill string) (*plugin.SkillDetail, error) {
+	d, _ := plugin.ReadBuiltinSkill(id, skill)
 	return d, nil
 }
 
-func newCollaborationEngine(t *testing.T, client provider.Client) (*Engine, *storetest.Store, *collaborationApps) {
+func newCollaborationEngine(t *testing.T, client provider.Client) (*Engine, *storetest.Store, *collaborationPlugins) {
 	t.Helper()
 	ctx := context.Background()
 	st := storetest.New(t)
-	apps := &collaborationApps{}
-	apps.enabled.Store(true)
-	if err := st.CreateSession(ctx, &store.Session{ID: "root", Title: "Root", Provider: client.Name(), Model: "model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedAppIDs: []string{app.BuiltinCollaborationID}}); err != nil {
+	plugins := &collaborationPlugins{}
+	plugins.enabled.Store(true)
+	if err := st.CreateSession(ctx, &store.Session{ID: "root", Title: "Root", Provider: client.Name(), Model: "model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedPluginIDs: []string{plugin.BuiltinCollaborationID}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.PutProviderProfile(ctx, &store.ProviderProfile{ID: client.Name(), Protocol: "openai-compatible", BaseURL: "http://example.invalid", Models: []store.ProviderModel{{ID: "model"}}}); err != nil {
 		t.Fatal(err)
 	}
-	eng := New(st, event.NewHub(), mapResolver{client.Name(): client}, st, WithApps(apps))
+	eng := New(st, event.NewHub(), mapResolver{client.Name(): client}, st, WithPlugins(plugins))
 	t.Cleanup(func() { eng.Stop(); eng.Wait() })
-	return eng, st, apps
+	return eng, st, plugins
 }
 
 func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 	ctx := context.Background()
-	eng, st, apps := newCollaborationEngine(t, mock.New(mock.WithScript([]string{"waiting"}), mock.WithDelay(time.Minute)))
+	eng, st, plugins := newCollaborationEngine(t, mock.New(mock.WithScript([]string{"waiting"}), mock.WithDelay(time.Minute)))
 	root, err := eng.Submit(ctx, SubmitInput{SessionID: "root", ClientMessageID: "root_input", Text: "ROOT"})
 	if err != nil {
 		t.Fatal(err)
@@ -83,8 +83,8 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 		t.Fatal("fourth child not queued")
 	}
 	// Children do not even receive the recursive tool definitions.
-	ids := []string{app.BuiltinCollaborationID}
-	if _, err := st.UpdateSession(ctx, children[0].ID, store.SessionUpdate{LoadedAppIDs: &ids}); err != nil {
+	ids := []string{plugin.BuiltinCollaborationID}
+	if _, err := st.UpdateSession(ctx, children[0].ID, store.SessionUpdate{LoadedPluginIDs: &ids}); err != nil {
 		t.Fatal(err)
 	}
 	defs, err := eng.toolDefinitions(ctx, children[0].ID, store.ModeWork)
@@ -96,7 +96,7 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 			t.Fatal("recursive tools exposed")
 		}
 	}
-	apps.enabled.Store(false)
+	plugins.enabled.Store(false)
 	if _, err := eng.dispatchChild(ctx, "root", root.TurnID, "disabled", "disabled", "CHILD", store.ModeWork); err == nil {
 		t.Fatal("disabled App accepted dispatch")
 	}
@@ -114,7 +114,7 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 	if _, err := st.RunningTurn(ctx, "root"); err != nil {
 		t.Fatal("stop collaboration cancelled main")
 	}
-	apps.enabled.Store(true)
+	plugins.enabled.Store(true)
 	if _, err := eng.dispatchChild(ctx, "root", root.TurnID, "late", "late", "CHILD", store.ModeWork); err == nil {
 		t.Fatal("stop did not block late dispatch")
 	}
@@ -152,7 +152,7 @@ func TestCollaborationWakeUsesLatestRetry(t *testing.T) {
 }
 
 type collaborationClient struct {
-	apps     *collaborationApps
+	plugins  *collaborationPlugins
 	mu       sync.Mutex
 	requests []provider.Request
 }
@@ -165,7 +165,7 @@ func (c *collaborationClient) Stream(ctx context.Context, req provider.Request) 
 	c.requests = append(c.requests, req)
 	c.mu.Unlock()
 	if !strings.Contains(body, "ROOT") {
-		c.apps.enabled.Store(false)
+		c.plugins.enabled.Store(false)
 		return mock.New(mock.WithScript([]string{"child result"}), mock.WithDelay(20*time.Millisecond)).Stream(ctx, req)
 	}
 	out := make(chan provider.Chunk, 2)
@@ -184,10 +184,10 @@ func (c *collaborationClient) Stream(ctx context.Context, req provider.Request) 
 	return out, nil
 }
 
-func TestCollaborationCollectsWithoutEnabledAppAndAcceptsChildFollowup(t *testing.T) {
+func TestCollaborationCollectsWithoutEnabledPluginAndAcceptsChildFollowup(t *testing.T) {
 	client := &collaborationClient{}
-	eng, st, apps := newCollaborationEngine(t, client)
-	client.apps = apps
+	eng, st, plugins := newCollaborationEngine(t, client)
+	client.plugins = plugins
 	ctx := context.Background()
 	main, err := eng.Submit(ctx, SubmitInput{SessionID: "root", ClientMessageID: "input", Text: "ROOT"})
 	if err != nil {
@@ -219,7 +219,7 @@ func TestCollaborationCollectsWithoutEnabledAppAndAcceptsChildFollowup(t *testin
 	if results != 1 || !integrated {
 		t.Fatalf("results=%d integrated=%v", results, integrated)
 	}
-	if apps.enabled.Load() {
+	if plugins.enabled.Load() {
 		t.Fatal("test did not disable App")
 	}
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: children[0].ID, ClientMessageID: "followup", Text: "revise CHILD"}); err != nil {

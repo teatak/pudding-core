@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"crypto/sha256"
@@ -14,24 +14,24 @@ import (
 )
 
 const (
-	AppPackageKind          = "pudding.app.package"
-	AppPackageSchemaVersion = 1
-	AppLockFileName         = ".pudding-app-lock.json"
-	AppLockKind             = "pudding.app.lock"
-	MaxPackageJSONBytes     = 8 << 20
-	MaxPackageFiles         = 512
+	PluginPackageKind          = "pudding.plugin.package"
+	PluginPackageSchemaVersion = 1
+	PluginLockFileName         = ".pudding-plugin-lock.json"
+	PluginLockKind             = "pudding.plugin.lock"
+	MaxPackageJSONBytes        = 8 << 20
+	MaxPackageFiles            = 512
 )
 
-var ErrPackageTooLarge = errors.New("app package is too large")
+var ErrPackageTooLarge = errors.New("plugin package is too large")
 
 type Package struct {
 	Kind          string        `json:"kind"`
 	SchemaVersion int           `json:"schema_version"`
-	App           PackageApp    `json:"app"`
+	Plugin        PackagePlugin `json:"plugin"`
 	Files         []PackageFile `json:"files"`
 }
 
-type PackageApp struct {
+type PackagePlugin struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
 	Version     string `json:"version"`
@@ -60,7 +60,7 @@ type PackageLockFile struct {
 
 func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL string) (*Definition, error) {
 	if len(packageJSON) == 0 {
-		return nil, errors.New("app package is required")
+		return nil, errors.New("plugin package is required")
 	}
 	if len(packageJSON) > MaxPackageJSONBytes {
 		return nil, ErrPackageTooLarge
@@ -68,53 +68,53 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	actualSHA := sha256Bytes(packageJSON)
 	expectedSHA256 = strings.ToLower(strings.TrimSpace(expectedSHA256))
 	if expectedSHA256 != "" && actualSHA != expectedSHA256 {
-		return nil, fmt.Errorf("app package sha256 mismatch")
+		return nil, fmt.Errorf("plugin package sha256 mismatch")
 	}
 
 	var pkg Package
 	if err := json.Unmarshal(packageJSON, &pkg); err != nil {
-		return nil, fmt.Errorf("app package: parse: %w", err)
+		return nil, fmt.Errorf("plugin package: parse: %w", err)
 	}
-	if pkg.Kind != AppPackageKind {
-		return nil, fmt.Errorf("unsupported app package kind %q", pkg.Kind)
+	if pkg.Kind != PluginPackageKind {
+		return nil, fmt.Errorf("unsupported plugin package kind %q", pkg.Kind)
 	}
-	if pkg.SchemaVersion != AppPackageSchemaVersion {
-		return nil, fmt.Errorf("unsupported app package schema %d", pkg.SchemaVersion)
+	if pkg.SchemaVersion != PluginPackageSchemaVersion {
+		return nil, fmt.Errorf("unsupported plugin package schema %d", pkg.SchemaVersion)
 	}
-	appID := strings.TrimSpace(pkg.App.ID)
-	if !appIDPattern.MatchString(appID) {
-		return nil, fmt.Errorf("invalid app id %q", pkg.App.ID)
+	pluginID := strings.TrimSpace(pkg.Plugin.ID)
+	if !pluginIDPattern.MatchString(pluginID) {
+		return nil, fmt.Errorf("invalid plugin id %q", pkg.Plugin.ID)
 	}
-	if IsReservedID(appID) {
-		return nil, fmt.Errorf("%w: %s", ErrBuiltinApp, appID)
+	if IsReservedID(pluginID) {
+		return nil, fmt.Errorf("%w: %s", ErrBuiltinPlugin, pluginID)
 	}
-	appVersion := strings.TrimSpace(pkg.App.Version)
-	if appVersion == "" {
-		return nil, errors.New("app package version is required")
+	pluginVersion := strings.TrimSpace(pkg.Plugin.Version)
+	if pluginVersion == "" {
+		return nil, errors.New("plugin package version is required")
 	}
 	files, err := packageFiles(pkg.Files)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := files[AppFileName]; !ok {
-		return nil, fmt.Errorf("%s is required", AppFileName)
+	if _, ok := files[PluginFileName]; !ok {
+		return nil, fmt.Errorf("%s is required", PluginFileName)
 	}
 
-	root, err = resolveAppRoot(root, true)
+	root, err = resolvePluginRoot(root, true)
 	if err != nil {
 		return nil, err
 	}
-	tempDir, err := os.MkdirTemp(root, ".app-install-"+appID+"-")
+	tempDir, err := os.MkdirTemp(root, ".app-install-"+pluginID+"-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tempDir)
 
-	dest := filepath.Join(root, appID)
+	dest := filepath.Join(root, pluginID)
 	oldLock, _ := readPackageLock(dest)
 	if info, statErr := os.Lstat(dest); statErr == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return nil, fmt.Errorf("app destination %s is not a directory", dest)
+			return nil, fmt.Errorf("plugin destination %s is not a directory", dest)
 		}
 		if err := copyPackageTree(dest, tempDir); err != nil {
 			return nil, err
@@ -128,7 +128,7 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if err := writePackageFiles(tempDir, files); err != nil {
 		return nil, err
 	}
-	lock := buildPackageLock(files, appVersion, actualSHA, sourceURL)
+	lock := buildPackageLock(files, pluginVersion, actualSHA, sourceURL)
 	if err := writePackageLock(tempDir, lock); err != nil {
 		return nil, err
 	}
@@ -136,18 +136,18 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if err != nil {
 		return nil, err
 	}
-	if tempDef.ID != appID {
-		return nil, fmt.Errorf("package app id %q does not match %s id %q", appID, AppFileName, tempDef.ID)
+	if tempDef.ID != pluginID {
+		return nil, fmt.Errorf("package plugin id %q does not match %s id %q", pluginID, PluginFileName, tempDef.ID)
 	}
-	if tempDef.Version != "" && tempDef.Version != appVersion {
-		return nil, fmt.Errorf("package version %q does not match %s version %q", appVersion, AppFileName, tempDef.Version)
+	if tempDef.Version != "" && tempDef.Version != pluginVersion {
+		return nil, fmt.Errorf("package version %q does not match %s version %q", pluginVersion, PluginFileName, tempDef.Version)
 	}
 	overrides, err := LoadMCPOverrideFile(filepath.Join(tempDir, MCPOverrideFileName))
 	if err != nil {
 		return nil, err
 	}
 	if _, err := ApplyMCPOverrides(tempDef, overrides); err != nil {
-		return nil, fmt.Errorf("app %s: %w", appID, err)
+		return nil, fmt.Errorf("plugin %s: %w", pluginID, err)
 	}
 	if err := replacePackageDir(dest, tempDir); err != nil {
 		return nil, err
@@ -172,14 +172,14 @@ func copyPackageTree(src, dst string) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("app package contains unsupported symlink %s", filepath.ToSlash(rel))
+			return fmt.Errorf("plugin package contains unsupported symlink %s", filepath.ToSlash(rel))
 		}
 		target := filepath.Join(dst, rel)
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("app package contains unsupported file %s", filepath.ToSlash(rel))
+			return fmt.Errorf("plugin package contains unsupported file %s", filepath.ToSlash(rel))
 		}
 		data, err := os.ReadFile(current)
 		if err != nil {
@@ -204,7 +204,7 @@ func replacePackageDir(dest, candidate string) error {
 	}
 	if err := os.Rename(candidate, dest); err != nil {
 		if restoreErr := os.Rename(backup, dest); restoreErr != nil {
-			return fmt.Errorf("replace app package: %w; restore previous package: %v", err, restoreErr)
+			return fmt.Errorf("replace plugin package: %w; restore previous package: %v", err, restoreErr)
 		}
 		return err
 	}
@@ -214,10 +214,10 @@ func replacePackageDir(dest, candidate string) error {
 
 func packageFiles(in []PackageFile) (map[string][]byte, error) {
 	if len(in) == 0 {
-		return nil, errors.New("app package files are required")
+		return nil, errors.New("plugin package files are required")
 	}
 	if len(in) > MaxPackageFiles {
-		return nil, fmt.Errorf("app package contains more than %d files", MaxPackageFiles)
+		return nil, fmt.Errorf("plugin package contains more than %d files", MaxPackageFiles)
 	}
 	out := make(map[string][]byte, len(in))
 	for _, file := range in {
@@ -225,7 +225,7 @@ func packageFiles(in []PackageFile) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if cleaned == AppLockFileName || cleaned == MCPOverrideFileName {
+		if cleaned == PluginLockFileName || cleaned == MCPOverrideFileName {
 			return nil, fmt.Errorf("%s is reserved", cleaned)
 		}
 		if _, exists := out[cleaned]; exists {
@@ -281,8 +281,8 @@ func removeOldPackageFiles(root string, oldLock *PackageLock, current map[string
 
 func buildPackageLock(files map[string][]byte, version, packageSHA256, sourceURL string) PackageLock {
 	lock := PackageLock{
-		Kind:          AppLockKind,
-		SchemaVersion: AppPackageSchemaVersion,
+		Kind:          PluginLockKind,
+		SchemaVersion: PluginPackageSchemaVersion,
 		SourceURL:     strings.TrimSpace(sourceURL),
 		Version:       strings.TrimSpace(version),
 		PackageSHA256: strings.TrimSpace(packageSHA256),
@@ -298,7 +298,7 @@ func buildPackageLock(files map[string][]byte, version, packageSHA256, sourceURL
 }
 
 func readPackageLock(dir string) (*PackageLock, error) {
-	data, err := os.ReadFile(filepath.Join(dir, AppLockFileName))
+	data, err := os.ReadFile(filepath.Join(dir, PluginLockFileName))
 	if err != nil {
 		return nil, err
 	}
@@ -306,8 +306,8 @@ func readPackageLock(dir string) (*PackageLock, error) {
 	if err := json.Unmarshal(data, &lock); err != nil {
 		return nil, err
 	}
-	if lock.Kind != AppLockKind {
-		return nil, fmt.Errorf("unsupported app lock kind %q", lock.Kind)
+	if lock.Kind != PluginLockKind {
+		return nil, fmt.Errorf("unsupported plugin lock kind %q", lock.Kind)
 	}
 	return &lock, nil
 }
@@ -318,7 +318,7 @@ func writePackageLock(dir string, lock PackageLock) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(dir, AppLockFileName), data, 0o600)
+	return os.WriteFile(filepath.Join(dir, PluginLockFileName), data, 0o600)
 }
 
 func applyDefinitionLock(dir string, def *Definition) {

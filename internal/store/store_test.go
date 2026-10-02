@@ -169,8 +169,8 @@ func TestUserInputPartsPreserveUIContext(t *testing.T) {
 	parts := UserInputParts("检查这个", []ContentPart{
 		{
 			Type:         ContentPartUIContext,
-			Surface:      "canvas",
-			Resource:     "canvas_item",
+			Surface:      "studio",
+			Resource:     "studio_item",
 			CallID:       "item_1",
 			Name:         "2026 World Cup",
 			ResourceKind: "grid",
@@ -179,14 +179,14 @@ func TestUserInputPartsPreserveUIContext(t *testing.T) {
 	if len(parts) != 2 || parts[0].Type != ContentPartUIContext || parts[1].Type != ContentPartText {
 		t.Fatalf("unexpected user parts: %+v", parts)
 	}
-	if parts[0].Surface != "canvas" || parts[0].CallID != "item_1" || parts[0].Name != "2026 World Cup" {
+	if parts[0].Surface != "studio" || parts[0].CallID != "item_1" || parts[0].Name != "2026 World Cup" {
 		t.Fatalf("ui context not preserved: %+v", parts[0])
 	}
 	data, err := json.Marshal(parts[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"surface":"canvas"`) || !strings.Contains(string(data), `"kind":"grid"`) {
+	if !strings.Contains(string(data), `"surface":"studio"`) || !strings.Contains(string(data), `"kind":"grid"`) {
 		t.Fatalf("ui context json missing fields: %s", data)
 	}
 }
@@ -413,23 +413,23 @@ func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	}
 }
 
-func TestSessionLoadedAppsAreNormalizedAndReadable(t *testing.T) {
+func TestSessionLoadedPluginsAreNormalizedAndReadable(t *testing.T) {
 	sess := &Session{
-		Provider:     "mock",
-		Model:        "mock",
-		LoadedAppIDs: []string{" terminal ", "browser", "browser", ""},
+		Provider:        "mock",
+		Model:           "mock",
+		LoadedPluginIDs: []string{" terminal ", "browser", "browser", ""},
 	}
 	if err := NormalizeSessionProviderModel(sess); err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.LoadedAppIDs) != 2 || sess.LoadedAppIDs[0] != "browser" || sess.LoadedAppIDs[1] != "terminal" {
-		t.Fatalf("loaded app ids = %+v", sess.LoadedAppIDs)
+	if len(sess.LoadedPluginIDs) != 2 || sess.LoadedPluginIDs[0] != "browser" || sess.LoadedPluginIDs[1] != "terminal" {
+		t.Fatalf("loaded app ids = %+v", sess.LoadedPluginIDs)
 	}
 	data, err := json.Marshal(sess)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"loadedAppIDs":["browser","terminal"]`) {
+	if !strings.Contains(string(data), `"loadedPluginIDs":["browser","terminal"]`) {
 		t.Fatalf("loaded app ids must be readable: %s", data)
 	}
 }

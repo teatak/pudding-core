@@ -31,7 +31,7 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	items, err := reopened.ListCanvasItems(ctx, "retain-a")
+	items, err := reopened.ListStudioMounts(ctx, "retain-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestCanvasClosedSnapshotsMigrateToRetainedContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer again.Close()
-	items, err = again.ListCanvasItems(ctx, "retain-a")
+	items, err = again.ListStudioMounts(ctx, "retain-a")
 	if err != nil || len(items) != 2 {
 		t.Fatalf("restart lost retained content: %+v %v", items, err)
 	}

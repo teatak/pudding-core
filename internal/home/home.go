@@ -35,12 +35,12 @@ func Resolve(flagValue string) (string, error) {
 
 // Prepare 创建 home 目录结构。
 func Prepare(dir string) error {
-	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "config"), filepath.Join(dir, "logs"), filepath.Join(dir, "apps"), filepath.Join(dir, "skills"), filepath.Join(dir, "temp")} {
+	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "config"), filepath.Join(dir, "logs"), filepath.Join(dir, "plugins"), filepath.Join(dir, "skills"), filepath.Join(dir, "temp")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("home: mkdir %s: %w", d, err)
 		}
 	}
-	return nil
+	return migratePluginLayout(dir)
 }
 
 // DefaultAddr 返回通道默认监听地址(release 9669 / dev 9679)。
@@ -59,7 +59,7 @@ func DBPath(dir string) string { return filepath.Join(dir, "data", "pudding.db")
 
 func TokenPath(dir string) string { return filepath.Join(dir, "daemon.token") }
 
-func AppsPath(dir string) string { return filepath.Join(dir, "apps") }
+func PluginsPath(dir string) string { return filepath.Join(dir, "plugins") }
 
 func SkillsPath(dir string) string { return filepath.Join(dir, "skills") }
 

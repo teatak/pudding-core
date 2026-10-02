@@ -1,6 +1,6 @@
 // Package app loads local app definitions and resolves session-scoped app
 // endpoints for generic REST / GraphQL tools.
-package app
+package plugin
 
 import (
 	"encoding/json"
@@ -40,8 +40,8 @@ const (
 )
 
 const (
-	KindApp = "app"
-	KindMCP = "mcp"
+	KindPlugin = "plugin"
+	KindMCP    = "mcp"
 )
 
 type Definition struct {
@@ -123,8 +123,8 @@ type ConnectionFieldInject struct {
 }
 
 type Endpoint struct {
-	// Generated canvases cannot write unless the installed App explicitly opts in.
-	CanvasWrites bool `json:"canvasWrites,omitempty" yaml:"canvas_writes,omitempty"`
+	// Generated widgets cannot write unless the installed plugin explicitly opts in.
+	WidgetWrites bool `json:"widgetWrites,omitempty" yaml:"widget_writes,omitempty"`
 
 	Kind        string                              `json:"kind" yaml:"kind"`
 	Transport   string                              `json:"transport,omitempty" yaml:"transport,omitempty"`
@@ -189,7 +189,7 @@ type SkillDetail struct {
 type Connection struct {
 	ID           string             `json:"id" yaml:"-"`
 	Name         string             `json:"name,omitempty" yaml:"name,omitempty"`
-	AppID        string             `json:"appID" yaml:"app"`
+	PluginID     string             `json:"pluginID" yaml:"plugin"`
 	Account      *ConnectionAccount `json:"account,omitempty" yaml:"account,omitempty"`
 	Auth         Auth               `json:"-" yaml:"auth,omitempty"`
 	Fields       map[string]string  `json:"-" yaml:"fields,omitempty"`
@@ -209,7 +209,7 @@ type ConnectionAccount struct {
 type ConnectionView struct {
 	ID                      string             `json:"id"`
 	Name                    string             `json:"name,omitempty"`
-	AppID                   string             `json:"appID"`
+	PluginID                string             `json:"pluginID"`
 	AuthType                string             `json:"authType,omitempty"`
 	AuthMethodID            string             `json:"authMethodID,omitempty"`
 	AuthVariant             string             `json:"authVariant,omitempty"`
@@ -249,7 +249,7 @@ type Auth struct {
 }
 
 type EndpointBinding struct {
-	AppID               string
+	PluginID            string
 	ConnectionID        string
 	EndpointName        string
 	Endpoint            Endpoint
@@ -259,7 +259,7 @@ type EndpointBinding struct {
 	ConnectionFieldDefs []ConnectionField
 }
 
-type AppConnectionsView struct {
+type PluginConnectionsView struct {
 	Connections []ConnectionView `json:"connections"`
 }
 
@@ -271,7 +271,7 @@ func ViewConnection(c *Connection) ConnectionView {
 	return ConnectionView{
 		ID:                      c.ID,
 		Name:                    c.Name,
-		AppID:                   c.AppID,
+		PluginID:                c.PluginID,
 		AuthType:                c.Auth.Type,
 		AuthMethodID:            c.Auth.MethodID,
 		AuthVariant:             c.Auth.Variant,
@@ -327,7 +327,7 @@ func cloneConnectionAccount(in *ConnectionAccount) *ConnectionAccount {
 }
 
 func githubAppReauthorizationRequired(c *Connection) bool {
-	return c != nil && c.AppID == "github" && c.Auth.Type == AuthTypeOAuth2 &&
+	return c != nil && c.PluginID == "github" && c.Auth.Type == AuthTypeOAuth2 &&
 		(c.Auth.MethodID != GitHubAppAuthMethodID || c.Auth.Variant != GitHubAppAuthVariant)
 }
 

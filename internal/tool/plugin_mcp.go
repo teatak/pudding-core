@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"hash/fnv"
 	"io"
 	"log/slog"
@@ -22,61 +22,61 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
 const (
-	appMCPToolPrefix        = "app_mcp__"
-	appMCPProtocolVersion   = "2025-06-18"
-	appMCPRequestTimeout    = 20 * time.Second
-	appMCPDiscoverTimeout   = 8 * time.Second
-	appMCPToolCacheTTL      = 5 * time.Minute
-	appMCPEmptyToolCacheTTL = 30 * time.Second
-	appMCPMaxResponseBytes  = 1 * 1024 * 1024
-	appMCPMaxTools          = 300
-	appMCPMaxToolNameLen    = 64
+	pluginMCPToolPrefix        = "plugin_mcp__"
+	pluginMCPProtocolVersion   = "2025-06-18"
+	pluginMCPRequestTimeout    = 20 * time.Second
+	pluginMCPDiscoverTimeout   = 8 * time.Second
+	pluginMCPToolCacheTTL      = 5 * time.Minute
+	pluginMCPEmptyToolCacheTTL = 30 * time.Second
+	pluginMCPMaxResponseBytes  = 1 * 1024 * 1024
+	pluginMCPMaxTools          = 300
+	pluginMCPMaxToolNameLen    = 64
 )
 
-type AppMCPSource interface {
-	ListEndpointBindings(ctx context.Context, kind string) ([]*app.EndpointBinding, error)
+type PluginMCPSource interface {
+	ListEndpointBindings(ctx context.Context, kind string) ([]*plugin.EndpointBinding, error)
 }
 
-type AppMCPOption func(*AppMCPRunner)
+type PluginMCPOption func(*PluginMCPRunner)
 
-type AppMCPRunner struct {
-	source     AppMCPSource
+type PluginMCPRunner struct {
+	source     PluginMCPSource
 	httpClient *http.Client
 	nextID     atomic.Int64
 
 	mu           sync.Mutex
 	sessionDefs  map[string][]provider.ToolDef
-	sessionTools map[string]map[string]appMCPDiscoveredTool
-	caches       map[string]appMCPToolCache
+	sessionTools map[string]map[string]pluginMCPDiscoveredTool
+	caches       map[string]pluginMCPToolCache
 }
 
-type AppMCPProbeStatus string
+type PluginMCPProbeStatus string
 
 const (
-	AppMCPProbeAvailable       AppMCPProbeStatus = "available"
-	AppMCPProbeUnavailable     AppMCPProbeStatus = "unavailable"
-	AppMCPProbeUnsupported     AppMCPProbeStatus = "unsupported"
-	AppMCPProbeNeedsConnection AppMCPProbeStatus = "needs_connection"
+	PluginMCPProbeAvailable       PluginMCPProbeStatus = "available"
+	PluginMCPProbeUnavailable     PluginMCPProbeStatus = "unavailable"
+	PluginMCPProbeUnsupported     PluginMCPProbeStatus = "unsupported"
+	PluginMCPProbeNeedsConnection PluginMCPProbeStatus = "needs_connection"
 )
 
-type AppMCPProbeEndpoint struct {
-	AppID        string            `json:"appID"`
-	EndpointName string            `json:"endpointName"`
-	ConnectionID string            `json:"connectionID,omitempty"`
-	Transport    string            `json:"transport,omitempty"`
-	Configured   bool              `json:"configured,omitempty"`
-	Status       AppMCPProbeStatus `json:"status"`
-	Error        string            `json:"error,omitempty"`
-	Tools        []AppMCPProbeTool `json:"tools,omitempty"`
+type PluginMCPProbeEndpoint struct {
+	PluginID     string               `json:"pluginID"`
+	EndpointName string               `json:"endpointName"`
+	ConnectionID string               `json:"connectionID,omitempty"`
+	Transport    string               `json:"transport,omitempty"`
+	Configured   bool                 `json:"configured,omitempty"`
+	Status       PluginMCPProbeStatus `json:"status"`
+	Error        string               `json:"error,omitempty"`
+	Tools        []PluginMCPProbeTool `json:"tools,omitempty"`
 }
 
-type AppMCPProbeTool struct {
+type PluginMCPProbeTool struct {
 	Name         string          `json:"name"`
 	ProviderName string          `json:"providerName,omitempty"`
 	Title        string          `json:"title,omitempty"`
@@ -84,32 +84,32 @@ type AppMCPProbeTool struct {
 	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
 }
 
-type appMCPDiscoveredTool struct {
-	binding    *app.EndpointBinding
+type pluginMCPDiscoveredTool struct {
+	binding    *plugin.EndpointBinding
 	remoteName string
 }
 
-type appMCPClient interface {
+type pluginMCPClient interface {
 	initialize(ctx context.Context) error
-	listTools(ctx context.Context) ([]appMCPRemoteTool, error)
+	listTools(ctx context.Context) ([]pluginMCPRemoteTool, error)
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	close()
 }
 
-type appMCPToolCache struct {
+type pluginMCPToolCache struct {
 	key       string
 	expiresAt time.Time
 	defs      []provider.ToolDef
-	tools     map[string]appMCPDiscoveredTool
+	tools     map[string]pluginMCPDiscoveredTool
 }
 
-func NewAppMCPRunner(source AppMCPSource, opts ...AppMCPOption) *AppMCPRunner {
-	r := &AppMCPRunner{
+func NewPluginMCPRunner(source PluginMCPSource, opts ...PluginMCPOption) *PluginMCPRunner {
+	r := &PluginMCPRunner{
 		source:       source,
-		httpClient:   &http.Client{Timeout: appMCPRequestTimeout},
+		httpClient:   &http.Client{Timeout: pluginMCPRequestTimeout},
 		sessionDefs:  map[string][]provider.ToolDef{},
-		sessionTools: map[string]map[string]appMCPDiscoveredTool{},
-		caches:       map[string]appMCPToolCache{},
+		sessionTools: map[string]map[string]pluginMCPDiscoveredTool{},
+		caches:       map[string]pluginMCPToolCache{},
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -117,23 +117,23 @@ func NewAppMCPRunner(source AppMCPSource, opts ...AppMCPOption) *AppMCPRunner {
 	return r
 }
 
-func WithAppMCPHTTPClient(client *http.Client) AppMCPOption {
-	return func(r *AppMCPRunner) {
+func WithPluginMCPHTTPClient(client *http.Client) PluginMCPOption {
+	return func(r *PluginMCPRunner) {
 		if client != nil {
 			r.httpClient = client
 		}
 	}
 }
 
-func (r *AppMCPRunner) Definitions(_ context.Context, sessionID string) ([]provider.ToolDef, error) {
+func (r *PluginMCPRunner) Definitions(_ context.Context, sessionID string) ([]provider.ToolDef, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return cloneAppMCPToolDefs(r.sessionDefs[sessionID]), nil
+	return clonePluginMCPToolDefs(r.sessionDefs[sessionID]), nil
 }
 
-func (r *AppMCPRunner) DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error) {
-	appIDs = normalizeAppIDs(appIDs)
-	if len(appIDs) == 0 {
+func (r *PluginMCPRunner) DefinitionsForPlugins(ctx context.Context, sessionID string, pluginIDs []string) ([]provider.ToolDef, error) {
+	pluginIDs = normalizePluginIDs(pluginIDs)
+	if len(pluginIDs) == 0 {
 		r.setSessionTools(sessionID, nil, nil)
 		return nil, nil
 	}
@@ -142,8 +142,8 @@ func (r *AppMCPRunner) DefinitionsForApps(ctx context.Context, sessionID string,
 		r.setSessionTools(sessionID, nil, nil)
 		return nil, nil
 	}
-	bindings = filterAppMCPBindings(bindings, appIDs)
-	cacheKey := appMCPBindingsCacheKey(bindings)
+	bindings = filterPluginMCPBindings(bindings, pluginIDs)
+	cacheKey := pluginMCPBindingsCacheKey(bindings)
 	if defs, tools, ok := r.cached(cacheKey); ok {
 		r.setSessionTools(sessionID, defs, tools)
 		return defs, nil
@@ -151,17 +151,17 @@ func (r *AppMCPRunner) DefinitionsForApps(ctx context.Context, sessionID string,
 	defs, tools := r.discoverBindings(ctx, bindings)
 	r.setSessionTools(sessionID, defs, tools)
 	r.mu.Lock()
-	r.caches[cacheKey] = appMCPToolCache{
+	r.caches[cacheKey] = pluginMCPToolCache{
 		key:       cacheKey,
-		expiresAt: time.Now().Add(appMCPCacheTTL(defs)),
-		defs:      cloneAppMCPToolDefs(defs),
-		tools:     cloneAppMCPTools(tools),
+		expiresAt: time.Now().Add(pluginMCPCacheTTL(defs)),
+		defs:      clonePluginMCPToolDefs(defs),
+		tools:     clonePluginMCPTools(tools),
 	}
 	r.mu.Unlock()
 	return defs, nil
 }
 
-func (r *AppMCPRunner) Call(ctx context.Context, call Call) Result {
+func (r *PluginMCPRunner) Call(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	tool, ok := r.lookup(call.SessionID, call.Name)
 	if !ok {
@@ -186,31 +186,31 @@ func (r *AppMCPRunner) Call(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "mcp_tool_failed", "error": err.Error()})
 	}
-	return appMCPToolResult(call, raw)
+	return pluginMCPToolResult(call, raw)
 }
 
-func (r *AppMCPRunner) lookup(sessionID, name string) (appMCPDiscoveredTool, bool) {
+func (r *PluginMCPRunner) lookup(sessionID, name string) (pluginMCPDiscoveredTool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tool, ok := r.sessionTools[sessionID][name]
 	return tool, ok
 }
 
-func (r *AppMCPRunner) setSessionTools(sessionID string, defs []provider.ToolDef, tools map[string]appMCPDiscoveredTool) {
+func (r *PluginMCPRunner) setSessionTools(sessionID string, defs []provider.ToolDef, tools map[string]pluginMCPDiscoveredTool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.sessionDefs[sessionID] = cloneAppMCPToolDefs(defs)
-	r.sessionTools[sessionID] = cloneAppMCPTools(tools)
+	r.sessionDefs[sessionID] = clonePluginMCPToolDefs(defs)
+	r.sessionTools[sessionID] = clonePluginMCPTools(tools)
 }
 
-func (r *AppMCPRunner) CloseSession(sessionID string) {
+func (r *PluginMCPRunner) CloseSession(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.sessionDefs, sessionID)
 	delete(r.sessionTools, sessionID)
 }
 
-func (r *AppMCPRunner) cached(cacheKey string) ([]provider.ToolDef, map[string]appMCPDiscoveredTool, bool) {
+func (r *PluginMCPRunner) cached(cacheKey string) ([]provider.ToolDef, map[string]pluginMCPDiscoveredTool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cache, ok := r.caches[cacheKey]
@@ -218,60 +218,60 @@ func (r *AppMCPRunner) cached(cacheKey string) ([]provider.ToolDef, map[string]a
 		delete(r.caches, cacheKey)
 		return nil, nil, false
 	}
-	return cloneAppMCPToolDefs(cache.defs), cloneAppMCPTools(cache.tools), true
+	return clonePluginMCPToolDefs(cache.defs), clonePluginMCPTools(cache.tools), true
 }
 
-func normalizeAppIDs(appIDs []string) []string {
-	seen := make(map[string]bool, len(appIDs))
-	out := make([]string, 0, len(appIDs))
-	for _, appID := range appIDs {
-		appID = strings.TrimSpace(appID)
-		if appID == "" || seen[appID] {
+func normalizePluginIDs(pluginIDs []string) []string {
+	seen := make(map[string]bool, len(pluginIDs))
+	out := make([]string, 0, len(pluginIDs))
+	for _, pluginID := range pluginIDs {
+		pluginID = strings.TrimSpace(pluginID)
+		if pluginID == "" || seen[pluginID] {
 			continue
 		}
-		seen[appID] = true
-		out = append(out, appID)
+		seen[pluginID] = true
+		out = append(out, pluginID)
 	}
 	sort.Strings(out)
 	return out
 }
 
-func filterAppMCPBindings(bindings []*app.EndpointBinding, appIDs []string) []*app.EndpointBinding {
-	allowed := make(map[string]bool, len(appIDs))
-	for _, appID := range appIDs {
-		allowed[appID] = true
+func filterPluginMCPBindings(bindings []*plugin.EndpointBinding, pluginIDs []string) []*plugin.EndpointBinding {
+	allowed := make(map[string]bool, len(pluginIDs))
+	for _, pluginID := range pluginIDs {
+		allowed[pluginID] = true
 	}
-	out := make([]*app.EndpointBinding, 0, len(bindings))
+	out := make([]*plugin.EndpointBinding, 0, len(bindings))
 	for _, binding := range bindings {
-		if binding != nil && allowed[binding.AppID] {
+		if binding != nil && allowed[binding.PluginID] {
 			out = append(out, binding)
 		}
 	}
 	return out
 }
 
-func (r *AppMCPRunner) listBindings(ctx context.Context) ([]*app.EndpointBinding, error) {
+func (r *PluginMCPRunner) listBindings(ctx context.Context) ([]*plugin.EndpointBinding, error) {
 	if r == nil || r.source == nil {
 		return nil, nil
 	}
-	bindings, err := r.source.ListEndpointBindings(ctx, app.EndpointKindMCP)
+	bindings, err := r.source.ListEndpointBindings(ctx, plugin.EndpointKindMCP)
 	if err != nil {
-		slog.Warn("app mcp: list endpoint bindings failed", "err", err)
+		slog.Warn("plugin mcp: list endpoint bindings failed", "err", err)
 		return nil, err
 	}
 	return bindings, nil
 }
 
-func (r *AppMCPRunner) discoverBindings(ctx context.Context, bindings []*app.EndpointBinding) ([]provider.ToolDef, map[string]appMCPDiscoveredTool) {
-	tools := map[string]appMCPDiscoveredTool{}
+func (r *PluginMCPRunner) discoverBindings(ctx context.Context, bindings []*plugin.EndpointBinding) ([]provider.ToolDef, map[string]pluginMCPDiscoveredTool) {
+	tools := map[string]pluginMCPDiscoveredTool{}
 	defs := make([]provider.ToolDef, 0)
 	for _, binding := range bindings {
-		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
+		if binding == nil || binding.Endpoint.Kind != plugin.EndpointKindMCP || !pluginMCPSupportedTransport(binding.Endpoint.Transport) {
 			continue
 		}
 		bindingDefs, bindingTools, err := r.discoverBinding(ctx, binding)
 		if err != nil {
-			slog.Warn("app mcp: discover endpoint failed", "app", binding.AppID, "endpoint", binding.EndpointName, "connection", binding.ConnectionID, "err", err)
+			slog.Warn("plugin mcp: discover endpoint failed", "plugin", binding.PluginID, "endpoint", binding.EndpointName, "connection", binding.ConnectionID, "err", err)
 			continue
 		}
 		for i, def := range bindingDefs {
@@ -288,20 +288,20 @@ func (r *AppMCPRunner) discoverBindings(ctx context.Context, bindings []*app.End
 	return defs, tools
 }
 
-func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.EndpointBinding) ([]provider.ToolDef, []appMCPDiscoveredTool, error) {
+func (r *PluginMCPRunner) discoverBinding(ctx context.Context, binding *plugin.EndpointBinding) ([]provider.ToolDef, []pluginMCPDiscoveredTool, error) {
 	remoteTools, err := r.listBindingRemoteTools(ctx, binding)
 	if err != nil {
 		return nil, nil, err
 	}
 	defs := make([]provider.ToolDef, 0, len(remoteTools))
-	tools := make([]appMCPDiscoveredTool, 0, len(remoteTools))
+	tools := make([]pluginMCPDiscoveredTool, 0, len(remoteTools))
 	for _, remote := range remoteTools {
 		remoteName := strings.TrimSpace(remote.Name)
 		if remoteName == "" {
 			continue
 		}
-		name := appMCPProviderToolName(binding, remoteName)
-		description := appMCPToolDescription(binding, remote)
+		name := pluginMCPProviderToolName(binding, remoteName)
+		description := pluginMCPToolDescription(binding, remote)
 		inputSchema := remote.InputSchema
 		if len(inputSchema) == 0 {
 			inputSchema = remote.inputSnake
@@ -309,30 +309,30 @@ func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.Endpoin
 		defs = append(defs, provider.ToolDef{
 			Name:        name,
 			Description: description,
-			InputSchema: appMCPInputSchema(inputSchema),
+			InputSchema: pluginMCPInputSchema(inputSchema),
 			Capability:  store.ModeWork,
-			AppID:       binding.AppID,
+			PluginID:    binding.PluginID,
 		})
-		tools = append(tools, appMCPDiscoveredTool{
-			binding:    cloneAppMCPBinding(binding),
+		tools = append(tools, pluginMCPDiscoveredTool{
+			binding:    clonePluginMCPBinding(binding),
 			remoteName: remoteName,
 		})
 	}
 	return defs, tools, nil
 }
 
-func (r *AppMCPRunner) ProbeBinding(ctx context.Context, binding *app.EndpointBinding) AppMCPProbeEndpoint {
-	out := AppMCPProbeEndpoint{Status: AppMCPProbeUnavailable}
+func (r *PluginMCPRunner) ProbeBinding(ctx context.Context, binding *plugin.EndpointBinding) PluginMCPProbeEndpoint {
+	out := PluginMCPProbeEndpoint{Status: PluginMCPProbeUnavailable}
 	if binding == nil {
 		out.Error = "mcp endpoint unavailable"
 		return out
 	}
-	out.AppID = binding.AppID
+	out.PluginID = binding.PluginID
 	out.EndpointName = binding.EndpointName
 	out.ConnectionID = binding.ConnectionID
 	out.Transport = strings.TrimSpace(binding.Endpoint.Transport)
-	if binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
-		out.Status = AppMCPProbeUnsupported
+	if binding.Endpoint.Kind != plugin.EndpointKindMCP || !pluginMCPSupportedTransport(binding.Endpoint.Transport) {
+		out.Status = PluginMCPProbeUnsupported
 		out.Error = fmt.Sprintf("unsupported mcp transport %q", binding.Endpoint.Transport)
 		return out
 	}
@@ -341,8 +341,8 @@ func (r *AppMCPRunner) ProbeBinding(ctx context.Context, binding *app.EndpointBi
 		out.Error = err.Error()
 		return out
 	}
-	out.Status = AppMCPProbeAvailable
-	out.Tools = make([]AppMCPProbeTool, 0, len(remoteTools))
+	out.Status = PluginMCPProbeAvailable
+	out.Tools = make([]PluginMCPProbeTool, 0, len(remoteTools))
 	for _, remote := range remoteTools {
 		remoteName := strings.TrimSpace(remote.Name)
 		if remoteName == "" {
@@ -352,19 +352,19 @@ func (r *AppMCPRunner) ProbeBinding(ctx context.Context, binding *app.EndpointBi
 		if len(inputSchema) == 0 {
 			inputSchema = remote.inputSnake
 		}
-		out.Tools = append(out.Tools, AppMCPProbeTool{
+		out.Tools = append(out.Tools, PluginMCPProbeTool{
 			Name:         remoteName,
-			ProviderName: appMCPProviderToolName(binding, remoteName),
+			ProviderName: pluginMCPProviderToolName(binding, remoteName),
 			Title:        strings.TrimSpace(remote.Title),
 			Description:  strings.TrimSpace(remote.Description),
-			InputSchema:  appMCPInputSchema(inputSchema),
+			InputSchema:  pluginMCPInputSchema(inputSchema),
 		})
 	}
 	return out
 }
 
-func (r *AppMCPRunner) listBindingRemoteTools(ctx context.Context, binding *app.EndpointBinding) ([]appMCPRemoteTool, error) {
-	discoverCtx, cancel := context.WithTimeout(ctx, appMCPDiscoverTimeout)
+func (r *PluginMCPRunner) listBindingRemoteTools(ctx context.Context, binding *plugin.EndpointBinding) ([]pluginMCPRemoteTool, error) {
+	discoverCtx, cancel := context.WithTimeout(ctx, pluginMCPDiscoverTimeout)
 	defer cancel()
 	client, err := r.newClient(binding)
 	if err != nil {
@@ -377,35 +377,35 @@ func (r *AppMCPRunner) listBindingRemoteTools(ctx context.Context, binding *app.
 	return client.listTools(discoverCtx)
 }
 
-func (r *AppMCPRunner) newClient(binding *app.EndpointBinding) (appMCPClient, error) {
+func (r *PluginMCPRunner) newClient(binding *plugin.EndpointBinding) (pluginMCPClient, error) {
 	switch strings.TrimSpace(binding.Endpoint.Transport) {
-	case app.EndpointTransportStreamableHTTP:
+	case plugin.EndpointTransportStreamableHTTP:
 		return r.newStreamableHTTPClient(binding), nil
-	case app.EndpointTransportStdio:
+	case plugin.EndpointTransportStdio:
 		return r.newStdioClient(binding), nil
 	default:
 		return nil, fmt.Errorf("unsupported mcp transport %q", binding.Endpoint.Transport)
 	}
 }
 
-func (r *AppMCPRunner) newStreamableHTTPClient(binding *app.EndpointBinding) *appMCPHTTPClient {
-	return &appMCPHTTPClient{
+func (r *PluginMCPRunner) newStreamableHTTPClient(binding *plugin.EndpointBinding) *pluginMCPHTTPClient {
+	return &pluginMCPHTTPClient{
 		runner:   r,
-		binding:  cloneAppMCPBinding(binding),
+		binding:  clonePluginMCPBinding(binding),
 		client:   r.httpClient,
-		protocol: appMCPProtocolVersion,
+		protocol: pluginMCPProtocolVersion,
 	}
 }
 
-func (r *AppMCPRunner) newStdioClient(binding *app.EndpointBinding) *appMCPStdioClient {
-	return &appMCPStdioClient{
+func (r *PluginMCPRunner) newStdioClient(binding *plugin.EndpointBinding) *pluginMCPStdioClient {
+	return &pluginMCPStdioClient{
 		runner:   r,
-		binding:  cloneAppMCPBinding(binding),
-		protocol: appMCPProtocolVersion,
+		binding:  clonePluginMCPBinding(binding),
+		protocol: pluginMCPProtocolVersion,
 	}
 }
 
-type appMCPRemoteTool struct {
+type pluginMCPRemoteTool struct {
 	Name        string          `json:"name"`
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
@@ -413,7 +413,7 @@ type appMCPRemoteTool struct {
 	inputSnake  json.RawMessage
 }
 
-func (t *appMCPRemoteTool) UnmarshalJSON(data []byte) error {
+func (t *pluginMCPRemoteTool) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Name             string          `json:"name"`
 		Title            string          `json:"title"`
@@ -432,17 +432,17 @@ func (t *appMCPRemoteTool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type appMCPHTTPClient struct {
-	runner    *AppMCPRunner
-	binding   *app.EndpointBinding
+type pluginMCPHTTPClient struct {
+	runner    *PluginMCPRunner
+	binding   *plugin.EndpointBinding
 	client    *http.Client
 	sessionID string
 	protocol  string
 }
 
-func (c *appMCPHTTPClient) initialize(ctx context.Context) error {
+func (c *pluginMCPHTTPClient) initialize(ctx context.Context) error {
 	raw, err := c.call(ctx, "initialize", map[string]any{
-		"protocolVersion": appMCPProtocolVersion,
+		"protocolVersion": pluginMCPProtocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
 			"name":    "pudding-core",
@@ -462,8 +462,8 @@ func (c *appMCPHTTPClient) initialize(ctx context.Context) error {
 	return c.notify(ctx, "notifications/initialized", nil)
 }
 
-func (c *appMCPHTTPClient) listTools(ctx context.Context) ([]appMCPRemoteTool, error) {
-	var tools []appMCPRemoteTool
+func (c *pluginMCPHTTPClient) listTools(ctx context.Context) ([]pluginMCPRemoteTool, error) {
+	var tools []pluginMCPRemoteTool
 	cursor := ""
 	for page := 0; page < 20; page++ {
 		params := map[string]any{}
@@ -475,15 +475,15 @@ func (c *appMCPHTTPClient) listTools(ctx context.Context) ([]appMCPRemoteTool, e
 			return nil, err
 		}
 		var out struct {
-			Tools      []appMCPRemoteTool `json:"tools"`
-			NextCursor string             `json:"nextCursor"`
+			Tools      []pluginMCPRemoteTool `json:"tools"`
+			NextCursor string                `json:"nextCursor"`
 		}
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return nil, err
 		}
 		tools = append(tools, out.Tools...)
-		if len(tools) >= appMCPMaxTools {
-			return tools[:appMCPMaxTools], nil
+		if len(tools) >= pluginMCPMaxTools {
+			return tools[:pluginMCPMaxTools], nil
 		}
 		cursor = strings.TrimSpace(out.NextCursor)
 		if cursor == "" {
@@ -493,9 +493,9 @@ func (c *appMCPHTTPClient) listTools(ctx context.Context) ([]appMCPRemoteTool, e
 	return tools, nil
 }
 
-func (c *appMCPHTTPClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (c *pluginMCPHTTPClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := fmt.Sprintf("%d", c.runner.nextID.Add(1))
-	return c.post(ctx, appMCPRPCMessage{
+	return c.post(ctx, pluginMCPRPCMessage{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
@@ -503,8 +503,8 @@ func (c *appMCPHTTPClient) call(ctx context.Context, method string, params any) 
 	}, id, true)
 }
 
-func (c *appMCPHTTPClient) notify(ctx context.Context, method string, params any) error {
-	_, err := c.post(ctx, appMCPRPCMessage{
+func (c *pluginMCPHTTPClient) notify(ctx context.Context, method string, params any) error {
+	_, err := c.post(ctx, pluginMCPRPCMessage{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
@@ -512,7 +512,7 @@ func (c *appMCPHTTPClient) notify(ctx context.Context, method string, params any
 	return err
 }
 
-func (c *appMCPHTTPClient) post(ctx context.Context, msg appMCPRPCMessage, id string, wantResponse bool) (json.RawMessage, error) {
+func (c *pluginMCPHTTPClient) post(ctx context.Context, msg pluginMCPRPCMessage, id string, wantResponse bool) (json.RawMessage, error) {
 	if c == nil || c.binding == nil {
 		return nil, errors.New("mcp endpoint unavailable")
 	}
@@ -534,13 +534,13 @@ func (c *appMCPHTTPClient) post(ctx context.Context, msg appMCPRPCMessage, id st
 	if c.sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", c.sessionID)
 	}
-	if err := applyAppMCPHeaders(req.Header, c.binding.Endpoint.Headers); err != nil {
+	if err := applyPluginMCPHeaders(req.Header, c.binding.Endpoint.Headers); err != nil {
 		return nil, err
 	}
-	if err := appexec.ApplyEndpointAuth(req.Header, c.binding.Auth); err != nil {
+	if err := pluginexec.ApplyEndpointAuth(req.Header, c.binding.Auth); err != nil {
 		return nil, err
 	}
-	if err := appexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
+	if err := pluginexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
 		return nil, err
 	}
 	resp, err := c.client.Do(req)
@@ -553,26 +553,26 @@ func (c *appMCPHTTPClient) post(ctx context.Context, msg appMCPRPCMessage, id st
 	}
 	if !wantResponse {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, appMCPHTTPError(resp)
+			return nil, pluginMCPHTTPError(resp)
 		}
-		io.Copy(io.Discard, io.LimitReader(resp.Body, appMCPMaxResponseBytes))
+		io.Copy(io.Discard, io.LimitReader(resp.Body, pluginMCPMaxResponseBytes))
 		return nil, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, appMCPHTTPError(resp)
+		return nil, pluginMCPHTTPError(resp)
 	}
 	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
 	if strings.HasPrefix(contentType, "text/event-stream") {
-		return readAppMCPSSE(ctx, resp.Body, id)
+		return readPluginMCPSSE(ctx, resp.Body, id)
 	}
-	data, err := readAppMCPBody(resp.Body)
+	data, err := readPluginMCPBody(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	return appMCPEnvelopeResult(data, id)
+	return pluginMCPEnvelopeResult(data, id)
 }
 
-func (c *appMCPHTTPClient) requestURL() (*url.URL, error) {
+func (c *pluginMCPHTTPClient) requestURL() (*url.URL, error) {
 	target, err := url.Parse(strings.TrimSpace(c.binding.Endpoint.URL))
 	if err != nil {
 		return nil, err
@@ -583,17 +583,17 @@ func (c *appMCPHTTPClient) requestURL() (*url.URL, error) {
 	if target.Host == "" {
 		return nil, errors.New("mcp endpoint url missing host")
 	}
-	if err := appexec.ApplyEndpointConnectionQuery(target, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
+	if err := pluginexec.ApplyEndpointConnectionQuery(target, http.MethodPost, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs); err != nil {
 		return nil, err
 	}
 	return target, nil
 }
 
-func (c *appMCPHTTPClient) close() {}
+func (c *pluginMCPHTTPClient) close() {}
 
-type appMCPStdioClient struct {
-	runner   *AppMCPRunner
-	binding  *app.EndpointBinding
+type pluginMCPStdioClient struct {
+	runner   *PluginMCPRunner
+	binding  *plugin.EndpointBinding
 	protocol string
 
 	mu       sync.Mutex
@@ -606,12 +606,12 @@ type appMCPStdioClient struct {
 	stderr   strings.Builder
 }
 
-func (c *appMCPStdioClient) initialize(ctx context.Context) error {
+func (c *pluginMCPStdioClient) initialize(ctx context.Context) error {
 	if err := c.start(ctx); err != nil {
 		return err
 	}
 	raw, err := c.call(ctx, "initialize", map[string]any{
-		"protocolVersion": appMCPProtocolVersion,
+		"protocolVersion": pluginMCPProtocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
 			"name":    "pudding-core",
@@ -631,8 +631,8 @@ func (c *appMCPStdioClient) initialize(ctx context.Context) error {
 	return c.notify(ctx, "notifications/initialized", nil)
 }
 
-func (c *appMCPStdioClient) listTools(ctx context.Context) ([]appMCPRemoteTool, error) {
-	var tools []appMCPRemoteTool
+func (c *pluginMCPStdioClient) listTools(ctx context.Context) ([]pluginMCPRemoteTool, error) {
+	var tools []pluginMCPRemoteTool
 	cursor := ""
 	for page := 0; page < 20; page++ {
 		params := map[string]any{}
@@ -644,15 +644,15 @@ func (c *appMCPStdioClient) listTools(ctx context.Context) ([]appMCPRemoteTool, 
 			return nil, err
 		}
 		var out struct {
-			Tools      []appMCPRemoteTool `json:"tools"`
-			NextCursor string             `json:"nextCursor"`
+			Tools      []pluginMCPRemoteTool `json:"tools"`
+			NextCursor string                `json:"nextCursor"`
 		}
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return nil, err
 		}
 		tools = append(tools, out.Tools...)
-		if len(tools) >= appMCPMaxTools {
-			return tools[:appMCPMaxTools], nil
+		if len(tools) >= pluginMCPMaxTools {
+			return tools[:pluginMCPMaxTools], nil
 		}
 		cursor = strings.TrimSpace(out.NextCursor)
 		if cursor == "" {
@@ -662,12 +662,12 @@ func (c *appMCPStdioClient) listTools(ctx context.Context) ([]appMCPRemoteTool, 
 	return tools, nil
 }
 
-func (c *appMCPStdioClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (c *pluginMCPStdioClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if err := c.start(ctx); err != nil {
 		return nil, err
 	}
 	id := fmt.Sprintf("%d", c.runner.nextID.Add(1))
-	if err := c.write(appMCPRPCMessage{
+	if err := c.write(pluginMCPRPCMessage{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
@@ -678,18 +678,18 @@ func (c *appMCPStdioClient) call(ctx context.Context, method string, params any)
 	return c.readResponse(ctx, id)
 }
 
-func (c *appMCPStdioClient) notify(ctx context.Context, method string, params any) error {
+func (c *pluginMCPStdioClient) notify(ctx context.Context, method string, params any) error {
 	if err := c.start(ctx); err != nil {
 		return err
 	}
-	return c.write(appMCPRPCMessage{
+	return c.write(pluginMCPRPCMessage{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
 	})
 }
 
-func (c *appMCPStdioClient) start(ctx context.Context) error {
+func (c *pluginMCPStdioClient) start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.started {
@@ -702,15 +702,15 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	if command == "" {
 		return errors.New("stdio mcp endpoint command is required")
 	}
-	extraEnv, err := appexec.ApplyEndpointConnectionEnv(c.binding.Endpoint.Env, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs)
+	extraEnv, err := pluginexec.ApplyEndpointConnectionEnv(c.binding.Endpoint.Env, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs)
 	if err != nil {
 		return err
 	}
-	env, err := appMCPStdioEnv(extraEnv)
+	env, err := pluginMCPStdioEnv(extraEnv)
 	if err != nil {
 		return err
 	}
-	commandPath, err := appMCPResolveCommand(command, env)
+	commandPath, err := pluginMCPResolveCommand(command, env)
 	if err != nil {
 		return err
 	}
@@ -750,7 +750,7 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	return nil
 }
 
-func (c *appMCPStdioClient) write(msg appMCPRPCMessage) error {
+func (c *pluginMCPStdioClient) write(msg pluginMCPRPCMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stdin == nil {
@@ -767,7 +767,7 @@ func (c *appMCPStdioClient) write(msg appMCPRPCMessage) error {
 	return nil
 }
 
-func (c *appMCPStdioClient) readResponse(ctx context.Context, id string) (json.RawMessage, error) {
+func (c *pluginMCPStdioClient) readResponse(ctx context.Context, id string) (json.RawMessage, error) {
 	for {
 		got, err := c.readEnvelope(ctx)
 		if err != nil {
@@ -776,7 +776,7 @@ func (c *appMCPStdioClient) readResponse(ctx context.Context, id string) (json.R
 		if len(got.ID) == 0 {
 			continue
 		}
-		if !appMCPIDMatches(got.ID, id) {
+		if !pluginMCPIDMatches(got.ID, id) {
 			continue
 		}
 		if got.Error != nil {
@@ -789,7 +789,7 @@ func (c *appMCPStdioClient) readResponse(ctx context.Context, id string) (json.R
 	}
 }
 
-func (c *appMCPStdioClient) readEnvelope(ctx context.Context) (rpcEnvelope, error) {
+func (c *pluginMCPStdioClient) readEnvelope(ctx context.Context) (rpcEnvelope, error) {
 	type decodedEnvelope struct {
 		envelope rpcEnvelope
 		err      error
@@ -825,7 +825,7 @@ func (c *appMCPStdioClient) readEnvelope(ctx context.Context) (rpcEnvelope, erro
 	}
 }
 
-func (c *appMCPStdioClient) close() {
+func (c *pluginMCPStdioClient) close() {
 	c.mu.Lock()
 	if c.stdin != nil {
 		_ = c.stdin.Close()
@@ -847,7 +847,7 @@ func (c *appMCPStdioClient) close() {
 	}
 }
 
-func (c *appMCPStdioClient) drainStderr(stderr io.Reader) {
+func (c *pluginMCPStdioClient) drainStderr(stderr io.Reader) {
 	data, _ := io.ReadAll(io.LimitReader(stderr, 16*1024))
 	if len(data) == 0 {
 		return
@@ -857,24 +857,24 @@ func (c *appMCPStdioClient) drainStderr(stderr io.Reader) {
 	c.stderr.WriteString(string(data))
 }
 
-func (c *appMCPStdioClient) stderrText() string {
+func (c *pluginMCPStdioClient) stderrText() string {
 	c.stderrMu.Lock()
 	defer c.stderrMu.Unlock()
 	return strings.TrimSpace(c.stderr.String())
 }
 
-func appMCPStdioEnv(extra map[string]string) ([]string, error) {
-	// App processes receive only the ordinary command baseline plus values
+func pluginMCPStdioEnv(extra map[string]string) ([]string, error) {
+	// Plugin processes receive only the ordinary command baseline plus values
 	// explicitly declared by the endpoint/connection. Do not leak daemon
 	// tokens, provider credentials, or unrelated parent-process secrets.
 	return commandEnvironment(extra)
 }
 
-func appMCPResolveCommand(command string, env []string) (string, error) {
+func pluginMCPResolveCommand(command string, env []string) (string, error) {
 	return resolveExecutableFromEnv(command, "", env)
 }
 
-func appMCPEnvValue(env []string, key string) string {
+func pluginMCPEnvValue(env []string, key string) string {
 	for _, item := range env {
 		gotKey, value, ok := strings.Cut(item, "=")
 		if ok && gotKey == key {
@@ -884,27 +884,27 @@ func appMCPEnvValue(env []string, key string) string {
 	return ""
 }
 
-type appMCPRPCMessage struct {
+type pluginMCPRPCMessage struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      string `json:"id,omitempty"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitempty"`
 }
 
-func readAppMCPBody(body io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(body, appMCPMaxResponseBytes+1))
+func readPluginMCPBody(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, pluginMCPMaxResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > appMCPMaxResponseBytes {
-		return nil, fmt.Errorf("mcp response exceeds %d bytes", appMCPMaxResponseBytes)
+	if len(data) > pluginMCPMaxResponseBytes {
+		return nil, fmt.Errorf("mcp response exceeds %d bytes", pluginMCPMaxResponseBytes)
 	}
 	return data, nil
 }
 
-func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMessage, error) {
+func readPluginMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMessage, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), appMCPMaxResponseBytes)
+	scanner.Buffer(make([]byte, 0, 64*1024), pluginMCPMaxResponseBytes)
 	var dataLines []string
 	dataBytes := 0
 	flush := func() (json.RawMessage, bool, error) {
@@ -914,9 +914,9 @@ func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMess
 		data := strings.Join(dataLines, "\n")
 		dataLines = nil
 		dataBytes = 0
-		raw, err := appMCPEnvelopeResult([]byte(data), id)
+		raw, err := pluginMCPEnvelopeResult([]byte(data), id)
 		if err != nil {
-			var mismatch appMCPIDMismatchError
+			var mismatch pluginMCPIDMismatchError
 			if errors.As(err, &mismatch) {
 				return nil, false, nil
 			}
@@ -944,8 +944,8 @@ func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMess
 			if len(dataLines) > 0 {
 				separator = 1
 			}
-			if dataBytes+separator+len(data) > appMCPMaxResponseBytes {
-				return nil, fmt.Errorf("mcp response exceeds %d bytes", appMCPMaxResponseBytes)
+			if dataBytes+separator+len(data) > pluginMCPMaxResponseBytes {
+				return nil, fmt.Errorf("mcp response exceeds %d bytes", pluginMCPMaxResponseBytes)
 			}
 			dataLines = append(dataLines, data)
 			dataBytes += separator + len(data)
@@ -960,19 +960,19 @@ func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMess
 	return nil, errors.New("mcp sse stream ended without response")
 }
 
-type appMCPIDMismatchError struct{}
+type pluginMCPIDMismatchError struct{}
 
-func (appMCPIDMismatchError) Error() string {
+func (pluginMCPIDMismatchError) Error() string {
 	return "mcp response id did not match request"
 }
 
-func appMCPEnvelopeResult(data []byte, id string) (json.RawMessage, error) {
+func pluginMCPEnvelopeResult(data []byte, id string) (json.RawMessage, error) {
 	var envelope rpcEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, err
 	}
-	if id != "" && !appMCPIDMatches(envelope.ID, id) {
-		return nil, appMCPIDMismatchError{}
+	if id != "" && !pluginMCPIDMatches(envelope.ID, id) {
+		return nil, pluginMCPIDMismatchError{}
 	}
 	if envelope.Error != nil {
 		return nil, errors.New(envelope.Error.Message)
@@ -983,7 +983,7 @@ func appMCPEnvelopeResult(data []byte, id string) (json.RawMessage, error) {
 	return envelope.Result, nil
 }
 
-func appMCPIDMatches(raw json.RawMessage, id string) bool {
+func pluginMCPIDMatches(raw json.RawMessage, id string) bool {
 	if len(raw) == 0 {
 		return false
 	}
@@ -998,24 +998,24 @@ func appMCPIDMatches(raw json.RawMessage, id string) bool {
 	return false
 }
 
-func appMCPHTTPError(resp *http.Response) error {
-	data, _ := readAppMCPBody(resp.Body)
+func pluginMCPHTTPError(resp *http.Response) error {
+	data, _ := readPluginMCPBody(resp.Body)
 	if len(data) > 0 {
 		return fmt.Errorf("mcp http %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return fmt.Errorf("mcp http %d", resp.StatusCode)
 }
 
-func applyAppMCPHeaders(headers http.Header, configured map[string]string) error {
+func applyPluginMCPHeaders(headers http.Header, configured map[string]string) error {
 	for name, value := range configured {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		if !app.IsAllowedRequestHeaderName(name) {
+		if !plugin.IsAllowedRequestHeaderName(name) {
 			return fmt.Errorf("mcp endpoint header %q is invalid", name)
 		}
-		if !app.IsAllowedRequestHeaderValue(value) {
+		if !plugin.IsAllowedRequestHeaderValue(value) {
 			return fmt.Errorf("mcp endpoint header %q has an invalid value", name)
 		}
 		headers.Set(name, value)
@@ -1023,15 +1023,15 @@ func applyAppMCPHeaders(headers http.Header, configured map[string]string) error
 	return nil
 }
 
-func appMCPProviderToolName(binding *app.EndpointBinding, remoteName string) string {
+func pluginMCPProviderToolName(binding *plugin.EndpointBinding, remoteName string) string {
 	// Keep provider-visible names compact; app, connection, and endpoint identity remain in the hash.
-	hash := appMCPToolHash(binding, remoteName)
-	maxToolLen := appMCPMaxToolNameLen - len(appMCPToolPrefix) - len("__") - len(hash)
-	tool := appMCPSanitizeNameSegment(remoteName, maxToolLen)
-	return appMCPToolPrefix + tool + "__" + hash
+	hash := pluginMCPToolHash(binding, remoteName)
+	maxToolLen := pluginMCPMaxToolNameLen - len(pluginMCPToolPrefix) - len("__") - len(hash)
+	tool := pluginMCPSanitizeNameSegment(remoteName, maxToolLen)
+	return pluginMCPToolPrefix + tool + "__" + hash
 }
 
-func appMCPSanitizeNameSegment(value string, maxLen int) string {
+func pluginMCPSanitizeNameSegment(value string, maxLen int) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
 	lastUnderscore := false
@@ -1060,9 +1060,9 @@ func appMCPSanitizeNameSegment(value string, maxLen int) string {
 	return out
 }
 
-func appMCPToolHash(binding *app.EndpointBinding, remoteName string) string {
+func pluginMCPToolHash(binding *plugin.EndpointBinding, remoteName string) string {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(binding.AppID))
+	_, _ = h.Write([]byte(binding.PluginID))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(binding.ConnectionID))
 	_, _ = h.Write([]byte{0})
@@ -1073,39 +1073,39 @@ func appMCPToolHash(binding *app.EndpointBinding, remoteName string) string {
 	return hex.EncodeToString(sum)
 }
 
-func appMCPToolDescription(binding *app.EndpointBinding, tool appMCPRemoteTool) string {
+func pluginMCPToolDescription(binding *plugin.EndpointBinding, tool pluginMCPRemoteTool) string {
 	description := strings.TrimSpace(tool.Description)
 	if description == "" {
 		description = strings.TrimSpace(tool.Title)
 	}
-	prefix := fmt.Sprintf("MCP tool %q from app %q endpoint %q.", strings.TrimSpace(tool.Name), binding.AppID, binding.EndpointName)
+	prefix := fmt.Sprintf("MCP tool %q from plugin %q endpoint %q.", strings.TrimSpace(tool.Name), binding.PluginID, binding.EndpointName)
 	if description == "" {
 		return prefix
 	}
 	return prefix + " " + description
 }
 
-func appMCPCacheTTL(defs []provider.ToolDef) time.Duration {
+func pluginMCPCacheTTL(defs []provider.ToolDef) time.Duration {
 	if len(defs) == 0 {
-		return appMCPEmptyToolCacheTTL
+		return pluginMCPEmptyToolCacheTTL
 	}
-	return appMCPToolCacheTTL
+	return pluginMCPToolCacheTTL
 }
 
-func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
+func pluginMCPBindingsCacheKey(bindings []*plugin.EndpointBinding) string {
 	parts := make([]string, 0, len(bindings))
 	for _, binding := range bindings {
-		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
+		if binding == nil || binding.Endpoint.Kind != plugin.EndpointKindMCP || !pluginMCPSupportedTransport(binding.Endpoint.Transport) {
 			continue
 		}
-		fields := appMCPMapSignature(binding.ConnectionFields)
-		headers := appMCPMapSignature(binding.Endpoint.Headers)
-		env := appMCPMapSignature(binding.Endpoint.Env)
-		args := appMCPSliceSignature(binding.Endpoint.Args)
-		auth := appMCPAuthSignature(binding.Auth)
+		fields := pluginMCPMapSignature(binding.ConnectionFields)
+		headers := pluginMCPMapSignature(binding.Endpoint.Headers)
+		env := pluginMCPMapSignature(binding.Endpoint.Env)
+		args := pluginMCPSliceSignature(binding.Endpoint.Args)
+		auth := pluginMCPAuthSignature(binding.Auth)
 		fieldDefs, _ := json.Marshal(binding.ConnectionFieldDefs)
 		parts = append(parts, strings.Join([]string{
-			binding.AppID,
+			binding.PluginID,
 			binding.ConnectionID,
 			binding.EndpointName,
 			binding.Endpoint.Transport,
@@ -1128,7 +1128,7 @@ func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func appMCPAuthSignature(auth app.Auth) string {
+func pluginMCPAuthSignature(auth plugin.Auth) string {
 	return strings.Join([]string{
 		strings.TrimSpace(auth.MethodID),
 		strings.TrimSpace(auth.Type),
@@ -1145,16 +1145,16 @@ func appMCPAuthSignature(auth app.Auth) string {
 	}, "\x00")
 }
 
-func appMCPSupportedTransport(transport string) bool {
+func pluginMCPSupportedTransport(transport string) bool {
 	switch strings.TrimSpace(transport) {
-	case app.EndpointTransportStreamableHTTP, app.EndpointTransportStdio:
+	case plugin.EndpointTransportStreamableHTTP, plugin.EndpointTransportStdio:
 		return true
 	default:
 		return false
 	}
 }
 
-func appMCPMapSignature(values map[string]string) string {
+func pluginMCPMapSignature(values map[string]string) string {
 	if len(values) == 0 {
 		return ""
 	}
@@ -1173,51 +1173,51 @@ func appMCPMapSignature(values map[string]string) string {
 	return b.String()
 }
 
-func appMCPSliceSignature(values []string) string {
+func pluginMCPSliceSignature(values []string) string {
 	if len(values) == 0 {
 		return ""
 	}
 	return strings.Join(values, "\x00")
 }
 
-func cloneAppMCPToolDefs(in []provider.ToolDef) []provider.ToolDef {
+func clonePluginMCPToolDefs(in []provider.ToolDef) []provider.ToolDef {
 	if len(in) == 0 {
 		return nil
 	}
 	out := append([]provider.ToolDef(nil), in...)
 	for i := range out {
-		out[i].InputSchema = app.CloneJSON(in[i].InputSchema)
+		out[i].InputSchema = plugin.CloneJSON(in[i].InputSchema)
 	}
 	return out
 }
 
-func cloneAppMCPTools(in map[string]appMCPDiscoveredTool) map[string]appMCPDiscoveredTool {
+func clonePluginMCPTools(in map[string]pluginMCPDiscoveredTool) map[string]pluginMCPDiscoveredTool {
 	if len(in) == 0 {
-		return map[string]appMCPDiscoveredTool{}
+		return map[string]pluginMCPDiscoveredTool{}
 	}
-	out := make(map[string]appMCPDiscoveredTool, len(in))
+	out := make(map[string]pluginMCPDiscoveredTool, len(in))
 	for key, tool := range in {
-		out[key] = appMCPDiscoveredTool{
-			binding:    cloneAppMCPBinding(tool.binding),
+		out[key] = pluginMCPDiscoveredTool{
+			binding:    clonePluginMCPBinding(tool.binding),
 			remoteName: tool.remoteName,
 		}
 	}
 	return out
 }
 
-func appMCPInputSchema(raw json.RawMessage) json.RawMessage {
+func pluginMCPInputSchema(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 || !json.Valid(raw) || strings.TrimSpace(string(raw)) == "null" {
 		return json.RawMessage(`{"type":"object","additionalProperties":true}`)
 	}
-	return app.CloneJSON(raw)
+	return plugin.CloneJSON(raw)
 }
 
-func appMCPToolResult(call Call, raw json.RawMessage) Result {
+func pluginMCPToolResult(call Call, raw json.RawMessage) Result {
 	out := Result{CallID: call.CallID, Name: call.Name, Ok: true}
 	var decoded struct {
-		IsError           bool            `json:"isError"`
-		Content           []appMCPContent `json:"content"`
-		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool               `json:"isError"`
+		Content           []pluginMCPContent `json:"content"`
+		StructuredContent json.RawMessage    `json:"structuredContent"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		out.Content = string(raw)
@@ -1241,32 +1241,32 @@ func appMCPToolResult(call Call, raw json.RawMessage) Result {
 	return out
 }
 
-type appMCPContent struct {
+type pluginMCPContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }
 
-func cloneAppMCPBinding(in *app.EndpointBinding) *app.EndpointBinding {
+func clonePluginMCPBinding(in *plugin.EndpointBinding) *plugin.EndpointBinding {
 	if in == nil {
 		return nil
 	}
 	out := *in
-	out.Auth = app.CloneAuth(in.Auth)
-	out.ConnectionFields = cloneStringMapForAppMCP(in.ConnectionFields)
-	out.ConnectionFieldDefs = append([]app.ConnectionField(nil), in.ConnectionFieldDefs...)
+	out.Auth = plugin.CloneAuth(in.Auth)
+	out.ConnectionFields = cloneStringMapForPluginMCP(in.ConnectionFields)
+	out.ConnectionFieldDefs = append([]plugin.ConnectionField(nil), in.ConnectionFieldDefs...)
 	for i := range out.ConnectionFieldDefs {
-		out.ConnectionFieldDefs[i].Inject = append([]app.ConnectionFieldInject(nil), in.ConnectionFieldDefs[i].Inject...)
+		out.ConnectionFieldDefs[i].Inject = append([]plugin.ConnectionFieldInject(nil), in.ConnectionFieldDefs[i].Inject...)
 		for j := range out.ConnectionFieldDefs[i].Inject {
 			out.ConnectionFieldDefs[i].Inject[j].Methods = append([]string(nil), in.ConnectionFieldDefs[i].Inject[j].Methods...)
 		}
 	}
 	out.Endpoint.Args = append([]string(nil), in.Endpoint.Args...)
-	out.Endpoint.Env = cloneStringMapForAppMCP(in.Endpoint.Env)
-	out.Endpoint.Headers = cloneStringMapForAppMCP(in.Endpoint.Headers)
+	out.Endpoint.Env = cloneStringMapForPluginMCP(in.Endpoint.Env)
+	out.Endpoint.Headers = cloneStringMapForPluginMCP(in.Endpoint.Headers)
 	return &out
 }
 
-func cloneStringMapForAppMCP(in map[string]string) map[string]string {
+func cloneStringMapForPluginMCP(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
 	}

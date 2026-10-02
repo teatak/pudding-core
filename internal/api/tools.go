@@ -31,9 +31,9 @@ func (s *Server) listBuiltinTools(c *cart.Context) error {
 }
 
 func settingsBuiltinToolDefinitions() []provider.ToolDef {
-	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.AppLoadDefinition(), tool.AppUnloadDefinition(nil)}
+	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.PluginLoadDefinition(), tool.PluginUnloadDefinition(nil)}
 	for _, def := range tool.BuiltinDefinitions() {
-		if _, appTool := tool.BuiltinAppIDForTool(def.Name); appTool || tool.IsAppAPITool(def.Name) || def.AppID != "" {
+		if _, pluginTool := tool.BuiltinPluginIDForTool(def.Name); pluginTool || tool.IsPluginAPITool(def.Name) || def.PluginID != "" {
 			continue
 		}
 		defs = append(defs, def)

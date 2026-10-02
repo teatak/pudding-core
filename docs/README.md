@@ -12,7 +12,7 @@
 | [API 快速开始](api-quickstart.md) | 临时 daemon 的创建会话、提交、取消与续传 |
 | [公共契约](../contracts/README.md)／[字段对照](contracts-checklist.md) | runtime、REST、SSE、消息与工具协议 |
 | [模型预设](provider-presets.md) | 模板与运行配置的边界、provider 适配记录 |
-| [Apps](apps.md)／[内置 App](builtin-apps-design.md) | 包、连接、动态加载与 runtime-provided App |
+| [插件](plugins.md)／[内置插件](builtin-plugins-design.md) | 包、连接、动态加载与 runtime-provided 插件 |
 | [Chat / Work / Code](agent-modes-design.md) | 模式与工具能力边界 |
 | [CLI 沙箱](code-cli-sandbox-design.md) | Ask / Auto / Full、host 和授权复用 |
 | [Agent 工具契约](agent-tool-contracts.md) | 路径、临时附件、后台命令、搜索与参数诊断 |
@@ -40,6 +40,6 @@
 
 `internal/`、`cmd/`、`contracts/` 相对 core；`web/`、`electron/`、`native/` 相对 desktop。历史文件中的路径、行号、版本和临时证据目录对应记录时基线。公共契约由 core 维护，desktop 的 `web/contracts/` 为生成文件，不手改、不提交。
 
-## 工作台
+## Studio
 
-[Canvas 资源契约](canvases.md)：统一源码资源、旧画布离线归档、迁移、App 查询授权、确认操作与实体关联；产品操作与验收由 Desktop 文档维护。
+[Studio 内容契约](studio.md)：内容资源与小组件源码版本、v25／v27 升级、插件查询、确认操作与实体关联；产品操作与验收由 Desktop 文档维护。

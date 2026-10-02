@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
-func draftResponse(d canvas.Draft) map[string]any {
+func draftResponse(d widget.Draft) map[string]any {
 	files := make([]string, 0, len(d.Files))
 	for name := range d.Files {
 		files = append(files, name)
@@ -27,11 +27,11 @@ func draftResponse(d canvas.Draft) map[string]any {
 	}
 }
 
-func (s *Server) readCanvasDraft(c *cart.Context, id string) (canvas.Draft, error) {
-	if _, err := s.store.GetCanvas(c.Request.Context(), id); err != nil {
-		return canvas.Draft{}, err
+func (s *Server) readWidgetDraft(c *cart.Context, id string) (widget.Draft, error) {
+	if _, err := s.store.GetStudioItem(c.Request.Context(), id); err != nil {
+		return widget.Draft{}, err
 	}
-	return canvas.ReadDraft(s.home, id)
+	return widget.ReadDraft(s.home, id)
 }
 
 func (s *Server) draftError(c *cart.Context, err error) error {
@@ -39,30 +39,18 @@ func (s *Server) draftError(c *cart.Context, err error) error {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "draft_not_found"})
 		return nil
 	}
-	return s.canvasError(c, err)
+	return s.studioItemError(c, err)
 }
 
-func (s *Server) startCanvasDraft(c *cart.Context) error {
-	id, _ := c.Param("canvasID")
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	w, err := s.store.GetCanvas(c.Request.Context(), id)
+func (s *Server) startWidgetDraft(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	w, err := s.store.GetStudioItem(c.Request.Context(), id)
 	if err != nil {
-		return s.canvasError(c, err)
+		return s.studioItemError(c, err)
 	}
-	d, err := canvas.StartDraft(s.home, id, w.HeadRevision)
-	if err != nil {
-		return s.draftError(c, err)
-	}
-	c.JSON(http.StatusOK, draftResponse(d))
-	return nil
-}
-
-func (s *Server) getCanvasDraft(c *cart.Context) error {
-	id, _ := c.Param("canvasID")
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	d, err := s.readCanvasDraft(c, id)
+	d, err := widget.StartDraft(s.home, id, w.HeadRevision)
 	if err != nil {
 		return s.draftError(c, err)
 	}
@@ -70,15 +58,27 @@ func (s *Server) getCanvasDraft(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) getCanvasDraftFile(c *cart.Context) error {
-	id, _ := c.Param("canvasID")
+func (s *Server) getWidgetDraft(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	d, err := s.readWidgetDraft(c, id)
+	if err != nil {
+		return s.draftError(c, err)
+	}
+	c.JSON(http.StatusOK, draftResponse(d))
+	return nil
+}
+
+func (s *Server) getWidgetDraftFile(c *cart.Context) error {
+	id, _ := c.Param("itemID")
 	name := c.Request.URL.Query().Get("path")
-	if !canvas.ValidFilePath(name) {
+	if !widget.ValidFilePath(name) {
 		return badRequest(c, "invalid draft source path")
 	}
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	d, err := s.readCanvasDraft(c, id)
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	d, err := s.readWidgetDraft(c, id)
 	if err != nil {
 		return s.draftError(c, err)
 	}
@@ -91,14 +91,14 @@ func (s *Server) getCanvasDraftFile(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) putCanvasDraftFile(c *cart.Context) error {
-	id, _ := c.Param("canvasID")
+func (s *Server) putWidgetDraftFile(c *cart.Context) error {
+	id, _ := c.Param("itemID")
 	var req struct {
 		Path              string          `json:"path"`
 		Content           json.RawMessage `json:"content"`
 		ExpectedDraftHash string          `json:"expectedDraftHash"`
 	}
-	if err := decodeCanvas(c, &req); err != nil {
+	if err := decodeStudioRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
 	if req.ExpectedDraftHash == "" || len(req.Content) == 0 {
@@ -112,13 +112,13 @@ func (s *Server) putCanvasDraftFile(c *cart.Context) error {
 		}
 		content = &value
 	}
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	if _, err := s.store.GetCanvas(c.Request.Context(), id); err != nil {
-		return s.canvasError(c, err)
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	if _, err := s.store.GetStudioItem(c.Request.Context(), id); err != nil {
+		return s.studioItemError(c, err)
 	}
-	d, err := canvas.WriteDraftFile(s.home, id, req.Path, content, req.ExpectedDraftHash)
-	if errors.Is(err, canvas.ErrDraftConflict) {
+	d, err := widget.WriteDraftFile(s.home, id, req.Path, content, req.ExpectedDraftHash)
+	if errors.Is(err, widget.ErrDraftConflict) {
 		c.JSON(http.StatusConflict, map[string]any{"error": "draft_conflict", "currentDraftHash": d.DraftHash, "baseRevisionHash": d.BaseRevisionHash})
 		return nil
 	}
@@ -132,21 +132,21 @@ func (s *Server) putCanvasDraftFile(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) commitCanvasDraft(c *cart.Context) error {
-	id, _ := c.Param("canvasID")
+func (s *Server) commitWidgetDraft(c *cart.Context) error {
+	id, _ := c.Param("itemID")
 	var req struct {
 		ExpectedDraftHash string `json:"expectedDraftHash"`
 		ClientRequestID   string `json:"clientRequestID"`
 	}
-	if err := decodeCanvas(c, &req); err != nil {
+	if err := decodeStudioRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
 	if req.ExpectedDraftHash == "" || req.ClientRequestID == "" || len(req.ClientRequestID) > 100 {
 		return badRequest(c, "expectedDraftHash and clientRequestID are required")
 	}
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	d, err := s.readCanvasDraft(c, id)
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	d, err := s.readWidgetDraft(c, id)
 	if err != nil {
 		return s.draftError(c, err)
 	}
@@ -154,27 +154,27 @@ func (s *Server) commitCanvasDraft(c *cart.Context) error {
 		c.JSON(http.StatusConflict, map[string]any{"error": "draft_conflict", "currentDraftHash": d.DraftHash, "baseRevisionHash": d.BaseRevisionHash})
 		return nil
 	}
-	pkg := canvas.Package{Files: d.Files}
+	pkg := widget.Package{Files: d.Files}
 	if _, _, err := pkg.Validate(); err != nil {
 		return badRequest(c, err.Error())
 	}
-	hash, err := canvas.WritePackage(s.home, id, pkg)
+	hash, err := widget.WritePackage(s.home, id, pkg)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.GetCanvas(c.Request.Context(), id)
+	w, err := s.store.GetStudioItem(c.Request.Context(), id)
 	if err != nil {
-		return s.canvasError(c, err)
+		return s.studioItemError(c, err)
 	}
 	if hash == d.BaseRevisionHash && w.HeadRevision == hash {
 		c.JSON(http.StatusOK, w)
 		return nil
 	}
-	w, err = s.store.SaveCanvasRevision(c.Request.Context(), &store.CanvasRevision{CanvasID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, d.BaseRevisionHash)
+	w, err = s.store.SaveStudioItemRevision(c.Request.Context(), &store.StudioItemRevision{ItemID: id, Hash: hash, ClientRequestID: req.ClientRequestID, CreatedAt: time.Now().UTC()}, d.BaseRevisionHash)
 	if err != nil {
-		return s.canvasError(c, err)
+		return s.studioItemError(c, err)
 	}
-	if _, err := canvas.SetDraftBase(s.home, id, hash); err != nil {
+	if _, err := widget.SetDraftBase(s.home, id, hash); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, w)

@@ -6,24 +6,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-type AppSkillSource interface {
-	ListDefinitions(context.Context) ([]*app.Definition, error)
-	ReadSkill(context.Context, string, string) (*app.SkillDetail, error)
+type PluginSkillSource interface {
+	ListDefinitions(context.Context) ([]*plugin.Definition, error)
+	ReadSkill(context.Context, string, string) (*plugin.SkillDetail, error)
 }
 
 type SkillSource interface {
 	ReadSkill(context.Context, string) (*skill.Document, error)
 }
 
-func WithSkillSources(apps AppSkillSource, skills SkillSource) Option {
-	return func(b *Builder) { b.apps, b.skills = apps, skills }
+func WithSkillSources(plugins PluginSkillSource, skills SkillSource) Option {
+	return func(b *Builder) { b.plugins, b.skills = plugins, skills }
 }
 
 // ResolveSkillReferences is the last context projection before sending a model
@@ -32,7 +32,7 @@ func WithSkillSources(apps AppSkillSource, skills SkillSource) Option {
 func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode string, req provider.Request) (provider.Request, error) {
 	type position struct{ message, part int }
 	latest := make(map[string]position)
-	hasApp := false
+	hasPlugin := false
 	for mi, message := range req.Messages {
 		for pi, part := range message.Parts {
 			if part.Type != provider.PartToolResult {
@@ -40,7 +40,7 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 			}
 			if ref, ok := tool.ReferencedSkill(part.Name, part.Ok, part.Content); ok {
 				latest[ref.Key()] = position{mi, pi}
-				hasApp = hasApp || ref.Kind == tool.AppSkillReference
+				hasPlugin = hasPlugin || ref.Kind == tool.PluginSkillReference
 			}
 		}
 	}
@@ -48,21 +48,21 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 		return req, nil
 	}
 	loaded := make(map[string]bool)
-	definitions := make(map[string]*app.Definition)
-	var appError error
-	if hasApp {
+	definitions := make(map[string]*plugin.Definition)
+	var pluginError error
+	if hasPlugin {
 		session, err := b.store.GetSession(ctx, sessionID)
 		if err != nil {
 			return provider.Request{}, err
 		}
-		for _, id := range session.LoadedAppIDs {
+		for _, id := range session.LoadedPluginIDs {
 			loaded[id] = true
 		}
-		if b.apps == nil {
-			appError = errors.New("App skill source is unavailable")
+		if b.plugins == nil {
+			pluginError = errors.New("Plugin skill source is unavailable")
 		} else {
-			var list []*app.Definition
-			list, appError = b.apps.ListDefinitions(ctx)
+			var list []*plugin.Definition
+			list, pluginError = b.plugins.ListDefinitions(ctx)
 			for _, definition := range list {
 				if definition != nil {
 					definitions[definition.ID] = definition
@@ -91,15 +91,15 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 				fields["instructionStatus"] = "superseded"
 			case strings.TrimSpace(ref.SkillID) == "":
 				err = errors.New("skill reference has no registered skill ID")
-			case part.Name == tool.AppLoad && ref.Kind == tool.AppSkillReference && ref.AppID != "":
-				definition := definitions[ref.AppID]
+			case tool.IsPluginLoad(part.Name) && ref.Kind == tool.PluginSkillReference && ref.PluginID != "":
+				definition := definitions[ref.PluginID]
 				switch {
-				case !loaded[ref.AppID]:
+				case !loaded[ref.PluginID]:
 					fields["instructionStatus"] = "unloaded"
-				case appError != nil:
-					err = appError
+				case pluginError != nil:
+					err = pluginError
 				case definition == nil || !definition.Enabled:
-					err = fmt.Errorf("App %q is disabled or unavailable in this runtime", ref.AppID)
+					err = fmt.Errorf("Plugin %q is disabled or unavailable in this runtime", ref.PluginID)
 				default:
 					required := store.NormalizeAgentMode(store.AgentMode(definition.RequiredMode))
 					if required == "" {
@@ -108,17 +108,17 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 					if store.AgentModeRank(currentMode) < store.AgentModeRank(required) {
 						fields["instructionStatus"] = "capability_required"
 					} else {
-						var doc *app.SkillDetail
-						doc, err = b.apps.ReadSkill(ctx, ref.AppID, ref.SkillID)
+						var doc *plugin.SkillDetail
+						doc, err = b.plugins.ReadSkill(ctx, ref.PluginID, ref.SkillID)
 						if err == nil && doc == nil {
-							err = errors.New("App skill source returned no document")
+							err = errors.New("Plugin skill source returned no document")
 						}
 						if err == nil {
 							fields["content"], fields["name"], fields["description"], fields["path"] = doc.Content, doc.Name, doc.Description, doc.Path
 						}
 					}
 				}
-			case part.Name == tool.SkillRead && ref.Kind == tool.GlobalSkillReference && ref.AppID == "":
+			case part.Name == tool.SkillRead && ref.Kind == tool.GlobalSkillReference && ref.PluginID == "":
 				if b.skills == nil {
 					err = errors.New("global skill source is unavailable")
 				} else {
@@ -144,7 +144,7 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 				fields["instructionStatus"] = "unavailable"
 				fields["instructionError"] = err.Error()
 			}
-			if part.Name == tool.AppLoad {
+			if tool.IsPluginLoad(part.Name) {
 				fields["instructionsLoaded"] = fields["instructionStatus"] == "current"
 			}
 			part.Content = tool.SkillReferencePayload(part.Content, ref, fields)
@@ -153,16 +153,16 @@ func (b *Builder) ResolveSkillReferences(ctx context.Context, sessionID, mode st
 	return req, nil
 }
 
-// Keep the latest reference per global skill / App even when its original turn
+// Keep the latest reference per global skill / plugin even when its original turn
 // was compacted. Canonical messages remain the sole source, including for old
 // summaries that did not explicitly preserve references. Only the original
 // call/result pair is retained, never the surrounding old conversation.
-func messagesWithSkillReferences(all, effective []*store.Message, loadedAppIDs []string) []*store.Message {
+func messagesWithSkillReferences(all, effective []*store.Message, loadedPluginIDs []string) []*store.Message {
 	if len(all) == len(effective) {
 		return effective
 	}
 	loaded := make(map[string]bool)
-	for _, id := range loadedAppIDs {
+	for _, id := range loadedPluginIDs {
 		loaded[id] = true
 	}
 	type entry struct {
@@ -185,7 +185,7 @@ func messagesWithSkillReferences(all, effective []*store.Message, loadedAppIDs [
 				continue
 			}
 			if ref, ok := tool.ReferencedSkill(part.Name, part.Ok, part.Content); ok {
-				if ref.Kind == tool.AppSkillReference && !loaded[ref.AppID] {
+				if ref.Kind == tool.PluginSkillReference && !loaded[ref.PluginID] {
 					continue
 				}
 				latest[ref.Key()] = entry{message, part, calls[callKey]}

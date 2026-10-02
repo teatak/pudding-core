@@ -1,7 +1,7 @@
-package appexec
+package pluginexec
 
 import (
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"testing"
 )
 
@@ -14,8 +14,8 @@ func TestEndpointURLPreservesEncodedSegment(t *testing.T) {
 		t.Fatalf("encoded identifier changed meaning: %s", u)
 	}
 }
-func TestCanvasCannotOverrideConnectionOwnedHotel(t *testing.T) {
-	binding := &app.EndpointBinding{ConnectionFields: map[string]string{"hotelCode": "selected-hotel"}, ConnectionFieldDefs: []app.ConnectionField{{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "body", Methods: []string{"POST"}}, {Target: "query", Methods: []string{"GET"}}}}}}
+func TestWidgetCannotOverrideConnectionOwnedHotel(t *testing.T) {
+	binding := &plugin.EndpointBinding{ConnectionFields: map[string]string{"hotelCode": "selected-hotel"}, ConnectionFieldDefs: []plugin.ConnectionField{{ID: "hotelCode", Inject: []plugin.ConnectionFieldInject{{Target: "body", Methods: []string{"POST"}}, {Target: "query", Methods: []string{"GET"}}}}}}
 	if err := ValidateBoundRequest(binding, "POST", nil, map[string]any{"hotelCode": "other-hotel"}); err == nil {
 		t.Fatal("body override accepted")
 	}

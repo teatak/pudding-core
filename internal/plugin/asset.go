@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"errors"
@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-var ErrInvalidAsset = errors.New("app: invalid asset")
+var ErrInvalidAsset = errors.New("plugin: invalid asset")
 
 func ReadAsset(root, rel string) ([]byte, string, error) {
-	resolvedRoot, err := resolveAppRoot(root, false)
+	resolvedRoot, err := resolvePluginRoot(root, false)
 	if err != nil {
 		return nil, "", ErrInvalidAsset
 	}
@@ -21,14 +21,14 @@ func ReadAsset(root, rel string) ([]byte, string, error) {
 		return nil, "", ErrInvalidAsset
 	}
 	parts := strings.Split(cleaned, "/")
-	if len(parts) != 3 || !appIDPattern.MatchString(parts[0]) || parts[1] != "assets" {
+	if len(parts) != 3 || !pluginIDPattern.MatchString(parts[0]) || parts[1] != "assets" {
 		return nil, "", ErrInvalidAsset
 	}
 	contentType, ok := iconContentType(parts[2])
 	if !ok {
 		return nil, "", ErrInvalidAsset
 	}
-	target, err := resolveAppRegularFile(filepath.Join(root, parts[0]), filepath.ToSlash(filepath.Join("assets", parts[2])))
+	target, err := resolvePluginRegularFile(filepath.Join(root, parts[0]), filepath.ToSlash(filepath.Join("assets", parts[2])))
 	if err != nil {
 		return nil, "", ErrInvalidAsset
 	}

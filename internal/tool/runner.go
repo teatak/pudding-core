@@ -57,8 +57,8 @@ type Runner interface {
 	Call(ctx context.Context, call Call) Result
 }
 
-type AppScopedDefinitionRunner interface {
-	DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error)
+type PluginScopedDefinitionRunner interface {
+	DefinitionsForPlugins(ctx context.Context, sessionID string, pluginIDs []string) ([]provider.ToolDef, error)
 }
 
 type ApprovalDetailsProvider interface {

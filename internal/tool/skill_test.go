@@ -59,10 +59,10 @@ func TestBuiltinSkillRead(t *testing.T) {
 	}
 }
 
-func TestBuiltinSkillReadRejectsAppScope(t *testing.T) {
+func TestBuiltinSkillReadRejectsPluginScope(t *testing.T) {
 	res := NewBuiltinRunner().Call(context.Background(), Call{
 		Name: SkillRead,
-		Args: json.RawMessage(`{"app_id":"github","skill_id":"github-issues"}`),
+		Args: json.RawMessage(`{"plugin_id":"github","skill_id":"github-issues"}`),
 	})
 	if res.Ok || !strings.Contains(res.Content, "unknown field") {
 		t.Fatalf("app-scoped skill read should be rejected: %+v", res)

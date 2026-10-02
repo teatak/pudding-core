@@ -10,24 +10,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/canvas"
-	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
+// canvasV25AppearanceFixture builds the released v26 layout and removes the
+// appearance columns that v26 added.
 func canvasV25AppearanceFixture(t *testing.T, keepColorColumn bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "canvas.db")
-	st, err := Open(path)
+	db := openMigrationTestDB(t, path)
+	schema, err := os.ReadFile("testdata/schema-v26.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateCanvas(context.Background(), &store.Canvas{ID: "old", Name: "Existing canvas"}); err != nil {
+	if _, err := db.Exec(string(schema)); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
+	if _, err := db.Exec(`INSERT INTO canvas_resources(id,name,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES('old','Existing canvas',1,'','','{}',1,0,1,1)`); err != nil {
 		t.Fatal(err)
 	}
-	db := openMigrationTestDB(t, path)
 	if _, err := db.Exec(`ALTER TABLE canvas_resources DROP COLUMN icon`); err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +53,11 @@ func TestCanvasAppearanceMigrationPreservesResourcesAndRestarts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resource, err := st.GetCanvas(context.Background(), "old")
+		resource, err := st.GetStudioItem(context.Background(), "old")
 		if err != nil || resource.Name != "Existing canvas" || resource.Icon != "" || resource.IconColor != "" {
 			t.Fatalf("migrated resource: %+v %v", resource, err)
 		}
-		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 		if err := st.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -119,21 +120,21 @@ func TestFinalCanvasMigrationConvertsReleaseDataAndRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources", "3")
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_items WHERE kind='widget'", "3")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='canvas_id'", "1")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('canvas_revisions') WHERE name='workbench_id'", "0")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_mounts", "3")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('studio_item_revisions') WHERE name='item_id'", "1")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_table_info('studio_item_revisions') WHERE name='workbench_id'", "0")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_mounts", "3")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM library_favorites", "1")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM library_recent_opens", "1")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_resources WHERE active_revision=head_revision AND active_revision<>''", "3")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM canvas_revisions WHERE build_receipt<>''", "0")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_items WHERE active_revision=head_revision AND active_revision<>''", "3")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_item_revisions WHERE build_receipt<>''", "0")
 		var hash string
-		if err := st.db.QueryRow("SELECT head_revision FROM canvas_resources WHERE id='saved'").Scan(&hash); err != nil {
+		if err := st.db.QueryRow("SELECT head_revision FROM studio_items WHERE id='saved'").Scan(&hash); err != nil {
 			t.Fatal(err)
 		}
-		pkg, err := canvas.ReadPackage(filepath.Dir(path), "saved", hash)
+		pkg, err := widget.ReadPackage(filepath.Dir(path), "saved", hash)
 		if err != nil || !strings.Contains(pkg.Files["src/App.tsx"], "saved") {
 			t.Fatal(pkg, err)
 		}
@@ -173,12 +174,14 @@ func TestFinalCanvasMigrationFailureRollsBack(t *testing.T) {
 func useV24CanvasFixture(t *testing.T, db *sql.DB) {
 	t.Helper()
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM canvas_resources`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("historical fixture contains canvas data: %d %v", count, err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM studio_items`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("historical fixture contains studio data: %d %v", count, err)
 	}
+	// Schema v27 renamed the session plugin column; earlier layouts keep loaded_app_ids.
 	if _, err := db.Exec(`PRAGMA foreign_keys=OFF;
- DROP TABLE library_recent_opens;DROP TABLE library_favorites;DROP TABLE canvas_mounts;
- DROP TABLE canvas_actions;DROP TABLE canvas_links;DROP TABLE canvas_saves;DROP TABLE canvas_revisions;DROP TABLE canvas_resources;`); err != nil {
+ DROP TABLE library_recent_opens;DROP TABLE library_favorites;DROP TABLE studio_mounts;
+ DROP TABLE widget_actions;DROP TABLE widget_links;DROP TABLE studio_item_saves;DROP TABLE studio_item_revisions;DROP TABLE studio_items;
+ ALTER TABLE sessions RENAME COLUMN loaded_plugin_ids TO loaded_app_ids;`); err != nil {
 		t.Fatal(err)
 	}
 	source := releaseV24Schema(t)

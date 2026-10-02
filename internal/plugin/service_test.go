@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"context"
@@ -21,7 +21,7 @@ type fakeConnectionStore struct {
 	items map[string]*Connection
 }
 
-func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection, error) {
+func (f fakeConnectionStore) ListPluginConnections(context.Context) ([]*Connection, error) {
 	out := make([]*Connection, 0, len(f.items))
 	for _, item := range f.items {
 		out = append(out, CloneConnection(item))
@@ -29,7 +29,7 @@ func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection,
 	return out, nil
 }
 
-func (f fakeConnectionStore) GetAppConnection(_ context.Context, id string) (*Connection, error) {
+func (f fakeConnectionStore) GetPluginConnection(_ context.Context, id string) (*Connection, error) {
 	item := f.items[id]
 	if item == nil {
 		return nil, ErrNotFound
@@ -37,7 +37,7 @@ func (f fakeConnectionStore) GetAppConnection(_ context.Context, id string) (*Co
 	return CloneConnection(item), nil
 }
 
-func (f fakeConnectionStore) PutAppConnection(_ context.Context, connection *Connection) error {
+func (f fakeConnectionStore) PutPluginConnection(_ context.Context, connection *Connection) error {
 	if connection == nil || connection.ID == "" {
 		return ErrNotFound
 	}
@@ -45,7 +45,7 @@ func (f fakeConnectionStore) PutAppConnection(_ context.Context, connection *Con
 	return nil
 }
 
-type fakeAppConfig struct {
+type fakePluginConfig struct {
 	fakeConnectionStore
 	enabled       map[string]bool
 	enablementErr error
@@ -58,24 +58,24 @@ func (fakeRuntimeSource) ListRuntimeDefinitions(_ context.Context, runtimeID str
 		return nil, nil
 	}
 	return []*Definition{{
-		ID:             "canvas",
-		Name:           "Canvas",
+		ID:             "widget-authoring",
+		Name:           "Widget Authoring",
 		Runtime:        "desktop",
 		RequiredMode:   "chat",
-		DefaultSkillID: "canvas",
-		Skills:         []SkillRef{{ID: "canvas", Name: "Canvas", Path: "skills/canvas/SKILL.md"}},
+		DefaultSkillID: "widget-authoring",
+		Skills:         []SkillRef{{ID: "widget-authoring", Name: "Widget Authoring", Path: "skills/widget-authoring/SKILL.md"}},
 		Tools:          []ToolRef{{Name: "canvas_markdown"}},
 	}}, nil
 }
 
-func (fakeRuntimeSource) ReadRuntimeSkill(_ context.Context, runtimeID, appID, skillID string) (*SkillDetail, error) {
-	if runtimeID != "desktop_a" || appID != "canvas" || skillID != "canvas" {
+func (fakeRuntimeSource) ReadRuntimeSkill(_ context.Context, runtimeID, pluginID, skillID string) (*SkillDetail, error) {
+	if runtimeID != "desktop_a" || pluginID != "widget-authoring" || skillID != "widget-authoring" {
 		return nil, ErrNotFound
 	}
-	return &SkillDetail{ID: "canvas", Name: "Canvas", Path: "skills/canvas/SKILL.md", Content: "# Canvas"}, nil
+	return &SkillDetail{ID: "widget-authoring", Name: "Widget Authoring", Path: "skills/widget-authoring/SKILL.md", Content: "# Widget Authoring"}, nil
 }
 
-func (f *fakeAppConfig) ListAppEnablement(context.Context) (map[string]bool, error) {
+func (f *fakePluginConfig) ListPluginEnablement(context.Context) (map[string]bool, error) {
 	if f.enablementErr != nil {
 		return nil, f.enablementErr
 	}
@@ -86,7 +86,7 @@ func (f *fakeAppConfig) ListAppEnablement(context.Context) (map[string]bool, err
 	return out, nil
 }
 
-func (f *fakeAppConfig) SetAppEnabled(_ context.Context, id string, enabled bool) error {
+func (f *fakePluginConfig) SetPluginEnabled(_ context.Context, id string, enabled bool) error {
 	if f.enabled == nil {
 		f.enabled = make(map[string]bool)
 	}
@@ -94,8 +94,8 @@ func (f *fakeAppConfig) SetAppEnabled(_ context.Context, id string, enabled bool
 	return nil
 }
 
-func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
-	config := &fakeAppConfig{}
+func TestBuiltinPluginsMergeEnablementAndSkills(t *testing.T) {
+	config := &fakePluginConfig{}
 	svc := NewService(t.TempDir(), config)
 
 	defs, err := svc.ListDefinitions(context.Background())
@@ -106,7 +106,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
 	}
 	if definitionByID(defs, "project-files") != nil {
-		t.Fatal("legacy Project Files App is still listed")
+		t.Fatal("legacy Project Files plugin is still listed")
 	}
 	browser := definitionByID(defs, BuiltinBrowserID)
 	if browser == nil || browser.Source != SourceBuiltin || !browser.Enabled || browser.CanUninstall || browser.RequiredMode != "work" || browser.DefaultSkillID != BuiltinBrowserID {
@@ -116,27 +116,27 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		t.Fatalf("unexpected builtin tools: browser=%+v", browser.Tools)
 	}
 	for _, tc := range []struct {
-		appID, skillID, toolName string
+		pluginID, skillID, toolName string
 	}{
 		{BuiltinSkillAuthoringID, "skill-creator", toolSkillValidate},
-		{BuiltinAppAuthoringID, "app-creator", toolAppSave},
+		{BuiltinPluginAuthoringID, "plugin-creator", toolPluginSave},
 	} {
-		def := definitionByID(defs, tc.appID)
+		def := definitionByID(defs, tc.pluginID)
 		if def == nil || def.RequiredMode != "code" || def.DefaultSkillID != tc.skillID || len(def.Tools) != 1 || def.Tools[0].Name != tc.toolName {
-			t.Fatalf("unexpected authoring app %s: %+v", tc.appID, def)
+			t.Fatalf("unexpected authoring plugin %s: %+v", tc.pluginID, def)
 		}
-		detail, err := svc.ReadSkill(context.Background(), tc.appID, tc.skillID)
+		detail, err := svc.ReadSkill(context.Background(), tc.pluginID, tc.skillID)
 		if err != nil || detail.Content == "" {
 			t.Fatalf("read authoring skill %s: detail=%+v err=%v", tc.skillID, detail, err)
 		}
 	}
 	capture := definitionByID(defs, BuiltinCaptureID)
 	if capture == nil || capture.RequiredMode != "chat" || capture.DefaultSkillID != "" || len(capture.Skills) != 0 || len(capture.Tools) != 2 {
-		t.Fatalf("unexpected Image Capture builtin App: %+v", capture)
+		t.Fatalf("unexpected Image Capture builtin plugin: %+v", capture)
 	}
 	computerUse := definitionByID(defs, BuiltinComputerUseID)
 	if computerUse == nil || computerUse.RequiredMode != "work" || computerUse.DefaultSkillID != BuiltinComputerUseID || len(computerUse.Skills) != 1 || len(computerUse.Tools) != 5 {
-		t.Fatalf("unexpected Computer Use builtin App: %+v", computerUse)
+		t.Fatalf("unexpected Computer Use builtin plugin: %+v", computerUse)
 	}
 	computerSkill, err := svc.ReadSkill(context.Background(), BuiltinComputerUseID, BuiltinComputerUseID)
 	if err != nil ||
@@ -192,13 +192,13 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if detail.ID != BuiltinBrowserID || detail.Content == "" {
 		t.Fatalf("unexpected builtin skill: %+v", detail)
 	}
-	if err := svc.DeleteDefinition(context.Background(), BuiltinBrowserID); !errors.Is(err, ErrBuiltinApp) {
+	if err := svc.DeleteDefinition(context.Background(), BuiltinBrowserID); !errors.Is(err, ErrBuiltinPlugin) {
 		t.Fatalf("delete builtin err = %v", err)
 	}
 }
 
-func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
-	config := &fakeAppConfig{}
+func TestRuntimePluginIsScopedToOriginRuntime(t *testing.T) {
+	config := &fakePluginConfig{}
 	svc := NewService(t.TempDir(), config).WithRuntimeSource(fakeRuntimeSource{})
 
 	defs, err := svc.ListDefinitions(context.Background())
@@ -206,7 +206,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(defs) != len(BuiltinDefinitions()) {
-		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
+		t.Fatalf("runtime plugin leaked without runtime identity: %+v", defs)
 	}
 
 	ctx := WithRuntimeID(context.Background(), "desktop_a")
@@ -214,21 +214,21 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canvas := definitionByID(defs, "canvas")
+	canvas := definitionByID(defs, "widget-authoring")
 	if len(defs) != len(BuiltinDefinitions())+1 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
-		t.Fatalf("unexpected runtime app definition: %+v", defs)
+		t.Fatalf("unexpected runtime plugin definition: %+v", defs)
 	}
-	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
+	if _, err := svc.SetEnabled(ctx, "widget-authoring", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ReadSkill(ctx, "canvas", "canvas"); !errors.Is(err, ErrDisabled) {
+	if _, err := svc.ReadSkill(ctx, "widget-authoring", "widget-authoring"); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("disabled runtime skill err = %v", err)
 	}
-	if _, err := svc.SetEnabled(ctx, "canvas", true); err != nil {
+	if _, err := svc.SetEnabled(ctx, "widget-authoring", true); err != nil {
 		t.Fatal(err)
 	}
-	detail, err := svc.ReadSkill(ctx, "canvas", "canvas")
-	if err != nil || detail.Content != "# Canvas" {
+	detail, err := svc.ReadSkill(ctx, "widget-authoring", "widget-authoring")
+	if err != nil || detail.Content != "# Widget Authoring" {
 		t.Fatalf("unexpected runtime skill: detail=%+v err=%v", detail, err)
 	}
 }
@@ -254,16 +254,16 @@ func TestDecorateInstalledDefinitionDoesNotDuplicateEndpointTools(t *testing.T) 
 	}
 }
 
-func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
-	config := &fakeAppConfig{}
-	svc := NewService(writeTestApp(t), config)
+func TestInstalledPluginCanBeTemporarilyDisabled(t *testing.T) {
+	config := &fakePluginConfig{}
+	svc := NewService(writeTestPlugin(t), config)
 
 	updated, err := svc.SetEnabled(context.Background(), "github", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Enabled || config.enabled["github"] {
-		t.Fatalf("installed app enablement was not updated: %+v", updated)
+		t.Fatalf("installed plugin enablement was not updated: %+v", updated)
 	}
 	defs, err := svc.ListDefinitions(context.Background())
 	if err != nil {
@@ -271,48 +271,48 @@ func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
 	}
 	for _, def := range defs {
 		if def.ID == "github" && def.Enabled {
-			t.Fatalf("installed app was enabled after reload: %+v", def)
+			t.Fatalf("installed plugin was enabled after reload: %+v", def)
 		}
 	}
 }
 
-func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
-	for _, appID := range []string{
-		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinAppAuthoringID,
+func TestInstallPackageRejectsReservedPluginIDs(t *testing.T) {
+	for _, pluginID := range []string{
+		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinPluginAuthoringID,
 		BuiltinCaptureID,
 		BuiltinComputerUseID,
-		RuntimeCanvasID,
+		RuntimeWidgetAuthoringID,
 	} {
-		t.Run(appID, func(t *testing.T) {
-			packageJSON := []byte(`{"kind":"pudding.app.package","schema_version":1,"app":{"id":"` + appID + `"}}`)
-			if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinApp) {
-				t.Fatalf("install reserved app id err = %v", err)
+		t.Run(pluginID, func(t *testing.T) {
+			packageJSON := []byte(`{"kind":"pudding.plugin.package","schema_version":1,"plugin":{"id":"` + pluginID + `"}}`)
+			if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinPlugin) {
+				t.Fatalf("install reserved plugin id err = %v", err)
 			}
 		})
 	}
 	if IsReservedID("project-files") {
-		t.Fatal("removed Project Files App id must be reusable")
+		t.Fatal("removed Project Files plugin id must be reusable")
 	}
 	if IsReservedID("source-control") {
-		t.Fatal("removed Source Control App id must be reusable")
+		t.Fatal("removed Source Control plugin id must be reusable")
 	}
 	if IsReservedID("code-intelligence") {
-		t.Fatal("removed Code Intelligence App id must be reusable")
+		t.Fatal("removed Code Intelligence plugin id must be reusable")
 	}
 }
 
 func TestSaveAuthoredPackageEnforcesCreateAndUpdate(t *testing.T) {
 	svc := NewService(t.TempDir(), nil)
 	pkg := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "0.1.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "0.1.0"},
 		Files: []PackageFile{{
-			Path:    AppFileName,
+			Path:    PluginFileName,
 			Content: "id: example\nname: Example\nversion: 0.1.0\n",
 		}},
 	}
-	raw := marshalTestAppPackage(t, pkg)
+	raw := marshalTestPluginPackage(t, pkg)
 	if _, err := svc.SaveAuthoredPackage(context.Background(), raw, false); err != nil {
 		t.Fatal(err)
 	}
@@ -320,55 +320,55 @@ func TestSaveAuthoredPackageEnforcesCreateAndUpdate(t *testing.T) {
 		t.Fatalf("second create err = %v", err)
 	}
 	missing := pkg
-	missing.App.ID = "missing"
-	missing.Files = []PackageFile{{Path: AppFileName, Content: "id: missing\nname: Missing\nversion: 0.1.0\n"}}
-	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, missing), true); !errors.Is(err, ErrNotFound) {
+	missing.Plugin.ID = "missing"
+	missing.Files = []PackageFile{{Path: PluginFileName, Content: "id: missing\nname: Missing\nversion: 0.1.0\n"}}
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestPluginPackage(t, missing), true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing update err = %v", err)
 	}
 }
 
-func TestSaveAuthoredPackageRejectsRuntimeAppID(t *testing.T) {
+func TestSaveAuthoredPackageRejectsRuntimePluginID(t *testing.T) {
 	svc := NewService(t.TempDir(), nil)
 	pkg := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: RuntimeCanvasID, Version: "0.1.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: RuntimeWidgetAuthoringID, Version: "0.1.0"},
 	}
-	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, pkg), false); !errors.Is(err, ErrBuiltinApp) {
-		t.Fatalf("save runtime app id err = %v", err)
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestPluginPackage(t, pkg), false); !errors.Is(err, ErrBuiltinPlugin) {
+		t.Fatalf("save runtime plugin id err = %v", err)
 	}
-	if err := svc.DeleteDefinition(context.Background(), RuntimeCanvasID); !errors.Is(err, ErrBuiltinApp) {
-		t.Fatalf("delete runtime app id err = %v", err)
+	if err := svc.DeleteDefinition(context.Background(), RuntimeWidgetAuthoringID); !errors.Is(err, ErrBuiltinPlugin) {
+		t.Fatalf("delete runtime plugin id err = %v", err)
 	}
 }
 
 func TestSaveAuthoredPackageDoesNotCommitWhenEnablementReadFails(t *testing.T) {
 	homeDir := t.TempDir()
-	svc := NewService(homeDir, &fakeAppConfig{enablementErr: errors.New("enablement unavailable")})
+	svc := NewService(homeDir, &fakePluginConfig{enablementErr: errors.New("enablement unavailable")})
 	pkg := Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App:           PackageApp{ID: "example", Version: "0.1.0"},
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin:        PackagePlugin{ID: "example", Version: "0.1.0"},
 		Files: []PackageFile{{
-			Path:    AppFileName,
+			Path:    PluginFileName,
 			Content: "id: example\nname: Example\nversion: 0.1.0\n",
 		}},
 	}
-	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, pkg), false); err == nil || err.Error() != "enablement unavailable" {
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestPluginPackage(t, pkg), false); err == nil || err.Error() != "enablement unavailable" {
 		t.Fatalf("save err = %v, want enablement unavailable", err)
 	}
-	if _, err := os.Stat(filepath.Join(home.AppsPath(homeDir), "example")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("App was committed after enablement failure: %v", err)
+	if _, err := os.Stat(filepath.Join(home.PluginsPath(homeDir), "example")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("plugin was committed after enablement failure: %v", err)
 	}
 }
 
 func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
-	homeDir := writeTestApp(t)
+	homeDir := writeTestPlugin(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
 			ID:           "github-main",
 			Name:         "GitHub",
-			AppID:        "github",
+			PluginID:     "github",
 			Auth:         Auth{Type: "bearer", Token: "secret"},
 			Fields:       map[string]string{"hotelCode": "H001"},
 			EndpointURLs: map[string]string{"github_rest": "https://github.example.com/api/v3"},
@@ -391,15 +391,15 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 }
 
 func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
-	homeDir := writeTestApp(t)
+	homeDir := writeTestPlugin(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
 		"github-work": {
-			ID: "github-work", Name: "Work", AppID: "github",
+			ID: "github-work", Name: "Work", PluginID: "github",
 			Account: &ConnectionAccount{ID: "42", Login: "octocat", Name: "The Octocat", Type: "User"},
 			Auth:    Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant},
 		},
 		"github-personal": {
-			ID: "github-personal", Name: "Personal", AppID: "github",
+			ID: "github-personal", Name: "Personal", PluginID: "github",
 			Account: &ConnectionAccount{ID: "43", Login: "hubot", Name: "Hubot", Type: "User"},
 			Auth:    Auth{MethodID: GitHubPATAuthMethodID, Type: AuthTypeBearer},
 		},
@@ -431,7 +431,7 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 func TestLegacyGitHubOAuthRequiresReauthorization(t *testing.T) {
 	connections := fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
-			ID: "github-main", AppID: "github",
+			ID: "github-main", PluginID: "github",
 			Auth: Auth{MethodID: "github-oauth", Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "legacy-token"},
 		},
 	}}
@@ -465,7 +465,7 @@ func TestReadyConnectionRefreshesGitHubAppToken(t *testing.T) {
 	t.Cleanup(server.Close)
 	connections := fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
-			ID: "github-main", AppID: "github",
+			ID: "github-main", PluginID: "github",
 			Auth: Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "access-old", RefreshToken: "refresh-old", ExpiresAt: time.Now().Add(time.Minute)},
 		},
 	}}
@@ -485,9 +485,9 @@ func TestReadyConnectionRefreshesGitHubAppToken(t *testing.T) {
 }
 
 func TestListEndpointBindingsFiltersKind(t *testing.T) {
-	homeDir := writeTestApp(t)
+	homeDir := writeTestPlugin(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
-		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
+		"github-main": {ID: "github-main", Name: "GitHub", PluginID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
 	}})
 
 	bindings, err := svc.ListEndpointBindings(context.Background(), EndpointKindREST)
@@ -507,15 +507,15 @@ func TestListEndpointBindingsFiltersKind(t *testing.T) {
 	}
 }
 
-func TestResolveEndpointUsesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
-	homeDir := writeConnectionlessTestApp(t)
+func TestResolveEndpointUsesConnectionlessPluginWhenAuthNotRequired(t *testing.T) {
+	homeDir := writeConnectionlessTestPlugin(t)
 	svc := NewService(homeDir, nil)
 
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "local_mcp", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if binding.AppID != "sequential-thinking" || binding.ConnectionID != "" || binding.Auth.Type != "" {
+	if binding.PluginID != "sequential-thinking" || binding.ConnectionID != "" || binding.Auth.Type != "" {
 		t.Fatalf("unexpected connectionless binding: %+v", binding)
 	}
 	if binding.Endpoint.Kind != EndpointKindMCP || binding.Endpoint.Transport != EndpointTransportStdio {
@@ -526,21 +526,21 @@ func TestResolveEndpointUsesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
 	}
 }
 
-func TestListEndpointBindingsIncludesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
-	homeDir := writeConnectionlessTestApp(t)
+func TestListEndpointBindingsIncludesConnectionlessPluginWhenAuthNotRequired(t *testing.T) {
+	homeDir := writeConnectionlessTestPlugin(t)
 	svc := NewService(homeDir, nil)
 
 	bindings, err := svc.ListEndpointBindings(context.Background(), EndpointKindMCP)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bindings) != 1 || bindings[0].AppID != "sequential-thinking" || bindings[0].ConnectionID != "" || bindings[0].EndpointName != "local_mcp" {
+	if len(bindings) != 1 || bindings[0].PluginID != "sequential-thinking" || bindings[0].ConnectionID != "" || bindings[0].EndpointName != "local_mcp" {
 		t.Fatalf("unexpected bindings: %+v", bindings)
 	}
 }
 
 func TestListDefinitionsAppliesMCPOverride(t *testing.T) {
-	homeDir := writeConnectionlessTestApp(t)
+	homeDir := writeConnectionlessTestPlugin(t)
 	writeMCPOverride(t, homeDir, "sequential-thinking", `
 mcp:
   local_mcp:
@@ -565,7 +565,7 @@ mcp:
 }
 
 func TestListDefinitionsRejectsMCPOverrideForNonMCPEndpoint(t *testing.T) {
-	homeDir := writeTestApp(t)
+	homeDir := writeTestPlugin(t)
 	writeMCPOverride(t, homeDir, "github", `
 mcp:
   github_rest:
@@ -579,7 +579,7 @@ mcp:
 }
 
 func TestPutGetDeleteMCPOverride(t *testing.T) {
-	homeDir := writeConnectionlessTestApp(t)
+	homeDir := writeConnectionlessTestPlugin(t)
 	svc := NewService(homeDir, nil)
 
 	_, configured, err := svc.GetMCPOverride(context.Background(), "sequential-thinking", "local_mcp")
@@ -622,13 +622,13 @@ func TestPutGetDeleteMCPOverride(t *testing.T) {
 }
 
 func TestMCPOverrideRejectsSymlinkWithoutTouchingTarget(t *testing.T) {
-	homeDir := writeConnectionlessTestApp(t)
+	homeDir := writeConnectionlessTestPlugin(t)
 	outside := filepath.Join(t.TempDir(), "outside.yaml")
 	original := []byte("outside content")
 	if err := os.WriteFile(outside, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	overridePath := filepath.Join(home.AppsPath(homeDir), "sequential-thinking", MCPOverrideFileName)
+	overridePath := filepath.Join(home.PluginsPath(homeDir), "sequential-thinking", MCPOverrideFileName)
 	if err := os.Symlink(outside, overridePath); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestMCPOverrideRejectsSymlinkWithoutTouchingTarget(t *testing.T) {
 }
 
 func TestReadSkillUsesSkillID(t *testing.T) {
-	homeDir := writeTestAppWithSkill(t)
+	homeDir := writeTestPluginWithSkill(t)
 	svc := NewService(homeDir, nil)
 
 	detail, err := svc.ReadSkill(context.Background(), "github", "github-issues")
@@ -670,14 +670,14 @@ func TestReadSkillUsesSkillID(t *testing.T) {
 	}
 }
 
-func writeTestApp(t *testing.T) string {
+func writeTestPlugin(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
-	appDir := filepath.Join(home.AppsPath(homeDir), "github")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home.PluginsPath(homeDir), "github")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: github
 name: GitHub
 connection:
@@ -700,14 +700,14 @@ endpoints:
 	return homeDir
 }
 
-func writeConnectionlessTestApp(t *testing.T) string {
+func writeConnectionlessTestPlugin(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
-	appDir := filepath.Join(home.AppsPath(homeDir), "sequential-thinking")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home.PluginsPath(homeDir), "sequential-thinking")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: sequential-thinking
 name: Sequential Thinking
 auth:
@@ -732,9 +732,9 @@ endpoints:
 	return homeDir
 }
 
-func writeMCPOverride(t *testing.T, homeDir, appID, content string) {
+func writeMCPOverride(t *testing.T, homeDir, pluginID, content string) {
 	t.Helper()
-	dir := filepath.Join(home.AppsPath(homeDir), appID)
+	dir := filepath.Join(home.PluginsPath(homeDir), pluginID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -748,15 +748,15 @@ func stringSlicePtr(values ...string) *[]string {
 	return &out
 }
 
-func writeTestAppWithSkill(t *testing.T) string {
+func writeTestPluginWithSkill(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
-	appDir := filepath.Join(home.AppsPath(homeDir), "github")
-	skillDir := filepath.Join(appDir, "skills", "issues")
+	pluginDir := filepath.Join(home.PluginsPath(homeDir), "github")
+	skillDir := filepath.Join(pluginDir, "skills", "issues")
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: github
 name: GitHub
 endpoints:

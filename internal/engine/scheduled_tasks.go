@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -50,7 +50,7 @@ func (e *Engine) CreateScheduledTask(ctx context.Context, in store.ScheduledTask
 	}
 	t, err = e.store.CreateScheduledTask(ctx, t, session)
 	if err == nil {
-		e.rememberScheduledRuntime(t.SessionID, app.RuntimeIDFromContext(ctx))
+		e.rememberScheduledRuntime(t.SessionID, plugin.RuntimeIDFromContext(ctx))
 	}
 	return t, err
 }
@@ -360,7 +360,7 @@ func (e *Engine) RunScheduledTask(ctx context.Context, id, requestID string) (*S
 	if err != nil {
 		return nil, err
 	}
-	e.rememberScheduledRuntime(t.SessionID, app.RuntimeIDFromContext(ctx))
+	e.rememberScheduledRuntime(t.SessionID, plugin.RuntimeIDFromContext(ctx))
 	if err := e.submitScheduledRun(ctx, r); err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (e *Engine) submitScheduledRun(ctx context.Context, r *store.ScheduledTaskR
 		e.mu.Lock()
 		runtimeID := e.scheduledRuntimeIDs[r.SessionID]
 		e.mu.Unlock()
-		_, err = e.Submit(app.WithRuntimeID(ctx, runtimeID), SubmitInput{SessionID: r.SessionID, ClientMessageID: r.ClientMessageID, Text: r.Prompt})
+		_, err = e.Submit(plugin.WithRuntimeID(ctx, runtimeID), SubmitInput{SessionID: r.SessionID, ClientMessageID: r.ClientMessageID, Text: r.Prompt})
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

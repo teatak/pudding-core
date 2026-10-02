@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v24 are immutable. Development-only
 	// canvas layouts were consolidated into the final v25 release upgrade.
 	releasedFingerprints := map[int]string{
+		27: "17f0afc13c71dec64e556026d99c3f4728a5783edbb0900e2b4e37c15de33df1",
 		26: "6e83d15eb674cfbadd22e77499b0ecacfcbae9b565879301ea82ace00ac4b22d",
 		25: "ba66df667b2b2de48b92bd6cedd2fb23c76d8934fa3ef7fbf0ec06567d4b19bf",
 		// v24 repairs the early v23 layout; the canonical schema is unchanged.
@@ -427,7 +428,7 @@ func TestOpenMigratesVersionEightRemovedBuiltinLoadedAppIDs(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{
 		ID: "sess_removed_apps", Title: "legacy apps", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
+		LoadedPluginIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -453,8 +454,8 @@ func TestOpenMigratesVersionEightRemovedBuiltinLoadedAppIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(session.LoadedAppIDs) != 1 || session.LoadedAppIDs[0] != "browser" {
-		t.Fatalf("loaded App ids after migration = %v", session.LoadedAppIDs)
+	if len(session.LoadedPluginIDs) != 1 || session.LoadedPluginIDs[0] != "browser" {
+		t.Fatalf("loaded App ids after migration = %v", session.LoadedPluginIDs)
 	}
 }
 
@@ -466,7 +467,7 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 	if err := st.CreateSession(context.Background(), &store.Session{
 		ID: "sess_baseline", Title: "baseline", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
+		LoadedPluginIDs: []string{"project-files", "source-control", "code-intelligence", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -502,8 +503,8 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	if session.Title != "baseline" {
 		t.Fatalf("session changed while stamping baseline: %+v", session)
 	}
-	if len(session.LoadedAppIDs) != 1 || session.LoadedAppIDs[0] != "browser" {
-		t.Fatalf("loaded App ids after unversioned migration = %v", session.LoadedAppIDs)
+	if len(session.LoadedPluginIDs) != 1 || session.LoadedPluginIDs[0] != "browser" {
+		t.Fatalf("loaded App ids after unversioned migration = %v", session.LoadedPluginIDs)
 	}
 }
 
@@ -619,7 +620,7 @@ func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	active, err := reopened.ListCanvasItems(context.Background(), "sess_keep")
+	active, err := reopened.ListStudioMounts(context.Background(), "sess_keep")
 	if err != nil {
 		t.Fatal(err)
 	}

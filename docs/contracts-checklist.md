@@ -125,8 +125,8 @@ messages（包括工具结果、已交付的提问回答和中断输出）继续
 | tool | capability | args | result |
 | --- | --- | --- | --- |
 | `builtin_request_user_input` | `chat` | `{title,type:form\|repeat,steps?,repeatSteps?,waitSeconds?}`；waitSeconds 为 0–300 整数，默认 60 | `{ok,requestID,turnID,title,status}`；答案统一由 user message 交付，等待与面板计时独立，详见 [user-input-flow.md](user-input-flow.md) |
-| `builtin_app_load` | `chat` | `{app_id, skill_id?}` | `{ok, appID, skillID, content, newlyLoaded, alreadyLoaded}`;显式加载 App，失败不修改 session |
-| `builtin_app_save` | `code` | `{operation:create|update,app_id,version,files[]}` | 完整文本包经隔离校验后替换已安装 App；失败保留旧版本；不接受凭据 |
+| `builtin_plugin_load` | `chat` | `{plugin_id, skill_id?}` | `{ok, pluginID, skillID, reference, newlyLoaded, alreadyLoaded}`;显式加载插件，失败不修改 session |
+| `builtin_plugin_save` | `code` | `{operation:create|update,plugin_id,version,files[]}` | 完整文本包经隔离校验后替换已安装插件；失败保留旧版本；不接受凭据 |
 | `builtin_command_run` | `code` | `{scope:"project", command:string, cwd?, env?, timeout_ms?, background?, tty?}` | 前台返回 `{ok, command, shell, cwd, exitCode, stdout, stderr, ...}`;`background:true` 返回 `{ok, processID, status, running, command, tty, ...}` |
 | `builtin_command_session` | `code` | `{action:"poll"|"write"|"stop", process_id, offset?, max_bytes?, wait_ms?, data?}` | poll 返回有界输出与 offset;write 返回 `bytesWritten`;stop 返回终态 |
 | `builtin_git_status` | `code` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |

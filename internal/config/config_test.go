@@ -29,7 +29,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		settings[SettingShowCompactSummary] != "true" ||
 		settings[SettingShowReasoning] != "true" ||
 		settings[SettingShowRawToolInfo] != "true" ||
-		settings[SettingShowAppPreviewVersions] != "false" ||
+		settings[SettingShowPluginPreviewVersions] != "false" ||
 		settings[SettingEditorFontFamily] != DefaultEditorFontFamily ||
 		settings[SettingEditorFontSize] != "12" ||
 		settings[SettingEditorLineHeight] != "20" {
@@ -143,22 +143,22 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 }
 
-func TestManagerPersistsAppEnablement(t *testing.T) {
+func TestManagerPersistsPluginEnablement(t *testing.T) {
 	home := t.TempDir()
 	manager := NewManager(home)
 	if err := manager.Prepare(); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := manager.SetAppEnabled(ctx, "browser", false); err != nil {
+	if err := manager.SetPluginEnabled(ctx, "browser", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.SetAppEnabled(ctx, "terminal", true); err != nil {
+	if err := manager.SetPluginEnabled(ctx, "terminal", true); err != nil {
 		t.Fatal(err)
 	}
 
 	reloaded := NewManager(home)
-	enabled, err := reloaded.ListAppEnablement(ctx)
+	enabled, err := reloaded.ListPluginEnablement(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,10 +175,10 @@ func TestManagerPersistsAppEnablement(t *testing.T) {
 	if !strings.Contains(string(data), "browser: false") || !strings.Contains(string(data), "terminal: true") {
 		t.Fatalf("app enablement missing from settings.yaml:\n%s", data)
 	}
-	if err := manager.DeleteAppEnablement(ctx, "browser"); err != nil {
+	if err := manager.DeletePluginEnablement(ctx, "browser"); err != nil {
 		t.Fatal(err)
 	}
-	enabled, err = manager.ListAppEnablement(ctx)
+	enabled, err = manager.ListPluginEnablement(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		SettingShowCompactSummary:          "false",
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
-		SettingShowAppPreviewVersions:      "true",
+		SettingShowPluginPreviewVersions:   "true",
 		SettingEditorFontFamily:            "JetBrains Mono, monospace",
 		SettingEditorFontSize:              "14",
 		SettingEditorLineHeight:            "0",
@@ -220,7 +220,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		settings[SettingShowCompactSummary] != "false" ||
 		settings[SettingShowReasoning] != "false" ||
 		settings[SettingShowRawToolInfo] != "false" ||
-		settings[SettingShowAppPreviewVersions] != "true" ||
+		settings[SettingShowPluginPreviewVersions] != "true" ||
 		settings[SettingEditorFontFamily] != "JetBrains Mono, monospace" ||
 		settings[SettingEditorFontSize] != "14" ||
 		settings[SettingEditorLineHeight] != "0" {
@@ -247,17 +247,17 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloadedSettings[SettingShowAppPreviewVersions] != "true" {
-		t.Fatalf("reloaded preview setting = %q", reloadedSettings[SettingShowAppPreviewVersions])
+	if reloadedSettings[SettingShowPluginPreviewVersions] != "true" {
+		t.Fatalf("reloaded preview setting = %q", reloadedSettings[SettingShowPluginPreviewVersions])
 	}
-	if err := reloaded.SetSettings(ctx, map[string]string{SettingShowAppPreviewVersions: "false"}); err != nil {
+	if err := reloaded.SetSettings(ctx, map[string]string{SettingShowPluginPreviewVersions: "false"}); err != nil {
 		t.Fatal(err)
 	}
 	reloadedSettings, err = reloaded.Settings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloadedSettings[SettingShowAppPreviewVersions] != "false" ||
+	if reloadedSettings[SettingShowPluginPreviewVersions] != "false" ||
 		reloadedSettings[SettingCompactTailInputTurns] != "3" {
 		t.Fatalf("unexpected settings after preview toggle: %+v", reloadedSettings)
 	}
@@ -336,7 +336,7 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		SettingShowCompactSummary:          "false",
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
-		SettingShowAppPreviewVersions:      "true",
+		SettingShowPluginPreviewVersions:   "true",
 		SettingEditorFontFamily:            "Fira Code, monospace",
 		SettingEditorFontSize:              "16",
 		SettingEditorLineHeight:            "24",
@@ -364,7 +364,7 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		reset[SettingShowCompactSummary] != "true" ||
 		reset[SettingShowReasoning] != "true" ||
 		reset[SettingShowRawToolInfo] != "true" ||
-		reset[SettingShowAppPreviewVersions] != "false" ||
+		reset[SettingShowPluginPreviewVersions] != "false" ||
 		reset[SettingEditorFontFamily] != DefaultEditorFontFamily ||
 		reset[SettingEditorFontSize] != "12" ||
 		reset[SettingEditorLineHeight] != "20" {

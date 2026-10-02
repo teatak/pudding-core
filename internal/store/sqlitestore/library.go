@@ -37,8 +37,8 @@ func (s *Store) PutLibraryFavorite(ctx context.Context, actorSessionID string, f
 			return err
 		}
 		var savedID any
-		if f.Kind == "canvas" {
-			if _, err := scanCanvas(tx.QueryRowContext(ctx, `SELECT `+canvasColumns+` FROM canvas_resources WHERE id=? AND deleted=0`, f.SavedItemID)); err != nil {
+		if f.Kind == "studio" {
+			if _, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, f.SavedItemID)); err != nil {
 				return err
 			}
 			savedID = f.SavedItemID

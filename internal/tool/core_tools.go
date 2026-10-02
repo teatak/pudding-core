@@ -33,8 +33,8 @@ var codeCoreTools = map[string]bool{
 }
 
 // CoreDefinitionsForMode returns the fixed, always-available tool surface.
-// Optional tools must belong to an App and are added by the engine only after
-// that App has been loaded for the session.
+// Optional tools must belong to a plugin and are added by the engine only after
+// that plugin has been loaded for the session.
 func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []provider.ToolDef {
 	mode = normalizedMode(mode)
 	byName := make(map[string]provider.ToolDef, len(defs))

@@ -1,4 +1,4 @@
-package canvas
+package widget
 
 import (
 	"errors"
@@ -16,7 +16,7 @@ func TestDraftFilesPersistUntilExplicitCommit(t *testing.T) {
 	}
 	initialHash := d.DraftHash
 	manifest := `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`
-	d, err = WriteDraftFile(home, id, "canvas.json", &manifest, d.DraftHash)
+	d, err = WriteDraftFile(home, id, "widget.json", &manifest, d.DraftHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,11 +31,11 @@ func TestDraftFilesPersistUntilExplicitCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "canvases", id, "draft", "src", "App.tsx")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "studio", id, "draft", "src", "App.tsx")); err != nil {
 		t.Fatalf("working copy is not a real source directory: %v", err)
 	}
 	for _, name := range []string{".DS_Store", "src/.DS_Store"} {
-		if err := os.WriteFile(filepath.Join(home, "canvases", id, "draft", name), []byte("Finder metadata"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(home, "studio", id, "draft", name), []byte("Finder metadata"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

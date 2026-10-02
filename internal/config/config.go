@@ -29,7 +29,7 @@ const (
 	SettingShowCompactSummary          = "show_compact_summary"
 	SettingShowReasoning               = "show_reasoning"
 	SettingShowRawToolInfo             = "show_raw_tool_info"
-	SettingShowAppPreviewVersions      = "show_app_preview_versions"
+	SettingShowPluginPreviewVersions   = "show_plugin_preview_versions"
 	SettingEditorFontFamily            = "editor_font_family"
 	SettingEditorFontSize              = "editor_font_size"
 	SettingEditorLineHeight            = "editor_line_height"
@@ -265,7 +265,7 @@ type settingsYAML struct {
 	Compact compactSettingsYAML `yaml:"compact,omitempty"`
 	Display displaySettingsYAML `yaml:"display,omitempty"`
 	Editor  editorSettingsYAML  `yaml:"editor,omitempty"`
-	Apps    appsSettingsYAML    `yaml:"apps,omitempty"`
+	Plugins pluginsSettingsYAML `yaml:"plugins,omitempty"`
 }
 
 type compactSettingsYAML struct {
@@ -285,26 +285,26 @@ type editorSettingsYAML struct {
 	LineHeight *int   `yaml:"line_height,omitempty"`
 }
 
-type appsSettingsYAML struct {
+type pluginsSettingsYAML struct {
 	ShowPreviewVersions *bool           `yaml:"show_preview_versions,omitempty"`
 	Enabled             map[string]bool `yaml:"enabled,omitempty"`
 }
 
-func (m *Manager) ListAppEnablement(_ context.Context) (map[string]bool, error) {
+func (m *Manager) ListPluginEnablement(_ context.Context) (map[string]bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cfg, err := m.readSettings()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool, len(cfg.Apps.Enabled))
-	for id, enabled := range cfg.Apps.Enabled {
+	out := make(map[string]bool, len(cfg.Plugins.Enabled))
+	for id, enabled := range cfg.Plugins.Enabled {
 		out[id] = enabled
 	}
 	return out, nil
 }
 
-func (m *Manager) SetAppEnabled(_ context.Context, id string, enabled bool) error {
+func (m *Manager) SetPluginEnabled(_ context.Context, id string, enabled bool) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
@@ -315,17 +315,17 @@ func (m *Manager) SetAppEnabled(_ context.Context, id string, enabled bool) erro
 	if err != nil {
 		return err
 	}
-	if cfg.Apps.Enabled == nil {
-		cfg.Apps.Enabled = make(map[string]bool)
+	if cfg.Plugins.Enabled == nil {
+		cfg.Plugins.Enabled = make(map[string]bool)
 	}
-	cfg.Apps.Enabled[id] = enabled
+	cfg.Plugins.Enabled[id] = enabled
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
 	return m.writeSettings(cfg)
 }
 
-func (m *Manager) DeleteAppEnablement(_ context.Context, id string) error {
+func (m *Manager) DeletePluginEnablement(_ context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
@@ -336,10 +336,10 @@ func (m *Manager) DeleteAppEnablement(_ context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := cfg.Apps.Enabled[id]; !ok {
+	if _, ok := cfg.Plugins.Enabled[id]; !ok {
 		return nil
 	}
-	delete(cfg.Apps.Enabled, id)
+	delete(cfg.Plugins.Enabled, id)
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
@@ -357,7 +357,7 @@ func (s settingsYAML) asMap() map[string]string {
 		SettingShowCompactSummary:          formatBoolSetting(s.showCompactSummary()),
 		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
 		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
-		SettingShowAppPreviewVersions:      formatBoolSetting(s.showAppPreviewVersions()),
+		SettingShowPluginPreviewVersions:   formatBoolSetting(s.showPluginPreviewVersions()),
 		SettingEditorFontFamily:            s.editorFontFamily(),
 		SettingEditorFontSize:              strconv.Itoa(s.editorFontSize()),
 		SettingEditorLineHeight:            strconv.Itoa(s.editorLineHeight()),
@@ -396,12 +396,12 @@ func (s *settingsYAML) set(key, raw string) error {
 			return err
 		}
 		s.Display.RawToolInfo = &v
-	case SettingShowAppPreviewVersions:
+	case SettingShowPluginPreviewVersions:
 		v, err := parseBoolSetting(raw)
 		if err != nil {
 			return err
 		}
-		s.Apps.ShowPreviewVersions = &v
+		s.Plugins.ShowPreviewVersions = &v
 	case SettingEditorFontFamily:
 		v := strings.TrimSpace(raw)
 		if v == "" || len(v) > 256 || strings.ContainsAny(v, "\r\n\x00") {
@@ -461,9 +461,9 @@ func (s settingsYAML) showRawToolInfo() bool {
 	return true
 }
 
-func (s settingsYAML) showAppPreviewVersions() bool {
-	if s.Apps.ShowPreviewVersions != nil {
-		return *s.Apps.ShowPreviewVersions
+func (s settingsYAML) showPluginPreviewVersions() bool {
+	if s.Plugins.ShowPreviewVersions != nil {
+		return *s.Plugins.ShowPreviewVersions
 	}
 	return false
 }

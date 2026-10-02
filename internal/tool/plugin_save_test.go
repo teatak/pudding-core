@@ -7,100 +7,100 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 )
 
-func TestBuiltinAppSaveCreatesAndUpdatesValidatedPackage(t *testing.T) {
+func TestBuiltinPluginSaveCreatesAndUpdatesValidatedPackage(t *testing.T) {
 	homeDir := t.TempDir()
-	apps := app.NewService(homeDir, nil)
-	runner := NewBuiltinRunner(WithAppAuthoring(apps))
+	plugins := plugin.NewService(homeDir, nil)
+	runner := NewBuiltinRunner(WithPluginAuthoring(plugins))
 
-	create := callAppSave(t, runner, appSaveRequest{
+	create := callPluginSave(t, runner, pluginSaveRequest{
 		Operation: "create",
-		AppID:     "example-service",
+		PluginID:  "example-service",
 		Version:   "0.1.0",
-		Files: []appSaveRequestFile{
-			{Path: "app.yaml", Content: testAuthoredAppManifest("0.1.0", "Example Service")},
+		Files: []pluginSaveRequestFile{
+			{Path: "plugin.yaml", Content: testAuthoredPluginManifest("0.1.0", "Example Service")},
 			{Path: "skills/example/SKILL.md", Content: "---\nname: example-records\ndescription: Read Example Service records.\n---\n\nUse example_rest.\n"},
 			{Path: "assets/icon.svg", Content: `<svg xmlns="http://www.w3.org/2000/svg"></svg>`},
 		},
 	})
 	if !create.Ok {
-		t.Fatalf("create App: %+v", create)
+		t.Fatalf("create plugin: %+v", create)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(create.Content), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["operation"] != "created" || payload["appID"] != "example-service" || payload["connectionRequired"] != true {
+	if payload["operation"] != "created" || payload["pluginID"] != "example-service" || payload["connectionRequired"] != true {
 		t.Fatalf("unexpected create payload: %+v", payload)
 	}
 
-	conflict := callAppSave(t, runner, appSaveRequest{
+	conflict := callPluginSave(t, runner, pluginSaveRequest{
 		Operation: "create",
-		AppID:     "example-service",
+		PluginID:  "example-service",
 		Version:   "0.1.0",
-		Files:     []appSaveRequestFile{{Path: "app.yaml", Content: testAuthoredAppManifest("0.1.0", "Replacement")}},
+		Files:     []pluginSaveRequestFile{{Path: "plugin.yaml", Content: testAuthoredPluginManifest("0.1.0", "Replacement")}},
 	})
-	if conflict.Ok || !jsonReasonIs(conflict.Content, "app_exists") {
+	if conflict.Ok || !jsonReasonIs(conflict.Content, "plugin_exists") {
 		t.Fatalf("create should refuse replacement: %+v", conflict)
 	}
 
-	update := callAppSave(t, runner, appSaveRequest{
+	update := callPluginSave(t, runner, pluginSaveRequest{
 		Operation: "update",
-		AppID:     "example-service",
+		PluginID:  "example-service",
 		Version:   "0.2.0",
-		Files: []appSaveRequestFile{
-			{Path: "app.yaml", Content: testAuthoredAppManifest("0.2.0", "Example Service Updated")},
+		Files: []pluginSaveRequestFile{
+			{Path: "plugin.yaml", Content: testAuthoredPluginManifest("0.2.0", "Example Service Updated")},
 			{Path: "skills/example/SKILL.md", Content: "---\nname: example-records\ndescription: Read and update Example Service records.\n---\n\nUse example_rest.\n"},
 			{Path: "assets/icon.svg", Content: `<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>`},
 		},
 	})
 	if !update.Ok {
-		t.Fatalf("update App: %+v", update)
+		t.Fatalf("update plugin: %+v", update)
 	}
-	definition, err := findInstalledApp(context.Background(), apps, "example-service")
+	definition, err := findInstalledPlugin(context.Background(), plugins, "example-service")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if definition.Version != "0.2.0" || definition.Name != "Example Service Updated" {
-		t.Fatalf("unexpected updated App: %+v", definition)
+		t.Fatalf("unexpected updated plugin: %+v", definition)
 	}
 }
 
-func TestBuiltinAppSaveInvalidUpdatePreservesInstalledApp(t *testing.T) {
+func TestBuiltinPluginSaveInvalidUpdatePreservesInstalledPlugin(t *testing.T) {
 	homeDir := t.TempDir()
-	apps := app.NewService(homeDir, nil)
-	runner := NewBuiltinRunner(WithAppAuthoring(apps))
-	initial := appSaveRequest{
+	plugins := plugin.NewService(homeDir, nil)
+	runner := NewBuiltinRunner(WithPluginAuthoring(plugins))
+	initial := pluginSaveRequest{
 		Operation: "create",
-		AppID:     "example-service",
+		PluginID:  "example-service",
 		Version:   "0.1.0",
-		Files: []appSaveRequestFile{
-			{Path: "app.yaml", Content: testAuthoredAppManifest("0.1.0", "Original")},
+		Files: []pluginSaveRequestFile{
+			{Path: "plugin.yaml", Content: testAuthoredPluginManifest("0.1.0", "Original")},
 			{Path: "skills/example/SKILL.md", Content: "---\nname: example-records\ndescription: Read Example Service records.\n---\n\nUse example_rest.\n"},
 			{Path: "assets/icon.svg", Content: `<svg xmlns="http://www.w3.org/2000/svg"></svg>`},
 		},
 	}
-	if result := callAppSave(t, runner, initial); !result.Ok {
-		t.Fatalf("create App: %+v", result)
+	if result := callPluginSave(t, runner, initial); !result.Ok {
+		t.Fatalf("create plugin: %+v", result)
 	}
-	manifestPath := filepath.Join(homeDir, "apps", "example-service", "app.yaml")
+	manifestPath := filepath.Join(homeDir, "plugins", "example-service", "plugin.yaml")
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	invalid := callAppSave(t, runner, appSaveRequest{
+	invalid := callPluginSave(t, runner, pluginSaveRequest{
 		Operation: "update",
-		AppID:     "example-service",
+		PluginID:  "example-service",
 		Version:   "0.2.0",
-		Files: []appSaveRequestFile{{
-			Path:    "app.yaml",
-			Content: "id: another-app\nname: Broken\nversion: 0.2.0\n",
+		Files: []pluginSaveRequestFile{{
+			Path:    "plugin.yaml",
+			Content: "id: another-plugin\nname: Broken\nversion: 0.2.0\n",
 		}},
 	})
-	if invalid.Ok || !jsonReasonIs(invalid.Content, "app_save_failed") {
+	if invalid.Ok || !jsonReasonIs(invalid.Content, "plugin_save_failed") {
 		t.Fatalf("invalid update should fail: %+v", invalid)
 	}
 	after, err := os.ReadFile(manifestPath)
@@ -112,16 +112,16 @@ func TestBuiltinAppSaveInvalidUpdatePreservesInstalledApp(t *testing.T) {
 	}
 }
 
-func callAppSave(t *testing.T, runner *BuiltinRunner, request appSaveRequest) Result {
+func callPluginSave(t *testing.T, runner *BuiltinRunner, request pluginSaveRequest) Result {
 	t.Helper()
 	raw, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runner.Call(context.Background(), Call{Name: AppSave, CallID: "app-save", Args: raw})
+	return runner.Call(context.Background(), Call{Name: PluginSave, CallID: "plugin-save", Args: raw})
 }
 
-func testAuthoredAppManifest(version, name string) string {
+func testAuthoredPluginManifest(version, name string) string {
 	return "id: example-service\n" +
 		"name: " + name + "\n" +
 		"version: " + version + "\n" +
@@ -131,8 +131,8 @@ func testAuthoredAppManifest(version, name string) string {
 		"skills:\n  - skills/example/SKILL.md\n"
 }
 
-func findInstalledApp(ctx context.Context, apps *app.Service, id string) (*app.Definition, error) {
-	definitions, err := apps.ListDefinitions(ctx)
+func findInstalledPlugin(ctx context.Context, plugins *plugin.Service, id string) (*plugin.Definition, error) {
+	definitions, err := plugins.ListDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func findInstalledApp(ctx context.Context, apps *app.Service, id string) (*app.D
 			return definition, nil
 		}
 	}
-	return nil, app.ErrNotFound
+	return nil, plugin.ErrNotFound
 }
 
 func jsonReasonIs(content, reason string) bool {

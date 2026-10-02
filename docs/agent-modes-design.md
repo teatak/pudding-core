@@ -24,8 +24,8 @@ chat < work < code
 
 | 模式 | 定位 | 能力 |
 | --- | --- | --- |
-| Chat | 查询与观察 | 对话、历史、附件、Skills、Web Search/Fetch、Weather、Image Capture、Canvas/UI |
-| Work | 操作外部系统 | Chat + 完整 Browser、Apps/MCP、REST/GraphQL |
+| Chat | 查询与观察 | 对话、历史、附件、Skills、Web Search/Fetch、Weather、Image Capture、UI 工具 |
+| Work | 操作外部系统 | Chat + 完整 Browser、插件/MCP、REST/GraphQL |
 | Code | 操作本地项目 | Work + Project、File、Command、Git、LSP、Patch、Skill 创作与校验 |
 
 Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
@@ -34,7 +34,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - back / forward / reload / close
 - click / type / scroll
 
-`DesktopScreenshot` 与 `CameraCapture` 跟随 Image Capture App 属于 Chat;
+`DesktopScreenshot` 与 `CameraCapture` 跟随 Image Capture 插件属于 Chat;
 `BrowserScreenshot` 跟随 Browser 整组属于 Work。
 
 ## 3. 工具归属
@@ -47,12 +47,12 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_web_fetch`
 - `builtin_history_search`
 - `builtin_history_get_message`
-- `builtin_app_load`
+- `builtin_plugin_load`
 - `builtin_skill_read`
 - `builtin_media_read`
 - `builtin_weather_get`
-- 加载 Image Capture App 后的 `builtin_desktop_screenshot` 与 `builtin_camera_capture`
-- 当前 Runtime 提供且已通过 `builtin_app_load` 加载的 UI App 工具
+- 加载 Image Capture 插件后的 `builtin_desktop_screenshot` 与 `builtin_camera_capture`
+- 当前 Runtime 提供且已通过 `builtin_plugin_load` 加载的 UI 插件工具
 
 ### 3.2 Work
 
@@ -61,7 +61,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_graphql_introspect`
 - `builtin_graphql_search`
 - 全部 `builtin_browser_*`
-- 已安装 App 的 MCP 工具
+- 已安装插件的 MCP 工具
 
 ### 3.3 Code
 
@@ -72,7 +72,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_git_*`
 - `builtin_patch_*`
 - `builtin_skill_validate`
-- `builtin_app_save`
+- `builtin_plugin_save`
 
 工具可见性按最低模式累积。Code 因此继承 Work 与 Chat;工具名称收敛是后续独立工作。
 
@@ -115,7 +115,7 @@ Composer 只显示当前 session 持久模式的弱提示图标,不提供点击�
 - Chat prompt 说明查询、观察能力。
 - Work prompt 增加 Browser 与外部系统操作规则。
 - Code prompt 增加 Project 本地开发规则。
-- Installed Apps 索引只在 Work / Code prompt 中出现;Chat 不暴露不可调用的 App 工具。
+- Installed 插件索引只在 Work / Code prompt 中出现;Chat 不暴露不可调用的插件工具。
 
 ## 7. 数据升级边界
 
@@ -139,7 +139,7 @@ FTS 初始化只管理派生索引，不承担 canonical schema 升级。
 ## 8. 验收标准
 
 - Store、API 与前端只接受 `chat | work | code`。
-- Chat 中没有 Browser、Work 级 Apps/MCP 或 REST/GraphQL；可以按需加载 Chat 级 Image Capture 与 Canvas App。
+- Chat 中没有 Browser、Work 级插件/MCP 或 REST/GraphQL；可以按需加载 Chat 级 Image Capture 插件；小组件创作需要 Code。
 - Work 中完整 Browser 工具组可用。
 - Code 中所有 Project 工具可用,且必须显式携带 Project scope/sessionID。
 - Project 创建会话默认 Code,普通会话默认 Chat。

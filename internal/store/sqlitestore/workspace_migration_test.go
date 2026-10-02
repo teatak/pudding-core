@@ -133,7 +133,7 @@ func TestWorkspaceMigrationFailureRollsBackWholeUpgrade(t *testing.T) {
 	}
 	defer st.Close()
 	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
-	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM canvas_mounts WHERE id='closed-item'", "1")
+	assertWorkspaceMigrationValue(t, st.db, "SELECT COUNT(*) FROM studio_mounts WHERE id='closed-item'", "1")
 }
 
 func TestWorkspaceMigrationRejectsUnregisteredVersionsWithoutChanges(t *testing.T) {

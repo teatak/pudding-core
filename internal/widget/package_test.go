@@ -1,4 +1,4 @@
-package canvas
+package widget
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 func fixturePackage(t *testing.T) Package {
 	t.Helper()
 	return Package{Files: map[string]string{
-		"canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"main":{"appID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"main","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":64}},"required":["id"],"additionalProperties":false},"request":{"method":"GET","path":"/items/{id}","pathParams":{"id":{"$input":"/id"}}}}}}`,
+		"widget.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"main":{"pluginID":"fixture","endpoint":"rest"}},"operations":{"items":{"source":"main","kind":"rest","effectHint":"read","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":64}},"required":["id"],"additionalProperties":false},"request":{"method":"GET","path":"/items/{id}","pathParams":{"id":{"$input":"/id"}}}}}}`,
 		"src/App.tsx": "export default function App() { return <p>Items</p>; }",
 	}}
 }
@@ -84,12 +84,12 @@ func TestPackageRejectsUnsafeAndUnknownDefinitions(t *testing.T) {
 	} {
 		p := fixturePackage(t)
 		var m map[string]any
-		if err := json.Unmarshal([]byte(p.Files["canvas.json"]), &m); err != nil {
+		if err := json.Unmarshal([]byte(p.Files["widget.json"]), &m); err != nil {
 			t.Fatal(err)
 		}
 		change(m)
 		b, _ := json.Marshal(m)
-		p.Files["canvas.json"] = string(b)
+		p.Files["widget.json"] = string(b)
 		if _, _, err := p.Validate(); err == nil {
 			t.Fatal("accepted invalid manifest")
 		}

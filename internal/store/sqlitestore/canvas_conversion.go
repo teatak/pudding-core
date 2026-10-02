@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/canvaslegacy"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -42,7 +41,7 @@ func convertLegacyCanvases(tx *sql.Tx, home string) error {
 		if err != nil {
 			return fmt.Errorf("convert canvas %s: %w", r.id, err)
 		}
-		hash, err := canvas.WritePackage(home, r.id, p)
+		hash, err := canvaslegacy.WritePackage(home, r.id, p)
 		if err != nil {
 			return err
 		}

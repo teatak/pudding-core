@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
@@ -36,7 +36,7 @@ func backgroundBatchClient(actions int) *backgroundEngineClient {
 	return &backgroundEngineClient{step: func(_ context.Context, req provider.Request, step int) (<-chan provider.Chunk, error) {
 		switch step {
 		case 1:
-			return smokeToolStream("load", tool.AppLoad, `{"app_id":"computer-use"}`), nil
+			return smokeToolStream("load", tool.PluginLoad, `{"plugin_id":"computer-use"}`), nil
 		case 2:
 			if !smokeHasToolDef(req.Tools, tool.ComputerAct) {
 				return nil, fmt.Errorf("Computer Use not loaded")
@@ -88,7 +88,7 @@ type backgroundEngineHarness struct {
 	store     *storetest.Store
 	hub       *event.Hub
 	runner    *tool.BuiltinRunner
-	apps      *app.Service
+	plugins   *plugin.Service
 	entry     <-chan string
 	terminal  map[string]chan event.Event
 	mu        sync.Mutex
@@ -100,10 +100,10 @@ type backgroundEngineHarness struct {
 func newBackgroundEngineHarness(t *testing.T, service computer.Service, clients map[string]provider.Client) *backgroundEngineHarness {
 	t.Helper()
 	controller := &backgroundEngineController{Controller: computer.NewManager(service), entered: make(chan string, 16)}
-	h := &backgroundEngineHarness{store: storetest.New(t), hub: event.NewHub(), apps: app.NewService(t.TempDir(), nil),
+	h := &backgroundEngineHarness{store: storetest.New(t), hub: event.NewHub(), plugins: plugin.NewService(t.TempDir(), nil),
 		runner: tool.NewBuiltinRunner(tool.WithComputer(controller), tool.WithHomeDir(t.TempDir())),
 		entry:  controller.entered, terminal: map[string]chan event.Event{}, approvals: map[string]int{}}
-	h.engine = New(h.store, h.hub, mapResolver(clients), h.store, WithTools(h.runner), WithApps(h.apps))
+	h.engine = New(h.store, h.hub, mapResolver(clients), h.store, WithTools(h.runner), WithPlugins(h.plugins))
 	var subscribers sync.WaitGroup
 	t.Cleanup(subscribers.Wait)
 	for sessionID := range clients {
@@ -273,7 +273,7 @@ func TestBackgroundEngineCancelPreservesCompletedPrefix(t *testing.T) {
 				}
 				return nil, fmt.Errorf("canonical partial result missing after Engine reconstruction")
 			}}
-			restarted := New(h.store, h.hub, mapResolver{"a": next}, h.store, WithTools(h.runner), WithApps(h.apps))
+			restarted := New(h.store, h.hub, mapResolver{"a": next}, h.store, WithTools(h.runner), WithPlugins(h.plugins))
 			defer func() {
 				_ = restarted.Cancel("a")
 				restarted.Stop()

@@ -114,7 +114,7 @@ func Images(home string) func(string) (string, error) {
 			return "", fmt.Errorf("unsupported image scheme %q", u.Scheme)
 		}
 		defer reader.Close()
-		limit := contracts.Canvas().MaxFileBytes*3/4 - 1024
+		limit := contracts.Widget().MaxFileBytes*3/4 - 1024
 		data, err := io.ReadAll(io.LimitReader(reader, int64(limit+1)))
 		if err != nil {
 			return "", err

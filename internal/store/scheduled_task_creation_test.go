@@ -43,7 +43,7 @@ func TestScheduledTaskNewSessionAtomicReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, err := st.GetSession(ctx, task.SessionID)
-	if err != nil || session.Title != in.Name || session.ActiveMode != store.ModeChat || session.ModeLease != store.ModeLeaseNone || session.ProjectID != "" || len(session.LoadedAppIDs) != 0 {
+	if err != nil || session.Title != in.Name || session.ActiveMode != store.ModeChat || session.ModeLease != store.ModeLeaseNone || session.ProjectID != "" || len(session.LoadedPluginIDs) != 0 {
 		t.Fatalf("new session defaults: %+v %v", session, err)
 	}
 	st.Close()

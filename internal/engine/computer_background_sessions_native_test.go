@@ -35,7 +35,7 @@ func calendarBatchClient(window uint32, actions func() []computer.ActionInput) *
 	return &backgroundEngineClient{step: func(_ context.Context, req provider.Request, step int) (<-chan provider.Chunk, error) {
 		switch step {
 		case 1:
-			return smokeToolStream("load", tool.AppLoad, `{"app_id":"computer-use"}`), nil
+			return smokeToolStream("load", tool.PluginLoad, `{"plugin_id":"computer-use"}`), nil
 		case 2:
 			if !smokeHasToolDef(req.Tools, tool.ComputerAct) {
 				return nil, fmt.Errorf("Computer Use was not loaded")

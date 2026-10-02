@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -1236,16 +1236,16 @@ func TestComputerToolApprovalHasSingleResolutionWinner(t *testing.T) {
 	}
 }
 
-func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
+func TestExplicitPluginLoadLoadsToolsForSession(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
-	client := &appLoadClient{}
+	client := &pluginLoadClient{}
 	runner := &recordingToolRunner{
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"app-load": client}, ms, WithTools(runner), WithApps(apps))
+	plugins := &mutablePluginSource{defs: plugin.BuiltinDefinitions()}
+	eng := New(ms, hub, mapResolver{"app-load": client}, ms, WithTools(runner), WithPlugins(plugins))
 	ctx := context.Background()
 	sid := "sess_app_load"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -1270,7 +1270,7 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("provider requests = %d, want 3", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) || !hasToolDef(client.requests[0].Tools, tool.AppLoad) {
+	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) || !hasToolDef(client.requests[0].Tools, tool.PluginLoad) {
 		t.Fatalf("browser must start unloaded: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.BrowserOpen) {
@@ -1283,8 +1283,8 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(sess.LoadedAppIDs, []string{app.BuiltinBrowserID}) {
-		t.Fatalf("loaded app ids = %+v", sess.LoadedAppIDs)
+	if !sameStrings(sess.LoadedPluginIDs, []string{plugin.BuiltinBrowserID}) {
+		t.Fatalf("loaded app ids = %+v", sess.LoadedPluginIDs)
 	}
 
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_app_load_2", Text: "继续"}); err != nil {
@@ -1301,13 +1301,13 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if hasToolDef(chatDefs, tool.BrowserOpen) {
 		t.Fatal("mode downgrade must hide loaded browser tools")
 	}
-	apps.mu.Lock()
-	for _, definition := range apps.defs {
-		if definition.ID == app.BuiltinBrowserID {
+	plugins.mu.Lock()
+	for _, definition := range plugins.defs {
+		if definition.ID == plugin.BuiltinBrowserID {
 			definition.Enabled = false
 		}
 	}
-	apps.mu.Unlock()
+	plugins.mu.Unlock()
 	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
@@ -1330,43 +1330,43 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	foundDisabled := false
 	for _, message := range messages {
 		for _, part := range message.Parts {
-			if part.Type == store.ContentPartToolResult && part.Name == tool.BrowserOpen && !part.Ok && strings.Contains(part.Content, `"reason":"app_disabled"`) {
+			if part.Type == store.ContentPartToolResult && part.Name == tool.BrowserOpen && !part.Ok && strings.Contains(part.Content, `"reason":"plugin_disabled"`) {
 				foundDisabled = true
 			}
 		}
 	}
 	if !foundDisabled {
-		t.Fatal("disabled app call did not return app_disabled")
+		t.Fatal("disabled app call did not return plugin_disabled")
 	}
 	sess, err = ms.GetSession(ctx, sid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(sess.LoadedAppIDs, []string{app.BuiltinBrowserID}) {
-		t.Fatalf("mode or enablement change cleared loaded app ids: %+v", sess.LoadedAppIDs)
+	if !sameStrings(sess.LoadedPluginIDs, []string{plugin.BuiltinBrowserID}) {
+		t.Fatalf("mode or enablement change cleared loaded app ids: %+v", sess.LoadedPluginIDs)
 	}
 }
 
-func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
+func TestPluginLoadIsExplicitAndAtomic(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
-	apps := app.NewService(t.TempDir(), nil)
-	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithApps(apps))
+	plugins := plugin.NewService(t.TempDir(), nil)
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithPlugins(plugins))
 	sid := "sess_app_load_atomic"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, removedID := range []string{"project-files", "source-control"} {
-		legacyCall := tool.Call{CallID: "load_" + removedID, Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"` + removedID + `"}`)}
-		result, changed := eng.loadApp(ctx, sid, legacyCall, store.ModeCode)
-		if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_unavailable"`) {
-			t.Fatalf("removed %s App did not return app_unavailable: %+v", removedID, result)
+		legacyCall := tool.Call{CallID: "load_" + removedID, Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"` + removedID + `"}`)}
+		result, changed := eng.loadPlugin(ctx, sid, legacyCall, store.ModeCode)
+		if result.Ok || changed || !strings.Contains(result.Content, `"reason":"plugin_unavailable"`) {
+			t.Fatalf("removed %s App did not return plugin_unavailable: %+v", removedID, result)
 		}
 	}
 
-	call := tool.Call{CallID: "load_browser", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"browser"}`)}
-	result, changed := eng.loadApp(ctx, sid, call, store.ModeChat)
+	call := tool.Call{CallID: "load_browser", Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"browser"}`)}
+	result, changed := eng.loadPlugin(ctx, sid, call, store.ModeChat)
 	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
 		t.Fatalf("Chat loaded Browser: %+v", result)
 	}
@@ -1374,53 +1374,53 @@ func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.LoadedAppIDs) != 0 {
-		t.Fatalf("failed load mutated session: %+v", sess.LoadedAppIDs)
+	if len(sess.LoadedPluginIDs) != 0 {
+		t.Fatalf("failed load mutated session: %+v", sess.LoadedPluginIDs)
 	}
 
-	call.Args = json.RawMessage(`{"app_id":"browser","skill_id":"missing"}`)
-	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
-	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_skill_not_found"`) {
+	call.Args = json.RawMessage(`{"plugin_id":"browser","skill_id":"missing"}`)
+	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
+	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"plugin_skill_not_found"`) {
 		t.Fatalf("missing App skill loaded Browser: %+v", result)
 	}
 	sess, _ = ms.GetSession(ctx, sid)
-	if len(sess.LoadedAppIDs) != 0 {
-		t.Fatalf("skill failure mutated session: %+v", sess.LoadedAppIDs)
+	if len(sess.LoadedPluginIDs) != 0 {
+		t.Fatalf("skill failure mutated session: %+v", sess.LoadedPluginIDs)
 	}
 
-	call.Args = json.RawMessage(`{"app_id":"browser"}`)
-	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
+	call.Args = json.RawMessage(`{"plugin_id":"browser"}`)
+	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
 	if !result.Ok || !changed || !strings.Contains(result.Content, `"newlyLoaded":true`) {
 		t.Fatalf("explicit App load failed: %+v", result)
 	}
-	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
+	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
 	if !result.Ok || changed || !strings.Contains(result.Content, `"alreadyLoaded":true`) {
 		t.Fatalf("repeated App load should be idempotent: %+v", result)
 	}
 }
 
-func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
+func TestPluginLoadAllowsToolOnlyPluginWithoutSkill(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
-	apps := &mutableAppSource{defs: []*app.Definition{{
+	plugins := &mutablePluginSource{defs: []*plugin.Definition{{
 		ID:           "tool-only",
 		Name:         "Tool Only",
 		Enabled:      true,
 		RequiredMode: string(store.ModeWork),
-		Endpoints: map[string]app.Endpoint{
-			"tool_only_rest": {Kind: app.EndpointKindREST, URL: "https://example.test"},
+		Endpoints: map[string]plugin.Endpoint{
+			"tool_only_rest": {Kind: plugin.EndpointKindREST, URL: "https://example.test"},
 		},
 	}}}
-	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithApps(apps))
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithPlugins(plugins))
 	sid := "sess_tool_only_app"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
 		t.Fatal(err)
 	}
 
-	result, changed := eng.loadApp(ctx, sid, tool.Call{
+	result, changed := eng.loadPlugin(ctx, sid, tool.Call{
 		CallID: "load_tool_only",
-		Name:   tool.AppLoad,
-		Args:   json.RawMessage(`{"app_id":"tool-only"}`),
+		Name:   tool.PluginLoad,
+		Args:   json.RawMessage(`{"plugin_id":"tool-only"}`),
 	}, store.ModeWork)
 	if !result.Ok || !changed || !strings.Contains(result.Content, `"instructionsLoaded":false`) {
 		t.Fatalf("tool-only App load failed: %+v", result)
@@ -1429,8 +1429,8 @@ func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.LoadedAppIDs) != 1 || sess.LoadedAppIDs[0] != "tool-only" {
-		t.Fatalf("tool-only App was not persisted as loaded: %+v", sess.LoadedAppIDs)
+	if len(sess.LoadedPluginIDs) != 1 || sess.LoadedPluginIDs[0] != "tool-only" {
+		t.Fatalf("tool-only App was not persisted as loaded: %+v", sess.LoadedPluginIDs)
 	}
 }
 
@@ -1438,8 +1438,8 @@ func TestProjectAndCodeToolsAreCodeCore(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
-	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithApps(apps))
+	plugins := &mutablePluginSource{defs: plugin.BuiltinDefinitions()}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithPlugins(plugins))
 	ctx := context.Background()
 	sid := "sess_command_core"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -1467,34 +1467,34 @@ func TestProjectAndCodeToolsAreCodeCore(t *testing.T) {
 			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	if hasToolDef(codeDefs, tool.SkillValidate) || hasToolDef(codeDefs, tool.AppSave) {
+	if hasToolDef(codeDefs, tool.SkillValidate) || hasToolDef(codeDefs, tool.PluginSave) {
 		t.Fatal("unloaded authoring App exposed its tools")
 	}
-	loadedAuthoringApps := []string{app.BuiltinSkillAuthoringID, app.BuiltinAppAuthoringID}
-	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loadedAuthoringApps}); err != nil {
+	loadedAuthoringPlugins := []string{plugin.BuiltinSkillAuthoringID, plugin.BuiltinPluginAuthoringID}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedPluginIDs: &loadedAuthoringPlugins}); err != nil {
 		t.Fatal(err)
 	}
 	codeDefs, err = eng.toolDefinitions(ctx, sid, store.ModeCode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasToolDef(codeDefs, tool.SkillValidate) || !hasToolDef(codeDefs, tool.AppSave) {
+	if !hasToolDef(codeDefs, tool.SkillValidate) || !hasToolDef(codeDefs, tool.PluginSave) {
 		t.Fatalf("loaded authoring Apps missing tools: %+v", codeDefs)
 	}
 	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasToolDef(workDefs, tool.CommandRun) || hasToolDef(workDefs, tool.CommandSession) || hasToolDef(workDefs, tool.SkillValidate) || hasToolDef(workDefs, tool.AppSave) {
+	if hasToolDef(workDefs, tool.CommandRun) || hasToolDef(workDefs, tool.CommandSession) || hasToolDef(workDefs, tool.SkillValidate) || hasToolDef(workDefs, tool.PluginSave) {
 		t.Fatal("mode downgrade exposed Code tools")
 	}
 }
 
-func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
+func TestOptionalBuiltinPluginToolsRequireSessionLoadAndMode(t *testing.T) {
 	ms := storetest.New(t)
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms,
-		WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+		WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_optional_builtin_apps"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
@@ -1516,8 +1516,8 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 		}
 	}
 
-	loaded := []string{app.BuiltinCaptureID}
-	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+	loaded := []string{plugin.BuiltinCaptureID}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
 	codeDefs, err = eng.toolDefinitions(ctx, sid, store.ModeCode)
@@ -1546,23 +1546,23 @@ func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
 	}
 }
 
-func TestRuntimeAppLoadExposesToolOnNextProviderStep(t *testing.T) {
+func TestRuntimePluginLoadExposesToolOnNextProviderStep(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
-	runtimeApp := &app.Definition{
-		ID: "canvas", Name: "Canvas", Enabled: true, RequiredMode: "chat", Runtime: "desktop",
+	runtimePlugin := &plugin.Definition{
+		ID: "widget-authoring", Name: "Widget Authoring", Enabled: true, RequiredMode: "chat", Runtime: "desktop",
 	}
-	apps := &mutableAppSource{defs: []*app.Definition{runtimeApp}}
-	client := &runtimeAppSnapshotClient{apps: apps}
+	plugins := &mutablePluginSource{defs: []*plugin.Definition{runtimePlugin}}
+	client := &runtimePluginSnapshotClient{plugins: plugins}
 	runner := &recordingToolRunner{
 		defs: []provider.ToolDef{{
-			Name: "canvas_table", Capability: store.ModeChat, AppID: "canvas",
+			Name: "canvas_table", Capability: store.ModeChat, PluginID: "widget-authoring",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		}},
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
 	eng := New(ms, event.NewHub(), mapResolver{"runtime-app-snapshot": client}, ms,
-		WithTools(runner), WithApps(apps))
+		WithTools(runner), WithPlugins(plugins))
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: "sess_runtime_app_snapshot", Title: "runtime App snapshot",
 		Provider: "runtime-app-snapshot", Model: "runtime-app-model",
@@ -1598,25 +1598,25 @@ func TestRuntimeAppLoadExposesToolOnNextProviderStep(t *testing.T) {
 	}
 }
 
-func TestInstalledAppToolsAreExposedOnlyWhenLoaded(t *testing.T) {
+func TestInstalledPluginToolsAreExposedOnlyWhenLoaded(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	defs := append(tool.BuiltinDefinitions(), provider.ToolDef{
-		Name: "app_mcp__search__hash", Description: "Search GitHub", Capability: store.ModeWork, AppID: "github",
+		Name: "plugin_mcp__search__hash", Description: "Search GitHub", Capability: store.ModeWork, PluginID: "github",
 	})
 	runner := &recordingToolRunner{defs: defs}
-	apps := &mutableAppSource{defs: []*app.Definition{{
-		ID: "github", Name: "GitHub", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", DefaultSkillID: "github",
-		Endpoints: map[string]app.Endpoint{
-			"github_rest": {Kind: app.EndpointKindREST},
+	plugins := &mutablePluginSource{defs: []*plugin.Definition{{
+		ID: "github", Name: "GitHub", Source: plugin.SourceInstalled, Enabled: true, RequiredMode: "work", DefaultSkillID: "github",
+		Endpoints: map[string]plugin.Endpoint{
+			"github_rest": {Kind: plugin.EndpointKindREST},
 		},
 	}}}
-	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithApps(apps))
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithPlugins(plugins))
 	ctx := context.Background()
 	sid := "sess_installed_app"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
-		LoadedAppIDs: []string{"github"},
+		LoadedPluginIDs: []string{"github"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1625,43 +1625,43 @@ func TestInstalledAppToolsAreExposedOnlyWhenLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasToolDef(loadedDefs, tool.RESTRequest) || hasToolDef(loadedDefs, tool.GraphQLRequest) || !hasToolDef(loadedDefs, "app_mcp__search__hash") {
+	if !hasToolDef(loadedDefs, tool.RESTRequest) || hasToolDef(loadedDefs, tool.GraphQLRequest) || !hasToolDef(loadedDefs, "plugin_mcp__search__hash") {
 		t.Fatalf("installed app tools not routed directly: %+v", loadedDefs)
 	}
-	if len(runner.definitionAppIDs) == 0 || !sameStrings(runner.definitionAppIDs[len(runner.definitionAppIDs)-1], []string{"github"}) {
-		t.Fatalf("scoped definitions received app ids: %+v", runner.definitionAppIDs)
+	if len(runner.definitionPluginIDs) == 0 || !sameStrings(runner.definitionPluginIDs[len(runner.definitionPluginIDs)-1], []string{"github"}) {
+		t.Fatalf("scoped definitions received app ids: %+v", runner.definitionPluginIDs)
 	}
 	loaded := []string{}
-	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
 	unloadedDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasToolDef(unloadedDefs, tool.RESTRequest) || hasToolDef(unloadedDefs, "app_mcp__search__hash") {
+	if hasToolDef(unloadedDefs, tool.RESTRequest) || hasToolDef(unloadedDefs, "plugin_mcp__search__hash") {
 		t.Fatalf("unloaded installed app exposed tools: %+v", unloadedDefs)
 	}
 }
 
-func TestLoadedAppCannotCallAnotherAppsEndpoint(t *testing.T) {
+func TestLoadedPluginCannotCallAnotherPluginsEndpoint(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
-	client := &crossAppAPIClient{}
+	client := &crossPluginAPIClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
-	apps := &mutableAppSource{
-		defs: []*app.Definition{
-			{ID: "github", Name: "GitHub", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]app.Endpoint{"github_rest": {Kind: app.EndpointKindREST}}},
-			{ID: "jira", Name: "Jira", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]app.Endpoint{"jira_rest": {Kind: app.EndpointKindREST}}},
+	plugins := &mutablePluginSource{
+		defs: []*plugin.Definition{
+			{ID: "github", Name: "GitHub", Source: plugin.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]plugin.Endpoint{"github_rest": {Kind: plugin.EndpointKindREST}}},
+			{ID: "jira", Name: "Jira", Source: plugin.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]plugin.Endpoint{"jira_rest": {Kind: plugin.EndpointKindREST}}},
 		},
-		endpointApps: map[string]string{"github_rest": "github", "jira_rest": "jira"},
+		endpointPlugins: map[string]string{"github_rest": "github", "jira_rest": "jira"},
 	}
-	eng := New(ms, hub, mapResolver{"cross-app-api": client}, ms, WithTools(runner), WithApps(apps))
+	eng := New(ms, hub, mapResolver{"cross-app-api": client}, ms, WithTools(runner), WithPlugins(plugins))
 	ctx := context.Background()
 	sid := "sess_cross_app_api"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "cross app", Provider: "cross-app-api", Model: "app-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
-		LoadedAppIDs: []string{"github"},
+		LoadedPluginIDs: []string{"github"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1689,14 +1689,14 @@ func TestLoadedAppCannotCallAnotherAppsEndpoint(t *testing.T) {
 			if part.Type == store.ContentPartToolResult {
 				toolResults = append(toolResults, part.Name+":"+part.Content)
 			}
-			if part.Type == store.ContentPartToolResult && part.Name == tool.RESTRequest && !part.Ok && strings.Contains(part.Content, `"appID":"jira"`) && strings.Contains(part.Content, `"reason":"app_not_loaded"`) {
+			if part.Type == store.ContentPartToolResult && part.Name == tool.RESTRequest && !part.Ok && strings.Contains(part.Content, `"pluginID":"jira"`) && strings.Contains(part.Content, `"reason":"plugin_not_loaded"`) {
 				foundBlocked = true
 			}
 		}
 	}
 	if !foundBlocked {
 		events, _ := ms.EventsAfter(ctx, sid, 0, 0)
-		t.Fatalf("cross-App API call was not blocked as app_not_loaded: results=%+v requests=%d events=%+v", toolResults, len(client.requests), events)
+		t.Fatalf("cross-App API call was not blocked as plugin_not_loaded: results=%+v requests=%d events=%+v", toolResults, len(client.requests), events)
 	}
 }
 
@@ -1800,10 +1800,10 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	hub := event.NewHub()
 	client := &browserToolLoopClient{}
 	browserSvc := &engineTestBrowser{}
-	apps := app.NewService(t.TempDir(), nil)
+	plugins := plugin.NewService(t.TempDir(), nil)
 	eng := New(ms, hub, mapResolver{"capture": client}, ms,
 		WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc))),
-		WithApps(apps),
+		WithPlugins(plugins),
 	)
 	ctx := context.Background()
 	sid := "sess_browser_tool"
@@ -1829,7 +1829,7 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("want 3 provider calls, got %d", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.AppLoad) {
+	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.PluginLoad) {
 		t.Fatalf("browser app must start unloaded: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.BrowserObserve) {
@@ -1869,7 +1869,7 @@ func TestSubmitRoutesMediaReadImageToNextProviderRequest(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &mediaReadImageClient{}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -1966,7 +1966,7 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 		ms,
 		WithAttachmentHome(home),
 		WithTools(runner),
-		WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}),
+		WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}),
 	)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -1976,8 +1976,8 @@ func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *tes
 		Model:      "vision-model",
 		ActiveMode: store.ModeWork,
 		ModeLease:  store.ModeLeaseSession,
-		LoadedAppIDs: []string{
-			app.BuiltinCaptureID,
+		LoadedPluginIDs: []string{
+			plugin.BuiltinCaptureID,
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -2056,7 +2056,7 @@ func TestSubmitDoesNotRouteMediaReadImageWhenCapabilityUnknown(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	client := &mediaReadImageClient{}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool_unknown"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -2628,7 +2628,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	hub := event.NewHub()
 	client := &capabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_capability"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "cap", Provider: "cap", Model: "cap-model"}); err != nil {
@@ -2684,7 +2684,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.PluginLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("code tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
@@ -2702,7 +2702,7 @@ func TestProjectApprovalSessionScopeDoesNotPersistProject(t *testing.T) {
 	dir := t.TempDir()
 	client := &projectCapabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
@@ -2775,7 +2775,7 @@ func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project_turn_dirs"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
@@ -2854,7 +2854,7 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project_file_write_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -2936,7 +2936,7 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &patchApprovalClient{}
-	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	sid := "sess_patch_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "patch", Provider: "patch", Model: "patch-model",
@@ -3015,7 +3015,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 		t.Fatal(err)
 	}
 	client := &gitCommitApprovalClient{}
-	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	sid := "sess_git_commit"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "git", Provider: "git", Model: "git-model",
@@ -3572,9 +3572,9 @@ func TestRefineToolRiskKeepsPatchDeletionProtected(t *testing.T) {
 	if destructive.Class != tool.RiskClassDestructive || destructive.LowRisk {
 		t.Fatalf("patch deletion should require approval: %+v", destructive)
 	}
-	canvasDeletion := refineToolRisk(tool.FilePatch, tool.ToolRisk{Scope: "canvas", Class: tool.RiskClassWrite, LowRisk: true}, map[string]any{"destructive": true})
-	if canvasDeletion.Class != tool.RiskClassDestructive || canvasDeletion.LowRisk || canvasDeletion.Summary != "Delete one canvas draft source file." {
-		t.Fatalf("canvas deletion should be described and protected: %+v", canvasDeletion)
+	studioItemDeletion := refineToolRisk(tool.FilePatch, tool.ToolRisk{Scope: "widget", Class: tool.RiskClassWrite, LowRisk: true}, map[string]any{"destructive": true})
+	if studioItemDeletion.Class != tool.RiskClassDestructive || studioItemDeletion.LowRisk || studioItemDeletion.Summary != "Delete one widget draft source file." {
+		t.Fatalf("widget deletion should be described and protected: %+v", studioItemDeletion)
 	}
 }
 
@@ -4404,14 +4404,14 @@ type browserToolLoopClient struct {
 	requests []provider.Request
 }
 
-type appLoadClient struct {
+type pluginLoadClient struct {
 	requests     []provider.Request
 	forceBrowser bool
 }
 
-func (c *appLoadClient) Name() string { return "app-load" }
+func (c *pluginLoadClient) Name() string { return "app-load" }
 
-func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *pluginLoadClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 3)
 	if c.forceBrowser {
@@ -4426,7 +4426,7 @@ func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan 
 	switch len(c.requests) {
 	case 1:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index: 0, CallID: "call_browser_load", Name: tool.AppLoad, ArgsDelta: `{"app_id":"browser"}`,
+			Index: 0, CallID: "call_browser_load", Name: tool.PluginLoad, ArgsDelta: `{"plugin_id":"browser"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
@@ -4442,32 +4442,32 @@ func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan 
 	return out, nil
 }
 
-type mutableAppSource struct {
-	mu           sync.RWMutex
-	defs         []*app.Definition
-	endpointApps map[string]string
+type mutablePluginSource struct {
+	mu              sync.RWMutex
+	defs            []*plugin.Definition
+	endpointPlugins map[string]string
 }
 
-type runtimeAppSnapshotClient struct {
-	apps     *mutableAppSource
+type runtimePluginSnapshotClient struct {
+	plugins  *mutablePluginSource
 	requests []provider.Request
 }
 
-func (c *runtimeAppSnapshotClient) Name() string { return "runtime-app-snapshot" }
+func (c *runtimePluginSnapshotClient) Name() string { return "runtime-app-snapshot" }
 
-func (c *runtimeAppSnapshotClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *runtimePluginSnapshotClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 3)
 	switch len(c.requests) {
 	case 1:
-		out <- appLoadChunk("call_canvas_load", "canvas")
+		out <- pluginLoadChunk("call_canvas_load", "widget-authoring")
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
-		// The App registry may disappear while the provider is deciding which of
+		// The plugin registry may disappear while the provider is deciding which of
 		// the tools it was offered to call. Execution must use that offered set.
-		c.apps.mu.Lock()
-		c.apps.defs = nil
-		c.apps.mu.Unlock()
+		c.plugins.mu.Lock()
+		c.plugins.defs = nil
+		c.plugins.mu.Unlock()
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index: 0, CallID: "call_canvas_table", Name: "canvas_table", ArgsDelta: `{}`,
 		}}
@@ -4480,53 +4480,53 @@ func (c *runtimeAppSnapshotClient) Stream(_ context.Context, req provider.Reques
 	return out, nil
 }
 
-func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, error) {
+func (s *mutablePluginSource) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*app.Definition, 0, len(s.defs))
+	out := make([]*plugin.Definition, 0, len(s.defs))
 	for _, definition := range s.defs {
-		out = append(out, app.CloneDefinition(definition))
+		out = append(out, plugin.CloneDefinition(definition))
 	}
 	return out, nil
 }
 
-func (s *mutableAppSource) ReadSkill(_ context.Context, appID, skillID string) (*app.SkillDetail, error) {
+func (s *mutablePluginSource) ReadSkill(_ context.Context, pluginID, skillID string) (*plugin.SkillDetail, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if detail, ok := app.ReadBuiltinSkill(appID, skillID); ok {
+	if detail, ok := plugin.ReadBuiltinSkill(pluginID, skillID); ok {
 		return detail, nil
 	}
 	for _, definition := range s.defs {
-		if definition == nil || definition.ID != appID {
+		if definition == nil || definition.ID != pluginID {
 			continue
 		}
 		if !definition.Enabled {
-			return nil, app.ErrDisabled
+			return nil, plugin.ErrDisabled
 		}
 		for _, skill := range definition.Skills {
 			if skillID == skill.ID || skillID == skill.Name || skillID == skill.Path {
-				return &app.SkillDetail{ID: skill.ID, Name: skill.Name, Description: skill.Description, Path: skill.Path, Content: "# " + definition.Name}, nil
+				return &plugin.SkillDetail{ID: skill.ID, Name: skill.Name, Description: skill.Description, Path: skill.Path, Content: "# " + definition.Name}, nil
 			}
 		}
 	}
-	return nil, app.ErrNotFound
+	return nil, plugin.ErrNotFound
 }
 
-func (s *mutableAppSource) ResolveEndpoint(_ context.Context, _ string, endpointName, _ string) (*app.EndpointBinding, error) {
-	appID := s.endpointApps[endpointName]
-	if appID == "" {
-		return nil, &app.EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
+func (s *mutablePluginSource) ResolveEndpoint(_ context.Context, _ string, endpointName, _ string) (*plugin.EndpointBinding, error) {
+	pluginID := s.endpointPlugins[endpointName]
+	if pluginID == "" {
+		return nil, &plugin.EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
 	}
-	return &app.EndpointBinding{AppID: appID, EndpointName: endpointName}, nil
+	return &plugin.EndpointBinding{PluginID: pluginID, EndpointName: endpointName}, nil
 }
 
-type crossAppAPIClient struct {
+type crossPluginAPIClient struct {
 	requests []provider.Request
 }
 
-func (c *crossAppAPIClient) Name() string { return "cross-app-api" }
+func (c *crossPluginAPIClient) Name() string { return "cross-app-api" }
 
-func (c *crossAppAPIClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *crossPluginAPIClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 3)
 	if len(c.requests) == 1 {
@@ -4550,7 +4550,7 @@ func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) 
 	switch len(c.requests) {
 	case 1:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index: 0, CallID: "call_browser_load", Name: tool.AppLoad, ArgsDelta: `{"app_id":"browser"}`,
+			Index: 0, CallID: "call_browser_load", Name: tool.PluginLoad, ArgsDelta: `{"plugin_id":"browser"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
@@ -4569,10 +4569,10 @@ func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) 
 	return out, nil
 }
 
-func appLoadChunk(callID, appID string) provider.Chunk {
-	args, _ := json.Marshal(map[string]any{"app_id": appID})
+func pluginLoadChunk(callID, pluginID string) provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"plugin_id": pluginID})
 	return provider.Chunk{Tool: &provider.ToolCallChunk{
-		Index: 0, CallID: callID, Name: tool.AppLoad, ArgsDelta: string(args),
+		Index: 0, CallID: callID, Name: tool.PluginLoad, ArgsDelta: string(args),
 	}}
 }
 
@@ -4979,14 +4979,14 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 }
 
 type recordingToolRunner struct {
-	defs             []provider.ToolDef
-	result           tool.Result
-	progress         []tool.Progress
-	calls            []tool.Call
-	closedSessions   []string
-	closeCount       int
-	definitionAppIDs [][]string
-	callFunc         func(tool.Call)
+	defs                []provider.ToolDef
+	result              tool.Result
+	progress            []tool.Progress
+	calls               []tool.Call
+	closedSessions      []string
+	closeCount          int
+	definitionPluginIDs [][]string
+	callFunc            func(tool.Call)
 }
 
 type approvalDetailsRecordingToolRunner struct {
@@ -5032,8 +5032,8 @@ func (r *recordingToolRunner) Definitions(context.Context, string) ([]provider.T
 	return r.defs, nil
 }
 
-func (r *recordingToolRunner) DefinitionsForApps(_ context.Context, _ string, appIDs []string) ([]provider.ToolDef, error) {
-	r.definitionAppIDs = append(r.definitionAppIDs, append([]string(nil), appIDs...))
+func (r *recordingToolRunner) DefinitionsForPlugins(_ context.Context, _ string, pluginIDs []string) ([]provider.ToolDef, error) {
+	r.definitionPluginIDs = append(r.definitionPluginIDs, append([]string(nil), pluginIDs...))
 	return r.defs, nil
 }
 

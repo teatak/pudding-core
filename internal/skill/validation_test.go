@@ -80,7 +80,7 @@ func TestServiceValidateSkillRejectsSymlinkedSkillFile(t *testing.T) {
 	}
 }
 
-func TestAppSkillIDDoesNotBlockGlobalSkillValidation(t *testing.T) {
+func TestPluginSkillIDDoesNotBlockGlobalSkillValidation(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "skills", "skill-creator")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

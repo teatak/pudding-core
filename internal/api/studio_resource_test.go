@@ -6,27 +6,27 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
-func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
+func TestWidgetVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{ID: "author", Provider: "mock", Model: "m"}); err != nil {
 		t.Fatal(err)
 	}
-	resource, err := st.CreateCanvas(ctx, &store.Canvas{ID: "canvas", Name: "Report", SourceSessionID: "author"})
+	resource, err := st.CreateStudioItem(ctx, &store.StudioItem{Kind: store.StudioItemKindWidget, ID: "widget", Name: "Report", SourceSessionID: "author"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := st.OpenCanvasResource(ctx, "author", resource.ID, "view")
+	item, err := st.OpenStudioItem(ctx, "author", resource.ID, "view")
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := ""
-	base := srv.URL + "/canvases/" + resource.ID
-	pkg := canvas.Package{Files: map[string]string{"canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
+	base := srv.URL + "/studio/items/" + resource.ID
+	pkg := widget.Package{Files: map[string]string{"widget.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/App.tsx": "export default function App(){return <button>Keep</button>}"}}
 	response := req(t, "POST", base+"/draft", map[string]any{})
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
@@ -49,11 +49,11 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}
-	resourcePtr := decodeJSON[store.Canvas](t, response)
+	resourcePtr := decodeJSON[store.StudioItem](t, response)
 	response.Body.Close()
 	resource = &resourcePtr
 	if resource.ActiveRevision != first {
-		t.Fatal("unbuilt source replaced working canvas")
+		t.Fatal("unbuilt source replaced working widget")
 	}
 	response = req(t, "POST", base+"/build-receipts", map[string]any{"revisionHash": resource.HeadRevision, "sdkVersion": "1", "compilerVersion": "test", "dependencyHash": strings.Repeat("a", 64), "ok": true})
 	if response.StatusCode != 200 {
@@ -64,11 +64,11 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}
-	resourcePtr = decodeJSON[store.Canvas](t, response)
+	resourcePtr = decodeJSON[store.StudioItem](t, response)
 	response.Body.Close()
 	resource = &resourcePtr
-	views, err := st.ListCanvasItems(ctx, "author")
-	if err != nil || len(views) != 1 || views[0].Kind != "app" || views[0].ResourceID != item.ResourceID {
+	views, err := st.ListStudioMounts(ctx, "author")
+	if err != nil || len(views) != 1 || views[0].Kind != store.StudioItemKindWidget || views[0].ItemID != item.ItemID {
 		t.Fatalf("upgrade detached mount: %+v %v", views, err)
 	}
 	first = resource.ActiveRevision
@@ -77,7 +77,7 @@ func TestCanvasAppVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	}
 	response = req(t, http.MethodGet, base+"/revisions/"+first, nil)
 	if response.StatusCode != 200 {
-		t.Fatal("source session deletion removed canvas")
+		t.Fatal("source session deletion removed widget")
 	}
 	response.Body.Close()
 }

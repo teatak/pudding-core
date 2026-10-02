@@ -1,14 +1,14 @@
-package app
+package plugin
 
 import "strings"
 
 const (
-	BuiltinCollaborationID  = "collaboration"
-	BuiltinBrowserID        = "browser"
-	BuiltinSkillAuthoringID = "skill-authoring"
-	BuiltinAppAuthoringID   = "app-authoring"
-	BuiltinCaptureID        = "capture"
-	BuiltinComputerUseID    = "computer-use"
+	BuiltinCollaborationID   = "collaboration"
+	BuiltinBrowserID         = "browser"
+	BuiltinSkillAuthoringID  = "skill-authoring"
+	BuiltinPluginAuthoringID = "plugin-authoring"
+	BuiltinCaptureID         = "capture"
+	BuiltinComputerUseID     = "computer-use"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 	toolBrowserType       = "builtin_browser_type"
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolSkillValidate     = "builtin_skill_validate"
-	toolAppSave           = "builtin_app_save"
+	toolPluginSave        = "builtin_plugin_save"
 	toolCameraCapture     = "builtin_camera_capture"
 	toolDesktopScreenshot = "builtin_desktop_screenshot"
 	toolComputerListApps  = "builtin_computer_list_apps"
@@ -40,7 +40,7 @@ type builtinDefinition struct {
 }
 
 var builtinDefinitions = []builtinDefinition{
-	{definition: &Definition{Kind: KindApp, ID: BuiltinCollaborationID, Name: "Collaboration", Description: "Let the main conversation delegate subtasks, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,
+	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Collaboration", Description: "Let the main conversation delegate subtasks, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,
 		Tools:  []ToolRef{{Name: "builtin_collaboration_list"}, {Name: "builtin_collaboration_dispatch"}, {Name: "builtin_collaboration_send"}, {Name: "builtin_collaboration_wait"}, {Name: "builtin_collaboration_stop"}},
 		Skills: []SkillRef{{ID: BuiltinCollaborationID, Name: "Collaboration", Description: "Delegate bounded subtasks and integrate their results.", Path: "skills/collaboration/SKILL.md"}}},
 		skills: map[string]SkillDetail{BuiltinCollaborationID: {ID: BuiltinCollaborationID, Name: "Collaboration", Description: "Delegate bounded subtasks and integrate their results.", Path: "skills/collaboration/SKILL.md", Content: `# Collaboration
@@ -54,12 +54,12 @@ Use child conversations for bounded work that can make useful progress independe
 - A follow-up input or retry supersedes that child's previous result. Wait for the latest turn before using it.
 - All approval decisions belong to the main window. Never ask users to approve in a child pane or instruct a child to bypass an approval.
 - Child conversations cannot delegate. Use send to assign work to existing children.
-- Stop cancels current children and prevents additional dispatch in this main turn. It does not disable the App or discard history. Disabling the App prevents new tool calls but lets accepted work settle.
+- Stop cancels current children and prevents additional dispatch in this main turn. It does not disable the plugin or discard history. Disabling the plugin prevents new tool calls but lets accepted work settle.
 - Do not narrate a separate dispatch timeline: the conversation's task card shows progress.
 `}}},
 	{
 		definition: &Definition{
-			Kind:           KindApp,
+			Kind:           KindPlugin,
 			ID:             BuiltinBrowserID,
 			Name:           "Browser",
 			Description:    "Browse and operate webpages in Pudding's built-in browser.",
@@ -108,7 +108,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 	},
 	{
 		definition: &Definition{
-			Kind:           KindApp,
+			Kind:           KindPlugin,
 			ID:             BuiltinSkillAuthoringID,
 			Name:           "Skill Authoring",
 			Description:    "Create, update, and validate reusable global Skills.",
@@ -137,36 +137,36 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 	},
 	{
 		definition: &Definition{
-			Kind:           KindApp,
-			ID:             BuiltinAppAuthoringID,
-			Name:           "App Authoring",
-			Description:    "Create or update validated local Pudding App packages.",
+			Kind:           KindPlugin,
+			ID:             BuiltinPluginAuthoringID,
+			Name:           "Plugin Authoring",
+			Description:    "Create or update validated local Pudding plugin packages.",
 			Source:         SourceBuiltin,
 			Enabled:        true,
 			CanUninstall:   false,
 			RequiredMode:   "code",
-			DefaultSkillID: "app-creator",
-			Tools:          []ToolRef{{Name: toolAppSave}},
+			DefaultSkillID: "plugin-creator",
+			Tools:          []ToolRef{{Name: toolPluginSave}},
 			Skills: []SkillRef{{
-				ID:          "app-creator",
-				Name:        "App Creator",
-				Description: "Create or update a local Pudding App package.",
-				Path:        "skills/app-creator/SKILL.md",
+				ID:          "plugin-creator",
+				Name:        "Plugin Creator",
+				Description: "Create or update a local Pudding plugin package.",
+				Path:        "skills/plugin-creator/SKILL.md",
 			}},
 		},
 		skills: map[string]SkillDetail{
-			"app-creator": {
-				ID:          "app-creator",
-				Name:        "App Creator",
-				Description: "Create or update a local Pudding App package.",
-				Path:        "skills/app-creator/SKILL.md",
-				Content:     builtinAppAuthoringInstructions,
+			"plugin-creator": {
+				ID:          "plugin-creator",
+				Name:        "Plugin Creator",
+				Description: "Create or update a local Pudding plugin package.",
+				Path:        "skills/plugin-creator/SKILL.md",
+				Content:     builtinPluginAuthoringInstructions,
 			},
 		},
 	},
 	{
 		definition: &Definition{
-			Kind:         KindApp,
+			Kind:         KindPlugin,
 			ID:           BuiltinCaptureID,
 			Name:         "Image Capture",
 			Description:  "Capture images from the local screen or camera when explicitly requested.",
@@ -182,7 +182,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 	},
 	{
 		definition: &Definition{
-			Kind:           KindApp,
+			Kind:           KindPlugin,
 			ID:             BuiltinComputerUseID,
 			Name:           "Computer Use",
 			Description:    "Observe and operate local macOS applications through explicit Accessibility actions.",
@@ -213,7 +213,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 				Path:        "skills/computer-use/SKILL.md",
 				Content: `# Computer Use
 
-Use this App for local macOS GUI tasks when a suitable structured API, connector, or browser tool cannot do the job.
+Use this plugin for local macOS GUI tasks when a suitable structured API, connector, or browser tool cannot do the job.
 
 - Open or reacquire a target only with builtin_computer_use_app, without activating or raising the app by default. Never use builtin_command_run, open, osascript, or AppleScript to substitute for this lifecycle. Discover an unknown appID with list_apps; never call builtin_computer_list_apps to refresh windows. The inventory is not an allowlist or per-app setting; controllable=false targets cannot be operated.
 - Background operation is the default, not a fallback after activation fails. Use foreground input only when the required operation cannot run in the background or the user explicitly requests foreground interaction. Ask before switching focus unless already authorized; session/app approval alone is not permission to switch focus. Do not activate merely for observation, convenience, or a background failure.
@@ -264,14 +264,14 @@ func IsBuiltinID(id string) bool {
 
 func IsReservedID(id string) bool {
 	id = strings.TrimSpace(id)
-	return IsBuiltinID(id) || id == RuntimeCanvasID
+	return IsBuiltinID(id) || id == RuntimeWidgetAuthoringID
 }
 
-func ReadBuiltinSkill(appID, selector string) (*SkillDetail, bool) {
-	appID = strings.TrimSpace(appID)
+func ReadBuiltinSkill(pluginID, selector string) (*SkillDetail, bool) {
+	pluginID = strings.TrimSpace(pluginID)
 	selector = strings.TrimSpace(selector)
 	for _, item := range builtinDefinitions {
-		if item.definition.ID != appID {
+		if item.definition.ID != pluginID {
 			continue
 		}
 		for id, detail := range item.skills {

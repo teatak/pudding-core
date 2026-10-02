@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	managedScopeApp     = "app"
+	managedScopePlugin  = "plugin"
 	managedScopeSkill   = "skill"
 	managedScopeTemp    = "temp"
 	managedScopeProject = "project"
-	managedScopeCanvas  = "canvas"
+	managedScopeWidget  = "widget"
 
 	defaultFileReadMaxChars       = 20000
 	maxFileReadChars              = 100000
@@ -55,7 +55,7 @@ type resolvedFilePath struct {
 	target    string
 	rel       string
 	project   bool
-	canvasID  string
+	widgetID  string
 	draftHash string
 }
 
@@ -72,8 +72,8 @@ func (p resolvedFilePath) payload(base map[string]any) map[string]any {
 		base["root"] = p.root
 		base["relativePath"] = p.rel
 	}
-	if p.canvasID != "" {
-		base["canvasID"] = p.canvasID
+	if p.widgetID != "" {
+		base["widgetID"] = p.widgetID
 		base["draftHash"] = p.draftHash
 	}
 	return base
@@ -110,10 +110,10 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "read_dir_failed", err.Error())
 	}
-	if args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp || args.Scope == managedScopeCanvas {
+	if args.Scope == managedScopeSkill || args.Scope == managedScopePlugin || args.Scope == managedScopeTemp || args.Scope == managedScopeWidget {
 		visible := entries[:0]
 		for _, entry := range entries {
-			if !strings.HasPrefix(entry.Name(), ".") && (args.Scope != managedScopeCanvas || canvasVisiblePath(filepath.ToSlash(filepath.Join(resolved.rel, entry.Name())), entry.IsDir())) {
+			if !strings.HasPrefix(entry.Name(), ".") && (args.Scope != managedScopeWidget || widgetVisiblePath(filepath.ToSlash(filepath.Join(resolved.rel, entry.Name())), entry.IsDir())) {
 				visible = append(visible, entry)
 			}
 		}
@@ -271,9 +271,9 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		return filePathError(out, args.Scope, err)
 	}
 	excludeGlobs := args.ExcludeGlobs
-	if args.Scope == managedScopeCanvas {
+	if args.Scope == managedScopeWidget {
 		if len(excludeGlobs) >= maxFileSearchGlobs {
-			return toolJSONError(out, "too_many_globs", "canvas search reserves one exclude glob for private draft files")
+			return toolJSONError(out, "too_many_globs", "widget search reserves one exclude glob for private draft files")
 		}
 		excludeGlobs = append(append([]string(nil), excludeGlobs...), "fixtures/**")
 	}
@@ -286,7 +286,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		MaxResults:    args.MaxResults,
 		Mode:          args.Mode,
 		Query:         args.Query,
-		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp || args.Scope == managedScopeCanvas,
+		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopePlugin || args.Scope == managedScopeTemp || args.Scope == managedScopeWidget,
 	})
 	if err != nil {
 		var searchErr *TextFileSearchError
@@ -303,7 +303,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 				path = filepath.ToSlash(rel)
 			}
 		}
-		if args.Scope == managedScopeCanvas && !canvasVisiblePath(path, false) {
+		if args.Scope == managedScopeWidget && !widgetVisiblePath(path, false) {
 			continue
 		}
 		items = append(items, map[string]any{
@@ -843,8 +843,8 @@ func copyFileDir(src, dst string) error {
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
 	scope = strings.TrimSpace(scope)
-	if scope == managedScopeCanvas {
-		return r.resolveCanvasFilePath(call, rawPath, requireWritable, allowRoot, allowMissing)
+	if scope == managedScopeWidget {
+		return r.resolveWidgetFilePath(call, rawPath, requireWritable, allowRoot, allowMissing)
 	}
 	if isProjectFileScope(scope) {
 		root, target, rel, err := resolveProjectPath(call.ProjectDirs, rawPath, allowRoot, allowMissing)
@@ -910,21 +910,21 @@ func isProjectFileScope(scope string) bool {
 
 func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
 	scope = strings.TrimSpace(scope)
-	if scope != managedScopeApp && scope != managedScopeSkill && scope != managedScopeTemp {
-		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopeApp, managedScopeSkill, managedScopeTemp, managedScopeProject}}
+	if scope != managedScopePlugin && scope != managedScopeSkill && scope != managedScopeTemp {
+		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopePlugin, managedScopeSkill, managedScopeTemp, managedScopeProject}}
 	}
 	if strings.TrimSpace(r.homeDir) == "" {
 		return "", false, errors.New("home directory is not configured")
 	}
 	switch scope {
-	case managedScopeApp:
-		return home.AppsPath(r.homeDir), false, nil
+	case managedScopePlugin:
+		return home.PluginsPath(r.homeDir), false, nil
 	case managedScopeSkill:
 		return home.SkillsPath(r.homeDir), true, nil
 	case managedScopeTemp:
 		return home.TempPath(r.homeDir), true, nil
 	default:
-		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopeApp, managedScopeSkill, managedScopeTemp, managedScopeProject}}
+		return "", false, &invalidScopeError{Field: "scope", Allowed: []string{managedScopePlugin, managedScopeSkill, managedScopeTemp, managedScopeProject}}
 	}
 }
 

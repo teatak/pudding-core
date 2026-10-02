@@ -6,32 +6,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestBuiltinToolsBelongToCoreOrApp(t *testing.T) {
+func TestBuiltinToolsBelongToCoreOrPlugin(t *testing.T) {
 	for _, def := range BuiltinDefinitions() {
-		_, appTool := BuiltinAppIDForTool(def.Name)
-		appTool = appTool || IsAppAPITool(def.Name)
+		_, pluginTool := BuiltinPluginIDForTool(def.Name)
+		pluginTool = pluginTool || IsPluginAPITool(def.Name)
 		coreTool := IsCoreTool(def.Name)
-		if appTool == coreTool {
-			t.Fatalf("tool %s core=%v app=%v; want exactly one owner", def.Name, coreTool, appTool)
+		if pluginTool == coreTool {
+			t.Fatalf("tool %s core=%v app=%v; want exactly one owner", def.Name, coreTool, pluginTool)
 		}
 	}
 }
 
-func TestBuiltinAppDefinitionsListOwnedTools(t *testing.T) {
+func TestBuiltinPluginDefinitionsListOwnedTools(t *testing.T) {
 	definitions := make(map[string]provider.ToolDef)
 	for _, def := range BuiltinDefinitions() {
 		definitions[def.Name] = def
 	}
 	seen := make(map[string]bool)
-	for _, def := range app.BuiltinDefinitions() {
+	for _, def := range plugin.BuiltinDefinitions() {
 		requiredMode := store.NormalizeAgentMode(store.AgentMode(def.RequiredMode))
 		for _, ref := range def.Tools {
-			owner, ok := BuiltinAppIDForTool(ref.Name)
+			owner, ok := BuiltinPluginIDForTool(ref.Name)
 			if !ok || owner != def.ID {
 				t.Fatalf("app %s lists unowned tool %s", def.ID, ref.Name)
 			}
@@ -45,8 +45,8 @@ func TestBuiltinAppDefinitionsListOwnedTools(t *testing.T) {
 			seen[ref.Name] = true
 		}
 	}
-	if len(seen) != len(builtinAppTools) {
-		t.Fatalf("app definitions list %d tools, ownership map has %d", len(seen), len(builtinAppTools))
+	if len(seen) != len(builtinPluginTools) {
+		t.Fatalf("app definitions list %d tools, ownership map has %d", len(seen), len(builtinPluginTools))
 	}
 }
 
@@ -73,7 +73,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	for _, name := range []string{CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, AppSave} {
+	for _, name := range []string{CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, PluginSave} {
 		if HasDefinition(first, name) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}
@@ -184,8 +184,8 @@ func TestCoreDefinitionsIncludeRuntimeRequestUserInputOnly(t *testing.T) {
 
 func TestDefaultCodeToolSchemaReduction(t *testing.T) {
 	defs := BuiltinDefinitions()
-	defaults := append(CoreDefinitionsForMode(store.ModeCode, defs), AppLoadDefinition())
-	full := []provider.ToolDef{RequestCapabilityDefinition(), AppLoadDefinition()}
+	defaults := append(CoreDefinitionsForMode(store.ModeCode, defs), PluginLoadDefinition())
+	full := []provider.ToolDef{RequestCapabilityDefinition(), PluginLoadDefinition()}
 	for _, def := range defs {
 		if ToolDefAllowedForMode(store.ModeCode, def) {
 			full = append(full, def)

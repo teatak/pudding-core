@@ -58,7 +58,7 @@ func OpenWithHome(path, sourceHome string) (*Store, error) {
 		return nil, err
 	}
 	// A process exit cannot establish whether a dispatched remote write committed.
-	if _, err := db.Exec(`UPDATE canvas_actions SET state='unknown' WHERE state='executing'`); err != nil {
+	if _, err := db.Exec(`UPDATE widget_actions SET state='unknown' WHERE state='executing'`); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -105,7 +105,7 @@ const messageSelectColumnsAliasM = `m.id,m.session_id,m.turn_id,m.role,m.kind,m.
 
 const projectSelectColumns = `id,name,root_dirs,approval_mode,created_at,updated_at,last_activity_at`
 
-const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_app_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
+const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_plugin_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
 
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -277,8 +277,8 @@ func createSessionTx(ctx context.Context, tx *sql.Tx, sess *store.Session) error
 	now := time.Now()
 	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+		`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 	)
 	if err != nil {
 		return err
@@ -337,7 +337,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 		target := *source
 		target.ID = in.TargetSessionID
 		target.Title = store.CloneSessionTitle(source.Title, in.TitleSuffix)
-		target.LoadedAppIDs = append([]string(nil), source.LoadedAppIDs...)
+		target.LoadedPluginIDs = append([]string(nil), source.LoadedPluginIDs...)
 		target.CreatedAt = now
 		target.UpdatedAt = now
 		target.LastActivityAt = now
@@ -347,8 +347,8 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 		target.Running = false
 		target.BackgroundProcessCount = 0
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			target.ID, target.Title, target.Provider, target.Model, target.ReasoningEffort, target.ReasoningModelKey, target.ActiveMode, target.ModeLease, target.ProjectID, encodeStringList(target.LoadedAppIDs), 0, 0, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			target.ID, target.Title, target.Provider, target.Model, target.ReasoningEffort, target.ReasoningModelKey, target.ActiveMode, target.ModeLease, target.ProjectID, encodeStringList(target.LoadedPluginIDs), 0, 0, unixMS(now), unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -507,8 +507,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 			}
 			sess.ProjectID = *upd.ProjectID
 		}
-		if upd.LoadedAppIDs != nil {
-			sess.LoadedAppIDs = append([]string(nil), (*upd.LoadedAppIDs)...)
+		if upd.LoadedPluginIDs != nil {
+			sess.LoadedPluginIDs = append([]string(nil), (*upd.LoadedPluginIDs)...)
 		}
 		if upd.Pinned != nil {
 			sess.Pinned = *upd.Pinned
@@ -518,8 +518,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, project_id=?, loaded_app_ids=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, project_id=?, loaded_plugin_ids=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -2756,7 +2756,7 @@ type messageScanner interface {
 func scanSession(row messageScanner) (*store.Session, error) {
 	var sess store.Session
 	var created, updated, lastActivity, archived int64
-	var loadedAppIDs string
+	var loadedPluginIDs string
 	if err := row.Scan(
 		&sess.ID,
 		&sess.Title,
@@ -2767,7 +2767,7 @@ func scanSession(row messageScanner) (*store.Session, error) {
 		&sess.ActiveMode,
 		&sess.ModeLease,
 		&sess.ProjectID,
-		&loadedAppIDs,
+		&loadedPluginIDs,
 		&sess.Pinned,
 		&sess.PinnedOrder,
 		&created,
@@ -2778,7 +2778,7 @@ func scanSession(row messageScanner) (*store.Session, error) {
 	); err != nil {
 		return nil, err
 	}
-	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
+	if err := decodeStringList(loadedPluginIDs, &sess.LoadedPluginIDs); err != nil {
 		return nil, err
 	}
 	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -3136,7 +3136,7 @@ func normalizeMessageMetadata(raw string) json.RawMessage {
 }
 
 func encodeStringList(values []string) string {
-	data, _ := json.Marshal(store.NormalizeAppIDs(values))
+	data, _ := json.Marshal(store.NormalizePluginIDs(values))
 	return string(data)
 }
 
@@ -3145,7 +3145,7 @@ func decodeStringList(raw string, target *[]string) error {
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
 		return fmt.Errorf("decode string list: %w", err)
 	}
-	*target = store.NormalizeAppIDs(values)
+	*target = store.NormalizePluginIDs(values)
 	return nil
 }
 

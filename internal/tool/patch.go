@@ -18,7 +18,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	formatdiff "github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/sergi/go-diff/diffmatchpatch"
-	"github.com/teatak/pudding-core/internal/canvas"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 
 type filePatchArgs struct {
 	Scope             string         `json:"scope"`
-	CanvasID          string         `json:"canvas_id,omitempty"`
+	ItemID            string         `json:"widget_id,omitempty"`
 	ExpectedDraftHash string         `json:"expectedDraftHash,omitempty"`
 	Files             []patchFileArg `json:"files"`
 }
@@ -53,7 +53,7 @@ type patchHunkArg struct {
 
 type preparedPatch struct {
 	Scope             string
-	CanvasID          string
+	ItemID            string
 	ExpectedDraftHash string
 	SessionID         string
 	CallID            string
@@ -128,17 +128,17 @@ func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError
 }
 
 func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
-	if strings.TrimSpace(args.Scope) != managedScopeProject && strings.TrimSpace(args.Scope) != managedScopeCanvas {
+	if strings.TrimSpace(args.Scope) != managedScopeProject && strings.TrimSpace(args.Scope) != managedScopeWidget {
 		return &toolArgumentError{
 			kind:     "invalid_scope",
-			detail:   "scope must be project or canvas",
-			hint:     "Set scope to project or canvas and retry.",
+			detail:   "scope must be project or widget",
+			hint:     "Set scope to project or widget and retry.",
 			field:    "scope",
-			expected: "project or canvas",
+			expected: "project or widget",
 		}
 	}
-	if args.Scope == managedScopeCanvas && (strings.TrimSpace(args.CanvasID) == "" || strings.TrimSpace(args.ExpectedDraftHash) == "" || len(args.Files) != 1) {
-		return &toolArgumentError{kind: "invalid_canvas_patch", detail: "canvas patches require canvas_id, expectedDraftHash, and exactly one file", field: "files", expected: "one canvas source file"}
+	if args.Scope == managedScopeWidget && (strings.TrimSpace(args.ItemID) == "" || strings.TrimSpace(args.ExpectedDraftHash) == "" || len(args.Files) != 1) {
+		return &toolArgumentError{kind: "invalid_widget_patch", detail: "widget patches require widget_id, expectedDraftHash, and exactly one file", field: "files", expected: "one widget source file"}
 	}
 	if len(args.Files) == 0 {
 		return &toolArgumentError{
@@ -485,8 +485,8 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	if err != nil {
 		return patchFailure(out, err)
 	}
-	if patch.Scope == managedScopeCanvas {
-		return r.applyCanvasPatchResult(out, call, patch)
+	if patch.Scope == managedScopeWidget {
+		return r.applyWidgetPatchResult(out, call, patch)
 	}
 	return applyPreparedPatchResult(out, call.ProjectDirs, patch)
 }
@@ -559,8 +559,8 @@ func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[str
 	}
 	var patch *preparedPatch
 	var err error
-	if args.Scope == managedScopeCanvas {
-		patch, err = r.prepareCanvasPatch(call, args)
+	if args.Scope == managedScopeWidget {
+		patch, err = r.prepareWidgetPatch(call, args)
 	} else {
 		patch, err = preparePatch(call, args)
 	}
@@ -662,26 +662,26 @@ func patchPayload(patch *preparedPatch) map[string]any {
 		"destructive": destructive,
 		"diff":        patch.Diff,
 	}
-	if patch.Scope == managedScopeCanvas {
+	if patch.Scope == managedScopeWidget {
 		delete(payload, "projectRoot")
-		payload["canvasID"] = patch.CanvasID
+		payload["widgetID"] = patch.ItemID
 		payload["expectedDraftHash"] = patch.ExpectedDraftHash
 	}
 	return payload
 }
 
-func (r *BuiltinRunner) prepareCanvasPatch(call Call, args filePatchArgs) (*preparedPatch, error) {
-	if !canvasSourcePath(args.Files[0].Path) {
-		return nil, newPatchError("invalid_canvas_path", "patch path must be a canvas source file")
+func (r *BuiltinRunner) prepareWidgetPatch(call Call, args filePatchArgs) (*preparedPatch, error) {
+	if !widgetSourcePath(args.Files[0].Path) {
+		return nil, newPatchError("invalid_widget_path", "patch path must be a widget source file")
 	}
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	draft, root, err := r.canvasDraftForCall(call, args.CanvasID)
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	draft, root, err := r.widgetDraftForCall(call, args.ItemID)
 	if err != nil {
 		return nil, err
 	}
 	if draft.DraftHash != args.ExpectedDraftHash {
-		return nil, &patchError{reason: "draft_conflict", detail: "canvas draft changed", currentDraftHash: draft.DraftHash}
+		return nil, &patchError{reason: "draft_conflict", detail: "widget draft changed", currentDraftHash: draft.DraftHash}
 	}
 	projectCall := call
 	projectCall.ProjectDirs = []string{root}
@@ -691,17 +691,17 @@ func (r *BuiltinRunner) prepareCanvasPatch(call Call, args filePatchArgs) (*prep
 	if err != nil {
 		return nil, err
 	}
-	patch.Scope = managedScopeCanvas
-	patch.CanvasID = args.CanvasID
+	patch.Scope = managedScopeWidget
+	patch.ItemID = args.ItemID
 	patch.ExpectedDraftHash = args.ExpectedDraftHash
 	patch.ProjectRoot = ""
 	return patch, nil
 }
 
-func (r *BuiltinRunner) applyCanvasPatchResult(out Result, call Call, patch *preparedPatch) Result {
-	canvas.DraftMu.Lock()
-	defer canvas.DraftMu.Unlock()
-	draft, _, err := r.canvasDraftForCall(call, patch.CanvasID)
+func (r *BuiltinRunner) applyWidgetPatchResult(out Result, call Call, patch *preparedPatch) Result {
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
+	draft, _, err := r.widgetDraftForCall(call, patch.ItemID)
 	if err != nil {
 		return patchFailure(out, err)
 	}
@@ -709,14 +709,14 @@ func (r *BuiltinRunner) applyCanvasPatchResult(out Result, call Call, patch *pre
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "draft_conflict", "currentDraftHash": draft.DraftHash})
 	}
 	file := patch.Files[0]
-	if !canvasSourcePath(file.Path) || patchContentHash([]byte(draft.Files[file.Path])) != file.OldHash {
-		return patchFailure(out, newPatchError("source_changed", "canvas source changed after patch preparation"))
+	if !widgetSourcePath(file.Path) || patchContentHash([]byte(draft.Files[file.Path])) != file.OldHash {
+		return patchFailure(out, newPatchError("source_changed", "widget source changed after patch preparation"))
 	}
 	var content *string
 	if !file.Delete {
 		content = &file.NewText
 	}
-	updated, err := canvas.WriteDraftFile(r.homeDir, patch.CanvasID, file.Path, content, patch.ExpectedDraftHash)
+	updated, err := widget.WriteDraftFile(r.homeDir, patch.ItemID, file.Path, content, patch.ExpectedDraftHash)
 	if err != nil {
 		return patchFailure(out, err)
 	}

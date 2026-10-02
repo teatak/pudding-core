@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     active_mode TEXT   NOT NULL DEFAULT 'chat',
     mode_lease  TEXT   NOT NULL DEFAULT 'none',
     project_id TEXT NOT NULL DEFAULT '',
-    loaded_app_ids TEXT NOT NULL DEFAULT '[]',
+    loaded_plugin_ids TEXT NOT NULL DEFAULT '[]',
     pinned     INTEGER NOT NULL DEFAULT 0,
     pinned_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL, -- unix ms
@@ -169,14 +169,14 @@ CREATE TABLE IF NOT EXISTS session_usage (
     updated_at                         INTEGER NOT NULL
 );
 
-CREATE TABLE canvas_mounts (
+CREATE TABLE studio_mounts (
  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  id TEXT NOT NULL,
- resource_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
  visible INTEGER NOT NULL DEFAULT 1,
  created_at INTEGER NOT NULL,
  PRIMARY KEY(session_id,id),
- UNIQUE(session_id,resource_id)
+ UNIQUE(session_id,item_id)
 );
 
 CREATE TABLE IF NOT EXISTS session_browser_tabs (
@@ -246,31 +246,31 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE TABLE IF NOT EXISTS library_favorites (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('canvas','web')),
+    kind TEXT NOT NULL CHECK(kind IN ('studio','web')),
     source_session_id TEXT NOT NULL DEFAULT '',
-    saved_item_id TEXT REFERENCES canvas_resources(id) ON DELETE CASCADE,
+    saved_item_id TEXT REFERENCES studio_items(id) ON DELETE CASCADE,
     url TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
-    CHECK ((kind='canvas' AND saved_item_id IS NOT NULL AND url='')
+    CHECK ((kind='studio' AND saved_item_id IS NOT NULL AND url='')
         OR (kind='web' AND saved_item_id IS NULL AND url<>''))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS library_favorites_canvas ON library_favorites(saved_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX IF NOT EXISTS library_favorites_studio ON library_favorites(saved_item_id) WHERE kind='studio';
 CREATE UNIQUE INDEX IF NOT EXISTS library_favorites_web ON library_favorites(url) WHERE kind='web';
 
 CREATE TABLE IF NOT EXISTS library_recent_opens (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('file','canvas')),
+    kind TEXT NOT NULL CHECK(kind IN ('file','studio')),
     source_session_id TEXT NOT NULL,
-    canvas_item_id TEXT,
+    studio_mount_id TEXT,
     root_path TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     opened_at INTEGER NOT NULL,
-    FOREIGN KEY(source_session_id,canvas_item_id) REFERENCES canvas_mounts(session_id,id) ON DELETE CASCADE,
-    CHECK ((kind='canvas' AND canvas_item_id IS NOT NULL AND root_path='' AND path='')
-        OR (kind='file' AND canvas_item_id IS NULL AND root_path<>'' AND path<>''))
+    FOREIGN KEY(source_session_id,studio_mount_id) REFERENCES studio_mounts(session_id,id) ON DELETE CASCADE,
+    CHECK ((kind='studio' AND studio_mount_id IS NOT NULL AND root_path='' AND path='')
+        OR (kind='file' AND studio_mount_id IS NULL AND root_path<>'' AND path<>''))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS library_recent_canvas ON library_recent_opens(source_session_id,canvas_item_id) WHERE kind='canvas';
+CREATE UNIQUE INDEX IF NOT EXISTS library_recent_studio ON library_recent_opens(source_session_id,studio_mount_id) WHERE kind='studio';
 CREATE UNIQUE INDEX IF NOT EXISTS library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
 CREATE INDEX IF NOT EXISTS library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);
 
@@ -323,8 +323,9 @@ CREATE TABLE IF NOT EXISTS scheduled_task_runs (
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_task ON scheduled_task_runs(task_id, accepted_at);
 CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(handoff, accepted_at);
 
-CREATE TABLE canvas_resources (
+CREATE TABLE studio_items (
     id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('doc','table','widget')),
     name TEXT NOT NULL,
     icon TEXT NOT NULL DEFAULT '',
     icon_color TEXT NOT NULL DEFAULT '',
@@ -338,40 +339,40 @@ CREATE TABLE canvas_resources (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
-CREATE TABLE canvas_revisions (
-    canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+CREATE TABLE studio_item_revisions (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
     hash TEXT NOT NULL,
     parent_revision TEXT NOT NULL,
     client_request_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     build_receipt TEXT NOT NULL,
-    PRIMARY KEY(canvas_id, hash),
-    UNIQUE(canvas_id, client_request_id)
+    PRIMARY KEY(item_id, hash),
+    UNIQUE(item_id, client_request_id)
 );
-CREATE TABLE canvas_saves (
-    canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+CREATE TABLE studio_item_saves (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
     client_request_id TEXT NOT NULL,
     hash TEXT NOT NULL,
-    PRIMARY KEY(canvas_id, client_request_id)
+    PRIMARY KEY(item_id, client_request_id)
 );
 
-CREATE TABLE canvas_actions (
+CREATE TABLE widget_actions (
  id TEXT PRIMARY KEY,
- canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
  client_request_id TEXT NOT NULL,
  request_hash TEXT NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('prepared','executing','succeeded','failed','unknown')),
  spec TEXT NOT NULL,
  result TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL,
- UNIQUE(canvas_id,client_request_id)
+ UNIQUE(item_id,client_request_id)
 );
 
-CREATE TABLE canvas_links (
+CREATE TABLE widget_links (
  id TEXT PRIMARY KEY,
- canvas_id TEXT NOT NULL REFERENCES canvas_resources(id) ON DELETE CASCADE,
+ item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
  left_entity TEXT NOT NULL,
  right_entity TEXT NOT NULL,
  created_at INTEGER NOT NULL,
- UNIQUE(canvas_id,left_entity,right_entity)
+ UNIQUE(item_id,left_entity,right_entity)
 );

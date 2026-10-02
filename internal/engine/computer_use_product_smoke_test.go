@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
@@ -198,10 +198,10 @@ func runComputerUseSmoke(t *testing.T, enabledEnv string, scenario computerUseSm
 	client := &computerUseSmokeClient{scenario: scenario}
 	ms := storetest.New(t)
 	hub := event.NewHub()
-	apps := app.NewService(t.TempDir(), nil)
+	plugins := plugin.NewService(t.TempDir(), nil)
 	providerName := "computer-use-" + scenario.name + "-smoke"
 	modelName := providerName + "-model"
-	eng := New(ms, hub, computerUseSmokeResolver{providerName: client}, ms, WithTools(runner), WithApps(apps))
+	eng := New(ms, hub, computerUseSmokeResolver{providerName: client}, ms, WithTools(runner), WithPlugins(plugins))
 
 	sessionID := "sess_" + strings.ReplaceAll(providerName, "-", "_")
 	ctx := context.Background()
@@ -320,11 +320,11 @@ func (c *computerUseSmokeClient) Stream(ctx context.Context, req provider.Reques
 	var args any
 	switch {
 	case stage == 1:
-		if !smokeHasToolDef(req.Tools, tool.AppLoad) || smokeHasToolDef(req.Tools, tool.ComputerUseApp) {
+		if !smokeHasToolDef(req.Tools, tool.PluginLoad) || smokeHasToolDef(req.Tools, tool.ComputerUseApp) {
 			return c.fail(fmt.Errorf("Computer Use must begin unloaded; tools = %+v", req.Tools))
 		}
-		name, callID = tool.AppLoad, "call_computer_app_load"
-		args = map[string]any{"app_id": app.BuiltinComputerUseID}
+		name, callID = tool.PluginLoad, "call_computer_app_load"
+		args = map[string]any{"plugin_id": plugin.BuiltinComputerUseID}
 	case stage == 2:
 		for _, required := range []string{tool.ComputerListApps, tool.ComputerUseApp, tool.ComputerQuitApp, tool.ComputerObserve, tool.ComputerAct} {
 			if !smokeHasToolDef(req.Tools, required) {

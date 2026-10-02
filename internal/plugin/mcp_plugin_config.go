@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const mcpAppEndpointName = "mcp"
+const mcpPluginEndpointName = "mcp"
 
-var ErrInvalidMCPAppConfig = errors.New("app: invalid mcp app config")
+var ErrInvalidMCPPluginConfig = errors.New("plugin: invalid mcp plugin config")
 
 type MCPServerConfig struct {
 	Command     string            `json:"command,omitempty"`
@@ -38,17 +38,17 @@ type mcpConfigEntry struct {
 	Endpoint    Endpoint
 }
 
-// ImportMCPApps imports each mcpServers entry as a regular installed App. An
-// existing MCP App with the same generated identity is updated in place.
-func (s *Service) ImportMCPApps(ctx context.Context, configJSON []byte, displayName string) ([]*Definition, error) {
+// ImportMCPPlugins imports each mcpServers entry as a regular installed plugin. An
+// existing MCP plugin with the same generated identity is updated in place.
+func (s *Service) ImportMCPPlugins(ctx context.Context, configJSON []byte, displayName string) ([]*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	entries, err := parseMCPServersConfig(configJSON)
 	if err != nil {
 		return nil, err
 	}
-	if err := applyMCPAppDisplayName(entries, displayName); err != nil {
+	if err := applyMCPPluginDisplayName(entries, displayName); err != nil {
 		return nil, err
 	}
 	definitions, err := s.ListDefinitions(ctx)
@@ -69,14 +69,14 @@ func (s *Service) ImportMCPApps(ctx context.Context, configJSON []byte, displayN
 	}
 	targets := make([]importTarget, 0, len(entries))
 	for _, entry := range entries {
-		id, update := availableMCPAppID(entry.Name, occupied)
+		id, update := availableMCPPluginID(entry.Name, occupied)
 		targets = append(targets, importTarget{entry: entry, id: id, update: update})
 		occupied[id] = &Definition{Kind: KindMCP, ID: id, Name: entry.Name}
 	}
 
 	result := make([]*Definition, 0, len(targets))
 	for _, target := range targets {
-		def, err := s.saveMCPApp(ctx, target.id, target.entry, "1.0.0", target.update)
+		def, err := s.saveMCPPlugin(ctx, target.id, target.entry, "1.0.0", target.update)
 		if err != nil {
 			return nil, err
 		}
@@ -85,9 +85,9 @@ func (s *Service) ImportMCPApps(ctx context.Context, configJSON []byte, displayN
 	return result, nil
 }
 
-func (s *Service) GetMCPAppConfig(ctx context.Context, id string) ([]byte, error) {
+func (s *Service) GetMCPPluginConfig(ctx context.Context, id string) ([]byte, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	def, err := s.definition(ctx, id)
 	if err != nil {
@@ -102,9 +102,9 @@ func (s *Service) GetMCPAppConfig(ctx context.Context, id string) ([]byte, error
 	}}, "", "  ")
 }
 
-func (s *Service) UpdateMCPApp(ctx context.Context, id string, configJSON []byte, displayName string) (*Definition, error) {
+func (s *Service) UpdateMCPPlugin(ctx context.Context, id string, configJSON []byte, displayName string) (*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	def, err := s.definition(ctx, id)
 	if err != nil {
@@ -118,34 +118,34 @@ func (s *Service) UpdateMCPApp(ctx context.Context, id string, configJSON []byte
 		return nil, err
 	}
 	if len(entries) != 1 {
-		return nil, fmt.Errorf("%w: editing an MCP App requires exactly one mcpServers entry", ErrInvalidMCPAppConfig)
+		return nil, fmt.Errorf("%w: editing an MCP plugin requires exactly one mcpServers entry", ErrInvalidMCPPluginConfig)
 	}
-	if err := applyMCPAppDisplayName(entries, displayName); err != nil {
+	if err := applyMCPPluginDisplayName(entries, displayName); err != nil {
 		return nil, err
 	}
 	version := strings.TrimSpace(def.Version)
 	if version == "" {
 		version = "1.0.0"
 	}
-	return s.saveMCPApp(ctx, def.ID, entries[0], version, true)
+	return s.saveMCPPlugin(ctx, def.ID, entries[0], version, true)
 }
 
-func applyMCPAppDisplayName(entries []mcpConfigEntry, displayName string) error {
+func applyMCPPluginDisplayName(entries []mcpConfigEntry, displayName string) error {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return nil
 	}
 	if len(entries) != 1 {
-		return fmt.Errorf("%w: a custom name requires exactly one mcpServers entry", ErrInvalidMCPAppConfig)
+		return fmt.Errorf("%w: a custom name requires exactly one mcpServers entry", ErrInvalidMCPPluginConfig)
 	}
-	if err := validateMCPAppName(displayName); err != nil {
+	if err := validateMCPPluginName(displayName); err != nil {
 		return err
 	}
 	entries[0].Name = displayName
 	return nil
 }
 
-func (s *Service) saveMCPApp(ctx context.Context, id string, entry mcpConfigEntry, version string, update bool) (*Definition, error) {
+func (s *Service) saveMCPPlugin(ctx context.Context, id string, entry mcpConfigEntry, version string, update bool) (*Definition, error) {
 	manifestEndpoint := CloneEndpoint(entry.Endpoint)
 	manifestEndpoint.Env = nil
 	manifestEndpoint.Headers = nil
@@ -162,22 +162,22 @@ func (s *Service) saveMCPApp(ctx context.Context, id string, entry mcpConfigEntr
 		Name:        entry.Name,
 		Version:     version,
 		Description: entry.Description,
-		Endpoints:   map[string]Endpoint{mcpAppEndpointName: manifestEndpoint},
+		Endpoints:   map[string]Endpoint{mcpPluginEndpointName: manifestEndpoint},
 	}
 	manifestYAML, err := yaml.Marshal(manifest)
 	if err != nil {
 		return nil, err
 	}
 	pkgJSON, err := json.Marshal(Package{
-		Kind:          AppPackageKind,
-		SchemaVersion: AppPackageSchemaVersion,
-		App: PackageApp{
+		Kind:          PluginPackageKind,
+		SchemaVersion: PluginPackageSchemaVersion,
+		Plugin: PackagePlugin{
 			ID:          id,
 			Name:        entry.Name,
 			Version:     version,
 			Description: entry.Description,
 		},
-		Files: []PackageFile{{Path: AppFileName, Content: string(manifestYAML)}},
+		Files: []PackageFile{{Path: PluginFileName, Content: string(manifestYAML)}},
 	})
 	if err != nil {
 		return nil, err
@@ -190,10 +190,10 @@ func (s *Service) saveMCPApp(ctx context.Context, id string, entry mcpConfigEntr
 		Headers: cloneStringMap(entry.Endpoint.Headers),
 	}
 	if len(override.Env) == 0 && len(override.Headers) == 0 {
-		if err := s.DeleteMCPOverride(ctx, id, mcpAppEndpointName); err != nil {
+		if err := s.DeleteMCPOverride(ctx, id, mcpPluginEndpointName); err != nil {
 			return nil, err
 		}
-	} else if _, err := s.PutMCPOverride(ctx, id, mcpAppEndpointName, override); err != nil {
+	} else if _, err := s.PutMCPOverride(ctx, id, mcpPluginEndpointName, override); err != nil {
 		return nil, err
 	}
 	return s.definition(ctx, id)
@@ -201,22 +201,22 @@ func (s *Service) saveMCPApp(ctx context.Context, id string, entry mcpConfigEntr
 
 func parseMCPServersConfig(data []byte) ([]mcpConfigEntry, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
-		return nil, fmt.Errorf("%w: JSON is required", ErrInvalidMCPAppConfig)
+		return nil, fmt.Errorf("%w: JSON is required", ErrInvalidMCPPluginConfig)
 	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidMCPAppConfig, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidMCPPluginConfig, err)
 	}
 	rawServers, ok := root["mcpServers"]
 	if !ok {
-		return nil, fmt.Errorf("%w: mcpServers is required", ErrInvalidMCPAppConfig)
+		return nil, fmt.Errorf("%w: mcpServers is required", ErrInvalidMCPPluginConfig)
 	}
 	var servers map[string]MCPServerConfig
 	if err := json.Unmarshal(rawServers, &servers); err != nil {
-		return nil, fmt.Errorf("%w: mcpServers: %v", ErrInvalidMCPAppConfig, err)
+		return nil, fmt.Errorf("%w: mcpServers: %v", ErrInvalidMCPPluginConfig, err)
 	}
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("%w: mcpServers cannot be empty", ErrInvalidMCPAppConfig)
+		return nil, fmt.Errorf("%w: mcpServers cannot be empty", ErrInvalidMCPPluginConfig)
 	}
 	names := make([]string, 0, len(servers))
 	for name := range servers {
@@ -227,18 +227,18 @@ func parseMCPServersConfig(data []byte) ([]mcpConfigEntry, error) {
 	seenNames := make(map[string]struct{}, len(names))
 	for _, rawName := range names {
 		name := strings.TrimSpace(rawName)
-		if err := validateMCPAppName(name); err != nil {
+		if err := validateMCPPluginName(name); err != nil {
 			return nil, err
 		}
 		nameKey := strings.ToLower(name)
 		if _, exists := seenNames[nameKey]; exists {
-			return nil, fmt.Errorf("%w: duplicate server name %q", ErrInvalidMCPAppConfig, name)
+			return nil, fmt.Errorf("%w: duplicate server name %q", ErrInvalidMCPPluginConfig, name)
 		}
 		seenNames[nameKey] = struct{}{}
 		server := servers[rawName]
 		endpoint, err := endpointFromMCPServerConfig(server)
 		if err != nil {
-			return nil, fmt.Errorf("%w: server %q: %v", ErrInvalidMCPAppConfig, name, err)
+			return nil, fmt.Errorf("%w: server %q: %v", ErrInvalidMCPPluginConfig, name, err)
 		}
 		entries = append(entries, mcpConfigEntry{
 			Name:        name,
@@ -249,12 +249,12 @@ func parseMCPServersConfig(data []byte) ([]mcpConfigEntry, error) {
 	return entries, nil
 }
 
-func validateMCPAppName(name string) error {
+func validateMCPPluginName(name string) error {
 	if name == "" {
-		return fmt.Errorf("%w: server name is required", ErrInvalidMCPAppConfig)
+		return fmt.Errorf("%w: server name is required", ErrInvalidMCPPluginConfig)
 	}
 	if utf8.RuneCountInString(name) > 128 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		return fmt.Errorf("%w: server name %q is invalid", ErrInvalidMCPAppConfig, name)
+		return fmt.Errorf("%w: server name %q is invalid", ErrInvalidMCPPluginConfig, name)
 	}
 	return nil
 }
@@ -335,8 +335,8 @@ func mcpServerConfigFromEndpoint(description string, endpoint Endpoint) MCPServe
 	}
 }
 
-func availableMCPAppID(name string, occupied map[string]*Definition) (string, bool) {
-	base := "mcp-" + mcpAppSlug(name)
+func availableMCPPluginID(name string, occupied map[string]*Definition) (string, bool) {
+	base := "mcp-" + mcpPluginSlug(name)
 	for suffix := 1; ; suffix++ {
 		candidate := base
 		if suffix > 1 {
@@ -352,7 +352,7 @@ func availableMCPAppID(name string, occupied map[string]*Definition) (string, bo
 	}
 }
 
-func mcpAppSlug(name string) string {
+func mcpPluginSlug(name string) string {
 	var out strings.Builder
 	lastDash := false
 	for _, r := range strings.ToLower(strings.TrimSpace(name)) {

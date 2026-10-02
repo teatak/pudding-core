@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/api"
-	appsvc "github.com/teatak/pudding-core/internal/app"
-	"github.com/teatak/pudding-core/internal/appexec"
 	audioasr "github.com/teatak/pudding-core/internal/audio/asr"
 	sherpaasr "github.com/teatak/pudding-core/internal/audio/asr/sherpa"
 	audiodriver "github.com/teatak/pudding-core/internal/audio/driver"
@@ -41,6 +39,8 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/lsp"
+	appsvc "github.com/teatak/pudding-core/internal/plugin"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -142,7 +142,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	apps := appsvc.NewService(dir, cfg)
+	plugins := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
 	browserService, err := newBrowserService(dir, st)
 	if err != nil {
@@ -156,8 +156,8 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	browserMCP := tool.NewBrowserMCPRunner(dir)
-	apps.WithRuntimeSource(browserMCP)
-	appMCP := tool.NewAppMCPRunner(apps)
+	plugins.WithRuntimeSource(browserMCP)
+	pluginMCP := tool.NewPluginMCPRunner(plugins)
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
 	languageServers := lsp.NewManager()
@@ -184,13 +184,13 @@ func Start(opts Options) (*Daemon, error) {
 			Payload:   payload,
 		})
 	}
-	appHTTP := appexec.New(nil)
+	pluginHTTP := pluginexec.New(nil)
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithAppExecutor(appHTTP), tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithCanvasResources(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithPluginExecutor(pluginHTTP), tool.WithWebConfig(cfg), tool.WithPluginEndpoints(plugins), tool.WithPluginAuthoring(plugins), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithStudioItems(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithComputer(computerController), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
-		appMCP,
+		pluginMCP,
 	)
-	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoaderWithApps(dir, apps, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithApps(apps), engine.WithSkills(skills))
+	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoaderWithPlugins(dir, plugins, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithPlugins(plugins), engine.WithSkills(skills))
 	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
 		Manager:   voice.NewManager(),
@@ -219,7 +219,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithAppExecutor(appHTTP).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithPluginExecutor(pluginHTTP).WithHome(dir).WithPlugins(plugins).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,

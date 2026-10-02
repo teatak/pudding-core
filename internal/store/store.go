@@ -52,11 +52,11 @@ type Session struct {
 	ModeLease         ModeLease `json:"modeLease"`
 	// ProjectID 指向项目目录与审批设置的唯一事实源。
 	ProjectID string `json:"projectID,omitempty"`
-	// LoadedAppIDs 是当前会话已经加载、会向后续 turn 提供工具的 App。
-	// 对客户端只读；写入仍只允许通过显式的 session App 接口。
-	LoadedAppIDs []string  `json:"loadedAppIDs,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	// LoadedPluginIDs 是当前会话已经加载、会向后续 turn 提供工具的插件。
+	// 对客户端只读；写入仍只允许通过显式的 session 插件接口。
+	LoadedPluginIDs []string  `json:"loadedPluginIDs,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
 	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
 	LastActivityAt time.Time  `json:"lastActivityAt"`
@@ -79,7 +79,7 @@ type SessionUpdate struct {
 	ActiveMode      *AgentMode `json:"activeMode"`
 	ModeLease       *ModeLease `json:"modeLease"`
 	ProjectID       *string    `json:"projectID"`
-	LoadedAppIDs    *[]string  `json:"-"`
+	LoadedPluginIDs *[]string  `json:"-"`
 	Pinned          *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
@@ -267,7 +267,7 @@ func NormalizeSessionProviderModel(s *Session) error {
 	if s.ModeLease == ModeLeaseNone {
 		s.ActiveMode = ModeChat
 	}
-	s.LoadedAppIDs = NormalizeAppIDs(s.LoadedAppIDs)
+	s.LoadedPluginIDs = NormalizePluginIDs(s.LoadedPluginIDs)
 	return nil
 }
 
@@ -318,14 +318,14 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 			upd.ModeLease = &lease
 		}
 	}
-	if upd.LoadedAppIDs != nil {
-		ids := NormalizeAppIDs(*upd.LoadedAppIDs)
-		upd.LoadedAppIDs = &ids
+	if upd.LoadedPluginIDs != nil {
+		ids := NormalizePluginIDs(*upd.LoadedPluginIDs)
+		upd.LoadedPluginIDs = &ids
 	}
 	return nil
 }
 
-func NormalizeAppIDs(ids []string) []string {
+func NormalizePluginIDs(ids []string) []string {
 	seen := make(map[string]bool, len(ids))
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -1519,7 +1519,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 		case ContentPartUIContext:
 			part.Surface = strings.TrimSpace(part.Surface)
 			switch part.Surface {
-			case "project", "canvas", "browser", "terminal", "file_preview":
+			case "project", "studio", "browser", "terminal", "file_preview":
 			default:
 				continue
 			}
@@ -1528,7 +1528,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			}
 			part.Resource = strings.TrimSpace(part.Resource)
 			switch part.Resource {
-			case "", "project_file", "project_diff", "canvas_item", "browser_tab", "terminal", "file":
+			case "", "project_file", "project_diff", "studio_item", "browser_tab", "terminal", "file":
 			default:
 				part.Resource = ""
 			}
@@ -2142,7 +2142,7 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 	return s.CumulativeInputTokens() + s.CumulativeOutputTokens()
 }
 
-type CanvasItem struct {
+type StudioMount struct {
 	ID                 string    `json:"id"`
 	SessionID          string    `json:"sessionID"`
 	SourceSessionID    string    `json:"sourceSessionID,omitempty"`
@@ -2152,14 +2152,14 @@ type CanvasItem struct {
 	Title              string    `json:"title,omitempty"`
 	Icon               string    `json:"icon,omitempty"`
 	IconColor          string    `json:"iconColor,omitempty"`
-	ResourceID         string    `json:"resourceID"`
+	ItemID             string    `json:"itemID"`
 	Revision           int64     `json:"revision"`
 	Visible            bool      `json:"visible"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-// LibraryFavorite refers to one canonical canvas resource or a web bookmark.
+// LibraryFavorite refers to one canonical Studio item or a web bookmark.
 type LibraryFavorite struct {
 	ID              string    `json:"id"`
 	Kind            string    `json:"kind"`
@@ -2292,7 +2292,7 @@ func browserHistoryVisibleURL(rawURL string) string {
 // 事件 seq 由 Store 在事务内按 session 单调分配。
 // SQLite 实现要求 WAL + 单 writer;schema 契约见 schema.sql。
 type Store interface {
-	CanvasStore
+	StudioStore
 	ScheduledTaskStore
 	CreateProject(ctx context.Context, p *Project) error
 	GetProject(ctx context.Context, id string) (*Project, error)
@@ -2408,12 +2408,12 @@ type Store interface {
 	// 服务无续传位点的全新 SSE 连接从尾部开始(tail)。
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 
-	ListCanvasItems(ctx context.Context, actorSessionID string) ([]*CanvasItem, error)
-	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
+	ListStudioMounts(ctx context.Context, actorSessionID string) ([]*StudioMount, error)
+	DeleteStudioMount(ctx context.Context, actorSessionID, mountID string) error
 	ListLibraryFavorites(ctx context.Context, actorSessionID string) ([]*LibraryFavorite, error)
 	PutLibraryFavorite(ctx context.Context, actorSessionID string, favorite LibraryFavorite) error
 	DeleteLibraryFavorite(ctx context.Context, actorSessionID, id string) error
-	OpenCanvasResource(ctx context.Context, actorSessionID, resourceID, itemID string) (*CanvasItem, error)
+	OpenStudioItem(ctx context.Context, actorSessionID, itemID, mountID string) (*StudioMount, error)
 
 	GetBrowserState(ctx context.Context, sessionID string) (*BrowserState, error)
 	GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*BrowserState, error)

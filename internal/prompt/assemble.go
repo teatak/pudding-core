@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -37,14 +37,14 @@ type Segment struct {
 }
 
 type Input struct {
-	UserInstruction string
-	Mode            string
-	Home            string
-	Skills          []skill.Skill
-	Apps            []*app.Definition
-	AppConnections  []*app.Connection
-	LoadedAppIDs    []string
-	RuntimeNow      time.Time
+	UserInstruction   string
+	Mode              string
+	Home              string
+	Skills            []skill.Skill
+	Plugins           []*plugin.Definition
+	PluginConnections []*plugin.Connection
+	LoadedPluginIDs   []string
+	RuntimeNow        time.Time
 }
 
 type Output struct {
@@ -55,40 +55,40 @@ type Output struct {
 type Loader struct {
 	home        string
 	skills      SkillLister
-	apps        AppLister
-	connections app.ConnectionSource
+	plugins     PluginLister
+	connections plugin.ConnectionSource
 }
 
-func NewLoader(home string, connections ...app.ConnectionSource) *Loader {
-	var source app.ConnectionSource
+func NewLoader(home string, connections ...plugin.ConnectionSource) *Loader {
+	var source plugin.ConnectionSource
 	if len(connections) > 0 {
 		source = connections[0]
 	}
-	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, source), connections: source}
+	return &Loader{home: home, skills: skill.NewService(home), plugins: plugin.NewService(home, source), connections: source}
 }
 
-func NewLoaderWithApps(home string, apps AppLister, connections app.ConnectionSource) *Loader {
-	return &Loader{home: home, skills: skill.NewService(home), apps: apps, connections: connections}
+func NewLoaderWithPlugins(home string, plugins PluginLister, connections plugin.ConnectionSource) *Loader {
+	return &Loader{home: home, skills: skill.NewService(home), plugins: plugins, connections: connections}
 }
 
 type SkillLister interface {
 	ListSkills(ctx context.Context) ([]skill.Skill, error)
 }
 
-type AppLister interface {
-	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+type PluginLister interface {
+	ListDefinitions(ctx context.Context) ([]*plugin.Definition, error)
 }
 
 func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 	return l.prompt(ctx, mode, nil)
 }
 
-// PromptWithLoadedApps assembles the prompt with session-owned App load state.
-func (l *Loader) PromptWithLoadedApps(ctx context.Context, mode string, loadedAppIDs []string) (Output, error) {
-	return l.prompt(ctx, mode, loadedAppIDs)
+// PromptWithLoadedPlugins assembles the prompt with session-owned plugin load state.
+func (l *Loader) PromptWithLoadedPlugins(ctx context.Context, mode string, loadedPluginIDs []string) (Output, error) {
+	return l.prompt(ctx, mode, loadedPluginIDs)
 }
 
-func (l *Loader) prompt(ctx context.Context, mode string, loadedAppIDs []string) (Output, error) {
+func (l *Loader) prompt(ctx context.Context, mode string, loadedPluginIDs []string) (Output, error) {
 	user, err := LoadUserInstruction(l.home)
 	if err != nil {
 		return Output{}, err
@@ -102,25 +102,25 @@ func (l *Loader) prompt(ctx context.Context, mode string, loadedAppIDs []string)
 			skills = loaded
 		}
 	}
-	var apps []*app.Definition
-	if l.apps != nil {
-		loaded, err := l.apps.ListDefinitions(ctx)
+	var plugins []*plugin.Definition
+	if l.plugins != nil {
+		loaded, err := l.plugins.ListDefinitions(ctx)
 		if err != nil {
-			slog.Warn("prompt: load apps failed", "error", err)
+			slog.Warn("prompt: load plugins failed", "error", err)
 		} else {
-			apps = loaded
+			plugins = loaded
 		}
 	}
-	var connections []*app.Connection
+	var connections []*plugin.Connection
 	if l.connections != nil {
-		loaded, err := l.connections.ListAppConnections(ctx)
+		loaded, err := l.connections.ListPluginConnections(ctx)
 		if err != nil {
-			slog.Warn("prompt: load app connections failed", "error", err)
+			slog.Warn("prompt: load plugin connections failed", "error", err)
 		} else {
 			connections = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, AppConnections: connections, LoadedAppIDs: loadedAppIDs, RuntimeNow: time.Now()}), nil
+	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Plugins: plugins, PluginConnections: connections, LoadedPluginIDs: loadedPluginIDs, RuntimeNow: time.Now()}), nil
 }
 
 func Assemble(input Input) Output {
@@ -134,7 +134,7 @@ func Assemble(input Input) Output {
 	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
-	if seg := appsSegment(input.Apps, input.AppConnections, input.LoadedAppIDs); seg != nil {
+	if seg := pluginsSegment(input.Plugins, input.PluginConnections, input.LoadedPluginIDs); seg != nil {
 		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
@@ -165,8 +165,8 @@ func runtimeSegment(now time.Time) Segment {
 	return Segment{ID: "runtime_context", Layer: "runtime", Content: content}
 }
 
-func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAppIDs []string) *Segment {
-	enabled := make([]*app.Definition, 0, len(list))
+func pluginsSegment(list []*plugin.Definition, connections []*plugin.Connection, loadedPluginIDs []string) *Segment {
+	enabled := make([]*plugin.Definition, 0, len(list))
 	for _, item := range list {
 		if item != nil && item.Enabled && strings.TrimSpace(item.ID) != "" {
 			enabled = append(enabled, item)
@@ -175,23 +175,23 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 	if len(enabled) == 0 {
 		return nil
 	}
-	connectionCounts := appConnectionCounts(connections)
-	loaded := make(map[string]bool, len(loadedAppIDs))
-	for _, id := range loadedAppIDs {
+	connectionCounts := pluginConnectionCounts(connections)
+	loaded := make(map[string]bool, len(loadedPluginIDs))
+	for _, id := range loadedPluginIDs {
 		if id = strings.TrimSpace(id); id != "" {
 			loaded[id] = true
 		}
 	}
 	var b strings.Builder
-	b.WriteString("## Available Apps\n\n")
-	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
-	b.WriteString("An App's `requires` label is its minimum capability, not an exact mode. Code includes Work, and Work includes Chat. When the current mode already satisfies the minimum, load the App directly without requesting another capability.\n")
-	b.WriteString("When an unloaded app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
-	b.WriteString("Apps marked `loaded for this session` are already active. Do not call `builtin_app_load` again for their default skill; if the current mode is below the App's required capability, request that capability instead. Reload only when intentionally selecting a different `skill_id`.\n")
-	b.WriteString("Selected App skills are references resolved to their current registered instructions in tool results on every model request, including after compaction. Loading another skill of the same App supersedes its prior selection. Unloading removes its active instructions as well as its tools.\n")
-	b.WriteString("After an App is no longer relevant to the current task, call `builtin_app_unload(app_id=\"<loaded app id>\")` to remove its tools from later model steps. This does not uninstall the App or delete its connections.\n")
-	b.WriteString("Apps and global skills use separate paths. Never use `builtin_skill_read` to load an App, including Browser or Canvas.\n")
-	b.WriteString("Do not load unrelated apps. Apps marked `not connected` cannot be loaded until a connection is added.\n\n")
+	b.WriteString("## Available Plugins\n\n")
+	b.WriteString("Enabled plugins are listed here as a compact capability index. Their tools are not loaded by default.\n")
+	b.WriteString("A plugin's `requires` label is its minimum capability, not an exact mode. Code includes Work, and Work includes Chat. When the current mode already satisfies the minimum, load the plugin directly without requesting another capability.\n")
+	b.WriteString("When an unloaded plugin matches the user's request, first request its required capability if needed, then call `builtin_plugin_load(plugin_id=\"<plugin id>\")`. The call returns the plugin's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default plugin skill clearly matches better.\n")
+	b.WriteString("Plugins marked `loaded for this session` are already active. Do not call `builtin_plugin_load` again for their default skill; if the current mode is below the plugin's required capability, request that capability instead. Reload only when intentionally selecting a different `skill_id`.\n")
+	b.WriteString("Selected plugin skills are references resolved to their current registered instructions in tool results on every model request, including after compaction. Loading another skill of the same plugin supersedes its prior selection. Unloading removes its active instructions as well as its tools.\n")
+	b.WriteString("After a plugin is no longer relevant to the current task, call `builtin_plugin_unload(plugin_id=\"<loaded plugin id>\")` to remove its tools from later model steps. This does not uninstall the plugin or delete its connections.\n")
+	b.WriteString("Plugins and global skills use separate paths. Never use `builtin_skill_read` to load a plugin, including Browser or Widget Authoring.\n")
+	b.WriteString("Do not load unrelated plugins. Plugins marked `not connected` cannot be loaded until a connection is added.\n\n")
 	for _, item := range enabled {
 		id := strings.TrimSpace(item.ID)
 		name := strings.TrimSpace(item.Name)
@@ -205,19 +205,19 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 		}
 		modeLabel := strings.ToUpper(requiredMode[:1]) + requiredMode[1:]
 		if desc != "" {
-			fmt.Fprintf(&b, "- App `%s` (%s), requires %s — %s\n", id, name, modeLabel, desc)
+			fmt.Fprintf(&b, "- Plugin `%s` (%s), requires %s — %s\n", id, name, modeLabel, desc)
 		} else {
-			fmt.Fprintf(&b, "- App `%s` (%s), requires %s\n", id, name, modeLabel)
+			fmt.Fprintf(&b, "- Plugin `%s` (%s), requires %s\n", id, name, modeLabel)
 		}
-		if !appPromptUsable(item, connectionCounts) {
-			fmt.Fprintf(&b, "  - Status: not connected. Add a connection before using this app.\n")
+		if !pluginPromptUsable(item, connectionCounts) {
+			fmt.Fprintf(&b, "  - Status: not connected. Add a connection before using this plugin.\n")
 			continue
 		}
 		if loaded[id] {
 			fmt.Fprintf(&b, "  - Status: loaded for this session.\n")
 		}
 		for _, connection := range connections {
-			if connection == nil || connection.AppID != id || app.ViewConnection(connection).ReauthorizationRequired {
+			if connection == nil || connection.PluginID != id || plugin.ViewConnection(connection).ReauthorizationRequired {
 				continue
 			}
 			connectionID := strings.TrimSpace(connection.ID)
@@ -243,7 +243,7 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 			}
 			b.WriteByte('\n')
 		}
-		skillID, skillDescription := defaultAppSkill(item)
+		skillID, skillDescription := defaultPluginSkill(item)
 		if skillID != "" {
 			fmt.Fprintf(&b, "  - Default skill `%s`", skillID)
 			if skillDescription != "" {
@@ -256,20 +256,20 @@ func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAp
 	if content == "" {
 		return nil
 	}
-	return &Segment{ID: "apps_index", Layer: "app", Content: content}
+	return &Segment{ID: "plugins_index", Layer: "plugin", Content: content}
 }
 
-func appPromptUsable(def *app.Definition, connectionCounts map[string]int) bool {
+func pluginPromptUsable(def *plugin.Definition, connectionCounts map[string]int) bool {
 	if def == nil || !def.Enabled {
 		return false
 	}
-	if !appRequiresConnection(def) {
+	if !pluginRequiresConnection(def) {
 		return true
 	}
 	return connectionCounts[strings.TrimSpace(def.ID)] > 0
 }
 
-func defaultAppSkill(def *app.Definition) (string, string) {
+func defaultPluginSkill(def *plugin.Definition) (string, string) {
 	if def == nil {
 		return "", ""
 	}
@@ -291,7 +291,7 @@ func defaultAppSkill(def *app.Definition) (string, string) {
 	return id, ""
 }
 
-func appRequiresConnection(def *app.Definition) bool {
+func pluginRequiresConnection(def *plugin.Definition) bool {
 	if def == nil {
 		return false
 	}
@@ -309,14 +309,14 @@ func appRequiresConnection(def *app.Definition) bool {
 	return false
 }
 
-func appConnectionCounts(connections []*app.Connection) map[string]int {
+func pluginConnectionCounts(connections []*plugin.Connection) map[string]int {
 	out := map[string]int{}
 	for _, conn := range connections {
-		if conn == nil || app.ViewConnection(conn).ReauthorizationRequired {
+		if conn == nil || plugin.ViewConnection(conn).ReauthorizationRequired {
 			continue
 		}
-		if appID := strings.TrimSpace(conn.AppID); appID != "" {
-			out[appID]++
+		if pluginID := strings.TrimSpace(conn.PluginID); pluginID != "" {
+			out[pluginID]++
 		}
 	}
 	return out

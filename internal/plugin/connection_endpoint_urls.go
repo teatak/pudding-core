@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 // their private MCP override configuration.
 func NormalizeConnectionEndpointURLs(def *Definition, values map[string]string) (map[string]string, error) {
 	if def == nil {
-		return nil, fmt.Errorf("app definition is required")
+		return nil, fmt.Errorf("plugin definition is required")
 	}
 	out := make(map[string]string, len(values))
 	for rawName, rawValue := range values {
@@ -22,7 +22,7 @@ func NormalizeConnectionEndpointURLs(def *Definition, values map[string]string) 
 		}
 		endpoint, ok := def.Endpoints[name]
 		if !ok {
-			return nil, fmt.Errorf("endpoint %s is not defined by app", name)
+			return nil, fmt.Errorf("endpoint %s is not defined by plugin", name)
 		}
 		if endpoint.Kind != EndpointKindREST && endpoint.Kind != EndpointKindGraphQL {
 			return nil, fmt.Errorf("endpoint %s does not support a connection URL override", name)

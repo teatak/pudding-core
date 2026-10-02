@@ -1,6 +1,6 @@
-// Package canvas validates immutable, generated canvas source packages.
+// Package widget validates immutable, generated widget source packages.
 // Generated code is never evaluated by Core.
-package canvas
+package widget
 
 import (
 	"bytes"
@@ -20,13 +20,16 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 )
 
+// ManifestFile declares a widget package's entry, plugin sources and operations.
+const ManifestFile = "widget.json"
+
 var identifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,79}$`)
 var sourceFileName = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
 var revisionID = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var graphqlUnsafeOperation = regexp.MustCompile(`\b(mutation|subscription)\b`)
 
 type Source struct {
-	AppID    string `json:"appID"`
+	PluginID string `json:"pluginID"`
 	Endpoint string `json:"endpoint"`
 }
 type Request struct {
@@ -84,7 +87,7 @@ func DecodeStrict(data []byte, target any) error {
 
 func (p Package) Validate() (Manifest, string, error) {
 	var m Manifest
-	policy := contracts.Canvas()
+	policy := contracts.Widget()
 	if len(p.Files) == 0 || len(p.Files) > policy.MaxFiles {
 		return m, "", errors.New("invalid package file count")
 	}
@@ -98,11 +101,11 @@ func (p Package) Validate() (Manifest, string, error) {
 			return m, "", errors.New("package exceeds size limit")
 		}
 	}
-	if err := DecodeStrict([]byte(p.Files["canvas.json"]), &m); err != nil {
-		return m, "", fmt.Errorf("canvas.json: %w", err)
+	if err := DecodeStrict([]byte(p.Files[ManifestFile]), &m); err != nil {
+		return m, "", fmt.Errorf("widget.json: %w", err)
 	}
 	if m.SchemaVersion != policy.SchemaVersion || m.SDKVersion != policy.SDKVersion {
-		return m, "", errors.New("unsupported canvas or SDK version")
+		return m, "", errors.New("unsupported widget or SDK version")
 	}
 	if !strings.HasPrefix(m.Entry, "src/") || !strings.HasSuffix(m.Entry, ".tsx") || p.Files[m.Entry] == "" {
 		return m, "", errors.New("entry must reference an existing src/*.tsx file")
@@ -111,7 +114,7 @@ func (p Package) Validate() (Manifest, string, error) {
 		return m, "", errors.New("too many sources or operations")
 	}
 	for id, source := range m.Sources {
-		if !identifier.MatchString(id) || !identifier.MatchString(source.AppID) || !identifier.MatchString(source.Endpoint) {
+		if !identifier.MatchString(id) || !identifier.MatchString(source.PluginID) || !identifier.MatchString(source.Endpoint) {
 			return m, "", fmt.Errorf("invalid source %q", id)
 		}
 	}
@@ -137,7 +140,7 @@ func ValidFilePath(name string) bool {
 	if !sourceFileName.MatchString(name) || len(name) > 240 || strings.ContainsAny(name, "\\\x00") || path.Clean(name) != name || strings.HasPrefix(name, "/") {
 		return false
 	}
-	if name == "canvas.json" {
+	if name == ManifestFile {
 		return true
 	}
 	if !strings.HasPrefix(name, "src/") && !strings.HasPrefix(name, "fixtures/") && !strings.HasPrefix(name, "assets/") {
@@ -201,7 +204,7 @@ func (o Operation) Validate() error {
 func validateRelativePath(value string) error {
 	u, err := url.Parse(value)
 	if err != nil || value == "" || u.IsAbs() || u.Host != "" || u.RawQuery != "" || u.Fragment != "" || strings.HasPrefix(value, "//") || strings.Contains(value, "\\") {
-		return errors.New("path must stay within the App endpoint")
+		return errors.New("path must stay within the plugin endpoint")
 	}
 	for _, segment := range strings.Split(u.Path, "/") {
 		if segment == ".." || segment == "." {
@@ -285,7 +288,7 @@ func transform(request Request, input map[string]any, validate bool) (any, error
 }
 
 func transformValue(value any, input map[string]any, validate bool, depth int) (any, error) {
-	if depth > contracts.Canvas().MaxSchemaDepth {
+	if depth > contracts.Widget().MaxSchemaDepth {
 		return nil, errors.New("request template too deep")
 	}
 	switch v := value.(type) {

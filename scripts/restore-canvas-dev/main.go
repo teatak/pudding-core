@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/canvaslegacy"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -99,7 +98,7 @@ func restore(home, archives, assets string) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", s.ID, err)
 			}
-			hash, err := canvas.WritePackage(home, s.ID, p)
+			hash, err := canvaslegacy.WritePackage(home, s.ID, p)
 			if err != nil {
 				return err
 			}

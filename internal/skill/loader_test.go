@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestAppOwnedBuiltinSkillsAreExcludedFromGlobalCatalog(t *testing.T) {
+func TestPluginOwnedBuiltinSkillsAreExcludedFromGlobalCatalog(t *testing.T) {
 	skills, err := LoadBuiltinSkills()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, item := range skills {
-		if item.ID == "skill-creator" || item.ID == "app-creator" {
+		if item.ID == "skill-creator" || item.ID == "plugin-creator" {
 			t.Fatalf("App-owned Skill leaked into global catalog: %+v", item)
 		}
 	}
@@ -95,7 +95,7 @@ func TestServiceRejectsSymlinkedUserSkillsRoot(t *testing.T) {
 	}
 }
 
-func TestAppSkillIDDoesNotReserveGlobalSkillNamespace(t *testing.T) {
+func TestPluginSkillIDDoesNotReserveGlobalSkillNamespace(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "skills", "skill-creator")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

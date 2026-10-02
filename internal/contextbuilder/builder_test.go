@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -21,11 +21,11 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-type testAppLister struct {
-	definitions []*app.Definition
+type testPluginLister struct {
+	definitions []*plugin.Definition
 }
 
-func (l *testAppLister) ListDefinitions(context.Context) ([]*app.Definition, error) {
+func (l *testPluginLister) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
 	return l.definitions, nil
 }
 
@@ -59,26 +59,26 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildMarksSessionLoadedAppsInPrompt(t *testing.T) {
+func TestBuildMarksSessionLoadedPluginsInPrompt(t *testing.T) {
 	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:           "s1",
-		Provider:     "mock",
-		Model:        "mock",
-		LoadedAppIDs: []string{"github"},
+		ID:              "s1",
+		Provider:        "mock",
+		Model:           "mock",
+		LoadedPluginIDs: []string{"github"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	apps := &testAppLister{definitions: []*app.Definition{{
+	plugins := &testPluginLister{definitions: []*plugin.Definition{{
 		ID:             "github",
 		Name:           "GitHub",
 		Enabled:        true,
 		RequiredMode:   "work",
 		DefaultSkillID: "github-issues",
-		Skills:         []app.SkillRef{{ID: "github-issues"}},
+		Skills:         []plugin.SkillRef{{ID: "github-issues"}},
 	}}}
-	b := New(ms, prompt.NewLoaderWithApps(t.TempDir(), apps, nil))
+	b := New(ms, prompt.NewLoaderWithPlugins(t.TempDir(), plugins, nil))
 
 	req, err := b.Build(ctx, "s1", "m", string(store.ModeWork))
 	if err != nil {
@@ -89,7 +89,7 @@ func TestBuildMarksSessionLoadedAppsInPrompt(t *testing.T) {
 	}
 
 	loaded := []string{}
-	if _, err := ms.UpdateSession(ctx, "s1", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+	if _, err := ms.UpdateSession(ctx, "s1", store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
 	req, err = b.Build(ctx, "s1", "m", string(store.ModeWork))

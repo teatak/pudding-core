@@ -11,8 +11,8 @@ import (
 	"html"
 	"strings"
 
-	"github.com/teatak/pudding-core/internal/canvas"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/widget"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -35,15 +35,15 @@ var missingImage = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToStr
 
 // Convert preserves content as source, with no requests or executable legacy HTML.
 // Asset resolution is explicit so migration tests never use the network.
-func Convert(content store.CanvasContent, image func(string) (string, error)) (canvas.Package, error) {
+func Convert(content store.CanvasContent, image func(string) (string, error)) (widget.Package, error) {
 	var item map[string]any
 	if err := json.Unmarshal(content.Item, &item); err != nil {
-		return canvas.Package{}, err
+		return widget.Package{}, err
 	}
 	g := generator{files: map[string]string{"canvas.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`, "src/style.css": stylesheet, "src/styles.d.ts": "declare module '*.css';\n"}, image: image}
 	body, err := g.render(content.Kind, item, 0)
 	if err != nil {
-		return canvas.Package{}, err
+		return widget.Package{}, err
 	}
 	imports := `/// <reference path="./styles.d.ts" />
 import "./style.css";` + "\n"
@@ -54,9 +54,8 @@ import "./style.css";` + "\n"
 		imports += "import { Chart } from './Chart';\n"
 	}
 	g.files["src/App.tsx"] = imports + "\nexport default function App() {\n  return <main className=\"canvas-content\">\n<h1>" + expr(content.Title) + "</h1>\n" + body + "\n</main>;\n}\n"
-	p := canvas.Package{Files: g.files}
-	_, _, err = p.Validate()
-	return p, err
+	p := widget.Package{Files: g.files}
+	return p, validate(p)
 }
 
 type generator struct {

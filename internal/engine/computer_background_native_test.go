@@ -111,7 +111,7 @@ func TestBackgroundCalendarEngineIntegration(t *testing.T) {
 	client := &backgroundEngineClient{step: func(_ context.Context, req provider.Request, step int) (<-chan provider.Chunk, error) {
 		switch step {
 		case 1:
-			return smokeToolStream("load", tool.AppLoad, `{"app_id":"computer-use"}`), nil
+			return smokeToolStream("load", tool.PluginLoad, `{"plugin_id":"computer-use"}`), nil
 		case 2:
 			return smokeToolStream("use", tool.ComputerUseApp, `{"appID":"com.apple.iCal","foreground":false}`), nil
 		case 3:

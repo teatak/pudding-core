@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 26
+	currentSchemaVersion       = 27
 )
 
 var (
@@ -33,6 +33,7 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	27: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
 	26: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE canvas_resources ADD COLUMN icon TEXT NOT NULL DEFAULT '';
 ALTER TABLE canvas_resources ADD COLUMN icon_color TEXT NOT NULL DEFAULT '';`)
@@ -527,11 +528,11 @@ func removeLoadedAppIDs(tx *sql.Tx, removedIDs ...string) error {
 	if err != nil {
 		return err
 	}
-	type sessionApps struct {
+	type sessionPlugins struct {
 		id  string
 		ids []string
 	}
-	updates := make([]sessionApps, 0)
+	updates := make([]sessionPlugins, 0)
 	for rows.Next() {
 		var id, raw string
 		if err := rows.Scan(&id, &raw); err != nil {
@@ -553,7 +554,7 @@ func removeLoadedAppIDs(tx *sql.Tx, removedIDs ...string) error {
 			filtered = append(filtered, appID)
 		}
 		if changed {
-			updates = append(updates, sessionApps{id: id, ids: store.NormalizeAppIDs(filtered)})
+			updates = append(updates, sessionPlugins{id: id, ids: store.NormalizePluginIDs(filtered)})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -671,6 +672,9 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 			migration := schemaMigrations[next]
 			if next == 25 {
 				migration = func(tx *sql.Tx) error { return migrateFinalCanvases(tx, sourceHome) }
+			}
+			if next == 27 {
+				migration = func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, sourceHome) }
 			}
 			if err := runSchemaMigration(db, next, migration); err != nil {
 				return err
@@ -911,23 +915,23 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
-		"session_children":     {"child_session_id", "parent_session_id"},
-		"session_dispatches":   {"child_session_id", "parent_turn_id", "call_id"},
-		"collaboration_stops":  {"parent_turn_id"},
-		"canvas_resources":     {"id", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
-		"canvas_revisions":     {"canvas_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
-		"canvas_links":         {"id", "canvas_id", "left_entity", "right_entity", "created_at"},
-		"canvas_actions":       {"id", "canvas_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
-		"canvas_saves":         {"canvas_id", "client_request_id", "hash"},
-		"scheduled_tasks":      {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
-		"scheduled_task_runs":  {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
-		"computer_app_grants":  {"session_id", "app_id", "created_at"},
-		"library_favorites":    {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
-		"library_recent_opens": {"id", "kind", "source_session_id", "canvas_item_id", "root_path", "path", "opened_at"},
+		"session_children":      {"child_session_id", "parent_session_id"},
+		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
+		"collaboration_stops":   {"parent_turn_id"},
+		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
+		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
+		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
+		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
+		"studio_item_saves":     {"item_id", "client_request_id", "hash"},
+		"scheduled_tasks":       {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
+		"scheduled_task_runs":   {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
+		"computer_app_grants":   {"session_id", "app_id", "created_at"},
+		"library_favorites":     {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
+		"library_recent_opens":  {"id", "kind", "source_session_id", "studio_mount_id", "root_path", "path", "opened_at"},
 	})
 	delete(out.tables, "canvas_items")
 	delete(out.tables, "canvas_saved_items")
-	out.tables["canvas_mounts"] = []string{"session_id", "id", "resource_id", "visible", "created_at"}
+	out.tables["studio_mounts"] = []string{"session_id", "id", "item_id", "visible", "created_at"}
 	out.indexes = slices.DeleteFunc(out.indexes, func(v string) bool { return strings.HasPrefix(v, "canvas_") })
 	delete(out.tables, "usage_calibrations")
 	delete(out.tables, "canvas_closed_items")
@@ -939,14 +943,15 @@ var currentSchemaContract = func() schemaContract {
 	}
 	out.tables["session_usage"] = append(out.tables["session_usage"], "last_provider", "last_model", "last_estimated_input_tokens")
 	out.tables["turn_file_changes"] = append(out.tables["turn_file_changes"], "origin")
-	out.tables["sessions"] = append(out.tables["sessions"], "archived_at")
+	out.tables["sessions"] = append(slices.DeleteFunc(out.tables["sessions"], func(v string) bool { return v == "loaded_app_ids" }), "archived_at", "loaded_plugin_ids")
 	out.tables["projects"] = append(out.tables["projects"], "last_activity_at")
 	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
-	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_canvas", "library_favorites_web")
-	out.indexes = append(out.indexes, "library_recent_canvas", "library_recent_file", "library_recent_opened")
+	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_studio", "library_favorites_web")
+	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
-	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches"}
+	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches",
+		"canvas_resources", "canvas_revisions", "canvas_saves", "canvas_actions", "canvas_links", "canvas_mounts"}
 	return out
 }()
 
@@ -967,12 +972,12 @@ func validateCurrentSchema(db *sql.DB) error {
 		return err
 	}
 	for table, retired := range map[string][]string{
-		"canvas_resources": {"grants"},
-		"canvas_revisions": {"workbench_id", "content_json"},
-		"canvas_saves":     {"workbench_id"},
-		"canvas_actions":   {"workbench_id"},
-		"canvas_links":     {"workbench_id"},
-		"canvas_mounts":    {"window_json"},
+		"studio_items":          {"grants"},
+		"studio_item_revisions": {"workbench_id", "content_json"},
+		"studio_item_saves":     {"workbench_id"},
+		"widget_actions":        {"workbench_id"},
+		"widget_links":          {"workbench_id"},
+		"studio_mounts":         {"window_json"},
 	} {
 		columns, err := tableColumns(db, table)
 		if err != nil {

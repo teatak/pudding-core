@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -28,8 +28,8 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 	if owner != "" {
 		return fail(store.ErrInvalidSessionRelation)
 	}
-	if !e.appToolCallable(ctx, sessionID, app.BuiltinCollaborationID, mode) {
-		return e.appToolUnavailableResult(ctx, sessionID, call, app.BuiltinCollaborationID)
+	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinCollaborationID, mode) {
+		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinCollaborationID)
 	}
 	var args struct {
 		Title     string `json:"title"`
@@ -99,14 +99,14 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 
 func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, title, prompt string, mode store.AgentMode) (*store.Session, error) {
 	e.collaborationMu.Lock()
-	// Serialize admission with stop and recheck the global App gate at admission.
+	// Serialize admission with stop and recheck the global plugin gate at admission.
 	if err := ctx.Err(); err != nil {
 		e.collaborationMu.Unlock()
 		return nil, err
 	}
-	if !e.appToolCallable(ctx, parentID, app.BuiltinCollaborationID, mode) {
+	if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinCollaborationID, mode) {
 		e.collaborationMu.Unlock()
-		return nil, errors.New("collaboration App is unavailable")
+		return nil, errors.New("collaboration plugin is unavailable")
 	}
 	parent, err := e.store.GetSession(ctx, parentID)
 	if err != nil {
@@ -115,9 +115,9 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	}
 	child := &store.Session{ID: store.NewID("session"), Title: strings.TrimSpace(title), Provider: parent.Provider, Model: parent.Model, ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey, ProjectID: parent.ProjectID, ActiveMode: parent.ActiveMode, ModeLease: parent.ModeLease}
 	// Capability grants scoped only to this parent turn do not transfer.
-	for _, id := range parent.LoadedAppIDs {
-		if id != app.BuiltinCollaborationID {
-			child.LoadedAppIDs = append(child.LoadedAppIDs, id)
+	for _, id := range parent.LoadedPluginIDs {
+		if id != plugin.BuiltinCollaborationID {
+			child.LoadedPluginIDs = append(child.LoadedPluginIDs, id)
 		}
 	}
 	resolved, err := e.resolveModel(ctx, child)
@@ -136,7 +136,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	}
 	result, err := e.store.DispatchChild(ctx, store.DispatchChildInput{ParentSessionID: parentID, ParentTurnID: turnID, CallID: callID, Child: child, Input: store.QueueInputInput{SessionID: child.ID, ClientMessageID: "dispatch_" + turnID + "_" + callID, Text: prompt, Provider: resolved.providerName, Model: resolved.model, Mode: resolved.mode, ModelConfig: resolved.configJSON}})
 	if err == nil && !result.Duplicate {
-		e.rememberQueuedRuntime(child.ID, "dispatch_"+turnID+"_"+callID, app.RuntimeIDFromContext(ctx))
+		e.rememberQueuedRuntime(child.ID, "dispatch_"+turnID+"_"+callID, plugin.RuntimeIDFromContext(ctx))
 		for _, ev := range result.Events {
 			e.hub.Publish(ev)
 		}
@@ -149,7 +149,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	return result.Session, nil
 }
 
-// Stop affects current work, while the App enablement controls future capability.
+// Stop affects current work, while the plugin enablement controls future capability.
 func (e *Engine) StopCollaboration(ctx context.Context, parentID string) error {
 	e.collaborationMu.Lock()
 	defer e.collaborationMu.Unlock()
@@ -346,7 +346,7 @@ func (e *Engine) sendChild(ctx context.Context, parentID, parentTurnID, childID,
 	if result.ExistingTurn != nil {
 		return &SubmitResult{TurnID: result.ExistingTurn.ID, Duplicate: true}, nil
 	}
-	e.rememberQueuedRuntime(childID, clientID, app.RuntimeIDFromContext(ctx))
+	e.rememberQueuedRuntime(childID, clientID, plugin.RuntimeIDFromContext(ctx))
 	if result.QueuedEvent != nil {
 		e.hub.Publish(*result.QueuedEvent)
 	}

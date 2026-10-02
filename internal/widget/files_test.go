@@ -1,4 +1,4 @@
-package canvas
+package widget
 
 import (
 	"os"
@@ -20,7 +20,7 @@ func TestImmutablePackageIntegrity(t *testing.T) {
 	if err != nil || got.Files["src/App.tsx"] != p.Files["src/App.tsx"] {
 		t.Fatalf("%+v %v", got, err)
 	}
-	root := filepath.Join(home, "canvases", "wb_test", "revisions", hash)
+	root := filepath.Join(home, "studio", "wb_test", "revisions", hash)
 	for _, name := range []string{".DS_Store", "src/.DS_Store"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("Finder metadata"), 0600); err != nil {
 			t.Fatal(err)
@@ -40,7 +40,7 @@ func TestImmutablePackageIntegrity(t *testing.T) {
 	if err := os.Remove(unexpected); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(home, "canvases", "wb_test", "revisions", hash, "src", "App.tsx")
+	file := filepath.Join(home, "studio", "wb_test", "revisions", hash, "src", "App.tsx")
 	if err = os.WriteFile(file, []byte("corrupt"), 0600); err != nil {
 		t.Fatal(err)
 	}

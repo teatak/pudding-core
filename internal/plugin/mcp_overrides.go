@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"errors"
@@ -31,22 +31,22 @@ func LoadMCPOverrideFile(path string) (*MCPOverrideFile, error) {
 	}
 	var raw rawMCPOverrideFile
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("app: parse mcp override %s: %w", path, err)
+		return nil, fmt.Errorf("plugin: parse mcp override %s: %w", path, err)
 	}
 	if len(raw.Extra) > 0 {
-		return nil, fmt.Errorf("app: mcp override %s has unsupported root keys", path)
+		return nil, fmt.Errorf("plugin: mcp override %s has unsupported root keys", path)
 	}
 	out := &MCPOverrideFile{MCP: make(map[string]MCPEndpointOverride, len(raw.MCP))}
 	for name, override := range raw.MCP {
 		name = strings.TrimSpace(name)
 		if !endpointNamePattern.MatchString(name) {
-			return nil, fmt.Errorf("app: mcp override %s has invalid endpoint %q", path, name)
+			return nil, fmt.Errorf("plugin: mcp override %s has invalid endpoint %q", path, name)
 		}
 		override.Transport = strings.TrimSpace(override.Transport)
 		override.URL = strings.TrimSpace(override.URL)
 		override.Command = strings.TrimSpace(override.Command)
 		if err := validateMCPEndpointOverride(override); err != nil {
-			return nil, fmt.Errorf("app: mcp override %s endpoint %q: %w", path, name, err)
+			return nil, fmt.Errorf("plugin: mcp override %s endpoint %q: %w", path, name, err)
 		}
 		out.MCP[name] = CloneMCPEndpointOverride(override)
 	}
@@ -79,7 +79,7 @@ func WriteMCPOverrideFile(path string, overrides *MCPOverrideFile) error {
 		return err
 	}
 	if dirInfo.Mode()&os.ModeSymlink != 0 || !dirInfo.IsDir() {
-		return errors.New("app: mcp override directory must be a directory, not a symlink")
+		return errors.New("plugin: mcp override directory must be a directory, not a symlink")
 	}
 	data, err := yaml.Marshal(overrides)
 	if err != nil {
@@ -114,7 +114,7 @@ func inspectMCPOverrideFile(path string) (bool, error) {
 		return false, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return false, errors.New("app: mcp override must be a regular file, not a symlink")
+		return false, errors.New("plugin: mcp override must be a regular file, not a symlink")
 	}
 	return true, nil
 }

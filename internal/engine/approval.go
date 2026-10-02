@@ -554,8 +554,8 @@ func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) too
 		if destructive, _ := details["destructive"].(bool); destructive {
 			risk.Class = tool.RiskClassDestructive
 			risk.LowRisk = false
-			if risk.Scope == "canvas" {
-				risk.Summary = "Delete one canvas draft source file."
+			if risk.Scope == "widget" {
+				risk.Summary = "Delete one widget draft source file."
 			} else {
 				risk.Summary = "Apply a multi-file patch that deletes project files."
 			}

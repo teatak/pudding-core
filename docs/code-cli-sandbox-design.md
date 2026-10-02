@@ -11,7 +11,7 @@ Pudding 的 Auto 审批应允许大多数项目内 CLI 工作流,同时用操作
 - 审批决定一条命令是否可以启动。
 - 沙箱决定已启动命令实际可以访问哪些资源。
 
-本次不沙箱化用户手动打开的交互终端、LSP、Browser、Canvas、App MCP 或整个
+本次不沙箱化用户手动打开的交互终端、LSP、Browser、小组件、插件 MCP 或整个
 Electron/daemon 进程。
 
 ## 2. 模式语义

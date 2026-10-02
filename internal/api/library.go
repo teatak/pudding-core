@@ -17,7 +17,7 @@ type libraryEntry struct {
 	FavoriteID string    `json:"favoriteID,omitempty"`
 	Icon       string    `json:"icon,omitempty"`
 	IconColor  string    `json:"iconColor,omitempty"`
-	CanvasKind string    `json:"canvasKind,omitempty"`
+	ItemKind   string    `json:"itemKind,omitempty"`
 	Revision   int64     `json:"revision,omitempty"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	librarySource
@@ -31,14 +31,14 @@ func (s *Server) listLibrary(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	saved, err := s.store.ListCanvases(ctx)
+	saved, err := s.store.ListStudioItems(ctx)
 	if err != nil {
 		return s.fail(c, err)
 	}
 	entries := make([]libraryEntry, 0, len(favorites)+len(saved))
 	savedFavorites := map[string]string{}
 	for _, f := range favorites {
-		if f.Kind == "canvas" {
+		if f.Kind == "studio" {
 			savedFavorites[f.SavedItemID] = f.ID
 			continue
 		}
@@ -49,9 +49,9 @@ func (s *Server) listLibrary(c *cart.Context) error {
 	for _, item := range saved {
 
 		entries = append(entries, libraryEntry{
-			LibraryFavorite: store.LibraryFavorite{ID: "canvas:" + item.ID, Kind: "canvas", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Name, CreatedAt: item.CreatedAt},
+			LibraryFavorite: store.LibraryFavorite{ID: "studio:" + item.ID, Kind: "studio", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Name, CreatedAt: item.CreatedAt},
 			Icon:            item.Icon, IconColor: item.IconColor,
-			FavoriteID: savedFavorites[item.ID], CanvasKind: "app", Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
+			FavoriteID: savedFavorites[item.ID], ItemKind: item.Kind, Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
 		})
 	}
 	ids := make([]string, 0, len(entries))
@@ -86,8 +86,8 @@ func (s *Server) putLibraryFavorite(c *cart.Context) error {
 	ctx := c.Request.Context()
 	f := store.LibraryFavorite{ID: store.NewID("favorite"), Kind: req.Kind, SourceSessionID: actor, Title: strings.TrimSpace(req.Title)}
 	switch req.Kind {
-	case "canvas":
-		f.ID = "canvas:" + req.SavedItemID
+	case "studio":
+		f.ID = "studio:" + req.SavedItemID
 		f.SavedItemID = req.SavedItemID
 		f.SourceSessionID = ""
 		f.Title = ""

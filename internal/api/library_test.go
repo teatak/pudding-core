@@ -10,7 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestLibraryFavoritesOnlyAcceptWebAndCanvas(t *testing.T) {
+func TestLibraryFavoritesOnlyAcceptWebAndStudio(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	root := t.TempDir()
@@ -62,16 +62,16 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "actor", Title: "Source", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := seedCanvasMount(st, "actor", "c", "Report")
+	initial, err := seedStudioMount(st, "actor", "c", "Report")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resourceID := initial.ResourceID
-	if err := st.PutLibraryFavorite(ctx, "actor", store.LibraryFavorite{ID: "canvas:" + resourceID, Kind: "canvas", SavedItemID: resourceID}); err != nil {
+	itemID := initial.ItemID
+	if err := st.PutLibraryFavorite(ctx, "actor", store.LibraryFavorite{ID: "studio:" + itemID, Kind: "studio", SavedItemID: itemID}); err != nil {
 		t.Fatal(err)
 	}
 
-	r := req(t, "DELETE", srv.URL+"/sessions/actor/library/favorites/canvas:"+resourceID, nil)
+	r := req(t, "DELETE", srv.URL+"/sessions/actor/library/favorites/studio:"+itemID, nil)
 	r.Body.Close()
 	if r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
@@ -83,14 +83,14 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 		t.Fatal("unstarred saved version not discoverable")
 	}
 	e := view.Entries[0]
-	if e.FavoriteID != "" || e.Revision != 2 || e.SavedItemID != resourceID || e.SourceSessionTitle != "Source" || e.CanvasKind != "app" {
+	if e.FavoriteID != "" || e.Revision != 2 || e.SavedItemID != itemID || e.SourceSessionTitle != "Source" || e.ItemKind != store.StudioItemKindWidget {
 		t.Fatalf("lost metadata: %+v", e)
 	}
-	item := decodeJSON[store.CanvasItem](t, req(t, "POST", srv.URL+"/sessions/actor/canvases/"+resourceID+"/open", nil))
-	if item.ID != "c" || item.ResourceID != resourceID {
+	item := decodeJSON[store.StudioMount](t, req(t, "POST", srv.URL+"/sessions/actor/studio/items/"+itemID+"/open", nil))
+	if item.ID != "c" || item.ItemID != itemID {
 		t.Fatal("opening version changed content or identity")
 	}
-	r = req(t, "POST", srv.URL+"/sessions/actor/library/favorites", map[string]any{"kind": "canvas", "savedItemID": resourceID})
+	r = req(t, "POST", srv.URL+"/sessions/actor/library/favorites", map[string]any{"kind": "studio", "savedItemID": itemID})
 	r.Body.Close()
 	if r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
@@ -98,12 +98,12 @@ func TestLibrarySavedVersionsRemainDiscoverableAfterUnfavorite(t *testing.T) {
 	view = decodeJSON[struct {
 		Entries []libraryEntry `json:"entries"`
 	}](t, req(t, "GET", srv.URL+"/sessions/actor/library", nil))
-	if view.Entries[0].FavoriteID != "canvas:"+resourceID {
+	if view.Entries[0].FavoriteID != "studio:"+itemID {
 		t.Fatal("could not re-favorite saved content")
 	}
 }
 
-func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T) {
+func TestGlobalStudioFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	for _, id := range []string{"source", "reader"} {
@@ -111,12 +111,12 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	initial, err := seedCanvasMount(st, "source", "canvas", "Reusable")
+	initial, err := seedStudioMount(st, "source", "studio", "Reusable")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resourceID := initial.ResourceID
-	if err := st.PutLibraryFavorite(ctx, "source", store.LibraryFavorite{ID: "canvas:" + resourceID, Kind: "canvas", SavedItemID: resourceID}); err != nil {
+	itemID := initial.ItemID
+	if err := st.PutLibraryFavorite(ctx, "source", store.LibraryFavorite{ID: "studio:" + itemID, Kind: "studio", SavedItemID: itemID}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,12 +130,12 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	if len(view.Entries) != 1 || view.Entries[0].FavoriteID == "" || !view.Entries[0].Available || view.Entries[0].SourceSessionAvailable {
 		t.Fatalf("global favorite lost: %+v", view)
 	}
-	first := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
-	second := decodeJSON[store.CanvasItem](t, req(t, "POST", endpoint+"/canvases/"+resourceID+"/open", nil))
-	if first.SessionID != "reader" || second.ID != first.ID || first.ResourceID != resourceID {
+	first := decodeJSON[store.StudioMount](t, req(t, "POST", endpoint+"/studio/items/"+itemID+"/open", nil))
+	second := decodeJSON[store.StudioMount](t, req(t, "POST", endpoint+"/studio/items/"+itemID+"/open", nil))
+	if first.SessionID != "reader" || second.ID != first.ID || first.ItemID != itemID {
 		t.Fatal("opening favorite must reuse reader's working copy")
 	}
-	r := req(t, "DELETE", endpoint+"/library/favorites/canvas:"+resourceID, nil)
+	r := req(t, "DELETE", endpoint+"/library/favorites/studio:"+itemID, nil)
 	r.Body.Close()
 	view = decodeJSON[struct {
 		Entries []libraryEntry `json:"entries"`
@@ -143,9 +143,9 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	if len(view.Entries) != 1 || view.Entries[0].FavoriteID != "" {
 		t.Fatal("unfavorite must retain searchable saved version")
 	}
-	items, err := st.ListCanvasItems(ctx, "reader")
+	items, err := st.ListStudioMounts(ctx, "reader")
 	if err != nil || len(items) != 1 {
-		t.Fatal("unfavorite must preserve reader's canvas")
+		t.Fatal("unfavorite must preserve reader's widget")
 	}
 	r = req(t, "GET", endpoint+"/library/recent", nil)
 	r.Body.Close()
@@ -154,14 +154,14 @@ func TestGlobalCanvasFavoriteOpensInActorAndSurvivesSourceDeletion(t *testing.T)
 	}
 }
 
-func seedCanvasMount(st store.Store, session, id, name string) (*store.CanvasItem, error) {
+func seedStudioMount(st store.Store, session, id, name string) (*store.StudioMount, error) {
 	ctx := context.Background()
-	w, err := st.CreateCanvas(ctx, &store.Canvas{ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
+	w, err := st.CreateStudioItem(ctx, &store.StudioItem{Kind: store.StudioItemKindWidget, ID: session + "-" + id + "-" + name, Name: name, SourceSessionID: session})
 	if err != nil {
 		return nil, err
 	}
-	if _, err = st.SaveCanvasRevision(ctx, &store.CanvasRevision{CanvasID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
+	if _, err = st.SaveStudioItemRevision(ctx, &store.StudioItemRevision{ItemID: w.ID, Hash: "first", ClientRequestID: "first"}, ""); err != nil {
 		return nil, err
 	}
-	return st.OpenCanvasResource(ctx, session, w.ID, id)
+	return st.OpenStudioItem(ctx, session, w.ID, id)
 }

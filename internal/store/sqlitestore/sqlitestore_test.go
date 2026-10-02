@@ -263,12 +263,12 @@ func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
 	}
 }
 
-func TestSessionLoadedAppIDsPersist(t *testing.T) {
+func TestSessionLoadedPluginIDsPersist(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{
 		ID: "sess_apps", Provider: "mock", Model: "mock",
-		LoadedAppIDs: []string{"terminal", "browser", "browser"},
+		LoadedPluginIDs: []string{"terminal", "browser", "browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -276,11 +276,11 @@ func TestSessionLoadedAppIDsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(got.LoadedAppIDs, []string{"browser", "terminal"}) {
-		t.Fatalf("created loaded app ids = %+v", got.LoadedAppIDs)
+	if !sameStrings(got.LoadedPluginIDs, []string{"browser", "terminal"}) {
+		t.Fatalf("created loaded app ids = %+v", got.LoadedPluginIDs)
 	}
 	loaded := []string{"browser"}
-	if _, err := st.UpdateSession(ctx, "sess_apps", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+	if _, err := st.UpdateSession(ctx, "sess_apps", store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -295,18 +295,18 @@ func TestSessionLoadedAppIDsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(got.LoadedAppIDs, []string{"browser"}) {
-		t.Fatalf("persisted loaded app ids = %+v", got.LoadedAppIDs)
+	if !sameStrings(got.LoadedPluginIDs, []string{"browser"}) {
+		t.Fatalf("persisted loaded app ids = %+v", got.LoadedPluginIDs)
 	}
 }
 
-func TestCanvasItemsAreSessionScoped(t *testing.T) {
+func TestStudioMountsAreSessionScoped(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()
 	createTestSession(t, st, "sess_left")
 	createTestSession(t, st, "sess_right")
 
-	item, err := seedCanvasMount(st, "sess_left", "canvas_1", "Note")
+	item, err := seedStudioMount(st, "sess_left", "canvas_1", "Note")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,15 +314,15 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 		t.Fatalf("unexpected actor fields: %+v", item)
 	}
 
-	visible, err := st.ListCanvasItems(ctx, "sess_right")
+	visible, err := st.ListStudioMounts(ctx, "sess_right")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(visible) != 0 {
-		t.Fatalf("right session should not see left canvas item: %+v", visible)
+		t.Fatalf("right session should not see left widget item: %+v", visible)
 	}
 
-	err = st.DeleteCanvasItem(ctx, "sess_right", "canvas_1")
+	err = st.DeleteStudioMount(ctx, "sess_right", "canvas_1")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("right session update error = %v, want not found", err)
 	}
@@ -330,12 +330,12 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 	if err := st.DeleteSession(ctx, "sess_left"); err != nil {
 		t.Fatal(err)
 	}
-	visible, err = st.ListCanvasItems(ctx, "sess_right")
+	visible, err = st.ListStudioMounts(ctx, "sess_right")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(visible) != 0 {
-		t.Fatalf("deleted session canvas should not survive: %+v", visible)
+		t.Fatalf("deleted session widget should not survive: %+v", visible)
 	}
 
 	if err := st.Close(); err != nil {
@@ -346,12 +346,12 @@ func TestCanvasItemsAreSessionScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	visible, err = reopened.ListCanvasItems(ctx, "sess_right")
+	visible, err = reopened.ListStudioMounts(ctx, "sess_right")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(visible) != 0 {
-		t.Fatalf("deleted session canvas item persisted: %+v", visible)
+		t.Fatalf("deleted session widget item persisted: %+v", visible)
 	}
 }
 
@@ -1118,7 +1118,7 @@ func TestCloneSessionCopiesCanonicalPrefixAsIndependentHistory(t *testing.T) {
 		ReasoningEffort: "high",
 		ActiveMode:      store.ModeCode,
 		ModeLease:       store.ModeLeaseSession,
-		LoadedAppIDs:    []string{"app_1"},
+		LoadedPluginIDs: []string{"plugin_1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1142,7 +1142,7 @@ func TestCloneSessionCopiesCanonicalPrefixAsIndependentHistory(t *testing.T) {
 	if cloned.ID != "sess_clone" || cloned.Title != "Source（副本）" || cloned.Provider != "mock" || cloned.Model != "model" || cloned.ReasoningEffort != "high" {
 		t.Fatalf("cloned session config = %+v", cloned)
 	}
-	if cloned.Pinned || cloned.ArchivedAt != nil || cloned.Running || !sameStrings(cloned.LoadedAppIDs, []string{"app_1"}) {
+	if cloned.Pinned || cloned.ArchivedAt != nil || cloned.Running || !sameStrings(cloned.LoadedPluginIDs, []string{"plugin_1"}) {
 		t.Fatalf("cloned session runtime state = %+v", cloned)
 	}
 	targetTurns, err := st.ListTurnsPage(ctx, cloned.ID, "", 0)

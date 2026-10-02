@@ -687,7 +687,7 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("open b status=%d tab=%+v", resp.StatusCode, tabB)
 	}
-	if _, err := seedCanvasMount(st, "sess_a", "note_sess_a", "Note"); err != nil {
+	if _, err := seedStudioMount(st, "sess_a", "note_sess_a", "Note"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -711,7 +711,7 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	if state, err := st.GetBrowserState(ctx, "sess_b"); err != nil || state.TabID != tabB.ID {
 		t.Fatalf("session b browser state should remain: state=%+v err=%v", state, err)
 	}
-	items, err := st.ListCanvasItems(ctx, "sess_a")
+	items, err := st.ListStudioMounts(ctx, "sess_a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -720,7 +720,7 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 		seen[item.ID] = true
 	}
 	if !seen["note_sess_a"] {
-		t.Fatal("canvas item should remain")
+		t.Fatal("widget item should remain")
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs", nil)

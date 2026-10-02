@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
-	"github.com/teatak/pudding-core/internal/appexec"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/lsp"
+	"github.com/teatak/pudding-core/internal/plugin"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
@@ -53,7 +53,7 @@ const (
 	GitUnstage        = "builtin_git_unstage"
 	GitCommit         = "builtin_git_commit"
 	SkillValidate     = "builtin_skill_validate"
-	AppSave           = "builtin_app_save"
+	PluginSave        = "builtin_plugin_save"
 	RESTRequest       = "builtin_rest_request"
 	GraphQLRequest    = "builtin_graphql_request"
 	GraphQLIntrospect = "builtin_graphql_introspect"
@@ -84,13 +84,13 @@ type WebConfigSource interface {
 	TavilyAPIKey(ctx context.Context) (string, bool, error)
 }
 
-type AppEndpointSource interface {
-	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connection string) (*app.EndpointBinding, error)
+type PluginEndpointSource interface {
+	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connection string) (*plugin.EndpointBinding, error)
 }
 
-type AppAuthoringSource interface {
-	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
-	SaveAuthoredPackage(ctx context.Context, packageJSON []byte, update bool) (*app.Definition, error)
+type PluginAuthoringSource interface {
+	ListDefinitions(ctx context.Context) ([]*plugin.Definition, error)
+	SaveAuthoredPackage(ctx context.Context, packageJSON []byte, update bool) (*plugin.Definition, error)
 }
 
 type SkillReader interface {
@@ -122,23 +122,23 @@ type BrowserStateStore interface {
 	ClearBrowserState(ctx context.Context, sessionID string) error
 }
 
-type CanvasResourceStore interface {
-	GetCanvas(ctx context.Context, id string) (*store.Canvas, error)
+type StudioItemStore interface {
+	GetStudioItem(ctx context.Context, id string) (*store.StudioItem, error)
 }
 
 type BuiltinOption func(*BuiltinRunner)
 
 type BuiltinRunner struct {
 	webConfig                WebConfigSource
-	appEndpoints             AppEndpointSource
-	appAuthoring             AppAuthoringSource
+	pluginEndpoints          PluginEndpointSource
+	pluginAuthoring          PluginAuthoringSource
 	skillReader              SkillReader
 	skillValidator           SkillValidator
 	history                  HistorySearchSource
 	historyMessages          HistoryMessageSource
 	historyTurns             HistoryTurnSource
 	browserState             BrowserStateStore
-	canvasStore              CanvasResourceStore
+	widgetStore              StudioItemStore
 	browser                  browser.Service
 	computer                 computer.Controller
 	languageService          lsp.Service
@@ -155,7 +155,7 @@ type BuiltinRunner struct {
 	weatherCache             map[string]weatherCacheEntry
 	graphqlSchemaMu          sync.Mutex
 	graphqlSchemas           map[string]*graphqlSchemaCache
-	appHTTP                  *appexec.Executor
+	pluginHTTP               *pluginexec.Executor
 	patchMu                  sync.Mutex
 	preparedPatches          map[string]*preparedPatch
 	gitApprovalMu            sync.Mutex
@@ -181,8 +181,8 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.appHTTP == nil {
-		r.appHTTP = appexec.New(r.webHTTPClient)
+	if r.pluginHTTP == nil {
+		r.pluginHTTP = pluginexec.New(r.webHTTPClient)
 	}
 	return r
 }
@@ -193,15 +193,15 @@ func WithWebConfig(source WebConfigSource) BuiltinOption {
 	}
 }
 
-func WithAppEndpoints(source AppEndpointSource) BuiltinOption {
+func WithPluginEndpoints(source PluginEndpointSource) BuiltinOption {
 	return func(r *BuiltinRunner) {
-		r.appEndpoints = source
+		r.pluginEndpoints = source
 	}
 }
 
-func WithAppAuthoring(source AppAuthoringSource) BuiltinOption {
+func WithPluginAuthoring(source PluginAuthoringSource) BuiltinOption {
 	return func(r *BuiltinRunner) {
-		r.appAuthoring = source
+		r.pluginAuthoring = source
 	}
 }
 
@@ -262,9 +262,9 @@ func WithBrowserState(store BrowserStateStore) BuiltinOption {
 	}
 }
 
-func WithCanvasResources(source CanvasResourceStore) BuiltinOption {
+func WithStudioItems(source StudioItemStore) BuiltinOption {
 	return func(r *BuiltinRunner) {
-		r.canvasStore = source
+		r.widgetStore = source
 	}
 }
 
@@ -363,7 +363,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        SkillRead,
-			Description: "Read the full SKILL.md body for one registered global skill after the user's intent clearly matches Available Skills. This creates a registered reference whose current body is supplied in the tool result on each model request, including after compaction; do not reread merely to refresh it. This does not load Apps; use builtin_app_load for an App.",
+			Description: "Read the full SKILL.md body for one registered global skill after the user's intent clearly matches Available Skills. This creates a registered reference whose current body is supplied in the tool result on each model request, including after compaction; do not reread merely to refresh it. This does not load plugins; use builtin_plugin_load for a plugin.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills. Do not pass the display path."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
@@ -406,19 +406,19 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory. For a multi-root Project, path=. returns every authorized root so each directory is visible and can be selected explicitly.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project","canvas"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized. Use . to list the root; when multiple Project roots are authorized, . lists those roots instead of silently selecting the first one."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. Use plugin to inspect installed plugin package files, skill for global user Skills, and project for authorized local project directories."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized. Use . to list the root; when multiple Project roots are authorized, . lists those roots instead of silently selecting the first one."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileRead,
 			Description: fmt.Sprintf("Read one UTF-8 text file up to %d KiB from a Pudding-managed file area or an authorized project directory. content is unnumbered; direct line counting is acceptable for short complete reads, while line-based patches for long, truncated, or unfamiliar files should use builtin_file_search or builtin_file_slice. Use those tools for larger files regardless of max_chars. Use builtin_media_read for supported images or audio.", maxFileReadWholeBytes/1024),
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project","canvas"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative file path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. Use plugin to inspect installed plugin package files, skill for global user Skills, and project for authorized local project directories."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative file path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        MediaRead,
 			Description: "Route one supported raster image or audio file up to 20 MiB to the model as a media attachment. Set source=attachment for an existing session attachment. In Code mode, source=file reads a Pudding-managed or explicitly authorized project file. Media bytes are visible only when the current model supports that input type; otherwise only metadata is available. This tool does not transcribe audio. SVG is text source and should be read with builtin_file_read.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["attachment","file"],"description":"Where the media comes from. source=file requires Code capability."},"attachmentKey":{"type":"string","description":"For source=attachment, the exact session attachment key returned by an upload or capture tool. Prefer this field."},"url":{"type":"string","description":"For source=attachment, a session attachment URL fallback."},"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"For source=file in Code mode, the target file area."},"path":{"type":"string","description":"For source=file in Code mode, a relative path in a managed area or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["source"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["attachment","file"],"description":"Where the media comes from. source=file requires Code capability."},"attachmentKey":{"type":"string","description":"For source=attachment, the exact session attachment key returned by an upload or capture tool. Prefer this field."},"url":{"type":"string","description":"For source=attachment, a session attachment URL fallback."},"scope":{"type":"string","enum":["plugin","skill","temp","project"],"description":"For source=file in Code mode, the target file area."},"path":{"type":"string","description":"For source=file in Code mode, a relative path in a managed area or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["source"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
@@ -430,19 +430,19 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		{
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project","canvas"],"description":"Target file area. The app scope is read-only and excludes connection data and hidden runtime overrides."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. The plugin scope is read-only and excludes connection data and hidden runtime overrides."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSearch,
 			Description: fmt.Sprintf("Search UTF-8 files by literal text or RE2 regex. Narrow path/globs first; context_lines accepts 0-%d inclusive (default 0). Skips binary and generated files. Match text is capped at %d characters and each excerpt line at %d; check truncated. The model view uses numberedExcerpt for line-numbered context; its number prefixes are not source text. The model preview shows at most 20 matches; matchCount/resultsCapped describe the saved search. Use result_ref with builtin_history_get_message to read that snapshot, or narrow the search. Read relevant source with builtin_file_slice before patching, not incomplete search excerpts.", maxFileSearchContextLines, maxFileSearchLineChars, maxFileSearchExcerptLineChars),
-			InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project","canvas"],"description":"Target file area. Use app to search visible installed App package files."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized. With one project root, use . for that root; with multiple roots, choose an absolute search directory from builtin_file_list."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":%d,"description":"Lines before and after each match, 0-%d inclusive (default 0). For more context, locate the matching line numbers, then use builtin_file_slice to read a larger range."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`, maxFileSearchContextLines, maxFileSearchContextLines)),
+			InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. Use plugin to search visible installed plugin package files."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized. With one project root, use . for that root; with multiple roots, choose an absolute search directory from builtin_file_list."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":%d,"description":"Lines before and after each match, 0-%d inclusive (default 0). For more context, locate the matching line numbers, then use builtin_file_slice to read a larger range."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`, maxFileSearchContextLines, maxFileSearchContextLines)),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSlice,
 			Description: fmt.Sprintf("Read a focused UTF-8 line slice. The model view includes numberedContent without a duplicate raw body. It contains exact one-based source line numbers; copy source text without its displayed number prefix into old_lines. Use order=natural for patch preparation. The saved slice is capped at %d KiB per text field and includes only complete lines. start/end are the lowest/highest included line numbers; lines is the actual count, all zero if empty. Check truncated. A preview_only result is not a complete slice: read a smaller range or use result_ref before patching.", maxFileSlicePayload/1024),
-			InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project","canvas"],"description":"Target file area. Use app to inspect visible installed App package files."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative file path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","minimum":1,"description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","minimum":1,"description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","minimum":1,"maximum":%d,"description":"Line count for origin=end or when end is omitted. Default 100."},"skip":{"type":"integer","minimum":0,"maximum":%d,"description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`, maxFileSliceLines, maxFileSliceSkip)),
+			InputSchema: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. Use plugin to inspect visible installed plugin package files."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative file path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","minimum":1,"description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","minimum":1,"description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","minimum":1,"maximum":%d,"description":"Line count for origin=end or when end is omitted. Default 100."},"skip":{"type":"integer","minimum":0,"maximum":%d,"description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`, maxFileSliceLines, maxFileSliceSkip)),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -519,8 +519,8 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FilePatch,
-			Description: fmt.Sprintf("Apply an exact text patch to authorized project files or one canvas draft source file. Use search to locate lines and builtin_file_slice.numberedContent to read them; counting lines from a short complete builtin_file_read result is acceptable. Read incomplete or truncated source lines in a fresh numbered slice with order=natural before filling old_lines. All hunks use exact original text without displayed line-number prefixes and non-overlapping pre-patch line numbers. A mismatch or out-of-range error includes recovery with the one-based hunk number, bounded numbered context, and exact candidateStartLines. Candidates are navigation hints only; confirm surrounding context, especially for multiple matches, then reread and rebuild instead of guessing or fuzzy matching. Never copy truncated diagnostic previews into old_lines. Limits: %d KiB per source/destination file, %d MiB combined source and destination text, %d KiB review diff. Every file is validated before writing.", patchMaxFileBytes/1024, patchMaxTotalBytes/(1024*1024), patchMaxDiffBytes/1024),
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project","canvas"],"description":"Use project for authorized files or canvas for one opened canvas draft source file."},"canvas_id":{"type":"string","description":"Canvas ID for scope=canvas. Requires a Code session and an opened draft."},"expectedDraftHash":{"type":"string","description":"Latest draftHash for scope=canvas. Canvas patches change exactly one source file."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Project path inside one authorized root, or relative canvas.json/src/assets path for canvas. Multiple project roots require an absolute path."},"action":{"type":"string","enum":["create","replace","edit","delete"],"description":"create refuses an existing file; replace requires an existing file; edit applies positioned hunks; delete removes an existing file."},"content":{"type":"string","description":"Complete UTF-8 content. Required only for create or replace."},"hunks":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"start_line":{"type":"integer","minimum":1,"description":"One-based first affected line in the original pre-patch file. For insertion, use the line before which new_lines are inserted; original line count plus one appends."},"old_lines":{"type":"array","items":{"type":"string"},"description":"Exact original lines without newline characters. An empty array inserts new_lines at start_line."},"new_lines":{"type":"array","items":{"type":"string"},"description":"Replacement lines without newline characters. An empty array deletes non-empty old_lines."}},"required":["start_line","old_lines","new_lines"],"additionalProperties":false},"description":"Non-overlapping hunks located against the original pre-patch file. Required only for action=edit."}},"required":["path","action"],"additionalProperties":false},"description":"Project scope supports multiple files in one root; canvas scope requires exactly one file."}},"required":["scope","files"],"additionalProperties":false}`),
+			Description: fmt.Sprintf("Apply an exact text patch to authorized project files or one widget draft source file. Use search to locate lines and builtin_file_slice.numberedContent to read them; counting lines from a short complete builtin_file_read result is acceptable. Read incomplete or truncated source lines in a fresh numbered slice with order=natural before filling old_lines. All hunks use exact original text without displayed line-number prefixes and non-overlapping pre-patch line numbers. A mismatch or out-of-range error includes recovery with the one-based hunk number, bounded numbered context, and exact candidateStartLines. Candidates are navigation hints only; confirm surrounding context, especially for multiple matches, then reread and rebuild instead of guessing or fuzzy matching. Never copy truncated diagnostic previews into old_lines. Limits: %d KiB per source/destination file, %d MiB combined source and destination text, %d KiB review diff. Every file is validated before writing.", patchMaxFileBytes/1024, patchMaxTotalBytes/(1024*1024), patchMaxDiffBytes/1024),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project","widget"],"description":"Use project for authorized files or widget for one opened widget draft source file."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"expectedDraftHash":{"type":"string","description":"Latest draftHash for scope=widget. Widget patches change exactly one source file."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Project path inside one authorized root, or relative widget.json/src/assets path for widget. Multiple project roots require an absolute path."},"action":{"type":"string","enum":["create","replace","edit","delete"],"description":"create refuses an existing file; replace requires an existing file; edit applies positioned hunks; delete removes an existing file."},"content":{"type":"string","description":"Complete UTF-8 content. Required only for create or replace."},"hunks":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"start_line":{"type":"integer","minimum":1,"description":"One-based first affected line in the original pre-patch file. For insertion, use the line before which new_lines are inserted; original line count plus one appends."},"old_lines":{"type":"array","items":{"type":"string"},"description":"Exact original lines without newline characters. An empty array inserts new_lines at start_line."},"new_lines":{"type":"array","items":{"type":"string"},"description":"Replacement lines without newline characters. An empty array deletes non-empty old_lines."}},"required":["start_line","old_lines","new_lines"],"additionalProperties":false},"description":"Non-overlapping hunks located against the original pre-patch file. Required only for action=edit."}},"required":["path","action"],"additionalProperties":false},"description":"Project scope supports multiple files in one root; widget scope requires exactly one file."}},"required":["scope","files"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -530,9 +530,9 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        AppSave,
-			Description: "Create or update one installed Pudding App from a complete text package. The package is validated in isolation and replaces the installed version only after validation succeeds. Use only when the user explicitly asks to create or modify an App; never include credentials or connection secrets.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"operation":{"type":"string","enum":["create","update"],"description":"create refuses to replace an installed App; update requires an existing installed App."},"app_id":{"type":"string","description":"Lowercase kebab-case App id. It must match id in app.yaml."},"version":{"type":"string","description":"Non-empty App package version. It must match version in app.yaml when declared."},"files":{"type":"array","minItems":1,"maxItems":64,"description":"Complete set of package-managed UTF-8 text files. app.yaml is required. Include every App file that should remain managed after this save.","items":{"type":"object","properties":{"path":{"type":"string","description":"Relative package path such as app.yaml, assets/icon.svg, or skills/issues/SKILL.md."},"content":{"type":"string","description":"Complete UTF-8 file content."}},"required":["path","content"],"additionalProperties":false}}},"required":["operation","app_id","version","files"],"additionalProperties":false}`),
+			Name:        PluginSave,
+			Description: "Create or update one installed Pudding plugin from a complete text package. The package is validated in isolation and replaces the installed version only after validation succeeds. Use only when the user explicitly asks to create or modify a plugin; never include credentials or connection secrets.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"operation":{"type":"string","enum":["create","update"],"description":"create refuses to replace an installed plugin; update requires an existing installed plugin."},"plugin_id":{"type":"string","description":"Lowercase kebab-case plugin id. It must match id in plugin.yaml."},"version":{"type":"string","description":"Non-empty plugin package version. It must match version in plugin.yaml when declared."},"files":{"type":"array","minItems":1,"maxItems":64,"description":"Complete set of package-managed UTF-8 text files. plugin.yaml is required. Include every plugin file that should remain managed after this save.","items":{"type":"object","properties":{"path":{"type":"string","description":"Relative package path such as plugin.yaml, assets/icon.svg, or skills/issues/SKILL.md."},"content":{"type":"string","description":"Complete UTF-8 file content."}},"required":["path","content"],"additionalProperties":false}}},"required":["operation","plugin_id","version","files"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -749,8 +749,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.filePatch(call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
-	case AppSave:
-		return r.appSave(ctx, call)
+	case PluginSave:
+		return r.pluginSave(ctx, call)
 	case RESTRequest:
 		return r.restRequest(ctx, call)
 	case GraphQLRequest:
@@ -845,6 +845,6 @@ func currentTime(call Call) Result {
 	return out
 }
 
-func WithAppExecutor(executor *appexec.Executor) BuiltinOption {
-	return func(r *BuiltinRunner) { r.appHTTP = executor }
+func WithPluginExecutor(executor *pluginexec.Executor) BuiltinOption {
+	return func(r *BuiltinRunner) { r.pluginHTTP = executor }
 }

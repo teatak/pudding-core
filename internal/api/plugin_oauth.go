@@ -19,14 +19,14 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	"github.com/teatak/pudding-core/internal/plugin"
 )
 
-const appOAuthStateTTL = 10 * time.Minute
+const pluginOAuthStateTTL = 10 * time.Minute
 
-type appOAuthProvider struct {
-	AppID                 string
+type pluginOAuthProvider struct {
+	PluginID              string
 	ClientID              string
 	AuthorizeURL          string
 	ExchangeURL           string
@@ -38,7 +38,7 @@ type appOAuthProvider struct {
 
 type oauthStartState struct {
 	Provider       string
-	AppID          string
+	PluginID       string
 	AuthMethodID   string
 	ConnectionID   string
 	ConnectionName string
@@ -49,27 +49,27 @@ type oauthStartState struct {
 	CreatedAt      time.Time
 }
 
-type startAppOAuthReq struct {
+type startPluginOAuthReq struct {
 	ConnectionID   string            `json:"connectionID"`
-	AppID          string            `json:"appID"`
+	PluginID       string            `json:"pluginID"`
 	AuthMethodID   string            `json:"authMethodID"`
 	ConnectionName string            `json:"connectionName"`
 	Fields         map[string]string `json:"fields"`
 	EndpointURLs   map[string]string `json:"endpointURLs"`
 }
 
-type startAppOAuthResp struct {
+type startPluginOAuthResp struct {
 	AuthorizationURL string `json:"authorizationURL"`
 }
 
-type completeAppOAuthReq struct {
+type completePluginOAuthReq struct {
 	Provider string `json:"provider"`
 	Ticket   string `json:"ticket"`
 	State    string `json:"state"`
 	Error    string `json:"error"`
 }
 
-type appOAuthTokenResp struct {
+type pluginOAuthTokenResp struct {
 	AccessToken           string `json:"access_token"`
 	RefreshToken          string `json:"refresh_token"`
 	TokenType             string `json:"token_type"`
@@ -80,9 +80,9 @@ type appOAuthTokenResp struct {
 	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
 }
 
-var appOAuthProviders = map[string]appOAuthProvider{
+var pluginOAuthProviders = map[string]pluginOAuthProvider{
 	"gmail": {
-		AppID:        "gmail",
+		PluginID:     "gmail",
 		ClientID:     "226317408426-s2jpl76do0qegl9vesjn1osrkbos1t9o.apps.googleusercontent.com",
 		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
 		ExchangeURL:  "https://oauth.x-t.top/gmail/exchange",
@@ -101,41 +101,41 @@ var appOAuthProviders = map[string]appOAuthProvider{
 	},
 }
 
-func (s *Server) startAppOAuth(c *cart.Context) error {
-	var req startAppOAuthReq
+func (s *Server) startPluginOAuth(c *cart.Context) error {
+	var req startPluginOAuthReq
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
 	}
-	appID := strings.TrimSpace(req.AppID)
-	def, err := s.getAppDefinition(c.Request.Context(), appID)
+	pluginID := strings.TrimSpace(req.PluginID)
+	def, err := s.getPluginDefinition(c.Request.Context(), pluginID)
 	if err != nil {
-		if errors.Is(err, app.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+		if errors.Is(err, plugin.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_not_found"})
 			return nil
 		}
 		return s.fail(c, err)
 	}
-	method, ok := app.FindAuthMethod(def, req.AuthMethodID, app.AuthTypeOAuth2)
-	if !ok || method.Type != app.AuthTypeOAuth2 {
-		return badRequest(c, "oauth2 is not supported by app")
+	method, ok := plugin.FindAuthMethod(def, req.AuthMethodID, plugin.AuthTypeOAuth2)
+	if !ok || method.Type != plugin.AuthTypeOAuth2 {
+		return badRequest(c, "oauth2 is not supported by plugin")
 	}
 	providerID := method.Provider
 	if providerID == "" {
-		providerID = appID
+		providerID = pluginID
 	}
-	githubAppFlow := providerID == "github" && method.ID == app.GitHubAppAuthMethodID
-	provider, legacyProvider := appOAuthProviders[providerID]
+	githubAppFlow := providerID == "github" && method.ID == plugin.GitHubAppAuthMethodID
+	provider, legacyProvider := pluginOAuthProviders[providerID]
 	if providerID == "github" && !githubAppFlow {
 		return badRequest(c, "github oauth method is not supported")
 	}
 	if !githubAppFlow && !legacyProvider {
-		return badRequest(c, "oauth provider is not configured for app")
+		return badRequest(c, "oauth provider is not configured for plugin")
 	}
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	connections, err := cfg.ListAppConnections(c.Request.Context())
+	connections, err := cfg.ListPluginConnections(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -144,14 +144,14 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if strings.ContainsAny(connectionID, "/ ") {
 		return badRequest(c, "connection id must not contain '/' or spaces")
 	}
-	var existing *app.Connection
+	var existing *plugin.Connection
 	if connectionID != "" {
 		for _, conn := range connections {
 			if conn == nil || conn.ID != connectionID {
 				continue
 			}
-			if conn.AppID != appID {
-				return badRequest(c, "connection does not belong to app")
+			if conn.PluginID != pluginID {
+				return badRequest(c, "connection does not belong to plugin")
 			}
 			if name == "" {
 				name = conn.Name
@@ -164,7 +164,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if fieldsInput == nil && existing != nil {
 		fieldsInput = existing.Fields
 	}
-	fields, err := normalizeAppConnectionFields(def.Connection, fieldsInput, existing)
+	fields, err := normalizePluginConnectionFields(def.Connection, fieldsInput, existing)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
@@ -172,7 +172,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if endpointURLsInput == nil && existing != nil {
 		endpointURLsInput = existing.EndpointURLs
 	}
-	endpointURLs, err := app.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
@@ -186,7 +186,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		name = provider.DefaultConnectionName
 	}
 	if connectionID == "" {
-		connectionID = nextAppOAuthConnectionID(appID, connections)
+		connectionID = nextPluginOAuthConnectionID(pluginID, connections)
 	}
 	redirectURI := ""
 	verifier := ""
@@ -198,7 +198,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		}
 		challengeBytes := sha256.Sum256([]byte(verifier))
 		started, err := s.oauthBroker.Start(c.Request.Context(), oauthbroker.StartRequest{
-			Provider: "github", Client: appOAuthBrokerClient(), ClientState: state, Flow: "install",
+			Provider: "github", Client: pluginOAuthBrokerClient(), ClientState: state, Flow: "install",
 			Challenge: base64.RawURLEncoding.EncodeToString(challengeBytes[:]),
 		})
 		if err != nil {
@@ -210,14 +210,14 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		if redirectURI == "" {
 			redirectURI = localOAuthCallbackURL(c.Request, providerID)
 		}
-		authorizationURL, err = buildAppOAuthAuthorizeURL(provider, redirectURI, state)
+		authorizationURL, err = buildPluginOAuthAuthorizeURL(provider, redirectURI, state)
 		if err != nil {
 			return s.fail(c, err)
 		}
 	}
 	s.rememberOAuthState(state, oauthStartState{
 		Provider:       providerID,
-		AppID:          appID,
+		PluginID:       pluginID,
 		AuthMethodID:   method.ID,
 		ConnectionID:   connectionID,
 		ConnectionName: name,
@@ -227,14 +227,14 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		Verifier:       verifier,
 		CreatedAt:      time.Now(),
 	})
-	c.JSON(http.StatusOK, startAppOAuthResp{AuthorizationURL: authorizationURL})
+	c.JSON(http.StatusOK, startPluginOAuthResp{AuthorizationURL: authorizationURL})
 	return nil
 }
 
-func (s *Server) appOAuthCallback(c *cart.Context) error {
+func (s *Server) pluginOAuthCallback(c *cart.Context) error {
 	providerID, _ := c.Param("provider")
 	providerID = strings.TrimSpace(providerID)
-	provider, configured := appOAuthProviders[providerID]
+	provider, configured := pluginOAuthProviders[providerID]
 	if !configured {
 		return oauthHTML(c, http.StatusBadRequest, "Authorization failed", "Provider is not configured.")
 	}
@@ -251,18 +251,18 @@ func (s *Server) appOAuthCallback(c *cart.Context) error {
 	if !ok || start.Provider != providerID {
 		return oauthHTML(c, http.StatusBadRequest, "Authorization expired", "Please return to Pudding and try again.")
 	}
-	token, err := exchangeAppOAuthCode(c.Request, provider, code, start.RedirectURI)
+	token, err := exchangePluginOAuthCode(c.Request, provider, code, start.RedirectURI)
 	if err != nil {
 		return oauthHTML(c, http.StatusBadGateway, "Authorization failed", err.Error())
 	}
 	if strings.TrimSpace(token.AccessToken) == "" {
 		return oauthHTML(c, http.StatusBadGateway, "Authorization failed", "Provider did not return an access token.")
 	}
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	auth := app.Auth{
+	auth := plugin.Auth{
 		MethodID:     start.AuthMethodID,
 		Type:         "oauth2",
 		AccessToken:  token.AccessToken,
@@ -273,29 +273,29 @@ func (s *Server) appOAuthCallback(c *cart.Context) error {
 	if token.ExpiresIn > 0 {
 		auth.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
-	conn := &app.Connection{
+	conn := &plugin.Connection{
 		ID:           start.ConnectionID,
 		Name:         start.ConnectionName,
-		AppID:        start.AppID,
+		PluginID:     start.PluginID,
 		Fields:       start.Fields,
 		EndpointURLs: start.EndpointURLs,
 		Auth:         auth,
 	}
-	if err := cfg.PutAppConnection(c.Request.Context(), conn); err != nil {
+	if err := cfg.PutPluginConnection(c.Request.Context(), conn); err != nil {
 		return oauthHTML(c, http.StatusInternalServerError, "Authorization failed", err.Error())
 	}
 	return oauthSuccessHTML(c, providerID)
 }
 
-func (s *Server) completeAppOAuth(c *cart.Context) error {
-	var req completeAppOAuthReq
+func (s *Server) completePluginOAuth(c *cart.Context) error {
+	var req completePluginOAuthReq
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
 	providerID := strings.TrimSpace(req.Provider)
 	state := strings.TrimSpace(req.State)
 	start, ok := s.takeOAuthState(state)
-	if !ok || start.Provider != providerID || providerID != "github" || start.AuthMethodID != app.GitHubAppAuthMethodID || start.Verifier == "" {
+	if !ok || start.Provider != providerID || providerID != "github" || start.AuthMethodID != plugin.GitHubAppAuthMethodID || start.Verifier == "" {
 		return badRequest(c, "oauth authorization expired")
 	}
 	if errorCode := strings.TrimSpace(req.Error); errorCode != "" {
@@ -312,18 +312,18 @@ func (s *Server) completeAppOAuth(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	connections, err := cfg.ListAppConnections(c.Request.Context())
+	connections, err := cfg.ListPluginConnections(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
 	targetID := start.ConnectionID
 	name := strings.TrimSpace(start.ConnectionName)
 	for _, connection := range connections {
-		if connection == nil || connection.AppID != "github" || connection.Auth.Type != app.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID || connection.ID == targetID {
+		if connection == nil || connection.PluginID != "github" || connection.Auth.Type != plugin.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID || connection.ID == targetID {
 			continue
 		}
 		targetID = connection.ID
@@ -335,10 +335,10 @@ func (s *Server) completeAppOAuth(c *cart.Context) error {
 	if name == "" || name == "GitHub" {
 		name = "GitHub · " + account.Login
 	}
-	auth := app.Auth{
+	auth := plugin.Auth{
 		MethodID:     start.AuthMethodID,
-		Type:         app.AuthTypeOAuth2,
-		Variant:      app.GitHubAppAuthVariant,
+		Type:         plugin.AuthTypeOAuth2,
+		Variant:      plugin.GitHubAppAuthVariant,
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
 		TokenType:    token.TokenType,
@@ -350,23 +350,23 @@ func (s *Server) completeAppOAuth(c *cart.Context) error {
 	if token.RefreshTokenExpiresIn > 0 {
 		auth.RefreshExpiresAt = time.Now().Add(time.Duration(token.RefreshTokenExpiresIn) * time.Second)
 	}
-	connection := &app.Connection{
-		ID: targetID, Name: name, AppID: start.AppID, Fields: start.Fields, EndpointURLs: start.EndpointURLs,
-		Account: &app.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type},
+	connection := &plugin.Connection{
+		ID: targetID, Name: name, PluginID: start.PluginID, Fields: start.Fields, EndpointURLs: start.EndpointURLs,
+		Account: &plugin.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type},
 		Auth:    auth,
 	}
-	if err := cfg.PutAppConnection(c.Request.Context(), connection); err != nil {
+	if err := cfg.PutPluginConnection(c.Request.Context(), connection); err != nil {
 		return s.fail(c, err)
 	}
-	updated, err := cfg.GetAppConnection(c.Request.Context(), targetID)
+	updated, err := cfg.GetPluginConnection(c.Request.Context(), targetID)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	c.JSON(http.StatusOK, app.ViewConnection(updated))
+	c.JSON(http.StatusOK, plugin.ViewConnection(updated))
 	return nil
 }
 
-func buildAppOAuthAuthorizeURL(provider appOAuthProvider, redirectURI, state string) (string, error) {
+func buildPluginOAuthAuthorizeURL(provider pluginOAuthProvider, redirectURI, state string) (string, error) {
 	u, err := url.Parse(provider.AuthorizeURL)
 	if err != nil {
 		return "", err
@@ -389,7 +389,7 @@ func buildAppOAuthAuthorizeURL(provider appOAuthProvider, redirectURI, state str
 	return u.String(), nil
 }
 
-func exchangeAppOAuthCode(r *http.Request, provider appOAuthProvider, code, redirectURI string) (*appOAuthTokenResp, error) {
+func exchangePluginOAuthCode(r *http.Request, provider pluginOAuthProvider, code, redirectURI string) (*pluginOAuthTokenResp, error) {
 	body, err := json.Marshal(map[string]string{
 		"code":         code,
 		"redirect_uri": redirectURI,
@@ -414,7 +414,7 @@ func exchangeAppOAuthCode(r *http.Request, provider appOAuthProvider, code, redi
 	if err != nil {
 		return nil, err
 	}
-	var token appOAuthTokenResp
+	var token pluginOAuthTokenResp
 	if err := json.Unmarshal(data, &token); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
@@ -436,11 +436,11 @@ func exchangeAppOAuthCode(r *http.Request, provider appOAuthProvider, code, redi
 	return &token, nil
 }
 
-func localOAuthCallbackURL(r *http.Request, appID string) string {
+func localOAuthCallbackURL(r *http.Request, pluginID string) string {
 	base := requestBaseURL(r)
 	u, err := url.Parse(base)
 	if err != nil {
-		return strings.TrimRight(base, "/") + "/oauth/callback/" + appID
+		return strings.TrimRight(base, "/") + "/oauth/callback/" + pluginID
 	}
 	host := u.Host
 	if name, port, err := net.SplitHostPort(u.Host); err == nil {
@@ -451,7 +451,7 @@ func localOAuthCallbackURL(r *http.Request, appID string) string {
 		host = "localhost"
 	}
 	u.Host = host
-	u.Path = "/oauth/callback/" + appID
+	u.Path = "/oauth/callback/" + pluginID
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String()
@@ -467,7 +467,7 @@ func (s *Server) rememberOAuthState(state string, start oauthStartState) {
 	defer s.oauthMu.Unlock()
 	now := time.Now()
 	for key, item := range s.oauth {
-		if now.Sub(item.CreatedAt) > appOAuthStateTTL {
+		if now.Sub(item.CreatedAt) > pluginOAuthStateTTL {
 			delete(s.oauth, key)
 		}
 	}
@@ -481,7 +481,7 @@ func (s *Server) takeOAuthState(state string) (oauthStartState, bool) {
 	if ok {
 		delete(s.oauth, state)
 	}
-	if !ok || time.Since(start.CreatedAt) > appOAuthStateTTL {
+	if !ok || time.Since(start.CreatedAt) > pluginOAuthStateTTL {
 		return oauthStartState{}, false
 	}
 	return start, true
@@ -495,19 +495,19 @@ func randomOAuthState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
 }
 
-func nextAppOAuthConnectionID(appID string, connections []*app.Connection) string {
+func nextPluginOAuthConnectionID(pluginID string, connections []*plugin.Connection) string {
 	used := make(map[string]struct{}, len(connections))
 	for _, conn := range connections {
 		if conn != nil {
 			used[conn.ID] = struct{}{}
 		}
 	}
-	base := appID + "-main"
+	base := pluginID + "-main"
 	if _, ok := used[base]; !ok {
 		return base
 	}
 	for i := 2; ; i++ {
-		id := appID + "-" + strconv.Itoa(i)
+		id := pluginID + "-" + strconv.Itoa(i)
 		if _, ok := used[id]; !ok {
 			return id
 		}
@@ -533,10 +533,10 @@ func oauthHTML(c *cart.Context, status int, title, detail string) error {
 }
 
 func oauthSuccessHTML(c *cart.Context, providerID string) error {
-	return oauthHTMLPage(c, http.StatusOK, "Connected", "You can return to Pudding.", appOAuthReturnScheme()+"://oauth/connected/"+url.PathEscape(providerID))
+	return oauthHTMLPage(c, http.StatusOK, "Connected", "You can return to Pudding.", pluginOAuthReturnScheme()+"://oauth/connected/"+url.PathEscape(providerID))
 }
 
-func appOAuthReturnScheme() string {
+func pluginOAuthReturnScheme() string {
 	scheme := strings.TrimSpace(os.Getenv("PUDDING_OAUTH_RETURN_SCHEME"))
 	if validURLScheme(scheme) {
 		return scheme
@@ -544,8 +544,8 @@ func appOAuthReturnScheme() string {
 	return "pudding"
 }
 
-func appOAuthBrokerClient() string {
-	if appOAuthReturnScheme() == "pudding-dev" {
+func pluginOAuthBrokerClient() string {
+	if pluginOAuthReturnScheme() == "pudding-dev" {
 		return "desktop_dev"
 	}
 	return "desktop"
@@ -583,7 +583,7 @@ func oauthHTMLPage(c *cart.Context, status int, title, detail, openURL string) e
   <title>` + html.EscapeString(title) + `</title>
   <style>
     :root { color-scheme: light dark; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: Canvas; color: CanvasText; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: Widget; color: CanvasText; }
     main { width: min(440px, calc(100vw - 48px)); text-align: center; }
     .mark { width: 56px; height: 56px; margin: 0 auto 22px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in oklch, CanvasText 8%, transparent); color: #4f46e5; font-size: 30px; font-weight: 700; }
     h1 { margin: 0; font-size: 28px; line-height: 1.2; letter-spacing: 0; }

@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"context"
@@ -16,35 +16,35 @@ import (
 )
 
 var (
-	ErrInvalidID                         = errors.New("app: invalid id")
-	ErrInvalidMCPOverride                = errors.New("app: invalid mcp override")
-	ErrNotFound                          = errors.New("app: not found")
-	ErrAlreadyExists                     = errors.New("app: already exists")
-	ErrBuiltinApp                        = errors.New("app: builtin app cannot be uninstalled")
-	ErrDisabled                          = errors.New("app: disabled")
-	ErrEnablementConfig                  = errors.New("app: enablement config unavailable")
-	ErrConnectionReauthorizationRequired = errors.New("app: connection reauthorization required")
+	ErrInvalidID                         = errors.New("plugin: invalid id")
+	ErrInvalidMCPOverride                = errors.New("plugin: invalid mcp override")
+	ErrNotFound                          = errors.New("plugin: not found")
+	ErrAlreadyExists                     = errors.New("plugin: already exists")
+	ErrBuiltinPlugin                     = errors.New("plugin: builtin plugin cannot be uninstalled")
+	ErrDisabled                          = errors.New("plugin: disabled")
+	ErrEnablementConfig                  = errors.New("plugin: enablement config unavailable")
+	ErrConnectionReauthorizationRequired = errors.New("plugin: connection reauthorization required")
 )
 
 type ConnectionSource interface {
-	ListAppConnections(ctx context.Context) ([]*Connection, error)
+	ListPluginConnections(ctx context.Context) ([]*Connection, error)
 }
 
 type ConnectionStore interface {
 	ConnectionSource
-	GetAppConnection(ctx context.Context, id string) (*Connection, error)
-	PutAppConnection(ctx context.Context, connection *Connection) error
+	GetPluginConnection(ctx context.Context, id string) (*Connection, error)
+	PutPluginConnection(ctx context.Context, connection *Connection) error
 }
 
 type EnablementSource interface {
-	ListAppEnablement(ctx context.Context) (map[string]bool, error)
-	SetAppEnabled(ctx context.Context, id string, enabled bool) error
+	ListPluginEnablement(ctx context.Context) (map[string]bool, error)
+	SetPluginEnabled(ctx context.Context, id string, enabled bool) error
 }
 
 type ConnectionChoice struct {
 	ID           string             `json:"id"`
 	Name         string             `json:"name,omitempty"`
-	AppID        string             `json:"appID"`
+	PluginID     string             `json:"pluginID"`
 	AuthType     string             `json:"authType,omitempty"`
 	AuthMethodID string             `json:"authMethodID,omitempty"`
 	AuthVariant  string             `json:"authVariant,omitempty"`
@@ -71,14 +71,14 @@ func (e *EndpointResolveError) Error() string {
 	case "connection_not_found":
 		return fmt.Sprintf("connection %q is not available for endpoint %q", e.Connection, e.Endpoint)
 	case "endpoint_ambiguous":
-		return fmt.Sprintf("endpoint %q matches multiple app connections", e.Endpoint)
+		return fmt.Sprintf("endpoint %q matches multiple plugin connections", e.Endpoint)
 	default:
 		return fmt.Sprintf("endpoint %q is not available", e.Endpoint)
 	}
 }
 
 type Service struct {
-	appsRoot        string
+	pluginsRoot     string
 	connections     ConnectionSource
 	enablement      EnablementSource
 	runtime         RuntimeSource
@@ -90,7 +90,7 @@ type Service struct {
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
 	service := &Service{
-		appsRoot:    home.AppsPath(homeDir),
+		pluginsRoot: home.PluginsPath(homeDir),
 		connections: connections,
 		oauthBroker: oauthbroker.New("", nil),
 	}
@@ -115,19 +115,19 @@ func (s *Service) WithRuntimeSource(source RuntimeSource) *Service {
 
 func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	s.packageMu.RLock()
 	defer s.packageMu.RUnlock()
 	enabled := map[string]bool{}
 	if s.enablement != nil {
 		var err error
-		enabled, err = s.enablement.ListAppEnablement(ctx)
+		enabled, err = s.enablement.ListPluginEnablement(ctx)
 		if err != nil {
 			return nil, err
 		}
 	}
-	defs, err := LoadUserDefinitions(s.appsRoot)
+	defs, err := LoadUserDefinitions(s.pluginsRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func decorateRuntimeDefinition(def *Definition) *Definition {
 	resolved.ID = strings.TrimSpace(resolved.ID)
 	resolved.Name = strings.TrimSpace(resolved.Name)
 	resolved.Kind = normalizedDefinitionKind(resolved.Kind)
-	if !appIDPattern.MatchString(resolved.ID) || resolved.Name == "" {
+	if !pluginIDPattern.MatchString(resolved.ID) || resolved.Name == "" {
 		return nil
 	}
 	resolved.Source = SourceBuiltin
@@ -237,7 +237,7 @@ func applyEnabledOverride(def *Definition, enabled map[string]bool) {
 
 func (s *Service) definition(ctx context.Context, id string) (*Definition, error) {
 	id = strings.TrimSpace(id)
-	if !appIDPattern.MatchString(id) {
+	if !pluginIDPattern.MatchString(id) {
 		return nil, ErrInvalidID
 	}
 	defs, err := s.ListDefinitions(ctx)
@@ -254,7 +254,7 @@ func (s *Service) definition(ctx context.Context, id string) (*Definition, error
 
 func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	def, err := s.definition(ctx, id)
 	if err != nil {
@@ -263,7 +263,7 @@ func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Def
 	if s.enablement == nil {
 		return nil, ErrEnablementConfig
 	}
-	if err := s.enablement.SetAppEnabled(ctx, def.ID, enabled); err != nil {
+	if err := s.enablement.SetPluginEnabled(ctx, def.ID, enabled); err != nil {
 		return nil, err
 	}
 	def.Enabled = enabled
@@ -283,14 +283,14 @@ func (s *Service) applyMCPOverrides(def *Definition) (*Definition, error) {
 	}
 	out, err := ApplyMCPOverrides(def, overrides)
 	if err != nil {
-		return nil, fmt.Errorf("app %s: %w", def.ID, err)
+		return nil, fmt.Errorf("plugin %s: %w", def.ID, err)
 	}
 	return out, nil
 }
 
 func (s *Service) InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	s.packageMu.Lock()
 	defer s.packageMu.Unlock()
@@ -299,22 +299,22 @@ func (s *Service) InstallPackage(ctx context.Context, packageJSON []byte, expect
 
 func (s *Service) SaveAuthoredPackage(ctx context.Context, packageJSON []byte, update bool) (*Definition, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	var pkg Package
 	if err := json.Unmarshal(packageJSON, &pkg); err != nil {
-		return nil, fmt.Errorf("app package: parse: %w", err)
+		return nil, fmt.Errorf("plugin package: parse: %w", err)
 	}
-	appID := strings.TrimSpace(pkg.App.ID)
-	if !appIDPattern.MatchString(appID) {
+	pluginID := strings.TrimSpace(pkg.Plugin.ID)
+	if !pluginIDPattern.MatchString(pluginID) {
 		return nil, ErrInvalidID
 	}
-	if IsReservedID(appID) {
-		return nil, ErrBuiltinApp
+	if IsReservedID(pluginID) {
+		return nil, ErrBuiltinPlugin
 	}
 	s.packageMu.Lock()
 	defer s.packageMu.Unlock()
-	_, statErr := os.Lstat(filepath.Join(s.appsRoot, appID))
+	_, statErr := os.Lstat(filepath.Join(s.pluginsRoot, pluginID))
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return nil, statErr
@@ -332,12 +332,12 @@ func (s *Service) installPackageLocked(ctx context.Context, packageJSON []byte, 
 	enabled := map[string]bool{}
 	if s.enablement != nil {
 		var err error
-		enabled, err = s.enablement.ListAppEnablement(ctx)
+		enabled, err = s.enablement.ListPluginEnablement(ctx)
 		if err != nil {
 			return nil, err
 		}
 	}
-	def, err := InstallPackage(s.appsRoot, packageJSON, expectedSHA256, sourceURL)
+	def, err := InstallPackage(s.pluginsRoot, packageJSON, expectedSHA256, sourceURL)
 	if err != nil {
 		return nil, err
 	}
@@ -350,18 +350,18 @@ func (s *Service) installPackageLocked(ctx context.Context, packageJSON []byte, 
 
 func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	if s == nil {
-		return errors.New("app service unavailable")
+		return errors.New("plugin service unavailable")
 	}
 	id = strings.TrimSpace(id)
-	if !appIDPattern.MatchString(id) {
+	if !pluginIDPattern.MatchString(id) {
 		return ErrInvalidID
 	}
 	if IsReservedID(id) {
-		return ErrBuiltinApp
+		return ErrBuiltinPlugin
 	}
 	s.packageMu.Lock()
 	defer s.packageMu.Unlock()
-	root, err := resolveAppRoot(s.appsRoot, false)
+	root, err := resolvePluginRoot(s.pluginsRoot, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
 	}
@@ -369,7 +369,7 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 		return err
 	}
 	target := filepath.Join(root, id)
-	if _, err := os.Stat(filepath.Join(target, AppFileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(target, PluginFileName)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
 		}
@@ -381,14 +381,14 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Service) GetMCPOverride(ctx context.Context, appID, endpointName string) (MCPEndpointOverride, bool, error) {
+func (s *Service) GetMCPOverride(ctx context.Context, pluginID, endpointName string) (MCPEndpointOverride, bool, error) {
 	_ = ctx
 	if s == nil {
-		return MCPEndpointOverride{}, false, errors.New("app service unavailable")
+		return MCPEndpointOverride{}, false, errors.New("plugin service unavailable")
 	}
 	s.packageMu.RLock()
 	defer s.packageMu.RUnlock()
-	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
+	def, endpointName, err := s.resolveMCPOverrideTarget(pluginID, endpointName, nil)
 	if err != nil {
 		return MCPEndpointOverride{}, false, err
 	}
@@ -403,14 +403,14 @@ func (s *Service) GetMCPOverride(ctx context.Context, appID, endpointName string
 	return CloneMCPEndpointOverride(override), ok, nil
 }
 
-func (s *Service) PutMCPOverride(ctx context.Context, appID, endpointName string, override MCPEndpointOverride) (MCPEndpointOverride, error) {
+func (s *Service) PutMCPOverride(ctx context.Context, pluginID, endpointName string, override MCPEndpointOverride) (MCPEndpointOverride, error) {
 	_ = ctx
 	if s == nil {
-		return MCPEndpointOverride{}, errors.New("app service unavailable")
+		return MCPEndpointOverride{}, errors.New("plugin service unavailable")
 	}
 	s.packageMu.Lock()
 	defer s.packageMu.Unlock()
-	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, &override)
+	def, endpointName, err := s.resolveMCPOverrideTarget(pluginID, endpointName, &override)
 	if err != nil {
 		return MCPEndpointOverride{}, err
 	}
@@ -429,14 +429,14 @@ func (s *Service) PutMCPOverride(ctx context.Context, appID, endpointName string
 	return CloneMCPEndpointOverride(override), nil
 }
 
-func (s *Service) DeleteMCPOverride(ctx context.Context, appID, endpointName string) error {
+func (s *Service) DeleteMCPOverride(ctx context.Context, pluginID, endpointName string) error {
 	_ = ctx
 	if s == nil {
-		return errors.New("app service unavailable")
+		return errors.New("plugin service unavailable")
 	}
 	s.packageMu.Lock()
 	defer s.packageMu.Unlock()
-	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
+	def, endpointName, err := s.resolveMCPOverrideTarget(pluginID, endpointName, nil)
 	if err != nil {
 		return err
 	}
@@ -454,48 +454,48 @@ func (s *Service) DeleteMCPOverride(ctx context.Context, appID, endpointName str
 
 func (s *Service) ReadAsset(ctx context.Context, rel string) ([]byte, string, error) {
 	if s == nil {
-		return nil, "", errors.New("app service unavailable")
+		return nil, "", errors.New("plugin service unavailable")
 	}
 	s.packageMu.RLock()
 	defer s.packageMu.RUnlock()
-	return ReadAsset(s.appsRoot, rel)
+	return ReadAsset(s.pluginsRoot, rel)
 }
 
-func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
+func (s *Service) ReadSkill(ctx context.Context, pluginID, skillID string) (*SkillDetail, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
-	appID = strings.TrimSpace(appID)
-	if !appIDPattern.MatchString(appID) {
+	pluginID = strings.TrimSpace(pluginID)
+	if !pluginIDPattern.MatchString(pluginID) {
 		return nil, ErrInvalidID
 	}
-	def, err := s.definition(ctx, appID)
+	def, err := s.definition(ctx, pluginID)
 	if err != nil {
 		return nil, err
 	}
 	if !def.Enabled {
 		return nil, ErrDisabled
 	}
-	return s.readSkill(ctx, appID, skillID)
+	return s.readSkill(ctx, pluginID, skillID)
 }
 
-func (s *Service) ReadSkillDetail(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
+func (s *Service) ReadSkillDetail(ctx context.Context, pluginID, skillID string) (*SkillDetail, error) {
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
-	appID = strings.TrimSpace(appID)
-	if !appIDPattern.MatchString(appID) {
+	pluginID = strings.TrimSpace(pluginID)
+	if !pluginIDPattern.MatchString(pluginID) {
 		return nil, ErrInvalidID
 	}
-	if _, err := s.definition(ctx, appID); err != nil {
+	if _, err := s.definition(ctx, pluginID); err != nil {
 		return nil, err
 	}
-	return s.readSkill(ctx, appID, skillID)
+	return s.readSkill(ctx, pluginID, skillID)
 }
 
-func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
-	if IsBuiltinID(appID) {
-		detail, ok := ReadBuiltinSkill(appID, skillID)
+func (s *Service) readSkill(ctx context.Context, pluginID, skillID string) (*SkillDetail, error) {
+	if IsBuiltinID(pluginID) {
+		detail, ok := ReadBuiltinSkill(pluginID, skillID)
 		if !ok {
 			return nil, ErrNotFound
 		}
@@ -504,7 +504,7 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 	if s.runtime != nil {
 		runtimeID := RuntimeIDFromContext(ctx)
 		if runtimeID != "" {
-			detail, err := s.runtime.ReadRuntimeSkill(ctx, runtimeID, appID, skillID)
+			detail, err := s.runtime.ReadRuntimeSkill(ctx, runtimeID, pluginID, skillID)
 			if err == nil {
 				return detail, nil
 			}
@@ -515,15 +515,15 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 	}
 	s.packageMu.RLock()
 	defer s.packageMu.RUnlock()
-	root, err := resolveAppRoot(s.appsRoot, false)
+	root, err := resolvePluginRoot(s.pluginsRoot, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	appDir := filepath.Join(root, appID)
-	diskDef, err := LoadDefinitionDir(appDir)
+	pluginDir := filepath.Join(root, pluginID)
+	diskDef, err := LoadDefinitionDir(pluginDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
@@ -553,7 +553,7 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 	if ref == nil {
 		return nil, ErrNotFound
 	}
-	resolvedPath, err := resolveAppRegularFile(appDir, ref.Path)
+	resolvedPath, err := resolvePluginRegularFile(pluginDir, ref.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
@@ -576,23 +576,23 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 	}, nil
 }
 
-func (s *Service) resolveMCPOverrideTarget(appID, endpointName string, override *MCPEndpointOverride) (*Definition, string, error) {
-	appID = strings.TrimSpace(appID)
+func (s *Service) resolveMCPOverrideTarget(pluginID, endpointName string, override *MCPEndpointOverride) (*Definition, string, error) {
+	pluginID = strings.TrimSpace(pluginID)
 	endpointName = strings.TrimSpace(endpointName)
-	if !appIDPattern.MatchString(appID) {
+	if !pluginIDPattern.MatchString(pluginID) {
 		return nil, "", ErrInvalidID
 	}
 	if !endpointNamePattern.MatchString(endpointName) {
 		return nil, "", ErrNotFound
 	}
-	root, err := resolveAppRoot(s.appsRoot, false)
+	root, err := resolvePluginRoot(s.pluginsRoot, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, "", ErrNotFound
 	}
 	if err != nil {
 		return nil, "", err
 	}
-	def, err := LoadDefinitionDir(filepath.Join(root, appID))
+	def, err := LoadDefinitionDir(filepath.Join(root, pluginID))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrNotFound
@@ -619,8 +619,8 @@ func (s *Service) resolveMCPOverrideTarget(appID, endpointName string, override 
 	return resolved, endpointName, nil
 }
 
-func (s *Service) mcpOverrideFilePath(appID string) string {
-	return filepath.Join(s.appsRoot, appID, MCPOverrideFileName)
+func (s *Service) mcpOverrideFilePath(pluginID string) string {
+	return filepath.Join(s.pluginsRoot, pluginID, MCPOverrideFileName)
 }
 
 func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*EndpointBinding, error) {
@@ -628,7 +628,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	connectionRef = strings.TrimSpace(connectionRef)
 	sessionID = strings.TrimSpace(sessionID)
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	if sessionID == "" || endpointName == "" {
 		return nil, errors.New("sessionID and endpoint are required")
@@ -640,7 +640,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	var matches []*EndpointBinding
 	var connections []*Connection
 	if s.connections != nil {
-		connections, err = s.connections.ListAppConnections(ctx)
+		connections, err = s.connections.ListPluginConnections(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -663,7 +663,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			}
 		}
 		for _, conn := range connections {
-			if conn == nil || conn.AppID != def.ID {
+			if conn == nil || conn.PluginID != def.ID {
 				continue
 			}
 			allChoices = append(allChoices, viewConnectionChoice(conn))
@@ -698,9 +698,9 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 
 func (s *Service) ReadyConnection(ctx context.Context, id string) (*Connection, error) {
 	if s == nil || s.connectionStore == nil {
-		return nil, errors.New("app connection store unavailable")
+		return nil, errors.New("plugin connection store unavailable")
 	}
-	connection, err := s.connectionStore.GetAppConnection(ctx, strings.TrimSpace(id))
+	connection, err := s.connectionStore.GetPluginConnection(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
 	}
@@ -708,14 +708,14 @@ func (s *Service) ReadyConnection(ctx context.Context, id string) (*Connection, 
 }
 
 // ResolveBoundEndpoint resolves an exact resource binding, without borrowing a
-// session's loaded Apps or choosing another account by display name.
-func (s *Service) ResolveBoundEndpoint(ctx context.Context, appID, endpointName, connectionID string) (*EndpointBinding, string, error) {
+// session's loaded plugins or choosing another account by display name.
+func (s *Service) ResolveBoundEndpoint(ctx context.Context, pluginID, endpointName, connectionID string) (*EndpointBinding, string, error) {
 	defs, err := s.ListDefinitions(ctx)
 	if err != nil {
 		return nil, "", err
 	}
 	for _, def := range defs {
-		if def == nil || def.ID != appID || !def.Enabled {
+		if def == nil || def.ID != pluginID || !def.Enabled {
 			continue
 		}
 		endpoint, ok := def.Endpoints[endpointName]
@@ -737,12 +737,12 @@ func (s *Service) ResolveBoundEndpoint(ctx context.Context, appID, endpointName,
 		if err != nil {
 			return nil, "", err
 		}
-		if connection.AppID != appID || connection.ID != connectionID {
-			return nil, "", errors.New("connection does not belong to App")
+		if connection.PluginID != pluginID || connection.ID != connectionID {
+			return nil, "", errors.New("connection does not belong to plugin")
 		}
 		binding := endpointBindingForConnection(def, endpointName, endpoint, connection)
 		// Connection timestamps change on edits and authorization refresh.
-		// The fingerprint invalidates prepared canvas actions when that happens.
+		// The fingerprint invalidates prepared widget actions when that happens.
 		revision, _ := json.Marshal(struct {
 			Definition *Definition
 			Endpoint   Endpoint
@@ -768,7 +768,7 @@ func (s *Service) readyEndpointBinding(ctx context.Context, binding *EndpointBin
 }
 
 func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Connection) (*Connection, error) {
-	if connection == nil || connection.AppID != "github" || connection.Auth.Type != AuthTypeOAuth2 {
+	if connection == nil || connection.PluginID != "github" || connection.Auth.Type != AuthTypeOAuth2 {
 		return CloneConnection(connection), nil
 	}
 	if githubAppReauthorizationRequired(connection) {
@@ -783,7 +783,7 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Con
 
 	s.authMu.Lock()
 	defer s.authMu.Unlock()
-	current, err := s.connectionStore.GetAppConnection(ctx, connection.ID)
+	current, err := s.connectionStore.GetPluginConnection(ctx, connection.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -804,10 +804,10 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Con
 	current.Auth.TokenType = token.TokenType
 	current.Auth.ExpiresAt = expiryFromDuration(token.ExpiresIn)
 	current.Auth.RefreshExpiresAt = expiryFromDuration(token.RefreshTokenExpiresIn)
-	if err := s.connectionStore.PutAppConnection(ctx, current); err != nil {
+	if err := s.connectionStore.PutPluginConnection(ctx, current); err != nil {
 		return nil, err
 	}
-	return s.connectionStore.GetAppConnection(ctx, current.ID)
+	return s.connectionStore.GetPluginConnection(ctx, current.ID)
 }
 
 func expiryFromDuration(seconds int64) time.Time {
@@ -820,7 +820,7 @@ func expiryFromDuration(seconds int64) time.Time {
 func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*EndpointBinding, error) {
 	kind = strings.TrimSpace(kind)
 	if s == nil {
-		return nil, errors.New("app service unavailable")
+		return nil, errors.New("plugin service unavailable")
 	}
 	defs, err := s.ListDefinitions(ctx)
 	if err != nil {
@@ -828,7 +828,7 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 	}
 	var connections []*Connection
 	if s.connections != nil {
-		connections, err = s.connections.ListAppConnections(ctx)
+		connections, err = s.connections.ListPluginConnections(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -842,14 +842,14 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 			if kind != "" && endpoint.Kind != kind {
 				continue
 			}
-			appConnections := connectionsForApp(connections, def.ID)
-			if len(appConnections) == 0 {
+			pluginConnections := connectionsForPlugin(connections, def.ID)
+			if len(pluginConnections) == 0 {
 				if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
 					out = append(out, binding)
 				}
 				continue
 			}
-			for _, conn := range appConnections {
+			for _, conn := range pluginConnections {
 				ready, err := s.refreshConnectionIfNeeded(ctx, conn)
 				if err != nil {
 					if errors.Is(err, ErrConnectionReauthorizationRequired) {
@@ -875,7 +875,7 @@ func endpointBindingForConnection(def *Definition, endpointName string, endpoint
 	}
 	authMethod, _ := FindAuthMethod(def, conn.Auth.MethodID, conn.Auth.Type)
 	return &EndpointBinding{
-		AppID:               def.ID,
+		PluginID:            def.ID,
 		ConnectionID:        conn.ID,
 		EndpointName:        endpointName,
 		Endpoint:            resolvedEndpoint,
@@ -891,7 +891,7 @@ func connectionlessEndpointBinding(def *Definition, endpointName string, endpoin
 		return nil, false
 	}
 	return &EndpointBinding{
-		AppID:        def.ID,
+		PluginID:     def.ID,
 		EndpointName: endpointName,
 		Endpoint:     ResolveEndpointPlatform(endpoint),
 	}, true
@@ -901,8 +901,8 @@ func allowsConnectionlessEndpoint(def *Definition) bool {
 	if def == nil || hasRequiredConnectionFields(def.Connection) {
 		return false
 	}
-	// A simplified MCP App carries its complete server configuration in the
-	// endpoint and never requires a separate App connection.
+	// A simplified MCP plugin carries its complete server configuration in the
+	// endpoint and never requires a separate plugin connection.
 	if def.Kind == KindMCP {
 		return true
 	}
@@ -921,10 +921,10 @@ func hasRequiredConnectionFields(config *ConnectionConfig) bool {
 	return false
 }
 
-func connectionsForApp(connections []*Connection, appID string) []*Connection {
+func connectionsForPlugin(connections []*Connection, pluginID string) []*Connection {
 	out := make([]*Connection, 0)
 	for _, conn := range connections {
-		if conn == nil || conn.AppID != appID {
+		if conn == nil || conn.PluginID != pluginID {
 			continue
 		}
 		out = append(out, conn)
@@ -954,7 +954,7 @@ func viewConnectionChoice(conn *Connection) ConnectionChoice {
 	return ConnectionChoice{
 		ID:           conn.ID,
 		Name:         strings.TrimSpace(conn.Name),
-		AppID:        conn.AppID,
+		PluginID:     conn.PluginID,
 		AuthType:     conn.Auth.Type,
 		AuthMethodID: conn.Auth.MethodID,
 		AuthVariant:  conn.Auth.Variant,
@@ -966,7 +966,7 @@ func dedupeConnectionChoices(in []ConnectionChoice) []ConnectionChoice {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]ConnectionChoice, 0, len(in))
 	for _, item := range in {
-		key := item.AppID + "/" + item.ID
+		key := item.PluginID + "/" + item.ID
 		if key == "/" {
 			continue
 		}

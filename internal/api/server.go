@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/app"
-	"github.com/teatak/pudding-core/internal/appexec"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
@@ -33,6 +31,8 @@ import (
 	"github.com/teatak/pudding-core/internal/githubapp"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	"github.com/teatak/pudding-core/internal/plugin"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/turnfiles"
@@ -40,14 +40,14 @@ import (
 )
 
 type Server struct {
-	appHTTP    *appexec.Executor
+	pluginHTTP *pluginexec.Executor
 	engine     *engine.Engine
 	store      store.Store
 	turnFiles  *turnfiles.Replayer
 	config     engine.ConfigSource
 	home       string
 	providers  providerWriter
-	apps       appService
+	plugins    pluginService
 	skills     skillService
 	hub        *event.Hub
 	voice      voiceController
@@ -66,8 +66,8 @@ type Server struct {
 	oauthBroker       *oauthbroker.Client
 	github            *githubapp.Client
 
-	canvasMu      sync.Mutex
-	canvasBudget  map[string]*canvasRequestBudget
+	widgetMu      sync.Mutex
+	widgetBudget  map[string]*widgetRequestBudget
 	providerSyncs singleflight.Group
 
 	// attachmentMu serializes API attachment writes (including pre-insert clones)
@@ -86,7 +86,7 @@ type voiceController interface {
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{appHTTP: appexec.New(nil), engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
+	return &Server{pluginHTTP: pluginexec.New(nil), engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
 }
 
 func (s *Server) WithOAuthBroker(client *oauthbroker.Client) *Server {
@@ -103,8 +103,8 @@ func (s *Server) WithGitHubClient(client *githubapp.Client) *Server {
 	return s
 }
 
-func (s *Server) WithApps(apps appService) *Server {
-	s.apps = apps
+func (s *Server) WithPlugins(plugins pluginService) *Server {
+	s.plugins = plugins
 	return s
 }
 
@@ -145,20 +145,20 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
-	"/canvases",
-	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
+	"/studio/items",
+	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/plugins", "/plugin-assets", "/plugin-skills", "/plugin-connections", "/plugin-oauth", "/mcp", "/desktop"}
 
-type appService interface {
-	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
-	InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*app.Definition, error)
+type pluginService interface {
+	ListDefinitions(ctx context.Context) ([]*plugin.Definition, error)
+	InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*plugin.Definition, error)
 	DeleteDefinition(ctx context.Context, id string) error
 	ReadAsset(ctx context.Context, rel string) ([]byte, string, error)
-	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
-	ReadSkillDetail(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
+	ReadSkill(ctx context.Context, pluginID, skillID string) (*plugin.SkillDetail, error)
+	ReadSkillDetail(ctx context.Context, pluginID, skillID string) (*plugin.SkillDetail, error)
 }
 
-type appEnableService interface {
-	SetEnabled(ctx context.Context, id string, enabled bool) (*app.Definition, error)
+type pluginEnableService interface {
+	SetEnabled(ctx context.Context, id string, enabled bool) (*plugin.Definition, error)
 }
 
 type browserMCPService interface {
@@ -175,23 +175,23 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	public := cart.New()
 
-	app.Route("/canvases").GET(s.listCanvases).POST(s.createCanvas)
-	app.Route("/canvases/:canvasID").GET(s.getCanvas).DELETE(s.deleteCanvas)
-	app.Route("/canvases/:canvasID/appearance").PATCH(s.patchCanvasAppearance)
-	app.Route("/canvases/:canvasID/revisions").GET(s.listCanvasRevisions)
-	app.Route("/canvases/:canvasID/revisions/:hash").GET(s.getCanvasRevision)
-	app.Route("/canvases/:canvasID/draft").GET(s.getCanvasDraft).POST(s.startCanvasDraft)
-	app.Route("/canvases/:canvasID/draft/file").GET(s.getCanvasDraftFile).PUT(s.putCanvasDraftFile)
-	app.Route("/canvases/:canvasID/draft/commit").POST(s.commitCanvasDraft)
-	app.Route("/canvases/:canvasID/build-receipts").POST(s.canvasBuildReceipt)
-	app.Route("/canvases/:canvasID/activate").POST(s.activateCanvas)
-	app.Route("/canvases/:canvasID/bindings").PUT(s.bindCanvas)
-	app.Route("/canvases/:canvasID/queries/:operationID").POST(s.queryCanvas)
-	app.Route("/canvases/:canvasID/actions/:operationID/prepare").POST(s.prepareCanvasAction)
-	app.Route("/canvases/:canvasID/actions").GET(s.listCanvasActions)
-	app.Route("/canvases/:canvasID/links").GET(s.listCanvasLinks).POST(s.putCanvasLink)
-	app.Route("/canvases/:canvasID/links/:linkID").DELETE(s.deleteCanvasLink)
-	app.Route("/canvases/:canvasID/action-runs/:actionID/execute").POST(s.executeCanvasAction)
+	app.Route("/studio/items").GET(s.listStudioItems).POST(s.createStudioItem)
+	app.Route("/studio/items/:itemID").GET(s.getStudioItem).DELETE(s.deleteStudioItem)
+	app.Route("/studio/items/:itemID/appearance").PATCH(s.patchStudioItemAppearance)
+	app.Route("/studio/items/:itemID/revisions").GET(s.listStudioItemRevisions)
+	app.Route("/studio/items/:itemID/revisions/:hash").GET(s.getStudioItemRevision)
+	app.Route("/studio/items/:itemID/draft").GET(s.getWidgetDraft).POST(s.startWidgetDraft)
+	app.Route("/studio/items/:itemID/draft/file").GET(s.getWidgetDraftFile).PUT(s.putWidgetDraftFile)
+	app.Route("/studio/items/:itemID/draft/commit").POST(s.commitWidgetDraft)
+	app.Route("/studio/items/:itemID/build-receipts").POST(s.widgetBuildReceipt)
+	app.Route("/studio/items/:itemID/activate").POST(s.activateWidget)
+	app.Route("/studio/items/:itemID/bindings").PUT(s.bindWidget)
+	app.Route("/studio/items/:itemID/queries/:operationID").POST(s.queryWidget)
+	app.Route("/studio/items/:itemID/actions/:operationID/prepare").POST(s.prepareWidgetAction)
+	app.Route("/studio/items/:itemID/actions").GET(s.listWidgetActions)
+	app.Route("/studio/items/:itemID/links").GET(s.listWidgetLinks).POST(s.putWidgetLink)
+	app.Route("/studio/items/:itemID/links/:linkID").DELETE(s.deleteWidgetLink)
+	app.Route("/studio/items/:itemID/action-runs/:actionID/execute").POST(s.executeWidgetAction)
 
 	app.Route("/scheduled-tasks").GET(s.listScheduledTasks).POST(s.createScheduledTask)
 	app.Route("/scheduled-tasks/:taskID").GET(s.getScheduledTask).PATCH(s.updateScheduledTask).DELETE(s.updateScheduledTask)
@@ -203,7 +203,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/clone").POST(s.cloneSession)
 	app.Route("/sessions/:id/archive").POST(s.archiveSession)
 	app.Route("/sessions/:id/restore").POST(s.restoreSession)
-	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)
+	app.Route("/sessions/:id/plugins/:pluginID").DELETE(s.unloadSessionPlugin)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/turns/:turnID/steer").POST(s.steerTurn)
 	app.Route("/sessions/:id/turns/:turnID/retry").POST(s.retryTurn)
@@ -261,9 +261,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/library").GET(s.listLibrary)
 	app.Route("/sessions/:id/library/favorites").POST(s.putLibraryFavorite)
 	app.Route("/sessions/:id/library/favorites/:favoriteID").DELETE(s.deleteLibraryFavorite)
-	app.Route("/sessions/:id/canvases/:canvasID/open").POST(s.openCanvasResource)
-	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems)
-	app.Route("/sessions/:id/canvas/items/:itemID").DELETE(s.deleteCanvasItem)
+	app.Route("/sessions/:id/studio/items/:itemID/open").POST(s.openStudioItem)
+	app.Route("/sessions/:id/studio/mounts").GET(s.listStudioMounts)
+	app.Route("/sessions/:id/studio/mounts/:mountID").DELETE(s.deleteStudioMount)
 	app.Route("/sessions/:id/project/search").GET(s.searchProjectFiles)
 	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
 	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)
@@ -308,21 +308,21 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/skills").GET(s.listSkills)
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
-	app.Route("/apps").GET(s.listApps)
-	app.Route("/apps/install").POST(s.installApp)
-	app.Route("/apps/mcp").POST(s.importMCPApps)
-	app.Route("/apps/:id/enabled").PUT(s.putAppEnabled)
-	app.Route("/apps/:id/mcp-config").GET(s.getMCPAppConfig).PUT(s.putMCPAppConfig)
-	app.Route("/apps/:id/mcp-overrides/:endpoint").GET(s.getAppMCPOverride).PUT(s.putAppMCPOverride).DELETE(s.deleteAppMCPOverride)
-	app.Route("/apps/:id/mcp").GET(s.getAppMCPStatus)
-	app.Route("/apps/:id").DELETE(s.deleteApp)
-	app.Route("/app-assets/*path").GET(s.getAppAsset)
-	app.Route("/app-skills/*path").GET(s.getAppSkill)
-	app.Route("/app-connections").GET(s.listAppConnections)
-	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
-	app.Route("/app-oauth/start").POST(s.startAppOAuth)
-	app.Route("/app-oauth/complete").POST(s.completeAppOAuth)
-	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
+	app.Route("/plugins").GET(s.listPlugins)
+	app.Route("/plugins/install").POST(s.installPlugin)
+	app.Route("/plugins/mcp").POST(s.importMCPPlugins)
+	app.Route("/plugins/:id/enabled").PUT(s.putPluginEnabled)
+	app.Route("/plugins/:id/mcp-config").GET(s.getMCPPluginConfig).PUT(s.putMCPPluginConfig)
+	app.Route("/plugins/:id/mcp-overrides/:endpoint").GET(s.getPluginMCPOverride).PUT(s.putPluginMCPOverride).DELETE(s.deletePluginMCPOverride)
+	app.Route("/plugins/:id/mcp").GET(s.getPluginMCPStatus)
+	app.Route("/plugins/:id").DELETE(s.deletePlugin)
+	app.Route("/plugin-assets/*path").GET(s.getPluginAsset)
+	app.Route("/plugin-skills/*path").GET(s.getPluginSkill)
+	app.Route("/plugin-connections").GET(s.listPluginConnections)
+	app.Route("/plugin-connections/:id").GET(s.getPluginConnection).PUT(s.putPluginConnection).DELETE(s.deletePluginConnection)
+	app.Route("/plugin-oauth/start").POST(s.startPluginOAuth)
+	app.Route("/plugin-oauth/complete").POST(s.completePluginOAuth)
+	public.Route("/oauth/callback/:provider").GET(s.pluginOAuthCallback)
 	public.Route("/desktop/health").GET(desktopHealth(token))
 	app.Route("/usage/daily").GET(s.getDailyUsage)
 	authed := withAuth(token, app)
@@ -361,9 +361,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if validBearerToken(r, token) {
-			runtimeID := strings.TrimSpace(r.Header.Get(app.RuntimeIDHeader))
+			runtimeID := strings.TrimSpace(r.Header.Get(plugin.RuntimeIDHeader))
 			if runtimeID != "" {
-				r = r.WithContext(app.WithRuntimeID(r.Context(), runtimeID))
+				r = r.WithContext(plugin.WithRuntimeID(r.Context(), runtimeID))
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -683,25 +683,25 @@ func (s *Server) patchSession(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) unloadSessionApp(c *cart.Context) error {
+func (s *Server) unloadSessionPlugin(c *cart.Context) error {
 	id, _ := c.Param("id")
-	appID, _ := c.Param("appID")
-	appID = strings.TrimSpace(appID)
-	if appID == "" {
+	pluginID, _ := c.Param("pluginID")
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
 		return badRequest(c, "app id is required")
 	}
 	sess, err := s.store.GetSession(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	loaded := make([]string, 0, len(sess.LoadedAppIDs))
-	for _, loadedID := range sess.LoadedAppIDs {
-		if loadedID != appID {
+	loaded := make([]string, 0, len(sess.LoadedPluginIDs))
+	for _, loadedID := range sess.LoadedPluginIDs {
+		if loadedID != pluginID {
 			loaded = append(loaded, loadedID)
 		}
 	}
-	if len(loaded) != len(sess.LoadedAppIDs) {
-		sess, err = s.store.UpdateSession(c.Request.Context(), id, store.SessionUpdate{LoadedAppIDs: &loaded})
+	if len(loaded) != len(sess.LoadedPluginIDs) {
+		sess, err = s.store.UpdateSession(c.Request.Context(), id, store.SessionUpdate{LoadedPluginIDs: &loaded})
 		if err != nil {
 			return s.fail(c, err)
 		}

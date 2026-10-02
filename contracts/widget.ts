@@ -1,13 +1,14 @@
 import { z } from "zod";
+import { studioItemRevision } from "./studio";
 
-export const canvasHash = z.string().regex(/^[a-f0-9]{64}$/);
-export const canvasPackage = z
+export const widgetHash = z.string().regex(/^[a-f0-9]{64}$/);
+export const widgetPackage = z
   .object({ files: z.record(z.string(), z.string()) })
   .strict();
-export const canvasSource = z
-  .object({ appID: z.string(), endpoint: z.string() })
+export const widgetSource = z
+  .object({ pluginID: z.string(), endpoint: z.string() })
   .strict();
-export const canvasOperation = z
+export const widgetOperation = z
   .object({
     source: z.string(),
     kind: z.enum(["rest", "graphql"]),
@@ -41,21 +42,21 @@ export const canvasOperation = z
       .optional(),
   })
   .strict();
-export const canvasManifest = z
+export const widgetManifest = z
   .object({
     schemaVersion: z.literal(1),
     sdkVersion: z.literal("1"),
     entry: z.string(),
-    sources: z.record(z.string(), canvasSource),
-    operations: z.record(z.string(), canvasOperation),
+    sources: z.record(z.string(), widgetSource),
+    operations: z.record(z.string(), widgetOperation),
   })
   .strict();
-export type CanvasPackage = z.infer<typeof canvasPackage>;
-export type CanvasManifest = z.infer<typeof canvasManifest>;
-export type CanvasOperation = z.infer<typeof canvasOperation>;
+export type WidgetPackage = z.infer<typeof widgetPackage>;
+export type WidgetManifest = z.infer<typeof widgetManifest>;
+export type WidgetOperation = z.infer<typeof widgetOperation>;
 
-export const canvasBuildResult = z.object({
-  revisionHash: canvasHash,
+export const widgetBuildResult = z.object({
+  revisionHash: widgetHash,
   sdkVersion: z.string(),
   compilerVersion: z.string(),
   dependencyHash: z.string(),
@@ -69,9 +70,9 @@ export const canvasBuildResult = z.object({
     }),
   ),
 });
-export type CanvasBuildResult = z.infer<typeof canvasBuildResult>;
+export type WidgetBuildResult = z.infer<typeof widgetBuildResult>;
 
-export const canvasBridgeRequest = z
+export const widgetBridgeRequest = z
   .object({
     id: z.string().min(1).max(100),
     method: z.enum([
@@ -89,61 +90,16 @@ export const canvasBridgeRequest = z
   })
   .strict();
 
-export const canvas = z.object({
-  id: z.string(),
-  name: z.string(),
-  icon: z.string().optional(),
-  iconColor: z.string().optional(),
-  sourceSessionID: z.string().optional(),
-  revision: z.number().int(),
-  headRevision: z.string(),
-  activeRevision: z.string(),
-  bindings: z.record(z.string(), z.string()),
-  bindingVersion: z.number().int(),
-  deleted: z.boolean(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export const canvasRevision = z.object({
-  canvasID: z.string(),
-  hash: canvasHash,
-  parentRevision: z.string(),
-  clientRequestID: z.string(),
-  createdAt: z.string(),
-  buildReceipt: z
-    .object({
-      revisionHash: canvasHash,
-      sdkVersion: z.string(),
-      compilerVersion: z.string(),
-      dependencyHash: z.string(),
-      ok: z.literal(true),
-    })
-    .optional(),
-});
-export const canvasRevisionResponse = z.object({
-  kind: z.literal("app"),
-  revision: canvasRevision,
-  package: canvasPackage,
-  manifest: canvasManifest,
-});
-export const canvasesResponse = z.object({
-  canvases: z.array(canvas),
-});
-export const canvasRevisionsResponse = z.object({
-  revisions: z.array(canvasRevision),
-});
-export type Canvas = z.infer<typeof canvas>;
-export type CanvasRevision = z.infer<typeof canvasRevision>;
-export const canvasQueryResult = z.object({
+export const widgetQueryResult = z.object({
   data: z.unknown(),
   requestID: z.string(),
-  revisionHash: canvasHash,
+  revisionHash: widgetHash,
   bindingVersion: z.number().int(),
   fetchedAt: z.string(),
 });
-export const canvasAction = z.object({
+export const widgetAction = z.object({
   id: z.string(),
-  canvasID: z.string(),
+  itemID: z.string(),
   clientRequestID: z.string(),
   requestHash: z.string(),
   state: z.enum(["prepared", "executing", "succeeded", "failed", "unknown"]),
@@ -155,7 +111,7 @@ export const canvasAction = z.object({
     operationID: z.string(),
     operationHash: z.string(),
     bindingFingerprint: z.string(),
-    appID: z.string(),
+    pluginID: z.string(),
     connectionID: z.string(),
     description: z.string(),
     params: z.record(z.string(), z.unknown()),
@@ -163,35 +119,42 @@ export const canvasAction = z.object({
   }),
   result: z.unknown().optional(),
 });
-export const canvasActionsResponse = z.object({
-  actions: z.array(canvasAction),
+export const widgetActionsResponse = z.object({
+  actions: z.array(widgetAction),
 });
-export type CanvasAction = z.infer<typeof canvasAction>;
+export type WidgetAction = z.infer<typeof widgetAction>;
 
-export const canvasEntity = z.object({
-  appID: z.string(),
+export const widgetEntity = z.object({
+  pluginID: z.string(),
   connectionID: z.string(),
   entityType: z.string(),
   entityID: z.string(),
 });
-export const canvasLink = z.object({
+export const widgetLink = z.object({
   id: z.string(),
-  canvasID: z.string(),
-  left: canvasEntity,
-  right: canvasEntity,
+  itemID: z.string(),
+  left: widgetEntity,
+  right: widgetEntity,
   createdAt: z.string(),
 });
-export const canvasLinksResponse = z.object({
-  links: z.array(canvasLink),
+export const widgetLinksResponse = z.object({
+  links: z.array(widgetLink),
 });
-export const canvasEntityInput = z
+export const widgetEntityInput = z
   .object({
     source: z.string().min(1),
     entityType: z.string().min(1).max(100),
     entityID: z.string().min(1).max(500),
   })
   .strict();
-export const canvasLinkInput = z
-  .object({ left: canvasEntityInput, right: canvasEntityInput })
+export const widgetLinkInput = z
+  .object({ left: widgetEntityInput, right: widgetEntityInput })
   .strict();
-export type CanvasLinkInput = z.infer<typeof canvasLinkInput>;
+export type WidgetLinkInput = z.infer<typeof widgetLinkInput>;
+
+export const widgetRevisionResponse = z.object({
+  kind: z.literal("widget"),
+  revision: studioItemRevision,
+  package: widgetPackage,
+  manifest: widgetManifest,
+});

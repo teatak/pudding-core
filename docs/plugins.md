@@ -1,48 +1,55 @@
-# Apps and Connection Fields
+# Plugins and Connection Fields
 
-Apps are local packages under `<home>/apps/<id>/`. Each app declares endpoints,
-auth methods, skills, and optional connection fields in `app.yaml`.
+Plugins are local packages under `<home>/plugins/<id>/`. Each plugin declares endpoints,
+auth methods, skills, and optional connection fields in `plugin.yaml`.
 
-## MCP Apps
+Installs created before plugins were renamed from Apps kept packages in
+`<home>/apps/<id>/` with `app.yaml` and `.pudding-app-lock.json`, connections in
+`config/app-connections.yaml` (`app:` per connection), and enablement under the
+`apps` key of `config/settings.yaml`. The daemon moves that layout once at start;
+each step is idempotent, so an interrupted move finishes on the next start. A name
+present in both `apps` and `plugins` is left in place and logged.
 
-Ordinary MCP servers are managed as simplified Apps with `kind: mcp`; there is
-no separate MCP registry or loader. The Apps page imports the standard
-`mcpServers` JSON format through **Add MCP App**, and lists built-in, installed,
-and MCP Apps together under Installed.
+## MCP Plugins
 
-Each MCP App has exactly one MCP endpoint and does not require an App
+Ordinary MCP servers are managed as simplified plugins with `kind: mcp`; there is
+no separate MCP registry or loader. The Plugins page imports the standard
+`mcpServers` JSON format through **Add MCP Plugin**, and lists built-in, installed,
+and MCP plugins together under Installed.
+
+Each MCP plugin has exactly one MCP endpoint and does not require a plugin
 connection. `stdio` servers require Code mode, while streamable HTTP servers
 require Work mode. Environment variables and HTTP headers are stored in the
-private MCP override file rather than `app.yaml`. Enabled MCP Apps appear in the
-compact Available Apps prompt and are loaded on demand with
-`builtin_app_load`; there is no `builtin_mcp_load` tool.
+private MCP override file rather than `plugin.yaml`. Enabled MCP plugins appear in the
+compact Available Plugins prompt and are loaded on demand with
+`builtin_plugin_load`; there is no `builtin_mcp_load` tool.
 
 ## LLM Authoring
 
-App creation is provided by the built-in App Authoring App:
+Plugin creation is provided by the built-in Plugin Authoring plugin:
 
-1. Enter Code mode and call `builtin_app_load(app_id="app-authoring")` when the
-   user explicitly asks to create or update an App.
-2. The load returns the bundled `app-creator` Skill and exposes
-   `builtin_app_save` for the session.
-3. For updates, inspect visible package files through the read-only `app` file
+1. Enter Code mode and call `builtin_plugin_load(plugin_id="plugin-authoring")` when the
+   user explicitly asks to create or update a plugin.
+2. The load returns the bundled `plugin-creator` Skill and exposes
+   `builtin_plugin_save` for the session.
+3. For updates, inspect visible package files through the read-only `plugin` file
    scope. Hidden connection and MCP override files are never exposed there.
-4. Call `builtin_app_save` with a complete UTF-8 package and either `create` or
+4. Call `builtin_plugin_save` with a complete UTF-8 package and either `create` or
    `update`.
 
 There is no Draft or publish step. The save tool builds and validates a hidden
 candidate directory, then replaces the installed directory. Validation or write
-failure leaves the previous installed App unchanged. Creation refuses an
-existing id; updates refuse builtin and runtime Apps. Saving is a persistent App
+failure leaves the previous installed plugin unchanged. Creation refuses an
+existing id; updates refuse builtin and runtime plugins. Saving is a persistent plugin
 write, so Ask and Auto approval modes request confirmation; Full Access does not.
 
-`builtin_app_save` accepts text files only, so authored icons use SVG. Secrets
-and connection values are configured through App Connections and must never be
+`builtin_plugin_save` accepts text files only, so authored icons use SVG. Secrets
+and connection values are configured through plugin Connections and must never be
 written into the package.
 
 ## Endpoint Kinds
 
-Apps can declare REST, GraphQL, and MCP endpoints under `endpoints`.
+Plugins can declare REST, GraphQL, and MCP endpoints under `endpoints`.
 
 ```yaml
 endpoints:
@@ -60,14 +67,14 @@ endpoints:
 
 For MCP endpoints, use `transport: streamable_http` with `url`, or
 `transport: stdio` with `command` and optional `args` / `env`. Runtime tool
-discovery exposes configured MCP endpoints as model-callable tools after the App
+discovery exposes configured MCP endpoints as model-callable tools after the plugin
 is loaded. The daemon starts `stdio` endpoints on demand and stops their process
-when the session App binding is cleared or the daemon exits.
+when the session plugin binding is cleared or the daemon exits.
 
 ## Connection Fields
 
 Use `connection.fields` for per-connection values that are not auth secrets but
-must be attached to most app API calls, such as `hotelCode`, `tenantId`, or
+must be attached to most plugin API calls, such as `hotelCode`, `tenantId`, or
 environment codes.
 
 Pudding shows these fields in the connection dialog, stores the values with the
@@ -93,7 +100,7 @@ connection:
 
 Field properties:
 
-- `id`: stable field id. It must be unique in the app.
+- `id`: stable field id. It must be unique in the plugin.
 - `label`: display label in the connection dialog.
 - `description`: optional helper text.
 - `placeholder`: optional input placeholder.
@@ -171,24 +178,24 @@ endpoints:
 ```
 
 The connection URL takes precedence over the endpoint URL declared in
-`app.yaml`. An optional URL config may be left empty to keep the App default;
+`plugin.yaml`. An optional URL config may be left empty to keep the plugin default;
 `required: true` requires every connection to provide an address. Overrides
 are keyed by endpoint name, so one connection can customize multiple declared
-REST or GraphQL endpoints and the same App can connect to different self-hosted
+REST or GraphQL endpoints and the same plugin can connect to different self-hosted
 instances.
 
 Only `http` and `https` URLs without userinfo, query parameters, or fragments
 are accepted. Authentication and connection field injection remain unchanged.
-MCP endpoints continue to use the App-level private MCP override configuration.
+MCP endpoints continue to use the plugin-level private MCP override configuration.
 
 ## Skill Guidance
 
-Core prompt assembly does not inline app-specific connection field rules. If an
-LLM needs to know how an app-specific field is injected, document it in the
-app's skill, for example:
+Core prompt assembly does not inline plugin-specific connection field rules. If an
+LLM needs to know how a plugin-specific field is injected, document it in the
+plugin's skill, for example:
 
 ```md
-- Connections require `hotelCode`. The app injects it as query parameter
+- Connections require `hotelCode`. The plugin injects it as query parameter
   `hotelCode` for GET/DELETE, JSON body field `hotelCode` for POST/PUT/PATCH,
   and header `X-Hotel-Code`; do not duplicate it unless the user explicitly
   wants to override the value for one call.

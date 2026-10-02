@@ -70,51 +70,51 @@ func TestBuiltinFileListAllowsSkillRoot(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileAppScopeIsReadOnlyAndHidesRuntimeFiles(t *testing.T) {
+func TestBuiltinFilePluginScopeIsReadOnlyAndHidesRuntimeFiles(t *testing.T) {
 	home := t.TempDir()
-	appDir := filepath.Join(home, "apps", "example")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home, "plugins", "example")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: example\nname: Example\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("id: example\nname: Example\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, ".pudding-mcp-overrides.yaml"), []byte("secret: hidden\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, ".pudding-mcp-overrides.yaml"), []byte("secret: hidden\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runner := NewBuiltinRunner(WithHomeDir(home))
 
 	read := runner.Call(context.Background(), Call{
 		Name: FileRead,
-		Args: json.RawMessage(`{"scope":"app","path":"example/app.yaml"}`),
+		Args: json.RawMessage(`{"scope":"plugin","path":"example/plugin.yaml"}`),
 	})
 	if !read.Ok || !strings.Contains(read.Content, "Example") {
 		t.Fatalf("read App manifest: %+v", read)
 	}
 	list := runner.Call(context.Background(), Call{
 		Name: FileList,
-		Args: json.RawMessage(`{"scope":"app","path":"example"}`),
+		Args: json.RawMessage(`{"scope":"plugin","path":"example"}`),
 	})
 	if !list.Ok || strings.Contains(list.Content, ".pudding-mcp-overrides.yaml") {
 		t.Fatalf("hidden App file leaked from list: %+v", list)
 	}
 	hidden := runner.Call(context.Background(), Call{
 		Name: FileRead,
-		Args: json.RawMessage(`{"scope":"app","path":"example/.pudding-mcp-overrides.yaml"}`),
+		Args: json.RawMessage(`{"scope":"plugin","path":"example/.pudding-mcp-overrides.yaml"}`),
 	})
 	if hidden.Ok {
 		t.Fatalf("hidden App file should not be readable: %+v", hidden)
 	}
 	search := runner.Call(context.Background(), Call{
 		Name: FileSearch,
-		Args: json.RawMessage(`{"scope":"app","path":"example","query":"hidden"}`),
+		Args: json.RawMessage(`{"scope":"plugin","path":"example","query":"hidden"}`),
 	})
 	if !search.Ok || strings.Contains(search.Content, ".pudding-mcp-overrides.yaml") || strings.Contains(search.Content, "secret: hidden") {
 		t.Fatalf("hidden App file leaked from search: %+v", search)
 	}
 	write := runner.Call(context.Background(), Call{
 		Name: FileWrite,
-		Args: json.RawMessage(`{"scope":"app","path":"example/app.yaml","content":"changed"}`),
+		Args: json.RawMessage(`{"scope":"plugin","path":"example/plugin.yaml","content":"changed"}`),
 	})
 	if write.Ok {
 		t.Fatalf("App scope should be read-only: %+v", write)
@@ -153,7 +153,7 @@ func TestBuiltinFileRejectsSymlinkedManagedRoot(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileAllowsAppSkillIDInGlobalScope(t *testing.T) {
+func TestBuiltinFileAllowsPluginSkillIDInGlobalScope(t *testing.T) {
 	homeDir := t.TempDir()
 	result := NewBuiltinRunner(WithHomeDir(homeDir)).Call(context.Background(), Call{
 		Name: FileWrite,

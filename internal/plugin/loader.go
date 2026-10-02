@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"bytes"
@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	AppFileName = "app.yaml"
+	PluginFileName = "plugin.yaml"
 )
 
-var appIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var pluginIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var endpointNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var connectionFieldIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 var endpointPlatformPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -66,7 +66,7 @@ type skillFrontmatter struct {
 }
 
 func LoadUserDefinitions(root string) ([]*Definition, error) {
-	resolvedRoot, err := resolveAppRoot(root, false)
+	resolvedRoot, err := resolvePluginRoot(root, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -96,10 +96,10 @@ func LoadUserDefinitions(root string) ([]*Definition, error) {
 	return out, nil
 }
 
-func resolveAppRoot(root string, create bool) (string, error) {
+func resolvePluginRoot(root string, create bool) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
-		return "", errors.New("app root is required")
+		return "", errors.New("plugin root is required")
 	}
 	if create {
 		if err := os.MkdirAll(root, 0o700); err != nil {
@@ -111,14 +111,14 @@ func resolveAppRoot(root string, create bool) (string, error) {
 		return "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", errors.New("app root must be a directory, not a symlink")
+		return "", errors.New("plugin root must be a directory, not a symlink")
 	}
 	return filepath.Clean(root), nil
 }
 
 func LoadDefinitionDir(dir string) (*Definition, error) {
-	path := filepath.Join(dir, AppFileName)
-	resolvedPath, err := resolveAppRegularFile(dir, AppFileName)
+	path := filepath.Join(dir, PluginFileName)
+	resolvedPath, err := resolvePluginRegularFile(dir, PluginFileName)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 	}
 	var raw fileDefinition
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("app: parse %s: %w", path, err)
+		return nil, fmt.Errorf("plugin: parse %s: %w", path, err)
 	}
 	def := &Definition{
 		Kind:        normalizedDefinitionKind(raw.Kind),
@@ -157,18 +157,18 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 		def.Skills = append(def.Skills, skill)
 	}
 	if err := ValidateDefinition(def); err != nil {
-		return nil, fmt.Errorf("app: validate %s: %w", path, err)
+		return nil, fmt.Errorf("plugin: validate %s: %w", path, err)
 	}
 	if def.Icon != nil {
-		if _, err := resolveAppRegularFile(dir, def.Icon.SVG); err != nil {
-			return nil, fmt.Errorf("app: validate %s: icon %q is not a regular file inside the App: %w", path, def.Icon.SVG, err)
+		if _, err := resolvePluginRegularFile(dir, def.Icon.SVG); err != nil {
+			return nil, fmt.Errorf("plugin: validate %s: icon %q is not a regular file inside the plugin: %w", path, def.Icon.SVG, err)
 		}
 	}
 	applyDefinitionLock(dir, def)
 	return def, nil
 }
 
-func normalizeIconSpec(raw IconSpec, appDir string) *IconSpec {
+func normalizeIconSpec(raw IconSpec, pluginDir string) *IconSpec {
 	icon := IconSpec{SVG: strings.TrimSpace(raw.SVG)}
 	if raw.Color != nil {
 		color := normalizeThemeColor(*raw.Color)
@@ -183,7 +183,7 @@ func normalizeIconSpec(raw IconSpec, appDir string) *IconSpec {
 		}
 	}
 	if icon.SVG == "" {
-		icon.SVG = defaultAppIconPath(appDir)
+		icon.SVG = defaultPluginIconPath(pluginDir)
 	}
 	if icon.SVG == "" && icon.Color == nil && icon.Background == nil {
 		return nil
@@ -269,9 +269,9 @@ func normalizeConnectionConfig(raw *ConnectionConfig) *ConnectionConfig {
 	return out
 }
 
-func defaultAppIconPath(appDir string) string {
+func defaultPluginIconPath(pluginDir string) string {
 	name := "icon.svg"
-	if _, err := resolveAppRegularFile(appDir, filepath.ToSlash(filepath.Join("assets", name))); err == nil {
+	if _, err := resolvePluginRegularFile(pluginDir, filepath.ToSlash(filepath.Join("assets", name))); err == nil {
 		return filepath.ToSlash(filepath.Join("assets", name))
 	}
 	return ""
@@ -283,18 +283,18 @@ func ValidateDefinition(def *Definition) error {
 	}
 	def.Kind = normalizedDefinitionKind(def.Kind)
 	switch def.Kind {
-	case KindApp:
+	case KindPlugin:
 	case KindMCP:
 		if len(def.Endpoints) != 1 {
-			return errors.New("mcp app must define exactly one endpoint")
+			return errors.New("mcp plugin must define exactly one endpoint")
 		}
 		if len(def.Skills) > 0 {
-			return errors.New("mcp app cannot define skills")
+			return errors.New("mcp plugin cannot define skills")
 		}
 	default:
-		return fmt.Errorf("unsupported app kind %q", def.Kind)
+		return fmt.Errorf("unsupported plugin kind %q", def.Kind)
 	}
-	if !appIDPattern.MatchString(strings.TrimSpace(def.ID)) {
+	if !pluginIDPattern.MatchString(strings.TrimSpace(def.ID)) {
 		return fmt.Errorf("invalid id %q", def.ID)
 	}
 	for name, endpoint := range def.Endpoints {
@@ -305,7 +305,7 @@ func ValidateDefinition(def *Definition) error {
 			return fmt.Errorf("endpoint %s: %w", name, err)
 		}
 		if def.Kind == KindMCP && endpoint.Kind != EndpointKindMCP {
-			return fmt.Errorf("mcp app endpoint %s must use kind %q", name, EndpointKindMCP)
+			return fmt.Errorf("mcp plugin endpoint %s must use kind %q", name, EndpointKindMCP)
 		}
 	}
 	for _, skill := range def.Skills {
@@ -345,7 +345,7 @@ func ValidateDefinition(def *Definition) error {
 func normalizedDefinitionKind(kind string) string {
 	kind = strings.TrimSpace(kind)
 	if kind == "" {
-		return KindApp
+		return KindPlugin
 	}
 	return kind
 }
@@ -659,7 +659,7 @@ func validEndpointEnvName(name string) bool {
 	return true
 }
 
-// IsAllowedRequestHeaderName reports whether an App may inject the header into
+// IsAllowedRequestHeaderName reports whether a plugin may inject the header into
 // an outbound request. Keep this shared by manifest validation and execution.
 func IsAllowedRequestHeaderName(name string) bool {
 	name = strings.TrimSpace(name)
@@ -714,12 +714,12 @@ func validateEndpointURL(rawURL string) error {
 	return nil
 }
 
-func loadSkillRef(appDir, rel string) (SkillRef, error) {
+func loadSkillRef(pluginDir, rel string) (SkillRef, error) {
 	cleaned, err := cleanRelativeSlashPath(rel)
 	if err != nil {
 		return SkillRef{}, fmt.Errorf("invalid skill path %q: %w", rel, err)
 	}
-	resolvedPath, err := resolveAppRegularFile(appDir, cleaned)
+	resolvedPath, err := resolvePluginRegularFile(pluginDir, cleaned)
 	if err != nil {
 		return SkillRef{}, err
 	}
@@ -728,7 +728,7 @@ func loadSkillRef(appDir, rel string) (SkillRef, error) {
 		return SkillRef{}, err
 	}
 	meta, _ := parseSkillFrontmatter(data)
-	path := filepath.Join(appDir, filepath.FromSlash(cleaned))
+	path := filepath.Join(pluginDir, filepath.FromSlash(cleaned))
 	id := strings.TrimSuffix(filepath.Base(filepath.Dir(path)), filepath.Ext(filepath.Base(path)))
 	if strings.TrimSpace(meta.Name) != "" {
 		id = strings.TrimSpace(meta.Name)
@@ -741,19 +741,19 @@ func loadSkillRef(appDir, rel string) (SkillRef, error) {
 	}, nil
 }
 
-func resolveAppRegularFile(appDir, rel string) (string, error) {
-	info, err := os.Lstat(appDir)
+func resolvePluginRegularFile(pluginDir, rel string) (string, error) {
+	info, err := os.Lstat(pluginDir)
 	if err != nil {
 		return "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", errors.New("app directory must be a directory, not a symlink")
+		return "", errors.New("plugin directory must be a directory, not a symlink")
 	}
 	cleaned, err := cleanRelativeSlashPath(rel)
 	if err != nil {
 		return "", err
 	}
-	root, err := filepath.EvalSymlinks(appDir)
+	root, err := filepath.EvalSymlinks(pluginDir)
 	if err != nil {
 		return "", err
 	}
@@ -763,14 +763,14 @@ func resolveAppRegularFile(appDir, rel string) (string, error) {
 	}
 	relative, err := filepath.Rel(root, target)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errors.New("app file escapes the App directory")
+		return "", errors.New("plugin file escapes the plugin directory")
 	}
 	info, err = os.Stat(target)
 	if err != nil {
 		return "", err
 	}
 	if !info.Mode().IsRegular() {
-		return "", errors.New("app file must be a regular file")
+		return "", errors.New("plugin file must be a regular file")
 	}
 	return target, nil
 }

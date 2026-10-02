@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestAppUnloadDefinitionListsLoadedApps(t *testing.T) {
-	definition := AppUnloadDefinition([]string{" github ", "browser", "github"})
+func TestPluginUnloadDefinitionListsLoadedPlugins(t *testing.T) {
+	definition := PluginUnloadDefinition([]string{" github ", "browser", "github"})
 	var schema struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`
@@ -15,21 +15,21 @@ func TestAppUnloadDefinitionListsLoadedApps(t *testing.T) {
 	if err := json.Unmarshal(definition.InputSchema, &schema); err != nil {
 		t.Fatal(err)
 	}
-	got := schema.Properties["app_id"].Enum
+	got := schema.Properties["plugin_id"].Enum
 	if len(got) != 2 || got[0] != "browser" || got[1] != "github" {
-		t.Fatalf("app_id enum = %+v", got)
+		t.Fatalf("plugin_id enum = %+v", got)
 	}
 }
 
-func TestDecodeAppUnloadRequest(t *testing.T) {
-	request, err := DecodeAppUnloadRequest(json.RawMessage(`{"app_id":" browser "}`))
+func TestDecodePluginUnloadRequest(t *testing.T) {
+	request, err := DecodePluginUnloadRequest(json.RawMessage(`{"plugin_id":" browser "}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.AppID != "browser" {
+	if request.PluginID != "browser" {
 		t.Fatalf("request = %+v", request)
 	}
-	if _, err := DecodeAppUnloadRequest(json.RawMessage(`{}`)); err == nil {
-		t.Fatal("missing app_id should fail")
+	if _, err := DecodePluginUnloadRequest(json.RawMessage(`{}`)); err == nil {
+		t.Fatal("missing plugin_id should fail")
 	}
 }

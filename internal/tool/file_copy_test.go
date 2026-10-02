@@ -105,7 +105,7 @@ func TestFileCopyRejectsInvalidEndpointScope(t *testing.T) {
 			"from": map[string]string{"scope": "temp", "path": "a"},
 			"to":   map[string]string{"scope": "temp", "path": "b"},
 		}
-		args[field] = map[string]string{"scope": "app", "path": "file.txt"}
+		args[field] = map[string]string{"scope": "plugin", "path": "file.txt"}
 		raw, _ := json.Marshal(args)
 		result := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{Name: FileCopy, Args: raw})
 		payload := decodeToolResult(t, result)

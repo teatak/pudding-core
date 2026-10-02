@@ -219,7 +219,7 @@ type ToolDef struct {
 	InputSchema json.RawMessage
 	Capability  store.AgentMode
 	// AppID is engine routing metadata and is never sent to the provider.
-	AppID string `json:"-"`
+	PluginID string `json:"-"`
 }
 
 type PartType string

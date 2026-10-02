@@ -45,7 +45,7 @@ make tools-report RUNARGS="--days 30"
 
 Turn 分母按当前工具 capability 累积计算:Chat 工具使用全部 Turn,Work 工具使用
 Work + Code Turn,Code 工具只使用 Code Turn。已经不在当前内置工具定义中的历史、
-App 或 UI 工具仍统计调用数,但 `TURN%` 显示 `-`,避免猜测其历史可见范围。
+插件或 UI 工具仍统计调用数,但 `TURN%` 显示 `-`,避免猜测其历史可见范围。
 
 CLI 回退只识别明确的同领域命令:
 
@@ -56,7 +56,7 @@ CLI 回退只识别明确的同领域命令:
 这个指标用于发现专用工具失败后的替代路径,不是所有命令调用的等价性证明。
 
 `builtin_command_run/session` 统一归入 `command` 组;
-`builtin_app_load` 单列为 `app` 组,便于观察 CLI 使用与会话级能力扩展频率。
+`builtin_plugin_load` 与 `builtin_plugin_unload` 单列为 `plugin` 组,便于观察 CLI 使用与会话级能力扩展频率。
 
 ## 使用原则
 

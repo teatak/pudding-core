@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
@@ -18,26 +18,29 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-type referenceApps struct {
-	defs  []*app.Definition
+type referencePlugins struct {
+	defs  []*plugin.Definition
 	docs  map[string]string
 	err   error
 	reads []string
 }
 
-func (s *referenceApps) ListDefinitions(context.Context) ([]*app.Definition, error) {
+// Canonical results stored before plugins were renamed from Apps keep this name.
+const legacyPluginLoad = "builtin_app_load"
+
+func (s *referencePlugins) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
 	return s.defs, nil
 }
-func (s *referenceApps) ReadSkill(_ context.Context, appID, skillID string) (*app.SkillDetail, error) {
-	s.reads = append(s.reads, appID+":"+skillID)
+func (s *referencePlugins) ReadSkill(_ context.Context, pluginID, skillID string) (*plugin.SkillDetail, error) {
+	s.reads = append(s.reads, pluginID+":"+skillID)
 	if s.err != nil {
 		return nil, s.err
 	}
 	body, ok := s.docs[skillID]
 	if !ok {
-		return nil, app.ErrNotFound
+		return nil, plugin.ErrNotFound
 	}
-	return &app.SkillDetail{ID: skillID, Name: skillID, Content: body}, nil
+	return &plugin.SkillDetail{ID: skillID, Name: skillID, Content: body}, nil
 }
 
 type referenceSkills struct {
@@ -54,8 +57,8 @@ func (s *referenceSkills) ReadSkill(_ context.Context, id string) (*skill.Docume
 	return &skill.Document{Skill: skill.Skill{ID: id}, Content: s.body}, nil
 }
 
-func referenceSources() (*referenceApps, *referenceSkills) {
-	return &referenceApps{defs: []*app.Definition{{ID: "demo", Enabled: true, RequiredMode: "work"}}, docs: map[string]string{
+func referenceSources() (*referencePlugins, *referenceSkills) {
+	return &referencePlugins{defs: []*plugin.Definition{{ID: "demo", Enabled: true, RequiredMode: "work"}}, docs: map[string]string{
 		"default": "CURRENT_DEFAULT_BODY", "custom": "CURRENT_CUSTOM_BODY",
 	}}, &referenceSkills{body: "CURRENT_GLOBAL_BODY"}
 }
@@ -67,13 +70,13 @@ func referencePart(name, callID, content string) provider.Part {
 func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)
-	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"demo"}}); err != nil {
+	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"demo"}}); err != nil {
 		t.Fatal(err)
 	}
-	apps, skills := referenceSources()
-	b := New(st, nil, WithSkillSources(apps, skills))
+	plugins, skills := referenceSources()
+	b := New(st, nil, WithSkillSources(plugins, skills))
 	req := provider.Request{System: "UNCHANGED_SYSTEM", Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{
-		referencePart(tool.AppLoad, "a", `{"ok":true,"appID":"demo","skillID":"default","content":"OLD_APP_BODY"}`),
+		referencePart(legacyPluginLoad, "a", `{"ok":true,"appID":"demo","skillID":"default","content":"OLD_APP_BODY"}`),
 		{Type: provider.PartText, Text: "a normal task fact"},
 		referencePart(tool.SkillRead, "b", `{"ok":true,"id":"writing","content":"OLD_GLOBAL_BODY"}`),
 	}}}}
@@ -92,7 +95,7 @@ func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T
 	if err != nil || !reflect.DeepEqual(again, resolved) {
 		t.Fatalf("unchanged source must produce stable context: %v", err)
 	}
-	apps.docs["default"], skills.body = "UPDATED_APP_BODY", "UPDATED_GLOBAL_BODY"
+	plugins.docs["default"], skills.body = "UPDATED_APP_BODY", "UPDATED_GLOBAL_BODY"
 	updated, err := b.ResolveSkillReferences(ctx, "s", "work", req)
 	if err != nil {
 		t.Fatal(err)
@@ -110,16 +113,16 @@ func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T
 	}
 }
 
-func TestResolveSkillReferencesSelectsLatestAppSkillAndDeduplicates(t *testing.T) {
+func TestResolveSkillReferencesSelectsLatestPluginSkillAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)
-	_ = st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"demo"}})
-	apps, skills := referenceSources()
-	b := New(st, nil, WithSkillSources(apps, skills))
+	_ = st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"demo"}})
+	plugins, skills := referenceSources()
+	b := New(st, nil, WithSkillSources(plugins, skills))
 	req := provider.Request{Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{
-		referencePart(tool.AppLoad, "default", `{"reference":{"kind":"app_skill","appID":"demo","skillID":"default"}}`),
+		referencePart(tool.PluginLoad, "default", `{"reference":{"kind":"plugin_skill","pluginID":"demo","skillID":"default"}}`),
 		referencePart(tool.SkillRead, "global1", `{"reference":{"kind":"skill","skillID":"writing"}}`),
-		referencePart(tool.AppLoad, "custom", `{"reference":{"kind":"app_skill","appID":"demo","skillID":"custom"}}`),
+		referencePart(legacyPluginLoad, "custom", `{"reference":{"kind":"app_skill","appID":"demo","skillID":"custom"}}`),
 		referencePart(tool.SkillRead, "global2", `{"reference":{"kind":"skill","skillID":"writing"}}`),
 	}}}}
 	resolved, err := b.ResolveSkillReferences(ctx, "s", "work", req)
@@ -130,8 +133,8 @@ func TestResolveSkillReferencesSelectsLatestAppSkillAndDeduplicates(t *testing.T
 	if strings.Contains(string(raw), "CURRENT_DEFAULT_BODY") || strings.Count(string(raw), "CURRENT_CUSTOM_BODY") != 1 || strings.Count(string(raw), "CURRENT_GLOBAL_BODY") != 1 {
 		t.Fatalf("wrong selection: %s", raw)
 	}
-	if !reflect.DeepEqual(apps.reads, []string{"demo:custom"}) || skills.reads != 1 {
-		t.Fatalf("redundant source reads: %+v / %d", apps.reads, skills.reads)
+	if !reflect.DeepEqual(plugins.reads, []string{"demo:custom"}) || skills.reads != 1 {
+		t.Fatalf("redundant source reads: %+v / %d", plugins.reads, skills.reads)
 	}
 }
 
@@ -141,30 +144,30 @@ func TestResolveSkillReferencesNeverFallsBackToHistoricalBodies(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)
 			loaded := []string{"demo"}
-			apps, skills := referenceSources()
+			plugins, skills := referenceSources()
 			mode := "work"
-			part := referencePart(tool.AppLoad, "app", `{"appID":"demo","skillID":"custom","content":"HISTORICAL_DO_NOT_USE"}`)
+			part := referencePart(legacyPluginLoad, "app", `{"appID":"demo","skillID":"custom","content":"HISTORICAL_DO_NOT_USE"}`)
 			switch scenario {
 			case "unloaded":
 				loaded = nil
 			case "disabled":
-				apps.defs[0].Enabled = false
+				plugins.defs[0].Enabled = false
 			case "disconnected":
-				apps.defs = nil
+				plugins.defs = nil
 			case "mode":
 				mode = "chat"
 			case "missing":
-				delete(apps.docs, "custom")
+				delete(plugins.docs, "custom")
 			case "read-error":
-				apps.err = errors.New("read refused")
+				plugins.err = errors.New("read refused")
 			case "global-missing":
 				skills.err = skill.ErrNotFound
 				part = referencePart(tool.SkillRead, "global", `{"id":"writing","content":"HISTORICAL_DO_NOT_USE"}`)
 			case "invalid":
 				part.Content = `{"reference":{"kind":"file","skillID":"/private/file"},"content":"HISTORICAL_DO_NOT_USE"}`
 			}
-			_ = st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: loaded})
-			b := New(st, nil, WithSkillSources(apps, skills))
+			_ = st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: loaded})
+			b := New(st, nil, WithSkillSources(plugins, skills))
 			resolved, err := b.ResolveSkillReferences(ctx, "s", mode, provider.Request{Messages: []provider.Message{{Parts: []provider.Part{part}}}})
 			if err != nil {
 				t.Fatal(err)
@@ -176,7 +179,7 @@ func TestResolveSkillReferencesNeverFallsBackToHistoricalBodies(t *testing.T) {
 			if scenario != "mode" && scenario != "unloaded" && (result.Ok || !strings.Contains(result.Content, "unavailable")) {
 				t.Fatalf("missing explicit error: %+v", result)
 			}
-			if scenario == "invalid" && len(apps.reads) != 0 {
+			if scenario == "invalid" && len(plugins.reads) != 0 {
 				t.Fatal("invalid reference reached the reader")
 			}
 		})
@@ -190,7 +193,7 @@ func TestSkillReferencesSurviveSQLiteRestartCompactionAndClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"demo"}}); err != nil {
+	if err := db.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"demo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: "s", TurnID: "t", UserMessageID: "u", ClientMessageID: "c", UserText: "use the custom skill"}); err != nil {
@@ -198,8 +201,8 @@ func TestSkillReferencesSurviveSQLiteRestartCompactionAndClone(t *testing.T) {
 	}
 	parts := []store.ContentPart{
 		{Type: store.ContentPartText, Text: "OLD_SURROUNDING_CONVERSATION"},
-		{Type: store.ContentPartToolUse, Name: tool.AppLoad, CallID: "app", Args: json.RawMessage(`{"app_id":"demo","skill_id":"custom"}`)},
-		{Type: store.ContentPartToolResult, Name: tool.AppLoad, CallID: "app", Ok: true, Content: `{"ok":true,"appID":"demo","skillID":"custom","content":"LEGACY_APP_BODY"}`},
+		{Type: store.ContentPartToolUse, Name: legacyPluginLoad, CallID: "app", Args: json.RawMessage(`{"app_id":"demo","skill_id":"custom"}`)},
+		{Type: store.ContentPartToolResult, Name: legacyPluginLoad, CallID: "app", Ok: true, Content: `{"ok":true,"appID":"demo","skillID":"custom","content":"LEGACY_APP_BODY"}`},
 		{Type: store.ContentPartToolUse, Name: tool.SkillRead, CallID: "global", Args: json.RawMessage(`{"skill_id":"writing"}`)},
 		{Type: store.ContentPartToolResult, Name: tool.SkillRead, CallID: "global", Ok: true, Content: `{"ok":true,"reference":{"kind":"skill","skillID":"writing"}}`},
 	}
@@ -233,10 +236,10 @@ func TestSkillReferencesSurviveSQLiteRestartCompactionAndClone(t *testing.T) {
 	if _, err := db.CloneSession(ctx, store.CloneSessionInput{SourceSessionID: "s", ThroughMessageID: "summary", TargetSessionID: "clone", TitleSuffix: " copy"}); err != nil {
 		t.Fatal(err)
 	}
-	apps, skills := referenceSources()
-	b := New(db, nil, WithSkillSources(apps, skills))
+	plugins, skills := referenceSources()
+	b := New(db, nil, WithSkillSources(plugins, skills))
 	for _, sessionID := range []string{"s", "clone"} {
-		req, err := b.BuildForProviderWithTools(ctx, sessionID, "mock", "mock", "work", []provider.ToolDef{{Name: tool.AppLoad}, {Name: tool.SkillRead}})
+		req, err := b.BuildForProviderWithTools(ctx, sessionID, "mock", "mock", "work", []provider.ToolDef{{Name: tool.PluginLoad}, {Name: tool.SkillRead}})
 		if err != nil {
 			t.Fatal(err)
 		}

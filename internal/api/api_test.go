@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	appsvc "github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/config"
@@ -34,6 +33,7 @@ import (
 	"github.com/teatak/pudding-core/internal/githubapp"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	appsvc "github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -266,10 +266,10 @@ func newConfigTestServerWithGitHub(t *testing.T, github *githubapp.Client) (*htt
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
-	writeOAuthTestApps(t, homeDir)
+	writeOAuthTestPlugins(t, homeDir)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg, engine.WithAttachmentHome(homeDir))
-	server := New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil))
+	server := New(eng, ms, cfg, hub).WithHome(homeDir).WithPlugins(appsvc.NewService(homeDir, nil))
 	if github != nil {
 		server.WithGitHubClient(github)
 	}
@@ -286,14 +286,14 @@ func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*htt
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
-	writeOAuthTestApps(t, homeDir)
+	writeOAuthTestPlugins(t, homeDir)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg, engine.WithAttachmentHome(homeDir))
 	brokerClient := oauthbroker.New(broker.URL, broker.Client())
-	apps := appsvc.NewService(homeDir, cfg).WithOAuthBroker(brokerClient)
+	plugins := appsvc.NewService(homeDir, cfg).WithOAuthBroker(brokerClient)
 	server := New(eng, ms, cfg, hub).
 		WithHome(homeDir).
-		WithApps(apps).
+		WithPlugins(plugins).
 		WithOAuthBroker(brokerClient).
 		WithGitHubClient(githubapp.New(github.URL, github.Client()))
 	srv := httptest.NewServer(server.Handler(testToken, nil))
@@ -552,20 +552,20 @@ func TestAudioConfigAPI(t *testing.T) {
 	}
 }
 
-func TestSettingsAppPreviewAPI(t *testing.T) {
+func TestSettingsPluginPreviewAPI(t *testing.T) {
 	srv, _, cfg := newConfigTestServer(t)
 	type settingsPayload struct {
 		Settings map[string]string `json:"settings"`
 	}
 
 	initial := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil))
-	if initial.Settings[config.SettingShowAppPreviewVersions] != "false" {
-		t.Fatalf("initial preview setting = %q", initial.Settings[config.SettingShowAppPreviewVersions])
+	if initial.Settings[config.SettingShowPluginPreviewVersions] != "false" {
+		t.Fatalf("initial preview setting = %q", initial.Settings[config.SettingShowPluginPreviewVersions])
 	}
 
 	resp := req(t, http.MethodPut, srv.URL+"/settings", map[string]string{
-		config.SettingCompactTailInputTurns:  "3",
-		config.SettingShowAppPreviewVersions: "true",
+		config.SettingCompactTailInputTurns:     "3",
+		config.SettingShowPluginPreviewVersions: "true",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
@@ -573,14 +573,14 @@ func TestSettingsAppPreviewAPI(t *testing.T) {
 	}
 
 	updated := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil))
-	if updated.Settings[config.SettingShowAppPreviewVersions] != "true" ||
+	if updated.Settings[config.SettingShowPluginPreviewVersions] != "true" ||
 		updated.Settings[config.SettingCompactTailInputTurns] != "3" ||
 		updated.Settings[config.SettingShowReasoning] != "true" {
 		t.Fatalf("unexpected updated settings: %+v", updated.Settings)
 	}
 
 	resp = req(t, http.MethodPut, srv.URL+"/settings", map[string]string{
-		config.SettingShowAppPreviewVersions: "not-a-bool",
+		config.SettingShowPluginPreviewVersions: "not-a-bool",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -590,7 +590,7 @@ func TestSettingsAppPreviewAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted[config.SettingShowAppPreviewVersions] != "true" {
+	if persisted[config.SettingShowPluginPreviewVersions] != "true" {
 		t.Fatalf("invalid update changed preview setting: %+v", persisted)
 	}
 }
@@ -599,9 +599,9 @@ func TestSettingsResetAPIs(t *testing.T) {
 	srv, _, cfg := newConfigTestServer(t)
 	ctx := context.Background()
 	if err := cfg.SetSettings(ctx, map[string]string{
-		config.SettingCompactTailInputTurns:  "9",
-		config.SettingShowReasoning:          "false",
-		config.SettingShowAppPreviewVersions: "true",
+		config.SettingCompactTailInputTurns:     "9",
+		config.SettingShowReasoning:             "false",
+		config.SettingShowPluginPreviewVersions: "true",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestSettingsResetAPIs(t *testing.T) {
 	if resetSettings[config.SettingCompactTailInputTurns] != "2" ||
 		resetSettings[config.SettingCompactAutoThresholdPercent] != "80" ||
 		resetSettings[config.SettingShowReasoning] != "true" ||
-		resetSettings[config.SettingShowAppPreviewVersions] != "false" {
+		resetSettings[config.SettingShowPluginPreviewVersions] != "false" {
 		t.Fatalf("unexpected reset settings: %+v", resetSettings)
 	}
 	reloadedSettings := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil)).Settings
@@ -709,9 +709,9 @@ func TestSettingsResetRestoresDefaults(t *testing.T) {
 	}
 }
 
-func writeOAuthTestApps(t *testing.T, homeDir string) {
+func writeOAuthTestPlugins(t *testing.T, homeDir string) {
 	t.Helper()
-	apps := map[string]string{
+	plugins := map[string]string{
 		"github": `
 id: github
 name: GitHub
@@ -811,12 +811,12 @@ endpoints:
     command: local-config-mcp
 `,
 	}
-	for id, body := range apps {
-		dir := filepath.Join(homeDir, "apps", id)
+	for id, body := range plugins {
+		dir := filepath.Join(homeDir, "plugins", id)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, appsvc.AppFileName), []byte(body), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, appsvc.PluginFileName), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -875,7 +875,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	t.Cleanup(github.Close)
 
 	srv, _, cfg := newGitHubAppTestServer(t, broker, github)
-	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	resp := req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "github"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -897,7 +897,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 		t.Fatalf("missing GitHub App OAuth values: url=%s state=%q challenge=%q", payload.AuthorizationURL, clientState, challenge)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+	resp = req(t, http.MethodPost, srv.URL+"/plugin-oauth/complete", map[string]string{
 		"provider": "github",
 		"ticket":   "transaction.secret",
 		"state":    clientState,
@@ -911,7 +911,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	if connectionView.ID != "github-main" || connectionView.Account == nil || connectionView.Account.ID != "42" || connectionView.Account.Login != "octocat" || connectionView.ReauthorizationRequired {
 		t.Fatalf("unexpected connection view: %+v", connectionView)
 	}
-	connection, err := cfg.GetAppConnection(context.Background(), connectionView.ID)
+	connection, err := cfg.GetPluginConnection(context.Background(), connectionView.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 		t.Fatalf("unexpected stored connection: %+v", connection)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	resp = req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "github"})
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		t.Fatalf("second start status = %d", resp.StatusCode)
@@ -927,7 +927,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	_ = decodeJSON[struct {
 		AuthorizationURL string `json:"authorizationURL"`
 	}](t, resp)
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+	resp = req(t, http.MethodPost, srv.URL+"/plugin-oauth/complete", map[string]string{
 		"provider": "github", "ticket": "transaction.secret", "state": clientState,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -935,7 +935,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 		t.Fatalf("second complete status = %d", resp.StatusCode)
 	}
 	secondView := decodeJSON[appsvc.ConnectionView](t, resp)
-	connections, err := cfg.ListAppConnections(context.Background())
+	connections, err := cfg.ListPluginConnections(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -944,7 +944,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	}
 
 	redeemAccessToken = "github-user-token-2"
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	resp = req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "github"})
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		t.Fatalf("different account start status = %d", resp.StatusCode)
@@ -952,7 +952,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 	_ = decodeJSON[struct {
 		AuthorizationURL string `json:"authorizationURL"`
 	}](t, resp)
-	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/complete", map[string]string{
+	resp = req(t, http.MethodPost, srv.URL+"/plugin-oauth/complete", map[string]string{
 		"provider": "github", "ticket": "transaction.secret", "state": clientState,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -960,7 +960,7 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 		t.Fatalf("different account complete status = %d", resp.StatusCode)
 	}
 	thirdView := decodeJSON[appsvc.ConnectionView](t, resp)
-	connections, err = cfg.ListAppConnections(context.Background())
+	connections, err = cfg.ListPluginConnections(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,8 +968,8 @@ func TestGitHubAppOAuthSupportsMultipleConnections(t *testing.T) {
 		t.Fatalf("different account should create another connection: view=%+v connections=%+v", thirdView, connections)
 	}
 
-	resp = req(t, http.MethodPut, srv.URL+"/app-connections/github-main", map[string]string{
-		"appID":        "github",
+	resp = req(t, http.MethodPut, srv.URL+"/plugin-connections/github-main", map[string]string{
+		"pluginID":     "github",
 		"name":         "Work GitHub",
 		"authMethodID": "github-app",
 		"authType":     "oauth2",
@@ -1003,14 +1003,14 @@ func TestStartGitHubAppOAuthUsesDevelopmentClient(t *testing.T) {
 	t.Cleanup(github.Close)
 	srv, _, _ := newGitHubAppTestServer(t, broker, github)
 
-	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	resp := req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "github"})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || client != "desktop_dev" {
 		t.Fatalf("status=%d client=%q", resp.StatusCode, client)
 	}
 }
 
-func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
+func TestPutPluginConnectionSupportsGitHubPAT(t *testing.T) {
 	accountRequests := 0
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		accountRequests++
@@ -1022,8 +1022,8 @@ func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
 	}))
 	t.Cleanup(github.Close)
 	srv, _, _ := newConfigTestServerWithGitHub(t, githubapp.New(github.URL, github.Client()))
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
-		"appID":        "github",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/github-pat", map[string]string{
+		"pluginID":     "github",
 		"name":         "GitHub PAT",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
@@ -1038,8 +1038,8 @@ func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
 		t.Fatalf("unexpected connection view: %+v", payload)
 	}
 
-	resp = req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
-		"appID":        "github",
+	resp = req(t, http.MethodPut, srv.URL+"/plugin-connections/github-pat", map[string]string{
+		"pluginID":     "github",
 		"name":         "Renamed connection",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
@@ -1055,10 +1055,10 @@ func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionRejectsEmptyGitHubPAT(t *testing.T) {
+func TestPutPluginConnectionRejectsEmptyGitHubPAT(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
-		"appID":        "github",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/github-pat", map[string]string{
+		"pluginID":     "github",
 		"name":         "GitHub PAT",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
@@ -1069,10 +1069,10 @@ func TestPutAppConnectionRejectsEmptyGitHubPAT(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionRejectsInvalidHeaderAuth(t *testing.T) {
+func TestPutPluginConnectionRejectsInvalidHeaderAuth(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]any{
-		"appID":        "unicorn",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/unicorn-main", map[string]any{
+		"pluginID":     "unicorn",
 		"name":         "Unicorn",
 		"authMethodID": "unicorn-header",
 		"authType":     "header",
@@ -1086,10 +1086,10 @@ func TestPutAppConnectionRejectsInvalidHeaderAuth(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionRejectsInvalidAuthValue(t *testing.T) {
+func TestPutPluginConnectionRejectsInvalidAuthValue(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
-		"appID":        "github",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/github-pat", map[string]string{
+		"pluginID":     "github",
 		"name":         "GitHub PAT",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
@@ -1101,7 +1101,7 @@ func TestPutAppConnectionRejectsInvalidAuthValue(t *testing.T) {
 	}
 }
 
-func TestNormalizeAppConnectionFieldsRejectsUnsafeInjectionValues(t *testing.T) {
+func TestNormalizePluginConnectionFieldsRejectsUnsafeInjectionValues(t *testing.T) {
 	tests := []struct {
 		name   string
 		target string
@@ -1112,7 +1112,7 @@ func TestNormalizeAppConnectionFieldsRejectsUnsafeInjectionValues(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := normalizeAppConnectionFields(&appsvc.ConnectionConfig{Fields: []appsvc.ConnectionField{{
+			_, err := normalizePluginConnectionFields(&appsvc.ConnectionConfig{Fields: []appsvc.ConnectionField{{
 				ID: "credential",
 				Inject: []appsvc.ConnectionFieldInject{{
 					Target: tt.target,
@@ -1126,10 +1126,10 @@ func TestNormalizeAppConnectionFieldsRejectsUnsafeInjectionValues(t *testing.T) 
 	}
 }
 
-func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
+func TestPutPluginConnectionStoresConnectionFields(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]any{
-		"appID":        "unicorn",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/unicorn-main", map[string]any{
+		"pluginID":     "unicorn",
 		"name":         "麒麟",
 		"authMethodID": "unicorn-header",
 		"authType":     "header",
@@ -1147,7 +1147,7 @@ func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
 		t.Fatalf("unexpected connection view: %+v", payload)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/unicorn-main", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-connections/unicorn-main", nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detail status = %d", resp.StatusCode)
@@ -1158,10 +1158,10 @@ func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionStoresConfigurableEndpointURLs(t *testing.T) {
+func TestPutPluginConnectionStoresConfigurableEndpointURLs(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
-		"appID":        "gitlab",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/gitlab-token", map[string]any{
+		"pluginID":     "gitlab",
 		"name":         "Self-managed GitLab",
 		"authMethodID": "gitlab-token",
 		"authType":     "bearer",
@@ -1175,7 +1175,7 @@ func TestPutAppConnectionStoresConfigurableEndpointURLs(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-connections/gitlab-token", nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detail status = %d", resp.StatusCode)
@@ -1186,23 +1186,23 @@ func TestPutAppConnectionStoresConfigurableEndpointURLs(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionRejectsInvalidEndpointURLs(t *testing.T) {
+func TestPutPluginConnectionRejectsInvalidEndpointURLs(t *testing.T) {
 	tests := []struct {
 		name         string
-		appID        string
+		pluginID     string
 		authMethodID string
 		endpointURLs map[string]string
 	}{
-		{name: "unknown endpoint", appID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"missing": "https://example.com"}},
-		{name: "mcp endpoint", appID: "local-config", endpointURLs: map[string]string{"local_mcp": "https://example.com/mcp"}},
-		{name: "fixed endpoint", appID: "github", authMethodID: "github-pat", endpointURLs: map[string]string{"github_rest": "https://github.example.com/api/v3"}},
-		{name: "invalid URL", appID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"gitlab_rest": "file:///tmp/gitlab"}},
+		{name: "unknown endpoint", pluginID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"missing": "https://example.com"}},
+		{name: "mcp endpoint", pluginID: "local-config", endpointURLs: map[string]string{"local_mcp": "https://example.com/mcp"}},
+		{name: "fixed endpoint", pluginID: "github", authMethodID: "github-pat", endpointURLs: map[string]string{"github_rest": "https://github.example.com/api/v3"}},
+		{name: "invalid URL", pluginID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"gitlab_rest": "file:///tmp/gitlab"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, _, _ := newConfigTestServer(t)
 			body := map[string]any{
-				"appID":        tt.appID,
+				"pluginID":     tt.pluginID,
 				"name":         "Test",
 				"authMethodID": tt.authMethodID,
 				"authType":     "bearer",
@@ -1211,13 +1211,13 @@ func TestPutAppConnectionRejectsInvalidEndpointURLs(t *testing.T) {
 			}
 			if tt.name == "mcp endpoint" {
 				body = map[string]any{
-					"appID":        "local-config",
+					"pluginID":     "local-config",
 					"name":         "Test",
 					"fields":       map[string]string{"apiKey": "secret"},
 					"endpointURLs": tt.endpointURLs,
 				}
 			}
-			resp := req(t, http.MethodPut, srv.URL+"/app-connections/test", body)
+			resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/test", body)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -1226,10 +1226,10 @@ func TestPutAppConnectionRejectsInvalidEndpointURLs(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
+func TestPutPluginConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
-		"appID":        "gitlab",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/gitlab-token", map[string]any{
+		"pluginID":     "gitlab",
 		"name":         "Self-managed GitLab",
 		"authMethodID": "gitlab-token",
 		"authType":     "bearer",
@@ -1241,8 +1241,8 @@ func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
 		t.Fatalf("create status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
-		"appID":        "gitlab",
+	resp = req(t, http.MethodPut, srv.URL+"/plugin-connections/gitlab-token", map[string]any{
+		"pluginID":     "gitlab",
 		"name":         "Renamed",
 		"authMethodID": "gitlab-token",
 		"authType":     "bearer",
@@ -1252,15 +1252,15 @@ func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
 		t.Fatalf("update status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-connections/gitlab-token", nil)
 	defer resp.Body.Close()
 	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
 	if detail.EndpointURLs["gitlab_rest"] != "https://gitlab.example.com/api/v4" {
 		t.Fatalf("endpoint URL was cleared: %+v", detail.EndpointURLs)
 	}
 
-	resp = req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
-		"appID":        "gitlab",
+	resp = req(t, http.MethodPut, srv.URL+"/plugin-connections/gitlab-token", map[string]any{
+		"pluginID":     "gitlab",
 		"name":         "GitLab",
 		"authMethodID": "gitlab-token",
 		"authType":     "bearer",
@@ -1271,7 +1271,7 @@ func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
 		t.Fatalf("clear status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-connections/gitlab-token", nil)
 	defer resp.Body.Close()
 	detail = decodeJSON[appsvc.ConnectionDetailView](t, resp)
 	if len(detail.EndpointURLs) != 0 {
@@ -1279,11 +1279,11 @@ func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionStoresFieldsWithoutAuth(t *testing.T) {
+func TestPutPluginConnectionStoresFieldsWithoutAuth(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/local-config-main", map[string]any{
-		"appID": "local-config",
-		"name":  "Local Config",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/local-config-main", map[string]any{
+		"pluginID": "local-config",
+		"name":     "Local Config",
 		"fields": map[string]string{
 			"apiKey": "secret",
 		},
@@ -1297,7 +1297,7 @@ func TestPutAppConnectionStoresFieldsWithoutAuth(t *testing.T) {
 		t.Fatalf("unexpected connection view: %+v", payload)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-connections/local-config-main", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-connections/local-config-main", nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detail status = %d", resp.StatusCode)
@@ -1308,10 +1308,10 @@ func TestPutAppConnectionStoresFieldsWithoutAuth(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionRequiresConnectionFields(t *testing.T) {
+func TestPutPluginConnectionRequiresConnectionFields(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]string{
-		"appID":        "unicorn",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/unicorn-main", map[string]string{
+		"pluginID":     "unicorn",
 		"name":         "麒麟",
 		"authMethodID": "unicorn-header",
 		"authType":     "header",
@@ -1323,7 +1323,7 @@ func TestPutAppConnectionRequiresConnectionFields(t *testing.T) {
 	}
 }
 
-func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
+func TestPutPluginConnectionPreservesLegacyBearerByType(t *testing.T) {
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user" || r.Header.Get("Authorization") != "Bearer ghp_old" {
 			t.Fatalf("unexpected GitHub request: path=%s authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
@@ -1333,16 +1333,16 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 	}))
 	t.Cleanup(github.Close)
 	srv, _, cfg := newConfigTestServerWithGitHub(t, githubapp.New(github.URL, github.Client()))
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "github-legacy",
-		Name:  "Legacy GitHub",
-		AppID: "github",
-		Auth:  appsvc.Auth{Type: "bearer", Token: "ghp_old"},
+	if err := cfg.PutPluginConnection(context.Background(), &appsvc.Connection{
+		ID:       "github-legacy",
+		Name:     "Legacy GitHub",
+		PluginID: "github",
+		Auth:     appsvc.Auth{Type: "bearer", Token: "ghp_old"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-legacy", map[string]string{
-		"appID":        "github",
+	resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/github-legacy", map[string]string{
+		"pluginID":     "github",
 		"name":         "GitHub PAT",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
@@ -1357,7 +1357,7 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 	}
 }
 
-func TestCanvasItemsAPIIsSessionScopedAndSavedWidgetsAreGlobal(t *testing.T) {
+func TestStudioMountsAPIIsSessionScopedAndItemsAreGlobal(t *testing.T) {
 	srv, ms := newTestServer(t)
 	for _, id := range []string{"sess_left", "sess_right"} {
 		if err := ms.CreateSession(context.Background(), &store.Session{ID: id, Provider: "mock", Model: "m"}); err != nil {
@@ -1365,43 +1365,43 @@ func TestCanvasItemsAPIIsSessionScopedAndSavedWidgetsAreGlobal(t *testing.T) {
 		}
 	}
 
-	item, err := seedCanvasMount(ms, "sess_left", "canvas_api", "Left")
+	item, err := seedStudioMount(ms, "sess_left", "canvas_api", "Left")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var resp *http.Response
 
-	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/canvas/items", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/studio/mounts", nil)
 	list := decodeJSON[struct {
-		Items []store.CanvasItem `json:"items"`
+		Items []store.StudioMount `json:"items"`
 	}](t, resp)
 	resp.Body.Close()
 	if len(list.Items) != 0 {
 		t.Fatalf("right session should not see left item: %+v", list.Items)
 	}
 
-	resp = req(t, http.MethodPatch, srv.URL+"/sessions/sess_right/canvas/items/canvas_api", map[string]any{"window": map[string]any{"z": 2}})
+	resp = req(t, http.MethodPatch, srv.URL+"/sessions/sess_right/studio/mounts/canvas_api", map[string]any{"window": map[string]any{"z": 2}})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-session patch status = %d", resp.StatusCode)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/canvases", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/studio/items", nil)
 	resources := decodeJSON[struct {
-		Canvases []store.Canvas `json:"canvases"`
+		Items []store.StudioItem `json:"items"`
 	}](t, resp)
 	resp.Body.Close()
-	if len(resources.Canvases) != 1 || resources.Canvases[0].ID != item.ResourceID {
-		t.Fatalf("missing canonical canvas: %+v", resources)
+	if len(resources.Items) != 1 || resources.Items[0].ID != item.ItemID {
+		t.Fatalf("missing canonical widget: %+v", resources)
 	}
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvases/"+item.ResourceID+"/open", nil)
-	right := decodeJSON[store.CanvasItem](t, resp)
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/studio/items/"+item.ItemID+"/open", nil)
+	right := decodeJSON[store.StudioMount](t, resp)
 	resp.Body.Close()
-	if right.ResourceID != item.ResourceID || right.Revision != item.Revision {
+	if right.ItemID != item.ItemID || right.Revision != item.Revision {
 		t.Fatal("open copied content")
 	}
 	for _, method := range []string{"POST", "PUT", "PATCH"} {
-		endpoint := "/sessions/sess_left/canvas/items"
+		endpoint := "/sessions/sess_left/studio/mounts"
 		if method != "POST" {
 			endpoint += "/canvas_api"
 		}
@@ -1458,9 +1458,9 @@ func TestDesktopSaveFileWritesDownload(t *testing.T) {
 	}
 }
 
-func TestStartGmailAppOAuth(t *testing.T) {
+func TestStartGmailPluginOAuth(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
-	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "gmail"})
+	resp := req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "gmail"})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -1490,7 +1490,7 @@ func TestStartGmailAppOAuth(t *testing.T) {
 	}
 }
 
-func TestAppOAuthCallbackReturnsHTML(t *testing.T) {
+func TestPluginOAuthCallbackReturnsHTML(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
 	resp := req(t, http.MethodGet, srv.URL+"/oauth/callback/github", nil)
 	defer resp.Body.Close()
@@ -1556,7 +1556,7 @@ func TestSkillsAPI(t *testing.T) {
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	var foundUser bool
 	for _, item := range got["skills"] {
-		if item["id"] == "skill-creator" || item["id"] == "app-creator" {
+		if item["id"] == "skill-creator" || item["id"] == "plugin-creator" {
 			t.Fatalf("App-owned Skill leaked through global Skills API: %+v", item)
 		}
 		if item["id"] == "test-skill" {
@@ -1571,21 +1571,21 @@ func TestSkillsAPI(t *testing.T) {
 	}
 }
 
-func TestAppAssetAPI(t *testing.T) {
+func TestPluginAssetAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "apps", "github", "assets"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "plugins", "github", "assets"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, "apps", "github", "assets", "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "plugins", "github", "assets", "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodGet, srv.URL+"/app-assets/github/assets/icon.svg?token="+testToken, nil)
+	resp := req(t, http.MethodGet, srv.URL+"/plugin-assets/github/assets/icon.svg?token="+testToken, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
@@ -1594,15 +1594,15 @@ func TestAppAssetAPI(t *testing.T) {
 	}
 }
 
-func TestInstallAppRejectsOversizedPackage(t *testing.T) {
+func TestInstallPluginRejectsOversizedPackage(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	homeDir := t.TempDir()
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodPost, srv.URL+"/apps/install", map[string]string{
+	resp := req(t, http.MethodPost, srv.URL+"/plugins/install", map[string]string{
 		"packageJSON": strings.Repeat("x", appsvc.MaxPackageJSONBytes+1),
 	})
 	defer resp.Body.Close()
@@ -1611,17 +1611,17 @@ func TestInstallAppRejectsOversizedPackage(t *testing.T) {
 	}
 }
 
-func TestAppSkillAPI(t *testing.T) {
+func TestPluginSkillAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	appDir := filepath.Join(home, "apps", "github")
-	skillDir := filepath.Join(appDir, "skills", "issues")
+	pluginDir := filepath.Join(home, "plugins", "github")
+	skillDir := filepath.Join(pluginDir, "skills", "issues")
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte(`id: github
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`id: github
 name: GitHub
 skills:
   - skills/issues/SKILL.md
@@ -1631,10 +1631,10 @@ skills:
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: github-issues\ndescription: Read issues.\n---\nBody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodGet, srv.URL+"/app-skills/github/skills/issues/SKILL.md", nil)
+	resp := req(t, http.MethodGet, srv.URL+"/plugin-skills/github/skills/issues/SKILL.md", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
@@ -1643,27 +1643,27 @@ skills:
 		t.Fatalf("unexpected app skill detail: %+v", got)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-skills/github/app.yaml", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-skills/github/plugin.yaml", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestAppMCPStatusAPI(t *testing.T) {
+func TestPluginMCPStatusAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	writeMCPStatusTestApp(t, home)
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	writeMCPStatusTestPlugin(t, home)
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodGet, srv.URL+"/apps/sequential-thinking/mcp", nil)
+	resp := req(t, http.MethodGet, srv.URL+"/plugins/sequential-thinking/mcp", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got := decodeJSON[map[string]any](t, resp)
-	if got["appID"] != "sequential-thinking" {
+	if got["pluginID"] != "sequential-thinking" {
 		t.Fatalf("unexpected app id: %+v", got)
 	}
 	endpoints, _ := got["endpoints"].([]any)
@@ -1671,7 +1671,7 @@ func TestAppMCPStatusAPI(t *testing.T) {
 		t.Fatalf("unexpected endpoints: %+v", got)
 	}
 	endpoint, _ := endpoints[0].(map[string]any)
-	if endpoint["endpointName"] != "sequential_thinking_mcp" || endpoint["status"] != string(tool.AppMCPProbeAvailable) {
+	if endpoint["endpointName"] != "sequential_thinking_mcp" || endpoint["status"] != string(tool.PluginMCPProbeAvailable) {
 		t.Fatalf("unexpected endpoint: %+v", endpoint)
 	}
 	tools, _ := endpoint["tools"].([]any)
@@ -1684,16 +1684,16 @@ func TestAppMCPStatusAPI(t *testing.T) {
 	}
 }
 
-func TestAppMCPOverrideAPI(t *testing.T) {
+func TestPluginMCPOverrideAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	writeMCPStatusTestApp(t, home)
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	writeMCPStatusTestPlugin(t, home)
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	path := srv.URL + "/apps/sequential-thinking/mcp-overrides/sequential_thinking_mcp"
+	path := srv.URL + "/plugins/sequential-thinking/mcp-overrides/sequential_thinking_mcp"
 	resp := req(t, http.MethodGet, path, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
@@ -1716,7 +1716,7 @@ func TestAppMCPOverrideAPI(t *testing.T) {
 	if saved["configured"] != true || override["command"] != "docker" {
 		t.Fatalf("unexpected saved override: %+v", saved)
 	}
-	resp = req(t, http.MethodGet, srv.URL+"/apps/sequential-thinking/mcp", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugins/sequential-thinking/mcp", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
@@ -1751,36 +1751,36 @@ func TestAppMCPOverrideAPI(t *testing.T) {
 	}
 }
 
-func TestMCPAppConfigAPI(t *testing.T) {
+func TestMCPPluginConfigAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	configJSON := fmt.Sprintf(`{"mcpServers":{"Local tools":{"command":%q,"args":["-test.run=TestAPIAppMCPStdioHelper","--"],"env":{"PUDDING_API_APP_MCP_STDIO_HELPER":"1","TOKEN":"secret"}}}}`, os.Args[0])
-	resp := req(t, http.MethodPost, srv.URL+"/apps/mcp", map[string]string{"configJSON": configJSON, "name": "My local tools"})
+	configJSON := fmt.Sprintf(`{"mcpServers":{"Local tools":{"command":%q,"args":["-test.run=TestAPIPluginMCPStdioHelper","--"],"env":{"PUDDING_API_APP_MCP_STDIO_HELPER":"1","TOKEN":"secret"}}}}`, os.Args[0])
+	resp := req(t, http.MethodPost, srv.URL+"/plugins/mcp", map[string]string{"configJSON": configJSON, "name": "My local tools"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("import status = %d", resp.StatusCode)
 	}
 	imported := decodeJSON[struct {
-		Apps []appsvc.Definition `json:"apps"`
+		Plugins []appsvc.Definition `json:"plugins"`
 	}](t, resp)
-	if len(imported.Apps) != 1 || imported.Apps[0].Name != "My local tools" || imported.Apps[0].Kind != appsvc.KindMCP || imported.Apps[0].RequiredMode != "code" {
-		t.Fatalf("unexpected imported Apps: %+v", imported.Apps)
+	if len(imported.Plugins) != 1 || imported.Plugins[0].Name != "My local tools" || imported.Plugins[0].Kind != appsvc.KindMCP || imported.Plugins[0].RequiredMode != "code" {
+		t.Fatalf("unexpected imported Apps: %+v", imported.Plugins)
 	}
-	id := imported.Apps[0].ID
-	resp = req(t, http.MethodGet, srv.URL+"/apps/"+id+"/mcp", nil)
+	id := imported.Plugins[0].ID
+	resp = req(t, http.MethodGet, srv.URL+"/plugins/"+id+"/mcp", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("MCP status = %d", resp.StatusCode)
 	}
-	status := decodeJSON[appMCPStatusView](t, resp)
-	if len(status.Endpoints) != 1 || status.Endpoints[0].Status != tool.AppMCPProbeAvailable || len(status.Endpoints[0].Tools) != 1 {
+	status := decodeJSON[pluginMCPStatusView](t, resp)
+	if len(status.Endpoints) != 1 || status.Endpoints[0].Status != tool.PluginMCPProbeAvailable || len(status.Endpoints[0].Tools) != 1 {
 		t.Fatalf("imported MCP App should be connectionless and available: %+v", status)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/apps/"+id+"/mcp-config", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugins/"+id+"/mcp-config", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get config status = %d", resp.StatusCode)
 	}
@@ -1790,7 +1790,7 @@ func TestMCPAppConfigAPI(t *testing.T) {
 	}
 
 	updatedJSON := `{"mcpServers":{"Remote tools":{"url":"https://example.test/mcp"}}}`
-	resp = req(t, http.MethodPut, srv.URL+"/apps/"+id+"/mcp-config", map[string]string{"configJSON": updatedJSON, "name": "Renamed MCP"})
+	resp = req(t, http.MethodPut, srv.URL+"/plugins/"+id+"/mcp-config", map[string]string{"configJSON": updatedJSON, "name": "Renamed MCP"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("update status = %d", resp.StatusCode)
 	}
@@ -1800,10 +1800,10 @@ func TestMCPAppConfigAPI(t *testing.T) {
 	}
 }
 
-func writeMCPStatusTestApp(t *testing.T, home string) {
+func writeMCPStatusTestPlugin(t *testing.T, home string) {
 	t.Helper()
-	appDir := filepath.Join(home, "apps", "sequential-thinking")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home, "plugins", "sequential-thinking")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	body := fmt.Sprintf(`id: sequential-thinking
@@ -1815,16 +1815,16 @@ endpoints:
     kind: mcp
     transport: stdio
     command: %q
-    args: ["-test.run=TestAPIAppMCPStdioHelper", "--"]
+    args: ["-test.run=TestAPIPluginMCPStdioHelper", "--"]
     env:
       PUDDING_API_APP_MCP_STDIO_HELPER: "1"
 `, os.Args[0])
-	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestAPIAppMCPStdioHelper(t *testing.T) {
+func TestAPIPluginMCPStdioHelper(t *testing.T) {
 	if os.Getenv("PUDDING_API_APP_MCP_STDIO_HELPER") != "1" {
 		return
 	}
@@ -1865,36 +1865,36 @@ func TestAPIAppMCPStdioHelper(t *testing.T) {
 	}
 }
 
-func TestDeleteAppAPI(t *testing.T) {
+func TestDeletePluginAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
-	appDir := filepath.Join(home, "apps", "github")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home, "plugins", "github")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	resp := req(t, http.MethodDelete, srv.URL+"/plugins/github", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("want 204, got %d", resp.StatusCode)
 	}
-	if _, err := os.Stat(appDir); !os.IsNotExist(err) {
+	if _, err := os.Stat(pluginDir); !os.IsNotExist(err) {
 		t.Fatalf("app dir should be removed, stat err=%v", err)
 	}
 
-	resp = req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	resp = req(t, http.MethodDelete, srv.URL+"/plugins/github", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestBuiltinAppEnablementAPI(t *testing.T) {
+func TestBuiltinPluginEnablementAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
@@ -1903,10 +1903,10 @@ func TestBuiltinAppEnablementAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, cfg)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithPlugins(appsvc.NewService(home, cfg)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodPut, srv.URL+"/apps/browser/enabled", map[string]bool{"enabled": false})
+	resp := req(t, http.MethodPut, srv.URL+"/plugins/browser/enabled", map[string]bool{"enabled": false})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("disable builtin app: want 200, got %d", resp.StatusCode)
 	}
@@ -1915,7 +1915,7 @@ func TestBuiltinAppEnablementAPI(t *testing.T) {
 		t.Fatalf("unexpected updated app: %+v", updated)
 	}
 
-	enabled, err := cfg.ListAppEnablement(context.Background())
+	enabled, err := cfg.ListPluginEnablement(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1923,7 +1923,7 @@ func TestBuiltinAppEnablementAPI(t *testing.T) {
 		t.Fatalf("browser enablement was not persisted: %+v", enabled)
 	}
 
-	resp = req(t, http.MethodGet, srv.URL+"/app-skills/browser/skills/browser/SKILL.md", nil)
+	resp = req(t, http.MethodGet, srv.URL+"/plugin-skills/browser/skills/browser/SKILL.md", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("disabled app management skill: want 200, got %d", resp.StatusCode)
 	}
@@ -1932,26 +1932,26 @@ func TestBuiltinAppEnablementAPI(t *testing.T) {
 		t.Fatalf("unexpected disabled app management skill: %+v", detail)
 	}
 
-	resp = req(t, http.MethodDelete, srv.URL+"/apps/browser", nil)
+	resp = req(t, http.MethodDelete, srv.URL+"/plugins/browser", nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("delete builtin app: want 409, got %d", resp.StatusCode)
 	}
 }
 
-func TestBuiltinAppToolsHaveDescriptions(t *testing.T) {
+func TestBuiltinPluginToolsHaveDescriptions(t *testing.T) {
 	definitions := appsvc.BuiltinDefinitions()
-	enrichBuiltinAppTools(definitions)
+	enrichBuiltinPluginTools(definitions)
 	for _, definition := range definitions {
-		for _, appTool := range definition.Tools {
-			if appTool.Description == "" {
-				t.Errorf("built-in app %q tool %q has no description", definition.ID, appTool.Name)
+		for _, pluginTool := range definition.Tools {
+			if pluginTool.Description == "" {
+				t.Errorf("built-in app %q tool %q has no description", definition.ID, pluginTool.Name)
 			}
 		}
 	}
 }
 
-func TestDeleteAppRemovesConnections(t *testing.T) {
+func TestDeletePluginRemovesConnections(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
@@ -1960,56 +1960,56 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
-	appDir := filepath.Join(home, "apps", "github")
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
+	pluginDir := filepath.Join(home, "plugins", "github")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "github-main",
-		Name:  "GitHub Main",
-		AppID: "github",
-		Auth:  appsvc.Auth{Type: "bearer", Token: "secret"},
+	if err := cfg.PutPluginConnection(context.Background(), &appsvc.Connection{
+		ID:       "github-main",
+		Name:     "GitHub Main",
+		PluginID: "github",
+		Auth:     appsvc.Auth{Type: "bearer", Token: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.SetAppEnabled(context.Background(), "github", false); err != nil {
+	if err := cfg.SetPluginEnabled(context.Background(), "github", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(context.Background(), &store.Session{
-		ID: "sess_github", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"github", "other"},
+		ID: "sess_github", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"github", "other"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(context.Background(), &store.Session{
-		ID: "sess_other", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"other"},
+		ID: "sess_other", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"other"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "other-main",
-		Name:  "Other Main",
-		AppID: "other",
-		Auth:  appsvc.Auth{Type: "bearer", Token: "secret"},
+	if err := cfg.PutPluginConnection(context.Background(), &appsvc.Connection{
+		ID:       "other-main",
+		Name:     "Other Main",
+		PluginID: "other",
+		Auth:     appsvc.Auth{Type: "bearer", Token: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithPlugins(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	resp := req(t, http.MethodDelete, srv.URL+"/plugins/github", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("want 204, got %d", resp.StatusCode)
 	}
-	if _, err := cfg.GetAppConnection(context.Background(), "github-main"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := cfg.GetPluginConnection(context.Background(), "github-main"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("github connection should be removed, err=%v", err)
 	}
-	if _, err := cfg.GetAppConnection(context.Background(), "other-main"); err != nil {
+	if _, err := cfg.GetPluginConnection(context.Background(), "other-main"); err != nil {
 		t.Fatalf("other connection should remain: %v", err)
 	}
-	enabled, err := cfg.ListAppEnablement(context.Background())
+	enabled, err := cfg.ListPluginEnablement(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2020,37 +2020,37 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(githubSession.LoadedAppIDs, []string{"other"}) {
-		t.Fatalf("deleted app should be unloaded from sessions: %+v", githubSession.LoadedAppIDs)
+	if !reflect.DeepEqual(githubSession.LoadedPluginIDs, []string{"other"}) {
+		t.Fatalf("deleted app should be unloaded from sessions: %+v", githubSession.LoadedPluginIDs)
 	}
 	otherSession, err := ms.GetSession(context.Background(), "sess_other")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(otherSession.LoadedAppIDs, []string{"other"}) {
-		t.Fatalf("unrelated session apps changed: %+v", otherSession.LoadedAppIDs)
+	if !reflect.DeepEqual(otherSession.LoadedPluginIDs, []string{"other"}) {
+		t.Fatalf("unrelated session plugins changed: %+v", otherSession.LoadedPluginIDs)
 	}
 
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID: "github-stale", Name: "GitHub Stale", AppID: "github",
+	if err := cfg.PutPluginConnection(context.Background(), &appsvc.Connection{
+		ID: "github-stale", Name: "GitHub Stale", PluginID: "github",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.SetAppEnabled(context.Background(), "github", false); err != nil {
+	if err := cfg.SetPluginEnabled(context.Background(), "github", false); err != nil {
 		t.Fatal(err)
 	}
 	loaded := []string{"github", "other"}
-	if _, err := ms.UpdateSession(context.Background(), "sess_github", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+	if _, err := ms.UpdateSession(context.Background(), "sess_github", store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
-	resp = req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	resp = req(t, http.MethodDelete, srv.URL+"/plugins/github", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("retry deleted app: want 404, got %d", resp.StatusCode)
 	}
-	if _, err := cfg.GetAppConnection(context.Background(), "github-stale"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := cfg.GetPluginConnection(context.Background(), "github-stale"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("retry should remove stale connection, err=%v", err)
 	}
-	enabled, err = cfg.ListAppEnablement(context.Background())
+	enabled, err = cfg.ListPluginEnablement(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2061,8 +2061,8 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(githubSession.LoadedAppIDs, []string{"other"}) {
-		t.Fatalf("retry should unload stale app: %+v", githubSession.LoadedAppIDs)
+	if !reflect.DeepEqual(githubSession.LoadedPluginIDs, []string{"other"}) {
+		t.Fatalf("retry should unload stale app: %+v", githubSession.LoadedPluginIDs)
 	}
 }
 
@@ -2155,11 +2155,11 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	var commandRun map[string]any
 	var commandSession map[string]any
-	var appLoad map[string]any
+	var pluginLoad map[string]any
 	var skillRead map[string]any
 	for _, item := range tools {
 		id, _ := item["id"].(string)
-		if _, appTool := tool.BuiltinAppIDForTool(id); appTool || tool.IsAppAPITool(id) {
+		if _, pluginTool := tool.BuiltinPluginIDForTool(id); pluginTool || tool.IsPluginAPITool(id) {
 			t.Fatalf("App-owned tool must not appear in settings: %+v", item)
 		}
 		switch id {
@@ -2167,8 +2167,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			commandRun = item
 		case tool.CommandSession:
 			commandSession = item
-		case tool.AppLoad:
-			appLoad = item
+		case tool.PluginLoad:
+			pluginLoad = item
 		case tool.SkillRead:
 			skillRead = item
 		}
@@ -2179,8 +2179,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if commandSession == nil || commandSession["capability"] != string(store.ModeCode) {
 		t.Fatalf("command session should be a Code Core tool: %+v", commandSession)
 	}
-	if appLoad == nil || appLoad["capability"] != string(store.ModeChat) {
-		t.Fatalf("app load should declare chat capability: %+v", appLoad)
+	if pluginLoad == nil || pluginLoad["capability"] != string(store.ModeChat) {
+		t.Fatalf("app load should declare chat capability: %+v", pluginLoad)
 	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
@@ -3501,11 +3501,11 @@ func TestCloneSessionAtMessageCopiesPrefixAndAttachment(t *testing.T) {
 	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:           "sess_clone_source",
-		Title:        "Clone source",
-		Provider:     "mock",
-		Model:        "model",
-		LoadedAppIDs: []string{"app_1"},
+		ID:              "sess_clone_source",
+		Title:           "Clone source",
+		Provider:        "mock",
+		Model:           "model",
+		LoadedPluginIDs: []string{"plugin_1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3552,7 +3552,7 @@ func TestCloneSessionAtMessageCopiesPrefixAndAttachment(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &cloned); err != nil {
 		t.Fatal(err)
 	}
-	if cloned.ID == "sess_clone_source" || cloned.Title != "Clone source（副本）" || !reflect.DeepEqual(cloned.LoadedAppIDs, []string{"app_1"}) {
+	if cloned.ID == "sess_clone_source" || cloned.Title != "Clone source（副本）" || !reflect.DeepEqual(cloned.LoadedPluginIDs, []string{"plugin_1"}) {
 		t.Fatalf("cloned session = %+v", cloned)
 	}
 	targetTurns, err := ms.ListTurnsPage(ctx, cloned.ID, "", 0)
@@ -3599,34 +3599,34 @@ func TestPatchSessionProjectBindingPromotesCodeMode(t *testing.T) {
 	}
 }
 
-func TestUnloadSessionAppIsSessionScopedAndIdempotent(t *testing.T) {
+func TestUnloadSessionPluginIsSessionScopedAndIdempotent(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{
-		ID: "sess_apps_a", Provider: "mock", Model: "m", LoadedAppIDs: []string{"browser", "terminal"},
+		ID: "sess_apps_a", Provider: "mock", Model: "m", LoadedPluginIDs: []string{"browser", "terminal"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateSession(ctx, &store.Session{
-		ID: "sess_apps_b", Provider: "mock", Model: "m", LoadedAppIDs: []string{"browser"},
+		ID: "sess_apps_b", Provider: "mock", Model: "m", LoadedPluginIDs: []string{"browser"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	got := decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/apps/browser", nil))
-	if !reflect.DeepEqual(got.LoadedAppIDs, []string{"terminal"}) {
-		t.Fatalf("loaded apps after unload = %+v", got.LoadedAppIDs)
+	got := decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/plugins/browser", nil))
+	if !reflect.DeepEqual(got.LoadedPluginIDs, []string{"terminal"}) {
+		t.Fatalf("loaded plugins after unload = %+v", got.LoadedPluginIDs)
 	}
-	got = decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/apps/browser", nil))
-	if !reflect.DeepEqual(got.LoadedAppIDs, []string{"terminal"}) {
-		t.Fatalf("idempotent unload changed loaded apps = %+v", got.LoadedAppIDs)
+	got = decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/plugins/browser", nil))
+	if !reflect.DeepEqual(got.LoadedPluginIDs, []string{"terminal"}) {
+		t.Fatalf("idempotent unload changed loaded plugins = %+v", got.LoadedPluginIDs)
 	}
 	other, err := st.GetSession(ctx, "sess_apps_b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(other.LoadedAppIDs, []string{"browser"}) {
-		t.Fatalf("unload leaked into another session: %+v", other.LoadedAppIDs)
+	if !reflect.DeepEqual(other.LoadedPluginIDs, []string{"browser"}) {
+		t.Fatalf("unload leaked into another session: %+v", other.LoadedPluginIDs)
 	}
 }
 

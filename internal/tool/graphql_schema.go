@@ -5,14 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 )
 
 const (
@@ -154,7 +154,7 @@ func (r *BuiltinRunner) graphqlIntrospect(ctx context.Context, call Call) Result
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
 	}
-	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), app.EndpointKindGraphQL)
+	binding, err := r.resolvePluginEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), plugin.EndpointKindGraphQL)
 	if err != nil {
 		return toolJSON(out, false, endpointResolveError("graphql_endpoint", err))
 	}
@@ -176,7 +176,7 @@ func (r *BuiltinRunner) graphqlSearch(ctx context.Context, call Call) Result {
 	if query == "" {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "search_query_required"})
 	}
-	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), app.EndpointKindGraphQL)
+	binding, err := r.resolvePluginEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), plugin.EndpointKindGraphQL)
 	if err != nil {
 		return toolJSON(out, false, endpointResolveError("graphql_endpoint", err))
 	}
@@ -223,7 +223,7 @@ func (r *BuiltinRunner) graphqlSearch(ctx context.Context, call Call) Result {
 	payload := map[string]any{
 		"ok":             true,
 		"endpoint":       binding.EndpointName,
-		"app":            binding.AppID,
+		"plugin":         binding.PluginID,
 		"query":          query,
 		"keywords":       keywords,
 		"source":         source,
@@ -238,7 +238,7 @@ func (r *BuiltinRunner) graphqlSearch(ctx context.Context, call Call) Result {
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(matches))
 }
 
-func (r *BuiltinRunner) graphqlIntrospectTopLevel(ctx context.Context, out Result, binding *app.EndpointBinding, force bool) Result {
+func (r *BuiltinRunner) graphqlIntrospectTopLevel(ctx context.Context, out Result, binding *plugin.EndpointBinding, force bool) Result {
 	key := graphqlSchemaCacheKey(binding)
 	r.graphqlSchemaMu.Lock()
 	defer r.graphqlSchemaMu.Unlock()
@@ -260,7 +260,7 @@ func (r *BuiltinRunner) graphqlIntrospectTopLevel(ctx context.Context, out Resul
 	payload := map[string]any{
 		"ok":             true,
 		"endpoint":       binding.EndpointName,
-		"app":            binding.AppID,
+		"plugin":         binding.PluginID,
 		"source":         source,
 		"schema_fetched": cache.fetchedAt.UTC().Format(time.RFC3339),
 	}
@@ -288,7 +288,7 @@ func (r *BuiltinRunner) graphqlIntrospectTopLevel(ctx context.Context, out Resul
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedFields, len(payload))
 }
 
-func (r *BuiltinRunner) graphqlIntrospectType(ctx context.Context, out Result, binding *app.EndpointBinding, typeName string, force bool) Result {
+func (r *BuiltinRunner) graphqlIntrospectType(ctx context.Context, out Result, binding *plugin.EndpointBinding, typeName string, force bool) Result {
 	key := graphqlSchemaCacheKey(binding)
 	r.graphqlSchemaMu.Lock()
 	defer r.graphqlSchemaMu.Unlock()
@@ -318,7 +318,7 @@ func (r *BuiltinRunner) graphqlIntrospectType(ctx context.Context, out Result, b
 	payload := map[string]any{
 		"ok":             true,
 		"endpoint":       binding.EndpointName,
-		"app":            binding.AppID,
+		"plugin":         binding.PluginID,
 		"source":         source,
 		"schema_fetched": cache.fetchedAt.UTC().Format(time.RFC3339),
 		"type":           renderGraphQLType(item),
@@ -326,7 +326,7 @@ func (r *BuiltinRunner) graphqlIntrospectType(ctx context.Context, out Result, b
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedFields, len(payload))
 }
 
-func (r *BuiltinRunner) fetchGraphQLTopLevel(ctx context.Context, binding *app.EndpointBinding) (*graphqlTopLevel, map[string]any) {
+func (r *BuiltinRunner) fetchGraphQLTopLevel(ctx context.Context, binding *plugin.EndpointBinding) (*graphqlTopLevel, map[string]any) {
 	res, errPayload := r.doGraphQLSchemaQuery(ctx, binding, graphqlTopLevelQuery, nil)
 	if errPayload != nil {
 		return nil, errPayload
@@ -369,7 +369,7 @@ func (r *BuiltinRunner) fetchGraphQLTopLevel(ctx context.Context, binding *app.E
 	return top, nil
 }
 
-func (r *BuiltinRunner) fetchGraphQLType(ctx context.Context, binding *app.EndpointBinding, typeName string) (*graphqlSchemaType, map[string]any) {
+func (r *BuiltinRunner) fetchGraphQLType(ctx context.Context, binding *plugin.EndpointBinding, typeName string) (*graphqlSchemaType, map[string]any) {
 	res, errPayload := r.doGraphQLSchemaQuery(ctx, binding, graphqlTypeQuery, map[string]any{"n": typeName})
 	if errPayload != nil {
 		return nil, errPayload
@@ -389,7 +389,7 @@ func (r *BuiltinRunner) fetchGraphQLType(ctx context.Context, binding *app.Endpo
 	return envelope.Type, nil
 }
 
-func (r *BuiltinRunner) fetchGraphQLFullSchema(ctx context.Context, binding *app.EndpointBinding) (*graphqlTopLevel, map[string]*graphqlSchemaType, map[string]any) {
+func (r *BuiltinRunner) fetchGraphQLFullSchema(ctx context.Context, binding *plugin.EndpointBinding) (*graphqlTopLevel, map[string]*graphqlSchemaType, map[string]any) {
 	res, errPayload := r.doGraphQLSchemaQuery(ctx, binding, graphqlFullQuery, nil)
 	if errPayload != nil {
 		return nil, nil, errPayload
@@ -437,32 +437,32 @@ func (r *BuiltinRunner) fetchGraphQLFullSchema(ctx context.Context, binding *app
 	return top, types, nil
 }
 
-func (r *BuiltinRunner) doGraphQLSchemaQuery(ctx context.Context, binding *app.EndpointBinding, query string, variables map[string]any) (*graphqlSchemaResponse, map[string]any) {
+func (r *BuiltinRunner) doGraphQLSchemaQuery(ctx context.Context, binding *plugin.EndpointBinding, query string, variables map[string]any) (*graphqlSchemaResponse, map[string]any) {
 	body, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "encode_error", err.Error())
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, appexec.EndpointRequestTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, pluginexec.EndpointRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, binding.Endpoint.URL, bytes.NewReader(body))
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "request_error", err.Error())
 	}
-	resolvedAuth, err := r.appHTTP.ResolveEndpointAuth(reqCtx, binding.AppID, binding.ConnectionID, binding.Auth, binding.AuthMethod, binding.ConnectionFields)
+	resolvedAuth, err := r.pluginHTTP.ResolveEndpointAuth(reqCtx, binding.PluginID, binding.ConnectionID, binding.Auth, binding.AuthMethod, binding.ConnectionFields)
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "token_exchange_failed", err.Error())
 	}
-	if err := appexec.ApplyEndpointAuth(req.Header, resolvedAuth); err != nil {
+	if err := pluginexec.ApplyEndpointAuth(req.Header, resolvedAuth); err != nil {
 		return nil, graphQLSchemaError(binding, "auth_config_error", err.Error())
 	}
-	if err := appexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
+	if err := pluginexec.ApplyEndpointConnectionHeaders(req.Header, http.MethodPost, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
 		return nil, graphQLSchemaError(binding, "connection_field_error", err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.webHTTPClient.Do(req)
 	if err != nil {
-		return nil, graphQLSchemaError(binding, appexec.EndpointNetworkReason(err), err.Error())
+		return nil, graphQLSchemaError(binding, pluginexec.EndpointNetworkReason(err), err.Error())
 	}
 	defer resp.Body.Close()
 	data, truncated, err := readGraphQLSchemaBody(resp.Body)
@@ -497,16 +497,16 @@ func readGraphQLSchemaBody(body io.Reader) ([]byte, bool, error) {
 	return data, false, nil
 }
 
-func graphqlSchemaCacheKey(binding *app.EndpointBinding) string {
-	return strings.Join([]string{binding.AppID, binding.ConnectionID, binding.EndpointName, binding.Endpoint.URL}, "|")
+func graphqlSchemaCacheKey(binding *plugin.EndpointBinding) string {
+	return strings.Join([]string{binding.PluginID, binding.ConnectionID, binding.EndpointName, binding.Endpoint.URL}, "|")
 }
 
-func graphQLSchemaError(binding *app.EndpointBinding, reason, message string) map[string]any {
+func graphQLSchemaError(binding *plugin.EndpointBinding, reason, message string) map[string]any {
 	out := map[string]any{
 		"ok":       false,
 		"reason":   reason,
 		"endpoint": binding.EndpointName,
-		"app":      binding.AppID,
+		"plugin":   binding.PluginID,
 	}
 	if message != "" {
 		out["message"] = message

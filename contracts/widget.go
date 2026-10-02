@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 )
 
-//go:embed canvas.json
-var canvasJSON []byte
+//go:embed widget.json
+var widgetJSON []byte
 
-// CanvasPolicy is shared by Core validation and the Desktop compiler/bridge.
-type CanvasPolicy struct {
+// WidgetPolicy is shared by Core validation and the Desktop compiler/bridge.
+type WidgetPolicy struct {
 	SchemaVersion         int    `json:"schemaVersion"`
 	SDKVersion            string `json:"sdkVersion"`
 	MaxFiles              int    `json:"maxFiles"`
@@ -28,15 +28,15 @@ type CanvasPolicy struct {
 	MaxDiagnostics        int    `json:"maxDiagnostics"`
 }
 
-var canvasPolicy = func() CanvasPolicy {
-	var p CanvasPolicy
-	if err := json.Unmarshal(canvasJSON, &p); err != nil {
+var widgetPolicy = func() WidgetPolicy {
+	var p WidgetPolicy
+	if err := json.Unmarshal(widgetJSON, &p); err != nil {
 		panic(err)
 	}
 	if p.SchemaVersion < 1 || p.MaxFiles < 1 || p.MaxPackageBytes < p.MaxFileBytes || p.MaxConcurrentRequests < 1 {
-		panic("invalid canvas policy")
+		panic("invalid widget policy")
 	}
 	return p
 }()
 
-func Canvas() CanvasPolicy { return canvasPolicy }
+func Widget() WidgetPolicy { return widgetPolicy }

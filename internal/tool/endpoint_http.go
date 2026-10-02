@@ -4,45 +4,45 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"unicode/utf8"
 )
 
 func (r *BuiltinRunner) restRequest(ctx context.Context, call Call) Result {
-	return r.appHTTPRequest(ctx, call, app.EndpointKindREST)
+	return r.pluginHTTPRequest(ctx, call, plugin.EndpointKindREST)
 }
 func (r *BuiltinRunner) graphqlRequest(ctx context.Context, call Call) Result {
-	return r.appHTTPRequest(ctx, call, app.EndpointKindGraphQL)
+	return r.pluginHTTPRequest(ctx, call, plugin.EndpointKindGraphQL)
 }
-func (r *BuiltinRunner) appHTTPRequest(ctx context.Context, call Call, kind string) Result {
+func (r *BuiltinRunner) pluginHTTPRequest(ctx context.Context, call Call, kind string) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, err := decodeToolArgs(call.Args)
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
 	}
-	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), kind)
+	binding, err := r.resolvePluginEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), kind)
 	if err != nil {
 		return toolJSON(out, false, endpointResolveError(kind+"_endpoint", err))
 	}
 	var response map[string]any
-	if kind == app.EndpointKindREST {
-		response = r.appHTTP.REST(ctx, binding, args)
+	if kind == plugin.EndpointKindREST {
+		response = r.pluginHTTP.REST(ctx, binding, args)
 	} else {
 		if stringArg(args, "query") == "" {
 			return toolJSON(out, false, map[string]any{"ok": false, "reason": "missing_query"})
 		}
-		response = r.appHTTP.GraphQL(ctx, binding, args)
+		response = r.pluginHTTP.GraphQL(ctx, binding, args)
 	}
 	ok, _ := response["ok"].(bool)
 	summary, count := endpointSummary(response)
 	return withResultSummary(toolJSON(out, ok, response), summary, count)
 }
-func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpointName, connection, wantKind string) (*app.EndpointBinding, error) {
-	if r.appEndpoints == nil {
+func (r *BuiltinRunner) resolvePluginEndpoint(ctx context.Context, sessionID, endpointName, connection, wantKind string) (*plugin.EndpointBinding, error) {
+	if r.pluginEndpoints == nil {
 		return nil, errors.New("app endpoints unavailable")
 	}
-	binding, err := r.appEndpoints.ResolveEndpoint(ctx, sessionID, endpointName, connection)
+	binding, err := r.pluginEndpoints.ResolveEndpoint(ctx, sessionID, endpointName, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpo
 
 func endpointResolveError(kind string, err error) map[string]any {
 	reason := "endpoint_unavailable"
-	var resolveErr *app.EndpointResolveError
+	var resolveErr *plugin.EndpointResolveError
 	if errors.As(err, &resolveErr) {
 		out := map[string]any{"ok": false, "reason": resolveErr.Reason, "error": resolveErr.Error()}
 		if resolveErr.Endpoint != "" {

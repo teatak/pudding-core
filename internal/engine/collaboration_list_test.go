@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
@@ -191,9 +191,9 @@ func TestCollaborationListIsScopedReadOnlyAndCurrent(t *testing.T) {
 	}
 }
 
-func TestCollaborationListKeepsAppModeAndParentBoundaries(t *testing.T) {
+func TestCollaborationListKeepsPluginModeAndParentBoundaries(t *testing.T) {
 	ctx := context.Background()
-	eng, st, apps := newCollaborationEngine(t, mock.New())
+	eng, st, plugins := newCollaborationEngine(t, mock.New())
 	hasList := func(sessionID string, mode store.AgentMode) bool {
 		t.Helper()
 		defs, err := eng.toolDefinitions(ctx, sessionID, mode)
@@ -219,19 +219,19 @@ func TestCollaborationListKeepsAppModeAndParentBoundaries(t *testing.T) {
 		t.Fatal("list accepted a target session override")
 	}
 	call.Args = json.RawMessage(`{}`)
-	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "child", Provider: "mock", Model: "model", LoadedAppIDs: []string{app.BuiltinCollaborationID}}); err != nil {
+	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "child", Provider: "mock", Model: "model", LoadedPluginIDs: []string{plugin.BuiltinCollaborationID}}); err != nil {
 		t.Fatal(err)
 	}
 	if hasList("child", store.ModeWork) || eng.executeCollaboration(ctx, "child", "", store.ModeWork, call).Ok {
 		t.Fatal("child received parent collaboration access")
 	}
-	apps.enabled.Store(false)
+	plugins.enabled.Store(false)
 	if hasList("root", store.ModeWork) || eng.executeCollaboration(ctx, "root", "", store.ModeWork, call).Ok {
 		t.Fatal("disabled collaboration app still exposes list")
 	}
-	apps.enabled.Store(true)
+	plugins.enabled.Store(true)
 	ids := []string{}
-	if _, err := st.UpdateSession(ctx, "root", store.SessionUpdate{LoadedAppIDs: &ids}); err != nil {
+	if _, err := st.UpdateSession(ctx, "root", store.SessionUpdate{LoadedPluginIDs: &ids}); err != nil {
 		t.Fatal(err)
 	}
 	if hasList("root", store.ModeWork) || eng.executeCollaboration(ctx, "root", "", store.ModeWork, call).Ok {

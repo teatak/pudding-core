@@ -3,29 +3,29 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 )
 
 type fakeEndpointSource struct {
-	binding *app.EndpointBinding
+	binding *plugin.EndpointBinding
 }
 
-func (f fakeEndpointSource) ResolveEndpoint(_ context.Context, sessionID, endpointName, _ string) (*app.EndpointBinding, error) {
+func (f fakeEndpointSource) ResolveEndpoint(_ context.Context, sessionID, endpointName, _ string) (*plugin.EndpointBinding, error) {
 	if sessionID == "" || endpointName == "" {
-		return nil, appErr("missing input")
+		return nil, pluginErr("missing input")
 	}
 	return f.binding, nil
 }
 
-type appErr string
+type pluginErr string
 
-func (e appErr) Error() string { return string(e) }
+func (e pluginErr) Error() string { return string(e) }
 
 func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -40,12 +40,12 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:        "github",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:     "github",
 			ConnectionID: "github-main",
 			EndpointName: "github_rest",
-			Endpoint:     app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
-			Auth:         app.Auth{MethodID: "github-pat", Type: "bearer", Token: "gh-token"},
+			Endpoint:     plugin.Endpoint{Kind: plugin.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:         plugin.Auth{MethodID: "github-pat", Type: "bearer", Token: "gh-token"},
 		}}),
 	)
 	res := runner.Call(context.Background(), Call{
@@ -65,7 +65,7 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 	}
 }
 
-func TestRESTRequestExchangesAndCachesAppCredentialToken(t *testing.T) {
+func TestRESTRequestExchangesAndCachesPluginCredentialToken(t *testing.T) {
 	tokenCalls := 0
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
@@ -89,16 +89,16 @@ func TestRESTRequestExchangesAndCachesAppCredentialToken(t *testing.T) {
 			return nil, nil
 		}
 	})}
-	binding := &app.EndpointBinding{
-		AppID:        "feishu",
+	binding := &plugin.EndpointBinding{
+		PluginID:     "feishu",
 		ConnectionID: "feishu-main",
 		EndpointName: "feishu_rest",
-		Endpoint:     app.Endpoint{Kind: app.EndpointKindREST, URL: "https://open.feishu.cn/open-apis"},
-		Auth:         app.Auth{MethodID: "feishu-app-credentials", Type: app.AuthTypeTokenExchange},
-		AuthMethod: app.AuthMethod{
+		Endpoint:     plugin.Endpoint{Kind: plugin.EndpointKindREST, URL: "https://open.feishu.cn/open-apis"},
+		Auth:         plugin.Auth{MethodID: "feishu-app-credentials", Type: plugin.AuthTypeTokenExchange},
+		AuthMethod: plugin.AuthMethod{
 			ID:   "feishu-app-credentials",
-			Type: app.AuthTypeTokenExchange,
-			TokenExchange: &app.TokenExchangeSpec{
+			Type: plugin.AuthTypeTokenExchange,
+			TokenExchange: &plugin.TokenExchangeSpec{
 				URL:              "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
 				BodyFields:       map[string]string{"app_id": "appId", "app_secret": "appSecret"},
 				AccessTokenField: "tenant_access_token",
@@ -110,7 +110,7 @@ func TestRESTRequestExchangesAndCachesAppCredentialToken(t *testing.T) {
 	}
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: binding}),
+		WithPluginEndpoints(fakeEndpointSource{binding: binding}),
 	)
 	for range 2 {
 		res := runner.Call(context.Background(), Call{
@@ -141,15 +141,15 @@ func TestRESTRequestInjectsConnectionQueryFields(t *testing.T) {
 
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:            "unicorn",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:         "unicorn",
 			ConnectionID:     "unicorn-main",
 			EndpointName:     "unicorn_rest",
-			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
-			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			Endpoint:         plugin.Endpoint{Kind: plugin.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             plugin.Auth{Type: "header", Header: "X-Token", Token: "secret"},
 			ConnectionFields: map[string]string{"hotelCode": "H001"},
-			ConnectionFieldDefs: []app.ConnectionField{
-				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "query", Methods: []string{"GET"}}}},
+			ConnectionFieldDefs: []plugin.ConnectionField{
+				{ID: "hotelCode", Inject: []plugin.ConnectionFieldInject{{Target: "query", Methods: []string{"GET"}}}},
 			},
 		}}),
 	)
@@ -180,15 +180,15 @@ func TestRESTRequestInjectsConnectionBodyFields(t *testing.T) {
 
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:            "unicorn",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:         "unicorn",
 			ConnectionID:     "unicorn-main",
 			EndpointName:     "unicorn_rest",
-			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
-			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			Endpoint:         plugin.Endpoint{Kind: plugin.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             plugin.Auth{Type: "header", Header: "X-Token", Token: "secret"},
 			ConnectionFields: map[string]string{"hotelCode": "H001"},
-			ConnectionFieldDefs: []app.ConnectionField{
-				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "body", Methods: []string{"POST"}}}},
+			ConnectionFieldDefs: []plugin.ConnectionField{
+				{ID: "hotelCode", Inject: []plugin.ConnectionFieldInject{{Target: "body", Methods: []string{"POST"}}}},
 			},
 		}}),
 	)
@@ -212,15 +212,15 @@ func TestRESTRequestInjectsConnectionHeaderFields(t *testing.T) {
 
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:            "unicorn",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:         "unicorn",
 			ConnectionID:     "unicorn-main",
 			EndpointName:     "unicorn_rest",
-			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
-			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			Endpoint:         plugin.Endpoint{Kind: plugin.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             plugin.Auth{Type: "header", Header: "X-Token", Token: "secret"},
 			ConnectionFields: map[string]string{"hotelCode": "H001"},
-			ConnectionFieldDefs: []app.ConnectionField{
-				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "header", Name: "X-Hotel-Code"}}},
+			ConnectionFieldDefs: []plugin.ConnectionField{
+				{ID: "hotelCode", Inject: []plugin.ConnectionFieldInject{{Target: "header", Name: "X-Hotel-Code"}}},
 			},
 		}}),
 	)
@@ -254,12 +254,12 @@ func TestGraphQLRequestExtractsDataAndErrors(t *testing.T) {
 
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:        "github",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:     "github",
 			ConnectionID: "github-main",
 			EndpointName: "github_graphql",
-			Endpoint:     app.Endpoint{Kind: app.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
-			Auth:         app.Auth{Type: "header", Header: "X-Test-Token", Token: "secret"},
+			Endpoint:     plugin.Endpoint{Kind: plugin.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
+			Auth:         plugin.Auth{Type: "header", Header: "X-Test-Token", Token: "secret"},
 		}}),
 	)
 	res := runner.Call(context.Background(), Call{
@@ -295,12 +295,12 @@ func TestGraphQLIntrospectUsesEndpointSchema(t *testing.T) {
 	})}
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:        "github",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:     "github",
 			ConnectionID: "github-main",
 			EndpointName: "github_graphql",
-			Endpoint:     app.Endpoint{Kind: app.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
-			Auth:         app.Auth{Type: "header", Header: "X-Test-Token", Token: "secret"},
+			Endpoint:     plugin.Endpoint{Kind: plugin.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
+			Auth:         plugin.Auth{Type: "header", Header: "X-Test-Token", Token: "secret"},
 		}}),
 	)
 
@@ -339,12 +339,12 @@ func TestGraphQLSearchFindsSchemaFields(t *testing.T) {
 	})}
 	runner := NewBuiltinRunner(
 		WithWebHTTPClient(client),
-		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
-			AppID:        "github",
+		WithPluginEndpoints(fakeEndpointSource{binding: &plugin.EndpointBinding{
+			PluginID:     "github",
 			ConnectionID: "github-main",
 			EndpointName: "github_graphql",
-			Endpoint:     app.Endpoint{Kind: app.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
-			Auth:         app.Auth{Type: "none"},
+			Endpoint:     plugin.Endpoint{Kind: plugin.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
+			Auth:         plugin.Auth{Type: "none"},
 		}}),
 	)
 	res := runner.Call(context.Background(), Call{
@@ -364,8 +364,8 @@ func TestGraphQLSearchFindsSchemaFields(t *testing.T) {
 
 func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	t.Run("auth", func(t *testing.T) {
-		err := appexec.ApplyEndpointAuth(http.Header{}, app.Auth{
-			Type:  app.AuthTypeBearer,
+		err := pluginexec.ApplyEndpointAuth(http.Header{}, plugin.Auth{
+			Type:  plugin.AuthTypeBearer,
 			Token: "secret\r\nX-Injected: true",
 		})
 		if err == nil {
@@ -374,13 +374,13 @@ func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	})
 
 	t.Run("connection header", func(t *testing.T) {
-		err := appexec.ApplyEndpointConnectionHeaders(
+		err := pluginexec.ApplyEndpointConnectionHeaders(
 			http.Header{},
 			http.MethodGet,
 			map[string]string{"credential": "secret\r\nX-Injected: true"},
-			[]app.ConnectionField{{
+			[]plugin.ConnectionField{{
 				ID: "credential",
-				Inject: []app.ConnectionFieldInject{{
+				Inject: []plugin.ConnectionFieldInject{{
 					Target: "header",
 					Name:   "X-Credential",
 				}},
@@ -392,14 +392,14 @@ func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
 	})
 
 	t.Run("endpoint env", func(t *testing.T) {
-		_, err := appexec.ApplyEndpointConnectionEnv(map[string]string{"APP_TOKEN": "secret\x00suffix"}, nil, nil)
+		_, err := pluginexec.ApplyEndpointConnectionEnv(map[string]string{"APP_TOKEN": "secret\x00suffix"}, nil, nil)
 		if err == nil {
 			t.Fatal("invalid endpoint env value should be rejected")
 		}
 	})
 
 	t.Run("mcp header", func(t *testing.T) {
-		err := applyAppMCPHeaders(http.Header{}, map[string]string{
+		err := applyPluginMCPHeaders(http.Header{}, map[string]string{
 			"X-Credential": "secret\r\nX-Injected: true",
 		})
 		if err == nil {

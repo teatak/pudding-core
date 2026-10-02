@@ -1,5 +1,5 @@
-// Package appexec owns App HTTP requests and credential injection. Callers validate their own resource scope before supplying a binding.
-package appexec
+// Package pluginexec owns plugin HTTP requests and credential injection. Callers validate their own resource scope before supplying a binding.
+package pluginexec
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,15 +23,15 @@ import (
 
 type Executor struct {
 	webHTTPClient *http.Client
-	appTokenMu    sync.Mutex
-	appTokens     map[string]endpointAuthTokenCacheEntry
+	pluginTokenMu sync.Mutex
+	pluginTokens  map[string]endpointAuthTokenCacheEntry
 }
 
 func New(client *http.Client) *Executor {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Executor{webHTTPClient: client, appTokens: map[string]endpointAuthTokenCacheEntry{}}
+	return &Executor{webHTTPClient: client, pluginTokens: map[string]endpointAuthTokenCacheEntry{}}
 }
 func stringArg(args map[string]any, key string) string { value, _ := args[key].(string); return value }
 
@@ -60,16 +60,16 @@ var endpointSensitiveResponseHeaders = map[string]struct{}{
 
 type RequestPayload struct {
 	EndpointName        string
-	AppID               string
+	PluginID            string
 	ConnectionID        string
 	Method              string
 	URL                 string
 	Body                []byte
 	ContentType         string
-	Auth                app.Auth
-	AuthMethod          app.AuthMethod
+	Auth                plugin.Auth
+	AuthMethod          plugin.AuthMethod
 	ConnectionFields    map[string]string
-	ConnectionFieldDefs []app.ConnectionField
+	ConnectionFieldDefs []plugin.ConnectionField
 	MaxResponseBytes    int
 	GraphQL             bool
 }
@@ -80,7 +80,7 @@ type endpointAuthTokenCacheEntry struct {
 	ExpiresAt   time.Time
 }
 
-func (r *Executor) REST(ctx context.Context, binding *app.EndpointBinding, args map[string]any, responseLimit ...int) map[string]any {
+func (r *Executor) REST(ctx context.Context, binding *plugin.EndpointBinding, args map[string]any, responseLimit ...int) map[string]any {
 	target, err := BuildEndpointURL(binding.Endpoint.URL, stringArg(args, "path"))
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "invalid_path", "error": err.Error()})
@@ -108,7 +108,7 @@ func (r *Executor) REST(ctx context.Context, binding *app.EndpointBinding, args 
 	payload := RequestPayload{
 		MaxResponseBytes:    responseBytes(responseLimit),
 		EndpointName:        binding.EndpointName,
-		AppID:               binding.AppID,
+		PluginID:            binding.PluginID,
 		ConnectionID:        binding.ConnectionID,
 		Method:              method,
 		URL:                 target.String(),
@@ -122,7 +122,7 @@ func (r *Executor) REST(ctx context.Context, binding *app.EndpointBinding, args 
 	return r.Do(ctx, payload)
 }
 
-func (r *Executor) GraphQL(ctx context.Context, binding *app.EndpointBinding, args map[string]any, responseLimit ...int) map[string]any {
+func (r *Executor) GraphQL(ctx context.Context, binding *plugin.EndpointBinding, args map[string]any, responseLimit ...int) map[string]any {
 	variables, err := parseEndpointGraphQLVariables(args["variables"])
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "invalid_variables", "error": err.Error()})
@@ -138,7 +138,7 @@ func (r *Executor) GraphQL(ctx context.Context, binding *app.EndpointBinding, ar
 	payload := RequestPayload{
 		MaxResponseBytes:    responseBytes(responseLimit),
 		EndpointName:        binding.EndpointName,
-		AppID:               binding.AppID,
+		PluginID:            binding.PluginID,
 		ConnectionID:        binding.ConnectionID,
 		Method:              http.MethodPost,
 		URL:                 binding.Endpoint.URL,
@@ -170,7 +170,7 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "request_error", "error": err.Error()})
 	}
-	resolvedAuth, err := r.ResolveEndpointAuth(reqCtx, payload.AppID, payload.ConnectionID, payload.Auth, payload.AuthMethod, payload.ConnectionFields)
+	resolvedAuth, err := r.ResolveEndpointAuth(reqCtx, payload.PluginID, payload.ConnectionID, payload.Auth, payload.AuthMethod, payload.ConnectionFields)
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "token_exchange_failed", "error": err.Error()})
 	}
@@ -196,7 +196,7 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 			"ok":          false,
 			"reason":      EndpointNetworkReason(err),
 			"endpoint":    payload.EndpointName,
-			"app":         payload.AppID,
+			"plugin":      payload.PluginID,
 			"method":      payload.Method,
 			"url":         payload.URL,
 			"duration_ms": elapsed.Milliseconds(),
@@ -211,7 +211,7 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 	response := map[string]any{
 		"ok":               true,
 		"endpoint":         payload.EndpointName,
-		"app":              payload.AppID,
+		"plugin":           payload.PluginID,
 		"connection":       payload.ConnectionID,
 		"auth_type":        payload.Auth.Type,
 		"auth_method":      payload.Auth.MethodID,
@@ -235,38 +235,38 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 
 func (r *Executor) ResolveEndpointAuth(
 	ctx context.Context,
-	appID string,
+	pluginID string,
 	connectionID string,
-	auth app.Auth,
-	method app.AuthMethod,
+	auth plugin.Auth,
+	method plugin.AuthMethod,
 	connectionFields map[string]string,
-) (app.Auth, error) {
-	if strings.TrimSpace(auth.Type) != app.AuthTypeTokenExchange {
+) (plugin.Auth, error) {
+	if strings.TrimSpace(auth.Type) != plugin.AuthTypeTokenExchange {
 		return auth, nil
 	}
 	exchange := method.TokenExchange
 	if exchange == nil {
-		return app.Auth{}, errors.New("token exchange configuration is missing")
+		return plugin.Auth{}, errors.New("token exchange configuration is missing")
 	}
 	body := make(map[string]string, len(exchange.BodyFields))
 	for bodyName, fieldID := range exchange.BodyFields {
 		value := strings.TrimSpace(connectionFields[fieldID])
 		if value == "" {
-			return app.Auth{}, fmt.Errorf("connection field %q is required for token exchange", fieldID)
+			return plugin.Auth{}, fmt.Errorf("connection field %q is required for token exchange", fieldID)
 		}
 		body[bodyName] = value
 	}
-	cacheKey := endpointAuthTokenCacheKey(appID, connectionID, method, body)
+	cacheKey := endpointAuthTokenCacheKey(pluginID, connectionID, method, body)
 	if cached, ok := r.cachedEndpointAuthToken(cacheKey); ok {
-		return app.Auth{Type: app.AuthTypeOAuth2, AccessToken: cached.AccessToken, TokenType: cached.TokenType}, nil
+		return plugin.Auth{Type: plugin.AuthTypeOAuth2, AccessToken: cached.AccessToken, TokenType: cached.TokenType}, nil
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return app.Auth{}, fmt.Errorf("encode token exchange request: %w", err)
+		return plugin.Auth{}, fmt.Errorf("encode token exchange request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchange.URL, bytes.NewReader(payload))
 	if err != nil {
-		return app.Auth{}, fmt.Errorf("create token exchange request: %w", err)
+		return plugin.Auth{}, fmt.Errorf("create token exchange request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -276,26 +276,26 @@ func (r *Executor) ResolveEndpointAuth(
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return app.Auth{}, fmt.Errorf("request token: %w", err)
+		return plugin.Auth{}, fmt.Errorf("request token: %w", err)
 	}
 	defer resp.Body.Close()
 	data, _, err := readEndpointBody(resp.Body, endpointMaxResponseBytes)
 	if err != nil {
-		return app.Auth{}, fmt.Errorf("read token response: %w", err)
+		return plugin.Auth{}, fmt.Errorf("read token response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return app.Auth{}, fmt.Errorf("token endpoint returned status %d", resp.StatusCode)
+		return plugin.Auth{}, fmt.Errorf("token endpoint returned status %d", resp.StatusCode)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return app.Auth{}, errors.New("token endpoint returned invalid JSON")
+		return plugin.Auth{}, errors.New("token endpoint returned invalid JSON")
 	}
 	accessToken, ok := tokenExchangeString(decoded, exchange.AccessTokenField)
 	if !ok || strings.TrimSpace(accessToken) == "" {
-		return app.Auth{}, fmt.Errorf("token response is missing %q", exchange.AccessTokenField)
+		return plugin.Auth{}, fmt.Errorf("token response is missing %q", exchange.AccessTokenField)
 	}
-	if !app.IsAllowedRequestHeaderValue(accessToken) {
-		return app.Auth{}, errors.New("token response contains an invalid access token")
+	if !plugin.IsAllowedRequestHeaderValue(accessToken) {
+		return plugin.Auth{}, errors.New("token response contains an invalid access token")
 	}
 	tokenType := strings.TrimSpace(exchange.TokenType)
 	if tokenType == "" {
@@ -310,31 +310,31 @@ func (r *Executor) ResolveEndpointAuth(
 		TokenType:   tokenType,
 		ExpiresAt:   time.Now().Add(expiresIn),
 	}
-	r.appTokenMu.Lock()
-	r.appTokens[cacheKey] = entry
-	r.appTokenMu.Unlock()
-	return app.Auth{Type: app.AuthTypeOAuth2, AccessToken: accessToken, TokenType: tokenType}, nil
+	r.pluginTokenMu.Lock()
+	r.pluginTokens[cacheKey] = entry
+	r.pluginTokenMu.Unlock()
+	return plugin.Auth{Type: plugin.AuthTypeOAuth2, AccessToken: accessToken, TokenType: tokenType}, nil
 }
 
 func (r *Executor) cachedEndpointAuthToken(key string) (endpointAuthTokenCacheEntry, bool) {
-	r.appTokenMu.Lock()
-	defer r.appTokenMu.Unlock()
-	entry, ok := r.appTokens[key]
+	r.pluginTokenMu.Lock()
+	defer r.pluginTokenMu.Unlock()
+	entry, ok := r.pluginTokens[key]
 	if !ok || !time.Now().Add(time.Minute).Before(entry.ExpiresAt) {
-		delete(r.appTokens, key)
+		delete(r.pluginTokens, key)
 		return endpointAuthTokenCacheEntry{}, false
 	}
 	return entry, true
 }
 
-func endpointAuthTokenCacheKey(appID, connectionID string, method app.AuthMethod, body map[string]string) string {
+func endpointAuthTokenCacheKey(pluginID, connectionID string, method plugin.AuthMethod, body map[string]string) string {
 	encoded, _ := json.Marshal(struct {
-		AppID        string                 `json:"app"`
-		ConnectionID string                 `json:"connection"`
-		MethodID     string                 `json:"method"`
-		Exchange     *app.TokenExchangeSpec `json:"exchange"`
-		Body         map[string]string      `json:"body"`
-	}{appID, connectionID, method.ID, method.TokenExchange, body})
+		PluginID     string                    `json:"plugin"`
+		ConnectionID string                    `json:"connection"`
+		MethodID     string                    `json:"method"`
+		Exchange     *plugin.TokenExchangeSpec `json:"exchange"`
+		Body         map[string]string         `json:"body"`
+	}{pluginID, connectionID, method.ID, method.TokenExchange, body})
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
@@ -471,7 +471,7 @@ func applyEndpointQuery(target *url.URL, raw any) error {
 	return nil
 }
 
-func ApplyEndpointConnectionQuery(target *url.URL, method string, fields map[string]string, defs []app.ConnectionField) error {
+func ApplyEndpointConnectionQuery(target *url.URL, method string, fields map[string]string, defs []plugin.ConnectionField) error {
 	if len(fields) == 0 || len(defs) == 0 {
 		return nil
 	}
@@ -504,13 +504,13 @@ func ApplyEndpointConnectionQuery(target *url.URL, method string, fields map[str
 	return nil
 }
 
-func applyEndpointConnectionBodyJSON(args map[string]any, method string, fields map[string]string, defs []app.ConnectionField) error {
+func applyEndpointConnectionBodyJSON(args map[string]any, method string, fields map[string]string, defs []plugin.ConnectionField) error {
 	if len(fields) == 0 || len(defs) == 0 {
 		return nil
 	}
 	type bodyInject struct {
-		field app.ConnectionField
-		rule  app.ConnectionFieldInject
+		field plugin.ConnectionField
+		rule  plugin.ConnectionFieldInject
 	}
 	bodyFields := make([]bodyInject, 0)
 	for _, field := range defs {
@@ -570,7 +570,7 @@ func applyEndpointConnectionBodyJSON(args map[string]any, method string, fields 
 	return nil
 }
 
-func ApplyEndpointConnectionHeaders(headers http.Header, method string, fields map[string]string, defs []app.ConnectionField) error {
+func ApplyEndpointConnectionHeaders(headers http.Header, method string, fields map[string]string, defs []plugin.ConnectionField) error {
 	if len(fields) == 0 || len(defs) == 0 {
 		return nil
 	}
@@ -588,10 +588,10 @@ func ApplyEndpointConnectionHeaders(headers http.Header, method string, fields m
 			if name == "" {
 				return fmt.Errorf("connection field %q has empty header name", id)
 			}
-			if !app.IsAllowedRequestHeaderName(name) {
+			if !plugin.IsAllowedRequestHeaderName(name) {
 				return fmt.Errorf("connection field %q targets forbidden header %q", id, name)
 			}
-			if !app.IsAllowedRequestHeaderValue(value) {
+			if !plugin.IsAllowedRequestHeaderValue(value) {
 				return fmt.Errorf("connection field %q contains an invalid header value", id)
 			}
 			if headers.Get(name) == "" {
@@ -602,7 +602,7 @@ func ApplyEndpointConnectionHeaders(headers http.Header, method string, fields m
 	return nil
 }
 
-func ApplyEndpointConnectionEnv(extra map[string]string, fields map[string]string, defs []app.ConnectionField) (map[string]string, error) {
+func ApplyEndpointConnectionEnv(extra map[string]string, fields map[string]string, defs []plugin.ConnectionField) (map[string]string, error) {
 	out := make(map[string]string, len(extra)+len(fields))
 	for key, value := range extra {
 		if !validConnectionEnvName(key) {
@@ -641,7 +641,7 @@ func ApplyEndpointConnectionEnv(extra map[string]string, fields map[string]strin
 	return out, nil
 }
 
-func connectionFieldRuleMatches(rule app.ConnectionFieldInject, target, method string) bool {
+func connectionFieldRuleMatches(rule plugin.ConnectionFieldInject, target, method string) bool {
 	if strings.TrimSpace(rule.Target) != target {
 		return false
 	}
@@ -657,7 +657,7 @@ func connectionFieldRuleMatches(rule app.ConnectionFieldInject, target, method s
 	return false
 }
 
-func connectionFieldInjectName(field app.ConnectionField, rule app.ConnectionFieldInject) string {
+func connectionFieldInjectName(field plugin.ConnectionField, rule plugin.ConnectionFieldInject) string {
 	name := strings.TrimSpace(rule.Name)
 	if name == "" {
 		name = strings.TrimSpace(field.ID)
@@ -791,7 +791,7 @@ func coerceEndpointScalar(v any) (string, bool) {
 	}
 }
 
-func ApplyEndpointAuth(headers http.Header, auth app.Auth) error {
+func ApplyEndpointAuth(headers http.Header, auth plugin.Auth) error {
 	switch strings.TrimSpace(auth.Type) {
 	case "", "none":
 		return nil
@@ -800,7 +800,7 @@ func ApplyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if token == "" {
 			return errors.New("bearer token is empty")
 		}
-		if !app.IsAllowedRequestHeaderValue(token) {
+		if !plugin.IsAllowedRequestHeaderValue(token) {
 			return errors.New("bearer token contains an invalid header value")
 		}
 		headers.Set("Authorization", "Bearer "+token)
@@ -813,7 +813,7 @@ func ApplyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if tokenType == "" || strings.EqualFold(tokenType, "bearer") {
 			tokenType = "Bearer"
 		}
-		if strings.ContainsAny(tokenType, "\r\n \t") || !app.IsAllowedRequestHeaderValue(token) {
+		if strings.ContainsAny(tokenType, "\r\n \t") || !plugin.IsAllowedRequestHeaderValue(token) {
 			return errors.New("oauth2 token type is invalid")
 		}
 		headers.Set("Authorization", tokenType+" "+token)
@@ -826,7 +826,7 @@ func ApplyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if prefix == "" {
 			prefix = "Token"
 		}
-		if !app.IsAllowedRequestHeaderValue(prefix) || !app.IsAllowedRequestHeaderValue(token) {
+		if !plugin.IsAllowedRequestHeaderValue(prefix) || !plugin.IsAllowedRequestHeaderValue(token) {
 			return errors.New("token contains an invalid header value")
 		}
 		headers.Set("Authorization", prefix+" "+token)
@@ -840,10 +840,10 @@ func ApplyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if name == "" || auth.Token == "" {
 			return errors.New("header auth name/token are required")
 		}
-		if !app.IsAllowedRequestHeaderName(name) {
+		if !plugin.IsAllowedRequestHeaderName(name) {
 			return fmt.Errorf("auth header %q is not allowed", name)
 		}
-		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+		if !plugin.IsAllowedRequestHeaderValue(auth.Token) {
 			return errors.New("header auth token contains an invalid header value")
 		}
 		headers.Set(name, auth.Token)
@@ -966,9 +966,9 @@ func responseBytes(limits []int) int {
 	return endpointMaxResponseBytes
 }
 
-// ValidateBoundRequest prevents generated canvases from overriding fields
+// ValidateBoundRequest prevents generated widgets from overriding fields
 // owned by the selected connection. Chat tools retain their explicit-call rules.
-func ValidateBoundRequest(binding *app.EndpointBinding, method string, query map[string]any, rawBody any) error {
+func ValidateBoundRequest(binding *plugin.EndpointBinding, method string, query map[string]any, rawBody any) error {
 	body, _ := rawBody.(map[string]any)
 	for _, field := range binding.ConnectionFieldDefs {
 		for _, rule := range field.Inject {
@@ -985,7 +985,7 @@ func ValidateBoundRequest(binding *app.EndpointBinding, method string, query map
 				continue
 			}
 			if _, exists := values[connectionFieldInjectName(field, rule)]; exists {
-				return fmt.Errorf("connection-owned field %q cannot be supplied by a canvas", field.ID)
+				return fmt.Errorf("connection-owned field %q cannot be supplied by a widget", field.ID)
 			}
 		}
 	}

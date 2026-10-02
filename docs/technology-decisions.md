@@ -17,7 +17,7 @@ Pudding 是 local-first、多会话的 Electron 桌面产品：
 
 采用 Go、SQLite、cart v3。REST 用于业务请求和快照，SSE 用于会话事件，WebSocket 用于 MCP、browser tools 与 realtime bridge。
 
-音频输入、工具循环、Apps/MCP、附件、画布数据、上下文压缩、输入队列、协作与定时任务已有实现，不能再按第一阶段的“暂不做”解释。功能入口见[文档索引](README.md)。
+音频输入、工具循环、插件/MCP、附件、Studio 内容、上下文压缩、输入队列、协作与定时任务已有实现，不能再按第一阶段的“暂不做”解释。功能入口见[文档索引](README.md)。
 
 core 独立构建，不读取 sibling desktop。公共运行协议版本和浏览器限额只来自 [contracts/runtime.json](../contracts/runtime.json)。desktop 锁定准确 core SHA，并从该版本生成 `web/contracts/`。
 
@@ -63,7 +63,7 @@ core 默认只提供 API；显式 `-ui-dir` 可挂载外置 UI。桌面构建、
 
 ## 6. 存储
 
-[当前 schema](../internal/store/schema.sql) 定义运行数据，包括 sessions、turns、messages、events、queued_inputs、projects、工具文件变更、画布、浏览器、协作关系及定时任务。配置文件不迁入 SQLite；不再使用第一阶段“第一批／后续表”作为当前结构清单。
+[当前 schema](../internal/store/schema.sql) 定义运行数据，包括 sessions、turns、messages、events、queued_inputs、projects、工具文件变更、Studio 内容、浏览器、协作关系及定时任务。配置文件不迁入 SQLite；不再使用第一阶段“第一批／后续表”作为当前结构清单。
 
 - canonical messages 是对话历史的事实源；turn 状态由 turns 保存，UI 不自建另一套状态。
 - token delta 不逐条落库。最终 assistant 输出、turn 收尾状态与 lifecycle events 按既有事务契约提交；工具循环的 canonical 结果供后续请求和回读使用。
@@ -110,7 +110,7 @@ turn.started → turn.delta / turn.tool / … → turn.completed | turn.failed |
 
 - daemon 只监听 loopback，请求按启动 token 认证；Electron 启动页面注入连接信息，前端读取后清理地址栏。
 - provider API key 当前保存在本地 YAML，文件权限 0600；不能描述为已接入系统 Keychain。
-- 模式、App 加载、项目目录和工具审批是不同边界。App load 不直接授予文件目录或操作权限。
+- 模式、插件加载、项目目录和工具审批是不同边界。plugin load 不直接授予文件目录或操作权限。
 - Code CLI 的 Ask / Auto / Full、host 请求和授权复用以 [沙箱说明](code-cli-sandbox-design.md)及当前 engine/tool 策略为准。
 
 ## 10. 数据目录与通道隔离

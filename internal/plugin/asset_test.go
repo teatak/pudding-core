@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"os"
@@ -24,7 +24,7 @@ func TestReadAssetAcceptsWildcardPath(t *testing.T) {
 	}
 }
 
-func TestReadAssetRejectsSymlinkOutsideApp(t *testing.T) {
+func TestReadAssetRejectsSymlinkOutsidePlugin(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "github", "assets")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

@@ -11,23 +11,23 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/plugin"
 )
 
-func TestBrowserToolResultPreservesCanvasScreenshot(t *testing.T) {
+func TestBrowserToolResultPreservesWidgetScreenshot(t *testing.T) {
 	home := t.TempDir()
 	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'E', 'N', 'D'}
 	raw, err := json.Marshal(map[string]any{"content": []any{
-		map[string]any{"type": "text", "text": `{"runtime":{"text":"Canvas ready"}}`},
+		map[string]any{"type": "text", "text": `{"runtime":{"text":"Widget ready"}}`},
 		map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(imageBytes)},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "canvas_inspect"}, raw, home)
+	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "widget_inspect"}, raw, home)
 	if !result.Ok || len(result.Attachments) != 1 || len(result.ContextAttachments) != 1 {
-		t.Fatalf("canvas inspection lost screenshot: %+v", result)
+		t.Fatalf("widget inspection lost screenshot: %+v", result)
 	}
 	if result.ContextAttachments[0].AttachmentKey != result.Attachments[0].AttachmentKey || result.Attachments[0].Origin != attachment.OriginTool {
 		t.Fatalf("screenshot not routed to model: %+v", result)
@@ -43,13 +43,13 @@ func TestBrowserToolResultPreservesCanvasScreenshot(t *testing.T) {
 }
 
 func TestBrowserToolResultRejectsInspectionWithoutScreenshot(t *testing.T) {
-	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "canvas_inspect"}, json.RawMessage(`{"content":[{"type":"text","text":"{}"}]}`), t.TempDir())
-	if result.Ok || !strings.Contains(result.Content, "canvas_screenshot_missing") {
+	result := browserToolResult(Call{SessionID: "sess_canvas", Name: "widget_inspect"}, json.RawMessage(`{"content":[{"type":"text","text":"{}"}]}`), t.TempDir())
+	if result.Ok || !strings.Contains(result.Content, "widget_screenshot_missing") {
 		t.Fatalf("missing screenshot must be explicit: %+v", result)
 	}
 }
 
-func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
+func TestBrowserMCPRunnerRegistersAndCallsWidgetTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -66,7 +66,7 @@ func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 
 	calls := make(chan map[string]any, 1)
 	go fakeBrowserMCPServer(ctx, t, conn, "runtime_a", calls)
-	runtimeCtx := app.WithRuntimeID(ctx, "runtime_a")
+	runtimeCtx := plugin.WithRuntimeID(ctx, "runtime_a")
 
 	var defsReady bool
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
@@ -90,15 +90,15 @@ func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].ServerName != "test" || sessions[0].RuntimeID != "runtime_a" || len(sessions[0].Tools) != 1 {
 		t.Fatalf("unexpected browser session snapshot: %+v", sessions)
 	}
-	if sessions[0].Tools[0].AppID != "canvas" {
-		t.Fatalf("canvas tool missing app ownership: %+v", sessions[0].Tools[0])
+	if sessions[0].Tools[0].PluginID != "widget-authoring" {
+		t.Fatalf("widget tool missing app ownership: %+v", sessions[0].Tools[0])
 	}
-	runtimeApps, err := runner.ListRuntimeDefinitions(ctx, "runtime_a")
-	if err != nil || len(runtimeApps) != 1 || runtimeApps[0].ID != "canvas" || len(runtimeApps[0].Tools) != 1 {
-		t.Fatalf("unexpected runtime apps: apps=%+v err=%v", runtimeApps, err)
+	runtimePlugins, err := runner.ListRuntimeDefinitions(ctx, "runtime_a")
+	if err != nil || len(runtimePlugins) != 1 || runtimePlugins[0].ID != "widget-authoring" || len(runtimePlugins[0].Tools) != 1 {
+		t.Fatalf("unexpected runtime plugins: plugins=%+v err=%v", runtimePlugins, err)
 	}
-	skill, err := runner.ReadRuntimeSkill(runtimeCtx, "runtime_a", "canvas", "canvas")
-	if err != nil || skill.Content != "# Canvas" {
+	skill, err := runner.ReadRuntimeSkill(runtimeCtx, "runtime_a", "widget-authoring", "widget-authoring")
+	if err != nil || skill.Content != "# Widget Authoring" {
 		t.Fatalf("unexpected runtime skill: skill=%+v err=%v", skill, err)
 	}
 
@@ -147,15 +147,15 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 	go fakeBrowserMCPServer(ctx, t, connB, "runtime_b", callsB)
 
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		defsA, _ := runner.Definitions(app.WithRuntimeID(ctx, "runtime_a"), "sess_a")
-		defsB, _ := runner.Definitions(app.WithRuntimeID(ctx, "runtime_b"), "sess_a")
+		defsA, _ := runner.Definitions(plugin.WithRuntimeID(ctx, "runtime_a"), "sess_a")
+		defsB, _ := runner.Definitions(plugin.WithRuntimeID(ctx, "runtime_b"), "sess_a")
 		if HasDefinition(defsA, "canvas_markdown") && HasDefinition(defsB, "canvas_markdown") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	res := runner.Call(app.WithRuntimeID(ctx, "runtime_a"), Call{
+	res := runner.Call(plugin.WithRuntimeID(ctx, "runtime_a"), Call{
 		SessionID: "sess_a",
 		CallID:    "call_a",
 		Name:      "canvas_markdown",
@@ -233,24 +233,24 @@ func fakeBrowserMCPServer(ctx context.Context, t *testing.T, conn *websocket.Con
 		case "tools/list":
 			result = map[string]any{"tools": []map[string]any{{
 				"name":        "canvas_markdown",
-				"description": "canvas markdown",
+				"description": "widget markdown",
 				"capability":  "chat",
-				"appID":       "canvas",
+				"pluginID":    "widget-authoring",
 				"inputSchema": map[string]any{"type": "object"},
 			}}}
-		case "apps/list":
-			result = map[string]any{"apps": []map[string]any{{
-				"id":             "canvas",
-				"name":           "Canvas",
+		case "plugins/list":
+			result = map[string]any{"plugins": []map[string]any{{
+				"id":             "widget-authoring",
+				"name":           "Widget Authoring",
 				"requiredMode":   "chat",
-				"defaultSkillID": "canvas",
+				"defaultSkillID": "widget-authoring",
 				"skills": []map[string]any{{
-					"id": "canvas", "name": "Canvas", "path": "skills/canvas/SKILL.md",
+					"id": "widget-authoring", "name": "Widget Authoring", "path": "skills/widget-authoring/SKILL.md",
 				}},
 			}}}
-		case "apps/skills/read":
+		case "plugins/skills/read":
 			result = map[string]any{
-				"id": "canvas", "name": "Canvas", "path": "skills/canvas/SKILL.md", "content": "# Canvas",
+				"id": "widget-authoring", "name": "Widget Authoring", "path": "skills/widget-authoring/SKILL.md", "content": "# Widget Authoring",
 			}
 		case "tools/call":
 			calls <- req.Params

@@ -3,19 +3,20 @@ package sqlitestore
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/internal/canvas"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
 func assertConvertedCanvasesContain(t *testing.T, path string, values ...string) {
 	t.Helper()
 	db := openMigrationTestDB(t, path)
 	defer db.Close()
-	rows, err := db.Query(`SELECT canvas_id,hash,client_request_id FROM canvas_revisions`)
+	rows, err := db.Query(`SELECT item_id,hash,client_request_id FROM studio_item_revisions`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func assertConvertedCanvasesContain(t *testing.T, path string, values ...string)
 		if err = rows.Scan(&id, &hash, &request); err != nil {
 			t.Fatal(err)
 		}
-		p, err := canvas.ReadPackage(filepath.Dir(path), id, hash)
+		p, err := widget.ReadPackage(filepath.Dir(path), id, hash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +36,7 @@ func assertConvertedCanvasesContain(t *testing.T, path string, values ...string)
 		}
 	}
 	rows.Close()
-	rows, err = db.Query(`SELECT session_id,id FROM canvas_mounts`)
+	rows, err = db.Query(`SELECT session_id,id FROM studio_mounts`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestFinalCanvasMigrationReplacesLostImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "26")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 	st.Close()
 	assertConvertedCanvasesContain(t, path, "Beach", "data:image/svg+xml;base64,")
 }

@@ -23,7 +23,7 @@ type Builder struct {
 	store          store.Store
 	prompts        PromptSource
 	attachmentHome string
-	apps           AppSkillSource
+	plugins        PluginSkillSource
 	skills         SkillSource
 }
 
@@ -41,8 +41,8 @@ type PromptSource interface {
 	Prompt(ctx context.Context, mode string) (prompt.Output, error)
 }
 
-type loadedAppsPromptSource interface {
-	PromptWithLoadedApps(ctx context.Context, mode string, loadedAppIDs []string) (prompt.Output, error)
+type loadedPluginsPromptSource interface {
+	PromptWithLoadedPlugins(ctx context.Context, mode string, loadedPluginIDs []string) (prompt.Output, error)
 }
 
 func New(s store.Store, prompts PromptSource, opts ...Option) *Builder {
@@ -81,7 +81,7 @@ func (b *Builder) BuildForProvider(
 }
 
 // BuildForProviderWithTools 使用本轮实际可调用的工具定义构建请求。传入空切片
-// 表示本轮不允许调用工具；这也会阻止已经禁用的 App 工具状态被跨 turn 重放。
+// 表示本轮不允许调用工具；这也会阻止已经禁用的插件工具状态被跨 turn 重放。
 func (b *Builder) BuildForProviderWithTools(
 	ctx context.Context,
 	sessionID, providerName, model, mode string,
@@ -131,15 +131,15 @@ func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, pr
 
 func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
 	sessionID := sess.ID
-	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedAppIDs)
+	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
 	}
 	var system prompt.Output
 	var err error
-	if source, ok := b.prompts.(loadedAppsPromptSource); ok {
-		system, err = source.PromptWithLoadedApps(ctx, mode, sess.LoadedAppIDs)
+	if source, ok := b.prompts.(loadedPluginsPromptSource); ok {
+		system, err = source.PromptWithLoadedPlugins(ctx, mode, sess.LoadedPluginIDs)
 	} else {
 		system, err = b.prompts.Prompt(ctx, mode)
 	}
@@ -283,7 +283,7 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 	for _, part := range msg.Parts {
 		switch part.Type {
 		case store.ContentPartToolUse, store.ContentPartToolResult:
-			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
+			if !toolAllowedForRequest(mode, tool.CurrentToolName(part.Name), allowedTools) {
 				return false
 			}
 		}
@@ -504,24 +504,26 @@ func (b *Builder) providerParts(
 			continue
 		case store.ContentPartToolUse:
 			flushReferences()
-			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
+			name := tool.CurrentToolName(part.Name)
+			if !toolAllowedForRequest(mode, name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{
 				Type:   provider.PartToolUse,
 				CallID: part.CallID,
-				Name:   part.Name,
+				Name:   name,
 				Args:   append([]byte(nil), part.Args...),
 			})
 		case store.ContentPartToolResult:
 			flushReferences()
-			if !toolAllowedForRequest(mode, part.Name, allowedTools) {
+			name := tool.CurrentToolName(part.Name)
+			if !toolAllowedForRequest(mode, name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{
 				Type:    provider.PartToolResult,
 				CallID:  part.CallID,
-				Name:    part.Name,
+				Name:    name,
 				Ok:      part.Ok,
 				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, toolIncluded(allowedTools, tool.HistoryGetMessage)),
 			})

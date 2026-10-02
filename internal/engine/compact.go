@@ -429,7 +429,7 @@ Accuracy is more important than brevity. Preserve user preferences, key facts, d
 
 Use the dominant language of the conversation. Cite important source messages with @message(message_id). You may omit greetings, repeated text, and bulky tool output.
 
-Do not copy or summarize App/Skill instruction bodies into the summary. Their registered references are retained separately and resolved from current sources on future requests. Summarize task facts and user decisions, not historical tool operating rules.
+Do not copy or summarize plugin/skill instruction bodies into the summary. Their registered references are retained separately and resolved from current sources on future requests. Summarize task facts and user decisions, not historical tool operating rules.
 
 Return markdown with these sections:
 ## User Context

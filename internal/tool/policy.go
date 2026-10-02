@@ -90,20 +90,20 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 			Paths: compactRiskPaths(paths...), Summary: summary,
 		}, true
 	}
-	if name == AppSave {
-		request, err := decodeAppSaveRequest(raw)
+	if name == PluginSave {
+		request, err := decodePluginSaveRequest(raw)
 		if err != nil {
 			return ToolRisk{}, false
 		}
-		summary := "Create an installed App package."
+		summary := "Create an installed plugin package."
 		if request.Operation == "update" {
-			summary = "Replace an installed App package."
+			summary = "Replace an installed plugin package."
 		}
 		return ToolRisk{
 			Class:     RiskClassWrite,
-			Operation: "app_save",
-			Scope:     "app",
-			Paths:     compactRiskPaths(request.AppID),
+			Operation: "plugin_save",
+			Scope:     "plugin",
+			Paths:     compactRiskPaths(request.PluginID),
 			Summary:   summary,
 		}, true
 	}
@@ -140,12 +140,12 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 			LowRisk:   true,
 		}
 		args, argumentErr := decodeFilePatchArgs(raw)
-		if argumentErr != nil || (strings.TrimSpace(args.Scope) != managedScopeProject && strings.TrimSpace(args.Scope) != managedScopeCanvas) || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
+		if argumentErr != nil || (strings.TrimSpace(args.Scope) != managedScopeProject && strings.TrimSpace(args.Scope) != managedScopeWidget) || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
 			return baseRisk, true
 		}
-		if args.Scope == managedScopeCanvas {
-			baseRisk.Scope = managedScopeCanvas
-			baseRisk.Summary = "Edit one canvas draft source file."
+		if args.Scope == managedScopeWidget {
+			baseRisk.Scope = managedScopeWidget
+			baseRisk.Summary = "Edit one widget draft source file."
 		}
 		paths := make([]string, 0, len(args.Files))
 		destructive := false
@@ -159,8 +159,8 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 		}
 		if destructive {
 			summary := "Apply a multi-file patch that deletes project files."
-			if args.Scope == managedScopeCanvas {
-				summary = "Delete one canvas draft source file."
+			if args.Scope == managedScopeWidget {
+				summary = "Delete one widget draft source file."
 			}
 			return ToolRisk{
 				Class:     RiskClassDestructive,

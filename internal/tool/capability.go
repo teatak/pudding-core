@@ -51,10 +51,10 @@ func RequiredModeForName(name string) store.AgentMode {
 	if IsCollaborationTool(name) {
 		return store.ModeWork
 	}
-	if name == RequestCapability || name == AppLoad || name == AppUnload {
+	if name == RequestCapability || name == PluginLoad || name == PluginUnload {
 		return store.ModeChat
 	}
-	if strings.HasPrefix(name, appMCPToolPrefix) {
+	if strings.HasPrefix(name, pluginMCPToolPrefix) {
 		return store.ModeWork
 	}
 	if strings.HasPrefix(name, "canvas_") || name == RequestUserInput {
@@ -77,7 +77,7 @@ func NameAllowedForMode(mode store.AgentMode, name string) bool {
 	if !store.ValidAgentMode(mode) {
 		mode = store.ModeChat
 	}
-	if name == RequestCapability || name == AppLoad || name == AppUnload {
+	if name == RequestCapability || name == PluginLoad || name == PluginUnload {
 		return true
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(RequiredModeForName(name))

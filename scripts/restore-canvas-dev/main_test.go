@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/widget"
 )
 
 func TestRestoreIsAtomicAndDoesNotOverwriteEditedCanvas(t *testing.T) {
@@ -19,17 +22,18 @@ func TestRestoreIsAtomicAndDoesNotOverwriteEditedCanvas(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(home, "data", "pudding.db")
-	st, err := sqlitestore.OpenWithHome(dbPath, home)
+	// The recovery targets the released v26 layout; schema v27 converts it on upgrade.
+	schema, err := os.ReadFile("../../internal/store/sqlitestore/testdata/schema-v26.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=on")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err = db.Exec(`INSERT INTO sessions(id,provider,model,created_at,updated_at,last_activity_at) VALUES('s','mock','m',1,1,1)`); err != nil {
+	if _, err = db.Exec(string(schema) + `;PRAGMA user_version=26;
+ INSERT INTO sessions(id,provider,model,created_at,updated_at,last_activity_at) VALUES('s','mock','m',1,1,1)`); err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(t.TempDir(), "snapshots")
@@ -75,5 +79,18 @@ func TestRestoreIsAtomicAndDoesNotOverwriteEditedCanvas(t *testing.T) {
 	db.QueryRow(`SELECT count(*) FROM canvas_mounts`).Scan(&count)
 	if count != 1 {
 		t.Fatal("duplicate mount", count)
+	}
+	db.Close()
+	st, err := sqlitestore.OpenWithHome(dbPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	item, err := st.GetStudioItem(context.Background(), "saved")
+	if err != nil || item.Kind != store.StudioItemKindWidget || item.Name != "Edited later" {
+		t.Fatalf("restored widget after upgrade: %+v %v", item, err)
+	}
+	if p, err := widget.ReadPackage(home, "saved", item.HeadRevision); err != nil || !strings.Contains(p.Files["src/App.tsx"], "Retained text") {
+		t.Fatalf("restored widget package: %+v %v", p, err)
 	}
 }

@@ -1,41 +1,41 @@
 package tool
 
-import "github.com/teatak/pudding-core/internal/app"
+import "github.com/teatak/pudding-core/internal/plugin"
 
-var builtinAppTools = map[string]string{
-	CollaborationList:     app.BuiltinCollaborationID,
-	CollaborationDispatch: app.BuiltinCollaborationID,
-	CollaborationSend:     app.BuiltinCollaborationID,
-	CollaborationWait:     app.BuiltinCollaborationID,
-	CollaborationStop:     app.BuiltinCollaborationID,
-	BrowserStatus:         app.BuiltinBrowserID,
-	BrowserOpen:           app.BuiltinBrowserID,
-	BrowserObserve:        app.BuiltinBrowserID,
-	BrowserScreenshot:     app.BuiltinBrowserID,
-	BrowserBack:           app.BuiltinBrowserID,
-	BrowserForward:        app.BuiltinBrowserID,
-	BrowserReload:         app.BuiltinBrowserID,
-	BrowserClose:          app.BuiltinBrowserID,
-	BrowserClick:          app.BuiltinBrowserID,
-	BrowserType:           app.BuiltinBrowserID,
-	BrowserScroll:         app.BuiltinBrowserID,
-	SkillValidate:         app.BuiltinSkillAuthoringID,
-	AppSave:               app.BuiltinAppAuthoringID,
-	CameraCapture:         app.BuiltinCaptureID,
-	DesktopScreenshot:     app.BuiltinCaptureID,
-	ComputerListApps:      app.BuiltinComputerUseID,
-	ComputerUseApp:        app.BuiltinComputerUseID,
-	ComputerQuitApp:       app.BuiltinComputerUseID,
-	ComputerObserve:       app.BuiltinComputerUseID,
-	ComputerAct:           app.BuiltinComputerUseID,
+var builtinPluginTools = map[string]string{
+	CollaborationList:     plugin.BuiltinCollaborationID,
+	CollaborationDispatch: plugin.BuiltinCollaborationID,
+	CollaborationSend:     plugin.BuiltinCollaborationID,
+	CollaborationWait:     plugin.BuiltinCollaborationID,
+	CollaborationStop:     plugin.BuiltinCollaborationID,
+	BrowserStatus:         plugin.BuiltinBrowserID,
+	BrowserOpen:           plugin.BuiltinBrowserID,
+	BrowserObserve:        plugin.BuiltinBrowserID,
+	BrowserScreenshot:     plugin.BuiltinBrowserID,
+	BrowserBack:           plugin.BuiltinBrowserID,
+	BrowserForward:        plugin.BuiltinBrowserID,
+	BrowserReload:         plugin.BuiltinBrowserID,
+	BrowserClose:          plugin.BuiltinBrowserID,
+	BrowserClick:          plugin.BuiltinBrowserID,
+	BrowserType:           plugin.BuiltinBrowserID,
+	BrowserScroll:         plugin.BuiltinBrowserID,
+	SkillValidate:         plugin.BuiltinSkillAuthoringID,
+	PluginSave:            plugin.BuiltinPluginAuthoringID,
+	CameraCapture:         plugin.BuiltinCaptureID,
+	DesktopScreenshot:     plugin.BuiltinCaptureID,
+	ComputerListApps:      plugin.BuiltinComputerUseID,
+	ComputerUseApp:        plugin.BuiltinComputerUseID,
+	ComputerQuitApp:       plugin.BuiltinComputerUseID,
+	ComputerObserve:       plugin.BuiltinComputerUseID,
+	ComputerAct:           plugin.BuiltinComputerUseID,
 }
 
-func BuiltinAppIDForTool(name string) (string, bool) {
-	id, ok := builtinAppTools[name]
+func BuiltinPluginIDForTool(name string) (string, bool) {
+	id, ok := builtinPluginTools[name]
 	return id, ok
 }
 
-func IsAppAPITool(name string) bool {
+func IsPluginAPITool(name string) bool {
 	switch name {
 	case RESTRequest, GraphQLRequest, GraphQLIntrospect, GraphQLSearch:
 		return true

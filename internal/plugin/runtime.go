@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 
 const RuntimeIDHeader = "X-Pudding-Runtime-ID"
 
-// RuntimeCanvasID is product-owned even when no desktop runtime is connected.
-// Reserving it prevents an installed App from changing identity when Canvas
+// RuntimeWidgetAuthoringID is product-owned even when no desktop runtime is connected.
+// Reserving it prevents an installed plugin from changing identity when Widget Authoring
 // later appears for the same session.
-const RuntimeCanvasID = "canvas"
+const RuntimeWidgetAuthoringID = "widget-authoring"
 
 type runtimeIDContextKey struct{}
 
-// WithRuntimeID scopes runtime-provided Apps and tools to the client that
+// WithRuntimeID scopes runtime-provided plugins and tools to the client that
 // originated the current request or turn. It is routing metadata, not focus.
 func WithRuntimeID(ctx context.Context, runtimeID string) context.Context {
 	runtimeID = strings.TrimSpace(runtimeID)
@@ -32,9 +32,9 @@ func RuntimeIDFromContext(ctx context.Context) string {
 	return strings.TrimSpace(runtimeID)
 }
 
-// RuntimeSource supplies Apps implemented by a connected UI runtime. The
+// RuntimeSource supplies plugins implemented by a connected UI runtime. The
 // daemon owns only their ephemeral registry and call routing.
 type RuntimeSource interface {
 	ListRuntimeDefinitions(ctx context.Context, runtimeID string) ([]*Definition, error)
-	ReadRuntimeSkill(ctx context.Context, runtimeID, appID, skillID string) (*SkillDetail, error)
+	ReadRuntimeSkill(ctx context.Context, runtimeID, pluginID, skillID string) (*SkillDetail, error)
 }

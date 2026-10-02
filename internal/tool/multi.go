@@ -96,18 +96,18 @@ func (r *MultiRunner) Definitions(ctx context.Context, sessionID string) ([]prov
 	return r.collectDefinitions(ctx, sessionID, nil, false)
 }
 
-func (r *MultiRunner) DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error) {
-	return r.collectDefinitions(ctx, sessionID, appIDs, true)
+func (r *MultiRunner) DefinitionsForPlugins(ctx context.Context, sessionID string, pluginIDs []string) ([]provider.ToolDef, error) {
+	return r.collectDefinitions(ctx, sessionID, pluginIDs, true)
 }
 
-func (r *MultiRunner) collectDefinitions(ctx context.Context, sessionID string, appIDs []string, appScoped bool) ([]provider.ToolDef, error) {
+func (r *MultiRunner) collectDefinitions(ctx context.Context, sessionID string, pluginIDs []string, pluginScoped bool) ([]provider.ToolDef, error) {
 	var defs []provider.ToolDef
 	seen := map[string]bool{}
 	for _, runner := range r.runners {
 		var runnerDefs []provider.ToolDef
 		var err error
-		if scoped, ok := runner.(AppScopedDefinitionRunner); appScoped && ok {
-			runnerDefs, err = scoped.DefinitionsForApps(ctx, sessionID, appIDs)
+		if scoped, ok := runner.(PluginScopedDefinitionRunner); pluginScoped && ok {
+			runnerDefs, err = scoped.DefinitionsForPlugins(ctx, sessionID, pluginIDs)
 		} else {
 			runnerDefs, err = runner.Definitions(ctx, sessionID)
 		}

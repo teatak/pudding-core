@@ -1,4 +1,4 @@
-package app
+package plugin
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 )
 
-func TestImportAndUpdateMCPApps(t *testing.T) {
+func TestImportAndUpdateMCPPlugins(t *testing.T) {
 	homeDir := t.TempDir()
 	svc := NewService(homeDir, nil)
 	config := `{
@@ -27,7 +27,7 @@ func TestImportAndUpdateMCPApps(t *testing.T) {
     }
   }
 }`
-	defs, err := svc.ImportMCPApps(context.Background(), []byte(config), "")
+	defs, err := svc.ImportMCPPlugins(context.Background(), []byte(config), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,31 +41,31 @@ func TestImportAndUpdateMCPApps(t *testing.T) {
 	local := byName["Local tools"]
 	remote := byName["Remote tools"]
 	if local == nil || local.Kind != KindMCP || local.RequiredMode != "code" {
-		t.Fatalf("unexpected local MCP App: %+v", local)
+		t.Fatalf("unexpected local MCP plugin: %+v", local)
 	}
 	if remote == nil || remote.Kind != KindMCP || remote.RequiredMode != "work" {
-		t.Fatalf("unexpected remote MCP App: %+v", remote)
+		t.Fatalf("unexpected remote MCP plugin: %+v", remote)
 	}
 	bindings, err := svc.ListEndpointBindings(context.Background(), EndpointKindMCP)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(bindings) != 2 {
-		t.Fatalf("MCP App bindings = %d, want 2", len(bindings))
+		t.Fatalf("MCP plugin bindings = %d, want 2", len(bindings))
 	}
 	for _, binding := range bindings {
 		if binding.ConnectionID != "" {
-			t.Fatalf("MCP App unexpectedly requires a connection: %+v", binding)
+			t.Fatalf("MCP plugin unexpectedly requires a connection: %+v", binding)
 		}
 	}
-	manifest, err := os.ReadFile(filepath.Join(home.AppsPath(homeDir), local.ID, AppFileName))
+	manifest, err := os.ReadFile(filepath.Join(home.PluginsPath(homeDir), local.ID, PluginFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(manifest), "secret") || strings.Contains(string(manifest), "API_TOKEN") {
-		t.Fatalf("secret data leaked into app manifest: %s", manifest)
+		t.Fatalf("secret data leaked into plugin manifest: %s", manifest)
 	}
-	exported, err := svc.GetMCPAppConfig(context.Background(), local.ID)
+	exported, err := svc.GetMCPPluginConfig(context.Background(), local.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestImportAndUpdateMCPApps(t *testing.T) {
 		t.Fatalf("exported API_TOKEN = %q", got)
 	}
 
-	updated, err := svc.UpdateMCPApp(context.Background(), local.ID, []byte(`{
+	updated, err := svc.UpdateMCPPlugin(context.Background(), local.ID, []byte(`{
   "mcpServers": {
     "Local tools": {"url": "https://example.test/new-mcp"}
   }
@@ -85,16 +85,16 @@ func TestImportAndUpdateMCPApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := updated.Endpoints[mcpAppEndpointName]
+	endpoint := updated.Endpoints[mcpPluginEndpointName]
 	if updated.ID != local.ID || updated.Name != "Renamed tools" || updated.RequiredMode != "work" || endpoint.Transport != EndpointTransportStreamableHTTP {
-		t.Fatalf("unexpected updated MCP App: %+v", updated)
+		t.Fatalf("unexpected updated MCP plugin: %+v", updated)
 	}
 	if len(endpoint.Env) != 0 {
 		t.Fatalf("old secret env survived transport update: %+v", endpoint.Env)
 	}
 }
 
-func TestMCPAppConfigValidation(t *testing.T) {
+func TestMCPPluginConfigValidation(t *testing.T) {
 	svc := NewService(t.TempDir(), nil)
 	for _, raw := range []string{
 		`{}`,
@@ -103,23 +103,23 @@ func TestMCPAppConfigValidation(t *testing.T) {
 		`{"mcpServers": {"bad": {"url": "https://example.test/mcp", "env": {"TOKEN": "x"}}}}`,
 		`{"mcpServers": {"same": {"command": "node"}, " SAME ": {"command": "node"}}}`,
 	} {
-		if _, err := svc.ImportMCPApps(context.Background(), []byte(raw), ""); err == nil {
+		if _, err := svc.ImportMCPPlugins(context.Background(), []byte(raw), ""); err == nil {
 			t.Fatalf("config unexpectedly accepted: %s", raw)
 		}
 	}
-	if _, err := svc.ImportMCPApps(context.Background(), []byte(`{"mcpServers":{"one":{"command":"node"},"two":{"command":"node"}}}`), "Custom"); err == nil {
+	if _, err := svc.ImportMCPPlugins(context.Background(), []byte(`{"mcpServers":{"one":{"command":"node"},"two":{"command":"node"}}}`), "Custom"); err == nil {
 		t.Fatal("custom name unexpectedly accepted for multiple servers")
 	}
 }
 
-func TestImportMCPAppCustomName(t *testing.T) {
+func TestImportMCPPluginCustomName(t *testing.T) {
 	svc := NewService(t.TempDir(), nil)
-	defs, err := svc.ImportMCPApps(context.Background(), []byte(`{"mcpServers":{"filesystem":{"command":"node"}}}`), "Local Files")
+	defs, err := svc.ImportMCPPlugins(context.Background(), []byte(`{"mcpServers":{"filesystem":{"command":"node"}}}`), "Local Files")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(defs) != 1 || defs[0].Name != "Local Files" || defs[0].ID != "mcp-local-files" {
-		t.Fatalf("unexpected custom-named MCP App: %+v", defs)
+		t.Fatalf("unexpected custom-named MCP plugin: %+v", defs)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestDefinitionKindDefaultsAndMCPConstraints(t *testing.T) {
 	if err := ValidateDefinition(ordinary); err != nil {
 		t.Fatal(err)
 	}
-	if ordinary.Kind != KindApp {
+	if ordinary.Kind != KindPlugin {
 		t.Fatalf("default kind = %q", ordinary.Kind)
 	}
 	invalid := &Definition{
@@ -140,6 +140,6 @@ func TestDefinitionKindDefaultsAndMCPConstraints(t *testing.T) {
 		},
 	}
 	if err := ValidateDefinition(invalid); err == nil {
-		t.Fatal("non-MCP endpoint accepted by MCP App")
+		t.Fatal("non-MCP endpoint accepted by MCP plugin")
 	}
 }

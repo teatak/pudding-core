@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/teatak/pudding-core/internal/appexec"
+	"github.com/teatak/pudding-core/internal/pluginexec"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,59 +14,59 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 )
 
-func TestAppMCPProviderToolNameUsesToolAndHash(t *testing.T) {
-	binding := &app.EndpointBinding{
-		AppID:        "sequential-thinking",
+func TestPluginMCPProviderToolNameUsesToolAndHash(t *testing.T) {
+	binding := &plugin.EndpointBinding{
+		PluginID:     "sequential-thinking",
 		EndpointName: "sequential_thinking_mcp",
 	}
-	got := appMCPProviderToolName(binding, "sequentialthinking")
-	if want := "app_mcp__sequentialthinking__66e7fc2f"; got != want {
+	got := pluginMCPProviderToolName(binding, "sequentialthinking")
+	if want := "plugin_mcp__sequentialthinking__66e7fc2f"; got != want {
 		t.Fatalf("unexpected provider tool name: got %q want %q", got, want)
 	}
 
 	otherConnection := *binding
 	otherConnection.ConnectionID = "secondary"
-	if other := appMCPProviderToolName(&otherConnection, "sequentialthinking"); other == got {
+	if other := pluginMCPProviderToolName(&otherConnection, "sequentialthinking"); other == got {
 		t.Fatalf("connection must contribute to provider tool name hash: %q", other)
 	}
 
-	longName := appMCPProviderToolName(binding, strings.Repeat("tool", 20))
-	if len(longName) != appMCPMaxToolNameLen {
-		t.Fatalf("long provider tool name must be capped at %d bytes: %q (%d)", appMCPMaxToolNameLen, longName, len(longName))
+	longName := pluginMCPProviderToolName(binding, strings.Repeat("tool", 20))
+	if len(longName) != pluginMCPMaxToolNameLen {
+		t.Fatalf("long provider tool name must be capped at %d bytes: %q (%d)", pluginMCPMaxToolNameLen, longName, len(longName))
 	}
 }
 
-func TestAppMCPCacheKeyChangesWithCredentialsAndInjectionRules(t *testing.T) {
-	binding := &app.EndpointBinding{
-		AppID:        "example",
+func TestPluginMCPCacheKeyChangesWithCredentialsAndInjectionRules(t *testing.T) {
+	binding := &plugin.EndpointBinding{
+		PluginID:     "example",
 		ConnectionID: "primary",
 		EndpointName: "example_mcp",
-		Endpoint: app.Endpoint{
-			Kind:      app.EndpointKindMCP,
-			Transport: app.EndpointTransportStreamableHTTP,
+		Endpoint: plugin.Endpoint{
+			Kind:      plugin.EndpointKindMCP,
+			Transport: plugin.EndpointTransportStreamableHTTP,
 			URL:       "https://example.test/mcp",
 		},
-		Auth: app.Auth{Type: app.AuthTypeBearer, Token: "first-secret"},
-		ConnectionFieldDefs: []app.ConnectionField{{
+		Auth: plugin.Auth{Type: plugin.AuthTypeBearer, Token: "first-secret"},
+		ConnectionFieldDefs: []plugin.ConnectionField{{
 			ID: "team",
-			Inject: []app.ConnectionFieldInject{{
+			Inject: []plugin.ConnectionFieldInject{{
 				Target: "header",
 				Name:   "X-Team",
 			}},
 		}},
 	}
-	initial := appMCPBindingsCacheKey([]*app.EndpointBinding{binding})
+	initial := pluginMCPBindingsCacheKey([]*plugin.EndpointBinding{binding})
 	binding.Auth.Token = "second-secret"
-	if rotated := appMCPBindingsCacheKey([]*app.EndpointBinding{binding}); rotated == initial {
+	if rotated := pluginMCPBindingsCacheKey([]*plugin.EndpointBinding{binding}); rotated == initial {
 		t.Fatal("credential rotation reused the stale MCP cache entry")
 	}
 	binding.Auth.Token = "first-secret"
 	binding.ConnectionFieldDefs[0].Inject[0].Name = "X-Workspace"
-	if changed := appMCPBindingsCacheKey([]*app.EndpointBinding{binding}); changed == initial {
+	if changed := pluginMCPBindingsCacheKey([]*plugin.EndpointBinding{binding}); changed == initial {
 		t.Fatal("connection injection change reused the stale MCP cache entry")
 	}
 	if strings.Contains(initial, "first-secret") {
@@ -74,26 +74,26 @@ func TestAppMCPCacheKeyChangesWithCredentialsAndInjectionRules(t *testing.T) {
 	}
 }
 
-func TestAppMCPRunnerClearsStaleSessionTools(t *testing.T) {
-	staleDef := provider.ToolDef{Name: "app_mcp__stale", AppID: "old-app"}
-	staleTool := appMCPDiscoveredTool{
-		binding:    &app.EndpointBinding{AppID: "old-app"},
+func TestPluginMCPRunnerClearsStaleSessionTools(t *testing.T) {
+	staleDef := provider.ToolDef{Name: "plugin_mcp__stale", PluginID: "old-plugin"}
+	staleTool := pluginMCPDiscoveredTool{
+		binding:    &plugin.EndpointBinding{PluginID: "old-plugin"},
 		remoteName: "stale",
 	}
 
-	runner := NewAppMCPRunner(fakeAppMCPSource{})
-	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]appMCPDiscoveredTool{staleDef.Name: staleTool})
-	defs, err := runner.DefinitionsForApps(context.Background(), "session-1", nil)
+	runner := NewPluginMCPRunner(fakePluginMCPSource{})
+	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]pluginMCPDiscoveredTool{staleDef.Name: staleTool})
+	defs, err := runner.DefinitionsForPlugins(context.Background(), "session-1", nil)
 	if err != nil || len(defs) != 0 {
-		t.Fatalf("empty App scope definitions = %+v, err = %v", defs, err)
+		t.Fatalf("empty plugin scope definitions = %+v, err = %v", defs, err)
 	}
 	if _, ok := runner.lookup("session-1", staleDef.Name); ok {
-		t.Fatal("stale MCP route survived an empty App scope")
+		t.Fatal("stale MCP route survived an empty plugin scope")
 	}
 
-	runner.source = fakeAppMCPSource{err: errors.New("connection config unavailable")}
-	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]appMCPDiscoveredTool{staleDef.Name: staleTool})
-	defs, err = runner.DefinitionsForApps(context.Background(), "session-1", []string{"new-app"})
+	runner.source = fakePluginMCPSource{err: errors.New("connection config unavailable")}
+	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]pluginMCPDiscoveredTool{staleDef.Name: staleTool})
+	defs, err = runner.DefinitionsForPlugins(context.Background(), "session-1", []string{"new-plugin"})
 	if err != nil || len(defs) != 0 {
 		t.Fatalf("failed binding lookup definitions = %+v, err = %v", defs, err)
 	}
@@ -102,7 +102,7 @@ func TestAppMCPRunnerClearsStaleSessionTools(t *testing.T) {
 	}
 }
 
-func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
+func TestPluginMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -134,7 +134,7 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 		case "initialize":
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Mcp-Session-Id", "sid-1")
-			writeAppMCPTestResponse(t, w, rpc.ID, map[string]any{
+			writePluginMCPTestResponse(t, w, rpc.ID, map[string]any{
 				"protocolVersion": "2025-06-18",
 				"serverInfo":      map[string]any{"name": "fake", "version": "1.0"},
 				"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -150,7 +150,7 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 				t.Errorf("missing session id on list: %s", req.Header.Get("Mcp-Session-Id"))
 			}
 			w.Header().Set("Content-Type", "application/json")
-			writeAppMCPTestResponse(t, w, rpc.ID, map[string]any{"tools": []map[string]any{{
+			writePluginMCPTestResponse(t, w, rpc.ID, map[string]any{"tools": []map[string]any{{
 				"name":        "search_issues",
 				"description": "Search issues",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
@@ -161,7 +161,7 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 			}
 			sawCall = true
 			w.Header().Set("Content-Type", "application/json")
-			writeAppMCPTestResponse(t, w, rpc.ID, map[string]any{
+			writePluginMCPTestResponse(t, w, rpc.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": `{"ok":true}`}},
 			})
 		default:
@@ -171,34 +171,34 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	runner := NewAppMCPRunner(fakeAppMCPSource{bindings: []*app.EndpointBinding{{
-		AppID:        "linear",
+	runner := NewPluginMCPRunner(fakePluginMCPSource{bindings: []*plugin.EndpointBinding{{
+		PluginID:     "linear",
 		ConnectionID: "linear-main",
 		EndpointName: "linear_mcp",
-		Endpoint: app.Endpoint{
-			Kind:      app.EndpointKindMCP,
-			Transport: app.EndpointTransportStreamableHTTP,
+		Endpoint: plugin.Endpoint{
+			Kind:      plugin.EndpointKindMCP,
+			Transport: plugin.EndpointTransportStreamableHTTP,
 			URL:       srv.URL,
 		},
-		Auth:             app.Auth{Type: app.AuthTypeBearer, Token: "secret"},
+		Auth:             plugin.Auth{Type: plugin.AuthTypeBearer, Token: "secret"},
 		ConnectionFields: map[string]string{"team": "pudding"},
-		ConnectionFieldDefs: []app.ConnectionField{{
+		ConnectionFieldDefs: []plugin.ConnectionField{{
 			ID: "team",
-			Inject: []app.ConnectionFieldInject{{
+			Inject: []plugin.ConnectionFieldInject{{
 				Target: "header",
 				Name:   "X-Team",
 			}},
 		}},
 	}}})
 
-	defs, err := runner.DefinitionsForApps(ctx, "session-1", []string{"linear"})
+	defs, err := runner.DefinitionsForPlugins(ctx, "session-1", []string{"linear"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(defs) != 1 {
 		t.Fatalf("expected one tool, got %+v", defs)
 	}
-	if !strings.HasPrefix(defs[0].Name, appMCPToolPrefix) || !strings.Contains(defs[0].Description, "linear") || defs[0].AppID != "linear" {
+	if !strings.HasPrefix(defs[0].Name, pluginMCPToolPrefix) || !strings.Contains(defs[0].Description, "linear") || defs[0].PluginID != "linear" {
 		t.Fatalf("unexpected definition: %+v", defs[0])
 	}
 	if !sawInitialized {
@@ -216,40 +216,40 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	}
 	other := runner.Call(ctx, Call{SessionID: "session-2", CallID: "call-other", Name: defs[0].Name, Args: json.RawMessage(`{}`)})
 	if other.Ok || !strings.Contains(other.Content, `"reason":"unknown_tool"`) {
-		t.Fatalf("app MCP tool leaked across sessions: %+v", other)
+		t.Fatalf("plugin MCP tool leaked across sessions: %+v", other)
 	}
 }
 
-func TestAppMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
+func TestPluginMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	runner := NewAppMCPRunner(fakeAppMCPSource{bindings: []*app.EndpointBinding{{
-		AppID:        "local",
+	runner := NewPluginMCPRunner(fakePluginMCPSource{bindings: []*plugin.EndpointBinding{{
+		PluginID:     "local",
 		ConnectionID: "local-main",
 		EndpointName: "local_mcp",
-		Endpoint: app.Endpoint{
-			Kind:      app.EndpointKindMCP,
-			Transport: app.EndpointTransportStdio,
+		Endpoint: plugin.Endpoint{
+			Kind:      plugin.EndpointKindMCP,
+			Transport: plugin.EndpointTransportStdio,
 			Command:   os.Args[0],
-			Args:      []string{"-test.run=TestAppMCPStdioServerHelper", "--"},
+			Args:      []string{"-test.run=TestPluginMCPStdioServerHelper", "--"},
 			Env:       map[string]string{"PUDDING_APP_MCP_STDIO_HELPER": "1"},
 		},
 		ConnectionFields: map[string]string{"apiKey": "abc"},
-		ConnectionFieldDefs: []app.ConnectionField{{
+		ConnectionFieldDefs: []plugin.ConnectionField{{
 			ID: "apiKey",
-			Inject: []app.ConnectionFieldInject{{
+			Inject: []plugin.ConnectionFieldInject{{
 				Target: "env",
 				Name:   "FAKE_MCP_TOKEN",
 			}},
 		}},
 	}}})
 
-	defs, err := runner.DefinitionsForApps(ctx, "session-1", []string{"local"})
+	defs, err := runner.DefinitionsForPlugins(ctx, "session-1", []string{"local"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 1 || !strings.HasPrefix(defs[0].Name, appMCPToolPrefix) {
+	if len(defs) != 1 || !strings.HasPrefix(defs[0].Name, pluginMCPToolPrefix) {
 		t.Fatalf("unexpected definitions: %+v", defs)
 	}
 
@@ -264,7 +264,7 @@ func TestAppMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
 	}
 }
 
-func TestAppMCPStdioServerHelper(t *testing.T) {
+func TestPluginMCPStdioServerHelper(t *testing.T) {
 	if os.Getenv("PUDDING_APP_MCP_STDIO_HELPER") != "1" {
 		return
 	}
@@ -313,18 +313,18 @@ func TestAppMCPStdioServerHelper(t *testing.T) {
 }
 
 func TestApplyEndpointConnectionEnvDoesNotOverrideEndpointEnv(t *testing.T) {
-	got, err := appexec.ApplyEndpointConnectionEnv(
+	got, err := pluginexec.ApplyEndpointConnectionEnv(
 		map[string]string{"FAKE_MCP_TOKEN": "custom", "BASE_ONLY": "base"},
 		map[string]string{"apiKey": "connection", "extra": "extra-value"},
-		[]app.ConnectionField{{
+		[]plugin.ConnectionField{{
 			ID: "apiKey",
-			Inject: []app.ConnectionFieldInject{{
+			Inject: []plugin.ConnectionFieldInject{{
 				Target: "env",
 				Name:   "FAKE_MCP_TOKEN",
 			}},
 		}, {
 			ID: "extra",
-			Inject: []app.ConnectionFieldInject{{
+			Inject: []plugin.ConnectionFieldInject{{
 				Target: "env",
 				Name:   "EXTRA_ENV",
 			}},
@@ -338,32 +338,32 @@ func TestApplyEndpointConnectionEnvDoesNotOverrideEndpointEnv(t *testing.T) {
 	}
 }
 
-func TestAppMCPStdioEnvDoesNotInheritDaemonSecrets(t *testing.T) {
+func TestPluginMCPStdioEnvDoesNotInheritDaemonSecrets(t *testing.T) {
 	t.Setenv("PUDDING_DAEMON_TOKEN", "daemon-secret")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud-secret")
 
-	env, err := appMCPStdioEnv(map[string]string{
+	env, err := pluginMCPStdioEnv(map[string]string{
 		"PUDDING_APP_MCP_STDIO_HELPER": "1",
 		"FAKE_MCP_TOKEN":               "connection-secret",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := appMCPEnvValue(env, "PUDDING_DAEMON_TOKEN"); got != "" {
-		t.Fatalf("daemon token leaked to App MCP process: %q", got)
+	if got := pluginMCPEnvValue(env, "PUDDING_DAEMON_TOKEN"); got != "" {
+		t.Fatalf("daemon token leaked to plugin MCP process: %q", got)
 	}
-	if got := appMCPEnvValue(env, "AWS_SECRET_ACCESS_KEY"); got != "" {
-		t.Fatalf("cloud credential leaked to App MCP process: %q", got)
+	if got := pluginMCPEnvValue(env, "AWS_SECRET_ACCESS_KEY"); got != "" {
+		t.Fatalf("cloud credential leaked to plugin MCP process: %q", got)
 	}
-	if got := appMCPEnvValue(env, "FAKE_MCP_TOKEN"); got != "connection-secret" {
+	if got := pluginMCPEnvValue(env, "FAKE_MCP_TOKEN"); got != "connection-secret" {
 		t.Fatalf("explicit connection env = %q", got)
 	}
-	if got := appMCPEnvValue(env, "PATH"); got == "" {
-		t.Fatal("App MCP PATH is empty")
+	if got := pluginMCPEnvValue(env, "PATH"); got == "" {
+		t.Fatal("plugin MCP PATH is empty")
 	}
 }
 
-func TestAppMCPResolveCommandUsesSuppliedEnvironmentOnly(t *testing.T) {
+func TestPluginMCPResolveCommandUsesSuppliedEnvironmentOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX executable")
 	}
@@ -374,15 +374,15 @@ func TestAppMCPResolveCommandUsesSuppliedEnvironmentOnly(t *testing.T) {
 	}
 	t.Setenv("PATH", processBin)
 
-	if _, err := appMCPResolveCommand("pudding-mcp-path-fixture", []string{"PATH=" + t.TempDir()}); err == nil {
+	if _, err := pluginMCPResolveCommand("pudding-mcp-path-fixture", []string{"PATH=" + t.TempDir()}); err == nil {
 		t.Fatal("expected supplied MCP environment to exclude the daemon process PATH")
 	}
 }
 
-func TestReadAppMCPSSEFindsMatchingResponse(t *testing.T) {
+func TestReadPluginMCPSSEFindsMatchingResponse(t *testing.T) {
 	raw := strings.NewReader("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}\n\n" +
 		"event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"42\",\"result\":{\"ok\":true}}\n\n")
-	got, err := readAppMCPSSE(context.Background(), raw, "42")
+	got, err := readPluginMCPSSE(context.Background(), raw, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,24 +391,24 @@ func TestReadAppMCPSSEFindsMatchingResponse(t *testing.T) {
 	}
 }
 
-func TestReadAppMCPSSELimitsCombinedDataLines(t *testing.T) {
-	line := strings.Repeat("x", appMCPMaxResponseBytes/2+1)
+func TestReadPluginMCPSSELimitsCombinedDataLines(t *testing.T) {
+	line := strings.Repeat("x", pluginMCPMaxResponseBytes/2+1)
 	raw := strings.NewReader("data: " + line + "\ndata: " + line + "\n\n")
-	if _, err := readAppMCPSSE(context.Background(), raw, "42"); err == nil || !strings.Contains(err.Error(), "exceeds") {
+	if _, err := readPluginMCPSSE(context.Background(), raw, "42"); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("oversized SSE event error = %v", err)
 	}
 }
 
-type fakeAppMCPSource struct {
-	bindings []*app.EndpointBinding
+type fakePluginMCPSource struct {
+	bindings []*plugin.EndpointBinding
 	err      error
 }
 
-func (f fakeAppMCPSource) ListEndpointBindings(context.Context, string) ([]*app.EndpointBinding, error) {
+func (f fakePluginMCPSource) ListEndpointBindings(context.Context, string) ([]*plugin.EndpointBinding, error) {
 	return f.bindings, f.err
 }
 
-func writeAppMCPTestResponse(t *testing.T, w http.ResponseWriter, id string, result any) {
+func writePluginMCPTestResponse(t *testing.T, w http.ResponseWriter, id string, result any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"jsonrpc": "2.0",

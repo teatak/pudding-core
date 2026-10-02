@@ -7,10 +7,10 @@ A local-first, multi-session agent daemon built with Go, SQLite, and loopback HT
 - Model providers, streaming output, context building and compaction, and tool execution loops.
 - Multiple sessions, message history, input queues, cancellation, approvals, and resumable SSE streams.
 - Projects and files, command execution and background processes, Git, LSP, permissions, and sandboxing.
-- Skills, Apps, MCP, attachments, resource libraries, canvas data, and usage tracking.
+- Skills, plugins, MCP, attachments, resource libraries, Studio items, and usage tracking.
 - Audio and camera services in Go, plus protocols and session management for browser and computer-use tools.
 
-Visual browsing, native computer-use actions, and interactive canvas tools require external client implementations.
+Visual browsing, native computer-use actions, and widget authoring tools require external client implementations.
 Headless browser capabilities require a local Chrome installation. Hardware features and native dependencies
 remain subject to their supported platforms.
 

@@ -1,8 +1,6 @@
-package canvas
+package widget
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 )
 
-var ErrDraftConflict = errors.New("canvas draft changed")
+var ErrDraftConflict = errors.New("widget draft changed")
 
 // DraftMu serializes draft edits and commits within the daemon. A tool edit
 // must not race the HTTP draft/commit path after checking expectedDraftHash.
@@ -30,17 +28,22 @@ type Draft struct {
 
 func DraftRoot(home, id string) (string, error) {
 	if home == "" || !identifier.MatchString(id) {
-		return "", errors.New("invalid canvas draft reference")
+		return "", errors.New("invalid widget draft reference")
 	}
-	return filepath.Join(home, "canvases", id, "draft"), nil
+	return filepath.Join(home, "studio", id, "draft"), nil
 }
 
 func ReadDraft(home, id string) (Draft, error) {
-	d := Draft{Files: map[string]string{}}
 	root, err := DraftRoot(home, id)
 	if err != nil {
-		return d, err
+		return Draft{Files: map[string]string{}}, err
 	}
+	return ReadDraftDir(root, ValidFilePath)
+}
+
+// ReadDraftDir reads one working copy, whose files may be incomplete.
+func ReadDraftDir(root string, validPath func(string) bool) (Draft, error) {
+	d := Draft{Files: map[string]string{}}
 	base, err := os.ReadFile(filepath.Join(root, ".base"))
 	if err != nil {
 		return d, err
@@ -68,14 +71,14 @@ func ReadDraft(home, id string) (Draft, error) {
 			return err
 		}
 		name = filepath.ToSlash(name)
-		if !ValidFilePath(name) {
+		if !validPath(name) {
 			return fmt.Errorf("invalid draft path %q", name)
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		policy := contracts.Canvas()
+		policy := contracts.Widget()
 		total += int(info.Size())
 		if !info.Mode().IsRegular() || info.Size() > int64(policy.MaxFileBytes) || total > policy.MaxPackageBytes || len(d.Files) >= policy.MaxFiles {
 			return errors.New("draft exceeds file limits")
@@ -98,8 +101,7 @@ func ReadDraft(home, id string) (Draft, error) {
 }
 
 func draftHash(files map[string]string) string {
-	data, _ := json.Marshal(Package{Files: files})
-	return fmt.Sprintf("%x", sha256.Sum256(data))
+	return PackageHash(files)
 }
 
 func StartDraft(home, id, baseHash string) (Draft, error) {
@@ -120,31 +122,36 @@ func StartDraft(home, id, baseHash string) (Draft, error) {
 		}
 		files = base.Files
 	}
+	if err := InstallDraft(root, baseHash, files); err != nil {
+		return Draft{}, err
+	}
+	return ReadDraft(home, id)
+}
+
+// InstallDraft atomically creates a working copy at root; root must not exist.
+func InstallDraft(root, baseHash string, files map[string]string) error {
 	parent := filepath.Dir(root)
 	if err := os.MkdirAll(parent, 0700); err != nil {
-		return Draft{}, err
+		return err
 	}
 	staging, err := os.MkdirTemp(parent, ".draft-")
 	if err != nil {
-		return Draft{}, err
+		return err
 	}
 	defer os.RemoveAll(staging)
 	if err := os.WriteFile(filepath.Join(staging, ".base"), []byte(baseHash), 0600); err != nil {
-		return Draft{}, err
+		return err
 	}
 	for name, content := range files {
 		file := filepath.Join(staging, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
-			return Draft{}, err
+			return err
 		}
 		if err := os.WriteFile(file, []byte(content), 0600); err != nil {
-			return Draft{}, err
+			return err
 		}
 	}
-	if err := os.Rename(staging, root); err != nil {
-		return Draft{}, err
-	}
-	return ReadDraft(home, id)
+	return os.Rename(staging, root)
 }
 
 func WriteDraftFile(home, id, name string, content *string, expectedHash string) (Draft, error) {
@@ -163,7 +170,7 @@ func WriteDraftFile(home, id, name string, content *string, expectedHash string)
 	} else {
 		d.Files[name] = *content
 	}
-	policy := contracts.Canvas()
+	policy := contracts.Widget()
 	if len(d.Files) > policy.MaxFiles {
 		return d, errors.New("draft exceeds file count")
 	}

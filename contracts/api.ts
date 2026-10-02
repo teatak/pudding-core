@@ -46,7 +46,7 @@ export const session = z.object({
   activeMode: z.enum(["chat", "work", "code"]),
   modeLease: z.enum(["none", "session"]),
   projectID: z.string().optional(),
-  loadedAppIDs: z.array(z.string()).optional(),
+  loadedPluginIDs: z.array(z.string()).optional(),
   pinned: z.boolean(),
   pinnedOrder: z.number(),
   createdAt: z.string(), // RFC3339
@@ -288,40 +288,40 @@ export const saveProjectFileRequest = z.object({
   expectedRevision: z.string().min(1),
 });
 
-export const canvasItem = z.object({
+export const studioMount = z.object({
   id: z.string(),
   sessionID: z.string(),
   sourceSessionID: z.string().optional(),
   createdBySessionID: z.string().optional(),
   updatedBySessionID: z.string().optional(),
-  kind: z.literal("app"),
+  kind: z.enum(["doc", "table", "widget"]),
   title: z.string().optional(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),
-  resourceID: z.string(),
+  itemID: z.string(),
   revision: z.number().int(),
   visible: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-export type CanvasItem = z.infer<typeof canvasItem>;
+export type StudioMount = z.infer<typeof studioMount>;
 
-export const listCanvasItemsResponse = z.object({
-  items: z.array(canvasItem),
+export const listStudioMountsResponse = z.object({
+  items: z.array(studioMount),
 });
 
 export const libraryEntry = z.object({
- id: z.string(), kind: z.enum(["canvas", "web"]), sourceSessionID: z.string(),
+ id: z.string(), kind: z.enum(["studio", "web"]), sourceSessionID: z.string(),
  savedItemID: z.string().optional(), url: z.string().optional(),
  title: z.string().optional(), createdAt: z.string(), updatedAt: z.string(), favoriteID: z.string().optional(),
  icon: z.string().optional(), iconColor: z.string().optional(),
- canvasKind: z.string().optional(), revision: z.number().optional(), sourceSessionTitle: z.string().optional(), sourceSessionAvailable: z.boolean(),
+ itemKind: z.string().optional(), revision: z.number().optional(), sourceSessionTitle: z.string().optional(), sourceSessionAvailable: z.boolean(),
  sourceProjectName: z.string().optional(), available: z.boolean(),
 });
 export type LibraryEntry = z.infer<typeof libraryEntry>;
 export const listLibraryResponse = z.object({ entries: z.array(libraryEntry) });
 export const putLibraryFavoriteRequest = z.discriminatedUnion("kind", [
- z.object({kind: z.literal("canvas"), savedItemID: z.string().min(1)}),
+ z.object({kind: z.literal("studio"), savedItemID: z.string().min(1)}),
  z.object({kind: z.literal("web"), url: z.string().url(), title: z.string().optional()}),
 ]);
 export type LibraryFavoriteInput = z.infer<typeof putLibraryFavoriteRequest>;
@@ -329,7 +329,7 @@ export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),
   capability: z.enum(["chat", "work", "code"]).optional(),
-  appID: z.string().optional(),
+  pluginID: z.string().optional(),
 });
 export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
 
@@ -500,8 +500,8 @@ export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("thought"), text: z.string() }),
   z.object({
     type: z.literal("ui_context"),
-    surface: z.enum(["project", "canvas", "browser", "terminal", "file_preview"]),
-    resource: z.enum(["project_file", "project_diff", "canvas_item", "browser_tab", "terminal", "file"]).optional(),
+    surface: z.enum(["project", "studio", "browser", "terminal", "file_preview"]),
+    resource: z.enum(["project_file", "project_diff", "studio_item", "browser_tab", "terminal", "file"]).optional(),
     id: z.string().optional(),
     name: z.string().optional(),
     path: z.string().optional(),
@@ -1086,7 +1086,7 @@ export const webToolsConfig = z.object({
 });
 export type WebToolsConfig = z.infer<typeof webToolsConfig>;
 
-export const appEndpointPlatformOverride = z.object({
+export const pluginEndpointPlatformOverride = z.object({
   url: z.string().optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
@@ -1094,29 +1094,29 @@ export const appEndpointPlatformOverride = z.object({
   headers: z.record(z.string(), z.string()).optional(),
 });
 
-export const appEndpointURLConfig = z.object({
+export const pluginEndpointURLConfig = z.object({
   label: z.string(),
   description: z.string().optional(),
   placeholder: z.string().optional(),
   required: z.boolean().optional(),
 });
 
-export const appEndpoint = z.object({
-  canvasWrites:z.boolean().optional(),
+export const pluginEndpoint = z.object({
+  widgetWrites:z.boolean().optional(),
   kind: z.enum(["rest", "graphql", "mcp"]),
   transport: z.enum(["stdio", "streamable_http"]).optional(),
   url: z.string().optional(),
-  urlConfig: appEndpointURLConfig.optional(),
+  urlConfig: pluginEndpointURLConfig.optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  platforms: z.record(z.string(), appEndpointPlatformOverride).optional(),
+  platforms: z.record(z.string(), pluginEndpointPlatformOverride).optional(),
   description: z.string().optional(),
 });
-export type AppEndpoint = z.infer<typeof appEndpoint>;
+export type PluginEndpoint = z.infer<typeof pluginEndpoint>;
 
-export const appMCPOverride = z.object({
+export const pluginMCPOverride = z.object({
   transport: z.enum(["stdio", "streamable_http"]).optional(),
   url: z.string().optional(),
   command: z.string().optional(),
@@ -1124,47 +1124,47 @@ export const appMCPOverride = z.object({
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
 });
-export type AppMCPOverride = z.infer<typeof appMCPOverride>;
+export type PluginMCPOverride = z.infer<typeof pluginMCPOverride>;
 
-export const appMCPOverrideResponse = z.object({
+export const pluginMCPOverrideResponse = z.object({
   configured: z.boolean(),
-  override: appMCPOverride,
+  override: pluginMCPOverride,
 });
-export type AppMCPOverrideResponse = z.infer<typeof appMCPOverrideResponse>;
+export type PluginMCPOverrideResponse = z.infer<typeof pluginMCPOverrideResponse>;
 
-export const appSkillRef = z.object({
+export const pluginSkillRef = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
   path: z.string(),
 });
-export type AppSkillRef = z.infer<typeof appSkillRef>;
+export type PluginSkillRef = z.infer<typeof pluginSkillRef>;
 
-export const appSkillDetail = appSkillRef.extend({
+export const pluginSkillDetail = pluginSkillRef.extend({
   content: z.string(),
 });
-export type AppSkillDetail = z.infer<typeof appSkillDetail>;
+export type PluginSkillDetail = z.infer<typeof pluginSkillDetail>;
 
-export const appToolRef = z.object({
+export const pluginToolRef = z.object({
   name: z.string(),
   description: z.string().optional(),
 });
-export type AppToolRef = z.infer<typeof appToolRef>;
+export type PluginToolRef = z.infer<typeof pluginToolRef>;
 
-export const appIconThemeColor = z.object({
+export const pluginIconThemeColor = z.object({
   light: z.string().optional(),
   dark: z.string().optional(),
 });
-export type AppIconThemeColor = z.infer<typeof appIconThemeColor>;
+export type PluginIconThemeColor = z.infer<typeof pluginIconThemeColor>;
 
-export const appIconSpec = z.object({
+export const pluginIconSpec = z.object({
   svg: z.string().optional(),
-  color: appIconThemeColor.optional(),
-  background: appIconThemeColor.optional(),
+  color: pluginIconThemeColor.optional(),
+  background: pluginIconThemeColor.optional(),
 });
-export type AppIconSpec = z.infer<typeof appIconSpec>;
+export type PluginIconSpec = z.infer<typeof pluginIconSpec>;
 
-export const appAuthMethod = z.object({
+export const pluginAuthMethod = z.object({
   id: z.string().optional(),
   type: z.string(),
   provider: z.string().optional(),
@@ -1182,42 +1182,42 @@ export const appAuthMethod = z.object({
     })
     .optional(),
 });
-export const appAuthConfig = z.object({
+export const pluginAuthConfig = z.object({
   required: z.boolean().optional(),
-  methods: z.array(appAuthMethod).optional(),
+  methods: z.array(pluginAuthMethod).optional(),
 });
 
-export const appConnectionFieldInject = z.object({
+export const pluginConnectionFieldInject = z.object({
   target: z.string(),
   name: z.string().optional(),
   methods: z.array(z.string()).optional(),
 });
 
-export const appConnectionField = z.object({
+export const pluginConnectionField = z.object({
   id: z.string(),
   label: z.string().optional(),
   description: z.string().optional(),
   placeholder: z.string().optional(),
   required: z.boolean().optional(),
   secret: z.boolean().optional(),
-  inject: z.array(appConnectionFieldInject).optional(),
+  inject: z.array(pluginConnectionFieldInject).optional(),
 });
-export const appConnectionConfig = z.object({
-  fields: z.array(appConnectionField).optional(),
+export const pluginConnectionConfig = z.object({
+  fields: z.array(pluginConnectionField).optional(),
 });
 
-export const appDefinition = z.object({
-  kind: z.enum(["app", "mcp"]),
+export const pluginDefinition = z.object({
+  kind: z.enum(["plugin", "mcp"]),
   id: z.string(),
   name: z.string(),
   version: z.string().optional(),
   description: z.string().optional(),
-  icon: appIconSpec.optional(),
-  auth: appAuthConfig.optional(),
-  connection: appConnectionConfig.optional(),
-  endpoints: z.record(z.string(), appEndpoint).optional(),
-  skills: z.array(appSkillRef).optional(),
-  tools: z.array(appToolRef).optional(),
+  icon: pluginIconSpec.optional(),
+  auth: pluginAuthConfig.optional(),
+  connection: pluginConnectionConfig.optional(),
+  endpoints: z.record(z.string(), pluginEndpoint).optional(),
+  skills: z.array(pluginSkillRef).optional(),
+  tools: z.array(pluginToolRef).optional(),
   path: z.string().optional(),
   sourceURL: z.string().optional(),
   packageSHA256: z.string().optional(),
@@ -1228,18 +1228,18 @@ export const appDefinition = z.object({
   requiredMode: z.enum(["chat", "work", "code"]),
   defaultSkillID: z.string().optional(),
 });
-export type AppDefinition = z.infer<typeof appDefinition>;
+export type PluginDefinition = z.infer<typeof pluginDefinition>;
 
-export const installAppRequest = z.object({
+export const installPluginRequest = z.object({
   packageJSON: z.string().min(1),
   packageSHA256: z.string().optional(),
   sourceURL: z.string().optional(),
 });
 
-export const appConnection = z.object({
+export const pluginConnection = z.object({
   id: z.string(),
   name: z.string().optional(),
-  appID: z.string(),
+  pluginID: z.string(),
   authType: z.string().optional(),
   authMethodID: z.string().optional(),
   authVariant: z.string().optional(),
@@ -1262,57 +1262,57 @@ export const appConnection = z.object({
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
-export type AppConnection = z.infer<typeof appConnection>;
+export type PluginConnection = z.infer<typeof pluginConnection>;
 
-export const appMCPTool = z.object({
+export const pluginMCPTool = z.object({
   name: z.string(),
   providerName: z.string().optional(),
   title: z.string().optional(),
   description: z.string().optional(),
   inputSchema: z.unknown().optional(),
 });
-export type AppMCPTool = z.infer<typeof appMCPTool>;
+export type PluginMCPTool = z.infer<typeof pluginMCPTool>;
 
-export const appMCPEndpointStatus = z.object({
-  appID: z.string(),
+export const pluginMCPEndpointStatus = z.object({
+  pluginID: z.string(),
   endpointName: z.string(),
   connectionID: z.string().optional(),
   transport: z.string().optional(),
   configured: z.boolean().optional(),
   status: z.string(),
   error: z.string().optional(),
-  tools: z.array(appMCPTool).optional(),
+  tools: z.array(pluginMCPTool).optional(),
 });
-export type AppMCPEndpointStatus = z.infer<typeof appMCPEndpointStatus>;
+export type PluginMCPEndpointStatus = z.infer<typeof pluginMCPEndpointStatus>;
 
-export const appMCPStatusResponse = z.object({
-  appID: z.string(),
-  endpoints: z.array(appMCPEndpointStatus),
+export const pluginMCPStatusResponse = z.object({
+  pluginID: z.string(),
+  endpoints: z.array(pluginMCPEndpointStatus),
 });
-export type AppMCPStatusResponse = z.infer<typeof appMCPStatusResponse>;
+export type PluginMCPStatusResponse = z.infer<typeof pluginMCPStatusResponse>;
 
-export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
-export const appMCPConfigRequest = z.object({
+export const listPluginsResponse = z.object({ plugins: z.array(pluginDefinition) });
+export const pluginMCPConfigRequest = z.object({
   configJSON: z.string().min(1),
   name: z.string().optional(),
 });
-export const appMCPConfigResponse = z.object({ configJSON: z.string() });
-export const importMCPAppsResponse = z.object({ apps: z.array(appDefinition) });
-export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
+export const pluginMCPConfigResponse = z.object({ configJSON: z.string() });
+export const importMCPPluginsResponse = z.object({ plugins: z.array(pluginDefinition) });
+export const listPluginConnectionsResponse = z.object({ connections: z.array(pluginConnection) });
 
-export const startAppOAuthRequest = z.object({
-  appID: z.string().min(1),
+export const startPluginOAuthRequest = z.object({
+  pluginID: z.string().min(1),
   authMethodID: z.string().optional(),
   connectionID: z.string().optional(),
   connectionName: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
   endpointURLs: z.record(z.string(), z.string()).optional(),
 });
-export const startAppOAuthResponse = z.object({
+export const startPluginOAuthResponse = z.object({
   authorizationURL: z.string().url(),
 });
 
-export const completeAppOAuthRequest = z.object({
+export const completePluginOAuthRequest = z.object({
   provider: z.string().min(1),
   ticket: z.string().optional(),
   state: z.string().min(1),

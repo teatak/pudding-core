@@ -41,19 +41,19 @@ func TestClassifyToolCallIgnoresManagedWrites(t *testing.T) {
 	}
 }
 
-func TestClassifyToolCallAppSaveRisk(t *testing.T) {
+func TestClassifyToolCallPluginSaveRisk(t *testing.T) {
 	for _, operation := range []string{"create", "update"} {
-		risk, ok := ClassifyToolCall(AppSave, json.RawMessage(`{
+		risk, ok := ClassifyToolCall(PluginSave, json.RawMessage(`{
 			"operation":"`+operation+`",
-			"app_id":"demo-app",
+			"plugin_id":"demo-app",
 			"version":"0.1.0",
-			"files":[{"path":"app.yaml","content":"id: demo-app"}]
+			"files":[{"path":"plugin.yaml","content":"id: demo-app"}]
 		}`))
-		if !ok || risk.Class != RiskClassWrite || risk.Operation != "app_save" || risk.Scope != "app" || risk.LowRisk || len(risk.Paths) != 1 || risk.Paths[0] != "demo-app" {
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != "plugin_save" || risk.Scope != "plugin" || risk.LowRisk || len(risk.Paths) != 1 || risk.Paths[0] != "demo-app" {
 			t.Fatalf("unexpected App save risk for %s: %+v ok=%v", operation, risk, ok)
 		}
 	}
-	if _, ok := ClassifyToolCall(AppSave, json.RawMessage(`{"operation":"create"}`)); ok {
+	if _, ok := ClassifyToolCall(PluginSave, json.RawMessage(`{"operation":"create"}`)); ok {
 		t.Fatal("invalid App save must not be classified")
 	}
 }

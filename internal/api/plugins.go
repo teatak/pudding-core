@@ -7,36 +7,36 @@ import (
 	"strings"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-type appConnectionConfig interface {
-	ListAppConnections(ctx context.Context) ([]*app.Connection, error)
-	GetAppConnection(ctx context.Context, id string) (*app.Connection, error)
-	PutAppConnection(ctx context.Context, conn *app.Connection) error
-	DeleteAppConnection(ctx context.Context, id string) error
+type pluginConnectionConfig interface {
+	ListPluginConnections(ctx context.Context) ([]*plugin.Connection, error)
+	GetPluginConnection(ctx context.Context, id string) (*plugin.Connection, error)
+	PutPluginConnection(ctx context.Context, conn *plugin.Connection) error
+	DeletePluginConnection(ctx context.Context, id string) error
 }
 
-type appMCPOverrideConfig interface {
-	GetMCPOverride(ctx context.Context, appID, endpointName string) (app.MCPEndpointOverride, bool, error)
-	PutMCPOverride(ctx context.Context, appID, endpointName string, override app.MCPEndpointOverride) (app.MCPEndpointOverride, error)
-	DeleteMCPOverride(ctx context.Context, appID, endpointName string) error
+type pluginMCPOverrideConfig interface {
+	GetMCPOverride(ctx context.Context, pluginID, endpointName string) (plugin.MCPEndpointOverride, bool, error)
+	PutMCPOverride(ctx context.Context, pluginID, endpointName string, override plugin.MCPEndpointOverride) (plugin.MCPEndpointOverride, error)
+	DeleteMCPOverride(ctx context.Context, pluginID, endpointName string) error
 }
 
-type appMCPConfigService interface {
-	ImportMCPApps(ctx context.Context, configJSON []byte, displayName string) ([]*app.Definition, error)
-	GetMCPAppConfig(ctx context.Context, id string) ([]byte, error)
-	UpdateMCPApp(ctx context.Context, id string, configJSON []byte, displayName string) (*app.Definition, error)
+type pluginMCPConfigService interface {
+	ImportMCPPlugins(ctx context.Context, configJSON []byte, displayName string) ([]*plugin.Definition, error)
+	GetMCPPluginConfig(ctx context.Context, id string) ([]byte, error)
+	UpdateMCPPlugin(ctx context.Context, id string, configJSON []byte, displayName string) (*plugin.Definition, error)
 }
 
-type appEnablementConfig interface {
-	DeleteAppEnablement(ctx context.Context, id string) error
+type pluginEnablementConfig interface {
+	DeletePluginEnablement(ctx context.Context, id string) error
 }
 
-type putAppConnectionReq struct {
-	AppID        string            `json:"appID"`
+type putPluginConnectionReq struct {
+	PluginID     string            `json:"pluginID"`
 	Name         string            `json:"name"`
 	AuthMethodID string            `json:"authMethodID"`
 	AuthType     string            `json:"authType"`
@@ -49,50 +49,50 @@ type putAppConnectionReq struct {
 	EndpointURLs map[string]string `json:"endpointURLs"`
 }
 
-type installAppReq struct {
+type installPluginReq struct {
 	PackageJSON   string `json:"packageJSON"`
 	PackageSHA256 string `json:"packageSHA256"`
 	SourceURL     string `json:"sourceURL"`
 }
 
-type putAppEnabledReq struct {
+type putPluginEnabledReq struct {
 	Enabled *bool `json:"enabled"`
 }
 
-type appMCPConfigReq struct {
+type pluginMCPConfigReq struct {
 	ConfigJSON string `json:"configJSON"`
 	Name       string `json:"name,omitempty"`
 }
 
-type appMCPOverrideView struct {
-	Configured bool                    `json:"configured"`
-	Override   app.MCPEndpointOverride `json:"override"`
+type pluginMCPOverrideView struct {
+	Configured bool                       `json:"configured"`
+	Override   plugin.MCPEndpointOverride `json:"override"`
 }
 
-const maxInstallAppRequestBytes = 2*app.MaxPackageJSONBytes + 64<<10
-const maxMCPAppConfigRequestBytes = 2 << 20
+const maxInstallPluginRequestBytes = 2*plugin.MaxPackageJSONBytes + 64<<10
+const maxMCPPluginConfigRequestBytes = 2 << 20
 
-func (s *Server) listApps(c *cart.Context) error {
-	if s.apps == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+func (s *Server) listPlugins(c *cart.Context) error {
+	if s.plugins == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_service_unavailable"})
 		return nil
 	}
-	apps, err := s.apps.ListDefinitions(c.Request.Context())
+	plugins, err := s.plugins.ListDefinitions(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
-	enrichBuiltinAppTools(apps)
-	c.JSON(http.StatusOK, map[string]any{"apps": apps})
+	enrichBuiltinPluginTools(plugins)
+	c.JSON(http.StatusOK, map[string]any{"plugins": plugins})
 	return nil
 }
 
-func enrichBuiltinAppTools(definitions []*app.Definition) {
+func enrichBuiltinPluginTools(definitions []*plugin.Definition) {
 	descriptions := make(map[string]string)
 	for _, definition := range tool.BuiltinDefinitions() {
 		descriptions[definition.Name] = definition.Description
 	}
 	for _, definition := range definitions {
-		if definition == nil || definition.Source != app.SourceBuiltin {
+		if definition == nil || definition.Source != plugin.SourceBuiltin {
 			continue
 		}
 		for index := range definition.Tools {
@@ -104,17 +104,17 @@ func enrichBuiltinAppTools(definitions []*app.Definition) {
 	}
 }
 
-func (s *Server) installApp(c *cart.Context) error {
-	if s.apps == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+func (s *Server) installPlugin(c *cart.Context) error {
+	if s.plugins == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_service_unavailable"})
 		return nil
 	}
-	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxInstallAppRequestBytes)
-	var req installAppReq
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxInstallPluginRequestBytes)
+	var req installPluginReq
 	if err := decode(c, &req); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_package_too_large"})
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "plugin_package_too_large"})
 			return nil
 		}
 		return badRequest(c, "invalid json body")
@@ -122,14 +122,14 @@ func (s *Server) installApp(c *cart.Context) error {
 	if strings.TrimSpace(req.PackageJSON) == "" {
 		return badRequest(c, "packageJSON is required")
 	}
-	def, err := s.apps.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
+	def, err := s.plugins.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
 	if err != nil {
-		if errors.Is(err, app.ErrPackageTooLarge) {
-			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_package_too_large"})
+		if errors.Is(err, plugin.ErrPackageTooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "plugin_package_too_large"})
 			return nil
 		}
-		if errors.Is(err, app.ErrBuiltinApp) {
-			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_id_reserved"})
+		if errors.Is(err, plugin.ErrBuiltinPlugin) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_plugin_id_reserved"})
 			return nil
 		}
 		return s.fail(c, err)
@@ -138,109 +138,109 @@ func (s *Server) installApp(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) importMCPApps(c *cart.Context) error {
-	apps, ok := s.apps.(appMCPConfigService)
+func (s *Server) importMCPPlugins(c *cart.Context) error {
+	plugins, ok := s.plugins.(pluginMCPConfigService)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_mcp_config_unavailable"})
 		return nil
 	}
-	req, ok := decodeAppMCPConfigRequest(c)
+	req, ok := decodePluginMCPConfigRequest(c)
 	if !ok {
 		return nil
 	}
-	definitions, err := apps.ImportMCPApps(c.Request.Context(), []byte(req.ConfigJSON), req.Name)
+	definitions, err := plugins.ImportMCPPlugins(c.Request.Context(), []byte(req.ConfigJSON), req.Name)
 	if err != nil {
-		return s.handleAppMCPConfigError(c, err)
+		return s.handlePluginMCPConfigError(c, err)
 	}
-	c.JSON(http.StatusOK, map[string]any{"apps": definitions})
+	c.JSON(http.StatusOK, map[string]any{"plugins": definitions})
 	return nil
 }
 
-func (s *Server) getMCPAppConfig(c *cart.Context) error {
-	apps, ok := s.apps.(appMCPConfigService)
+func (s *Server) getMCPPluginConfig(c *cart.Context) error {
+	plugins, ok := s.plugins.(pluginMCPConfigService)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_mcp_config_unavailable"})
 		return nil
 	}
 	id, _ := c.Param("id")
-	configJSON, err := apps.GetMCPAppConfig(c.Request.Context(), id)
+	configJSON, err := plugins.GetMCPPluginConfig(c.Request.Context(), id)
 	if err != nil {
-		return s.handleAppMCPConfigError(c, err)
+		return s.handlePluginMCPConfigError(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]string{"configJSON": string(configJSON)})
 	return nil
 }
 
-func (s *Server) putMCPAppConfig(c *cart.Context) error {
-	apps, ok := s.apps.(appMCPConfigService)
+func (s *Server) putMCPPluginConfig(c *cart.Context) error {
+	plugins, ok := s.plugins.(pluginMCPConfigService)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_mcp_config_unavailable"})
 		return nil
 	}
-	req, ok := decodeAppMCPConfigRequest(c)
+	req, ok := decodePluginMCPConfigRequest(c)
 	if !ok {
 		return nil
 	}
 	id, _ := c.Param("id")
-	definition, err := apps.UpdateMCPApp(c.Request.Context(), id, []byte(req.ConfigJSON), req.Name)
+	definition, err := plugins.UpdateMCPPlugin(c.Request.Context(), id, []byte(req.ConfigJSON), req.Name)
 	if err != nil {
-		return s.handleAppMCPConfigError(c, err)
+		return s.handlePluginMCPConfigError(c, err)
 	}
 	c.JSON(http.StatusOK, definition)
 	return nil
 }
 
-func decodeAppMCPConfigRequest(c *cart.Context) (appMCPConfigReq, bool) {
-	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxMCPAppConfigRequestBytes)
-	var req appMCPConfigReq
+func decodePluginMCPConfigRequest(c *cart.Context) (pluginMCPConfigReq, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxMCPPluginConfigRequestBytes)
+	var req pluginMCPConfigReq
 	if err := decode(c, &req); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_mcp_config_too_large"})
-			return appMCPConfigReq{}, false
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "plugin_mcp_config_too_large"})
+			return pluginMCPConfigReq{}, false
 		}
 		_ = badRequest(c, "invalid json body")
-		return appMCPConfigReq{}, false
+		return pluginMCPConfigReq{}, false
 	}
 	if strings.TrimSpace(req.ConfigJSON) == "" {
 		_ = badRequest(c, "configJSON is required")
-		return appMCPConfigReq{}, false
+		return pluginMCPConfigReq{}, false
 	}
 	return req, true
 }
 
-func (s *Server) handleAppMCPConfigError(c *cart.Context, err error) error {
-	if errors.Is(err, app.ErrInvalidID) || errors.Is(err, app.ErrInvalidMCPAppConfig) {
+func (s *Server) handlePluginMCPConfigError(c *cart.Context, err error) error {
+	if errors.Is(err, plugin.ErrInvalidID) || errors.Is(err, plugin.ErrInvalidMCPPluginConfig) {
 		return badRequest(c, err.Error())
 	}
-	if errors.Is(err, app.ErrNotFound) {
-		c.JSON(http.StatusNotFound, map[string]string{"error": "mcp_app_not_found"})
+	if errors.Is(err, plugin.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "mcp_plugin_not_found"})
 		return nil
 	}
-	if errors.Is(err, app.ErrAlreadyExists) || errors.Is(err, app.ErrBuiltinApp) {
-		c.JSON(http.StatusConflict, map[string]string{"error": "mcp_app_conflict"})
+	if errors.Is(err, plugin.ErrAlreadyExists) || errors.Is(err, plugin.ErrBuiltinPlugin) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "mcp_plugin_conflict"})
 		return nil
 	}
 	return s.fail(c, err)
 }
 
-func (s *Server) putAppEnabled(c *cart.Context) error {
-	apps, ok := s.apps.(appEnableService)
+func (s *Server) putPluginEnabled(c *cart.Context) error {
+	plugins, ok := s.plugins.(pluginEnableService)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_enablement_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_enablement_unavailable"})
 		return nil
 	}
-	var req putAppEnabledReq
+	var req putPluginEnabledReq
 	if err := decode(c, &req); err != nil || req.Enabled == nil {
 		return badRequest(c, "enabled is required")
 	}
 	id, _ := c.Param("id")
-	def, err := apps.SetEnabled(c.Request.Context(), id, *req.Enabled)
-	if errors.Is(err, app.ErrInvalidID) {
-		return badRequest(c, "invalid app id")
+	def, err := plugins.SetEnabled(c.Request.Context(), id, *req.Enabled)
+	if errors.Is(err, plugin.ErrInvalidID) {
+		return badRequest(c, "invalid plugin id")
 	}
-	if errors.Is(err, app.ErrNotFound) {
-		c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+	if errors.Is(err, plugin.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_not_found"})
 		return nil
 	}
 	if err != nil {
@@ -250,19 +250,19 @@ func (s *Server) putAppEnabled(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) deleteApp(c *cart.Context) error {
-	if s.apps == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+func (s *Server) deletePlugin(c *cart.Context) error {
+	if s.plugins == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_service_unavailable"})
 		return nil
 	}
 	id, _ := c.Param("id")
 	id = strings.TrimSpace(id)
-	var cfg appConnectionConfig
-	var conns []*app.Connection
-	if candidate, ok := s.config.(appConnectionConfig); ok {
+	var cfg pluginConnectionConfig
+	var conns []*plugin.Connection
+	if candidate, ok := s.config.(pluginConnectionConfig); ok {
 		cfg = candidate
 		var err error
-		conns, err = cfg.ListAppConnections(c.Request.Context())
+		conns, err = cfg.ListPluginConnections(c.Request.Context())
 		if err != nil {
 			return s.fail(c, err)
 		}
@@ -271,13 +271,13 @@ func (s *Server) deleteApp(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	deleteErr := s.apps.DeleteDefinition(c.Request.Context(), id)
-	if deleteErr != nil && !errors.Is(deleteErr, app.ErrNotFound) {
-		if errors.Is(deleteErr, app.ErrInvalidID) {
-			return badRequest(c, "invalid app id")
+	deleteErr := s.plugins.DeleteDefinition(c.Request.Context(), id)
+	if deleteErr != nil && !errors.Is(deleteErr, plugin.ErrNotFound) {
+		if errors.Is(deleteErr, plugin.ErrInvalidID) {
+			return badRequest(c, "invalid plugin id")
 		}
-		if errors.Is(deleteErr, app.ErrBuiltinApp) {
-			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_cannot_be_uninstalled"})
+		if errors.Is(deleteErr, plugin.ErrBuiltinPlugin) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_plugin_cannot_be_uninstalled"})
 			return nil
 		}
 		return s.fail(c, deleteErr)
@@ -285,10 +285,10 @@ func (s *Server) deleteApp(c *cart.Context) error {
 	var cleanupErr error
 	if cfg != nil {
 		for _, conn := range conns {
-			if conn == nil || conn.AppID != id {
+			if conn == nil || conn.PluginID != id {
 				continue
 			}
-			if err := cfg.DeleteAppConnection(c.Request.Context(), conn.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			if err := cfg.DeletePluginConnection(c.Request.Context(), conn.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 				cleanupErr = errors.Join(cleanupErr, err)
 			}
 		}
@@ -297,107 +297,107 @@ func (s *Server) deleteApp(c *cart.Context) error {
 		if session == nil {
 			continue
 		}
-		loaded := make([]string, 0, len(session.LoadedAppIDs))
-		for _, loadedID := range session.LoadedAppIDs {
+		loaded := make([]string, 0, len(session.LoadedPluginIDs))
+		for _, loadedID := range session.LoadedPluginIDs {
 			if loadedID != id {
 				loaded = append(loaded, loadedID)
 			}
 		}
-		if len(loaded) == len(session.LoadedAppIDs) {
+		if len(loaded) == len(session.LoadedPluginIDs) {
 			continue
 		}
-		if _, err := s.store.UpdateSession(c.Request.Context(), session.ID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		if _, err := s.store.UpdateSession(c.Request.Context(), session.ID, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
-	if cfg, ok := s.config.(appEnablementConfig); ok {
-		if err := cfg.DeleteAppEnablement(c.Request.Context(), id); err != nil {
+	if cfg, ok := s.config.(pluginEnablementConfig); ok {
+		if err := cfg.DeletePluginEnablement(c.Request.Context(), id); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
 	if cleanupErr != nil {
 		return s.fail(c, cleanupErr)
 	}
-	if errors.Is(deleteErr, app.ErrNotFound) {
-		c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+	if errors.Is(deleteErr, plugin.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_not_found"})
 		return nil
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
 
-func (s *Server) getAppMCPOverride(c *cart.Context) error {
-	cfg, ok := s.appMCPOverrideConfig(c)
+func (s *Server) getPluginMCPOverride(c *cart.Context) error {
+	cfg, ok := s.pluginMCPOverrideConfig(c)
 	if !ok {
 		return nil
 	}
-	appID, _ := c.Param("id")
+	pluginID, _ := c.Param("id")
 	endpointName, _ := c.Param("endpoint")
-	override, configured, err := cfg.GetMCPOverride(c.Request.Context(), appID, endpointName)
+	override, configured, err := cfg.GetMCPOverride(c.Request.Context(), pluginID, endpointName)
 	if err != nil {
-		return s.handleAppMCPOverrideError(c, err)
+		return s.handlePluginMCPOverrideError(c, err)
 	}
-	c.JSON(http.StatusOK, appMCPOverrideView{Configured: configured, Override: override})
+	c.JSON(http.StatusOK, pluginMCPOverrideView{Configured: configured, Override: override})
 	return nil
 }
 
-func (s *Server) putAppMCPOverride(c *cart.Context) error {
-	cfg, ok := s.appMCPOverrideConfig(c)
+func (s *Server) putPluginMCPOverride(c *cart.Context) error {
+	cfg, ok := s.pluginMCPOverrideConfig(c)
 	if !ok {
 		return nil
 	}
-	appID, _ := c.Param("id")
+	pluginID, _ := c.Param("id")
 	endpointName, _ := c.Param("endpoint")
-	var req app.MCPEndpointOverride
+	var req plugin.MCPEndpointOverride
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	override, err := cfg.PutMCPOverride(c.Request.Context(), appID, endpointName, req)
+	override, err := cfg.PutMCPOverride(c.Request.Context(), pluginID, endpointName, req)
 	if err != nil {
-		return s.handleAppMCPOverrideError(c, err)
+		return s.handlePluginMCPOverrideError(c, err)
 	}
-	c.JSON(http.StatusOK, appMCPOverrideView{Configured: true, Override: override})
+	c.JSON(http.StatusOK, pluginMCPOverrideView{Configured: true, Override: override})
 	return nil
 }
 
-func (s *Server) deleteAppMCPOverride(c *cart.Context) error {
-	cfg, ok := s.appMCPOverrideConfig(c)
+func (s *Server) deletePluginMCPOverride(c *cart.Context) error {
+	cfg, ok := s.pluginMCPOverrideConfig(c)
 	if !ok {
 		return nil
 	}
-	appID, _ := c.Param("id")
+	pluginID, _ := c.Param("id")
 	endpointName, _ := c.Param("endpoint")
-	if err := cfg.DeleteMCPOverride(c.Request.Context(), appID, endpointName); err != nil {
-		return s.handleAppMCPOverrideError(c, err)
+	if err := cfg.DeleteMCPOverride(c.Request.Context(), pluginID, endpointName); err != nil {
+		return s.handlePluginMCPOverrideError(c, err)
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
 
-func (s *Server) handleAppMCPOverrideError(c *cart.Context, err error) error {
-	if errors.Is(err, app.ErrInvalidID) {
-		return badRequest(c, "invalid app id")
+func (s *Server) handlePluginMCPOverrideError(c *cart.Context, err error) error {
+	if errors.Is(err, plugin.ErrInvalidID) {
+		return badRequest(c, "invalid plugin id")
 	}
-	if errors.Is(err, app.ErrNotFound) {
-		c.JSON(http.StatusNotFound, map[string]string{"error": "app_mcp_endpoint_not_found"})
+	if errors.Is(err, plugin.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_mcp_endpoint_not_found"})
 		return nil
 	}
-	if errors.Is(err, app.ErrInvalidMCPOverride) {
+	if errors.Is(err, plugin.ErrInvalidMCPOverride) {
 		return badRequest(c, err.Error())
 	}
 	return s.fail(c, err)
 }
 
-func (s *Server) getAppAsset(c *cart.Context) error {
-	if s.apps == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+func (s *Server) getPluginAsset(c *cart.Context) error {
+	if s.plugins == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_service_unavailable"})
 		return nil
 	}
 	rel, _ := c.Param("path")
-	data, contentType, err := s.apps.ReadAsset(c.Request.Context(), rel)
+	data, contentType, err := s.plugins.ReadAsset(c.Request.Context(), rel)
 	if err != nil {
-		if errors.Is(err, app.ErrInvalidAsset) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_asset_not_found"})
+		if errors.Is(err, plugin.ErrInvalidAsset) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_asset_not_found"})
 			return nil
 		}
 		return s.fail(c, err)
@@ -407,25 +407,25 @@ func (s *Server) getAppAsset(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) getAppSkill(c *cart.Context) error {
-	if s.apps == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+func (s *Server) getPluginSkill(c *cart.Context) error {
+	if s.plugins == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_service_unavailable"})
 		return nil
 	}
 	rel, _ := c.Param("path")
 	parts := strings.SplitN(strings.TrimPrefix(rel, "/"), "/", 2)
 	if len(parts) != 2 {
-		return badRequest(c, "invalid app skill path")
+		return badRequest(c, "invalid plugin skill path")
 	}
 	id := parts[0]
 	skillPath := parts[1]
-	detail, err := s.apps.ReadSkillDetail(c.Request.Context(), id, skillPath)
+	detail, err := s.plugins.ReadSkillDetail(c.Request.Context(), id, skillPath)
 	if err != nil {
-		if errors.Is(err, app.ErrInvalidID) {
-			return badRequest(c, "invalid app id")
+		if errors.Is(err, plugin.ErrInvalidID) {
+			return badRequest(c, "invalid plugin id")
 		}
-		if errors.Is(err, app.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_skill_not_found"})
+		if errors.Is(err, plugin.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_skill_not_found"})
 			return nil
 		}
 		return s.fail(c, err)
@@ -434,87 +434,87 @@ func (s *Server) getAppSkill(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) listAppConnections(c *cart.Context) error {
-	cfg, ok := s.appConnectionConfig(c)
+func (s *Server) listPluginConnections(c *cart.Context) error {
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	conns, err := cfg.ListAppConnections(c.Request.Context())
+	conns, err := cfg.ListPluginConnections(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
-	views := make([]app.ConnectionView, 0, len(conns))
+	views := make([]plugin.ConnectionView, 0, len(conns))
 	for _, conn := range conns {
-		views = append(views, app.ViewConnection(conn))
+		views = append(views, plugin.ViewConnection(conn))
 	}
-	c.JSON(http.StatusOK, app.AppConnectionsView{Connections: views})
+	c.JSON(http.StatusOK, plugin.PluginConnectionsView{Connections: views})
 	return nil
 }
 
-func (s *Server) getAppConnection(c *cart.Context) error {
+func (s *Server) getPluginConnection(c *cart.Context) error {
 	id, _ := c.Param("id")
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	conn, err := cfg.GetAppConnection(c.Request.Context(), id)
+	conn, err := cfg.GetPluginConnection(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_connection_not_found"})
+			c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_connection_not_found"})
 			return nil
 		}
 		return s.fail(c, err)
 	}
-	c.JSON(http.StatusOK, app.ViewConnectionDetail(conn))
+	c.JSON(http.StatusOK, plugin.ViewConnectionDetail(conn))
 	return nil
 }
 
-func (s *Server) putAppConnection(c *cart.Context) error {
+func (s *Server) putPluginConnection(c *cart.Context) error {
 	id, _ := c.Param("id")
 	id = strings.TrimSpace(id)
 	if id == "" || strings.ContainsAny(id, "/ ") {
 		return badRequest(c, "connection id is required and must not contain '/' or spaces")
 	}
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	var req putAppConnectionReq
+	var req putPluginConnectionReq
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	appID := strings.TrimSpace(req.AppID)
-	if appID == "" {
-		return badRequest(c, "appID is required")
+	pluginID := strings.TrimSpace(req.PluginID)
+	if pluginID == "" {
+		return badRequest(c, "pluginID is required")
 	}
-	def, err := s.getAppDefinition(c.Request.Context(), appID)
+	def, err := s.getPluginDefinition(c.Request.Context(), pluginID)
 	if err != nil {
-		if errors.Is(err, app.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+		if errors.Is(err, plugin.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "plugin_not_found"})
 			return nil
 		}
 		return s.fail(c, err)
 	}
-	method, ok := app.FindAuthMethod(def, req.AuthMethodID, req.AuthType)
+	method, ok := plugin.FindAuthMethod(def, req.AuthMethodID, req.AuthType)
 	if !ok {
-		method, ok = appConnectionOnlyAuthMethod(def, req)
+		method, ok = pluginConnectionOnlyAuthMethod(def, req)
 		if !ok {
-			return badRequest(c, "auth method is not supported by app")
+			return badRequest(c, "auth method is not supported by plugin")
 		}
 	}
-	var existing *app.Connection
-	if found, err := cfg.GetAppConnection(c.Request.Context(), id); err == nil {
+	var existing *plugin.Connection
+	if found, err := cfg.GetPluginConnection(c.Request.Context(), id); err == nil {
 		existing = found
 	}
-	fields, err := normalizeAppConnectionFields(def.Connection, req.Fields, existing)
+	fields, err := normalizePluginConnectionFields(def.Connection, req.Fields, existing)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
 	endpointURLsInput := req.EndpointURLs
-	if endpointURLsInput == nil && existing != nil && existing.AppID == appID {
+	if endpointURLsInput == nil && existing != nil && existing.PluginID == pluginID {
 		endpointURLsInput = existing.EndpointURLs
 	}
-	endpointURLs, err := app.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
@@ -526,13 +526,13 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	if header == "" {
 		header = method.Header
 	}
-	conn := &app.Connection{
+	conn := &plugin.Connection{
 		ID:           id,
 		Name:         strings.TrimSpace(req.Name),
-		AppID:        appID,
+		PluginID:     pluginID,
 		Fields:       fields,
 		EndpointURLs: endpointURLs,
-		Auth: app.Auth{
+		Auth: plugin.Auth{
 			MethodID: method.ID,
 			Type:     method.Type,
 			Token:    req.Token,
@@ -542,9 +542,9 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 			Password: req.Password,
 		},
 	}
-	sameExistingIdentity := existing != nil && existing.AppID == appID && sameAppConnectionAuthMethod(existing.Auth, method)
+	sameExistingIdentity := existing != nil && existing.PluginID == pluginID && samePluginConnectionAuthMethod(existing.Auth, method)
 	if sameExistingIdentity {
-		conn.Account = app.CloneConnection(existing).Account
+		conn.Account = plugin.CloneConnection(existing).Account
 	}
 	if req.Token == "" && req.Password == "" {
 		if sameExistingIdentity {
@@ -562,45 +562,45 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 			}
 		}
 	}
-	if err := validateAppConnectionAuth(conn.Auth); err != nil {
+	if err := validatePluginConnectionAuth(conn.Auth); err != nil {
 		return badRequest(c, err.Error())
 	}
 	patTokenChanged := strings.TrimSpace(req.Token) != "" && (existing == nil || req.Token != existing.Auth.Token)
-	if appID == "github" && method.ID == app.GitHubPATAuthMethodID && (patTokenChanged || conn.Account == nil) {
+	if pluginID == "github" && method.ID == plugin.GitHubPATAuthMethodID && (patTokenChanged || conn.Account == nil) {
 		account, err := s.github.Account(c.Request.Context(), conn.Auth.Token)
 		if err != nil {
 			return badRequest(c, "github account could not be verified: "+err.Error())
 		}
-		conn.Account = &app.ConnectionAccount{
+		conn.Account = &plugin.ConnectionAccount{
 			ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type,
 		}
 	}
-	if err := cfg.PutAppConnection(c.Request.Context(), conn); err != nil {
+	if err := cfg.PutPluginConnection(c.Request.Context(), conn); err != nil {
 		return s.fail(c, err)
 	}
-	updated, err := cfg.GetAppConnection(c.Request.Context(), id)
+	updated, err := cfg.GetPluginConnection(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	c.JSON(http.StatusOK, app.ViewConnection(updated))
+	c.JSON(http.StatusOK, plugin.ViewConnection(updated))
 	return nil
 }
 
-func appConnectionOnlyAuthMethod(def *app.Definition, req putAppConnectionReq) (app.AuthMethod, bool) {
+func pluginConnectionOnlyAuthMethod(def *plugin.Definition, req putPluginConnectionReq) (plugin.AuthMethod, bool) {
 	if def == nil || (def.Auth != nil && def.Auth.Required) {
-		return app.AuthMethod{}, false
+		return plugin.AuthMethod{}, false
 	}
 	if strings.TrimSpace(req.AuthMethodID) != "" {
-		return app.AuthMethod{}, false
+		return plugin.AuthMethod{}, false
 	}
 	authType := strings.TrimSpace(req.AuthType)
-	if authType != "" && authType != app.AuthTypeNone {
-		return app.AuthMethod{}, false
+	if authType != "" && authType != plugin.AuthTypeNone {
+		return plugin.AuthMethod{}, false
 	}
-	return app.AuthMethod{Type: app.AuthTypeNone}, true
+	return plugin.AuthMethod{Type: plugin.AuthTypeNone}, true
 }
 
-func sameAppConnectionAuthMethod(auth app.Auth, method app.AuthMethod) bool {
+func samePluginConnectionAuthMethod(auth plugin.Auth, method plugin.AuthMethod) bool {
 	authMethodID := strings.TrimSpace(auth.MethodID)
 	methodID := strings.TrimSpace(method.ID)
 	if authMethodID != "" && methodID != "" {
@@ -609,10 +609,10 @@ func sameAppConnectionAuthMethod(auth app.Auth, method app.AuthMethod) bool {
 	return strings.TrimSpace(auth.Type) == strings.TrimSpace(method.Type)
 }
 
-func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[string]string, existing *app.Connection) (map[string]string, error) {
+func normalizePluginConnectionFields(config *plugin.ConnectionConfig, values map[string]string, existing *plugin.Connection) (map[string]string, error) {
 	if config == nil || len(config.Fields) == 0 {
 		if len(values) > 0 {
-			return nil, errors.New("connection fields are not supported by app")
+			return nil, errors.New("connection fields are not supported by plugin")
 		}
 		return nil, nil
 	}
@@ -635,7 +635,7 @@ func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[strin
 			for _, rule := range field.Inject {
 				switch strings.TrimSpace(rule.Target) {
 				case "header":
-					if !app.IsAllowedRequestHeaderValue(value) {
+					if !plugin.IsAllowedRequestHeaderValue(value) {
 						return nil, errors.New("connection field " + id + " contains an invalid header value")
 					}
 				case "env":
@@ -649,7 +649,7 @@ func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[strin
 	}
 	for id := range values {
 		if _, ok := seen[id]; !ok {
-			return nil, errors.New("connection field " + id + " is not supported by app")
+			return nil, errors.New("connection field " + id + " is not supported by plugin")
 		}
 	}
 	if len(out) == 0 {
@@ -658,46 +658,46 @@ func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[strin
 	return out, nil
 }
 
-func validateAppConnectionAuth(auth app.Auth) error {
+func validatePluginConnectionAuth(auth plugin.Auth) error {
 	switch strings.TrimSpace(auth.Type) {
-	case app.AuthTypeNone:
+	case plugin.AuthTypeNone:
 		return nil
-	case app.AuthTypeBearer:
+	case plugin.AuthTypeBearer:
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("bearer token is required")
 		}
-		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+		if !plugin.IsAllowedRequestHeaderValue(auth.Token) {
 			return errors.New("bearer token contains an invalid header value")
 		}
-	case app.AuthTypeToken:
+	case plugin.AuthTypeToken:
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("token is required")
 		}
-		if !app.IsAllowedRequestHeaderValue(auth.Token) || !app.IsAllowedRequestHeaderValue(auth.Prefix) {
+		if !plugin.IsAllowedRequestHeaderValue(auth.Token) || !plugin.IsAllowedRequestHeaderValue(auth.Prefix) {
 			return errors.New("token contains an invalid header value")
 		}
-	case app.AuthTypeHeader:
-		if !app.IsAllowedRequestHeaderName(auth.Header) {
+	case plugin.AuthTypeHeader:
+		if !plugin.IsAllowedRequestHeaderName(auth.Header) {
 			return errors.New("header is invalid or not allowed")
 		}
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("header token is required")
 		}
-		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+		if !plugin.IsAllowedRequestHeaderValue(auth.Token) {
 			return errors.New("header token contains an invalid header value")
 		}
-	case app.AuthTypeBasic:
+	case plugin.AuthTypeBasic:
 		if strings.TrimSpace(auth.Username) == "" && strings.TrimSpace(auth.Password) == "" {
 			return errors.New("username or password is required")
 		}
-	case app.AuthTypeOAuth2:
+	case plugin.AuthTypeOAuth2:
 		if strings.TrimSpace(auth.AccessToken) == "" {
 			return errors.New("oauth2 access token is required")
 		}
-		if !app.IsAllowedRequestHeaderValue(auth.AccessToken) || strings.ContainsAny(strings.TrimSpace(auth.TokenType), "\r\n \t") {
+		if !plugin.IsAllowedRequestHeaderValue(auth.AccessToken) || strings.ContainsAny(strings.TrimSpace(auth.TokenType), "\r\n \t") {
 			return errors.New("oauth2 token contains an invalid header value")
 		}
-	case app.AuthTypeTokenExchange:
+	case plugin.AuthTypeTokenExchange:
 		return nil
 	default:
 		return errors.New("auth type is not supported")
@@ -705,11 +705,11 @@ func validateAppConnectionAuth(auth app.Auth) error {
 	return nil
 }
 
-func (s *Server) getAppDefinition(ctx context.Context, id string) (*app.Definition, error) {
-	if s.apps == nil {
-		return nil, errors.New("app service unavailable")
+func (s *Server) getPluginDefinition(ctx context.Context, id string) (*plugin.Definition, error) {
+	if s.plugins == nil {
+		return nil, errors.New("plugin service unavailable")
 	}
-	defs, err := s.apps.ListDefinitions(ctx)
+	defs, err := s.plugins.ListDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -718,44 +718,44 @@ func (s *Server) getAppDefinition(ctx context.Context, id string) (*app.Definiti
 			return def, nil
 		}
 	}
-	return nil, app.ErrNotFound
+	return nil, plugin.ErrNotFound
 }
 
-func (s *Server) deleteAppConnection(c *cart.Context) error {
+func (s *Server) deletePluginConnection(c *cart.Context) error {
 	id, _ := c.Param("id")
-	cfg, ok := s.appConnectionConfig(c)
+	cfg, ok := s.pluginConnectionConfig(c)
 	if !ok {
 		return nil
 	}
-	connection, err := cfg.GetAppConnection(c.Request.Context(), id)
+	connection, err := cfg.GetPluginConnection(c.Request.Context(), id)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if connection.AppID == "github" && connection.Auth.Type == app.AuthTypeOAuth2 && connection.Auth.Variant == app.GitHubAppAuthVariant && strings.TrimSpace(connection.Auth.AccessToken) != "" {
+	if connection.PluginID == "github" && connection.Auth.Type == plugin.AuthTypeOAuth2 && connection.Auth.Variant == plugin.GitHubAppAuthVariant && strings.TrimSpace(connection.Auth.AccessToken) != "" {
 		if err := s.oauthBroker.Revoke(c.Request.Context(), "github", connection.Auth.AccessToken); err != nil {
 			return s.fail(c, err)
 		}
 	}
-	if err := cfg.DeleteAppConnection(c.Request.Context(), id); err != nil {
+	if err := cfg.DeletePluginConnection(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
 
-func (s *Server) appConnectionConfig(c *cart.Context) (appConnectionConfig, bool) {
-	cfg, ok := s.config.(appConnectionConfig)
+func (s *Server) pluginConnectionConfig(c *cart.Context) (pluginConnectionConfig, bool) {
+	cfg, ok := s.config.(pluginConnectionConfig)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_connection_config_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_connection_config_unavailable"})
 		return nil, false
 	}
 	return cfg, true
 }
 
-func (s *Server) appMCPOverrideConfig(c *cart.Context) (appMCPOverrideConfig, bool) {
-	cfg, ok := s.apps.(appMCPOverrideConfig)
+func (s *Server) pluginMCPOverrideConfig(c *cart.Context) (pluginMCPOverrideConfig, bool) {
+	cfg, ok := s.plugins.(pluginMCPOverrideConfig)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_override_config_unavailable"})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "plugin_mcp_override_config_unavailable"})
 		return nil, false
 	}
 	return cfg, true

@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
@@ -62,13 +62,13 @@ type ConfigSource interface {
 	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
 }
 
-type AppSource interface {
-	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
-	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
+type PluginSource interface {
+	ListDefinitions(ctx context.Context) ([]*plugin.Definition, error)
+	ReadSkill(ctx context.Context, pluginID, skillID string) (*plugin.SkillDetail, error)
 }
 
-type appEndpointResolver interface {
-	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*app.EndpointBinding, error)
+type pluginEndpointResolver interface {
+	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*plugin.EndpointBinding, error)
 }
 
 type emptyConfig struct{}
@@ -95,7 +95,7 @@ type Engine struct {
 	resolver            Resolver
 	builder             *contextbuilder.Builder
 	tools               tool.Runner
-	apps                AppSource
+	plugins             PluginSource
 	turnFiles           *turnfiles.Tracker
 
 	promptSource   contextbuilder.PromptSource
@@ -182,9 +182,9 @@ func WithTools(runner tool.Runner) Option {
 	}
 }
 
-func WithApps(source AppSource) Option {
+func WithPlugins(source PluginSource) Option {
 	return func(e *Engine) {
-		e.apps = source
+		e.plugins = source
 		e.rebuildBuilder()
 	}
 }
@@ -211,7 +211,7 @@ func WithAttachmentHome(home string) Option {
 }
 
 func (e *Engine) rebuildBuilder() {
-	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.apps, e.skills))
+	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.plugins, e.skills))
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
@@ -485,7 +485,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 先注册 cancel 再 publish started:否则收到 turn.started 立刻 cancel 的
 	// 客户端可能落在注册之前,错拿 no_running_turn。turn 生命周期长于 HTTP
 	// 请求,不继承请求 ctx;取消只走 Cancel()。
-	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
+	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), plugin.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
@@ -548,7 +548,7 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 		e.mu.Unlock()
 		return &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}, nil
 	}
-	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
+	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), plugin.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
@@ -688,7 +688,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 	if res.ExistingTurn != nil {
 		return &SubmitResult{Duplicate: true, TurnID: res.ExistingTurn.ID}, nil
 	}
-	e.rememberQueuedRuntime(in.SessionID, in.ClientMessageID, app.RuntimeIDFromContext(ctx))
+	e.rememberQueuedRuntime(in.SessionID, in.ClientMessageID, plugin.RuntimeIDFromContext(ctx))
 	if res.QueuedEvent != nil {
 		e.hub.Publish(*res.QueuedEvent)
 	}
@@ -1657,7 +1657,7 @@ func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, res
 }
 
 func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode store.AgentMode) ([]provider.ToolDef, error) {
-	if e.apps == nil {
+	if e.plugins == nil {
 		var defs []provider.ToolDef
 		if e.tools != nil {
 			runnerDefs, err := e.tools.Definitions(ctx, sessionID)
@@ -1672,16 +1672,16 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 		}
 		return tool.CoreDefinitionsForMode(mode, defs), nil
 	}
-	appStates, err := e.sessionAppStates(ctx, sessionID)
+	pluginStates, err := e.sessionPluginStates(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	callableIDs := callableAppIDs(appStates, mode)
+	callableIDs := callablePluginIDs(pluginStates, mode)
 	var defs []provider.ToolDef
 	if e.tools != nil {
 		var runnerDefs []provider.ToolDef
-		if scoped, ok := e.tools.(tool.AppScopedDefinitionRunner); ok {
-			runnerDefs, err = scoped.DefinitionsForApps(ctx, sessionID, callableIDs)
+		if scoped, ok := e.tools.(tool.PluginScopedDefinitionRunner); ok {
+			runnerDefs, err = scoped.DefinitionsForPlugins(ctx, sessionID, callableIDs)
 		} else {
 			runnerDefs, err = e.tools.Definitions(ctx, sessionID)
 		}
@@ -1707,43 +1707,43 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 		defs = append(defs, tool.CollaborationDefinitions()...)
 	}
 	coreDefs := make([]provider.ToolDef, 0, len(defs))
-	appDefs := make([]provider.ToolDef, 0)
+	pluginDefs := make([]provider.ToolDef, 0)
 	for _, def := range defs {
-		appID, appTool := tool.BuiltinAppIDForTool(def.Name)
-		if appTool {
-			if appDefinitionCallable(appStates[appID], mode) && tool.ToolDefAllowedForMode(mode, def) {
-				appDefs = append(appDefs, def)
+		pluginID, pluginTool := tool.BuiltinPluginIDForTool(def.Name)
+		if pluginTool {
+			if pluginDefinitionCallable(pluginStates[pluginID], mode) && tool.ToolDefAllowedForMode(mode, def) {
+				pluginDefs = append(pluginDefs, def)
 			}
 			continue
 		}
-		if def.AppID != "" {
-			if appDefinitionCallable(appStates[def.AppID], mode) && tool.ToolDefAllowedForMode(mode, def) {
-				appDefs = append(appDefs, def)
+		if def.PluginID != "" {
+			if pluginDefinitionCallable(pluginStates[def.PluginID], mode) && tool.ToolDefAllowedForMode(mode, def) {
+				pluginDefs = append(pluginDefs, def)
 			}
 			continue
 		}
-		if tool.IsAppAPITool(def.Name) {
-			if appAPIToolCallable(def.Name, appStates, mode) && tool.ToolDefAllowedForMode(mode, def) {
-				appDefs = append(appDefs, def)
+		if tool.IsPluginAPITool(def.Name) {
+			if pluginAPIToolCallable(def.Name, pluginStates, mode) && tool.ToolDefAllowedForMode(mode, def) {
+				pluginDefs = append(pluginDefs, def)
 			}
 			continue
 		}
 		coreDefs = append(coreDefs, def)
 	}
 	out := tool.CoreDefinitionsForMode(mode, coreDefs)
-	out = append(out, tool.AppLoadDefinition())
-	if loadedIDs := loadedSessionAppIDs(appStates); len(loadedIDs) > 0 {
-		out = append(out, tool.AppUnloadDefinition(loadedIDs))
+	out = append(out, tool.PluginLoadDefinition())
+	if loadedIDs := loadedSessionPluginIDs(pluginStates); len(loadedIDs) > 0 {
+		out = append(out, tool.PluginUnloadDefinition(loadedIDs))
 	}
-	sort.Slice(appDefs, func(i, j int) bool { return appDefs[i].Name < appDefs[j].Name })
-	out = append(out, appDefs...)
+	sort.Slice(pluginDefs, func(i, j int) bool { return pluginDefs[i].Name < pluginDefs[j].Name })
+	out = append(out, pluginDefs...)
 	return out, nil
 }
 
-func callableAppIDs(states map[string]sessionAppState, mode store.AgentMode) []string {
+func callablePluginIDs(states map[string]sessionPluginState, mode store.AgentMode) []string {
 	ids := make([]string, 0, len(states))
 	for id, state := range states {
-		if appDefinitionCallable(state, mode) {
+		if pluginDefinitionCallable(state, mode) {
 			ids = append(ids, id)
 		}
 	}
@@ -1751,7 +1751,7 @@ func callableAppIDs(states map[string]sessionAppState, mode store.AgentMode) []s
 	return ids
 }
 
-func loadedSessionAppIDs(states map[string]sessionAppState) []string {
+func loadedSessionPluginIDs(states map[string]sessionPluginState) []string {
 	ids := make([]string, 0, len(states))
 	for id, state := range states {
 		if state.loaded {
@@ -1762,17 +1762,17 @@ func loadedSessionAppIDs(states map[string]sessionAppState) []string {
 	return ids
 }
 
-func appDefinitionCallable(state sessionAppState, mode store.AgentMode) bool {
-	return state.definition != nil && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredAppMode(state.definition))
+func pluginDefinitionCallable(state sessionPluginState, mode store.AgentMode) bool {
+	return state.definition != nil && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredPluginMode(state.definition))
 }
 
-func appAPIToolCallable(name string, states map[string]sessionAppState, mode store.AgentMode) bool {
-	kind := app.EndpointKindREST
+func pluginAPIToolCallable(name string, states map[string]sessionPluginState, mode store.AgentMode) bool {
+	kind := plugin.EndpointKindREST
 	if name != tool.RESTRequest {
-		kind = app.EndpointKindGraphQL
+		kind = plugin.EndpointKindGraphQL
 	}
 	for _, state := range states {
-		if !appDefinitionCallable(state, mode) {
+		if !pluginDefinitionCallable(state, mode) {
 			continue
 		}
 		for _, endpoint := range state.definition.Endpoints {
@@ -1784,35 +1784,35 @@ func appAPIToolCallable(name string, states map[string]sessionAppState, mode sto
 	return false
 }
 
-type sessionAppState struct {
-	definition *app.Definition
+type sessionPluginState struct {
+	definition *plugin.Definition
 	loaded     bool
 }
 
-func (e *Engine) sessionAppStates(ctx context.Context, sessionID string) (map[string]sessionAppState, error) {
+func (e *Engine) sessionPluginStates(ctx context.Context, sessionID string) (map[string]sessionPluginState, error) {
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	definitions, err := e.apps.ListDefinitions(ctx)
+	definitions, err := e.plugins.ListDefinitions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list apps: %w", err)
+		return nil, fmt.Errorf("list plugins: %w", err)
 	}
-	loaded := make(map[string]bool, len(sess.LoadedAppIDs))
-	for _, id := range sess.LoadedAppIDs {
+	loaded := make(map[string]bool, len(sess.LoadedPluginIDs))
+	for _, id := range sess.LoadedPluginIDs {
 		loaded[id] = true
 	}
-	out := make(map[string]sessionAppState, len(definitions))
+	out := make(map[string]sessionPluginState, len(definitions))
 	for _, definition := range definitions {
 		if definition == nil || strings.TrimSpace(definition.ID) == "" {
 			continue
 		}
-		out[definition.ID] = sessionAppState{definition: definition, loaded: loaded[definition.ID]}
+		out[definition.ID] = sessionPluginState{definition: definition, loaded: loaded[definition.ID]}
 	}
 	return out, nil
 }
 
-func requiredAppMode(definition *app.Definition) store.AgentMode {
+func requiredPluginMode(definition *plugin.Definition) store.AgentMode {
 	if definition == nil {
 		return store.ModeWork
 	}
@@ -2110,35 +2110,35 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				nextMode = requestedMode
 				modeChanged = true
 			}
-		} else if call.Name == tool.AppLoad {
+		} else if call.Name == tool.PluginLoad {
 			var changed bool
-			result, changed = e.loadApp(ctx, sessionID, call, nextMode)
+			result, changed = e.loadPlugin(ctx, sessionID, call, nextMode)
 			toolsChanged = toolsChanged || changed
-		} else if call.Name == tool.AppUnload {
+		} else if call.Name == tool.PluginUnload {
 			var changed bool
-			result, changed = e.unloadApp(ctx, sessionID, call)
+			result, changed = e.unloadPlugin(ctx, sessionID, call)
 			toolsChanged = toolsChanged || changed
-		} else if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
+		} else if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
 			if !tool.NameAllowedForMode(nextMode, call.Name) {
 				result = toolNotAllowedResult(call, nextMode)
-			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.appToolCallable(ctx, sessionID, appID, nextMode) {
-				result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
+			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode) {
+				result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
 			} else {
 				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
-		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.AppID != "" && e.apps != nil {
-			// The provider received this App tool in allowedTools after the App was
+		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.PluginID != "" && e.plugins != nil {
+			// The provider received this plugin tool in allowedTools after the plugin was
 			// loaded, enabled, and mode-checked. Treat that request as the authority
-			// for this model step instead of re-reading an ephemeral Runtime App
+			// for this model step instead of re-reading an ephemeral runtime plugin
 			// registry immediately before execution.
 			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-		} else if tool.IsAppAPITool(call.Name) && e.apps != nil {
-			appID, resolved := e.appEndpointTarget(ctx, sessionID, call)
+		} else if tool.IsPluginAPITool(call.Name) && e.plugins != nil {
+			pluginID, resolved := e.pluginEndpointTarget(ctx, sessionID, call)
 			switch {
-			case resolved && !e.appToolCallable(ctx, sessionID, appID, nextMode):
-				result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
+			case resolved && !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode):
+				result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
 			case !tool.HasDefinition(allowedTools, call.Name):
-				result = appAPINotLoadedResult(call)
+				result = pluginAPINotLoadedResult(call)
 			default:
 				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
@@ -2148,8 +2148,8 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
 			} else if known {
 				if tool.NameAllowedForMode(nextMode, call.Name) {
-					if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
-						result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
+					if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
+						result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
 					} else {
 						result = toolUnavailableResult(call)
 					}
@@ -2336,89 +2336,89 @@ func commandSandboxStateKey(project *store.Project, sessionID string) string {
 	return "session:" + sessionID
 }
 
-func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool) {
-	if e.apps == nil {
-		return appLoadFailure(call, "app_service_unavailable", "App loading is unavailable", nil), false
+func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool) {
+	if e.plugins == nil {
+		return pluginLoadFailure(call, "plugin_service_unavailable", "Plugin loading is unavailable", nil), false
 	}
-	request, err := tool.DecodeAppLoadRequest(call.Args)
+	request, err := tool.DecodePluginLoadRequest(call.Args)
 	if err != nil {
-		return appLoadFailure(call, "invalid_arguments", err.Error(), nil), false
+		return pluginLoadFailure(call, "invalid_arguments", err.Error(), nil), false
 	}
-	if request.AppID == app.BuiltinCollaborationID {
+	if request.PluginID == plugin.BuiltinCollaborationID {
 		owner, err := e.store.ParentSessionID(ctx, sessionID)
 		if err != nil || owner != "" {
-			return appLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false
+			return pluginLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false
 		}
 	}
-	definitions, err := e.apps.ListDefinitions(ctx)
+	definitions, err := e.plugins.ListDefinitions(ctx)
 	if err != nil {
-		return appLoadFailure(call, "app_state_unavailable", err.Error(), nil), false
+		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), nil), false
 	}
-	var definition *app.Definition
+	var definition *plugin.Definition
 	for _, candidate := range definitions {
-		if candidate != nil && candidate.ID == request.AppID {
+		if candidate != nil && candidate.ID == request.PluginID {
 			definition = candidate
 			break
 		}
 	}
 	if definition == nil {
-		return appLoadFailure(call, "app_unavailable", "the App is not available in the current runtime", map[string]any{"appID": request.AppID}), false
+		return pluginLoadFailure(call, "plugin_unavailable", "the plugin is not available in the current runtime", map[string]any{"pluginID": request.PluginID}), false
 	}
 	if !definition.Enabled {
-		return appLoadFailure(call, "app_disabled", "the App is disabled", map[string]any{"appID": request.AppID}), false
+		return pluginLoadFailure(call, "plugin_disabled", "the plugin is disabled", map[string]any{"pluginID": request.PluginID}), false
 	}
-	requiredMode := requiredAppMode(definition)
+	requiredMode := requiredPluginMode(definition)
 	if store.AgentModeRank(mode) < store.AgentModeRank(requiredMode) {
-		return appLoadFailure(call, "capability_required", "the App requires a higher capability", map[string]any{
-			"appID":        request.AppID,
+		return pluginLoadFailure(call, "capability_required", "the plugin requires a higher capability", map[string]any{
+			"pluginID":     request.PluginID,
 			"currentMode":  store.NormalizeAgentMode(mode),
 			"requiredMode": requiredMode,
 		}), false
 	}
 	skillID := request.SkillID
 	if skillID == "" {
-		skillID = defaultAppSkillID(definition)
+		skillID = defaultPluginSkillID(definition)
 	}
-	var detail *app.SkillDetail
+	var detail *plugin.SkillDetail
 	if skillID != "" {
-		detail, err = e.apps.ReadSkill(ctx, request.AppID, skillID)
+		detail, err = e.plugins.ReadSkill(ctx, request.PluginID, skillID)
 		if err != nil {
-			reason := "app_skill_read_failed"
+			reason := "plugin_skill_read_failed"
 			switch {
-			case errors.Is(err, app.ErrInvalidID):
-				reason = "invalid_app_id"
-			case errors.Is(err, app.ErrNotFound):
-				reason = "app_skill_not_found"
-			case errors.Is(err, app.ErrDisabled):
-				reason = "app_disabled"
+			case errors.Is(err, plugin.ErrInvalidID):
+				reason = "invalid_plugin_id"
+			case errors.Is(err, plugin.ErrNotFound):
+				reason = "plugin_skill_not_found"
+			case errors.Is(err, plugin.ErrDisabled):
+				reason = "plugin_disabled"
 			}
-			return appLoadFailure(call, reason, err.Error(), map[string]any{"appID": request.AppID, "skillID": skillID}), false
+			return pluginLoadFailure(call, reason, err.Error(), map[string]any{"pluginID": request.PluginID, "skillID": skillID}), false
 		}
 	}
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
 	}
 	alreadyLoaded := false
-	for _, loadedID := range sess.LoadedAppIDs {
-		if loadedID == request.AppID {
+	for _, loadedID := range sess.LoadedPluginIDs {
+		if loadedID == request.PluginID {
 			alreadyLoaded = true
 			break
 		}
 	}
 	if !alreadyLoaded {
-		loaded := store.NormalizeAppIDs(append(append([]string(nil), sess.LoadedAppIDs...), request.AppID))
-		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
-			return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		loaded := store.NormalizePluginIDs(append(append([]string(nil), sess.LoadedPluginIDs...), request.PluginID))
+		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
+			return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
 		}
 	}
 	payload := map[string]any{
 		"ok":                 true,
-		"appID":              request.AppID,
+		"pluginID":           request.PluginID,
 		"instructionsLoaded": detail != nil,
 		"newlyLoaded":        !alreadyLoaded,
 		"alreadyLoaded":      alreadyLoaded,
-		"message":            "the App is loaded; its tools are available on the next model step",
+		"message":            "the plugin is loaded; its tools are available on the next model step",
 	}
 	summaryKind := tool.SummaryReturnedFields
 	summaryCount := len(payload)
@@ -2431,7 +2431,7 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 		payload["name"] = detail.Name
 		payload["description"] = detail.Description
 		payload["path"] = detail.Path
-		payload["reference"] = tool.SkillReference{Kind: tool.AppSkillReference, AppID: request.AppID, SkillID: resolvedSkillID}
+		payload["reference"] = tool.SkillReference{Kind: tool.PluginSkillReference, PluginID: request.PluginID, SkillID: resolvedSkillID}
 		summaryKind = tool.SummaryReadChars
 		summaryCount = len(detail.Content)
 	}
@@ -2446,40 +2446,40 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 	}, !alreadyLoaded
 }
 
-func (e *Engine) unloadApp(ctx context.Context, sessionID string, call tool.Call) (tool.Result, bool) {
-	if e.apps == nil {
-		return appLoadFailure(call, "app_service_unavailable", "App unloading is unavailable", nil), false
+func (e *Engine) unloadPlugin(ctx context.Context, sessionID string, call tool.Call) (tool.Result, bool) {
+	if e.plugins == nil {
+		return pluginLoadFailure(call, "plugin_service_unavailable", "Plugin unloading is unavailable", nil), false
 	}
-	request, err := tool.DecodeAppUnloadRequest(call.Args)
+	request, err := tool.DecodePluginUnloadRequest(call.Args)
 	if err != nil {
-		return appLoadFailure(call, "invalid_arguments", err.Error(), nil), false
+		return pluginLoadFailure(call, "invalid_arguments", err.Error(), nil), false
 	}
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
 	}
-	loaded := make([]string, 0, len(sess.LoadedAppIDs))
+	loaded := make([]string, 0, len(sess.LoadedPluginIDs))
 	newlyUnloaded := false
-	for _, loadedID := range sess.LoadedAppIDs {
-		if loadedID == request.AppID {
+	for _, loadedID := range sess.LoadedPluginIDs {
+		if loadedID == request.PluginID {
 			newlyUnloaded = true
 			continue
 		}
 		loaded = append(loaded, loadedID)
 	}
 	if newlyUnloaded {
-		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
-			return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
+			return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
 		}
 	}
 	payload := map[string]any{
 		"ok":               true,
-		"appID":            request.AppID,
+		"pluginID":         request.PluginID,
 		"newlyUnloaded":    newlyUnloaded,
 		"alreadyUnloaded":  !newlyUnloaded,
 		"connectionsKept":  true,
 		"installationKept": true,
-		"message":          "the App is unloaded for this session; its installation and connections are unchanged",
+		"message":          "the plugin is unloaded for this session; its installation and connections are unchanged",
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{
@@ -2492,7 +2492,7 @@ func (e *Engine) unloadApp(ctx context.Context, sessionID string, call tool.Call
 	}, newlyUnloaded
 }
 
-func defaultAppSkillID(definition *app.Definition) string {
+func defaultPluginSkillID(definition *plugin.Definition) string {
 	if definition == nil {
 		return ""
 	}
@@ -2513,7 +2513,7 @@ func defaultAppSkillID(definition *app.Definition) string {
 	return ""
 }
 
-func appLoadFailure(call tool.Call, reason, message string, extra map[string]any) tool.Result {
+func pluginLoadFailure(call tool.Call, reason, message string, extra map[string]any) tool.Result {
 	payload := map[string]any{"ok": false, "reason": reason, "message": message}
 	for key, value := range extra {
 		payload[key] = value
@@ -2653,7 +2653,7 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
-	if name == tool.RequestCapability || ((name == tool.AppLoad || name == tool.AppUnload) && e.apps != nil) {
+	if name == tool.RequestCapability || ((name == tool.PluginLoad || name == tool.PluginUnload) && e.plugins != nil) {
 		return true, nil
 	}
 	if e.tools == nil {
@@ -2666,31 +2666,31 @@ func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (boo
 	return tool.HasDefinition(defs, name), nil
 }
 
-func (e *Engine) appToolUnavailableResult(ctx context.Context, sessionID string, call tool.Call, appID string) tool.Result {
+func (e *Engine) pluginToolUnavailableResult(ctx context.Context, sessionID string, call tool.Call, pluginID string) tool.Result {
 	payload := map[string]any{
-		"ok":      false,
-		"appID":   appID,
-		"tool":    call.Name,
-		"reason":  "app_not_loaded",
-		"message": "load the App with builtin_app_load before using its tools",
+		"ok":       false,
+		"pluginID": pluginID,
+		"tool":     call.Name,
+		"reason":   "plugin_not_loaded",
+		"message":  "load the plugin with builtin_plugin_load before using its tools",
 	}
-	states, err := e.sessionAppStates(ctx, sessionID)
+	states, err := e.sessionPluginStates(ctx, sessionID)
 	if err != nil {
-		payload["reason"] = "app_state_unavailable"
+		payload["reason"] = "plugin_state_unavailable"
 		payload["message"] = err.Error()
-	} else if state, ok := states[appID]; !ok {
-		payload["reason"] = "app_unavailable"
-		payload["message"] = "the app is unavailable in the current runtime"
+	} else if state, ok := states[pluginID]; !ok {
+		payload["reason"] = "plugin_unavailable"
+		payload["message"] = "the plugin is unavailable in the current runtime"
 	} else if !state.definition.Enabled {
-		payload["reason"] = "app_disabled"
-		payload["message"] = "the app is disabled"
+		payload["reason"] = "plugin_disabled"
+		payload["message"] = "the plugin is disabled"
 	} else {
 		if state.definition.DefaultSkillID != "" {
 			payload["defaultSkillID"] = state.definition.DefaultSkillID
 		}
 		if state.loaded {
-			payload["reason"] = "app_tool_unavailable"
-			payload["message"] = "the app is loaded but this tool is not available in the current request"
+			payload["reason"] = "plugin_tool_unavailable"
+			payload["message"] = "the plugin is loaded but this tool is not available in the current request"
 		}
 	}
 	content, _ := json.Marshal(payload)
@@ -2704,17 +2704,17 @@ func (e *Engine) appToolUnavailableResult(ctx context.Context, sessionID string,
 	}
 }
 
-func (e *Engine) appToolCallable(ctx context.Context, sessionID, appID string, mode store.AgentMode) bool {
-	states, err := e.sessionAppStates(ctx, sessionID)
+func (e *Engine) pluginToolCallable(ctx context.Context, sessionID, pluginID string, mode store.AgentMode) bool {
+	states, err := e.sessionPluginStates(ctx, sessionID)
 	if err != nil {
 		return false
 	}
-	state, ok := states[appID]
-	return ok && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredAppMode(state.definition))
+	state, ok := states[pluginID]
+	return ok && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredPluginMode(state.definition))
 }
 
-func (e *Engine) appEndpointTarget(ctx context.Context, sessionID string, call tool.Call) (string, bool) {
-	resolver, ok := e.apps.(appEndpointResolver)
+func (e *Engine) pluginEndpointTarget(ctx context.Context, sessionID string, call tool.Call) (string, bool) {
+	resolver, ok := e.plugins.(pluginEndpointResolver)
 	if !ok {
 		return "", false
 	}
@@ -2726,22 +2726,22 @@ func (e *Engine) appEndpointTarget(ctx context.Context, sessionID string, call t
 		return "", false
 	}
 	binding, err := resolver.ResolveEndpoint(ctx, sessionID, args.Endpoint, args.Connection)
-	if err == nil && binding != nil && strings.TrimSpace(binding.AppID) != "" {
-		return binding.AppID, true
+	if err == nil && binding != nil && strings.TrimSpace(binding.PluginID) != "" {
+		return binding.PluginID, true
 	}
-	states, stateErr := e.sessionAppStates(ctx, sessionID)
+	states, stateErr := e.sessionPluginStates(ctx, sessionID)
 	if stateErr != nil {
 		return "", false
 	}
 	matched := ""
-	for appID, state := range states {
+	for pluginID, state := range states {
 		if _, ok := state.definition.Endpoints[strings.TrimSpace(args.Endpoint)]; !ok {
 			continue
 		}
-		if matched != "" && matched != appID {
+		if matched != "" && matched != pluginID {
 			return "", false
 		}
-		matched = appID
+		matched = pluginID
 	}
 	return matched, matched != ""
 }
@@ -2755,12 +2755,12 @@ func providerToolDefinition(defs []provider.ToolDef, name string) (provider.Tool
 	return provider.ToolDef{}, false
 }
 
-func appAPINotLoadedResult(call tool.Call) tool.Result {
+func pluginAPINotLoadedResult(call tool.Call) tool.Result {
 	payload := map[string]any{
 		"ok":      false,
-		"reason":  "app_not_loaded",
+		"reason":  "plugin_not_loaded",
 		"tool":    call.Name,
-		"message": "load the target App with builtin_app_load before using its API tools",
+		"message": "load the target plugin with builtin_plugin_load before using its API tools",
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{
@@ -3281,7 +3281,7 @@ func (e *Engine) promoteQueuedForRun(sessionID string) (*store.PromoteQueuedInpu
 	}
 
 	runtimeID := e.takeQueuedRuntimeLocked(sessionID, res.Input.ClientMessageID)
-	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
+	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), runtimeID))
 	active := newActiveTurn(res.Turn.ID, cancel)
 	e.running[sessionID] = active
 	e.mu.Unlock()
