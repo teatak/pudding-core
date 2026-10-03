@@ -46,6 +46,15 @@ func (s *Server) studioItemError(c *cart.Context, err error) error {
 		c.JSON(http.StatusConflict, map[string]string{"error": "content_conflict", "currentHash": conflict.CurrentHash})
 		return nil
 	}
+	var cellConflict *store.TableCellConflict
+	if errors.As(err, &cellConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "cell_conflict", "rowID": cellConflict.RowID, "columnID": cellConflict.ColumnID})
+		return nil
+	}
+	var invalidTable *store.InvalidTable
+	if errors.As(err, &invalidTable) {
+		return badRequest(c, invalidTable.Error())
+	}
 	var invalid *store.InvalidDocument
 	if errors.As(err, &invalid) {
 		return badRequest(c, invalid.Error())
@@ -77,14 +86,14 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 }
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
-		Name            string `json:"name"`
-		Kind            string `json:"kind"`
-		Body            string `json:"body,omitempty"`
-		SourceSessionID string `json:"sourceSessionID,omitempty"`
-		Icon            string `json:"icon,omitempty"`
-		IconColor       string `json:"iconColor,omitempty"`
+		Name            string          `json:"name"`
+		Kind            string          `json:"kind"`
+		Body            json.RawMessage `json:"body,omitempty"`
+		SourceSessionID string          `json:"sourceSessionID,omitempty"`
+		Icon            string          `json:"icon,omitempty"`
+		IconColor       string          `json:"iconColor,omitempty"`
 	}
-	if err := decodeDocumentRequest(c, &req); err != nil {
+	if err := decodeNativeContentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -94,11 +103,11 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if !validItemAppearance(req.Icon, req.IconColor) {
 		return badRequest(c, "invalid item appearance")
 	}
-	if req.Kind != store.StudioItemKindDoc && req.Kind != store.StudioItemKindWidget {
-		return badRequest(c, "kind must be doc or widget")
+	if req.Kind != store.StudioItemKindDoc && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindTable {
+		return badRequest(c, "kind must be doc, table or widget")
 	}
-	if req.Kind == store.StudioItemKindWidget && req.Body != "" {
-		return badRequest(c, "widget cannot have a document body")
+	if req.Kind == store.StudioItemKindWidget && len(req.Body) > 0 {
+		return badRequest(c, "widget cannot have a content body")
 	}
 	now := time.Now().UTC()
 	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
@@ -107,7 +116,27 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		if w.Icon == "" {
 			w.Icon = "file-text"
 		}
-		_, err = s.store.CreateDocument(c.Request.Context(), w, req.Body, store.ContentAuthor{Kind: "user"})
+		var body string
+		if len(req.Body) > 0 {
+			if err := json.Unmarshal(req.Body, &body); err != nil {
+				return badRequest(c, "document body must be a string")
+			}
+		}
+		_, err = s.store.CreateDocument(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
+		if err == nil {
+			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
+		}
+	} else if req.Kind == store.StudioItemKindTable {
+		body := store.TableBody{Columns: []store.TableColumn{}, Rows: []store.TableRow{}}
+		if len(req.Body) > 0 {
+			if err := widget.DecodeStrict(req.Body, &body); err != nil {
+				return badRequest(c, err.Error())
+			}
+		}
+		if w.Icon == "" {
+			w.Icon = "table"
+		}
+		_, err = s.store.CreateTable(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
@@ -198,7 +227,7 @@ func (s *Server) getStudioItemRevision(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if w.Kind == store.StudioItemKindDoc {
+	if w.Kind == store.StudioItemKindDoc || w.Kind == store.StudioItemKindTable {
 		c.JSON(http.StatusOK, map[string]any{"kind": w.Kind, "revision": r})
 		return nil
 	}

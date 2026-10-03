@@ -57,3 +57,30 @@ export type DocumentWrite = {
   clientRequestID: string; expectedHash?: string; body?: string;
   edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean;
 };
+
+export const tableCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
+export const tableColumn = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(200),
+  type: z.enum(["text", "number", "date", "select", "checkbox", "link"]),
+  options: z.array(z.string()).optional(),
+}).strict();
+export const tableRow = z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), cells: z.record(z.string(), tableCell) }).strict();
+export const tableBody = z.object({ columns: z.array(tableColumn), rows: z.array(tableRow) }).strict();
+export const tableContent = z.object({ itemID: z.string(), body: tableBody, contentHash: itemHash, revisionID: itemHash });
+export const tableOperation = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set_cell"), rowID: z.string(), columnID: z.string(), value: tableCell, expected: tableCell.optional() }).strict(),
+  z.object({ kind: z.literal("add_row"), row: tableRow, beforeID: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("delete_row"), rowID: z.string() }).strict(),
+  z.object({ kind: z.literal("move_row"), rowID: z.string(), beforeID: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("add_column"), column: tableColumn, beforeID: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("update_column"), columnID: z.string(), column: tableColumn }).strict(),
+  z.object({ kind: z.literal("delete_column"), columnID: z.string() }).strict(),
+  z.object({ kind: z.literal("move_column"), columnID: z.string(), beforeID: z.string().optional() }).strict(),
+]);
+export type TableCell = z.infer<typeof tableCell>;
+export type TableColumn = z.infer<typeof tableColumn>;
+export type TableRow = z.infer<typeof tableRow>;
+export type TableBody = z.infer<typeof tableBody>;
+export type TableContent = z.infer<typeof tableContent>;
+export type TableOperation = z.infer<typeof tableOperation>;
+export type TableWrite = { clientRequestID: string; operations?: TableOperation[]; restoreRevision?: string; expectedHash?: string };

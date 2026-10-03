@@ -40,7 +40,7 @@ func validateContentAuthor(ctx context.Context, tx *sql.Tx, author store.Content
 			return nil
 		}
 	}
-	return &store.InvalidDocument{Message: "invalid document author"}
+	return &store.InvalidDocument{Message: "invalid content author"}
 }
 
 func (s *Store) CreateDocument(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor) (*store.DocumentContent, error) {
@@ -63,7 +63,7 @@ func (s *Store) CreateDocument(ctx context.Context, item *store.StudioItem, body
 			return err
 		}
 		out = &store.DocumentContent{ItemID: item.ID, Body: body, ContentHash: hash}
-		return saveDocumentTx(ctx, tx, out, store.DocumentWrite{ClientRequestID: "create", Author: author}, "")
+		return saveNativeContentTx(ctx, tx, out, store.DocumentWrite{ClientRequestID: "create", Author: author}, "")
 	})
 	return out, err
 }
@@ -148,7 +148,7 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 			return err
 		}
 		out = &store.DocumentContent{ItemID: id, Body: body, ContentHash: store.DocumentHash(body), RevisionID: current.RevisionID}
-		if err := saveDocumentTx(ctx, tx, out, in, requestHash); err != nil {
+		if err := saveNativeContentTx(ctx, tx, out, in, requestHash); err != nil {
 			return err
 		}
 		if in.PreserveOnly {
@@ -161,7 +161,7 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 
 // Each debounced human save seals that editing pause. AI writes and restores
 // always append a version, even when restoring a previously seen body.
-func saveDocumentTx(ctx context.Context, tx *sql.Tx, d *store.DocumentContent, in store.DocumentWrite, requestHash string) error {
+func saveNativeContentTx(ctx context.Context, tx *sql.Tx, d *store.DocumentContent, in store.DocumentWrite, requestHash string) error {
 	parent := d.RevisionID
 	revision := store.DocumentHash(d.ItemID + "\x00" + parent + "\x00" + in.ClientRequestID + "\x00" + d.ContentHash)
 	now := unixMS(time.Now().UTC())

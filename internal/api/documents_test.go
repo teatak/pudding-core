@@ -52,5 +52,5 @@ func TestDocumentAPIAndWidgetBoundary(t *testing.T) {
 		t.Fatal("asset changed")
 	}
 	call("GET", path+"/assets/not-a-hash.png", nil, 400)
-	call("POST", "/studio/items", []byte(`{"kind":"table","name":"Not yet"}`), 400)
+	call("POST", "/studio/items", []byte(`{"kind":"unsupported","name":"Invalid kind"}`), 400)
 }

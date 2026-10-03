@@ -42,6 +42,7 @@ type StudioItemRevision struct {
 }
 type StudioStore interface {
 	DocumentStore
+	TableStore
 	ListWidgetLinks(context.Context, string) ([]*WidgetLink, error)
 	PutWidgetLink(context.Context, *WidgetLink, int64) error
 	DeleteWidgetLink(context.Context, string, string, int64) error

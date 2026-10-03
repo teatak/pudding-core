@@ -18,6 +18,10 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	respond := func(value any, err error) tool.Result {
 		if err != nil {
 			value = map[string]any{"error": err.Error()}
+			var cellConflict *store.TableCellConflict
+			if errors.As(err, &cellConflict) {
+				value = map[string]any{"error": "cell_conflict", "rowID": cellConflict.RowID, "columnID": cellConflict.ColumnID}
+			}
 			var conflict *store.ContentConflict
 			if errors.As(err, &conflict) {
 				value = map[string]any{"error": "content_conflict", "currentHash": conflict.CurrentHash}
@@ -32,11 +36,14 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	if err != nil {
 		return respond(nil, err)
 	}
-	if call.Name != tool.StudioList && call.Name != tool.DocCreate && args.ItemID == "" {
+	if call.Name != tool.StudioList && call.Name != tool.DocCreate && call.Name != tool.TableCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
 	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}
 	switch call.Name {
+	case tool.TableCreate, tool.TableRead, tool.TableUpdate:
+		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
+		return respond(result, err)
 	case tool.StudioList:
 		items, err := e.store.ListStudioItems(ctx)
 		if err != nil {

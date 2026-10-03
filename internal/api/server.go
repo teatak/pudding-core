@@ -177,7 +177,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 
 	app.Route("/studio/items").GET(s.listStudioItems).POST(s.createStudioItem)
 	app.Route("/studio/items/:itemID").GET(s.getStudioItem).PATCH(s.renameStudioItem).DELETE(s.deleteStudioItem)
-	app.Route("/studio/items/:itemID/content").GET(s.getDocument).PUT(s.writeDocument)
+	app.Route("/studio/items/:itemID/content").GET(s.getStudioContent).PUT(s.writeDocument)
+	app.Route("/studio/items/:itemID/operations").POST(s.writeTable)
 	app.Route("/studio/items/:itemID/assets").POST(s.uploadDocumentAsset)
 	app.Route("/studio/items/:itemID/assets/:filename").GET(s.getDocumentAsset)
 	app.Route("/studio/items/:itemID/appearance").PATCH(s.patchStudioItemAppearance)

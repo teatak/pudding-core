@@ -3,5 +3,12 @@
   "maxAssetBytes": 10485760,
   "maxDocumentEdits": 100,
   "maxReadBytes": 65536,
-  "autosaveMS": 1000
+  "autosaveMS": 1000,
+  "maxTableRows": 10000,
+  "maxTableColumns": 100,
+  "maxTableBytes": 10485760,
+  "maxTableCellBytes": 65536,
+  "maxTableOperations": 1000,
+  "maxTableReadRows": 200,
+  "maxTableReadBytes": 1048576
 }

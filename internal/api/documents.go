@@ -15,15 +15,15 @@ import (
 	"github.com/teatak/pudding-core/internal/widget"
 )
 
-func decodeDocumentRequest(c *cart.Context, target any) error {
+func decodeNativeContentRequest(c *cart.Context, target any) error {
 	// JSON escaping may expand each UTF-8 byte to six ASCII bytes.
-	limit := contracts.Studio().MaxDocumentBytes*6 + 65536
+	limit := max(contracts.Studio().MaxDocumentBytes, contracts.Studio().MaxTableBytes)*6 + 65536
 	data, err := io.ReadAll(io.LimitReader(c.Request.Body, int64(limit+1)))
 	if err != nil {
 		return err
 	}
 	if len(data) > limit {
-		return errors.New("document request too large")
+		return errors.New("content request too large")
 	}
 	return widget.DecodeStrict(data, target)
 }
@@ -40,7 +40,7 @@ func (s *Server) getDocument(c *cart.Context) error {
 func (s *Server) writeDocument(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	var in store.DocumentWrite
-	if err := decodeDocumentRequest(c, &in); err != nil {
+	if err := decodeNativeContentRequest(c, &in); err != nil {
 		return badRequest(c, err.Error())
 	}
 	in.Author = store.ContentAuthor{Kind: "user"}

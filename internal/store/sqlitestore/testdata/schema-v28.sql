@@ -387,10 +387,3 @@ CREATE TABLE widget_links (
  created_at INTEGER NOT NULL,
  UNIQUE(item_id,left_entity,right_entity)
 );
-
-CREATE TABLE studio_table_ids (
-    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
-    entity_kind TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    PRIMARY KEY (item_id, entity_kind, entity_id)
-);

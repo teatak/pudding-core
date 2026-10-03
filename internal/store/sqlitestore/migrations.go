@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 28
+	currentSchemaVersion       = 29
 )
 
 var (
@@ -33,6 +33,10 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	29: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE studio_table_ids (item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL, PRIMARY KEY (item_id, entity_kind, entity_id));`)
+		return err
+	},
 	28: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE studio_item_content (
     item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
@@ -918,7 +922,7 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 // The shipped v24 layout is also recognized when an existing database has a
-// missing user_version. The development-only v25–v28 layouts are not inferred.
+// missing user_version. The development-only v25–v29 layouts are not inferred.
 var schemaV24Contract = schemaContract{tables: map[string][]string{
 	"canvas_items":        {"session_id", "id", "item_json", "source_saved_item_id", "saved_dirty"},
 	"canvas_saved_items":  {"id", "item_json", "window_json"},
@@ -935,6 +939,7 @@ var currentSchemaContract = func() schemaContract {
 		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
 		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
 		"studio_item_content":   {"item_id", "body", "content_hash"},
+		"studio_table_ids":      {"item_id", "entity_kind", "entity_id"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
 		"studio_item_saves":     {"item_id", "client_request_id", "hash", "request_hash"},
