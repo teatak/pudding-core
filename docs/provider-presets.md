@@ -62,7 +62,7 @@ Free 保持列表首项，输出上限由实际路由到的模型决定，预设
 Chat Completions、Responses、Anthropic 和 Gemini 的模型请求统一携带 Pudding 应用标识，直连 OpenRouter 或经 BuzzHive 转发时均可用于归属统计，无需修改已保存的提供方配置：
 
 ```http
-HTTP-Referer: https://x-t.top
+HTTP-Referer: https://teatak.com
 X-OpenRouter-Title: Pudding
 X-OpenRouter-Categories: programming-app,personal-agent
 ```

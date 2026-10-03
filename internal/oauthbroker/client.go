@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const DefaultBaseURL = "https://x-t.top"
+const DefaultBaseURL = "https://teatak.com"
 
 type Client struct {
 	baseURL    string
