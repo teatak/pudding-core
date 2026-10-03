@@ -3,6 +3,7 @@ package tool
 import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
+	StudioList: plugin.BuiltinStudioID, StudioOpen: plugin.BuiltinStudioID, DocCreate: plugin.BuiltinStudioID, DocRead: plugin.BuiltinStudioID, DocEdit: plugin.BuiltinStudioID,
 	CollaborationList:     plugin.BuiltinCollaborationID,
 	CollaborationDispatch: plugin.BuiltinCollaborationID,
 	CollaborationSend:     plugin.BuiltinCollaborationID,

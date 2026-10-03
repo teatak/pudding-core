@@ -1,0 +1,7 @@
+{
+  "maxDocumentBytes": 2097152,
+  "maxAssetBytes": 10485760,
+  "maxDocumentEdits": 100,
+  "maxReadBytes": 65536,
+  "autosaveMS": 1000
+}

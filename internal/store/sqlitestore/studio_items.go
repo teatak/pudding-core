@@ -52,21 +52,22 @@ func (s *Store) GetStudioItem(ctx context.Context, id string) (*store.StudioItem
 	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, id))
 }
 func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		var session any
-		if w.SourceSessionID != "" {
-			if _, err := getSessionTx(ctx, tx, w.SourceSessionID); err != nil {
-				return err
-			}
-			session = w.SourceSessionID
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO studio_items(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Kind, w.Name, w.Icon, w.IconColor, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
-		return err
-	})
+	err := s.tx(ctx, func(tx *sql.Tx) error { return createStudioItemTx(ctx, tx, w) })
 	if err != nil {
 		return nil, err
 	}
 	return s.GetStudioItem(ctx, w.ID)
+}
+func createStudioItemTx(ctx context.Context, tx *sql.Tx, w *store.StudioItem) error {
+	var session any
+	if w.SourceSessionID != "" {
+		if _, err := getSessionTx(ctx, tx, w.SourceSessionID); err != nil {
+			return err
+		}
+		session = w.SourceSessionID
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO studio_items(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Kind, w.Name, w.Icon, w.IconColor, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
+	return err
 }
 func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expected int64) (*store.StudioItem, error) {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -154,13 +155,21 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 	r := &store.StudioItemRevision{}
 	var created int64
 	var receipt string
-	if err := row.Scan(&r.ItemID, &r.Hash, &r.ParentRevision, &r.ClientRequestID, &created, &receipt); err != nil {
+	var body sql.NullString
+	var author store.ContentAuthor
+	if err := row.Scan(&r.ItemID, &r.Hash, &r.ParentRevision, &r.ClientRequestID, &created, &receipt, &body, &r.ContentHash, &author.Kind, &author.SessionID, &author.TurnID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, err
 	}
 	r.CreatedAt = time.UnixMilli(created).UTC()
+	if body.Valid {
+		r.Body = &body.String
+	}
+	if author.Kind != "" {
+		r.Author = &author
+	}
 
 	if receipt != "" {
 		r.BuildReceipt = json.RawMessage(receipt)
@@ -170,7 +179,7 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*store.StudioItemRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,hash`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,NULL,content_hash,author_kind,author_session_id,author_turn_id FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,rowid DESC`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +190,7 @@ func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*stor
 		if err != nil {
 			return nil, err
 		}
+		r.Body = nil
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -188,7 +198,7 @@ func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*stor
 func (s *Store) GetStudioItemRevision(ctx context.Context, id, hash string) (*store.StudioItemRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
+	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
 }
 func (s *Store) PutWidgetBuildReceipt(ctx context.Context, id, hash string, receipt json.RawMessage) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {

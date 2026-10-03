@@ -346,24 +346,13 @@ CREATE TABLE studio_item_revisions (
     client_request_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     build_receipt TEXT NOT NULL,
-    content TEXT,
-    content_hash TEXT NOT NULL DEFAULT '',
-    author_kind TEXT NOT NULL DEFAULT '',
-    author_session_id TEXT NOT NULL DEFAULT '',
-    author_turn_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(item_id, hash),
     UNIQUE(item_id, client_request_id)
-);
-CREATE TABLE studio_item_content (
-    item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
-    body TEXT NOT NULL,
-    content_hash TEXT NOT NULL
 );
 CREATE TABLE studio_item_saves (
     item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
     client_request_id TEXT NOT NULL,
     hash TEXT NOT NULL,
-    request_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(item_id, client_request_id)
 );
 

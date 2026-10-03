@@ -25,6 +25,9 @@ export const studioItemRevision = z.object({
   parentRevision: z.string(),
   clientRequestID: z.string(),
   createdAt: z.string(),
+  contentHash: itemHash.optional(),
+  body: z.string().optional(),
+  author: z.object({ kind: z.enum(["user", "session"]), sessionID: z.string().optional(), turnID: z.string().optional() }).optional(),
   buildReceipt: z
     .object({
       revisionHash: itemHash,
@@ -44,3 +47,13 @@ export const studioItemRevisionsResponse = z.object({
 });
 export type StudioItem = z.infer<typeof studioItem>;
 export type StudioItemRevision = z.infer<typeof studioItemRevision>;
+
+export const documentContent = z.object({
+  itemID: z.string(), body: z.string(), contentHash: itemHash, revisionID: itemHash,
+});
+export type DocumentContent = z.infer<typeof documentContent>;
+export type DocumentEdit = { old: string; new: string };
+export type DocumentWrite = {
+  clientRequestID: string; expectedHash?: string; body?: string;
+  edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean;
+};

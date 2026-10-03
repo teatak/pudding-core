@@ -65,9 +65,9 @@ func TestStudioItemAppearanceCanBeCreatedAndChanged(t *testing.T) {
 		}
 		return out.Body.Bytes()
 	}
-	call("POST", "/studio/items", map[string]any{"name": "Invalid", "icon": "Bad/Icon"}, 400)
+	call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Invalid", "icon": "Bad/Icon"}, 400)
 	var resource store.StudioItem
-	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"name": "Weather", "icon": "cloud-sun", "iconColor": "blue"}, 201), &resource); err != nil {
+	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Weather", "icon": "cloud-sun", "iconColor": "blue"}, 201), &resource); err != nil {
 		t.Fatal(err)
 	}
 	if resource.Icon != "cloud-sun" || resource.IconColor != "blue" {
@@ -94,7 +94,7 @@ func TestStudioItemAppearanceCanBeCreatedAndChanged(t *testing.T) {
 	// Changing the appearance is not new work: an item created later stays first.
 	time.Sleep(2 * time.Millisecond)
 	var later store.StudioItem
-	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"name": "Later"}, 201), &later); err != nil {
+	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Later"}, 201), &later); err != nil {
 		t.Fatal(err)
 	}
 	call("PATCH", path+"/appearance", map[string]any{"expectedRevision": resource.Revision, "icon": "cloud-sun", "iconColor": "blue"}, 200)
@@ -154,7 +154,7 @@ func TestWidgetRevisionChangesKeepUnchangedFilesAndReportConflicts(t *testing.T)
 		return out.Body.Bytes()
 	}
 	var w store.StudioItem
-	_ = json.Unmarshal(call("POST", "/studio/items", map[string]any{"name": "Report"}, 201), &w)
+	_ = json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Report"}, 201), &w)
 	base := "/studio/items/" + w.ID
 	files := map[string]string{
 		"widget.json":   `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{},"operations":{}}`,
@@ -264,7 +264,7 @@ func TestWidgetQueryUsesAuthorizedPluginConnection(t *testing.T) {
 		t.Fatal("missing token accepted")
 	}
 	var w store.StudioItem
-	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"name": "Fixture"}, 201), &w); err != nil {
+	if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Fixture"}, 201), &w); err != nil {
 		t.Fatal(err)
 	}
 	base := "/studio/items/" + w.ID
@@ -337,7 +337,7 @@ func TestWidgetActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 		return out.Body.Bytes()
 	}
 	var w store.StudioItem
-	_ = json.Unmarshal(call("POST", "/studio/items", map[string]any{"name": "Actions"}, 201), &w)
+	_ = json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Actions"}, 201), &w)
 	base := "/studio/items/" + w.ID
 	pkg := widget.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "widget.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"pluginID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
 	_ = json.Unmarshal(saveWidgetTestFiles(t, call, base, "save", pkg.Files), &w)

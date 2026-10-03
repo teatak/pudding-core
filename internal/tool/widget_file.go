@@ -34,8 +34,12 @@ func (r *BuiltinRunner) widgetDraftForCall(call Call, id string) (widget.Draft, 
 	if r.widgetStore == nil {
 		return widget.Draft{}, "", errors.New("widget store is unavailable")
 	}
-	if _, err := r.widgetStore.GetStudioItem(context.Background(), id); err != nil {
+	item, err := r.widgetStore.GetStudioItem(context.Background(), id)
+	if err != nil {
 		return widget.Draft{}, "", err
+	}
+	if item.Kind != store.StudioItemKindWidget {
+		return widget.Draft{}, "", errors.New("widget kind required")
 	}
 	root, err := widget.DraftRoot(r.homeDir, id)
 	if err != nil {

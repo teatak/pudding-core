@@ -32,6 +32,7 @@ User Mentions:
 
 - The user points at a specific item with `@<type>/<id>(<name>)`. Use the exact ID; the parenthesized name is display text only, may be absent, and never replaces the ID.
 - `@plugin/<plugin id>` is that plugin from Available Plugins: `builtin_plugin_load(plugin_id="<plugin id>")`. `@skill/<skill id>` is that global skill: `builtin_skill_read(skill_id="<skill id>")`. `@skill/<plugin id>/<skill id>` is that plugin's skill: `builtin_plugin_load(plugin_id="<plugin id>", skill_id="<skill id>")`. Capability and connection rules from Available Plugins still apply.
+- `@doc/<id>` is an existing native Studio document. Load the `studio` plugin, read it explicitly, and edit using its document tools in Chat mode. `@widget/<id>` is a widget; Studio can open it, while source changes use `widget-authoring` in Code mode.
 - Other types are defined by the plugin that provides them, such as `@widget/<widget id>` in the Widget Authoring plugin description.
 - Earlier messages may contain `@app/<id>` and `@canvas/<id>`: they mean the plugin and the widget with the same ID.
 

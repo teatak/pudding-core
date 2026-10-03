@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 27
+	currentSchemaVersion       = 28
 )
 
 var (
@@ -33,6 +33,20 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	28: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE studio_item_content (
+    item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+);
+ALTER TABLE studio_item_revisions ADD COLUMN content TEXT;
+ALTER TABLE studio_item_revisions ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE studio_item_revisions ADD COLUMN author_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE studio_item_revisions ADD COLUMN author_session_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE studio_item_revisions ADD COLUMN author_turn_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE studio_item_saves ADD COLUMN request_hash TEXT NOT NULL DEFAULT '';`)
+		return err
+	},
 	27: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
 	26: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE canvas_resources ADD COLUMN icon TEXT NOT NULL DEFAULT '';
@@ -919,10 +933,11 @@ var currentSchemaContract = func() schemaContract {
 		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":   {"parent_turn_id"},
 		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
-		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt"},
+		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
+		"studio_item_content":   {"item_id", "body", "content_hash"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
-		"studio_item_saves":     {"item_id", "client_request_id", "hash"},
+		"studio_item_saves":     {"item_id", "client_request_id", "hash", "request_hash"},
 		"scheduled_tasks":       {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
 		"scheduled_task_runs":   {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
 		"computer_app_grants":   {"session_id", "app_id", "created_at"},

@@ -1695,9 +1695,9 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 		return nil, err
 	}
 	runnerDefs := defs
-	defs = nil
+	defs = tool.StudioDefinitions()
 	for _, def := range runnerDefs {
-		if !tool.IsCollaborationTool(def.Name) {
+		if !tool.IsCollaborationTool(def.Name) && !tool.IsStudioTool(def.Name) {
 			defs = append(defs, def)
 		}
 	}
@@ -2201,6 +2201,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	if tool.IsStudioTool(call.Name) {
+		return e.executeStudio(ctx, sessionID, turnID, call)
+	}
 	if tool.IsScheduledTaskTool(call.Name) {
 		return e.executeScheduledTask(ctx, sessionID, turnID, call)
 	}

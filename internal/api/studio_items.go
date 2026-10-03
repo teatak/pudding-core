@@ -41,6 +41,15 @@ func decodeStudioRequest(c *cart.Context, target any) error {
 	return widget.DecodeStrict(data, target)
 }
 func (s *Server) studioItemError(c *cart.Context, err error) error {
+	var conflict *store.ContentConflict
+	if errors.As(err, &conflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "content_conflict", "currentHash": conflict.CurrentHash})
+		return nil
+	}
+	var invalid *store.InvalidDocument
+	if errors.As(err, &invalid) {
+		return badRequest(c, invalid.Error())
+	}
 	if errors.Is(err, errWidgetConnectionSelectionRequired) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "connection_selection_required"})
 		return nil
@@ -69,11 +78,13 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
 		Name            string `json:"name"`
+		Kind            string `json:"kind"`
+		Body            string `json:"body,omitempty"`
 		SourceSessionID string `json:"sourceSessionID,omitempty"`
 		Icon            string `json:"icon,omitempty"`
 		IconColor       string `json:"iconColor,omitempty"`
 	}
-	if err := decodeStudioRequest(c, &req); err != nil {
+	if err := decodeDocumentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -83,8 +94,26 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if !validItemAppearance(req.Icon, req.IconColor) {
 		return badRequest(c, "invalid item appearance")
 	}
+	if req.Kind != store.StudioItemKindDoc && req.Kind != store.StudioItemKindWidget {
+		return badRequest(c, "kind must be doc or widget")
+	}
+	if req.Kind == store.StudioItemKindWidget && req.Body != "" {
+		return badRequest(c, "widget cannot have a document body")
+	}
 	now := time.Now().UTC()
-	w, err := s.store.CreateStudioItem(c.Request.Context(), &store.StudioItem{ID: store.NewID("widget"), Kind: store.StudioItemKindWidget, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now})
+	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
+	var err error
+	if req.Kind == store.StudioItemKindDoc {
+		if w.Icon == "" {
+			w.Icon = "file-text"
+		}
+		_, err = s.store.CreateDocument(c.Request.Context(), w, req.Body, store.ContentAuthor{Kind: "user"})
+		if err == nil {
+			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
+		}
+	} else {
+		w, err = s.store.CreateStudioItem(c.Request.Context(), w)
+	}
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
@@ -168,6 +197,10 @@ func (s *Server) getStudioItemRevision(c *cart.Context) error {
 	r, err := s.store.GetStudioItemRevision(c.Request.Context(), id, hash)
 	if err != nil {
 		return s.studioItemError(c, err)
+	}
+	if w.Kind == store.StudioItemKindDoc {
+		c.JSON(http.StatusOK, map[string]any{"kind": w.Kind, "revision": r})
+		return nil
 	}
 	p, err := widget.ReadPackage(s.home, id, hash)
 	if err != nil {

@@ -1,8 +1,8 @@
 # Studio item contract
 
-Protocol 8 serves Studio items under `/studio/items`. An item has a `kind`: `doc`, `table` or `widget`; this release creates widgets, LLM-authored React source packages built by Desktop. Shared client schemas live in `contracts/studio.ts` (items and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links); widget limits live in `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
+Protocol 9 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `doc` for native GFM Markdown or `widget` for LLM-authored React source packages built by Desktop. `table` is reserved and rejected by creation APIs until implemented. Shared schemas live in `contracts/studio.ts` (items, documents and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
 
-An item has an integer optimistic `revision`, immutable `headRevision` / `activeRevision` source hashes, optional `sourceSessionID`, source-slot `bindings` and `bindingVersion`. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.
+An item has an integer optimistic `revision`, a `headRevision` and optional `sourceSessionID`. Widgets additionally use `activeRevision` source hashes, source-slot `bindings` and `bindingVersion`. Document heads refer to immutable snapshot IDs; their content hash is separate. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.
 
 Every widget revision references an immutable package of `widget.json` plus `src/*.tsx`. Manifest sources name an installed plugin endpoint as `{pluginID, endpoint}`, and generated code imports `@pudding/widget`. New activation requests require a matching build receipt. Revision reads return `kind`, `revision`, `package` and `manifest`.
 
@@ -10,7 +10,8 @@ Every widget revision references an immutable package of `widget.json` plus `src
 
 All routes require the loopback startup token.
 
-- `GET/POST /studio/items`, `GET/DELETE /studio/items/{id}`, `PATCH /studio/items/{id}/appearance`.
+- `GET/POST /studio/items`, `GET/PATCH/DELETE /studio/items/{id}`, `PATCH /studio/items/{id}/appearance`. Creation accepts `kind`, `name`, optional `sourceSessionID`, and a document `body`. Rename requires `name` and `expectedRevision`.
+- `GET/PUT /studio/items/{id}/content` reads or writes a native document. `POST /studio/items/{id}/assets` stores a raw raster upload; `GET /studio/items/{id}/assets/{filename}` reads it with the startup token.
 - `POST/GET /studio/items/{id}/draft` starts or reads the persistent widget working copy, initialized from the current source head. `GET/PUT /studio/items/{id}/draft/file` reads or edits one file; writes require the previous `draftHash`, and `null` deletes. An incomplete draft is allowed. `POST /studio/items/{id}/draft/commit` validates the complete package, publishes one immutable revision and advances the source head only when it still matches the draft's base. Draft conflicts return `currentDraftHash`; source conflicts return `currentRevision` and `currentHeadRevision`. Drafts live under `<home>/studio/<id>/draft`.
 - `GET /studio/items/{id}/revisions`, `GET /studio/items/{id}/revisions/{hash}`.
 - `POST /studio/items/{id}/build-receipts`, `POST /studio/items/{id}/activate`, `PUT /studio/items/{id}/bindings`.
@@ -18,6 +19,20 @@ All routes require the loopback startup token.
 - `POST /studio/items/{id}/actions/{operationID}/prepare`, `POST /studio/items/{id}/action-runs/{actionID}/execute`, `GET /studio/items/{id}/actions`.
 - `GET/POST /studio/items/{id}/links`, `DELETE /studio/items/{id}/links/{linkID}`.
 - `POST /sessions/{id}/studio/items/{itemID}/open` opens or reuses a session mount; `GET /sessions/{id}/studio/mounts` lists them and `DELETE /sessions/{id}/studio/mounts/{mountID}` removes one mount. Global deletion removes the item from all views. Library favorites reference the item as `studio:<id>`.
+
+Document and widget operations validate the item kind. Documents do not have builds, activation, plugin bindings or widget drafts.
+
+## Native documents
+
+The working Markdown and its SHA-256 content hash live in SQLite `studio_item_content`. Each write atomically updates that body, the item head and an immutable `studio_item_revisions` snapshot with an author (`user`, or trusted session ID + turn ID). Storing the body with its versions keeps a document write in one transaction; there is no second filesystem copy of the working Markdown. Revision IDs include the parent and request ID, so restoring identical content creates a new version. Revision lists omit bodies; individual revision reads return `{kind, revision}` with `revision.body`. Deleting the origin session does not remove content or historical authorship.
+
+Writes require `clientRequestID` and exactly one of `body`, `edits` or `restoreRevision`. Full replacement and restore require `expectedHash`; stale content returns 409 `{error: "content_conflict", currentHash}`. Anchor edits resolve every `old` string against the latest body, require a unique non-overlapping match and apply atomically, so unrelated human changes remain intact. The same request ID and payload return the original write result without applying it again; reuse with different content is rejected.
+
+Desktop seals each human editing pause after 1 second; every persisted human save is already a version before a later AI edit or restore. `preserveOnly: true` archives an unsaved human body without replacing the working content, then returns the current body for the load-latest conflict action. AI tools cannot use this option. Saving the local body after a conflict explicitly compares against a fresh hash; both authors' versions remain available.
+
+`contracts/studio.json` bounds a document at 2 MiB UTF-8, a raster asset at 10 MiB and one edit call at 100 anchors. Tool reads accept Unicode character offsets and limits (default 16000, at most 16384 characters / 64 KiB) and return `nextOffset` when needed. PNG, JPEG, GIF and WebP uploads are detected from their bytes and atomically stored at `<home>/studio/<id>/content/assets/<sha256>.<ext>`. Markdown uses relative `assets/...` paths. Desktop fetches these authenticated assets as blobs, suppresses remote image requests and never executes raw HTML. Export returns the Markdown source unchanged.
+
+The optional Core `studio` plugin exposes `builtin_studio_list`, `builtin_studio_open`, `builtin_doc_create`, `builtin_doc_read` and `builtin_doc_edit` in Chat mode. Tools execute in Core with explicit session and turn scope, without Desktop or per-write approval; scheduled turns and child sessions use the same path. Creation opens a mount and returns `itemID`, `mountID`, `contentHash` and `revisionID`. Content is read explicitly through tools, not injected into system instructions. There is no AI deletion tool. Widget source editing remains a Code-mode capability of `widget-authoring`.
 
 ## Queries and actions
 
@@ -40,5 +55,7 @@ Schema v27 renames canvases to Studio items and Apps to plugins in one transacti
 - Packages are installed before the SQL commit and are reused on retry. A failure rolls back the database, and the whole-database upgrade backup is kept. `<home>/canvases` stays in place as the source matching that backup.
 
 Plugin packages, connections and enablement move from the App layout at daemon start (see [Plugins](plugins.md)). Canonical messages are never rewritten: model requests read stored `builtin_app_load` results and `app_skill` references under the current plugin names, and keep stored `app_mcp__*` and `canvas_*` calls under the names those tools have now.
+
+Schema v28 adds `studio_item_content`, document body/hash/authorship fields on revisions, and a request fingerprint on saves. Existing widgets and their versions remain unchanged. Migration tests start from v27, inject a transactional failure, verify rollback and retry, and check persisted document versions after reopening the database.
 
 Development snapshots produced by the abandoned archive migration can be restored with `scripts/restore-canvas-dev` against a copied v26 database; the next start upgrades the result. This recovery is not part of daemon startup.

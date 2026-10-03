@@ -36,8 +36,12 @@ type StudioItemRevision struct {
 	ClientRequestID string          `json:"clientRequestID"`
 	CreatedAt       time.Time       `json:"createdAt"`
 	BuildReceipt    json.RawMessage `json:"buildReceipt,omitempty"`
+	ContentHash     string          `json:"contentHash,omitempty"`
+	Body            *string         `json:"body,omitempty"`
+	Author          *ContentAuthor  `json:"author,omitempty"`
 }
 type StudioStore interface {
+	DocumentStore
 	ListWidgetLinks(context.Context, string) ([]*WidgetLink, error)
 	PutWidgetLink(context.Context, *WidgetLink, int64) error
 	DeleteWidgetLink(context.Context, string, string, int64) error
