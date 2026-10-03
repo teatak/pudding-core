@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 29
+	currentSchemaVersion       = 30
 )
 
 var (
@@ -33,6 +33,11 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 var schemaMigrations = map[int]schemaMigration{
+	30: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE studio_items ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX studio_items_archived_at ON studio_items(archived_at);`)
+		return err
+	},
 	29: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE studio_table_ids (item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL, PRIMARY KEY (item_id, entity_kind, entity_id));`)
 		return err
@@ -922,7 +927,7 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 // The shipped v24 layout is also recognized when an existing database has a
-// missing user_version. The development-only v25–v29 layouts are not inferred.
+// missing user_version. The development-only v25–v30 layouts are not inferred.
 var schemaV24Contract = schemaContract{tables: map[string][]string{
 	"canvas_items":        {"session_id", "id", "item_json", "source_saved_item_id", "saved_dirty"},
 	"canvas_saved_items":  {"id", "item_json", "window_json"},
@@ -936,7 +941,7 @@ var currentSchemaContract = func() schemaContract {
 		"session_children":      {"child_session_id", "parent_session_id"},
 		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":   {"parent_turn_id"},
-		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at"},
+		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
 		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
 		"studio_item_content":   {"item_id", "body", "content_hash"},
 		"studio_table_ids":      {"item_id", "entity_kind", "entity_id"},
@@ -967,6 +972,7 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["projects"] = append(out.tables["projects"], "last_activity_at")
 	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_studio", "library_favorites_web")
+	out.indexes = append(out.indexes, "studio_items_archived_at")
 	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")

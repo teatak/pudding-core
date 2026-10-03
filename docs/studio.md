@@ -1,6 +1,6 @@
 # Studio item contract
 
-Protocol 11 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `doc` for native GFM Markdown, `table` for typed tabular data, or `widget` for LLM-authored React source packages built by Desktop. Shared schemas live in `contracts/studio.ts` (items, documents, tables and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
+Protocol 12 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `doc` for native GFM Markdown, `table` for typed tabular data, or `widget` for LLM-authored React source packages built by Desktop. Shared schemas live in `contracts/studio.ts` (items, documents, tables and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
 
 An item has an integer optimistic `revision`, a `headRevision` and optional `sourceSessionID`. Widgets additionally use `activeRevision` source hashes, source-slot `bindings` and `bindingVersion`. Document and table heads refer to immutable snapshot IDs; their content hash is separate. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.
 
@@ -21,6 +21,12 @@ All routes require the loopback startup token.
 - `POST /sessions/{id}/studio/items/{itemID}/open` opens or reuses a session mount; `GET /sessions/{id}/studio/mounts` lists them and `DELETE /sessions/{id}/studio/mounts/{mountID}` removes one mount. Global deletion removes the item from all views. Library favorites reference the item as `studio:<id>`.
 
 All native content and widget operations validate the item kind. Documents and tables do not have builds, activation, plugin bindings or widget drafts.
+
+## Archives
+
+Protocol 12 / schema v30 adds `archivedAt` to all three item kinds. `GET /studio/items` lists active items; `?scope=archived` lists archived items. `POST /studio/items/{id}/archive` and `/restore` require `expectedRevision`; changing state increments the metadata revision without changing content history or `updatedAt`. Repeating the same state is idempotent and never extends retention. Archived items are unavailable to normal reads/writes, tools, active lists and session mounts. Restore preserves content, versions, drafts, bindings, mounts and favorites.
+
+The daemon checks at startup and hourly, permanently deleting items archived for at least 30 days. `DELETE /studio/items/{id}` with `expectedRevision` is immediate permanent deletion. Cleanup first records an inaccessible tombstone, removes `<home>/studio/<id>` (including assets and widget files), then deletes the database row with cascading dependent history and references. Filesystem failures leave the tombstone for the next cleanup; restoring or changing the item after a cleanup scan invalidates its revision and prevents stale deletion. Desktop normal removal uses archive without confirmation after saving local drafts; only permanent deletion asks for confirmation.
 
 ## Native documents
 

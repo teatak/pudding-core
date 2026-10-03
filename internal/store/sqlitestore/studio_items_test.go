@@ -139,7 +139,7 @@ func TestStudioItemMetadataChangesKeepListOrder(t *testing.T) {
 	}
 	order := func() string {
 		t.Helper()
-		list, err := s.ListStudioItems(ctx)
+		list, err := s.ListStudioItems(ctx, store.StudioItemsActive)
 		if err != nil {
 			t.Fatal(err)
 		}

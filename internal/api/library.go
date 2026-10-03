@@ -31,7 +31,7 @@ func (s *Server) listLibrary(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	saved, err := s.store.ListStudioItems(ctx)
+	saved, err := s.store.ListStudioItems(ctx, store.StudioItemsActive)
 	if err != nil {
 		return s.fail(c, err)
 	}

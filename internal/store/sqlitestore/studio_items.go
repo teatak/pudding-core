@@ -10,13 +10,13 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at`
+const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at`
 
 func scanStudioItem(row messageScanner) (*store.StudioItem, error) {
 	w := &store.StudioItem{}
 	var bindings string
-	var created, updated int64
-	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated); err != nil {
+	var created, updated, archived int64
+	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated, &archived); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -26,12 +26,26 @@ func scanStudioItem(row messageScanner) (*store.StudioItem, error) {
 		return nil, err
 	}
 	w.CreatedAt, w.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
+	if archived > 0 {
+		at := time.UnixMilli(archived).UTC()
+		w.ArchivedAt = &at
+	}
 	return w, nil
 }
-func (s *Store) ListStudioItems(ctx context.Context) ([]*store.StudioItem, error) {
+func (s *Store) ListStudioItems(ctx context.Context, scope store.StudioItemListScope) ([]*store.StudioItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE deleted=0 ORDER BY updated_at DESC,id`)
+	where, order := "archived_at=0", "updated_at DESC,id"
+	if scope == store.StudioItemsArchived {
+		where, order = "archived_at>0", "archived_at DESC,id"
+	} else if scope != store.StudioItemsActive {
+		return nil, errors.New("invalid studio item scope")
+	}
+	return s.listStudioItems(ctx, `deleted=0 AND `+where+` ORDER BY `+order)
+}
+
+func (s *Store) listStudioItems(ctx context.Context, predicate string, args ...any) ([]*store.StudioItem, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE `+predicate, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +63,7 @@ func (s *Store) ListStudioItems(ctx context.Context) ([]*store.StudioItem, error
 func (s *Store) GetStudioItem(ctx context.Context, id string) (*store.StudioItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, id))
+	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, id))
 }
 func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem) (*store.StudioItem, error) {
 	err := s.tx(ctx, func(tx *sql.Tx) error { return createStudioItemTx(ctx, tx, w) })
@@ -84,7 +98,7 @@ func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expec
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE studio_items SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,deleted=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.Deleted, w.ID, expected)
+		result, err := tx.ExecContext(ctx, `UPDATE studio_items SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0 AND archived_at=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.ID, expected)
 		if err != nil {
 			return err
 		}
@@ -95,17 +109,10 @@ func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expec
 		if count != 1 {
 			return store.ErrStudioItemConflict
 		}
-		if w.Deleted {
-			_, err = tx.ExecContext(ctx, `DELETE FROM studio_mounts WHERE item_id=?`, w.ID)
-			return err
-		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
-	}
-	if w.Deleted {
-		return w, nil
 	}
 	return s.GetStudioItem(ctx, w.ID)
 }
@@ -117,7 +124,7 @@ func (s *Store) SaveStudioItemRevision(ctx context.Context, r *store.StudioItemR
 	return s.GetStudioItem(ctx, r.ItemID)
 }
 func saveStudioItemRevisionTx(ctx context.Context, tx *sql.Tx, r *store.StudioItemRevision, baseHash string) error {
-	current, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, r.ItemID))
+	current, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, r.ItemID))
 	if err != nil {
 		return err
 	}

@@ -58,7 +58,7 @@ func TestStudioChatToolsWithoutDesktop(t *testing.T) {
 	}
 	json.Unmarshal([]byte(result.Content), &created)
 	run(tool.DocCreate, "create", map[string]any{"name": "Notes", "body": "甲\n\n乙"})
-	items, _ := st.ListStudioItems(ctx)
+	items, _ := st.ListStudioItems(ctx, store.StudioItemsActive)
 	if len(items) != 1 {
 		t.Fatal("retry created duplicate document")
 	}

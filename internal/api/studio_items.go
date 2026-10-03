@@ -77,7 +77,14 @@ func (s *Server) studioItemError(c *cart.Context, err error) error {
 	return s.fail(c, err)
 }
 func (s *Server) listStudioItems(c *cart.Context) error {
-	items, err := s.store.ListStudioItems(c.Request.Context())
+	scope := store.StudioItemListScope(c.Request.URL.Query().Get("scope"))
+	if scope == "" {
+		scope = store.StudioItemsActive
+	}
+	if scope != store.StudioItemsActive && scope != store.StudioItemsArchived {
+		return badRequest(c, "scope must be active or archived")
+	}
+	items, err := s.store.ListStudioItems(c.Request.Context(), scope)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -192,13 +199,7 @@ func (s *Server) deleteStudioItem(c *cart.Context) error {
 	if err := decodeStudioRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.GetStudioItem(c.Request.Context(), id)
-	if err != nil {
-		return s.studioItemError(c, err)
-	}
-	w.Deleted = true
-	_, err = s.store.UpdateStudioItem(c.Request.Context(), w, req.ExpectedRevision)
-	if err != nil {
+	if err := s.purgeStudioItem(c.Request.Context(), id, req.ExpectedRevision); err != nil {
 		return s.studioItemError(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]any{"deleted": id})

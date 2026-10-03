@@ -177,6 +177,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 
 	app.Route("/studio/items").GET(s.listStudioItems).POST(s.createStudioItem)
 	app.Route("/studio/items/:itemID").GET(s.getStudioItem).PATCH(s.renameStudioItem).DELETE(s.deleteStudioItem)
+	app.Route("/studio/items/:itemID/archive").POST(s.archiveStudioItem)
+	app.Route("/studio/items/:itemID/restore").POST(s.restoreStudioItem)
 	app.Route("/studio/items/:itemID/content").GET(s.getStudioContent).PUT(s.writeDocument)
 	app.Route("/studio/items/:itemID/operations").POST(s.writeTable)
 	app.Route("/studio/items/:itemID/assets").POST(s.uploadDocumentAsset)
@@ -840,21 +842,24 @@ func (s *Server) releaseSessionResources(ctx context.Context, id string, removeS
 }
 
 const (
-	sessionArchiveRetention       = 30 * 24 * time.Hour
-	sessionArchiveCleanupInterval = time.Hour
+	archiveRetention       = 30 * 24 * time.Hour
+	archiveCleanupInterval = time.Hour
 )
 
-func (s *Server) RunSessionArchiveJanitor(ctx context.Context) {
+func (s *Server) RunArchiveJanitor(ctx context.Context) {
 	cleanup := func() {
 		if err := s.purgeExpiredSessionArchives(ctx, time.Now()); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("purge expired session archives failed", "err", err)
+		}
+		if err := s.purgeExpiredStudioArchives(ctx, time.Now()); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("purge expired studio archives failed", "err", err)
 		}
 		if err := s.reclaimOrphanAttachments(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("reclaim orphan attachments failed", "err", err)
 		}
 	}
 	cleanup()
-	ticker := time.NewTicker(sessionArchiveCleanupInterval)
+	ticker := time.NewTicker(archiveCleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -867,7 +872,7 @@ func (s *Server) RunSessionArchiveJanitor(ctx context.Context) {
 }
 
 func (s *Server) purgeExpiredSessionArchives(ctx context.Context, now time.Time) error {
-	ids, err := s.store.ListExpiredArchivedSessionIDs(ctx, now.Add(-sessionArchiveRetention))
+	ids, err := s.store.ListExpiredArchivedSessionIDs(ctx, now.Add(-archiveRetention))
 	if err != nil {
 		return err
 	}

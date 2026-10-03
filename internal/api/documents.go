@@ -92,6 +92,8 @@ func (s *Server) widgetOnly(handler func(*cart.Context) error) func(*cart.Contex
 }
 
 func (s *Server) uploadDocumentAsset(c *cart.Context) error {
+	widget.DraftMu.Lock()
+	defer widget.DraftMu.Unlock()
 	id, _ := c.Param("itemID")
 	if _, err := s.store.GetDocument(c.Request.Context(), id); err != nil {
 		return s.studioItemError(c, err)

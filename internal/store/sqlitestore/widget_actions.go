@@ -83,7 +83,7 @@ func (s *Store) ClaimWidgetAction(ctx context.Context, wid, id string) error {
 		if err != nil {
 			return err
 		}
-		w, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, wid))
+		w, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, wid))
 		if err != nil {
 			return err
 		}

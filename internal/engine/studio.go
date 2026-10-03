@@ -45,7 +45,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
 		return respond(result, err)
 	case tool.StudioList:
-		items, err := e.store.ListStudioItems(ctx)
+		items, err := e.store.ListStudioItems(ctx, store.StudioItemsActive)
 		if err != nil {
 			return respond(nil, err)
 		}

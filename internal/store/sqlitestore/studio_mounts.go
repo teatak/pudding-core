@@ -11,7 +11,7 @@ import (
 
 const studioMountSelect = `SELECT m.session_id,m.id,m.item_id,m.visible,m.created_at,
  w.kind,w.name,w.icon,w.icon_color,coalesce(w.source_session_id,''),w.revision,w.updated_at
- FROM studio_mounts m JOIN studio_items w ON w.id=m.item_id AND w.deleted=0`
+ FROM studio_mounts m JOIN studio_items w ON w.id=m.item_id AND w.deleted=0 AND w.archived_at=0`
 
 func scanStudioMount(row messageScanner) (*store.StudioMount, error) {
 	m := &store.StudioMount{}
@@ -80,7 +80,7 @@ func (s *Store) OpenStudioItem(ctx context.Context, session, itemID, mountID str
 		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
-		if _, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, itemID)); err != nil {
+		if _, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, itemID)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO studio_mounts(session_id,id,item_id,created_at) VALUES(?,?,?,?) ON CONFLICT(session_id,item_id) DO UPDATE SET visible=1`, session, mountID, itemID, unixMS(time.Now())); err != nil {

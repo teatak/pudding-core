@@ -244,7 +244,7 @@ func Start(opts Options) (*Daemon, error) {
 	}
 	listenerOwned = true
 	eng.StartScheduledTasks()
-	go apiServer.RunSessionArchiveJanitor(sseCtx)
+	go apiServer.RunArchiveJanitor(sseCtx)
 	go func() { d.serveErr <- server.Serve(ln) }()
 
 	slog.Info("puddingd starting",

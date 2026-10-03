@@ -10,7 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const documentSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='doc' AND w.deleted=0`
+const documentSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='doc' AND w.deleted=0 AND w.archived_at=0`
 
 func scanDocument(row messageScanner) (*store.DocumentContent, error) {
 	d := &store.DocumentContent{}

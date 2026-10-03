@@ -16,6 +16,7 @@ export const studioItem = z.object({
   bindings: z.record(z.string(), z.string()),
   bindingVersion: z.number().int(),
   deleted: z.boolean(),
+  archivedAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

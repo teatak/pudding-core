@@ -9,7 +9,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const tableSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='table' AND w.deleted=0`
+const tableSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='table' AND w.deleted=0 AND w.archived_at=0`
 
 func tableFromContent(d *store.DocumentContent) (*store.TableContent, error) {
 	var body store.TableBody

@@ -69,8 +69,10 @@ func TestStudioItemsShareContentRetainHistoryAndFavorites(t *testing.T) {
 	if err := st.PutLibraryFavorite(ctx, "b", favorite); err != nil {
 		t.Fatal(err)
 	}
-	w.Deleted = true
-	if _, err := st.UpdateStudioItem(ctx, w, w.Revision); err != nil {
+	if _, err := st.MarkStudioItemDeleted(ctx, w.ID, w.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PurgeDeletedStudioItem(ctx, w.ID); err != nil {
 		t.Fatal(err)
 	}
 	views, err = st.ListStudioMounts(ctx, "b")

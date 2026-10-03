@@ -38,7 +38,7 @@ func TestTableChatToolsAndCSVWithoutDesktop(t *testing.T) {
 		ItemID string `json:"itemID"`
 	}
 	json.Unmarshal([]byte(created.Content), &result)
-	items, _ := st.ListStudioItems(ctx)
+	items, _ := st.ListStudioItems(ctx, store.StudioItemsActive)
 	if len(items) != 1 {
 		t.Fatal("duplicate create")
 	}

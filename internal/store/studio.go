@@ -25,6 +25,7 @@ type StudioItem struct {
 	Bindings        map[string]string `json:"bindings"`
 	BindingVersion  int64             `json:"bindingVersion"`
 	Deleted         bool              `json:"deleted"`
+	ArchivedAt      *time.Time        `json:"archivedAt,omitempty"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }
@@ -54,10 +55,14 @@ type StudioStore interface {
 	FinishWidgetAction(context.Context, string, string, string, json.RawMessage) error
 
 	// ListStudioItems orders by UpdatedAt, the time of the latest saved revision.
-	ListStudioItems(context.Context) ([]*StudioItem, error)
+	ListStudioItems(context.Context, StudioItemListScope) ([]*StudioItem, error)
+	SetStudioItemArchived(context.Context, string, int64, bool) (*StudioItem, error)
+	MarkStudioItemDeleted(context.Context, string, int64) (*StudioItem, error)
+	PurgeDeletedStudioItem(context.Context, string) error
+	ListStudioItemsForCleanup(context.Context, time.Time) ([]*StudioItem, error)
 	GetStudioItem(context.Context, string) (*StudioItem, error)
 	CreateStudioItem(context.Context, *StudioItem) (*StudioItem, error)
-	// UpdateStudioItem changes metadata (appearance, bindings, active revision, deletion) and keeps
+	// UpdateStudioItem changes metadata (appearance, bindings, active revision) and keeps
 	// UpdatedAt: only a new revision is new work, so metadata changes do not reorder the list.
 	UpdateStudioItem(context.Context, *StudioItem, int64) (*StudioItem, error)
 	SaveStudioItemRevision(context.Context, *StudioItemRevision, string) (*StudioItem, error)
@@ -65,6 +70,13 @@ type StudioStore interface {
 	GetStudioItemRevision(context.Context, string, string) (*StudioItemRevision, error)
 	PutWidgetBuildReceipt(context.Context, string, string, json.RawMessage) error
 }
+
+type StudioItemListScope string
+
+const (
+	StudioItemsActive   StudioItemListScope = "active"
+	StudioItemsArchived StudioItemListScope = "archived"
+)
 
 // WidgetActionSpec is frozen before the trusted host asks for confirmation.
 // It contains no connection credentials.
