@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/widget"
 )
 
@@ -60,6 +61,8 @@ func studioV26Fixture(t *testing.T) (path string, oldA, oldB string) {
 	spec := `{"revisionHash":"` + oldA + `","resourceRevision":3,"bindingVersion":2,"operationID":"items","operationHash":"op","bindingFingerprint":"fp","appID":"github","connectionID":"conn_1","description":"List","params":{"state":"open"},"request":{"method":"GET"}}`
 	if _, err := db.Exec(`
  INSERT INTO sessions(id,provider,model,loaded_app_ids,created_at,updated_at,last_activity_at) VALUES('s1','mock','m','["app-authoring","canvas","github"]',1,1,1);
+ INSERT INTO turns(id,session_id,client_message_id,status,created_at,updated_at) VALUES('t1','s1','cm1','completed',1,2);
+ INSERT INTO messages(id,session_id,turn_id,role,text,created_at) VALUES('m1','s1','t1','assistant','Keep canonical message',2);
  INSERT INTO canvas_resources(id,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at)
   VALUES('canvas_w','Board','chart','blue','s1',3,?,?,'{"primary":"conn_1"}',2,0,1,2);
  INSERT INTO canvas_revisions(canvas_id,hash,parent_revision,client_request_id,created_at,build_receipt) VALUES('canvas_w',?,'','req-a',1,'{"ok":true}'),('canvas_w',?,?,'req-b',2,'');
@@ -96,6 +99,8 @@ func TestStudioMigrationMovesWidgetsAndRenamesPlugins(t *testing.T) {
 			{"SELECT kind||'|'||studio_mount_id FROM library_recent_opens", "studio|mount_1"},
 			{"SELECT loaded_plugin_ids FROM sessions WHERE id='s1'", `["github","plugin-authoring","widget-authoring"]`},
 			{"SELECT count(*) FROM sqlite_master WHERE name LIKE 'canvas_%'", "0"},
+			{"SELECT text FROM messages WHERE id='m1'", "Keep canonical message"},
+			{"SELECT status FROM turns WHERE id='t1'", "completed"},
 			{"SELECT count(*) FROM pragma_foreign_key_check", "0"},
 			{"PRAGMA integrity_check", "ok"},
 		} {
@@ -137,6 +142,64 @@ func TestStudioMigrationMovesWidgetsAndRenamesPlugins(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "canvases", "canvas_w", "revisions", oldA, "canvas.json")); err != nil {
 		t.Fatal(err)
 	}
+	if backups := migrationBackupFiles(t, path); len(backups) != 1 || !strings.Contains(backups[0], ".backup-v26-") {
+		t.Fatalf("upgrade and reopen must create only one v26 backup: %v", backups)
+	}
+}
+
+func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
+	path, _, _ := studioV26Fixture(t)
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if st != nil {
+			_ = st.Close()
+		}
+	})
+	ctx := context.Background()
+	user := store.ContentAuthor{Kind: "user"}
+	doc, err := st.CreateDocument(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes"}, "Keep document", user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, err := st.CreateTable(ctx, &store.StudioItem{ID: "table", Kind: "table", Name: "Data"}, tableFixture(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := st.GetStudioItem(ctx, "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetStudioItemArchived(ctx, "doc", item.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := st.ListStudioItems(ctx, store.StudioItemsArchived)
+	if err != nil || len(archived) != 1 || archived[0].ID != "doc" || archived[0].ArchivedAt == nil {
+		t.Fatal("archive lost on reopen", archived, err)
+	}
+	if _, err := st.SetStudioItemArchived(ctx, "doc", archived[0].Revision, false); err != nil {
+		t.Fatal(err)
+	}
+	reopenedDoc, err := st.GetDocument(ctx, "doc")
+	if err != nil || !reflect.DeepEqual(reopenedDoc, doc) {
+		t.Fatal("document content or version lost", reopenedDoc, err)
+	}
+	reopenedTable, err := st.GetTable(ctx, "table")
+	if err != nil || !reflect.DeepEqual(reopenedTable, table) {
+		t.Fatal("table content or version lost", reopenedTable, err)
+	}
+	if backups := migrationBackupFiles(t, path); len(backups) != 1 {
+		t.Fatalf("current v30 reopen created a migration backup: %v", backups)
+	}
 }
 
 func TestStudioMigrationFailureRollsBackAndRetries(t *testing.T) {
@@ -172,6 +235,55 @@ func TestStudioMigrationFailureRollsBackAndRetries(t *testing.T) {
 	}
 	if mustQueryString(t, st, `SELECT active_revision FROM studio_items`) == oldA {
 		t.Fatal("active revision kept its v26 hash")
+	}
+}
+
+func TestStudioMigrationLateFailureRollsBackWholeUpgrade(t *testing.T) {
+	path, _, _ := studioV26Fixture(t)
+	db := openMigrationTestDB(t, path)
+	// Fail at the archive index, after all Studio tables have been created.
+	if _, err := db.Exec(`CREATE INDEX studio_items_archived_at ON sessions(id)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if st, err := Open(path); err == nil {
+		st.Close()
+		t.Fatal("conflicting archive index did not fail the upgrade")
+	} else if !strings.Contains(err.Error(), "studio_items_archived_at") {
+		t.Fatal("unexpected migration failure", err)
+	}
+	db = openMigrationTestDB(t, path)
+	assertWorkspaceMigrationValue(t, db, "PRAGMA user_version", "26")
+	assertWorkspaceMigrationValue(t, db, "SELECT count(*) FROM canvas_revisions", "2")
+	assertWorkspaceMigrationValue(t, db, "SELECT count(*) FROM sqlite_master WHERE name IN ('studio_items','studio_item_revisions','studio_item_content','studio_table_ids')", "0")
+	assertWorkspaceMigrationValue(t, db, "SELECT loaded_app_ids FROM sessions WHERE id='s1'", `["app-authoring","canvas","github"]`)
+	assertWorkspaceMigrationValue(t, db, "SELECT text FROM messages WHERE id='m1'", "Keep canonical message")
+	backups := migrationBackupFiles(t, path)
+	if len(backups) != 1 || !strings.Contains(backups[0], ".backup-v26-") {
+		t.Fatalf("expected one v26 backup: %v", backups)
+	}
+	backup := openMigrationTestDB(t, backups[0])
+	assertWorkspaceMigrationValue(t, backup, "PRAGMA user_version", "26")
+	assertWorkspaceMigrationValue(t, backup, "SELECT count(*) FROM canvas_revisions", "2")
+	assertWorkspaceMigrationValue(t, backup, "SELECT text FROM messages WHERE id='m1'", "Keep canonical message")
+	backup.Close()
+	if _, err := db.Exec(`DROP INDEX studio_items_archived_at`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	for range 2 {
+		st, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "30")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_item_revisions", "2")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT archived_at FROM studio_items WHERE id='canvas_w'", "0")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM sqlite_master WHERE name IN ('studio_item_content','studio_table_ids')", "2")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

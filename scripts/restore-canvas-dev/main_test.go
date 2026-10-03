@@ -22,7 +22,7 @@ func TestRestoreIsAtomicAndDoesNotOverwriteEditedCanvas(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(home, "data", "pudding.db")
-	// The recovery targets the released v26 layout; schema v27 converts it on upgrade.
+	// The recovery targets the released v26 layout; schema v30 converts it on upgrade.
 	schema, err := os.ReadFile("../../internal/store/sqlitestore/testdata/schema-v26.sql")
 	if err != nil {
 		t.Fatal(err)

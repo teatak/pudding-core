@@ -15,13 +15,10 @@ import (
 )
 
 func TestSchemaReleaseContract(t *testing.T) {
-	// Published fingerprints through v24 are immutable. Development-only
-	// canvas layouts were consolidated into the final v25 release upgrade.
+	// Published fingerprints through v26 are immutable. Unpublished Studio
+	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
 		30: "31bbcfea63185381096cb5643a99656070a850aea7fd58b8e8d51190f5928840",
-		29: "3b04d1e058172587e74d8bea79b892cb5d75b7dee6a603597b4c4403137ab625",
-		28: "18187cde9f3a8e55987557a5df882916b4937409a440fc51b69b0cd9335ddc44",
-		27: "17f0afc13c71dec64e556026d99c3f4728a5783edbb0900e2b4e37c15de33df1",
 		26: "6e83d15eb674cfbadd22e77499b0ecacfcbae9b565879301ea82ace00ac4b22d",
 		25: "ba66df667b2b2de48b92bd6cedd2fb23c76d8934fa3ef7fbf0ec06567d4b19bf",
 		// v24 repairs the early v23 layout; the canonical schema is unchanged.

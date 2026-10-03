@@ -137,7 +137,7 @@ func TestWorkspaceMigrationFailureRollsBackWholeUpgrade(t *testing.T) {
 }
 
 func TestWorkspaceMigrationRejectsUnregisteredVersionsWithoutChanges(t *testing.T) {
-	for _, version := range []int{14, 15, 16} {
+	for _, version := range []int{14, 15, 16, 27, 28, 29} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			db, path := openWorkspaceV13Database(t)
 			if err := setSchemaVersion(db, version); err != nil {

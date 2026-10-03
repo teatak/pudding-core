@@ -13,14 +13,15 @@ import (
 	"github.com/teatak/pudding-core/internal/widget"
 )
 
-// Schema v27 renames canvases to Studio items and Apps to plugins.
+// Schema v30 upgrades v26 canvases and Apps to Studio and plugins, including
+// native documents, tables and archives in the same database transaction.
 //
 // Widget source moves from <home>/canvases to <home>/studio with the widget
 // manifest name, plugin source fields and SDK import, so every content hash
 // changes and stored references are remapped. New packages are installed before
 // the SQL commit and are reused on retry. <home>/canvases is left in place: it is
 // the source of the database backup taken before this upgrade.
-const studioSchemaV27 = `
+const studioSchemaV30 = `
 CREATE TABLE studio_items (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK(kind IN ('doc','table','widget')),
@@ -35,7 +36,8 @@ CREATE TABLE studio_items (
     binding_version INTEGER NOT NULL,
     deleted INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    archived_at INTEGER NOT NULL DEFAULT 0
 );
 INSERT INTO studio_items(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at)
  SELECT id,'widget',name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at FROM canvas_resources;
@@ -46,6 +48,11 @@ CREATE TABLE studio_item_revisions (
     client_request_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     build_receipt TEXT NOT NULL,
+    content TEXT,
+    content_hash TEXT NOT NULL DEFAULT '',
+    author_kind TEXT NOT NULL DEFAULT '',
+    author_session_id TEXT NOT NULL DEFAULT '',
+    author_turn_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(item_id, hash),
     UNIQUE(item_id, client_request_id)
 );
@@ -55,9 +62,21 @@ CREATE TABLE studio_item_saves (
     item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
     client_request_id TEXT NOT NULL,
     hash TEXT NOT NULL,
+    request_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(item_id, client_request_id)
 );
 INSERT INTO studio_item_saves(item_id,client_request_id,hash) SELECT canvas_id,client_request_id,hash FROM canvas_saves;
+CREATE TABLE studio_item_content (
+    item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+);
+CREATE TABLE studio_table_ids (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    entity_kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    PRIMARY KEY (item_id, entity_kind, entity_id)
+);
 CREATE TABLE widget_actions (
  id TEXT PRIMARY KEY,
  item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
@@ -133,6 +152,7 @@ CREATE UNIQUE INDEX library_recent_studio ON library_recent_opens(source_session
 CREATE UNIQUE INDEX library_recent_file ON library_recent_opens(root_path,path) WHERE kind='file';
 CREATE INDEX library_recent_opened ON library_recent_opens(opened_at DESC,id DESC);
 ALTER TABLE sessions RENAME COLUMN loaded_app_ids TO loaded_plugin_ids;
+CREATE INDEX studio_items_archived_at ON studio_items(archived_at);
 `
 
 // Built-in plugin IDs renamed with the App concept.
@@ -143,7 +163,7 @@ func migrateStudioAndPlugins(tx *sql.Tx, home string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(studioSchemaV27); err != nil {
+	if _, err := tx.Exec(studioSchemaV30); err != nil {
 		return err
 	}
 	if err := remapWidgetHashes(tx, moved); err != nil {

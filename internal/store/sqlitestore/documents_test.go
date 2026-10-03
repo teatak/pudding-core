@@ -2,9 +2,7 @@ package sqlitestore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,45 +131,5 @@ func TestDocumentEditsAreAtomicAndSizeBounded(t *testing.T) {
 	}
 	if _, err = s.GetStudioItem(ctx, "large"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("failed create left an item")
-	}
-}
-
-func TestDocumentMigrationV27RollbackAndRetry(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pudding.db")
-	db := openMigrationTestDB(t, path)
-	schema, err := os.ReadFile("testdata/schema-v27.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(string(schema) + `;INSERT INTO studio_items(id,kind,name,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES('old','widget','Kept',1,'','','{}',1,0,1,1);PRAGMA user_version=27;`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-	migration := schemaMigrations[28]
-	defer func() { schemaMigrations[28] = migration }()
-	schemaMigrations[28] = func(tx *sql.Tx) error {
-		if err := migration(tx); err != nil {
-			return err
-		}
-		return errors.New("injected failure")
-	}
-	if st, err := Open(path); err == nil {
-		st.Close()
-		t.Fatal("migration should fail")
-	}
-	db = openMigrationTestDB(t, path)
-	assertWorkspaceMigrationValue(t, db, "PRAGMA user_version", "27")
-	assertWorkspaceMigrationValue(t, db, "SELECT count(*) FROM sqlite_master WHERE name='studio_item_content'", "0")
-	assertWorkspaceMigrationValue(t, db, "SELECT name FROM studio_items WHERE id='old'", "Kept")
-	db.Close()
-	schemaMigrations[28] = migration
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	item, err := st.GetStudioItem(context.Background(), "old")
-	if err != nil || item.Name != "Kept" || item.Kind != "widget" {
-		t.Fatal("old widget lost", item, err)
 	}
 }

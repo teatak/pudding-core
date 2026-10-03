@@ -32,31 +32,9 @@ type schemaMigration func(*sql.Tx) error
 // schemaMigrations is keyed by the destination version. Version 1 is the
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
+// Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
-	30: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`ALTER TABLE studio_items ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0;
-CREATE INDEX studio_items_archived_at ON studio_items(archived_at);`)
-		return err
-	},
-	29: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TABLE studio_table_ids (item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL, PRIMARY KEY (item_id, entity_kind, entity_id));`)
-		return err
-	},
-	28: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TABLE studio_item_content (
-    item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
-    body TEXT NOT NULL,
-    content_hash TEXT NOT NULL
-);
-ALTER TABLE studio_item_revisions ADD COLUMN content TEXT;
-ALTER TABLE studio_item_revisions ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
-ALTER TABLE studio_item_revisions ADD COLUMN author_kind TEXT NOT NULL DEFAULT '';
-ALTER TABLE studio_item_revisions ADD COLUMN author_session_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE studio_item_revisions ADD COLUMN author_turn_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE studio_item_saves ADD COLUMN request_hash TEXT NOT NULL DEFAULT '';`)
-		return err
-	},
-	27: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
+	30: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
 	26: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE canvas_resources ADD COLUMN icon TEXT NOT NULL DEFAULT '';
 ALTER TABLE canvas_resources ADD COLUMN icon_color TEXT NOT NULL DEFAULT '';`)
@@ -696,7 +674,7 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 			if next == 25 {
 				migration = func(tx *sql.Tx) error { return migrateFinalCanvases(tx, sourceHome) }
 			}
-			if next == 27 {
+			if next == 30 {
 				migration = func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, sourceHome) }
 			}
 			if err := runSchemaMigration(db, next, migration); err != nil {
@@ -927,7 +905,7 @@ var schemaV5Contract = extendSchemaContract(schemaV4Contract, map[string][]strin
 })
 
 // The shipped v24 layout is also recognized when an existing database has a
-// missing user_version. The development-only v25–v30 layouts are not inferred.
+// missing user_version. Other older layouts are not inferred here.
 var schemaV24Contract = schemaContract{tables: map[string][]string{
 	"canvas_items":        {"session_id", "id", "item_json", "source_saved_item_id", "saved_dirty"},
 	"canvas_saved_items":  {"id", "item_json", "window_json"},
