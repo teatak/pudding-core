@@ -121,8 +121,21 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 	if in.ClientRequestID == "" || len(in.ClientRequestID) > 200 {
 		return nil, &store.InvalidTable{Message: "clientRequestID is required (max 200 bytes)"}
 	}
-	if (len(in.Operations) == 0) == (in.RestoreRevision == "") {
-		return nil, &store.InvalidTable{Message: "provide operations or restoreRevision"}
+	modes := 0
+	if len(in.Operations) > 0 {
+		modes++
+	}
+	if in.RestoreRevision != "" {
+		modes++
+	}
+	if in.UndoRevision != "" {
+		modes++
+	}
+	if modes != 1 || (in.RowID != "" && in.UndoRevision == "") {
+		return nil, &store.InvalidTable{Message: "provide operations, restoreRevision or undoRevision; rowID is only for undo"}
+	}
+	if in.UndoRevision != "" && in.Author.Kind != "user" {
+		return nil, &store.InvalidTable{Message: "undo is a user operation"}
 	}
 	if in.RestoreRevision != "" && in.ExpectedHash == nil {
 		return nil, &store.InvalidTable{Message: "expectedHash is required for restore"}
@@ -172,6 +185,25 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 			if err := json.Unmarshal([]byte(raw), &body); err != nil {
 				return err
 			}
+
+		} else if in.UndoRevision != "" {
+			prior, changed, undoErr := nativeUndoSourceTx(ctx, tx, id, current.RevisionID, in.UndoRevision)
+			var priorBody, changedBody store.TableBody
+			if undoErr == nil {
+				undoErr = json.Unmarshal([]byte(prior), &priorBody)
+			}
+			if undoErr == nil {
+				undoErr = json.Unmarshal([]byte(changed), &changedBody)
+			}
+			if undoErr == nil {
+				body, undoErr = store.UndoTable(priorBody, changedBody, before.Body, in.RowID)
+			}
+			if errors.Is(undoErr, store.ErrUndoConflict) {
+				return &store.ContentConflict{CurrentHash: current.ContentHash}
+			}
+			if undoErr != nil {
+				return undoErr
+			}
 		} else {
 			body, err = store.ApplyTableOperations(before.Body, in.Operations)
 			if err != nil {
@@ -181,7 +213,7 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 		if err := store.ValidateTable(body); err != nil {
 			return err
 		}
-		if err := recordTableIDs(ctx, tx, id, body, &before.Body, in.RestoreRevision != "", in.Operations); err != nil {
+		if err := recordTableIDs(ctx, tx, id, body, &before.Body, in.RestoreRevision != "" || in.UndoRevision != "", in.Operations); err != nil {
 			return err
 		}
 		raw, _ := json.Marshal(body)

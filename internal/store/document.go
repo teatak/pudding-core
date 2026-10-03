@@ -37,6 +37,7 @@ type DocumentWrite struct {
 	Body            *string        `json:"body,omitempty"`
 	Edits           []DocumentEdit `json:"edits,omitempty"`
 	RestoreRevision string         `json:"restoreRevision,omitempty"`
+	UndoRevision    string         `json:"undoRevision,omitempty"`
 	// PreserveOnly archives a dirty editor buffer before loading the latest body.
 	// It never replaces the working content or changes its head.
 	PreserveOnly bool          `json:"preserveOnly,omitempty"`

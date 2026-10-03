@@ -82,8 +82,14 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 	if in.RestoreRevision != "" {
 		modes++
 	}
+	if in.UndoRevision != "" {
+		modes++
+	}
+	if in.UndoRevision != "" && in.Author.Kind != "user" {
+		return nil, &store.InvalidDocument{Message: "undo is a user operation"}
+	}
 	if modes != 1 || (in.PreserveOnly && (in.Body == nil || in.Author.Kind != "user")) {
-		return nil, &store.InvalidDocument{Message: "provide exactly one of body, edits, or restoreRevision"}
+		return nil, &store.InvalidDocument{Message: "provide exactly one of body, edits, restoreRevision or undoRevision"}
 	}
 	if (in.Body != nil || in.RestoreRevision != "") && in.ExpectedHash == nil {
 		return nil, &store.InvalidDocument{Message: "expectedHash is required for replacement or restore"}
@@ -143,6 +149,19 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 				return &store.InvalidDocument{Message: "revision has no document content"}
 			}
 			body = content.String
+		}
+
+		if in.UndoRevision != "" {
+			before, after, err := nativeUndoSourceTx(ctx, tx, id, current.RevisionID, in.UndoRevision)
+			if err == nil {
+				body, err = store.UndoDocument(before, after, current.Body)
+			}
+			if errors.Is(err, store.ErrUndoConflict) {
+				return &store.ContentConflict{CurrentHash: current.ContentHash}
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if err := store.ValidateDocument(body); err != nil {
 			return err

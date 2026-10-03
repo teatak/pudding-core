@@ -55,7 +55,7 @@ export type DocumentContent = z.infer<typeof documentContent>;
 export type DocumentEdit = { old: string; new: string };
 export type DocumentWrite = {
   clientRequestID: string; expectedHash?: string; body?: string;
-  edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean;
+  edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
 };
 
 export const tableCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
@@ -83,4 +83,4 @@ export type TableRow = z.infer<typeof tableRow>;
 export type TableBody = z.infer<typeof tableBody>;
 export type TableContent = z.infer<typeof tableContent>;
 export type TableOperation = z.infer<typeof tableOperation>;
-export type TableWrite = { clientRequestID: string; operations?: TableOperation[]; restoreRevision?: string; expectedHash?: string };
+export type TableWrite = { clientRequestID: string; operations?: TableOperation[]; restoreRevision?: string; expectedHash?: string; undoRevision?: string; rowID?: string };

@@ -56,6 +56,8 @@ type TableWrite struct {
 	ClientRequestID string           `json:"clientRequestID"`
 	Operations      []TableOperation `json:"operations,omitempty"`
 	RestoreRevision string           `json:"restoreRevision,omitempty"`
+	UndoRevision    string           `json:"undoRevision,omitempty"`
+	RowID           string           `json:"rowID,omitempty"`
 	ExpectedHash    *string          `json:"expectedHash,omitempty"`
 	Author          ContentAuthor    `json:"-"`
 }
