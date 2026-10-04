@@ -185,7 +185,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 			Kind:         KindPlugin,
 			ID:           BuiltinCaptureID,
 			Name:         "Image Capture",
-			Description:  "Capture images from the local screen or camera when explicitly requested.",
+			Description:  "Capture images using the available local capture tools when explicitly requested.",
 			Source:       SourceBuiltin,
 			Enabled:      true,
 			CanUninstall: false,

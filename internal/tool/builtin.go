@@ -471,8 +471,8 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CommandRun,
-			Description: "Run one fixed-shell command in an authorized project directory. Commands use the project sandbox by default, including after a risk approval. Set execution=host only when the exact invocation genuinely needs host services or credentials; include a concrete host_access_reason and expect a separate approval in Ask or Auto. For another local directory, request that directory instead of using host execution. Auto permits code within the authorized sandbox; loops, variables, functions and opaque scripts do not need approval solely for dynamic syntax. Explicit risks and permission extensions still require review. This is not a read-only or no-side-effects guarantee. The command may use pipelines, redirects, heredocs, and compound expressions. Use $TMPDIR instead of shared /tmp for temporary files. Python packages needed only by sandboxed commands can be installed with python3 -m pip install --user; Pudding redirects that user base into stable project state and supplies the system CA bundle. Do not disable TLS verification. Foreground commands return bounded output and verification diagnostics. Set background=true for a persistent session and receive a process_id; set tty=true only for an interactive CLI or REPL. Manage background sessions with builtin_command_session; action=list finds this session's managed processes. Commands can read and write the current session artifact directory returned by builtin_attachment_export(scope=temp).",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"command":{"type":"string","minLength":1,"maxLength":65536,"description":"Complete command line executed by Pudding's fixed shell."},"execution":{"type":"string","enum":["sandbox","host"],"description":"Execution boundary. Defaults to sandbox. Use host only for an exact invocation that genuinely requires host services or credentials."},"host_access_reason":{"type":"string","minLength":1,"description":"Concrete reason this exact invocation must run outside the project sandbox. Required only when execution=host."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. May be omitted only with one authorized root; multiple roots require an absolute target."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Foreground timeout in milliseconds. Defaults to 60000; unavailable when background=true."},"background":{"type":"boolean","description":"Keep the command running as a session-owned process and return process_id. Defaults false."},"tty":{"type":"boolean","description":"Allocate a PTY for an interactive CLI. Requires background=true and is unavailable on Windows."}},"required":["scope","command"],"additionalProperties":false}`),
+			Description: commandRunDescription(),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"command":{"type":"string","minLength":1,"maxLength":65536,"description":"Complete command line executed by Pudding's fixed shell."},"execution":{"type":"string","enum":["sandbox","host"],"description":"Execution boundary. Defaults to sandbox. On Windows only host execution is supported; request host explicitly with a concrete reason. Elsewhere use host only for an invocation requiring host services or credentials."},"host_access_reason":{"type":"string","minLength":1,"description":"Concrete reason this exact invocation must run outside the project sandbox. Required only when execution=host."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. May be omitted only with one authorized root; multiple roots require an absolute target."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Foreground timeout in milliseconds. Defaults to 60000; unavailable when background=true."},"background":{"type":"boolean","description":"Keep the command running as a session-owned process and return process_id. Defaults false."},"tty":{"type":"boolean","description":"Allocate a PTY for an interactive CLI. Requires background=true and is unavailable on Windows."}},"required":["scope","command"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -677,7 +677,29 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 }
 
 func (r *BuiltinRunner) Definitions(context.Context, string) ([]provider.ToolDef, error) {
-	return BuiltinDefinitions(), nil
+	defs := BuiltinDefinitions()
+	out := defs[:0]
+	for _, def := range defs {
+		if r.ToolAvailable(def.Name) {
+			out = append(out, def)
+		}
+	}
+	return out, nil
+}
+
+// ToolAvailable is shared with the plugin catalog; runtime implementations are
+// the authority, not persisted enablement or a second platform flag registry.
+func (r *BuiltinRunner) ToolAvailable(name string) bool {
+	switch name {
+	case ComputerListApps, ComputerUseApp, ComputerQuitApp, ComputerObserve, ComputerAct:
+		return r.computer != nil
+	case CameraCapture:
+		return r.camera != nil
+	case DesktopScreenshot:
+		return r.screen != nil
+	default:
+		return true
+	}
 }
 
 func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {

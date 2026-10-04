@@ -87,7 +87,10 @@ func TestCommandInvocationDoesNotUseLoginShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix shell invocation")
 	}
-	executable, args, shell := commandInvocation(commandRunArgs{Command: "printf ok"})
+	executable, args, shell, err := commandInvocation(context.Background(), commandRunArgs{Command: "printf ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if executable != "/bin/sh" || shell != "sh" {
 		t.Fatalf("unexpected shell invocation: executable=%q shell=%q", executable, shell)
 	}
@@ -411,6 +414,13 @@ func commandHelperArgs(mode string, args ...string) []string {
 }
 
 func commandHelperCommand(mode string, args ...string) string {
+	if runtime.GOOS == "windows" {
+		var quoted []string
+		for _, arg := range commandHelperArgs(mode, args...) {
+			quoted = append(quoted, "'"+strings.ReplaceAll(arg, "'", "''")+"'")
+		}
+		return "& " + strings.Join(quoted, " ")
+	}
 	return joinShellCommand(commandHelperArgs(mode, args...))
 }
 

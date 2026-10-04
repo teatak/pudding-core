@@ -78,14 +78,15 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
-	pluginsRoot     string
-	connections     ConnectionSource
-	enablement      EnablementSource
-	runtime         RuntimeSource
-	packageMu       sync.RWMutex
-	authMu          sync.Mutex
-	connectionStore ConnectionStore
-	oauthBroker     *oauthbroker.Client
+	pluginsRoot          string
+	connections          ConnectionSource
+	enablement           EnablementSource
+	runtime              RuntimeSource
+	builtinToolAvailable func(string) bool
+	packageMu            sync.RWMutex
+	authMu               sync.Mutex
+	connectionStore      ConnectionStore
+	oauthBroker          *oauthbroker.Client
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
@@ -113,6 +114,13 @@ func (s *Service) WithRuntimeSource(source RuntimeSource) *Service {
 	return s
 }
 
+// WithBuiltinToolAvailability connects the catalog to the actual runner. It does
+// not persist capability flags or change the user's enablement preferences.
+func (s *Service) WithBuiltinToolAvailability(available func(string) bool) *Service {
+	s.builtinToolAvailable = available
+	return s
+}
+
 func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	if s == nil {
 		return nil, errors.New("plugin service unavailable")
@@ -135,6 +143,18 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	out := make([]*Definition, 0, len(builtins)+len(defs))
 	seen := make(map[string]bool, len(builtins)+len(defs))
 	for _, def := range builtins {
+		if s.builtinToolAvailable != nil && len(def.Tools) > 0 {
+			tools := def.Tools[:0]
+			for _, item := range def.Tools {
+				if s.builtinToolAvailable(item.Name) {
+					tools = append(tools, item)
+				}
+			}
+			def.Tools = tools
+			if len(def.Tools) == 0 {
+				continue
+			}
+		}
 		applyEnabledOverride(def, enabled)
 		out = append(out, def)
 		seen[def.ID] = true

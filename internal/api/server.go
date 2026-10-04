@@ -1519,7 +1519,8 @@ func (s *Server) resetAudioConfig(c *cart.Context) error {
 
 func (s *Server) getAudioRuntime(c *cart.Context) error {
 	if s.audioRT == nil {
-		return badRequest(c, "audio runtime installer unavailable")
+		c.JSON(http.StatusOK, runtimeassets.UnsupportedStatus())
+		return nil
 	}
 	cfg, err := s.currentAudioConfig(c.Request.Context())
 	if err != nil {
@@ -1531,7 +1532,8 @@ func (s *Server) getAudioRuntime(c *cart.Context) error {
 
 func (s *Server) startAudioRuntimeInstall(c *cart.Context) error {
 	if s.audioRT == nil {
-		return badRequest(c, "audio runtime installer unavailable")
+		c.JSON(http.StatusOK, runtimeassets.UnsupportedStatus())
+		return nil
 	}
 	cfg, err := s.currentAudioConfig(c.Request.Context())
 	if err != nil {
@@ -1543,7 +1545,8 @@ func (s *Server) startAudioRuntimeInstall(c *cart.Context) error {
 
 func (s *Server) cancelAudioRuntimeInstall(c *cart.Context) error {
 	if s.audioRT == nil {
-		return badRequest(c, "audio runtime installer unavailable")
+		c.JSON(http.StatusOK, runtimeassets.UnsupportedStatus())
+		return nil
 	}
 	c.JSON(http.StatusOK, s.audioRT.Cancel())
 	return nil

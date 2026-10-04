@@ -1,7 +1,7 @@
 name: Core CI
 on:
   push:
-    branches: [main]
+    branches: [main, codex/windows-x64]
   pull_request:
 permissions:
   contents: read
@@ -26,3 +26,36 @@ jobs:
         with:
           node-version: 24
       - run: node scripts/scan-secrets.cjs
+  windows-x64:
+    runs-on: windows-latest
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: '1'
+      CC: gcc
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          architecture: x64
+          cache: true
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: make mingw-w64-ucrt-x86_64-gcc
+      - name: Verify x64 CGO toolchain
+        run: |
+          go env GOOS GOARCH CGO_ENABLED CC
+          gcc -dumpmachine
+          test "$(go env GOARCH)" = amd64
+          test "$(gcc -dumpmachine)" = x86_64-w64-mingw32
+          pwsh.exe -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion.Major -lt 7 -or [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne "X64") { exit 1 }; $PSVersionTable.PSVersion.ToString()'
+      - run: make daemon BUILDTAGS=sqlite_fts5 DAEMON_OUT=bin/puddingd.exe
+      - run: make test BUILDTAGS=sqlite_fts5
+      - run: make schema-check BUILDTAGS=sqlite_fts5

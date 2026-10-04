@@ -1,6 +1,6 @@
 # Code CLI 沙箱设计
 
-> 状态：macOS 项目沙箱已实现；非 Darwin runner 当前拒绝项目沙箱模式。目录与操作授权遵循下述期限和范围。
+> 状态：macOS 项目沙箱已实现；Windows 首版仅提供逐次审批的 PowerShell 7 x64 host 命令，不提供项目沙箱。其他非 Darwin runner 仍拒绝项目沙箱模式。目录与操作授权遵循下述期限和范围。
 > 范围:仅覆盖 LLM 调用的 `builtin_command_run` 及其前台/后台子进程。
 
 ## 1. 目标
@@ -15,6 +15,8 @@ Pudding 的 Auto 审批应允许大多数项目内 CLI 工作流,同时用操作
 Electron/daemon 进程。
 
 ## 2. 模式语义
+
+下表中的项目沙箱和命令授权复用仅适用于已实现沙箱的平台（目前为 macOS）；Windows 差异见本节末。
 
 | Project 审批模式 | 启动前 | CLI 执行边界 |
 | --- | --- | --- |
@@ -47,13 +49,25 @@ host 的例外是用户明确选择的受限截图授权:直接、前台的 head
 进程权限在启动时固定。切换模式、撤销 Code 能力或修改 Project roots 不改变已经
 运行的进程,也不主动终止进程。
 
+### Windows 首版：PowerShell 7 x64 host 命令
+
+- Windows 必须已安装 PowerShell 7 x64，daemon 的 `PATH` 能找到 `pwsh.exe`；安装或修改 PATH 后重启 Pudding。当前不自动安装或打包 PowerShell，不使用 `powershell.exe` 5.1、Git Bash 或 WSL 作为 fallback。构建工具链使用 Git Bash / GNU make 与模型命令执行是两回事。
+- `execution="sandbox"` 在 Ask / Auto 的审批前返回 `host_access_required`，提示显式提供 `execution="host"` 和 `host_access_reason`；不会先批准后报“不支持”，也不要求切换 Full Access。
+- Ask / Auto 对每条 host 调用重新审批，包含原始命令、cwd 和环境；不提供固定命令或截图授权复用。`full` 保持用户主动选择的无沙箱语义。合法 cwd 只是启动目录约束，不能限制 host 命令读取项目外文件。
+- 审批前用 PowerShell 原生 `Parser.ParseInput` 检查语法、后台操作符以及运行时版本和架构；该步骤不求值用户输入，不加载 profile，不使用模型提供的 cwd / env。解析不是安全沙箱，不把 POSIX 风险分析用于 Windows 自动免批。
+- 命令以编码参数传入，保留 stdin 给受管后台进程。设置 UTF-8 输入输出，不启用交互 profile；cmdlet 错误按终止错误处理，保留显式退出码和最后一条失败原生命令的退出码。过长命令应写入项目脚本后按路径调用；复杂脚本仍需单独验收。
+- 前后台使用相同执行路径。只支持 `background=true` 管理后台进程，拒绝 PowerShell 的后台操作符与 TTY；超时从真正启动命令时计起，预检受调用取消信号和独立 10 秒上限控制。
+- Windows 返回实际 stdout / stderr / exitCode，不用 POSIX 解析推断 `verificationKind`；调用方应检查真实结果，不能将缺少自动识别的测试标签视为未执行。
+
+Mac 上的真实 PowerShell 解析、参数和退出码回归不等于 Windows 运行验收；Windows 的路径、`.cmd`、取消和子进程收尾仍需原生 x64 CI / VM 实测。
+
 ## 3. 执行架构
 
 ```text
 engine approval policy
   -> tool.Call(ProjectDirs + command execution policy)
   -> CommandRunner.Prepare
-       -> direct runner(full)
+       -> direct runner(full / explicitly approved host)
        -> macOS sandbox runner(ask / auto)
        -> unsupported-platform rejection(ask / auto)
   -> exec.Cmd lifecycle
@@ -103,10 +117,12 @@ macOS Seatbelt 将 `0.0.0.0` bind 也归入 `localhost` 规则,无法在保留�
 `CommandRunner` 后面,不能渗透到 engine、审批或 transcript 协议。未来可以替换
 为其他系统 runner,而不改变 LLM 工具契约。
 
-非 macOS 平台在 `ask` / `auto` 下明确拒绝 CLI,不会退回无沙箱执行;`full` 仍按
-完整访问语义直接执行。Windows/Linux runner 后续独立适配。
+非 macOS 平台仍拒绝项目沙箱执行，不会静默降级。Windows 的 `ask` / `auto` 仅允许
+本节前述显式审批的 host 命令；`full` 按完整访问语义直接执行。Windows 原生沙箱尚未实现。
 
 ## 5. 审批规则
+
+本节对 CLI 自动放行和静态风险提取的说明适用于 macOS 项目沙箱；Windows host 命令始终遵循第 2 节的逐次审批规则。结构化文件/Git 工具继续使用各自已有策略。
 
 Ask 不再询问明确标记为低风险的只读工具,包括结构化 Git status/diff/log 与代码
 导航/诊断。`LowRisk` 写入、符号重命名、任意命令执行及未明确分类为低风险的读取仍需
@@ -167,6 +183,8 @@ clean filters。免弹窗不意味着任务授权:模型只应在用户要求提
 只重试审批卡中展示的同一条调用。
 
 ## 7. 验收标准
+
+以下为 macOS 项目沙箱验收；Windows 不宣称具备这些隔离能力。
 
 - 未知直接 CLI 在 Auto 下无需仅因命令名未知而审批。
 - 命令可以正常读写授权 Project。

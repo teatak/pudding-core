@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package portaudio captures PCM16 audio from the default input device.
 package portaudio
 

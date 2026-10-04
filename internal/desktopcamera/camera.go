@@ -75,10 +75,6 @@ func emptyPhotoError() error {
 	return NewError(CodeFailed, "camera returned empty photo")
 }
 
-func unsupportedError() error {
-	return NewError(CodeUnsupported, "camera capture unsupported on this platform")
-}
-
 func wrapFailed(err error) error {
 	if err == nil {
 		return nil

@@ -44,6 +44,18 @@ Pudding 使用统一的**插件**概念承载需要说明、工具、界面和�
 
 重新启用后可以继续使用既有资源。
 
+### 本机实现可用性
+
+本机工具是否存在，以 daemon 实际装配的 runner 为准。插件目录与 runner 的工具定义共用
+`BuiltinRunner.ToolAvailable`，不保存另一套平台能力开关。过滤发生在用户启用覆盖之前：
+
+- 未提供 Computer Use bridge 时，不列出 Computer Use 插件、工具或可加载 Skill。
+- 非 macOS 不装配相机实现，Image Capture 只保留已装配的桌面截图工具。
+- 某个内置插件的工具全部不可用时，隐藏整个插件；只缺少部分工具时保留其余工具。
+- 用户原有启用偏好不被改写，也不能使缺少实现的工具重新出现。
+
+这里的可用性表示实现已装配，不代表屏幕、相机等操作已经获得系统权限或通过实机验收。
+
 ### loadedPluginIDs
 
 session 级技术状态，表示模型已经显式加载该插件，可以在后续 turn 复用其工具。
@@ -60,6 +72,7 @@ session 级技术状态，表示模型已经显式加载该插件，可以在后
 plugin.enabled
 && session.loadedPluginIDs contains plugin.id
 && currentMode >= plugin.requiredMode
+&& tool implementation is available
 && tool is declared by plugin runtime
 && (plugin.runtime is empty || its provider for the current turn is connected)
 ```

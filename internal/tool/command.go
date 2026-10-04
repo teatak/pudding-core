@@ -54,7 +54,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	if args.Background {
-		return r.commandStart(call, args)
+		return r.commandStart(ctx, call, args)
 	}
 
 	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
@@ -66,10 +66,10 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	executable, commandArgs, shell := commandInvocation(args)
+	executable, commandArgs, shell, err := commandInvocation(ctx, args)
+	if err != nil {
+		return commandShellFailure(out, err)
+	}
 	env, err := commandEnvironment(args.Env)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
@@ -104,6 +104,8 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	defer stdoutWriter.Close()
 	defer stderrWriter.Close()
 
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
 		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
@@ -166,11 +168,20 @@ func decodeCommandRunArgs(raw json.RawMessage) (commandRunArgs, error) {
 	return args, nil
 }
 
-func commandInvocation(args commandRunArgs) (string, []string, string) {
+func commandInvocation(ctx context.Context, args commandRunArgs) (string, []string, string, error) {
 	if runtime.GOOS == "windows" {
-		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", args.Command}, "powershell"
+		executable, argv, err := preparePowerShell(ctx, args.Command, runtime.GOOS)
+		return executable, argv, "pwsh", err
 	}
-	return "/bin/sh", []string{"-c", args.Command}, "sh"
+	return "/bin/sh", []string{"-c", args.Command}, "sh", nil
+}
+
+func commandShellFailure(out Result, err error) Result {
+	var shellErr *commandShellError
+	if errors.As(err, &shellErr) {
+		return toolJSONError(out, shellErr.reason, shellErr.detail)
+	}
+	return toolJSONError(out, "command_prepare_failed", err.Error())
 }
 
 var errCommandCWDNotDirectory = errors.New("command cwd must be a directory")
@@ -197,7 +208,7 @@ func commandCWDFailure(out Result, err error) Result {
 	return filePathError(out, managedScopeProject, err)
 }
 
-func commandApprovalDetails(call Call) (map[string]any, error) {
+func commandApprovalDetails(ctx context.Context, call Call) (map[string]any, error) {
 	args, err := decodeCommandRunArgs(call.Args)
 	if err != nil {
 		return nil, err
@@ -210,6 +221,15 @@ func commandApprovalDetails(call Call) (map[string]any, error) {
 		"command":   args.Command,
 		"execution": string(args.Execution),
 		"cwd":       cwd,
+	}
+	if runtime.GOOS == "windows" {
+		details["shell"] = "PowerShell 7 x64"
+		// A sandbox request must return host guidance without requiring pwsh.
+		if args.Execution == CommandExecutionHost {
+			if _, _, err := preparePowerShell(ctx, args.Command, runtime.GOOS); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if args.HostAccessReason != "" {
 		details["hostAccessReason"] = args.HostAccessReason
@@ -257,6 +277,10 @@ func validCommandEnvKey(key string) bool {
 }
 
 func validateCommandInput(args commandRunArgs) error {
+	return validateCommandInputForOS(args, runtime.GOOS)
+}
+
+func validateCommandInputForOS(args commandRunArgs, goos string) error {
 	if strings.TrimSpace(args.Command) == "" {
 		return errors.New("command is required")
 	}
@@ -275,12 +299,21 @@ func validateCommandInput(args commandRunArgs) error {
 	if args.Execution == CommandExecutionSandbox && args.HostAccessReason != "" {
 		return errors.New("host_access_reason is available only when execution is host")
 	}
-	analysis, err := analyzeShellCommand(args.Command)
-	if err != nil {
-		return err
-	}
-	if analysis.Background {
-		return errors.New("shell background operators are not supported; set background=true instead")
+	if goos == "windows" {
+		if args.TTY {
+			return errors.New("tty is not supported on Windows")
+		}
+		if err := powerShellInputLimit(args.Command); err != nil {
+			return err
+		}
+	} else {
+		analysis, err := analyzeShellCommand(args.Command)
+		if err != nil {
+			return err
+		}
+		if analysis.Background {
+			return errors.New("shell background operators are not supported; set background=true instead")
+		}
 	}
 	if args.TTY && !args.Background {
 		return errors.New("tty requires background=true")
@@ -395,10 +428,14 @@ func CommandBoundaryFailure(call Call, risk ToolRisk) (Result, bool) {
 		return toolJSON(out, false, payload), true
 	}
 	if risk.hostAccessRequired {
+		detail := "command requires host access; retry with execution=host and an explicit host_access_reason"
+		if runtime.GOOS == "windows" {
+			detail = "Windows does not support the project command sandbox; retry the same command with execution=host and an explicit host_access_reason. Ask/Auto requires approval for each invocation. Do not switch to Full Access."
+		}
 		payload := map[string]any{
 			"ok":        false,
 			"reason":    "host_access_required",
-			"detail":    "command requires host access; retry with execution=host and an explicit host_access_reason",
+			"detail":    detail,
 			"execution": string(CommandExecutionSandbox),
 		}
 		return toolJSON(out, false, payload), true

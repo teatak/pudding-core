@@ -122,14 +122,14 @@ func TestProjectPathContractCommandApprovalExecutionAndTrackingAgree(t *testing.
 	t.Cleanup(func() { _ = runner.Close() })
 	args := map[string]any{"scope": "project", "command": "printf second > target.txt"}
 	call := projectContractCall(CommandRun, []string{first, second}, args)
-	if _, err := commandApprovalDetails(call); !errors.Is(err, errProjectAbsolutePathRequired) {
+	if _, err := commandApprovalDetails(context.Background(), call); !errors.Is(err, errProjectAbsolutePathRequired) {
 		t.Fatalf("pre-approval did not reject omitted multi-root cwd: %v", err)
 	} else if result := ApprovalDetailsFailure(call, err); decodeToolResult(t, result)["reason"] != "absolute_path_required" {
 		t.Fatalf("pre-approval changed path failure: %+v", result)
 	}
 	args["cwd"] = second
 	call = projectContractCall(CommandRun, []string{first, second}, args)
-	details, err := commandApprovalDetails(call)
+	details, err := commandApprovalDetails(context.Background(), call)
 	if err != nil || details["cwd"] != second {
 		t.Fatalf("pre-approval cwd=%v err=%v", details, err)
 	}
@@ -211,7 +211,7 @@ func TestProjectPathContractCommandPreapprovalKeepsArgumentFailures(t *testing.T
 		{"project", "", "invalid_arguments"},
 	} {
 		call := projectContractCall(CommandRun, []string{projectContractDir(t)}, map[string]any{"scope": test.scope, "command": test.command})
-		_, err := commandApprovalDetails(call)
+		_, err := commandApprovalDetails(context.Background(), call)
 		if err == nil {
 			t.Fatal("invalid command was prepared for approval")
 		}
@@ -238,7 +238,7 @@ func TestProjectPathContractManagedCommandOperandsDoNotSelectCWD(t *testing.T) {
 		t.Fatalf("unregistered artifact directory was accepted: %+v", withoutArtifacts)
 	}
 	outsideCWD := projectContractCall(CommandRun, []string{root}, map[string]any{"scope": "project", "cwd": artifacts, "command": "cat result.txt"})
-	if _, err := commandApprovalDetails(outsideCWD); !errors.Is(err, errProjectPathNotAllowed) {
+	if _, err := commandApprovalDetails(context.Background(), outsideCWD); !errors.Is(err, errProjectPathNotAllowed) {
 		t.Fatalf("artifact directory selected a project cwd: %v", err)
 	}
 	if commandExecutableAllowedForAuto(artifact, root, []string{root}) {

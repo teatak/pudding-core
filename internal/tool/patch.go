@@ -531,7 +531,7 @@ func patchLimitFailure(out Result, limitErr *patchLimitError) Result {
 func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[string]any, error) {
 	switch call.Name {
 	case CommandRun:
-		return commandApprovalDetails(call)
+		return commandApprovalDetails(ctx, call)
 	case FileCopy:
 		return r.fileCopyApprovalDetails(call)
 	case GitStage, GitUnstage, GitCommit:
@@ -864,6 +864,10 @@ func ApprovalDetailsFailure(call Call, err error) Result {
 	}
 	if call.Name == CommandRun {
 		out := Result{CallID: call.CallID, Name: call.Name}
+		var shellErr *commandShellError
+		if errors.As(err, &shellErr) {
+			return commandShellFailure(out, err)
+		}
 		if _, argumentErr := decodeCommandRunArgs(call.Args); argumentErr != nil {
 			var scopeErr *invalidScopeError
 			if errors.As(argumentErr, &scopeErr) {

@@ -19,5 +19,5 @@ func (r unsupportedSandboxCommandRunner) Prepare(spec commandSpec) (*commandExec
 	if spec.SandboxMode == CommandSandboxBypass {
 		return r.direct.Prepare(spec)
 	}
-	return nil, fmt.Errorf("project command sandbox is not supported on %s; use Full Access to run this command", runtime.GOOS)
+	return nil, fmt.Errorf("project command sandbox is not supported on %s; request execution=host with a concrete host_access_reason and obtain approval for this invocation", runtime.GOOS)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -314,6 +315,9 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	if err != nil {
 		return ToolRisk{}, false
 	}
+	if runtime.GOOS == "windows" {
+		return windowsCommandRisk(args, projectDirs), true
+	}
 	analysis, err := analyzeCommandPolicy(args.Command, 0)
 	if err != nil {
 		return ToolRisk{}, false
@@ -448,6 +452,25 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	}
 	risk.ApprovalReasons = compactRiskPaths(risk.ApprovalReasons...)
 	return risk, true
+}
+
+// No POSIX safety inference applies to PowerShell. Windows host commands are
+// always reviewed in Ask/Auto; Full Access retains its existing explicit scope.
+func windowsCommandRisk(args commandRunArgs, projectDirs []string) ToolRisk {
+	operation := "shell"
+	if args.Background {
+		operation = "process_start"
+	}
+	cwd := args.CWD
+	if resolved, err := resolveCommandCWD(projectDirs, cwd); err == nil {
+		cwd = resolved
+	}
+	return ToolRisk{
+		Class: RiskClassCommand, Operation: operation, Scope: managedScopeProject,
+		Paths: compactRiskPaths(cwd), LowRisk: false,
+		Summary:         "Run PowerShell 7 x64 on the host without a project sandbox: " + compactShellCommand(args.Command),
+		ApprovalReasons: []string{"host_execution"}, hostAccessRequired: true,
+	}
 }
 
 func compactShellCommand(command string) string {

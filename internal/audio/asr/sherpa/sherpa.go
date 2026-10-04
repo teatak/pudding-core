@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package sherpa implements ASR with sherpa-onnx SenseVoice + Silero VAD.
 package sherpa
 

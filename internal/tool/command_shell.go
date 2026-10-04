@@ -3,6 +3,7 @@ package tool
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -278,6 +279,10 @@ func isShellFileDescriptor(value string) bool {
 }
 
 func commandVerificationArgv(command string) []string {
+	if runtime.GOOS == "windows" {
+		// POSIX parsing cannot establish PowerShell verification semantics.
+		return nil
+	}
 	analysis, err := analyzeShellCommand(command)
 	if err != nil || analysis.Dynamic || len(analysis.Commands) != 1 {
 		return nil

@@ -179,7 +179,7 @@ func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandR
 	}
 }
 
-func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
+func (r *BuiltinRunner) commandStart(ctx context.Context, call Call, args commandRunArgs) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	if strings.TrimSpace(call.SessionID) == "" {
 		return toolJSONError(out, "session_required", "background processes require a session")
@@ -194,7 +194,10 @@ func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	commandArgs := commandRunArgs{Scope: args.Scope, Command: args.Command, CWD: args.CWD, Env: args.Env}
-	executable, invocationArgs, shell := commandInvocation(commandArgs)
+	executable, invocationArgs, shell, err := commandInvocation(ctx, commandArgs)
+	if err != nil {
+		return commandShellFailure(out, err)
+	}
 	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, call.CommandStateKey, env, executable, invocationArgs, args.Command, shell, args.TTY)
 	if err != nil {
 		return backgroundProcessError(out, err)

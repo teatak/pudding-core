@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -29,6 +30,20 @@ var workModePrompt string
 
 //go:embed assets/mode_code.md
 var codeModePrompt string
+
+//go:embed assets/code_commands_posix.md
+var codeCommandsPOSIX string
+
+//go:embed assets/code_commands_windows.md
+var codeCommandsWindows string
+
+func codeModePromptForOS(goos string) string {
+	commands := codeCommandsPOSIX
+	if goos == "windows" {
+		commands = codeCommandsWindows
+	}
+	return strings.ReplaceAll(codeModePrompt, "{{COMMAND_PLATFORM}}", strings.TrimSpace(commands))
+}
 
 type Segment struct {
 	ID      string
@@ -376,7 +391,7 @@ func skillRealPath(item skill.Skill, homeDir string) string {
 func modePrompt(mode string) string {
 	switch normalizeMode(mode) {
 	case "code":
-		return codeModePrompt
+		return codeModePromptForOS(runtime.GOOS)
 	case "work":
 		return workModePrompt
 	case "chat":

@@ -142,6 +142,17 @@ func PlatformKey(goos, goarch string) string {
 	return goos + "_" + goarch
 }
 
+// UnsupportedStatus is used when the daemon has no voice runtime implementation.
+// Missing model files must not be presented as the reason capture is unavailable.
+func UnsupportedStatus() Status {
+	return normalizeStatus(Status{
+		OK: true, Disabled: true, State: "unsupported",
+		Release: DefaultRelease, Profile: defaultRuntimeProfile,
+		PlatformKey: PlatformKey(goruntime.GOOS, goruntime.GOARCH),
+		Message:     "Voice input is not supported in this build",
+	})
+}
+
 func (i *Installer) Status(ctx context.Context, cfg config.AudioConfig) Status {
 	i.mu.Lock()
 	status := i.state
