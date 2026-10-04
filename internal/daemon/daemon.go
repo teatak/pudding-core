@@ -194,7 +194,11 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithPluginExecutor(pluginHTTP).WithHome(dir).WithPlugins(plugins).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithPluginExecutor(pluginHTTP).WithHome(dir).WithPlugins(plugins).WithSkills(skills).WithBrowserMCP(browserMCP).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
+	// An absent concrete service must not become a non-nil controller interface.
+	if voiceService != nil {
+		apiServer.WithVoice(voiceService)
+	}
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,
