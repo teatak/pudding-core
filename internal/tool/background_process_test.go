@@ -351,12 +351,14 @@ func TestBackgroundProcessPublishesLifecycleEventsWithSource(t *testing.T) {
 
 func TestBackgroundProcessEnforcesPerSessionLimit(t *testing.T) {
 	runner := NewBuiltinRunner()
-	t.Cleanup(func() { _ = runner.Close() })
+	defer runner.Close() // Release child CWD handles before TempDir cleanup.
 	root := t.TempDir()
+	// Keep helpers alive until session cleanup; fixed sleeps can expire while
+	// Windows starts the remaining PowerShell processes.
 	for i := 0; i < backgroundProcessPerSessionLimit; i++ {
 		result := backgroundToolCall(runner, "sess_limit", root, CommandRun, map[string]any{
 			"scope":   "project",
-			"command": commandHelperCommand("sleep", "5000"),
+			"command": commandHelperCommand("stdin-line"),
 		})
 		if !result.Ok {
 			t.Fatalf("start %d failed: %+v", i, result)
@@ -364,7 +366,7 @@ func TestBackgroundProcessEnforcesPerSessionLimit(t *testing.T) {
 	}
 	overflow := backgroundToolCall(runner, "sess_limit", root, CommandRun, map[string]any{
 		"scope":   "project",
-		"command": commandHelperCommand("sleep", "5000"),
+		"command": commandHelperCommand("stdin-line"),
 	})
 	if overflow.Ok || !strings.Contains(overflow.Content, `"reason":"session_process_limit"`) {
 		t.Fatalf("session process limit was not enforced: %+v", overflow)

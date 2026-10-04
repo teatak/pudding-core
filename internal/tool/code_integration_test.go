@@ -95,6 +95,14 @@ func TestCodeToolsWithTypeScriptLanguageServer(t *testing.T) {
 		}
 	}
 	assertRealCodeRename(t, ctx, runner, root, "main.ts", 2, 20, "target", "renamedTarget")
+	// A completed clean check must replace the earlier error, not reuse a push
+	// snapshot (which may still contain the previous document's diagnostics).
+	writeCodeTestFile(t, filepath.Join(root, "main.ts"), "export const fixed: string = 'ok'\n")
+	result := runner.Call(ctx, Call{Name: CodeDiagnostics, Args: json.RawMessage(`{"scope":"project","paths":["main.ts"]}`), ProjectDirs: []string{root}})
+	payload := decodeToolResult(t, result)
+	if !result.Ok || payload["diagnosticCount"] != float64(0) || payload["fresh"] != true {
+		t.Fatalf("clean TypeScript check reused old diagnostics: %s", result.Content)
+	}
 }
 
 func assertRealCodeRename(t *testing.T, ctx context.Context, runner *BuiltinRunner, root, path string, line, column int, oldName, newName string) {

@@ -3,6 +3,9 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +32,7 @@ func (c *diagnosticsCache) update(raw json.RawMessage) {
 	}
 	c.mu.Lock()
 	c.generation++
-	c.byURI[params.URI] = DiagnosticSnapshot{
+	c.byURI[diagnosticURIKey(params.URI)] = DiagnosticSnapshot{
 		URI:         params.URI,
 		Version:     params.Version,
 		Diagnostics: append([]Diagnostic(nil), params.Diagnostics...),
@@ -43,7 +46,7 @@ func (c *diagnosticsCache) update(raw json.RawMessage) {
 
 func (c *diagnosticsCache) get(uri string) (DiagnosticSnapshot, bool) {
 	c.mu.RLock()
-	snapshot, ok := c.byURI[uri]
+	snapshot, ok := c.byURI[diagnosticURIKey(uri)]
 	c.mu.RUnlock()
 	if !ok {
 		return DiagnosticSnapshot{}, false
@@ -54,12 +57,13 @@ func (c *diagnosticsCache) get(uri string) (DiagnosticSnapshot, bool) {
 
 func (c *diagnosticsCache) generationForURI(uri string) uint64 {
 	c.mu.RLock()
-	snapshot := c.byURI[uri]
+	snapshot := c.byURI[diagnosticURIKey(uri)]
 	c.mu.RUnlock()
 	return snapshot.Generation
 }
 
 func (c *diagnosticsCache) wait(ctx context.Context, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error) {
+	uri = diagnosticURIKey(uri)
 	for {
 		c.mu.RLock()
 		snapshot, ok := c.byURI[uri]
@@ -76,4 +80,19 @@ func (c *diagnosticsCache) wait(ctx context.Context, uri string, afterGeneration
 		case <-changed:
 		}
 	}
+}
+
+func diagnosticURIKey(uri string) string {
+	if runtime.GOOS != "windows" {
+		return uri
+	}
+	parsed, err := url.Parse(uri)
+	if err != nil || parsed.Scheme != "file" || parsed.Host != "" || len(parsed.Path) < 3 || parsed.Path[0] != '/' || parsed.Path[2] != ':' {
+		return uri
+	}
+	// TypeScript publishes file:///c%3A/... while gopls preserves C:/.
+	// Normalize the drive, not the rest of the path (case-sensitive folders exist).
+	parsed.Path = "/" + strings.ToLower(parsed.Path[1:2]) + parsed.Path[2:]
+	parsed.RawPath = ""
+	return parsed.String()
 }

@@ -16,20 +16,19 @@ import (
 )
 
 const (
-	defaultCodeResults           = 100
-	maxCodeSymbols               = 200
-	maxCodeDefinitions           = 20
-	maxCodeReferences            = 500
-	maxCodeDiagnostics           = 500
-	maxCodeDiagnosticTargets     = 32
-	maxCodeQueryRunes            = 500
-	maxCodeResultBytes           = 256 << 10
-	maxCodeSymbolTextRunes       = 400
-	maxCodeDiagnosticRunes       = 2000
-	maxCodeMetadataRunes         = 200
-	maxCodeBootstrapFiles        = 2048
-	codeDiagnosticWait           = 750 * time.Millisecond
-	codeTypeScriptDiagnosticWait = 3 * time.Second
+	defaultCodeResults       = 100
+	maxCodeSymbols           = 200
+	maxCodeDefinitions       = 20
+	maxCodeReferences        = 500
+	maxCodeDiagnostics       = 500
+	maxCodeDiagnosticTargets = 32
+	maxCodeQueryRunes        = 500
+	maxCodeResultBytes       = 256 << 10
+	maxCodeSymbolTextRunes   = 400
+	maxCodeDiagnosticRunes   = 2000
+	maxCodeMetadataRunes     = 200
+	maxCodeBootstrapFiles    = 2048
+	codeDiagnosticWait       = 750 * time.Millisecond
 )
 
 type codeSymbolsArgs struct {
@@ -423,6 +422,10 @@ func (r *BuiltinRunner) prepareCodePosition(ctx context.Context, out Result, cal
 }
 
 func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target resolvedCodeTarget, uri string, state lsp.DocumentState) ([]lsp.Diagnostic, bool, error) {
+	if target.language == "typescript" {
+		items, err := r.typeScriptDocumentDiagnostics(ctx, target, uri)
+		return items, err == nil, err
+	}
 	var report struct {
 		Kind  string           `json:"kind"`
 		Items []lsp.Diagnostic `json:"items"`
@@ -441,11 +444,7 @@ func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target reso
 	if state.Changed {
 		afterGeneration = state.PreviousDiagnosticGeneration
 	}
-	wait := codeDiagnosticWait
-	if target.language == "typescript" {
-		wait = codeTypeScriptDiagnosticWait
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	waitCtx, cancel := context.WithTimeout(ctx, codeDiagnosticWait)
 	defer cancel()
 	snapshot, ok, waitErr := r.languageService.PublishedDiagnostics(waitCtx, target.spec, uri, afterGeneration)
 	if errors.Is(waitErr, context.DeadlineExceeded) {
