@@ -380,6 +380,10 @@ func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !state.HasState || state.TabID != blankTab.ID || state.URL != "about:blank" {
 		t.Fatalf("blank state status=%d state=%+v", resp.StatusCode, state)
 	}
+	// This checks the newest tab, not equal-time tie breaking. Windows clock
+	// resolution can give two fast requests identical wall-clock timestamps.
+	blankTab.UpdatedAt = time.Unix(1, 0).UTC()
+	browserSvc.tabs[blankTab.ID] = blankTab
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_state/browser/open", map[string]string{"url": "https://www.sohu.com/"})
 	tab := decodeJSON[browser.TabSnapshot](t, resp)
