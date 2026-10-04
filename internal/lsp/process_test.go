@@ -29,7 +29,7 @@ func TestLSPHelperProcess(t *testing.T) {
 
 func TestProcessConcurrentRequestsAndDiagnostics(t *testing.T) {
 	manager := newTestManager()
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	spec := testServerSpec(t, "concurrent")
 	process, err := manager.Acquire(context.Background(), spec)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestProcessConcurrentRequestsAndDiagnostics(t *testing.T) {
 
 func TestProcessCancelKeepsSharedServerAlive(t *testing.T) {
 	manager := newTestManager()
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	process, err := manager.Acquire(context.Background(), testServerSpec(t, "cancel"))
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestManagerAppliesRequestTimeoutAndKeepsServerAlive(t *testing.T) {
 		WithIdleTimeout(0),
 		WithReapInterval(0),
 	)
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	spec := testServerSpec(t, "request-timeout")
 	if err := manager.Request(context.Background(), spec, "test/wait", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("request timeout error = %v", err)
@@ -139,7 +139,7 @@ func TestManagerAppliesRequestTimeoutAndKeepsServerAlive(t *testing.T) {
 
 func TestManagerRequestRestartsExitedProcess(t *testing.T) {
 	manager := newTestManager()
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	spec := testServerSpec(t, "request-restart")
 	process, err := manager.Acquire(context.Background(), spec)
 	if err != nil {
@@ -167,7 +167,7 @@ func TestManagerRequestRestartsExitedProcess(t *testing.T) {
 
 func TestProcessRespondsToServerRequest(t *testing.T) {
 	manager := newTestManager()
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	process, err := manager.Acquire(context.Background(), testServerSpec(t, "server-request"))
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestProcessRespondsToServerRequest(t *testing.T) {
 
 func TestManagerSynchronizesDocumentVersionsAndDiagnostics(t *testing.T) {
 	manager := newTestManager()
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	spec := testServerSpec(t, "documents")
 	uri := fileURI(filepath.Join(spec.Key.LanguageRoot, "document.go"))
 	first, err := manager.SyncDocument(context.Background(), spec, Document{URI: uri, LanguageID: "go", Text: "package demo\n"})
@@ -291,7 +291,7 @@ func TestManagerReapsIdleProcess(t *testing.T) {
 		WithIdleTimeout(15*time.Millisecond),
 		WithReapInterval(0),
 	)
-	t.Cleanup(func() { closeTestManager(t, manager) })
+	defer closeTestManager(t, manager)
 	process, err := manager.Acquire(context.Background(), testServerSpec(t, "idle"))
 	if err != nil {
 		t.Fatal(err)
@@ -319,13 +319,13 @@ func TestManagerDefaultCapacityEvictsToThreeProcesses(t *testing.T) {
 		WithIdleTimeout(0),
 		WithReapInterval(0),
 	)
-	t.Cleanup(func() {
+	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := manager.Close(ctx); err != nil {
 			t.Errorf("close manager: %v", err)
 		}
-	})
+	}()
 	var first *Process
 	for index := 0; index < 4; index++ {
 		process, err := manager.Acquire(context.Background(), testServerSpec(t, "capacity-"+strconv.Itoa(index)))

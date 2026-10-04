@@ -85,6 +85,9 @@ func validatePowerShell(ctx context.Context, executable, command, goos string) e
 	configureCommandProcess(cmd)
 	output, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return &commandShellError{"shell_unavailable", fmt.Sprintf("PowerShell 7 preflight failed: %v", err)}
 	}
 	var parsed struct {

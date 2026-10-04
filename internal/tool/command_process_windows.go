@@ -27,11 +27,7 @@ func terminateCommandProcess(cmd *exec.Cmd) error {
 }
 
 func requestCommandProcessStop(cmd *exec.Cmd) error {
-	if cmd.Process == nil {
-		return nil
-	}
-	if err := exec.Command("taskkill", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run(); err == nil {
-		return nil
-	}
-	return cmd.Process.Kill()
+	// Console processes have no reliable SIGTERM equivalent. Killing only the
+	// shell first loses the parent PID needed to terminate its descendants.
+	return terminateCommandProcess(cmd)
 }

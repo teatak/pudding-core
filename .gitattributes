@@ -1,0 +1,2 @@
+# Release schema fingerprints and embedded fixtures must have identical bytes.
+* text=auto eol=lf

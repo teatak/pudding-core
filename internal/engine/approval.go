@@ -289,7 +289,6 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	}
 	targetMode, publicTargetMode := normalizeCapabilityTargetMode(req.TargetMode)
 	req.TargetMode = targetMode
-	req.ProjectDirs = store.NormalizeProjectDirs(req.ProjectDirs)
 	req.SuggestedDirName = strings.TrimSpace(req.SuggestedDirName)
 	currentMode = store.NormalizeAgentMode(currentMode)
 	if currentMode == "" {
@@ -301,6 +300,7 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	if req.TargetMode == store.ModeWork && (len(req.ProjectDirs) > 0 || req.NeedsProjectDir || req.SuggestedDirName != "") {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_not_allowed"}), currentMode, false
 	}
+	req.ProjectDirs = store.NormalizeProjectDirs(req.ProjectDirs)
 	if currentMode == store.ModeCode && req.TargetMode == store.ModeWork {
 		return capabilityToolResult(call, true, map[string]any{
 			"ok":          true,

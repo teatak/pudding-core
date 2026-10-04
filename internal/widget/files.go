@@ -71,23 +71,14 @@ func WriteVersion(parent, hash string, files map[string]string) error {
 			return closeErr
 		}
 	}
-	if err = os.Rename(staging, filepath.Join(parent, hash)); err != nil {
+	if err = renamePublication(staging, filepath.Join(parent, hash)); err != nil {
 		// Concurrent identical packages may already have published this hash.
 		existing, readErr := ReadVersion(filepath.Join(parent, hash), func(string) bool { return true })
 		if readErr != nil || PackageHash(existing) != hash {
 			return err
 		}
 	}
-	directory, err := os.Open(parent)
-	if err != nil {
-		return err
-	}
-	syncErr := directory.Sync()
-	closeErr := directory.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	return syncPublication(parent)
 }
 
 func ReadPackage(home, id, hash string) (Package, error) {

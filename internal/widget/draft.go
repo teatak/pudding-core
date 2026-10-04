@@ -234,17 +234,8 @@ func writeDraftAtomic(root, file string, data []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(f.Name(), file); err != nil {
+	if err := renamePublication(f.Name(), file); err != nil {
 		return err
 	}
-	dir, err := os.Open(parent)
-	if err != nil {
-		return err
-	}
-	syncErr := dir.Sync()
-	closeErr := dir.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	return syncPublication(parent)
 }

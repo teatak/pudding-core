@@ -12,6 +12,18 @@ import (
 	"testing"
 )
 
+func TestPowerShellCancelledPreflightIsNotMissingRuntime(t *testing.T) {
+	executable := testPowerShell(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := validatePowerShell(ctx, executable, "Write-Output ok", runtime.GOOS)
+	result := commandShellFailure(Result{}, err)
+	payload := decodeCommandPayload(t, result)
+	if result.Ok || !payload.Cancelled || payload.Reason != "cancelled" {
+		t.Fatalf("cancelled parser reported a runtime installation problem: %+v", result)
+	}
+}
+
 func TestWindowsCommandInputDoesNotUsePOSIXGrammar(t *testing.T) {
 	for _, command := range []string{
 		`& 'C:\Program Files\Go\bin\go.exe' version`,

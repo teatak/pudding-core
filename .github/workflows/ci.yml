@@ -57,5 +57,10 @@ jobs:
           test "$(gcc -dumpmachine)" = x86_64-w64-mingw32
           pwsh.exe -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion.Major -lt 7 -or [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne "X64") { exit 1 }; $PSVersionTable.PSVersion.ToString()'
       - run: make daemon BUILDTAGS=sqlite_fts5 DAEMON_OUT=bin/puddingd.exe
+        id: daemon-build
+      - name: Verify native PowerShell and command lifecycle
+        run: go test -count=1 -tags sqlite_fts5 ./internal/tool -run '^(TestPowerShell|TestWindows|TestCommandRun(UsesProjectCWDAndCapturesOutput|StreamsStdoutAndStderr|ReturnsExitCode|TimeoutKillsProcessTree|StopsOnContextCancel)|TestBackgroundProcess(StartPollStop|PipeAcceptsInput|RunsAndStopsLocalServer))'
       - run: make test BUILDTAGS=sqlite_fts5
+        if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
       - run: make schema-check BUILDTAGS=sqlite_fts5
+        if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}

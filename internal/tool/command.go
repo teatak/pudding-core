@@ -177,6 +177,14 @@ func commandInvocation(ctx context.Context, args commandRunArgs) (string, []stri
 }
 
 func commandShellFailure(out Result, err error) Result {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		cancelled := errors.Is(err, context.Canceled)
+		reason := "timed_out"
+		if cancelled {
+			reason = "cancelled"
+		}
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": reason, "cancelled": cancelled, "timedOut": !cancelled})
+	}
 	var shellErr *commandShellError
 	if errors.As(err, &shellErr) {
 		return toolJSONError(out, shellErr.reason, shellErr.detail)

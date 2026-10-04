@@ -17,6 +17,7 @@ func TestProjectGitStatusAndDiff(t *testing.T) {
 	root := t.TempDir()
 	runProjectGit(t, root, "init", "--quiet")
 	runProjectGit(t, root, "config", "user.name", "Pudding Test")
+	runProjectGit(t, root, "config", "core.autocrlf", "false")
 	runProjectGit(t, root, "config", "user.email", "pudding@example.test")
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -80,6 +81,7 @@ func TestProjectGitWriteOperations(t *testing.T) {
 	if !status.Available || !status.Clean {
 		t.Fatalf("unexpected initialized status: %+v", status)
 	}
+	runProjectGit(t, root, "config", "core.autocrlf", "false")
 	runProjectGit(t, root, "config", "user.name", "Pudding Test")
 	runProjectGit(t, root, "config", "user.email", "pudding@example.test")
 	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o600); err != nil {

@@ -865,7 +865,7 @@ func ApprovalDetailsFailure(call Call, err error) Result {
 	if call.Name == CommandRun {
 		out := Result{CallID: call.CallID, Name: call.Name}
 		var shellErr *commandShellError
-		if errors.As(err, &shellErr) {
+		if errors.As(err, &shellErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return commandShellFailure(out, err)
 		}
 		if _, argumentErr := decodeCommandRunArgs(call.Args); argumentErr != nil {

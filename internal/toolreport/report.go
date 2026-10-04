@@ -134,7 +134,11 @@ func openReadOnly(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tool report resolve database path: %w", err)
 	}
-	uri := &url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	uriPath := filepath.ToSlash(abs)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := &url.URL{Scheme: "file", Path: uriPath}
 	query := uri.Query()
 	query.Set("mode", "ro")
 	query.Set("_busy_timeout", "5000")

@@ -2477,20 +2477,25 @@ func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T)
 func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
 	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
-	ctx := context.Background()
+	t.Cleanup(eng.Stop)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 	sid := "sess_work_dirs"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "test", Model: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_work", tool.Call{
-		SessionID: sid,
-		TurnID:    "turn_work",
-		CallID:    "call_work",
-		Name:      tool.RequestCapability,
-		Args:      json.RawMessage(`{"targetMode":"work","reason":"需要操作浏览器","projectDirs":["/tmp"]}`),
-	}, store.ModeChat)
-	if result.Ok || upgraded || mode != store.ModeChat || !strings.Contains(result.Content, "project_dirs_not_allowed") {
-		t.Fatalf("unexpected work directory rejection: result=%+v mode=%q upgraded=%t", result, mode, upgraded)
+	for _, path := range []string{"/tmp", "relative/path", "", t.TempDir()} {
+		raw, _ := json.Marshal(map[string]any{"targetMode": "work", "reason": "需要操作浏览器", "projectDirs": []string{path}})
+		result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_work", tool.Call{
+			SessionID: sid,
+			TurnID:    "turn_work",
+			CallID:    "call_work",
+			Name:      tool.RequestCapability,
+			Args:      raw,
+		}, store.ModeChat)
+		if result.Ok || upgraded || mode != store.ModeChat || !strings.Contains(result.Content, "project_dirs_not_allowed") {
+			t.Fatalf("path=%q: unexpected work directory rejection: result=%+v mode=%q upgraded=%t", path, result, mode, upgraded)
+		}
 	}
 }
 

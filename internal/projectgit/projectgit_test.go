@@ -259,6 +259,7 @@ func newRepository(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	git(t, root, "init", "--quiet")
+	git(t, root, "config", "core.autocrlf", "false")
 	git(t, root, "config", "user.name", "Pudding Test")
 	git(t, root, "config", "user.email", "pudding@example.test")
 	return root
