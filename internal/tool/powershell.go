@@ -34,7 +34,7 @@ func powerShellScript(command string) string {
 	// available for managed background processes. The original command is also
 	// kept unchanged in the approval and result payloads.
 	return `$ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7 -or ($IsWindows -and [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64')) { throw 'PowerShell 7 x64 is required on Windows' }
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7 -or ($IsWindows -and [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -notin @('X64', 'Arm64'))) { throw 'PowerShell 7 (x64 or ARM64) is required on Windows' }
 $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $puddingSource = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('` + base64.StdEncoding.EncodeToString([]byte(command)) + `'))
 $puddingScript = [scriptblock]::Create($puddingSource + '
@@ -63,7 +63,7 @@ func preparePowerShell(ctx context.Context, command, goos string) (string, []str
 	}
 	executable, err := exec.LookPath(name)
 	if err != nil {
-		return "", nil, &commandShellError{"shell_unavailable", "PowerShell 7 x64 (pwsh.exe) is required on Windows; install it and restart Pudding. No fallback to Windows PowerShell 5.1 or Git Bash."}
+		return "", nil, &commandShellError{"shell_unavailable", "PowerShell 7 (x64 or ARM64) (pwsh.exe) is required on Windows; install it and restart Pudding. No fallback to Windows PowerShell 5.1 or Git Bash."}
 	}
 	if err := powerShellInputLimit(command); err != nil {
 		return "", nil, &commandShellError{"invalid_arguments", err.Error()}
@@ -100,8 +100,8 @@ func validatePowerShell(ctx context.Context, executable, command, goos string) e
 	if err := json.Unmarshal(output, &parsed); err != nil {
 		return &commandShellError{"shell_unavailable", "PowerShell returned an invalid preflight response"}
 	}
-	if parsed.Major < 7 || parsed.Edition != "Core" || (goos == "windows" && parsed.Arch != "X64") {
-		return &commandShellError{"shell_unavailable", "PowerShell 7 x64 is required; Windows PowerShell 5.1 and ARM64/x86 runtimes are not supported"}
+	if !powerShellRuntimeSupported(parsed.Major, parsed.Edition, parsed.Arch, goos) {
+		return &commandShellError{"shell_unavailable", "PowerShell 7 (x64 or ARM64) is required; Windows PowerShell 5.1 and x86 runtimes are not supported"}
 	}
 	if len(parsed.Errors) > 0 {
 		return &commandShellError{"invalid_arguments", "invalid PowerShell command: " + strings.Join(parsed.Errors, "; ")}
@@ -110,4 +110,8 @@ func validatePowerShell(ctx context.Context, executable, command, goos string) e
 		return &commandShellError{"invalid_arguments", "PowerShell background operators are not supported; set background=true instead"}
 	}
 	return nil
+}
+
+func powerShellRuntimeSupported(major int, edition, arch, goos string) bool {
+	return major >= 7 && edition == "Core" && (goos != "windows" || arch == "X64" || arch == "Arm64")
 }

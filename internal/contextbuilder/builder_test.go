@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -160,7 +161,7 @@ func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(req.System, "## Project Directories") || !strings.Contains(req.System, firstRoot) || !strings.Contains(req.System, secondRoot) {
+	if !strings.Contains(req.System, "## Project Directories") || !strings.Contains(req.System, strconv.Quote(firstRoot)) || !strings.Contains(req.System, strconv.Quote(secondRoot)) {
 		t.Fatalf("system prompt missing multi-root Project directories:\n%s", req.System)
 	}
 	if strings.Contains(req.System, "## Project Instructions") {
@@ -235,6 +236,7 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 }
 
 func TestBuildIncludesProjectReferencesTag(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "tutorials", "README.md")
 	ms := storetest.New(t)
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -251,7 +253,7 @@ func TestBuildIncludesProjectReferencesTag(t *testing.T) {
 				ID:          "ref_1",
 				Name:        "README.md",
 				Path:        "tutorials/README.md",
-				SourcePath:  "/workspace/tutorials/README.md",
+				SourcePath:  sourcePath,
 				RootID:      "root_1",
 				Kind:        "file",
 				StartLine:   3,
@@ -268,7 +270,7 @@ func TestBuildIncludesProjectReferencesTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-project-references version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"rootID":"root_1"`) || !strings.Contains(req.Messages[0].Text, `"path":"tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"sourcePath":"/workspace/tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"startLine":3`) || !strings.Contains(req.Messages[0].Text, `"endLine":5`) {
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-project-references version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"rootID":"root_1"`) || !strings.Contains(req.Messages[0].Text, `"path":"tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"sourcePath":`+strconv.Quote(sourcePath)) || !strings.Contains(req.Messages[0].Text, `"startLine":3`) || !strings.Contains(req.Messages[0].Text, `"endLine":5`) {
 		t.Fatalf("project reference tag missing from provider context: %+v", req.Messages)
 	}
 	if strings.Index(req.Messages[0].Text, "<pudding-project-references version=\"1\">") > strings.Index(req.Messages[0].Text, "check this") {

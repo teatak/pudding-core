@@ -56,7 +56,11 @@ func ProjectFileURLAuthorizer(scope ProjectFileScope) FileURLAuthorizer {
 		if err != nil {
 			return AuthorizedURL{}, ErrFileURLNotAllowed
 		}
-		canonical := (&url.URL{Scheme: "file", Path: filepath.ToSlash(target), RawQuery: parsed.RawQuery, Fragment: parsed.Fragment}).String()
+		urlPath := filepath.ToSlash(target)
+		if !strings.HasPrefix(urlPath, "/") {
+			urlPath = "/" + urlPath
+		}
+		canonical := (&url.URL{Scheme: "file", Path: urlPath, RawQuery: parsed.RawQuery, Fragment: parsed.Fragment}).String()
 		return AuthorizedURL{URL: canonical, FileRoot: resolvedRoot}, nil
 	}
 }

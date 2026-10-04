@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -632,8 +633,10 @@ func TestComputerObservePreservesSuccessfulChannel(t *testing.T) {
 	}
 }
 func TestComputerSelectionAndKeyboardApprovalDetails(t *testing.T) {
-	details, err := computerUseAppApprovalDetails(Call{Args: json.RawMessage(`{"appID":"com.github.Electron","appPath":"/tmp/Source.app","pid":123}`)})
-	if err != nil || details["appPath"] != "/tmp/Source.app" || details["pid"] != int32(123) {
+	appPath := filepath.Join(t.TempDir(), "Source.app")
+	args, _ := json.Marshal(map[string]any{"appID": "com.github.Electron", "appPath": appPath, "pid": 123})
+	details, err := computerUseAppApprovalDetails(Call{Args: args})
+	if err != nil || details["appPath"] != appPath || details["pid"] != int32(123) {
 		t.Fatalf("details=%+v err=%v", details, err)
 	}
 	details, err = computerActApprovalDetails(Call{Args: json.RawMessage(`{"appID":"com.github.Electron","windowID":42,"actions":[{"type":"press_key","key":"f","modifiers":["command"]}]}`)})

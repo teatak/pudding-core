@@ -125,6 +125,11 @@ func TestManagerAppliesRequestTimeoutAndKeepsServerAlive(t *testing.T) {
 	)
 	defer closeTestManager(t, manager)
 	spec := testServerSpec(t, "request-timeout")
+	// Exercise request timeout, not cold process startup within 40 ms.
+	process, err := manager.Acquire(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.Request(context.Background(), spec, "test/wait", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("request timeout error = %v", err)
 	}
@@ -134,6 +139,10 @@ func TestManagerAppliesRequestTimeoutAndKeepsServerAlive(t *testing.T) {
 	}
 	if echo["value"] != "still-alive" {
 		t.Fatalf("echo = %+v", echo)
+	}
+	current, err := manager.Acquire(context.Background(), spec)
+	if err != nil || current.PID() != process.PID() {
+		t.Fatalf("timeout replaced the shared server: %v", err)
 	}
 }
 

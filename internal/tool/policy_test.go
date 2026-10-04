@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -134,6 +135,10 @@ func TestClassifyToolCallGitWriteRisk(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandRisk(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	tests := []struct {
 		name      string
 		args      string
@@ -242,6 +247,10 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandSandboxHandlesUnresolvedArguments(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	for _, command := range []string{
 		`git config $OLDPWD`,
 		`git config "$OLDPWD"`,
@@ -268,6 +277,10 @@ func TestClassifyToolCallCommandSandboxHandlesUnresolvedArguments(t *testing.T) 
 }
 
 func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := filepath.Join(t.TempDir(), "golang study")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -310,6 +323,10 @@ func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := t.TempDir()
 	inside := filepath.Join(root, "reports", "test.log")
 	insideRaw, _ := json.Marshal(map[string]any{
@@ -363,6 +380,10 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandSeparatesApprovalFromExecutionBoundary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "report.txt")
 	outsideScript := filepath.Join(t.TempDir(), "report.py")
@@ -413,6 +434,10 @@ func TestClassifyToolCallCommandSeparatesApprovalFromExecutionBoundary(t *testin
 }
 
 func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	base := t.TempDir()
 	realRoot := filepath.Join(base, "real")
 	if err := os.MkdirAll(realRoot, 0o700); err != nil {
@@ -430,6 +455,10 @@ func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandAcceptsAncestorAndRootAliases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	base := projectContractDir(t)
 	canonicalParent := filepath.Join(base, "private", "var")
 	canonicalRoot := filepath.Join(canonicalParent, "real")
@@ -455,6 +484,10 @@ func TestClassifyToolCallCommandAcceptsAncestorAndRootAliases(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"/tmp/go test ./..."}`))
 	if !ok || risk.LowRisk {
 		t.Fatalf("external executable must require approval: %+v ok=%v", risk, ok)
@@ -480,6 +513,10 @@ func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
 }
 
 func TestCommandExecutableUsesSandboxReadRoots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := t.TempDir()
 	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{chrome, "--headless=new", "--screenshot=preview.png", "demo.html"})})
@@ -499,6 +536,10 @@ func TestCommandExecutableUsesSandboxReadRoots(t *testing.T) {
 }
 
 func TestClassifyToolCallBackgroundCommandUsesSameRiskRules(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	for _, test := range []struct {
 		name    string
 		args    string

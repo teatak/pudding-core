@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -35,8 +34,8 @@ func TestCommandEnvironmentIncludesDesktopToolchainPaths(t *testing.T) {
 			t.Fatalf("PATH %q does not contain %q", pathValue, want)
 		}
 	}
-	if strings.Count(pathValue, "/usr/bin") != 1 {
-		t.Fatalf("PATH contains duplicate standard directories: %q", pathValue)
+	if len(parts) != len(slices.Compact(slices.Sorted(slices.Values(parts)))) {
+		t.Fatalf("PATH contains duplicate directories: %q", pathValue)
 	}
 }
 
@@ -119,7 +118,7 @@ func (r *recordingCommandRunner) Prepare(spec commandSpec) (*commandExecution, e
 
 func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 	runner := NewBuiltinRunner()
-	t.Cleanup(func() { _ = runner.Close() })
+	defer runner.Close()
 	runner.setCommandRunner(&recordingCommandRunner{sandboxed: true, sandboxKind: "test-sandbox"})
 	root := t.TempDir()
 
@@ -157,7 +156,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 	deniedPoll := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandSession, map[string]any{
 		"action":     "poll",
 		"process_id": deniedStarted.ProcessID,
-		"wait_ms":    1000,
+		"wait_ms":    10000, // Includes PowerShell startup under x64 emulation.
 	})
 	deniedFinished := decodeBackgroundProcessPayload(t, deniedPoll)
 	if deniedFinished.Running || !deniedFinished.SandboxDenied {

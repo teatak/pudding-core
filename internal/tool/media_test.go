@@ -132,7 +132,7 @@ func TestBuiltinMediaReadRejectsCrossSessionAndFilesystemAttachmentKeys(t *testi
 	}{
 		{name: "other session", args: map[string]string{"source": "attachment", "url": stored.URL}, reason: "session_mismatch"},
 		{name: "other session key", args: map[string]string{"source": "attachment", "attachmentKey": stored.AttachmentKey}, reason: "session_mismatch"},
-		{name: "filesystem path", args: map[string]string{"source": "attachment", "attachmentKey": "/Users/me/photo.png"}, reason: "invalid_attachment_key"},
+		{name: "filesystem path", args: map[string]string{"source": "attachment", "attachmentKey": filepath.Join(t.TempDir(), "photo.png")}, reason: "invalid_attachment_key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args, err := json.Marshal(tc.args)

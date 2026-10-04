@@ -12,6 +12,39 @@ import (
 	"testing"
 )
 
+func TestPowerShellRuntimeArchitectures(t *testing.T) {
+	for _, tc := range []struct {
+		major               int
+		edition, arch, goos string
+		want                bool
+	}{
+		{7, "Core", "X64", "windows", true},
+		{7, "Core", "Arm64", "windows", true},
+		{7, "Core", "X86", "windows", false},
+		{7, "Core", "Arm", "windows", false},
+		{7, "Core", "", "windows", false},
+		{5, "Desktop", "X64", "windows", false},
+		{5, "Core", "Arm64", "windows", false},
+		{7, "Desktop", "Arm64", "windows", false},
+		{7, "Core", "Arm64", "darwin", true},
+	} {
+		if got := powerShellRuntimeSupported(tc.major, tc.edition, tc.arch, tc.goos); got != tc.want {
+			t.Errorf("runtime %+v: supported=%v", tc, got)
+		}
+	}
+}
+
+func TestWindowsExecutablePATHUsesOnlyHostEnvironment(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows host PATH contract")
+	}
+	for _, path := range []string{"", `C:\tools;C:\Windows\System32`} {
+		if got := mergedExecutablePATH(path); got != path {
+			t.Fatalf("Windows PATH gained implicit executable locations: %q", got)
+		}
+	}
+}
+
 func TestPowerShellCancelledPreflightIsNotMissingRuntime(t *testing.T) {
 	executable := testPowerShell(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -84,7 +117,7 @@ func testPowerShell(t *testing.T) string {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		if runtime.GOOS == "windows" {
-			t.Fatal("Windows CI requires PowerShell 7 x64: ", err)
+			t.Fatal("Windows CI requires PowerShell 7 (x64 or ARM64): ", err)
 		}
 		t.Skip("optional native PowerShell parser tests: pwsh is not installed")
 	}

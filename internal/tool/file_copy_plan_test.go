@@ -240,6 +240,36 @@ func overwriteCopyCall(call Call, recursive bool) Call {
 	return call
 }
 
+func TestFileCopyPlanRejectsReplacementWithSameMetadata(t *testing.T) {
+	root := t.TempDir()
+	source, target := filepath.Join(root, "source"), filepath.Join(root, "target")
+	writeCopyFixture(t, source, "before")
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	call := copyPathCall(source, target, root)
+	args, err := decodeFileCopyArgs(call.Args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := runner.prepareFileCopy(call, args, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCopyFixture(t, source+".new", "after!")
+	if err := os.Chtimes(source+".new", before.sourceInfo.ModTime(), before.sourceInfo.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(source+".new", source); err != nil {
+		t.Fatal(err)
+	}
+	after, err := runner.prepareFileCopy(call, args, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.matches(after) {
+		t.Fatal("replacement with identical metadata retained approval identity")
+	}
+}
+
 func TestFileCopyApprovalRejectsChangedDirectoryEntries(t *testing.T) {
 	for _, endpoint := range []string{"source", "destination"} {
 		for _, change := range []string{"edit", "add", "remove", "replace"} {

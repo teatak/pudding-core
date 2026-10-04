@@ -35,6 +35,11 @@ func mergedExecutablePATH(current string) string {
 }
 
 func commonExecutableDirs() []string {
+	// Windows tools are discovered through the host PATH. Unix defaults are
+	// drive-relative paths there, not trusted absolute executable locations.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	dirs := []string{
 		"/opt/homebrew/bin",
 		"/opt/homebrew/sbin",

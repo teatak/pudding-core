@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func TestBuiltinAttachmentExportWritesAuthorizedProjectFile(t *testing.T) {
 	}
 	wantPath := filepath.Join(canonicalProject, "assets", "capture.png")
 	payload := decodeToolResult(t, res)
-	if payload["path"] != wantPath || payload["relativePath"] != filepath.Join("assets", "capture.png") || payload["attachmentKey"] != stored.AttachmentKey {
+	if payload["path"] != wantPath || payload["relativePath"] != "assets/capture.png" || payload["attachmentKey"] != stored.AttachmentKey {
 		t.Fatalf("unexpected export payload: %+v", payload)
 	}
 	data, err := os.ReadFile(wantPath)
@@ -125,7 +126,11 @@ func TestBuiltinAttachmentExportTempRoundTrip(t *testing.T) {
 				}
 				commandProjects = []string{scratch}
 			}
-			commandArgs, _ := json.Marshal(map[string]any{"scope": "project", "command": "wc -c < '" + absolute + "'", "cwd": commandProjects[0]})
+			commandText := "wc -c < " + quoteShellArg(absolute)
+			if runtime.GOOS == "windows" {
+				commandText = "(Get-Item -LiteralPath '" + strings.ReplaceAll(absolute, "'", "''") + "').Length"
+			}
+			commandArgs, _ := json.Marshal(map[string]any{"scope": "project", "command": commandText, "cwd": commandProjects[0]})
 			command := runner.Call(context.Background(), Call{SessionID: "session-a", TurnID: "turn-b", Name: CommandRun, Mode: store.ModeCode, ProjectDirs: commandProjects, Args: commandArgs})
 			if !command.Ok || strings.TrimSpace(fmt.Sprint(decodeToolResult(t, command)["stdout"])) != strconv.Itoa(len(data)) {
 				t.Fatalf("command could not read absolutePath: %+v", command)

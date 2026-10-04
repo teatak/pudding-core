@@ -78,7 +78,9 @@ func copyDirectoryEntries(path string, info os.FileInfo) (map[string]os.FileInfo
 		if err != nil {
 			return err
 		}
-		entries[rel], err = entry.Info()
+		// Windows directory enumeration may cache stale metadata. Stat each
+		// path so unchanged trees compare against the same live metadata.
+		entries[rel], err = copyFileMetadata(name)
 		return err
 	})
 	return entries, err
@@ -101,6 +103,20 @@ func sameCopyFile(before, after os.FileInfo) bool {
 		return before == nil && after == nil
 	}
 	return os.SameFile(before, after) && before.Mode() == after.Mode() && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime())
+}
+
+func copyFileMetadata(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	// Go loads Windows file IDs lazily in SameFile. Capture the ID now,
+	// before approval/staging, so a later replacement cannot inherit it.
+	// This reads metadata only and does not follow the final symlink.
+	if !os.SameFile(info, info) {
+		return nil, &os.PathError{Op: "stat copy identity", Path: path, Err: errors.New("file identity unavailable")}
+	}
+	return info, nil
 }
 
 type fileCopyError struct {
@@ -152,7 +168,7 @@ func (r *BuiltinRunner) prepareFileCopy(call Call, args fileCopyArgs, allowExter
 	if pathInsideRoot(from.Path, to.Path) {
 		return nil, &fileCopyError{reason: "copy_overlap", detail: "destination contains the source path"}
 	}
-	info, err := os.Lstat(from.Path)
+	info, err := copyFileMetadata(from.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +183,7 @@ func (r *BuiltinRunner) prepareFileCopy(call Call, args fileCopyArgs, allowExter
 			return nil, &fileCopyError{reason: "copy_into_self", detail: "cannot copy a directory into itself or its descendants"}
 		}
 	}
-	destination, err := os.Lstat(to.Path)
+	destination, err := copyFileMetadata(to.Path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

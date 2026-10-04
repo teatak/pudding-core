@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/attachment"
@@ -63,7 +64,7 @@ func TestAttachmentExportDraftUsesCurrentCanonicalReference(t *testing.T) {
 			}
 			commandArgs, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"cat", absolute})})
 			risk, classified := ClassifyToolCallForProject(CommandRun, commandArgs, []string{project}, managed...)
-			if !classified || !risk.LowRisk || len(risk.requiredProjectPaths) != 0 {
+			if !classified || risk.LowRisk != (runtime.GOOS != "windows") || len(risk.requiredProjectPaths) != 0 {
 				t.Fatalf("export cannot enter the command analysis path: %+v", risk)
 			}
 			// Removing the canonical reference revokes draft export authority even

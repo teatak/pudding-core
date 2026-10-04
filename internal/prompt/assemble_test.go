@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -358,14 +359,20 @@ func TestAssembleModeLayersAndAllModesShowPlugins(t *testing.T) {
 		"Ask mode still requires approval",
 		"Ask mode allows low-risk project reads without a prompt",
 		"Writes and command execution still require approval in Ask mode",
-		"Auto trusts code execution within the authorized project sandbox",
-		"do not require approval solely because their behavior cannot be statically proved",
-		"A failed compound command may have completed earlier steps",
 		"Never switch tools or execution modes to bypass a denial",
 	} {
 		if !strings.Contains(code.SystemInstruction, guidance) {
 			t.Fatalf("code prompt missing approval guidance: %q", guidance)
 		}
+	}
+	if runtime.GOOS != "windows" {
+		for _, guidance := range []string{"Auto trusts code execution within the authorized project sandbox", "do not require approval solely because their behavior cannot be statically proved", "A failed compound command may have completed earlier steps"} {
+			if !strings.Contains(code.SystemInstruction, guidance) {
+				t.Fatalf("code prompt missing POSIX approval guidance: %q", guidance)
+			}
+		}
+	} else if !strings.Contains(code.SystemInstruction, "Inspect partial effects before retrying") {
+		t.Fatal("Windows code prompt missing partial-effect warning")
 	}
 	if strings.Contains(code.SystemInstruction, "explicit-path approval") || strings.Contains(code.SystemInstruction, "Git-write, outside-Project") {
 		t.Fatal("code prompt still claims all local Git writes need approval")

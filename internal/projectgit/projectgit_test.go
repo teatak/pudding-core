@@ -116,6 +116,7 @@ func TestInitializeStageUnstageDiscardAndCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	git(t, root, "config", "core.autocrlf", "false")
 	git(t, root, "config", "user.name", "Pudding Test")
 	git(t, root, "config", "user.email", "pudding@example.test")
 	writeFile(t, root, "tracked.txt", "base\n")

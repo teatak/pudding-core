@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -40,7 +41,7 @@ func TestProjectFileURLAuthorizerAllowsOnlyRegularFilesInsideProject(t *testing.
 		session: &store.Session{ID: "session-1", ProjectID: "project-1"},
 		project: &store.Project{ID: "project-1", RootDirs: []string{root}},
 	})
-	parsed := &url.URL{Scheme: "file", Path: filepath.ToSlash(file), Fragment: "intro"}
+	parsed := &url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(file), "/"), Fragment: "intro"}
 	authorized, err := authorize(context.Background(), "session-1", parsed)
 	if err != nil {
 		t.Fatal(err)
@@ -60,11 +61,11 @@ func TestProjectFileURLAuthorizerAllowsOnlyRegularFilesInsideProject(t *testing.
 	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: filepath.ToSlash(outside)})
+	_, err = authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(outside), "/")})
 	if !errors.Is(err, ErrFileURLNotAllowed) {
 		t.Fatalf("outside file error = %v", err)
 	}
-	_, err = authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: filepath.ToSlash(root)})
+	_, err = authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(root), "/")})
 	if !errors.Is(err, ErrFileURLNotAllowed) {
 		t.Fatalf("directory error = %v", err)
 	}
@@ -84,7 +85,7 @@ func TestProjectFileURLAuthorizerRejectsSymlinkEscape(t *testing.T) {
 		session: &store.Session{ID: "session-1", ProjectID: "project-1"},
 		project: &store.Project{ID: "project-1", RootDirs: []string{root}},
 	})
-	_, err := authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: filepath.ToSlash(link)})
+	_, err := authorize(context.Background(), "session-1", &url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(link), "/")})
 	if !errors.Is(err, ErrFileURLNotAllowed) {
 		t.Fatalf("symlink escape error = %v", err)
 	}

@@ -167,7 +167,7 @@ func (f *fixture) evalFileSlice(ctx context.Context) Case {
 		"scope": "project", "path": "src/main.go", "origin": "start", "start": 2, "end": 3,
 	}, []string{"sed", "-n", "2,3p", "src/main.go"}, func(dedicated, cli map[string]any) (bool, string) {
 		want := stringValue(dedicated, "content")
-		got := stringValue(cli, "stdout")
+		got := strings.ReplaceAll(stringValue(cli, "stdout"), "\r\n", "\n")
 		return strings.TrimSuffix(want, "\n") == strings.TrimSuffix(got, "\n"), fmt.Sprintf("chars dedicated=%d cli=%d", len(want), len(got))
 	})
 }
@@ -204,9 +204,25 @@ func (f *fixture) evalGitLog(ctx context.Context) Case {
 
 func (f *fixture) compare(ctx context.Context, name, domain, dedicatedName string, dedicatedArgs map[string]any, argv []string, compare func(map[string]any, map[string]any) (bool, string)) Case {
 	item := Case{Name: name, Domain: domain, DedicatedTool: dedicatedName, CLI: strings.Join(argv, " ")}
-	if _, err := exec.LookPath(argv[0]); err != nil {
+	executable := argv[0]
+	if runtime.GOOS == "windows" && domain == "file" {
+		// Native cmdlets avoid the unrelated Windows FIND command and do not
+		// require a Unix utilities installation for the Windows evaluator.
+		executable = "pwsh"
+		switch name {
+		case "file_list":
+			item.CLI = "Get-ChildItem -Force -Name"
+		case "file_stat":
+			item.CLI = "(Get-Item -LiteralPath 'README.md').Length"
+		case "file_search":
+			item.CLI = "Select-String -SimpleMatch -Pattern 'EvalNeedle' -LiteralPath 'README.md','src/main.go' | ForEach-Object { $_.Line }"
+		case "file_slice":
+			item.CLI = "Get-Content -LiteralPath 'src/main.go' | Select-Object -Skip 1 -First 2"
+		}
+	}
+	if _, err := exec.LookPath(executable); err != nil {
 		item.Skipped = true
-		item.Detail = argv[0] + " executable unavailable"
+		item.Detail = executable + " executable unavailable"
 		return item
 	}
 	dedicated, err := f.call(ctx, dedicatedName, dedicatedArgs)
@@ -214,7 +230,7 @@ func (f *fixture) compare(ctx context.Context, name, domain, dedicatedName strin
 		item.Detail = "dedicated tool: " + err.Error()
 		return item
 	}
-	cli, err := f.call(ctx, tool.CommandRun, map[string]any{"scope": "project", "command": strings.Join(argv, " ")})
+	cli, err := f.call(ctx, tool.CommandRun, map[string]any{"scope": "project", "command": item.CLI})
 	item.DedicatedResultBytes = len(dedicated.result.Content)
 	if err != nil {
 		item.Detail = "CLI: " + err.Error()

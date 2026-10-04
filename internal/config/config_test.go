@@ -266,17 +266,17 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialPrompt.Exists || initialPrompt.Content != "" || initialPrompt.Path != home+"/pudding.md" {
+	if initialPrompt.Exists || initialPrompt.Content != "" || initialPrompt.Path != filepath.Join(home, "pudding.md") {
 		t.Fatalf("unexpected initial prompt: %+v", initialPrompt)
 	}
 	updatedPrompt, err := m.SetUserPrompt(ctx, "short replies")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updatedPrompt.Exists || updatedPrompt.Content != "short replies" || updatedPrompt.Path != home+"/pudding.md" {
+	if !updatedPrompt.Exists || updatedPrompt.Content != "short replies" || updatedPrompt.Path != filepath.Join(home, "pudding.md") {
 		t.Fatalf("unexpected updated prompt: %+v", updatedPrompt)
 	}
-	b, err = os.ReadFile(home + "/pudding.md")
+	b, err = os.ReadFile(filepath.Join(home, "pudding.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

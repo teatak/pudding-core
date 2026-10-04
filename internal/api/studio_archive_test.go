@@ -145,11 +145,11 @@ func TestStudioPurgeRetriesFileCleanupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A non-directory ancestor reliably rejects removal, without relying on permissions.
-	obstruction := filepath.Join(home, "studio")
-	if err := os.WriteFile(obstruction, []byte("obstruction"), 0600); err != nil {
+	path := filepath.Join(home, "studio", item.ID)
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	release := blockDirectoryRemoval(t, path)
 	if err := server.purgeStudioItem(ctx, item.ID, item.Revision); err == nil {
 		t.Fatal("expected filesystem failure")
 	}
@@ -163,9 +163,7 @@ func TestStudioPurgeRetriesFileCleanupFailure(t *testing.T) {
 	if err != nil || len(pending) != 1 || !pending[0].Deleted {
 		t.Fatalf("lost retry: %+v %v", pending, err)
 	}
-	if err := os.Remove(obstruction); err != nil {
-		t.Fatal(err)
-	}
+	release()
 	if err := server.purgeExpiredStudioArchives(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}

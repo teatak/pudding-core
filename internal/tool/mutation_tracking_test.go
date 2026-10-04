@@ -102,6 +102,10 @@ func TestMutationTrackingForCall(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && test.call.Name == CommandRun {
+				// PowerShell does not infer file targets using the POSIX parser.
+				test.wantTargets = nil
+			}
 			got, ok := MutationTrackingForCall(test.call)
 			if ok != test.wantOK {
 				t.Fatalf("ok = %v, want %v, tracking = %+v", ok, test.wantOK, got)

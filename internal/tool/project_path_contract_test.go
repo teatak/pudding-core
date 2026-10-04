@@ -223,6 +223,10 @@ func TestProjectPathContractCommandPreapprovalKeepsArgumentFailures(t *testing.T
 }
 
 func TestProjectPathContractManagedCommandOperandsDoNotSelectCWD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root, artifacts := projectContractDir(t), projectContractDir(t)
 	artifact := filepath.Join(artifacts, "result.txt")
 	if err := os.WriteFile(artifact, []byte("result"), 0o600); err != nil {

@@ -122,7 +122,7 @@ func TestRunGitPreservesConfigIsolationAndHostDefaults(t *testing.T) {
 			case "system", "system_disabled":
 				configPath := filepath.Join(t.TempDir(), "system.config")
 				writeConfig(configPath)
-				t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+				t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent.gitconfig"))
 				t.Setenv("GIT_CONFIG_SYSTEM", configPath)
 				if name == "system" {
 					t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
@@ -139,7 +139,7 @@ func TestRunGitPreservesConfigIsolationAndHostDefaults(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(userHome, ".gitconfig"), []byte("[invalid\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+				t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent.gitconfig"))
 				want, wantExit = "", 1
 			}
 			result := runGit(context.Background(), t.TempDir(), 1024, "config", "--get", "puddingtest.source")

@@ -22,11 +22,12 @@ func TestStructuredGitWorkflowApprovalModes(t *testing.T) {
 	}
 	t.Setenv("HOME", userHome)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent.gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	for _, mode := range []store.ApprovalMode{store.ApprovalAuto, store.ApprovalAsk, store.ApprovalFull} {
 		t.Run(string(mode), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			// This workflow launches many real Git processes, including on Windows.
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			root := t.TempDir()
 			runEngineGitTest(t, root, "init")
@@ -50,6 +51,7 @@ func TestStructuredGitWorkflowApprovalModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			eng := New(ms, hub, mapResolver{}, ms, WithTools(tool.NewBuiltinRunner()))
+			defer eng.Stop()
 			sub, unsub := hub.Subscribe(sid)
 			defer unsub()
 			steps := []struct {

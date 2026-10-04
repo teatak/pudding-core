@@ -218,6 +218,12 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 	if !res.Ok || payload.ExitCode != 0 || !strings.Contains(payload.Stdout, "example.com/commandtest") {
 		t.Fatalf("go test command failed: %+v", payload)
 	}
+	if runtime.GOOS == "windows" {
+		if payload.VerificationKind != "" || payload.VerificationStatus != "" || payload.DiagnosticCount != 0 {
+			t.Fatalf("PowerShell used POSIX verification analysis: %+v", payload)
+		}
+		return
+	}
 	if payload.VerificationKind != "test" || payload.VerificationStatus != "passed" || payload.DiagnosticCount != 0 {
 		t.Fatalf("go test verification metadata missing: %+v", payload)
 	}
@@ -233,6 +239,12 @@ func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {
 		"timeout_ms": 30000,
 	})
 	payload := decodeCommandPayload(t, res)
+	if runtime.GOOS == "windows" {
+		if !res.Ok || payload.ExitCode == 0 || !strings.Contains(payload.Stderr, "missingSymbol") || payload.VerificationKind != "" || payload.VerificationStatus != "" || payload.DiagnosticCount != 0 {
+			t.Fatalf("PowerShell lost native failure output or used POSIX analysis: %+v", payload)
+		}
+		return
+	}
 	if !res.Ok || payload.ExitCode == 0 || payload.VerificationKind != "test" || payload.VerificationStatus != "failed" {
 		t.Fatalf("failed go test metadata missing: %+v", payload)
 	}

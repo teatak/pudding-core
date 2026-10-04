@@ -231,7 +231,7 @@ func commandApprovalDetails(ctx context.Context, call Call) (map[string]any, err
 		"cwd":       cwd,
 	}
 	if runtime.GOOS == "windows" {
-		details["shell"] = "PowerShell 7 x64"
+		details["shell"] = "PowerShell 7 (x64 or ARM64)"
 		// A sandbox request must return host guidance without requiring pwsh.
 		if args.Execution == CommandExecutionHost {
 			if _, _, err := preparePowerShell(ctx, args.Command, runtime.GOOS); err != nil {

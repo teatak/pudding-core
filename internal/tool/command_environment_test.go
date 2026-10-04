@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -67,7 +68,7 @@ func TestCommandEnvironmentPrecedence(t *testing.T) {
 	if values["JAVA_HOME"] != "/custom/java" {
 		t.Fatalf("JAVA_HOME = %q, want custom value", values["JAVA_HOME"])
 	}
-	if path := values["PATH"]; path != "/snapshot/bin" && !strings.HasPrefix(path, "/snapshot/bin:") {
+	if path := values["PATH"]; path != "/snapshot/bin" && !strings.HasPrefix(path, "/snapshot/bin"+string(os.PathListSeparator)) {
 		t.Fatalf("PATH = %q, want snapshot path first", path)
 	}
 }

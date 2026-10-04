@@ -62,11 +62,17 @@ func TestPrepareMovesAppLayoutToPlugins(t *testing.T) {
 			t.Fatalf("%s remains: %v", path, err)
 		}
 	}
+	modePath := filepath.Join(t.TempDir(), "mode")
+	writeLayoutFile(t, modePath, "")
+	wantMode, err := os.Stat(modePath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	connections := filepath.Join(dir, "config", "plugin-connections.yaml")
 	if got := readLayoutFile(t, connections); !strings.Contains(got, "plugin: github") || strings.Contains(got, "app:") || !strings.Contains(got, "type: token") {
 		t.Fatalf("connections: %q", got)
 	}
-	if info, err := os.Stat(connections); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(connections); err != nil || info.Mode().Perm() != wantMode.Mode().Perm() {
 		t.Fatalf("connections mode: %v %v", info, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "config", "app-connections.yaml")); !errors.Is(err, os.ErrNotExist) {

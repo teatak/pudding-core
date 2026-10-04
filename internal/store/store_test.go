@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -197,7 +198,7 @@ func TestUserInputPartsPreserveProjectReference(t *testing.T) {
 			ID:          "ref_1",
 			Name:        "README.md",
 			Path:        "tutorials/README.md",
-			SourcePath:  "/workspace/tutorials/README.md",
+			SourcePath:  filepath.Join(t.TempDir(), "tutorials", "README.md"),
 			RootID:      "root_1",
 			Kind:        "file",
 			StartLine:   3,

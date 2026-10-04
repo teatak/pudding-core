@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ type backgroundProcessPayload struct {
 
 func TestBackgroundProcessListFindsProcessesForPollAndStop(t *testing.T) {
 	runner := NewBuiltinRunner()
-	t.Cleanup(func() { _ = runner.Close() })
+	defer runner.Close() // Release child CWD handles before TempDir cleanup.
 	root := t.TempDir()
 	finished := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_list", root, CommandRun, map[string]any{
 		"scope":   "project",
@@ -275,7 +276,7 @@ func TestBackgroundProcessPollWaitsForExit(t *testing.T) {
 
 func TestBackgroundProcessPollWaitTimeoutAndCancellation(t *testing.T) {
 	runner := NewBuiltinRunner()
-	t.Cleanup(func() { _ = runner.Close() })
+	defer runner.Close() // Stop the still-running fixture before deleting its CWD.
 	root := t.TempDir()
 	start := backgroundToolCall(runner, "sess_wait_timeout", root, CommandRun, map[string]any{
 		"scope":   "project",
@@ -512,8 +513,9 @@ func TestBackgroundProcessDetectsSplitSandboxDenial(t *testing.T) {
 }
 
 func TestBackgroundProcessStartUsesForegroundRiskRules(t *testing.T) {
+	foreground, _ := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"go test ./..."}`))
 	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"go test ./...","background":true}`))
-	if !ok || risk.Class != RiskClassCommand || risk.Operation != "process_start" || !risk.LowRisk {
+	if !ok || risk.Class != RiskClassCommand || risk.Operation != "process_start" || risk.LowRisk != foreground.LowRisk || !reflect.DeepEqual(risk.ApprovalReasons, foreground.ApprovalReasons) {
 		t.Fatalf("background start risk is wrong: %+v ok=%v", risk, ok)
 	}
 }

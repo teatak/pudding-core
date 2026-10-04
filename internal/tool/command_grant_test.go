@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestCommandSessionGrantBoundaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := t.TempDir()
 	chrome := filepath.Join(t.TempDir(), "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
 	if err := os.MkdirAll(filepath.Dir(chrome), 0o700); err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ func TestBackgroundProcessAPIListsAndStopsSessionProcess(t *testing.T) {
 		}
 	}
 	runner := tool.NewBuiltinRunner()
+	defer runner.Close()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithTools(tool.NewMultiRunner(runner)))
 	t.Cleanup(eng.Stop)
@@ -36,9 +38,13 @@ func TestBackgroundProcessAPIListsAndStopsSessionProcess(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	root := t.TempDir()
+	command := fmt.Sprintf("%q -test.run=^TestAPIBackgroundProcessHelper$", os.Args[0])
+	if runtime.GOOS == "windows" {
+		command = "& '" + strings.ReplaceAll(os.Args[0], "'", "''") + "' '-test.run=^TestAPIBackgroundProcessHelper$'"
+	}
 	args, _ := json.Marshal(map[string]any{
 		"scope":      "project",
-		"command":    fmt.Sprintf("%q -test.run=^TestAPIBackgroundProcessHelper$", os.Args[0]),
+		"command":    command,
 		"env":        map[string]string{"PUDDING_API_BACKGROUND_HELPER": "1"},
 		"background": true,
 	})

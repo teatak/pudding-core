@@ -79,7 +79,7 @@ func TestProjectEntryResolvesClickedFilesAndDirectories(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "docs.md"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	name := "中文 (guide)#?%.md"
+	name := "中文 (guide)#%.md"
 	if err := os.WriteFile(filepath.Join(root, name), []byte("# Hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -123,7 +124,12 @@ func (m mapResolver) Resolve(_ context.Context, name string) (provider.Client, e
 
 func waitTurnDone(t *testing.T, s store.Store, sessionID string) *store.Turn {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	return waitTurnDoneWithin(t, s, sessionID, 3*time.Second)
+}
+
+func waitTurnDoneWithin(t *testing.T, s store.Store, sessionID string, timeout time.Duration) *store.Turn {
+	t.Helper()
+	deadline := time.After(timeout)
 	for {
 		select {
 		case <-deadline:
@@ -3021,6 +3027,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	}
 	client := &gitCommitApprovalClient{}
 	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
+	defer eng.Stop()
 	sid := "sess_git_commit"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "git", Provider: "git", Model: "git-model",
@@ -3043,7 +3050,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 		t.Fatal(err)
 	}
 	var approval event.Event
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for approval.Kind != event.ApprovalRequested {
 		select {
 		case ev := <-sub:
@@ -3064,7 +3071,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitTurnDone(t, ms, sid)
+	waitTurnDoneWithin(t, ms, sid, 15*time.Second)
 	if subject := runEngineGitOutput(t, dir, "log", "-1", "--format=%s"); subject != "reviewed commit" {
 		t.Fatalf("approved commit was not created: %q", subject)
 	}
@@ -3238,6 +3245,9 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 		{name: "full", mode: store.ApprovalFull, want: tool.CommandSandboxBypass},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && test.mode == store.ApprovalAuto {
+				t.Skip("POSIX Auto sandbox; Windows host approval is tested separately")
+			}
 			ctx := context.Background()
 			ms := storetest.New(t)
 			root := t.TempDir()
@@ -3292,10 +3302,10 @@ func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	}
 	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithAttachmentHome(homeDir), WithTools(runner))
-	raw := json.RawMessage(`{"scope":"project","command":"go version"}`)
-	result := eng.executeAllowedTool(ctx, sessionID, "turn_scratch", store.ModeCode, tool.Call{CallID: "call_scratch", Name: tool.CommandRun, Args: raw})
+	raw := json.RawMessage(`{"scope":"project","path":"."}`)
+	result := eng.executeAllowedTool(ctx, sessionID, "turn_scratch", store.ModeCode, tool.Call{CallID: "call_scratch", Name: tool.FileList, Args: raw})
 	if !result.Ok || len(calls.calls) != 1 {
-		t.Fatalf("scratch command was not executed once: result=%+v calls=%d", result, len(calls.calls))
+		t.Fatalf("scratch tool was not executed once: result=%+v calls=%d", result, len(calls.calls))
 	}
 	want, err := filepath.EvalSymlinks(home.CodeScratchPath(homeDir, sessionID))
 	if err != nil {
@@ -3347,6 +3357,10 @@ func TestCallTrackedToolDoesNotAttributeOpaqueCommandFileChanges(t *testing.T) {
 }
 
 func TestCallTrackedToolAttributesExplicitCommandTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
 	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
@@ -3515,6 +3529,10 @@ func TestSandboxCommandReportsHostBoundaryWithoutApproval(t *testing.T) {
 }
 
 func TestApprovedDestructiveCommandRemainsSandboxed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	ctx := context.Background()
 	ms := storetest.New(t)
 	hub := event.NewHub()

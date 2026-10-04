@@ -88,17 +88,12 @@ func TestOrphanAttachmentCleanupRetriesAfterRestartAndPreservesArchives(t *testi
 	if err := os.MkdirAll(legacyDraft, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(base, 0500); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(base, 0700)
+	release := blockDirectoryRemoval(t, filepath.Join(base, "orphan"))
 	srv := &Server{store: ms, home: dir}
 	if err := srv.reclaimOrphanAttachments(ctx); err == nil {
 		t.Fatal("cleanup failure was hidden")
 	}
-	if err := os.Chmod(base, 0700); err != nil {
-		t.Fatal(err)
-	}
+	release()
 	// A fresh Server has no memory of the failed deletion, only the store and disk.
 	srv = &Server{store: ms, home: dir}
 	if err := srv.reclaimOrphanAttachments(ctx); err != nil {

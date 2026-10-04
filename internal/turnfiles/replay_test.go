@@ -20,10 +20,10 @@ func TestReplayerUndoRedoWholeTurn(t *testing.T) {
 	writeReplayTestFile(t, root, "renamed.txt", []byte("renamed\n"))
 
 	changes := []store.TurnFileChangeInput{
-		replayTestChange(root, "modified.txt", "", store.FileChangeModified, []byte("old\n"), []byte("new\n"), false),
-		replayTestChange(root, "added.bin", "", store.FileChangeAdded, nil, []byte{0, 1, 2}, true),
-		replayTestChange(root, "deleted.txt", "", store.FileChangeDeleted, []byte("deleted\n"), nil, false),
-		replayTestChange(root, "renamed.txt", "original.txt", store.FileChangeRenamed, []byte("renamed\n"), []byte("renamed\n"), false),
+		replayTestChange(t, root, "modified.txt", "", store.FileChangeModified, []byte("old\n"), []byte("new\n"), false),
+		replayTestChange(t, root, "added.bin", "", store.FileChangeAdded, nil, []byte{0, 1, 2}, true),
+		replayTestChange(t, root, "deleted.txt", "", store.FileChangeDeleted, []byte("deleted\n"), nil, false),
+		replayTestChange(t, root, "renamed.txt", "original.txt", store.FileChangeRenamed, []byte("renamed\n"), []byte("renamed\n"), false),
 	}
 	mem := replayTestStore(t, root, changes)
 	replayer := NewReplayer(mem)
@@ -54,8 +54,8 @@ func TestReplayerConflictIsAllOrNothing(t *testing.T) {
 	writeReplayTestFile(t, root, "one.txt", []byte("new one"))
 	writeReplayTestFile(t, root, "two.txt", []byte("externally changed"))
 	changes := []store.TurnFileChangeInput{
-		replayTestChange(root, "one.txt", "", store.FileChangeModified, []byte("old one"), []byte("new one"), false),
-		replayTestChange(root, "two.txt", "", store.FileChangeModified, []byte("old two"), []byte("new two"), false),
+		replayTestChange(t, root, "one.txt", "", store.FileChangeModified, []byte("old one"), []byte("new one"), false),
+		replayTestChange(t, root, "two.txt", "", store.FileChangeModified, []byte("old two"), []byte("new two"), false),
 	}
 	mem := replayTestStore(t, root, changes)
 	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
@@ -103,7 +103,7 @@ func TestReplayerHandlesTextBinaryConversion(t *testing.T) {
 func TestReplayerRejectsOldSnapshotsAndFormerRoots(t *testing.T) {
 	root := t.TempDir()
 	writeReplayTestFile(t, root, "file.txt", []byte("new"))
-	change := replayTestChange(root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
+	change := replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
 	change.SnapshotVersion = 0
 	mem := replayTestStore(t, root, []store.TurnFileChangeInput{change})
 	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
@@ -122,7 +122,7 @@ func TestReplayerRejectsOldSnapshotsAndFormerRoots(t *testing.T) {
 func TestReplayerRejectsActionWhileSessionTurnIsRunning(t *testing.T) {
 	root := t.TempDir()
 	writeReplayTestFile(t, root, "file.txt", []byte("new"))
-	change := replayTestChange(root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
+	change := replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
 	mem := replayTestStore(t, root, []store.TurnFileChangeInput{change})
 	if _, err := mem.BeginTurn(context.Background(), store.BeginTurnInput{
 		SessionID: "session", TurnID: "running", UserMessageID: "running_user", ClientMessageID: "running_client", UserText: "running",
@@ -155,10 +155,21 @@ func replayTestStore(t *testing.T, root string, changes []store.TurnFileChangeIn
 	return mem
 }
 
-func replayTestChange(root, path, original string, kind store.FileChangeKind, oldData, newData []byte, binary bool) store.TurnFileChangeInput {
+func replayTestChange(t *testing.T, root, path, original string, kind store.FileChangeKind, oldData, newData []byte, binary bool) store.TurnFileChangeInput {
+	t.Helper()
+	// Match the actual filesystem mode rather than assuming Unix permissions.
+	modePath := filepath.Join(t.TempDir(), "mode")
+	if err := os.WriteFile(modePath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(modePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := uint32(info.Mode().Perm())
 	change := store.TurnFileChangeInput{
 		RootPath: root, Path: path, OriginalPath: original, Kind: kind, Binary: binary, SnapshotVersion: 1,
-		OldMode: 0o644, NewMode: 0o644,
+		OldMode: mode, NewMode: mode,
 	}
 	if oldData != nil {
 		change.OldType = "file"

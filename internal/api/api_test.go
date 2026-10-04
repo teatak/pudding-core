@@ -216,6 +216,10 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 	if err := os.WriteFile(path, []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "project", RootDirs: []string{root}}); err != nil {
 		t.Fatal(err)
@@ -228,7 +232,7 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 	}
 	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: "turn", Status: store.TurnCompleted, FileChanges: []store.TurnFileChangeInput{{
 		RootPath: root, Path: "main.txt", Kind: store.FileChangeModified,
-		OldContent: "old\n", NewContent: "new\n", OldMode: 0o644, NewMode: 0o644,
+		OldContent: "old\n", NewContent: "new\n", OldMode: uint32(info.Mode().Perm()), NewMode: uint32(info.Mode().Perm()),
 		OldType: "file", NewType: "file", SnapshotVersion: 1,
 		OldDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("old\n"))),
 		NewDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("new\n"))),
@@ -2348,6 +2352,7 @@ func TestAttachmentDocumentsAreSandboxed(t *testing.T) {
 }
 
 func TestAttachmentUploadSubmitAndRead(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "note.txt")
 	srv, st := newTestServer(t)
 	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_attach", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
@@ -2362,7 +2367,7 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	if _, err := part.Write([]byte("hello attachment")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.WriteField("sourcePath", "/Users/me/Desktop/note.txt"); err != nil {
+	if err := writer.WriteField("sourcePath", sourcePath); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -2384,7 +2389,7 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 		t.Fatalf("upload status = %d body=%s", resp.StatusCode, string(data))
 	}
 	uploaded := decodeJSON[store.Attachment](t, resp)
-	if uploaded.Name != "note.txt" || uploaded.MIME != "text/plain" || uploaded.AttachmentKey == "" || uploaded.URL == "" || uploaded.SourcePath != "/Users/me/Desktop/note.txt" {
+	if uploaded.Name != "note.txt" || uploaded.MIME != "text/plain" || uploaded.AttachmentKey == "" || uploaded.URL == "" || uploaded.SourcePath != sourcePath {
 		t.Fatalf("unexpected uploaded attachment: %+v", uploaded)
 	}
 
@@ -2458,8 +2463,9 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 }
 
 func TestCleanAttachmentSourcePathAcceptsPlatformAndWindowsAbsolutePaths(t *testing.T) {
-	if got := cleanAttachmentSourcePath("/Users/me/Desktop/note.txt"); got != "/Users/me/Desktop/note.txt" {
-		t.Fatalf("unix path = %q", got)
+	path := filepath.Join(t.TempDir(), "note.txt")
+	if got := cleanAttachmentSourcePath(path); got != path {
+		t.Fatalf("native path = %q", got)
 	}
 	if got := cleanAttachmentSourcePath(`C:\Users\me\Desktop\note.txt`); got == "" {
 		t.Fatal("windows absolute path should be accepted")

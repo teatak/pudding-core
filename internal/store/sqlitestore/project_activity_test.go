@@ -115,7 +115,7 @@ func TestProjectActivityContract(t *testing.T) {
 
 	// Moving older content into a newer project must not move its clock backwards.
 	time.Sleep(2 * time.Millisecond)
-	other := &store.Project{ID: "other", RootDirs: []string{"/other"}}
+	other := &store.Project{ID: "other", RootDirs: []string{t.TempDir()}}
 	if err := st.CreateProject(ctx, other); err != nil {
 		t.Fatal(err)
 	}

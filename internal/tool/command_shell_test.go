@@ -2,6 +2,7 @@ package tool
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -88,6 +89,12 @@ func TestAnalyzeShellCommandRejectsMalformedAndBackgroundCommands(t *testing.T) 
 }
 
 func TestCommandVerificationArgvRequiresOneStaticCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		if argv := commandVerificationArgv("go test ./..."); len(argv) != 0 {
+			t.Fatalf("PowerShell must not use POSIX verification analysis: %v", argv)
+		}
+		return
+	}
 	if got := commandVerificationArgv("go test ./..."); !reflect.DeepEqual(got, []string{"go", "test", "./..."}) {
 		t.Fatalf("unexpected verification argv: %v", got)
 	}

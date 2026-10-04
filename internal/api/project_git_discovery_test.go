@@ -13,7 +13,7 @@ func TestProjectGitStatusReportsDiscoveryFailure(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent.gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	root := t.TempDir()
 	runProjectGit(t, root, "init", "--quiet")
@@ -47,7 +47,7 @@ func TestProjectGitStatusHonorsConfigIsolation(t *testing.T) {
 	}
 	t.Setenv("HOME", userHome)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent.gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	root := t.TempDir()
 	runProjectGit(t, root, "init", "--quiet")

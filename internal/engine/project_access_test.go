@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,10 @@ pending:
 }
 
 func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
 	for _, action := range []string{"approve", "deny", "revoke", "replace-directory"} {
 		t.Run(action, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

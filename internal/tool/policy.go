@@ -468,7 +468,7 @@ func windowsCommandRisk(args commandRunArgs, projectDirs []string) ToolRisk {
 	return ToolRisk{
 		Class: RiskClassCommand, Operation: operation, Scope: managedScopeProject,
 		Paths: compactRiskPaths(cwd), LowRisk: false,
-		Summary:         "Run PowerShell 7 x64 on the host without a project sandbox: " + compactShellCommand(args.Command),
+		Summary:         "Run PowerShell 7 (x64 or ARM64) on the host without a project sandbox: " + compactShellCommand(args.Command),
 		ApprovalReasons: []string{"host_execution"}, hostAccessRequired: true,
 	}
 }

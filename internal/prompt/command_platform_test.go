@@ -7,7 +7,7 @@ import (
 
 func TestCodeCommandPromptMatchesPlatform(t *testing.T) {
 	windows := codeModePromptForOS("windows")
-	for _, want := range []string{"PowerShell 7 x64", "Ask and Auto require a fresh approval", "No reusable Windows command grants"} {
+	for _, want := range []string{"PowerShell 7 (x64 or ARM64)", "Ask and Auto require a fresh approval", "No reusable Windows command grants"} {
 		if !strings.Contains(windows, want) {
 			t.Errorf("Windows prompt missing %q", want)
 		}
