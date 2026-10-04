@@ -196,6 +196,41 @@ func TestBrowserToolArgsInjectsSessionForWidgetTools(t *testing.T) {
 	}
 }
 
+func TestBrowserToolArgsAcceptsNullArguments(t *testing.T) {
+	for _, name := range []string{"widget_list", RequestUserInput, "browser_navigate"} {
+		for _, tt := range []struct {
+			label string
+			args  json.RawMessage
+		}{
+			{label: "missing"},
+			{label: "null", args: json.RawMessage(`null`)},
+			{label: "null with whitespace", args: json.RawMessage(" \nnull\t")},
+		} {
+			t.Run(name+"/"+tt.label, func(t *testing.T) {
+				args, err := browserToolArgs(Call{
+					SessionID: "sess_null", TurnID: "turn_null", CallID: "call_null", Name: name, Args: tt.args,
+				})
+				if err != nil {
+					t.Fatalf("browserToolArgs: %v", err)
+				}
+				if args == nil {
+					t.Fatal("arguments must remain an object")
+				}
+				if name == "browser_navigate" {
+					if len(args) != 0 {
+						t.Fatalf("unexpected metadata for generic browser tool: %+v", args)
+					}
+				} else if args["_pudding_session_id"] != "sess_null" {
+					t.Fatalf("missing session injection: %+v", args)
+				}
+				if name == RequestUserInput && args["_pudding_request_id"] != "turn_null:call_null" {
+					t.Fatalf("missing request identity: %+v", args)
+				}
+			})
+		}
+	}
+}
+
 func TestBrowserToolArgsInjectsSessionForUITools(t *testing.T) {
 	args, err := browserToolArgs(Call{
 		SessionID: "sess_b",

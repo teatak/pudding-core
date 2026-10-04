@@ -525,11 +525,14 @@ type rpcError struct {
 }
 
 func browserToolArgs(call Call) (map[string]any, error) {
-	args := map[string]any{}
-	if len(call.Args) > 0 && string(call.Args) != "null" {
+	var args map[string]any
+	if len(call.Args) > 0 {
 		if err := json.Unmarshal(call.Args, &args); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
+	}
+	if args == nil {
+		args = map[string]any{}
 	}
 	if sessionScopedBrowserTool(call.Name) {
 		sessionID := strings.TrimSpace(call.SessionID)

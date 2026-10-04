@@ -57,7 +57,7 @@ func RequiredModeForName(name string) store.AgentMode {
 	if strings.HasPrefix(name, pluginMCPToolPrefix) {
 		return store.ModeWork
 	}
-	if strings.HasPrefix(name, "canvas_") || name == RequestUserInput {
+	if name == RequestUserInput {
 		return store.ModeChat
 	}
 	for _, def := range BuiltinDefinitions() {
