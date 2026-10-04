@@ -544,7 +544,7 @@ func browserToolArgs(call Call) (map[string]any, error) {
 }
 
 func sessionScopedBrowserTool(name string) bool {
-	return strings.HasPrefix(name, "canvas_") || name == RequestUserInput
+	return strings.HasPrefix(name, "widget_") || name == RequestUserInput
 }
 
 func browserToolResult(call Call, raw json.RawMessage, homeDir string) Result {

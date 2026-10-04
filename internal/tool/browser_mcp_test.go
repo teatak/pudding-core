@@ -74,16 +74,16 @@ func TestBrowserMCPRunnerRegistersAndCallsWidgetTool(t *testing.T) {
 		if err != nil {
 			t.Fatalf("definitions: %v", err)
 		}
-		if HasDefinition(defs, "canvas_markdown") {
+		if HasDefinition(defs, "widget_draft_open") {
 			defsReady = true
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if !defsReady {
-		t.Fatal("canvas_markdown was not registered")
+		t.Fatal("widget_draft_open was not registered")
 	}
-	if defs, err := runner.Definitions(ctx, "sess_a"); err != nil || HasDefinition(defs, "canvas_markdown") {
+	if defs, err := runner.Definitions(ctx, "sess_a"); err != nil || HasDefinition(defs, "widget_draft_open") {
 		t.Fatalf("runtime tool must not be exposed without runtime identity: defs=%+v err=%v", defs, err)
 	}
 	sessions := runner.BrowserSessions()
@@ -105,8 +105,8 @@ func TestBrowserMCPRunnerRegistersAndCallsWidgetTool(t *testing.T) {
 	res := runner.Call(runtimeCtx, Call{
 		SessionID: "sess_a",
 		CallID:    "call_1",
-		Name:      "canvas_markdown",
-		Args:      json.RawMessage(`{"title":"Note","content":"Hello"}`),
+		Name:      "widget_draft_open",
+		Args:      json.RawMessage(`{"name":"Note"}`),
 	})
 	if !res.Ok || !strings.Contains(res.Content, `"ok":true`) {
 		t.Fatalf("unexpected result: %+v", res)
@@ -149,7 +149,7 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
 		defsA, _ := runner.Definitions(plugin.WithRuntimeID(ctx, "runtime_a"), "sess_a")
 		defsB, _ := runner.Definitions(plugin.WithRuntimeID(ctx, "runtime_b"), "sess_a")
-		if HasDefinition(defsA, "canvas_markdown") && HasDefinition(defsB, "canvas_markdown") {
+		if HasDefinition(defsA, "widget_draft_open") && HasDefinition(defsB, "widget_draft_open") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -158,8 +158,8 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 	res := runner.Call(plugin.WithRuntimeID(ctx, "runtime_a"), Call{
 		SessionID: "sess_a",
 		CallID:    "call_a",
-		Name:      "canvas_markdown",
-		Args:      json.RawMessage(`{"title":"A"}`),
+		Name:      "widget_draft_open",
+		Args:      json.RawMessage(`{"name":"A"}`),
 	})
 	if !res.Ok {
 		t.Fatalf("runtime a call failed: %+v", res)
@@ -173,6 +173,26 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 	case got := <-callsB:
 		t.Fatalf("runtime b received runtime a call: %+v", got)
 	default:
+	}
+}
+
+func TestBrowserToolArgsInjectsSessionForWidgetTools(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args json.RawMessage
+	}{
+		{name: "widget_list", args: json.RawMessage(`{}`)},
+		{name: "widget_draft_open", args: json.RawMessage(`{"name":"Note","_pudding_session_id":"invented"}`)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := browserToolArgs(Call{SessionID: "sess_widget", Name: tt.name, Args: tt.args})
+			if err != nil {
+				t.Fatalf("browserToolArgs: %v", err)
+			}
+			if args["_pudding_session_id"] != "sess_widget" {
+				t.Fatalf("widget session identity must come from engine: %+v", args)
+			}
+		})
 	}
 }
 
@@ -232,9 +252,9 @@ func fakeBrowserMCPServer(ctx context.Context, t *testing.T, conn *websocket.Con
 			}
 		case "tools/list":
 			result = map[string]any{"tools": []map[string]any{{
-				"name":        "canvas_markdown",
-				"description": "widget markdown",
-				"capability":  "chat",
+				"name":        "widget_draft_open",
+				"description": "open widget draft",
+				"capability":  "code",
 				"pluginID":    "widget-authoring",
 				"inputSchema": map[string]any{"type": "object"},
 			}}}
@@ -242,7 +262,7 @@ func fakeBrowserMCPServer(ctx context.Context, t *testing.T, conn *websocket.Con
 			result = map[string]any{"plugins": []map[string]any{{
 				"id":             "widget-authoring",
 				"name":           "Widget Authoring",
-				"requiredMode":   "chat",
+				"requiredMode":   "code",
 				"defaultSkillID": "widget-authoring",
 				"skills": []map[string]any{{
 					"id": "widget-authoring", "name": "Widget Authoring", "path": "skills/widget-authoring/SKILL.md",
