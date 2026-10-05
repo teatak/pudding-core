@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -727,11 +728,7 @@ func TestOpenCleansOldBackupsAfterMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
-		if _, err := backupDatabaseBeforeMigration(st.db, path, 7); err != nil {
-			t.Fatal(err)
-		}
-	}
+	createDistinctMigrationBackups(t, st.db, path, 7, 3)
 	backups := migrationBackupFiles(t, path)
 	if len(backups) != 3 {
 		t.Fatalf("migration backups = %v, want three", backups)
@@ -772,11 +769,7 @@ func TestOpenDoesNotCleanBackupsWithoutMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		if _, err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
-			t.Fatal(err)
-		}
-	}
+	createDistinctMigrationBackups(t, st.db, path, currentSchemaVersion, 2)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -799,17 +792,30 @@ func TestCleanupMigrationBackupsDoesNotDeleteWithoutKeepBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	for i := 0; i < 2; i++ {
-		if _, err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
-			t.Fatal(err)
-		}
-	}
+	createDistinctMigrationBackups(t, st.db, path, currentSchemaVersion, 2)
 	if err := cleanupMigrationBackups(path, path+".backup-v9-missing"); err == nil {
 		t.Fatal("cleanup without the keep backup succeeded")
 	}
 	backups := migrationBackupFiles(t, path)
 	if len(backups) != 2 {
 		t.Fatalf("migration backups after rejected cleanup = %v, want two", backups)
+	}
+}
+
+// Backup names use the wall clock, which Windows advances in timer ticks;
+// consecutive backups within one tick would share a name.
+func createDistinctMigrationBackups(t *testing.T, db *sql.DB, path string, version, count int) {
+	t.Helper()
+	previous := ""
+	for i := 0; i < count; i++ {
+		for previous != "" && strings.HasSuffix(previous, time.Now().UTC().Format("20060102T150405.000000000Z")) {
+			time.Sleep(time.Millisecond)
+		}
+		backup, err := backupDatabaseBeforeMigration(db, path, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous = backup
 	}
 }
 
