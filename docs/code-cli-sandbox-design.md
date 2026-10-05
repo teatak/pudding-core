@@ -51,7 +51,7 @@ host 的例外是用户明确选择的受限截图授权:直接、前台的 head
 
 ### Windows 首版：PowerShell 7 x64 host 命令
 
-- Windows 必须已安装 PowerShell 7（x64 或 ARM64）。daemon 先在自身的 `PATH` 中查找 `pwsh.exe`，找不到再查注册表里的系统和用户 `PATH`：安装程序会更新持久化的 PATH，但运行中的进程仍保留启动时的值，所以运行期间装好的 PowerShell 不用重启 Pudding 即可使用。`GET /tools/command-shell` 返回同一查找结果，桌面端据此引导用户用 winget 安装。Pudding 不打包 PowerShell，也不使用 `powershell.exe` 5.1、Git Bash 或 WSL 作为 fallback。构建工具链使用 Git Bash / GNU make 与模型命令执行是两回事。
+- Windows 必须已安装 PowerShell 7（x64 或 ARM64）。daemon 先在自身的 `PATH` 中查找 `pwsh.exe`，找不到再查注册表里的系统和用户 `PATH`：MSI 会把安装目录写进持久化的 PATH，但运行中的进程仍保留启动时的值；winget 自 PowerShell 7.6 起默认安装的 MSIX 包则在 `WindowsApps` 里放置 `pwsh.exe` 应用执行别名，查找时与 `exec.LookPath` 一样接受这种非普通文件。两种方式在 Pudding 运行期间装好后都不用重启即可使用。PowerShell 的 MSIX 包按微软文档不受文件和注册表虚拟化影响，可用于执行命令。`GET /tools/command-shell` 返回同一查找结果，桌面端据此引导用户用 winget 安装。Pudding 不打包 PowerShell，也不使用 `powershell.exe` 5.1、Git Bash 或 WSL 作为 fallback。构建工具链使用 Git Bash / GNU make 与模型命令执行是两回事。
 - `execution="sandbox"` 在 Ask / Auto 的审批前返回 `host_access_required`，提示显式提供 `execution="host"` 和 `host_access_reason`；不会先批准后报“不支持”，也不要求切换 Full Access。
 - Ask / Auto 对每条 host 调用重新审批，包含原始命令、cwd 和环境；不提供固定命令或截图授权复用。`full` 保持用户主动选择的无沙箱语义。合法 cwd 只是启动目录约束，不能限制 host 命令读取项目外文件。
 - 审批前用 PowerShell 原生 `Parser.ParseInput` 检查语法、后台操作符以及运行时版本和架构；该步骤不求值用户输入，不加载 profile，不使用模型提供的 cwd / env。解析不是安全沙箱，不把 POSIX 风险分析用于 Windows 自动免批。

@@ -58,8 +58,8 @@ func powerShellInputLimit(command string) error {
 	return nil
 }
 
-// persistedPowerShellPATH is the PATH Windows gives new processes. Installing
-// PowerShell 7 updates it, while this process keeps the PATH it started with.
+// persistedPowerShellPATH is the PATH Windows gives new processes. The MSI adds
+// its directory there, while this process keeps the PATH it started with.
 var persistedPowerShellPATH = persistedWindowsPATH
 
 func lookupPowerShell(goos string) (string, error) {
@@ -72,7 +72,10 @@ func lookupPowerShell(goos string) (string, error) {
 	}
 	for _, dir := range filepath.SplitList(persistedPowerShellPATH()) {
 		candidate := filepath.Join(dir, "pwsh.exe")
-		if info, err := os.Stat(candidate); err == nil && filepath.IsAbs(dir) && info.Mode().IsRegular() {
+		// Like exec.LookPath on Windows, accept any non-directory. winget installs
+		// the MSIX package by default since PowerShell 7.6; its pwsh.exe is an
+		// App Execution Alias in WindowsApps, which os.Stat reports as irregular.
+		if info, err := os.Stat(candidate); err == nil && filepath.IsAbs(dir) && !info.IsDir() {
 			return candidate, nil
 		}
 	}

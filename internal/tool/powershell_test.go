@@ -113,7 +113,12 @@ func TestPowerShellLookupFindsRuntimeInstalledAfterStart(t *testing.T) {
 	processDir, persistedDir := t.TempDir(), t.TempDir()
 	t.Setenv("PATH", processDir)
 	installed := writeFakePowerShell(t, persistedDir)
-	stubPersistedPowerShellPATH(t, strings.Join([]string{"relative", persistedDir}, string(os.PathListSeparator)))
+	// A directory named pwsh.exe is skipped like exec.LookPath does.
+	shadow := t.TempDir()
+	if err := os.Mkdir(filepath.Join(shadow, "pwsh.exe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stubPersistedPowerShellPATH(t, strings.Join([]string{"relative", shadow, persistedDir}, string(os.PathListSeparator)))
 	if got, err := lookupPowerShell("windows"); err != nil || got != installed {
 		t.Fatalf("persisted PATH lookup = %q, %v; want %q", got, err, installed)
 	}
