@@ -110,6 +110,12 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if err := cmd.Start(); err != nil {
 		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
 	}
+	if err := attachCommandProcess(cmd); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
+	}
+	defer releaseCommandProcess(cmd)
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
 

@@ -8,6 +8,10 @@ func configureCommandProcess(_ *exec.Cmd) {}
 
 func configureCommandPTY(_ *exec.Cmd) {}
 
+func attachCommandProcess(*exec.Cmd) error { return nil }
+
+func releaseCommandProcess(*exec.Cmd) {}
+
 func terminateCommandProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil

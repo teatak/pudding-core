@@ -403,8 +403,11 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 			}
 		}
 		err = startErr
-	} else {
-		err = cmd.Start()
+	} else if err = cmd.Start(); err == nil {
+		if err = attachCommandProcess(cmd); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
 	}
 	if err != nil {
 		delete(m.processes, process.id)
@@ -632,6 +635,7 @@ func (p *backgroundProcess) wait() {
 	waitErr = errors.Join(waitErr, p.cmd.Wait())
 	p.signalMu.Lock()
 	p.signalsDone = true
+	releaseCommandProcess(p.cmd)
 	p.signalMu.Unlock()
 	if p.ptyReadDone != nil {
 		// exec.Cmd joins its pipe writers, but the PTY reader is ours. Drain
