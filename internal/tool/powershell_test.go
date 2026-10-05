@@ -102,10 +102,75 @@ func TestWindowsPowerShellInputLimits(t *testing.T) {
 
 func TestPowerShellDoesNotFallback(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	stubPersistedPowerShellPATH(t, "")
 	_, _, err := preparePowerShell(context.Background(), "Write-Output ok", "windows")
 	if err == nil || !strings.Contains(err.Error(), "No fallback") {
 		t.Fatalf("missing pwsh: %v", err)
 	}
+}
+
+func TestPowerShellLookupFindsRuntimeInstalledAfterStart(t *testing.T) {
+	processDir, persistedDir := t.TempDir(), t.TempDir()
+	t.Setenv("PATH", processDir)
+	installed := writeFakePowerShell(t, persistedDir)
+	stubPersistedPowerShellPATH(t, strings.Join([]string{"relative", persistedDir}, string(os.PathListSeparator)))
+	if got, err := lookupPowerShell("windows"); err != nil || got != installed {
+		t.Fatalf("persisted PATH lookup = %q, %v; want %q", got, err, installed)
+	}
+	// The PATH this process started with still wins when it has pwsh.exe.
+	started := writeFakePowerShell(t, processDir)
+	if got, err := lookupPowerShell("windows"); err != nil || got != started {
+		t.Fatalf("process PATH lookup = %q, %v; want %q", got, err, started)
+	}
+}
+
+func TestPowerShellCommandShellStatus(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		if got := CurrentCommandShellStatus(); got != (CommandShellStatus{State: "not_required"}) {
+			t.Fatalf("non-Windows status = %+v", got)
+		}
+		return
+	}
+	t.Setenv("PATH", t.TempDir())
+	stubPersistedPowerShellPATH(t, "")
+	if got := CurrentCommandShellStatus(); got != (CommandShellStatus{State: "missing"}) {
+		t.Fatalf("missing status = %+v", got)
+	}
+	dir := t.TempDir()
+	installed := writeFakePowerShell(t, dir)
+	stubPersistedPowerShellPATH(t, dir)
+	if got := CurrentCommandShellStatus(); got != (CommandShellStatus{State: "installed", Path: installed}) {
+		t.Fatalf("installed status = %+v", got)
+	}
+}
+
+func TestWindowsPersistedPATHReadsRegistry(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows registry PATH")
+	}
+	system := strings.ToLower(filepath.Join(os.Getenv("SystemRoot"), "System32"))
+	for _, dir := range filepath.SplitList(persistedWindowsPATH()) {
+		if strings.ToLower(strings.TrimRight(dir, `\`)) == system {
+			return
+		}
+	}
+	t.Fatalf("persisted PATH lacks %s: %q", system, persistedWindowsPATH())
+}
+
+func stubPersistedPowerShellPATH(t *testing.T, value string) {
+	t.Helper()
+	previous := persistedPowerShellPATH
+	persistedPowerShellPATH = func() string { return value }
+	t.Cleanup(func() { persistedPowerShellPATH = previous })
+}
+
+func writeFakePowerShell(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "pwsh.exe")
+	if err := os.WriteFile(path, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func testPowerShell(t *testing.T) string {

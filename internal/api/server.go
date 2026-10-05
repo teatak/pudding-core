@@ -306,6 +306,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/providers/:name/sync").POST(s.syncProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
+	app.Route("/tools/command-shell").GET(s.getCommandShell)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/desktop/about").GET(s.desktopAbout)
 	app.Route("/desktop/save-file").POST(s.desktopSaveFile)

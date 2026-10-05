@@ -1058,6 +1058,13 @@ export type BuiltinTool = z.infer<typeof builtinTool>;
 
 export const listBuiltinToolsResponse = z.object({ tools: z.array(builtinTool) });
 
+// Whether the Windows command tool can find PowerShell 7; other platforms report not_required.
+export const commandShellStatus = z.object({
+  state: z.enum(["installed", "missing", "not_required"]),
+  path: z.string().optional(),
+});
+export type CommandShellStatus = z.infer<typeof commandShellStatus>;
+
 export const skill = z.object({
   id: z.string(),
   name: z.string(),

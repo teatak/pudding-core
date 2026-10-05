@@ -7,7 +7,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -55,15 +58,49 @@ func powerShellInputLimit(command string) error {
 	return nil
 }
 
-func preparePowerShell(ctx context.Context, command, goos string) (string, []string, error) {
-	name := "pwsh.exe"
+// persistedPowerShellPATH is the PATH Windows gives new processes. Installing
+// PowerShell 7 updates it, while this process keeps the PATH it started with.
+var persistedPowerShellPATH = persistedWindowsPATH
+
+func lookupPowerShell(goos string) (string, error) {
 	if goos != "windows" {
 		// Used by the optional portable PowerShell regression tests on macOS.
-		name = "pwsh"
+		return exec.LookPath("pwsh")
 	}
-	executable, err := exec.LookPath(name)
+	if executable, err := exec.LookPath("pwsh.exe"); err == nil {
+		return executable, nil
+	}
+	for _, dir := range filepath.SplitList(persistedPowerShellPATH()) {
+		candidate := filepath.Join(dir, "pwsh.exe")
+		if info, err := os.Stat(candidate); err == nil && filepath.IsAbs(dir) && info.Mode().IsRegular() {
+			return candidate, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+// CommandShellStatus reports whether the Windows command tool can find
+// PowerShell 7. Version and architecture are still checked before each command.
+type CommandShellStatus struct {
+	State string `json:"state"` // installed, missing or not_required
+	Path  string `json:"path,omitempty"`
+}
+
+func CurrentCommandShellStatus() CommandShellStatus {
+	if runtime.GOOS != "windows" {
+		return CommandShellStatus{State: "not_required"}
+	}
+	executable, err := lookupPowerShell(runtime.GOOS)
 	if err != nil {
-		return "", nil, &commandShellError{"shell_unavailable", "PowerShell 7 (x64 or ARM64) (pwsh.exe) is required on Windows; install it and restart Pudding. No fallback to Windows PowerShell 5.1 or Git Bash."}
+		return CommandShellStatus{State: "missing"}
+	}
+	return CommandShellStatus{State: "installed", Path: executable}
+}
+
+func preparePowerShell(ctx context.Context, command, goos string) (string, []string, error) {
+	executable, err := lookupPowerShell(goos)
+	if err != nil {
+		return "", nil, &commandShellError{"shell_unavailable", "PowerShell 7 (x64 or ARM64) (pwsh.exe) is required on Windows; install it from Pudding's prompt or with `winget install --id Microsoft.PowerShell --exact --source winget`. No fallback to Windows PowerShell 5.1 or Git Bash."}
 	}
 	if err := powerShellInputLimit(command); err != nil {
 		return "", nil, &commandShellError{"invalid_arguments", err.Error()}

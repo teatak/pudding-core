@@ -30,6 +30,13 @@ func (s *Server) listBuiltinTools(c *cart.Context) error {
 	return nil
 }
 
+// getCommandShell lets the Windows desktop guide users to install PowerShell 7
+// before the command tool fails.
+func (s *Server) getCommandShell(c *cart.Context) error {
+	c.JSON(http.StatusOK, tool.CurrentCommandShellStatus())
+	return nil
+}
+
 func settingsBuiltinToolDefinitions() []provider.ToolDef {
 	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.PluginLoadDefinition(), tool.PluginUnloadDefinition(nil)}
 	for _, def := range tool.BuiltinDefinitions() {

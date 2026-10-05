@@ -2126,6 +2126,18 @@ func TestSkillAssetsAPI(t *testing.T) {
 	}
 }
 
+func TestCommandShellAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	resp := req(t, http.MethodGet, srv.URL+"/tools/command-shell", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := decodeJSON[tool.CommandShellStatus](t, resp); got != tool.CurrentCommandShellStatus() {
+		t.Fatalf("command shell status = %+v, want %+v", got, tool.CurrentCommandShellStatus())
+	}
+}
+
 func TestBuiltinToolsAPI(t *testing.T) {
 	srv, _ := newTestServer(t)
 
