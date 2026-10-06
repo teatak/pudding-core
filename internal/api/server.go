@@ -40,6 +40,9 @@ import (
 )
 
 type Server struct {
+	remoteMu          sync.Mutex
+	remoteSubscribers map[chan remoteChange]struct{}
+
 	pluginHTTP *pluginexec.Executor
 	engine     *engine.Engine
 	store      store.Store
@@ -145,6 +148,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
+	"/remote",
 	"/studio/items",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/plugins", "/plugin-assets", "/plugin-skills", "/plugin-connections", "/plugin-oauth", "/mcp", "/desktop"}
 
@@ -173,6 +177,7 @@ type browserMCPService interface {
 // (浏览器 SSE 无法自定义 header)。
 func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
+	s.registerRemote(app)
 	public := cart.New()
 
 	app.Route("/studio/items").GET(s.listStudioItems).POST(s.createStudioItem)
