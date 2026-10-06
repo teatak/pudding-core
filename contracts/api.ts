@@ -1363,8 +1363,13 @@ export const remotePairingRequest = remoteScope.extend({ code: z.string(), devic
 export const remotePairingClaim = z.object({ token: z.string(), device: remoteDevice });
 export const remoteAuthorizeInput = remoteScope.extend({ token: z.string() });
 export const remoteAuthorization = z.object({ desktopID: z.string(), device: remoteDevice });
-export const remoteModels = z.object({models: z.array(z.object({provider: z.string(), model: z.string(), label: z.string().optional()}))});
+export const remoteModels = z.object({models: z.array(z.object({
+  provider: z.string(), model: z.string(), label: z.string().optional(),
+  providerLabel: z.string(), providerBrand: z.string().optional(), providerProtocol,
+  configuration: providerModel,
+}))});
 export const remoteChanged = z.object({deviceID: z.string().optional(), pairingID: z.string().optional()});
+export type RemoteModel = z.infer<typeof remoteModels>["models"][number];
 export type RemoteDevice = z.infer<typeof remoteDevice>;
 export type RemotePairing = z.infer<typeof remotePairing>;
 export type RemoteAccess = z.infer<typeof remoteAccess>;

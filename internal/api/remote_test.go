@@ -195,3 +195,26 @@ func TestRemoteAPILANHTTPIPv4OriginBoundary(t *testing.T) {
 		t.Fatalf("loopback HTTP pairing status=%d", response.StatusCode)
 	}
 }
+
+func TestRemoteModelConfigurationStripsArbitraryProviderOptions(t *testing.T) {
+	model := store.ProviderModel{ID: "model", ContextWindow: 120000,
+		ProviderOptions: &store.ProviderOptions{
+			OpenAI:    map[string]any{"reasoning_effort": "high", "api_key": "fixture-model-secret"},
+			Google:    map[string]any{"thinking": map[string]any{"level": "medium", "credential": "fixture-private"}, "headers": "fixture-secret"},
+			Anthropic: map[string]any{"output_config": map[string]any{"effort": "max", "token": "fixture-secret"}},
+		}}
+	safe := remoteModelConfiguration(model)
+	raw, err := json.Marshal(safe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "fixture-") {
+		t.Fatalf("secret escaped into catalog: %s", raw)
+	}
+	if safe.ContextWindow != model.ContextWindow || safe.ProviderOptions.OpenAI["reasoning_effort"] != "high" {
+		t.Fatal(safe)
+	}
+	if model.ProviderOptions.OpenAI["api_key"] != "fixture-model-secret" {
+		t.Fatal("canonical configuration mutated")
+	}
+}
