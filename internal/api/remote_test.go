@@ -29,7 +29,7 @@ func TestRemoteAPIStartupAuthApprovalClaimAndRevoke(t *testing.T) {
 			t.Fatalf("unguarded %s: %d", path, resp.StatusCode)
 		}
 	}
-	scope := store.RemoteScope{Mode: "lan", Origin: "https://192.168.1.10:9443"}
+	scope := store.RemoteScope{Mode: "lan", Origin: "http://192.168.1.10:18443"}
 	initial := decodeJSON[store.RemoteAccess](t, req(t, http.MethodGet, server.URL+"/remote/access", nil))
 	if initial.DesktopID == "" || initial.Devices == nil || initial.Pairings == nil {
 		t.Fatal(initial)
@@ -63,8 +63,7 @@ func TestRemoteAPIStartupAuthApprovalClaimAndRevoke(t *testing.T) {
 	if auth.DesktopID != initial.DesktopID || auth.Device.ID != claimed.Device.ID {
 		t.Fatal(auth)
 	}
-	wrong := scope
-	wrong.Mode = "relay"
+	wrong := store.RemoteScope{Mode: "relay", Origin: "https://phone.example.com"}
 	resp = req(t, http.MethodPost, server.URL+"/remote/authorize", store.RemoteAuthorizeInput{RemoteScope: wrong, Token: claimed.Token})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -163,5 +162,29 @@ func TestRemoteEventsAreCanonicalMutationInvalidations(t *testing.T) {
 	<-slow
 	if _, open := <-slow; open {
 		t.Fatal("overflow did not close subscription")
+	}
+}
+
+func TestRemoteAPILANHTTPIPv4OriginBoundary(t *testing.T) {
+	st := storetest.New(t)
+	server := httptest.NewServer(New(nil, st, st, nil).Handler(testToken, nil))
+	defer server.Close()
+	for _, scope := range []store.RemoteScope{
+		{Mode: "lan", Origin: "https://127.0.0.1:18443"},
+		{Mode: "lan", Origin: "http://localhost:18443"},
+		{Mode: "lan", Origin: "http://[::1]:18443"},
+		{Mode: "lan", Origin: "http://127.0.0.1:18443?"},
+		{Mode: "relay", Origin: "http://phone.example.com"},
+	} {
+		response := req(t, http.MethodPost, server.URL+"/remote/pairings", scope)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%+v status=%d", scope, response.StatusCode)
+		}
+	}
+	response := req(t, http.MethodPost, server.URL+"/remote/pairings", store.RemoteScope{Mode: "lan", Origin: "http://127.0.0.1:18443"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("loopback HTTP pairing status=%d", response.StatusCode)
 	}
 }

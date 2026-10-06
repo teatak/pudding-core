@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -24,7 +25,20 @@ type RemoteScope struct {
 
 func (s RemoteScope) Validate() error {
 	u, err := url.Parse(s.Origin)
-	if err != nil || (s.Mode != "lan" && s.Mode != "relay") || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.String() != s.Origin || strings.ContainsAny(s.Origin, "\r\n") {
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.String() != s.Origin || strings.ContainsAny(s.Origin, "\r\n") {
+		return ErrInvalidRemote
+	}
+	switch s.Mode {
+	case "lan":
+		address, err := netip.ParseAddr(u.Hostname())
+		if u.Scheme != "http" || err != nil || !address.Is4() {
+			return ErrInvalidRemote
+		}
+	case "relay":
+		if u.Scheme != "https" {
+			return ErrInvalidRemote
+		}
+	default:
 		return ErrInvalidRemote
 	}
 	return nil

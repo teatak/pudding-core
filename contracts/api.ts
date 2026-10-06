@@ -1347,6 +1347,7 @@ export const conflictResponse = z.object({
 
 // Remote access control stays loopback/startup-token guarded. Electron exposes
 // only scoped pairing requests and authenticated whitelisted business methods.
+// LAN origins are HTTP IPv4; relay origins are HTTPS. The gateway supplies exact origins.
 export const remoteScope = z.object({ mode: z.enum(["lan", "relay"]), origin: z.string() });
 export const remoteDevice = remoteScope.extend({
   id: z.string(), name: z.string(), createdAt: z.string(), expiresAt: z.string(),

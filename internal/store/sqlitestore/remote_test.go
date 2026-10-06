@@ -13,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-var remoteLAN = store.RemoteScope{Mode: "lan", Origin: "https://192.168.1.10:9443"}
+var remoteLAN = store.RemoteScope{Mode: "lan", Origin: "http://192.168.1.10:18443"}
 var remoteRelay = store.RemoteScope{Mode: "relay", Origin: "https://phone.example.com"}
 
 func requestedRemote(t *testing.T, s *Store, scope store.RemoteScope) (*store.RemotePairingCode, *store.RemotePairingRequested) {
@@ -64,7 +64,7 @@ func TestRemotePairingCredentialsScopeAndRestart(t *testing.T) {
 	if _, err := s.RequestRemotePairing(ctx, store.RemotePairingRequest{RemoteScope: remoteLAN, Code: code.Code, DeviceName: "again"}); !errors.Is(err, store.ErrRemoteUnauthorized) {
 		t.Fatal("code reused", err)
 	}
-	for _, scope := range []store.RemoteScope{remoteRelay, {Mode: "lan", Origin: "https://other.example.com"}, {Mode: "relay", Origin: remoteLAN.Origin}} {
+	for _, scope := range []store.RemoteScope{remoteRelay, {Mode: "lan", Origin: "http://192.168.1.11:18443"}, {Mode: "lan", Origin: "http://192.168.1.10:18444"}} {
 		if _, err := s.PollRemotePairing(ctx, request.ID, store.RemotePollInput{RemoteScope: scope, PollToken: request.PollToken}); !errors.Is(err, store.ErrRemoteUnauthorized) {
 			t.Fatal("poll scope not bound", scope, err)
 		}
@@ -105,7 +105,7 @@ func TestRemotePairingCredentialsScopeAndRestart(t *testing.T) {
 	if err != nil || auth.DesktopID != before.DesktopID || auth.Device.ID != result.Device.ID {
 		t.Fatal("restart lost identity or credential", auth, err)
 	}
-	for _, scope := range []store.RemoteScope{remoteRelay, {Mode: "lan", Origin: "https://other.example.com"}, {Mode: "relay", Origin: remoteLAN.Origin}} {
+	for _, scope := range []store.RemoteScope{remoteRelay, {Mode: "lan", Origin: "http://192.168.1.11:18443"}, {Mode: "lan", Origin: "http://192.168.1.10:18444"}} {
 		if _, err := s.AuthorizeRemote(ctx, store.RemoteAuthorizeInput{RemoteScope: scope, Token: result.Token}); !errors.Is(err, store.ErrRemoteUnauthorized) {
 			t.Fatal("credential crossed origin/mode", scope, err)
 		}
@@ -297,4 +297,20 @@ func TestRemoteMigrationFailureRollsBackAndCanRestart(t *testing.T) {
 	}
 	defer s.Close()
 	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "31")
+}
+
+func TestRemoteHTTPSLANCredentialCannotMoveToHTTP(t *testing.T) {
+	s, _ := openTestStore(t)
+	ctx := context.Background()
+	_, claimed := approvedRemote(t, s, remoteLAN)
+	if _, err := s.db.Exec(`UPDATE remote_devices SET origin=? WHERE id=?`, "https://192.168.1.10:18443", claimed.Device.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AuthorizeRemote(ctx, store.RemoteAuthorizeInput{RemoteScope: remoteLAN, Token: claimed.Token}); !errors.Is(err, store.ErrRemoteUnauthorized) {
+		t.Fatal("credential moved from HTTPS to HTTP", err)
+	}
+	oldScope := store.RemoteScope{Mode: "lan", Origin: "https://192.168.1.10:18443"}
+	if _, err := s.AuthorizeRemote(ctx, store.RemoteAuthorizeInput{RemoteScope: oldScope, Token: claimed.Token}); !errors.Is(err, store.ErrInvalidRemote) {
+		t.Fatal("HTTPS LAN compatibility remains", err)
+	}
 }
