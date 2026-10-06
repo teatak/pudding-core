@@ -73,14 +73,14 @@ func (s *Store) RemoteAccess(ctx context.Context) (*store.RemoteAccess, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT id,mode,origin,status,device_name,expires_at FROM remote_pairings WHERE expires_at>? ORDER BY expires_at,id`, now)
+	rows, err = tx.QueryContext(ctx, `SELECT id,mode,origin,expires_at FROM remote_pairings WHERE expires_at>? ORDER BY expires_at,id`, now)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var p store.RemotePairing
 		var expires int64
-		if err := rows.Scan(&p.ID, &p.Mode, &p.Origin, &p.Status, &p.DeviceName, &expires); err != nil {
+		if err := rows.Scan(&p.ID, &p.Mode, &p.Origin, &expires); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -103,10 +103,14 @@ func (s *Store) CreateRemotePairing(ctx context.Context, scope store.RemoteScope
 		return nil, err
 	}
 	out := &store.RemotePairingCode{ID: store.NewID("pair"), Code: base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), ExpiresAt: time.Now().UTC().Add(store.RemotePairingLifetime)}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO remote_pairings(id,mode,origin,status,code_hash,expires_at) VALUES(?,?,?,'pending',?,?)`, out.ID, scope.Mode, scope.Origin, remoteHash(out.Code), out.ExpiresAt.UnixMilli())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO remote_pairings(id,mode,origin,code_hash,expires_at) VALUES(?,?,?,?,?)`, out.ID, scope.Mode, scope.Origin, remoteHash(out.Code), out.ExpiresAt.UnixMilli())
 	return out, err
 }
-func (s *Store) RequestRemotePairing(ctx context.Context, in store.RemotePairingRequest) (*store.RemotePairingRequested, error) {
+
+// RequestRemotePairing atomically consumes a locally issued authorization code
+// and creates the device grant. Losing this one-time token response requires
+// issuing a new code; no credential recovery or pending approval path exists.
+func (s *Store) RequestRemotePairing(ctx context.Context, in store.RemotePairingRequest) (*store.RemotePairingClaim, error) {
 	if err := in.RemoteScope.Validate(); err != nil {
 		return nil, err
 	}
@@ -118,56 +122,18 @@ func (s *Store) RequestRemotePairing(ctx context.Context, in store.RemotePairing
 	if len(code) != 8 {
 		return nil, store.ErrRemoteUnauthorized
 	}
-	poll, err := remoteSecret()
-	if err != nil {
-		return nil, err
-	}
-	var id string
-	err = s.db.QueryRowContext(ctx, `UPDATE remote_pairings SET status='requested',code_hash=NULL,poll_hash=?,device_name=? WHERE code_hash=? AND mode=? AND origin=? AND status='pending' AND expires_at>? RETURNING id`, remoteHash(poll), name, remoteHash(code), in.Mode, in.Origin, time.Now().UnixMilli()).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrRemoteUnauthorized
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &store.RemotePairingRequested{ID: id, PollToken: poll, Status: "pending"}, nil
-}
-func (s *Store) ApproveRemotePairing(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE remote_pairings SET status='approved' WHERE id=? AND status='requested' AND expires_at>?`, id, time.Now().UnixMilli())
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return store.ErrRemoteConflict
-	}
-	return nil
-}
-func (s *Store) PollRemotePairing(ctx context.Context, id string, in store.RemotePollInput) (*store.RemotePollResult, error) {
-	if err := in.RemoteScope.Validate(); err != nil {
-		return nil, err
-	}
-	if len(in.PollToken) != 43 {
-		return nil, store.ErrRemoteUnauthorized
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	var status, name string
-	err = tx.QueryRowContext(ctx, `SELECT status,device_name FROM remote_pairings WHERE id=? AND poll_hash=? AND mode=? AND origin=? AND expires_at>?`, id, remoteHash(in.PollToken), in.Mode, in.Origin, time.Now().UnixMilli()).Scan(&status, &name)
+	var id string
+	err = tx.QueryRowContext(ctx, `DELETE FROM remote_pairings WHERE code_hash=? AND mode=? AND origin=? AND expires_at>? RETURNING id`, remoteHash(code), in.Mode, in.Origin, time.Now().UnixMilli()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrRemoteUnauthorized
 	}
 	if err != nil {
 		return nil, err
-	}
-	if status != "approved" {
-		return &store.RemotePollResult{Status: "pending"}, nil
 	}
 	if _, err = remoteDesktopID(ctx, tx); err != nil {
 		return nil, err
@@ -177,20 +143,18 @@ func (s *Store) PollRemotePairing(ctx context.Context, id string, in store.Remot
 		return nil, err
 	}
 	now := time.Now().UTC()
-	d := &store.RemoteDevice{ID: store.NewID("device"), Name: name, RemoteScope: in.RemoteScope, CreatedAt: now, ExpiresAt: now.Add(store.RemoteDeviceLifetime)}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO remote_devices(id,name,mode,origin,credential_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?)`, d.ID, d.Name, d.Mode, d.Origin, remoteHash(token), d.CreatedAt.UnixMilli(), d.ExpiresAt.UnixMilli()); err != nil {
-		return nil, err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM remote_pairings WHERE id=?`, id); err != nil {
+	device := store.RemoteDevice{ID: store.NewID("device"), Name: name, RemoteScope: in.RemoteScope, CreatedAt: now, ExpiresAt: now.Add(store.RemoteDeviceLifetime)}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO remote_devices(id,name,mode,origin,credential_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?)`, device.ID, device.Name, device.Mode, device.Origin, remoteHash(token), device.CreatedAt.UnixMilli(), device.ExpiresAt.UnixMilli()); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &store.RemotePollResult{Status: "approved", Token: token, Device: d}, nil
+	return &store.RemotePairingClaim{Token: token, Device: device}, nil
 }
 func (s *Store) DeleteRemotePairing(ctx context.Context, id string) error {
-	return s.deleteRemote(ctx, `DELETE FROM remote_pairings WHERE id=?`, id)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM remote_pairings WHERE id=?`, id)
+	return err
 }
 func (s *Store) DeleteRemoteDevice(ctx context.Context, id string) error {
 	return s.deleteRemote(ctx, `DELETE FROM remote_devices WHERE id=?`, id)

@@ -1353,19 +1353,14 @@ export const remoteDevice = remoteScope.extend({
   id: z.string(), name: z.string(), createdAt: z.string(), expiresAt: z.string(),
 });
 export const remotePairing = remoteScope.extend({
-  id: z.string(), status: z.enum(["pending", "requested", "approved"]),
-  deviceName: z.string().optional(), expiresAt: z.string(),
+  id: z.string(), expiresAt: z.string(),
 });
 export const remoteAccess = z.object({
   desktopID: z.string(), devices: z.array(remoteDevice), pairings: z.array(remotePairing),
 });
 export const remotePairingCode = z.object({ id: z.string(), code: z.string(), expiresAt: z.string() });
 export const remotePairingRequest = remoteScope.extend({ code: z.string(), deviceName: z.string() });
-export const remotePairingRequested = z.object({ id: z.string(), pollToken: z.string(), status: z.literal("pending") });
-export const remotePollInput = remoteScope.extend({ pollToken: z.string() });
-export const remotePollResult = z.object({
-  status: z.enum(["pending", "approved"]), token: z.string().optional(), device: remoteDevice.optional(),
-});
+export const remotePairingClaim = z.object({ token: z.string(), device: remoteDevice });
 export const remoteAuthorizeInput = remoteScope.extend({ token: z.string() });
 export const remoteAuthorization = z.object({ desktopID: z.string(), device: remoteDevice });
 export const remoteModels = z.object({models: z.array(z.object({provider: z.string(), model: z.string(), label: z.string().optional()}))});
