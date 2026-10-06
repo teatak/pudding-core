@@ -276,7 +276,7 @@ func TestStudioMigrationLateFailureRollsBackWholeUpgrade(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "30")
+		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_item_revisions", "2")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT archived_at FROM studio_items WHERE id='canvas_w'", "0")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM sqlite_master WHERE name IN ('studio_item_content','studio_table_ids')", "2")

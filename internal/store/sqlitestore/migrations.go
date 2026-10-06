@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 30
+	currentSchemaVersion       = 31
 )
 
 var (
@@ -34,6 +34,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	31: migrateRemoteAccess,
 	30: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
 	26: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE canvas_resources ADD COLUMN icon TEXT NOT NULL DEFAULT '';
@@ -916,6 +917,9 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"remote_identity":       {"singleton", "desktop_id"},
+		"remote_pairings":       {"id", "mode", "origin", "status", "code_hash", "poll_hash", "device_name", "expires_at"},
+		"remote_devices":        {"id", "name", "mode", "origin", "credential_hash", "created_at", "expires_at"},
 		"session_children":      {"child_session_id", "parent_session_id"},
 		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":   {"parent_turn_id"},

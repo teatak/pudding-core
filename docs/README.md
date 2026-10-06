@@ -19,6 +19,7 @@
 | [工具结果按需读取](context-working-set.md)／[上下文压缩](context-compaction.md) | canonical 历史、结果投影与上下文预算 |
 | [用户问题收集](user-input-flow.md) | 等待、补答、canonical 数据与桌面面板 |
 | [会话协作](session-collaboration-plan.md) | 父子调度、结果回收、任务卡片与统一审批 |
+| [浏览器远程访问](remote-access.md) | 配对、设备凭证、LAN / relay 与授权通知 |
 | [定时任务](scheduled-tasks-plan.md) | 规则、持久化、调度、执行记录与通知 |
 | [Agent Eval](agent-eval.md)／[工具使用率报告](tool-usage-report.md) | 开发验证和本地统计入口 |
 
