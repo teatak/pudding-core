@@ -17,9 +17,6 @@ func (s *Server) registerRemote(app *cart.Engine) {
 	app.Route("/remote/pairings").POST(s.remoteCreatePairing)
 	app.Route("/remote/pairings/request").POST(s.remoteRequestPairing)
 	app.Route("/remote/pairings/:pairingID").DELETE(s.remoteDeletePairing)
-	app.Route("/remote/pairings/:pairingID/poll").POST(s.remotePollPairing)
-	app.Route("/remote/pairings/:pairingID/approve").POST(s.remoteApprovePairing)
-	app.Route("/remote/pairings/:pairingID/deny").POST(s.remoteDeletePairing)
 	app.Route("/remote/devices/:deviceID").DELETE(s.remoteDeleteDevice)
 	app.Route("/remote/authorize").POST(s.remoteAuthorize)
 	app.Route("/remote/events").GET(s.remoteEvents)
@@ -30,8 +27,6 @@ func (s *Server) remoteFail(c *cart.Context, err error) error {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_remote_input"})
 	case errors.Is(err, store.ErrRemoteUnauthorized):
 		c.JSON(http.StatusUnauthorized, map[string]string{"error": "remote_unauthorized"})
-	case errors.Is(err, store.ErrRemoteConflict):
-		c.JSON(http.StatusConflict, map[string]string{"error": "remote_pairing_conflict"})
 	default:
 		return s.fail(c, err)
 	}
@@ -70,35 +65,8 @@ func (s *Server) remoteRequestPairing(c *cart.Context) error {
 	if err != nil {
 		return s.remoteFail(c, err)
 	}
-	s.notifyRemote(remoteChange{PairingID: out.ID})
+	s.notifyRemote(remoteChange{DeviceID: out.Device.ID})
 	c.JSON(http.StatusOK, out)
-	return nil
-}
-func (s *Server) remotePollPairing(c *cart.Context) error {
-	c.Response.Header().Set("Cache-Control", "no-store")
-	id, _ := c.Param("pairingID")
-	var in store.RemotePollInput
-	if err := decode(c, &in); err != nil {
-		return badRequest(c, "invalid_json")
-	}
-	out, err := s.store.PollRemotePairing(c.Request.Context(), id, in)
-	if err != nil {
-		return s.remoteFail(c, err)
-	}
-	if out.Device != nil {
-		s.notifyRemote(remoteChange{DeviceID: out.Device.ID, PairingID: id})
-	}
-	c.JSON(http.StatusOK, out)
-	return nil
-}
-func (s *Server) remoteApprovePairing(c *cart.Context) error {
-	c.Response.Header().Set("Cache-Control", "no-store")
-	id, _ := c.Param("pairingID")
-	if err := s.store.ApproveRemotePairing(c.Request.Context(), id); err != nil {
-		return s.remoteFail(c, err)
-	}
-	s.notifyRemote(remoteChange{PairingID: id})
-	c.JSON(http.StatusOK, map[string]string{"status": "approved"})
 	return nil
 }
 func (s *Server) remoteDeletePairing(c *cart.Context) error {

@@ -15,7 +15,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
-func TestRemoteAPIStartupAuthApprovalClaimAndRevoke(t *testing.T) {
+func TestRemoteAPIStartupAuthDirectClaimAndRevoke(t *testing.T) {
 	st := storetest.New(t)
 	server := httptest.NewServer(New(nil, st, st, nil).Handler(testToken, nil))
 	defer server.Close()
@@ -29,7 +29,7 @@ func TestRemoteAPIStartupAuthApprovalClaimAndRevoke(t *testing.T) {
 			t.Fatalf("unguarded %s: %d", path, resp.StatusCode)
 		}
 	}
-	scope := store.RemoteScope{Mode: "lan", Origin: "https://192.168.1.10:9443"}
+	scope := store.RemoteScope{Mode: "lan", Origin: "http://192.168.1.10:18443"}
 	initial := decodeJSON[store.RemoteAccess](t, req(t, http.MethodGet, server.URL+"/remote/access", nil))
 	if initial.DesktopID == "" || initial.Devices == nil || initial.Pairings == nil {
 		t.Fatal(initial)
@@ -39,32 +39,38 @@ func TestRemoteAPIStartupAuthApprovalClaimAndRevoke(t *testing.T) {
 		t.Fatal("pairing response status/cache", create.StatusCode, create.Header)
 	}
 	code := decodeJSON[store.RemotePairingCode](t, create)
-	requested := decodeJSON[store.RemotePairingRequested](t, req(t, http.MethodPost, server.URL+"/remote/pairings/request", store.RemotePairingRequest{RemoteScope: scope, Code: code.Code, DeviceName: "Phone"}))
-	input := store.RemotePollInput{RemoteScope: scope, PollToken: requested.PollToken}
-	pending := decodeJSON[store.RemotePollResult](t, req(t, http.MethodPost, server.URL+"/remote/pairings/"+requested.ID+"/poll", input))
-	if pending.Status != "pending" || pending.Device != nil || pending.Token != "" {
-		t.Fatal(pending)
+	claimResponse := req(t, http.MethodPost, server.URL+"/remote/pairings/request", store.RemotePairingRequest{RemoteScope: scope, Code: code.Code, DeviceName: "Browser device"})
+	if claimResponse.StatusCode != http.StatusOK || claimResponse.Header.Get("Cache-Control") != "no-store" {
+		t.Fatal(claimResponse.StatusCode, claimResponse.Header)
 	}
-	resp := req(t, http.MethodPost, server.URL+"/remote/pairings/"+requested.ID+"/approve", map[string]any{})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatal(resp.StatusCode)
+	claimed := decodeJSON[store.RemotePairingClaim](t, claimResponse)
+	if claimed.Token == "" || claimed.Device.Name != "Browser device" {
+		t.Fatal("missing immediate grant", claimed)
 	}
-	claimed := decodeJSON[store.RemotePollResult](t, req(t, http.MethodPost, server.URL+"/remote/pairings/"+requested.ID+"/poll", input))
-	if claimed.Status != "approved" || claimed.Device == nil || claimed.Token == "" {
-		t.Fatal(claimed)
-	}
-	resp = req(t, http.MethodPost, server.URL+"/remote/pairings/"+requested.ID+"/poll", input)
+	resp := req(t, http.MethodPost, server.URL+"/remote/pairings/request", store.RemotePairingRequest{RemoteScope: scope, Code: code.Code, DeviceName: "Browser device"})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatal("duplicate claim succeeded", resp.StatusCode)
+		t.Fatal("duplicate code accepted", resp.StatusCode)
+	}
+	for _, suffix := range []string{"poll", "approve", "deny"} {
+		response := req(t, http.MethodPost, server.URL+"/remote/pairings/"+code.ID+"/"+suffix, map[string]any{})
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatal("old route remains", suffix, response.StatusCode)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		response := req(t, http.MethodDelete, server.URL+"/remote/pairings/"+code.ID, nil)
+		response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatal("cancel consumed code not idempotent", response.StatusCode)
+		}
 	}
 	auth := decodeJSON[store.RemoteAuthorization](t, req(t, http.MethodPost, server.URL+"/remote/authorize", store.RemoteAuthorizeInput{RemoteScope: scope, Token: claimed.Token}))
 	if auth.DesktopID != initial.DesktopID || auth.Device.ID != claimed.Device.ID {
 		t.Fatal(auth)
 	}
-	wrong := scope
-	wrong.Mode = "relay"
+	wrong := store.RemoteScope{Mode: "relay", Origin: "https://phone.example.com"}
 	resp = req(t, http.MethodPost, server.URL+"/remote/authorize", store.RemoteAuthorizeInput{RemoteScope: wrong, Token: claimed.Token})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -163,5 +169,29 @@ func TestRemoteEventsAreCanonicalMutationInvalidations(t *testing.T) {
 	<-slow
 	if _, open := <-slow; open {
 		t.Fatal("overflow did not close subscription")
+	}
+}
+
+func TestRemoteAPILANHTTPIPv4OriginBoundary(t *testing.T) {
+	st := storetest.New(t)
+	server := httptest.NewServer(New(nil, st, st, nil).Handler(testToken, nil))
+	defer server.Close()
+	for _, scope := range []store.RemoteScope{
+		{Mode: "lan", Origin: "https://127.0.0.1:18443"},
+		{Mode: "lan", Origin: "http://localhost:18443"},
+		{Mode: "lan", Origin: "http://[::1]:18443"},
+		{Mode: "lan", Origin: "http://127.0.0.1:18443?"},
+		{Mode: "relay", Origin: "http://phone.example.com"},
+	} {
+		response := req(t, http.MethodPost, server.URL+"/remote/pairings", scope)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%+v status=%d", scope, response.StatusCode)
+		}
+	}
+	response := req(t, http.MethodPost, server.URL+"/remote/pairings", store.RemoteScope{Mode: "lan", Origin: "http://127.0.0.1:18443"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("loopback HTTP pairing status=%d", response.StatusCode)
 	}
 }

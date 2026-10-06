@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -10,7 +11,6 @@ import (
 
 var ErrInvalidRemote = errors.New("store: invalid remote access input")
 var ErrRemoteUnauthorized = errors.New("store: remote credential unavailable or expired")
-var ErrRemoteConflict = errors.New("store: remote pairing state conflict")
 
 const RemotePairingLifetime = 5 * time.Minute
 const RemoteDeviceLifetime = 30 * 24 * time.Hour
@@ -24,7 +24,20 @@ type RemoteScope struct {
 
 func (s RemoteScope) Validate() error {
 	u, err := url.Parse(s.Origin)
-	if err != nil || (s.Mode != "lan" && s.Mode != "relay") || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.String() != s.Origin || strings.ContainsAny(s.Origin, "\r\n") {
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.String() != s.Origin || strings.ContainsAny(s.Origin, "\r\n") {
+		return ErrInvalidRemote
+	}
+	switch s.Mode {
+	case "lan":
+		address, err := netip.ParseAddr(u.Hostname())
+		if u.Scheme != "http" || err != nil || !address.Is4() {
+			return ErrInvalidRemote
+		}
+	case "relay":
+		if u.Scheme != "https" {
+			return ErrInvalidRemote
+		}
+	default:
 		return ErrInvalidRemote
 	}
 	return nil
@@ -40,9 +53,7 @@ type RemoteDevice struct {
 type RemotePairing struct {
 	ID string `json:"id"`
 	RemoteScope
-	Status     string    `json:"status"`
-	DeviceName string    `json:"deviceName,omitempty"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 type RemoteAccess struct {
 	DesktopID string          `json:"desktopID"`
@@ -59,19 +70,9 @@ type RemotePairingRequest struct {
 	Code       string `json:"code"`
 	DeviceName string `json:"deviceName"`
 }
-type RemotePairingRequested struct {
-	ID        string `json:"id"`
-	PollToken string `json:"pollToken"`
-	Status    string `json:"status"`
-}
-type RemotePollInput struct {
-	RemoteScope
-	PollToken string `json:"pollToken"`
-}
-type RemotePollResult struct {
-	Status string        `json:"status"`
-	Token  string        `json:"token,omitempty"`
-	Device *RemoteDevice `json:"device,omitempty"`
+type RemotePairingClaim struct {
+	Token  string       `json:"token"`
+	Device RemoteDevice `json:"device"`
 }
 type RemoteAuthorizeInput struct {
 	RemoteScope
@@ -87,9 +88,7 @@ type RemoteAuthorization struct {
 type RemoteStore interface {
 	RemoteAccess(context.Context) (*RemoteAccess, error)
 	CreateRemotePairing(context.Context, RemoteScope) (*RemotePairingCode, error)
-	RequestRemotePairing(context.Context, RemotePairingRequest) (*RemotePairingRequested, error)
-	PollRemotePairing(context.Context, string, RemotePollInput) (*RemotePollResult, error)
-	ApproveRemotePairing(context.Context, string) error
+	RequestRemotePairing(context.Context, RemotePairingRequest) (*RemotePairingClaim, error)
 	DeleteRemotePairing(context.Context, string) error
 	DeleteRemoteDevice(context.Context, string) error
 	AuthorizeRemote(context.Context, RemoteAuthorizeInput) (*RemoteAuthorization, error)

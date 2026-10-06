@@ -405,7 +405,10 @@ CREATE TABLE remote_pairings (
     id TEXT PRIMARY KEY,
     mode TEXT NOT NULL CHECK (mode IN ('lan','relay')),
     origin TEXT NOT NULL,
-    code_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK (status IN ('pending','requested','approved')),
+    code_hash TEXT UNIQUE,
+    poll_hash TEXT UNIQUE,
+    device_name TEXT NOT NULL DEFAULT '',
     expires_at INTEGER NOT NULL
 );
 CREATE TABLE remote_devices (
