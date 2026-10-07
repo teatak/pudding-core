@@ -104,9 +104,49 @@ func (s *Server) remoteAuthorize(c *cart.Context) error {
 }
 
 type remoteModel struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Label    string `json:"label,omitempty"`
+	Provider         string              `json:"provider"`
+	Model            string              `json:"model"`
+	Label            string              `json:"label,omitempty"`
+	ProviderLabel    string              `json:"providerLabel"`
+	ProviderBrand    string              `json:"providerBrand,omitempty"`
+	ProviderProtocol string              `json:"providerProtocol"`
+	Configuration    store.ProviderModel `json:"configuration"`
+}
+
+// The catalog contains selection metadata, never endpoint credentials or
+// arbitrary provider options. UI reasoning defaults are a bounded enum.
+func remoteModelConfiguration(model store.ProviderModel) store.ProviderModel {
+	original := model.ProviderOptions
+	model.ProviderOptions = nil
+	if original == nil {
+		return model
+	}
+	valid := func(value any) (string, bool) {
+		s, ok := value.(string)
+		switch s {
+		case "low", "medium", "high", "xhigh", "max":
+			return s, ok
+		}
+		return "", false
+	}
+	options := &store.ProviderOptions{}
+	if effort, ok := valid(original.OpenAI["reasoning_effort"]); ok {
+		options.OpenAI = map[string]any{"reasoning_effort": effort}
+	}
+	if thinking, ok := original.Google["thinking"].(map[string]any); ok {
+		if level, ok := valid(thinking["level"]); ok {
+			options.Google = map[string]any{"thinking": map[string]any{"level": level}}
+		}
+	}
+	if output, ok := original.Anthropic["output_config"].(map[string]any); ok {
+		if effort, ok := valid(output["effort"]); ok {
+			options.Anthropic = map[string]any{"output_config": map[string]any{"effort": effort}}
+		}
+	}
+	if options.OpenAI != nil || options.Google != nil || options.Anthropic != nil {
+		model.ProviderOptions = options
+	}
+	return model
 }
 
 func (s *Server) remoteModels(c *cart.Context) error {
@@ -119,7 +159,8 @@ func (s *Server) remoteModels(c *cart.Context) error {
 	for _, p := range profiles {
 		for _, m := range p.Models {
 			if !m.Unavailable {
-				models = append(models, remoteModel{Provider: p.ProfileID(), Model: m.ID, Label: m.DisplayName})
+				models = append(models, remoteModel{Provider: p.ProfileID(), Model: m.ID, Label: m.DisplayName,
+					ProviderLabel: p.DisplayLabel(), ProviderBrand: p.Brand, ProviderProtocol: p.Protocol, Configuration: remoteModelConfiguration(m)})
 			}
 		}
 	}
