@@ -62,7 +62,7 @@ Free 保持列表首项，输出上限由实际路由到的模型决定，预设
 Chat Completions、Responses、Anthropic 和 Gemini 的模型请求统一携带 Pudding 应用标识，直连 OpenRouter 或经 BuzzHive 转发时均可用于归属统计，无需修改已保存的提供方配置：
 
 ```http
-HTTP-Referer: https://teatak.com
+HTTP-Referer: https://pudding.teatak.com
 X-OpenRouter-Title: Pudding
 X-OpenRouter-Categories: programming-app,personal-agent
 ```
@@ -72,6 +72,8 @@ X-OpenRouter-Categories: programming-app,personal-agent
 按官方已公布的单次两个分类限制，正常模型请求轮换携带 `programming-app,personal-agent` 与 `general-chat,creative-writing`，由 OpenRouter 合并应用分类。轮换仅使用进程内原子计数，不持久化，也不额外发送模型请求；两个分组都到达 OpenRouter 后才能完成四类归属。2026-09-14 核对时，官方页面的上限数字显示缺失，搜索索引中的官方文档仍明确写明单次两个分类、累计最多十个。
 
 标识统一定义在 `internal/provider/attribution.go`，不按模型名或代理地址推断。OpenRouter 收到带标识的实际调用后可建立应用条目；榜单只统计经过 OpenRouter 的调用。规则见 [OpenRouter App Attribution](https://openrouter.ai/docs/app-attribution)。
+
+`pudding.teatak.com` 使用独立的 Pudding 网站图标，首页直接返回页面，不跳转到 Teatak 主站。上线顺序为：先部署官网子域名并确认 HTTPS 首页及图标可访问，再发布使用新归属网址的客户端。OpenRouter 如何合并旧条目及何时更新图标由其服务决定，修改请求头不迁移历史用量。
 
 ## DeepSeek Responses
 

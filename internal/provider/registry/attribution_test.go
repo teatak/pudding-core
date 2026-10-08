@@ -87,7 +87,7 @@ func TestModelRequestsCarryPuddingAttribution(t *testing.T) {
 					t.Fatalf("request = %s %s, want POST %s", request.Method, request.URL.Path, tc.path)
 				}
 				for name, want := range map[string]string{
-					"HTTP-Referer":       "https://teatak.com",
+					"HTTP-Referer":       "https://pudding.teatak.com",
 					"X-OpenRouter-Title": "Pudding",
 					tc.authHeader:        tc.authValue,
 				} {

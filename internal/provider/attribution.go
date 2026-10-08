@@ -11,7 +11,7 @@ var appAttributionSequence atomic.Uint64
 // forwarded to OpenRouter by gateways such as BuzzHive.
 // https://openrouter.ai/docs/app-attribution
 func SetAppAttribution(headers http.Header) {
-	headers.Set("HTTP-Referer", "https://teatak.com")
+	headers.Set("HTTP-Referer", "https://pudding.teatak.com")
 	headers.Set("X-OpenRouter-Title", "Pudding")
 	// OpenRouter documents two categories per request and merges them across
 	// requests. Rotate pairs without issuing extra requests or persisting state.
