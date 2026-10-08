@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -130,5 +131,33 @@ func TestWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T) {
 	chat.Mode = store.ModeChat
 	if runner.Call(context.Background(), chat).Ok {
 		t.Fatal("Chat mode should not access widget scope")
+	}
+}
+
+type downloadedWidgetFileStore struct{ widgetFileStore }
+
+func (s downloadedWidgetFileStore) GetStudioItem(ctx context.Context, id string) (*store.StudioItem, error) {
+	w, err := s.widgetFileStore.GetStudioItem(ctx, id)
+	if w != nil {
+		w.Origin = &store.WidgetOrigin{Copy: false}
+	}
+	return w, err
+}
+func TestDownloadedOriginalRejectsDirectFilePatch(t *testing.T) {
+	home := t.TempDir()
+	const id = "widget_downloaded"
+	draft, err := widget.StartDraft(home, id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(home), WithStudioItems(downloadedWidgetFileStore{widgetFileStore{id}}))
+	raw, _ := json.Marshal(map[string]any{"scope": "widget", "widget_id": id, "expectedDraftHash": draft.DraftHash, "files": []any{map[string]any{"path": "src/App.tsx", "action": "create", "content": "export default ()=>null"}}})
+	call := Call{Name: FilePatch, CallID: "edit", SessionID: "session_widget", Mode: store.ModeCode, Args: raw}
+	if _, err := runner.ApprovalDetails(context.Background(), call); err == nil || !strings.Contains(err.Error(), "independent copy") {
+		t.Fatal("expected original-copy guard during patch preparation", err)
+	}
+	after, err := widget.ReadDraft(home, id)
+	if err != nil || after.DraftHash != draft.DraftHash {
+		t.Fatal(after, err)
 	}
 }

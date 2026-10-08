@@ -15,5 +15,12 @@
   "maxSchemaDepth": 16,
   "maxDiagnostics": 50,
   "maxRequestsPerMinute": 120,
-  "maxStorageBytes": 262144
+  "maxStorageBytes": 262144,
+  "distribution": {
+    "kind": "pudding.widget.source-package",
+    "schemaVersion": 2,
+    "minProtocolVersion": 18,
+    "maxBytes": 8388608,
+    "maxIconBytes": 16384
+  }
 }

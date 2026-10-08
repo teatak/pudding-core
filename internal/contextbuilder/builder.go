@@ -132,6 +132,7 @@ func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, pr
 func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
 	sessionID := sess.ID
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
+	msgs = historyInTurnOrder(msgs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat

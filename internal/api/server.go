@@ -149,7 +149,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
 	"/remote",
-	"/studio/items",
+	"/studio/items", "/studio/widget-sources", "/widget-runs", "/widget-pages",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/plugins", "/plugin-assets", "/plugin-skills", "/plugin-connections", "/plugin-oauth", "/mcp", "/desktop"}
 
 type pluginService interface {
@@ -180,6 +180,14 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	s.registerRemote(app)
 	public := cart.New()
 
+	app.Route("/studio/items/:itemID/runs").POST(s.widgetOnly(s.createWidgetRun))
+	app.Route("/widget-runs/:runID").GET(s.getWidgetRun).PATCH(s.updateWidgetRun)
+	app.Route("/widget-runs/:runID/notifications").POST(s.notifyWidgetRun)
+	app.Route("/widget-runs/:runID/requests").PUT(s.setWidgetRequests)
+	app.Route("/sessions/:id/widget-runs/:runID/authorize").POST(s.authorizeWidgetRun)
+	app.Route("/studio/items/install").POST(s.installWidgetPackage)
+	app.Route("/studio/widget-sources").GET(s.listWidgetSources).POST(s.addWidgetSource)
+	app.Route("/studio/widget-sources/:sourceID").DELETE(s.removeWidgetSource)
 	app.Route("/studio/items").GET(s.listStudioItems).POST(s.createStudioItem)
 	app.Route("/studio/items/:itemID").GET(s.getStudioItem).PATCH(s.renameStudioItem).DELETE(s.deleteStudioItem)
 	app.Route("/studio/items/:itemID/archive").POST(s.archiveStudioItem)
@@ -200,6 +208,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/studio/items/:itemID/queries/:operationID").POST(s.widgetOnly(s.queryWidget))
 	app.Route("/studio/items/:itemID/actions/:operationID/prepare").POST(s.widgetOnly(s.prepareWidgetAction))
 	app.Route("/studio/items/:itemID/actions").GET(s.widgetOnly(s.listWidgetActions))
+	app.Route("/studio/items/:itemID/pages").POST(s.widgetOnly(s.openWidgetPage)).DELETE(s.closeWidgetPages)
+	app.Route("/widget-pages/:pageID").PUT(s.writeWidgetPage)
 	app.Route("/studio/items/:itemID/data").GET(s.widgetOnly(s.getWidgetData)).PUT(s.widgetOnly(s.writeWidgetData))
 	app.Route("/studio/items/:itemID/links").GET(s.widgetOnly(s.listWidgetLinks)).POST(s.widgetOnly(s.putWidgetLink))
 	app.Route("/studio/items/:itemID/links/:linkID").DELETE(s.widgetOnly(s.deleteWidgetLink))

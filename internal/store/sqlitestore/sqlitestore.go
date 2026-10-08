@@ -656,6 +656,9 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 
 func (s *Store) deleteSession(ctx context.Context, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_pages WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id IN
 			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id); err != nil {
 			return err

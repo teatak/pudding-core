@@ -1,9 +1,17 @@
 import { z } from "zod";
+import widgetPolicy from "./widget.json";
+
+// Embedded images are rendered only through <img>, never as inline SVG.
+export const studioIconImage = z.string()
+  .max(26 + 4 * Math.ceil(widgetPolicy.distribution.maxIconBytes / 3))
+  .regex(/^data:image\/svg\+xml;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+  .min(30);
 
 // Content addresses of item versions.
 export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const studioItem = z.object({
+  origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
   kind: z.enum(["doc", "table", "widget"]),
   name: z.string(),

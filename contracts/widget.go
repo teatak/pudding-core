@@ -9,24 +9,33 @@ import (
 var widgetJSON []byte
 
 // WidgetPolicy is shared by Core validation and the Desktop compiler/bridge.
+type WidgetDistributionPolicy struct {
+	Kind               string `json:"kind"`
+	SchemaVersion      int    `json:"schemaVersion"`
+	MinProtocolVersion int    `json:"minProtocolVersion"`
+	MaxBytes           int    `json:"maxBytes"`
+	MaxIconBytes       int    `json:"maxIconBytes"`
+}
+
 type WidgetPolicy struct {
-	SchemaVersion         int    `json:"schemaVersion"`
-	SDKVersion            string `json:"sdkVersion"`
-	MaxFiles              int    `json:"maxFiles"`
-	MaxPackageBytes       int    `json:"maxPackageBytes"`
-	MaxFileBytes          int    `json:"maxFileBytes"`
-	MaxSources            int    `json:"maxSources"`
-	MaxOperations         int    `json:"maxOperations"`
-	MaxRequestBytes       int    `json:"maxRequestBytes"`
-	MaxResponseBytes      int    `json:"maxResponseBytes"`
-	MaxConcurrentRequests int    `json:"maxConcurrentRequests"`
-	RequestTimeoutMS      int    `json:"requestTimeoutMS"`
-	BuildTimeoutMS        int    `json:"buildTimeoutMS"`
-	MinRefreshMS          int    `json:"minRefreshMS"`
-	MaxSchemaDepth        int    `json:"maxSchemaDepth"`
-	MaxRequestsPerMinute  int    `json:"maxRequestsPerMinute"`
-	MaxDiagnostics        int    `json:"maxDiagnostics"`
-	MaxStorageBytes       int    `json:"maxStorageBytes"`
+	Distribution          WidgetDistributionPolicy `json:"distribution"`
+	SchemaVersion         int                      `json:"schemaVersion"`
+	SDKVersion            string                   `json:"sdkVersion"`
+	MaxFiles              int                      `json:"maxFiles"`
+	MaxPackageBytes       int                      `json:"maxPackageBytes"`
+	MaxFileBytes          int                      `json:"maxFileBytes"`
+	MaxSources            int                      `json:"maxSources"`
+	MaxOperations         int                      `json:"maxOperations"`
+	MaxRequestBytes       int                      `json:"maxRequestBytes"`
+	MaxResponseBytes      int                      `json:"maxResponseBytes"`
+	MaxConcurrentRequests int                      `json:"maxConcurrentRequests"`
+	RequestTimeoutMS      int                      `json:"requestTimeoutMS"`
+	BuildTimeoutMS        int                      `json:"buildTimeoutMS"`
+	MinRefreshMS          int                      `json:"minRefreshMS"`
+	MaxSchemaDepth        int                      `json:"maxSchemaDepth"`
+	MaxRequestsPerMinute  int                      `json:"maxRequestsPerMinute"`
+	MaxDiagnostics        int                      `json:"maxDiagnostics"`
+	MaxStorageBytes       int                      `json:"maxStorageBytes"`
 }
 
 var widgetPolicy = func() WidgetPolicy {

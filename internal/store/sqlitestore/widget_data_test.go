@@ -175,7 +175,7 @@ func TestWidgetDataConcurrentWriteAndValidation(t *testing.T) {
 func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	st, path := openTestStore(t)
 	w := createDataWidget(t, st, "existing")
-	if _, err := st.db.Exec(`DROP TABLE widget_data; PRAGMA user_version=32`); err != nil {
+	if _, err := st.db.Exec(`DROP TABLE widget_pages; DROP TABLE widget_data; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=32`); err != nil {
 		t.Fatal(err)
 	}
 	err := runSchemaMigration(st.db, 33, func(tx *sql.Tx) error {
@@ -205,5 +205,5 @@ func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	if err != nil || data.Version != 0 {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "33")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "35")
 }

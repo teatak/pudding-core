@@ -86,6 +86,7 @@ func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderP
 }
 
 type Engine struct {
+	widgetRuns          widgetRuns
 	scheduleMu          sync.Mutex
 	scheduleStart       sync.Once
 	scheduledRuntimeIDs map[string]string
@@ -247,6 +248,12 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 // 让 best-effort 后台任务(自动标题等)优雅退出时立即收手。
 func (e *Engine) Stop() {
 	e.auxCancel()
+	e.widgetRuns.Lock()
+	for _, run := range e.widgetRuns.entries {
+		e.cancelWidgetRunLocked(run)
+	}
+	e.widgetRuns.entries = nil
+	e.widgetRuns.Unlock()
 	e.toolCloseOnce.Do(func() {
 		if closer, ok := e.tools.(tool.ResourceCloser); ok {
 			if err := closer.Close(); err != nil {

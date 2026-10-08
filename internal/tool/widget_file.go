@@ -38,6 +38,9 @@ func (r *BuiltinRunner) widgetDraftForCall(call Call, id string) (widget.Draft, 
 	if err != nil {
 		return widget.Draft{}, "", err
 	}
+	if call.Name == FilePatch && item.Origin != nil && !item.Origin.Copy {
+		return widget.Draft{}, "", errors.New("downloaded widgets require an independent copy; call widget_draft_open and use its returned widget.id")
+	}
 	if item.Kind != store.StudioItemKindWidget {
 		return widget.Draft{}, "", errors.New("widget kind required")
 	}

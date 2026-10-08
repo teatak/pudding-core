@@ -120,6 +120,31 @@ func TestBrowserMCPRunnerRegistersAndCallsWidgetTool(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for tool call")
 	}
+	for _, scoped := range []bool{false, true} {
+		callCtx := runtimeCtx
+		if scoped {
+			callCtx = plugin.WithWidgetRequest(callCtx, plugin.WidgetRequest{RunID: "real-run", NotificationID: "real-request"})
+		}
+		result := runner.Call(callCtx, Call{SessionID: "sess_a", CallID: "private-context", Name: "widget_draft_open", Args: json.RawMessage(`{"_pudding_widget_request":{"runID":"spoofed","notificationID":"spoofed"}}`)})
+		if !result.Ok {
+			t.Fatal(result)
+		}
+		select {
+		case got := <-calls:
+			args := got["arguments"].(map[string]any)
+			request, hasRequest := args["_pudding_widget_request"].(map[string]any)
+			if scoped {
+				if request["runID"] != "real-run" || request["notificationID"] != "real-request" {
+					t.Fatal("scheduler identity not authoritative", args)
+				}
+			} else if hasRequest {
+				t.Fatal("model supplied scheduler identity", args)
+			}
+		case <-ctx.Done():
+			t.Fatal("missing tool call")
+		}
+	}
+
 }
 
 func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {

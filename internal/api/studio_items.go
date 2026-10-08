@@ -18,7 +18,7 @@ import (
 var itemIconID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
 
 func validItemAppearance(icon, color string) bool {
-	if icon != "" && !itemIconID.MatchString(icon) {
+	if icon != "" && !itemIconID.MatchString(icon) && !widget.ValidIconImage(icon) {
 		return false
 	}
 	switch color {

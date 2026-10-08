@@ -8,6 +8,7 @@
 
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
+| `widget.notice` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`；只追加通知 canonical 条目，不启动模型或结束当前 turn |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID?`, `retryOfTurnID?`, `text?`；system/retry 不含 user message |
 | `input.queued` / `input.updated` | ✓ | ✓ | `clientMessageID`, `text?`, `status`;纯附件输入省略空 `text` |
 | `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text?`;在安全采样边界应用引导后发布，后续输出位于该引导之后 |
@@ -257,3 +258,45 @@ submit 时 engine 解析成 effective model config,随 turn 写入 `turns.model_
 `GET /sessions/{id}/command-approvals` 返回 `{projectDirs, grantCount, reusedCount, approvalReasons}`。`projectDirs` 为当前会话的临时目录租约；固定命令授权计数仍为 `grantCount`。对应的撤销接口清除本会话临时目录（含当前轮）及固定命令授权，不终止已运行进程。
 
 命令审批 payload 可含 `additionalProjectDirs` 与 `directoryScope: "call"`，表示仅该次调用的沙箱目录扩展。该范围由后端准备，审批请求不能通过传入 `projectDirs` 扩大它。
+
+
+## Widget 共享运行与通知（协议 18）
+
+Go：`engine/widget_runs.go`、`store/sqlitestore/widget_notices.go`；TS：`contracts/widget.ts` 与 `contracts/events.ts`。本次不改变 SQLite schema。
+
+所有端点要求启动 token 和 `X-Pudding-Runtime-ID`，run 仅可由创建它的桌面 runtime 管理。参与会话使用显式 sessionID 授权，不从焦点或全局选中会话推断。
+
+| 端点 | 输入 | 输出 |
+| --- | --- | --- |
+| `POST /studio/items/{itemID}/runs` | `targetID,revisionHash,bindingVersion,participants[{sessionID?,roles[]}]` | WidgetRun；宿主分配 run/participant ID，验证活动源码及实际会话 |
+| `GET /widget-runs/{runID}` | — | WidgetRun 快照 |
+| `PATCH /widget-runs/{runID}` | `action:heartbeat\|pause\|resume\|stop` | WidgetRun；停止后不再可读 |
+| `POST /widget-runs/{runID}/notifications` | `notification,stateVersion,actor?` | WidgetRun；actor 仅宿主从当前模型操作注入，页面不可提供 |
+| `PUT /widget-runs/{runID}/requests` | `requests[{notificationID,participantID}]` | WidgetRun；必须是已有有效请求的子集 |
+| `POST /sessions/{id}/widget-runs/{runID}/authorize` | `notificationID?` | WidgetParticipant；逐次检查参与者、活动源码、运行状态及行动请求 |
+
+WidgetRun 包括 id、itemID、title、targetID、revisionHash、bindingVersion、participants、status、reason?、receipts。参与者含 id、sessionID?、name、roles；传入 guest 时去掉 sessionID，提供 kind:session/human。Notification 为 id、audience(all/selected + participantIDs)、delivery(inform/request-action)、topic、summary?（面向用户的本地化摘要，最多 1000 字符）、message、data?。Receipt 补充 actor?、seq、stateVersion 和每位收件人的 deliveries：participantID、status、attempt、active、messageID?、turnID?、error?。
+
+通知可能在另一轮工具执行期间落库。构建模型上下文时按 canonical turn 保持每轮内部的调用、结果、附件和 provider continuation 连续，跨轮通知放在该轮之后；保留轮内插话顺序及压缩边界，不改写原始消息或界面时间线。已有交错历史也在请求构建时按此规则重放。
+
+同 ID 同内容返回原回执，改变通知内容拒绝。每位会话的固定 clientMessageID 由 runID、notificationID、participantID 派生；通知载荷仅写一次。行动 turn 写来源引用（metadata.widgetAction），不重写通知内容。`inform` 没有行动 turn；`request-action` 等空闲并让普通排队输入优先。业务完成由组件撤销 active 请求，不能只凭模型 turn 结束推断。
+
+运行和待办不持久化。45 秒租约失效、源码/绑定变化、停止、退出会撤销运行；仅取消所属 turn。暂停保留待办，继续被中断请求使用新的 attempt 幂等键，复用原 notice。重启不会根据 canonical 通知恢复运行。
+
+Core 仅从调度上下文向 Widget 工具注入私有 `_pudding_widget_request:{runID,notificationID}`；删除任何模型传入同名字段。Desktop 每次执行前向 Core 核实请求仍有效，此字段不出现在 LLM 工具 schema 中。
+
+## Widget Hub 源码分发
+
+`contracts/widget.json.distribution` 是格式/限额策略；`contracts/widget.ts` 提供 registry 格式 2。Hub 打包调用 `cmd/widget-package`，与 API 共用 `widget.DecodeDistribution`；源码仍复用 Package.Validate。包必须符合最低协议 18、SDK 1，且整体/逐文件 SHA-256 相符。
+
+`POST /studio/items/install` 接收 packageJSON、packageHash、registryURL、packageID、version、mode(install/upgrade)、clientRequestID、locale；upgrade 另带 itemID、expectedRevision。返回 StudioItem（可带 origin）。schema 34 新增 origin 和 canonical 安装唯一索引，发布过的旧 schema 指纹不变。已有安装复用原项，安装接口拒绝 copy 模式；副本由首次编辑下载原版的 draft 流程创建；upgrade 更新 head、origin 和发行图标，不替换 active、不清除 widget_data，发现本地源码修改返回 409。
+
+### Widget library sources
+
+`GET/POST /studio/widget-sources` and `DELETE /studio/widget-sources/:sourceID` manage global library configuration in `config/widget-sources.yaml`. The official source is immutable. Third-party HTTPS URLs are normalized and deduplicated; removing a source does not mutate Studio content or data. Source metadata is defined in `contracts/widget.ts`. Adding content remains `/studio/items/install`; removing it uses the existing archive/restore lifecycle and 30-day retention.
+
+Opening `/studio/items/:id/draft` for a downloaded original requires `clientRequestID` and `copyName` and returns `widgetDraftOpened`, including the actual independent widget ID. The source snapshots, bindings and durable data are copied; self-created widgets and copies retain their ID. Originals reject direct source writes/commits; copies reject catalog upgrades. `builtin_file_patch` also enforces this boundary. Subsequent tool calls must use the ID returned by draft open.
+
+分发包与目录条目的可选 `icon` 为 base64 SVG data URL，上限由 `distribution.maxIconBytes` 定义（16 KiB 原始 SVG）。Core 验证格式、大小与 SVG 根元素，安装／升级写入现有 StudioItem.icon，副本继承图标，无新增存储字段。客户端只使用 img 显示，禁止作为宿主内联 SVG 插入；不提供图标时使用通用组件图标。
+
+- Widget 页面快照：协议 20 / schema 35；`POST/DELETE /studio/items/{itemID}/pages` 显式指定打开位置 scope（会话 ID 或 library），`PUT /widget-pages/{pageID}` 带当前 targetID 与 expectedVersion。page ID 稳定，target 是可撤销执行标识。刷新/重启恢复快照和暂停的角色绑定，不重放工作；关闭清理页面，item-scoped storage 独立保留。

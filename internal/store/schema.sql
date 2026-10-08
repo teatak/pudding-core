@@ -338,7 +338,8 @@ CREATE TABLE studio_items (
     deleted INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    archived_at INTEGER NOT NULL DEFAULT 0
+    archived_at INTEGER NOT NULL DEFAULT 0,
+    origin TEXT NOT NULL DEFAULT 'null'
 );
 CREATE INDEX studio_items_archived_at ON studio_items(archived_at);
 CREATE TABLE studio_item_revisions (
@@ -422,4 +423,18 @@ CREATE TABLE widget_data (
     item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
     version INTEGER NOT NULL CHECK (version > 0),
     data TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX studio_items_package ON studio_items(json_extract(origin, '$.registryURL'), json_extract(origin, '$.packageID')) WHERE deleted=0 AND json_extract(origin, '$.copy')=0;
+
+CREATE TABLE widget_pages (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL,
+    revision_hash TEXT NOT NULL,
+    target_id TEXT NOT NULL UNIQUE,
+    version INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    interaction TEXT NOT NULL DEFAULT '',
+    UNIQUE(item_id, scope, revision_hash)
 );

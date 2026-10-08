@@ -20,7 +20,17 @@ type WidgetData struct {
 // StudioItemKindWidget is an LLM-authored React source package built by Desktop.
 const StudioItemKindWidget = "widget"
 
+type WidgetOrigin struct {
+	RegistryURL string `json:"registryURL"`
+	PackageID   string `json:"packageID"`
+	Version     string `json:"version"`
+	PackageHash string `json:"packageHash"`
+	SourceHash  string `json:"sourceHash"`
+	Copy        bool   `json:"copy"`
+}
+
 type StudioItem struct {
+	Origin          *WidgetOrigin     `json:"origin,omitempty"`
 	ID              string            `json:"id"`
 	Kind            string            `json:"kind"`
 	Name            string            `json:"name"`
@@ -50,6 +60,9 @@ type StudioItemRevision struct {
 	Author          *ContentAuthor  `json:"author,omitempty"`
 }
 type StudioStore interface {
+	WidgetPageStore
+	ForkWidgetForEditing(context.Context, string, string, string, int64) (*StudioItem, error)
+	InstallWidgetPackage(context.Context, *StudioItem, int64) (*StudioItem, error)
 	DocumentStore
 	TableStore
 	GetWidgetData(context.Context, string) (*WidgetData, error)

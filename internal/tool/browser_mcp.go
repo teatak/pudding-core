@@ -134,6 +134,13 @@ func (r *BrowserMCPRunner) Call(ctx context.Context, call Call) Result {
 		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("tool %s is unavailable in runtime %s", call.Name, runtimeID)}
 	}
 	args, err := browserToolArgs(call)
+	if args != nil && strings.HasPrefix(call.Name, "widget_") {
+		delete(args, "_pudding_widget_request")
+		if request, ok := plugin.WidgetRequestFromContext(ctx); ok {
+			args["_pudding_widget_request"] = request
+		}
+	}
+
 	if err != nil {
 		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
 	}

@@ -1845,6 +1845,21 @@ type BeginTurnResult struct {
 	StartedEvent *event.Event // 已分配 seq 并落库;Duplicate 时为 nil
 }
 
+// Widget notices enter canonical history independently of model execution.
+type WidgetNoticeInput struct {
+	SessionID, ClientMessageID, Text string
+	Metadata                         json.RawMessage
+}
+type WidgetNoticeResult struct {
+	Message *Message
+	Event   *event.Event
+}
+type BeginWidgetTurnInput struct {
+	SessionID, ClientMessageID, SourceMessageID, TurnID, Provider, Model string
+	Mode                                                                 AgentMode
+	ModelConfig                                                          json.RawMessage
+}
+
 type BeginSystemTurnInput struct {
 	// RetryOfTurnID requires the latest failed turn and an empty input queue.
 	// The new attempt keeps its own immutable lifecycle and reuses canonical history.
@@ -2339,6 +2354,8 @@ type Store interface {
 	// BeginSystemTurn 创建无 user message 的 running turn。用于重试和 /summary
 	// 这类 system reminder:触发模型回复,但不在 transcript 里冒用户气泡。
 	BeginSystemTurn(ctx context.Context, in BeginSystemTurnInput) (*BeginSystemTurnResult, error)
+	RecordWidgetNotice(context.Context, WidgetNoticeInput) (*WidgetNoticeResult, error)
+	BeginWidgetTurn(context.Context, BeginWidgetTurnInput) (*BeginTurnResult, error)
 	// QueueInput 持久化等待发送的用户输入。Duplicate 表示同一
 	// clientMessageID 已存在于 queued_inputs 或 turns,不重复写入。
 	QueueInput(ctx context.Context, in QueueInputInput) (*QueueInputResult, error)

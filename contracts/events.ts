@@ -5,6 +5,15 @@ import { z } from "zod";
 
 import { attachment, backgroundProcess, contentPart } from "./api";
 
+export const widgetNoticeEvent = z.object({
+  kind: z.literal("widget.notice"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  userMessageID: z.string(),
+  clientMessageID: z.string(),
+});
+
 export const turnStartedEvent = z.object({
   retryOfTurnID: z.string().optional(),
   kind: z.literal("turn.started"),
@@ -112,7 +121,9 @@ export const audioBindingsEvent = z.object({
   kind: z.literal("audio.bindings"),
   sessionID: z.string(),
   inputOwner: z.string().default(""),
-  inputMode: z.union([z.literal(""), z.literal("transcribe"), z.literal("raw")]).default(""),
+  inputMode: z
+    .union([z.literal(""), z.literal("transcribe"), z.literal("raw")])
+    .default(""),
   inputLevel: z.number().default(0),
 });
 
@@ -188,11 +199,14 @@ export const pingEvent = z.object({
 });
 
 export const collaborationChangedEvent = z.object({
- kind: z.literal("collaboration.changed"), sessionID: z.string(), seq: z.number().int().positive(),
+  kind: z.literal("collaboration.changed"),
+  sessionID: z.string(),
+  seq: z.number().int().positive(),
 });
 
 export const sessionEvent = z.discriminatedUnion("kind", [
- collaborationChangedEvent,
+  widgetNoticeEvent,
+  collaborationChangedEvent,
   turnStartedEvent,
   turnDeltaEvent,
   turnToolEvent,

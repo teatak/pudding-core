@@ -8,6 +8,7 @@ import "encoding/json"
 type Kind string
 
 const (
+	WidgetNotice         Kind = "widget.notice"
 	CollaborationChanged Kind = "collaboration.changed"
 	TurnStarted          Kind = "turn.started"
 	TurnDelta            Kind = "turn.delta"

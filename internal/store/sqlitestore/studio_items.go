@@ -10,19 +10,22 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at`
+const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin`
 
 func scanStudioItem(row messageScanner) (*store.StudioItem, error) {
 	w := &store.StudioItem{}
-	var bindings string
+	var bindings, origin string
 	var created, updated, archived int64
-	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated, &archived); err != nil {
+	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated, &archived, &origin); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(bindings), &w.Bindings); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(origin), &w.Origin); err != nil {
 		return nil, err
 	}
 	w.CreatedAt, w.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()

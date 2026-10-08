@@ -38,3 +38,18 @@ type RuntimeSource interface {
 	ListRuntimeDefinitions(ctx context.Context, runtimeID string) ([]*Definition, error)
 	ReadRuntimeSkill(ctx context.Context, runtimeID, pluginID, skillID string) (*SkillDetail, error)
 }
+
+// WidgetRequest is assigned only by the action scheduler, never model arguments.
+type WidgetRequest struct {
+	RunID          string `json:"runID"`
+	NotificationID string `json:"notificationID"`
+}
+type widgetRequestKey struct{}
+
+func WithWidgetRequest(ctx context.Context, request WidgetRequest) context.Context {
+	return context.WithValue(ctx, widgetRequestKey{}, request)
+}
+func WidgetRequestFromContext(ctx context.Context) (WidgetRequest, bool) {
+	v, ok := ctx.Value(widgetRequestKey{}).(WidgetRequest)
+	return v, ok
+}
