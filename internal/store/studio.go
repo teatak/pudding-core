@@ -8,6 +8,14 @@ import (
 )
 
 var ErrStudioItemConflict = errors.New("studio item revision conflict")
+var ErrWidgetDataConflict = errors.New("widget data version conflict")
+var ErrInvalidWidgetData = errors.New("invalid widget data")
+
+// WidgetData belongs to the Studio item, independently of its source revision or mounts.
+type WidgetData struct {
+	Version int64           `json:"version"`
+	Data    json.RawMessage `json:"data"`
+}
 
 // StudioItemKindWidget is an LLM-authored React source package built by Desktop.
 const StudioItemKindWidget = "widget"
@@ -44,6 +52,8 @@ type StudioItemRevision struct {
 type StudioStore interface {
 	DocumentStore
 	TableStore
+	GetWidgetData(context.Context, string) (*WidgetData, error)
+	WriteWidgetData(context.Context, string, string, int64, json.RawMessage) (*WidgetData, error)
 	ListWidgetLinks(context.Context, string) ([]*WidgetLink, error)
 	PutWidgetLink(context.Context, *WidgetLink, int64) error
 	DeleteWidgetLink(context.Context, string, string, int64) error

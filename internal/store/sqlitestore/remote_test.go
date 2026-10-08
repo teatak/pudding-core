@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,7 +224,7 @@ func TestRemoteMigration32InvalidatesOldCodesPreservesGrantsAndRestarts(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "32")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 	assertWorkspaceMigrationValue(t, s.db, "SELECT text FROM messages WHERE id='old-message'", "preserve this")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT COUNT(*) FROM remote_pairings", "0")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT COUNT(*) FROM pragma_table_info('remote_pairings') WHERE name IN ('status','poll_hash','device_name')", "0")

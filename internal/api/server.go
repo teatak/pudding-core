@@ -200,6 +200,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/studio/items/:itemID/queries/:operationID").POST(s.widgetOnly(s.queryWidget))
 	app.Route("/studio/items/:itemID/actions/:operationID/prepare").POST(s.widgetOnly(s.prepareWidgetAction))
 	app.Route("/studio/items/:itemID/actions").GET(s.widgetOnly(s.listWidgetActions))
+	app.Route("/studio/items/:itemID/data").GET(s.widgetOnly(s.getWidgetData)).PUT(s.widgetOnly(s.writeWidgetData))
 	app.Route("/studio/items/:itemID/links").GET(s.widgetOnly(s.listWidgetLinks)).POST(s.widgetOnly(s.putWidgetLink))
 	app.Route("/studio/items/:itemID/links/:linkID").DELETE(s.widgetOnly(s.deleteWidgetLink))
 	app.Route("/studio/items/:itemID/action-runs/:actionID/execute").POST(s.widgetOnly(s.executeWidgetAction))

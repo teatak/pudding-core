@@ -14,5 +14,6 @@
   "minRefreshMS": 30000,
   "maxSchemaDepth": 16,
   "maxDiagnostics": 50,
-  "maxRequestsPerMinute": 120
+  "maxRequestsPerMinute": 120,
+  "maxStorageBytes": 262144
 }

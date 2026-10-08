@@ -84,6 +84,8 @@ export const widgetBridgeRequest = z
       "linksRemove",
       "cancel",
       "exportFile",
+      "storageRead",
+      "storageWrite",
     ]),
     operationID: z.string().max(80).optional(),
     params: z.record(z.string(), z.unknown()).optional(),
@@ -158,3 +160,14 @@ export const widgetRevisionResponse = z.object({
   package: widgetPackage,
   manifest: widgetManifest,
 });
+
+// Persistent data is scoped to the item, never to a session or source revision.
+export const widgetData = z.object({
+  version: z.number().int().nonnegative(),
+  data: z.record(z.string(), z.unknown()),
+});
+export const widgetDataWrite = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  data: z.record(z.string(), z.unknown()),
+}).strict();
+export type WidgetData = z.infer<typeof widgetData>;

@@ -63,6 +63,13 @@ func (s *Server) studioItemError(c *cart.Context, err error) error {
 		c.JSON(http.StatusConflict, map[string]string{"error": "connection_selection_required"})
 		return nil
 	}
+	if errors.Is(err, store.ErrInvalidWidgetData) {
+		return badRequest(c, err.Error())
+	}
+	if errors.Is(err, store.ErrWidgetDataConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "widget_data_conflict"})
+		return nil
+	}
 	if errors.Is(err, store.ErrStudioItemConflict) {
 		response := map[string]any{"error": "revision_conflict"}
 		if id, ok := c.Param("itemID"); ok {

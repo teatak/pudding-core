@@ -17,6 +17,7 @@ All routes require the loopback startup token.
 - `POST /studio/items/{id}/build-receipts`, `POST /studio/items/{id}/activate`, `PUT /studio/items/{id}/bindings`.
 - `POST /studio/items/{id}/queries/{operationID}`.
 - `POST /studio/items/{id}/actions/{operationID}/prepare`, `POST /studio/items/{id}/action-runs/{actionID}/execute`, `GET /studio/items/{id}/actions`.
+- `GET/PUT /studio/items/{id}/data` reads/writes widget-owned persistent JSON data. See below.
 - `GET/POST /studio/items/{id}/links`, `DELETE /studio/items/{id}/links/{linkID}`.
 - `POST /sessions/{id}/studio/items/{itemID}/open` opens or reuses a session mount; `GET /sessions/{id}/studio/mounts` lists them and `DELETE /sessions/{id}/studio/mounts/{mountID}` removes one mount. Global deletion removes the item from all views. Library favorites reference the item as `studio:<id>`.
 
@@ -87,3 +88,11 @@ Plugin packages, connections and enablement move from the App layout at daemon s
 The same transaction creates `studio_item_content`, document body/hash/authorship fields on revisions, a request fingerprint on saves, `studio_table_ids` for row/column identity history, and the archive timestamp/index. Migration tests start from the released v26 layout, fail at the final archive index, verify that all database changes and the version roll back to v26, then retry and reopen. Canonical messages, widget versions and sources are preserved; native documents, tables and archive state are also exercised after migration. The upgrade makes one pre-migration database backup; reopening v30 does not create another.
 
 Development snapshots produced by the abandoned archive migration can be restored with `scripts/restore-canvas-dev` against a copied v26 database; the next start upgrades the result. This recovery is not part of daemon startup.
+
+## Widget-owned persistent data
+
+Protocol 17 / schema 33 adds `widget_data`, keyed by item ID and independent of session mounts or source revisions. GET returns `{version,data}`, initially `{version:0,data:{}}`. PUT requires `{revisionHash,expectedVersion,data}`; data is a JSON object of at most `contracts/widget.json.maxStorageBytes` bytes (256 KiB), and `revisionHash` must match the active source. The item must be a live, unarchived Widget. No caller-supplied session ID or storage owner is accepted.
+
+Writes replace the object and increment its version in one transaction. Stale data versions return HTTP 409 `widget_data_conflict`; inactive source returns the existing item conflict. There is no automatic retry: callers must read and reconcile stale or uncertain writes. Renaming, source upgrades, closing views and restarts preserve data; archiving blocks access but keeps it, and permanent deletion cascades. Schema 33 migration adds only this table; it does not rewrite any source or old migration.
+
+Temporary page state belongs to the Desktop SDK's runtime memory and is not persisted here. Its destruction resets it; ordinary conversation history cannot restore it. Data formats, interface names and business rules are authored by the Widget, not hard-coded in Core. Shared interactive runs, actor-bound operations and automatic notifications remain separate pending work.

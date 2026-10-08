@@ -417,3 +417,9 @@ CREATE TABLE remote_devices (
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
 );
+
+CREATE TABLE widget_data (
+    item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version > 0),
+    data TEXT NOT NULL
+);

@@ -26,6 +26,7 @@ type WidgetPolicy struct {
 	MaxSchemaDepth        int    `json:"maxSchemaDepth"`
 	MaxRequestsPerMinute  int    `json:"maxRequestsPerMinute"`
 	MaxDiagnostics        int    `json:"maxDiagnostics"`
+	MaxStorageBytes       int    `json:"maxStorageBytes"`
 }
 
 var widgetPolicy = func() WidgetPolicy {

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 32
+	currentSchemaVersion       = 33
 )
 
 var (
@@ -34,6 +34,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	33: migrateWidgetData,
 	32: migratePreauthorizedRemotePairings,
 	31: migrateRemoteAccess,
 	30: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
