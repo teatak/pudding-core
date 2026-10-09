@@ -3,7 +3,10 @@ package tool
 import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
-	StudioList: plugin.BuiltinStudioID, StudioOpen: plugin.BuiltinStudioID, DocCreate: plugin.BuiltinStudioID, DocRead: plugin.BuiltinStudioID, DocEdit: plugin.BuiltinStudioID, TableCreate: plugin.BuiltinStudioID, TableRead: plugin.BuiltinStudioID, TableUpdate: plugin.BuiltinStudioID,
+	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
+	StudioList: plugin.BuiltinArtifactsID, StudioOpen: plugin.BuiltinArtifactsID,
+	DocCreate: plugin.BuiltinArtifactsID, DocRead: plugin.BuiltinArtifactsID, DocEdit: plugin.BuiltinArtifactsID,
+	TableCreate: plugin.BuiltinArtifactsID, TableRead: plugin.BuiltinArtifactsID, TableUpdate: plugin.BuiltinArtifactsID,
 	SubtaskList:       plugin.BuiltinCollaborationID,
 	SubtaskDispatch:   plugin.BuiltinCollaborationID,
 	SubtaskSend:       plugin.BuiltinCollaborationID,
@@ -32,7 +35,7 @@ var builtinPluginTools = map[string]string{
 }
 
 func BuiltinPluginIDForTool(name string) (string, bool) {
-	id, ok := builtinPluginTools[name]
+	id, ok := builtinPluginTools[NormalizeStudioTool(NormalizeCollaborationTool(name))]
 	return id, ok
 }
 

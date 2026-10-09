@@ -7,10 +7,10 @@ description: Create or update Pudding global skills. Trigger when the user asks 
 
 Pudding has two skill scopes:
 
-- Global skills live under `<home>/skills/<name>/SKILL.md` and are not tied to an app.
-- App skills live inside an app definition and describe how to use that app's endpoints.
+- Global skills live under `<home>/skills/<name>/SKILL.md` and are not tied to a plugin.
+- Plugin skills live inside a plugin package and describe how to use that plugin's endpoints.
 
-Use this skill for global skills only. If the skill describes REST or GraphQL operations for one app, create an app skill instead.
+Use this skill for global skills only. If the skill describes REST or GraphQL operations for one plugin, create a plugin skill instead.
 
 ## Write Location
 
@@ -28,7 +28,7 @@ Global user skills live here:
 
 When the user explicitly asks to create or update a Skill, write it directly to this directory. There is no draft, submit, or publish step. A user Skill becomes discoverable as soon as it is valid.
 
-This authoring guide belongs to the built-in Skill Authoring App. Do not edit or overwrite it.
+This authoring guide belongs to the built-in Skill Authoring plugin. Do not edit or overwrite it.
 
 At runtime Pudding injects only the skills index (`name`, `description`, path/source metadata) into the system prompt. The full `SKILL.md` body is loaded on demand with `builtin_skill_read(skill_id="<name>")` when the user's intent matches the description.
 
@@ -38,13 +38,13 @@ The read records a registered skill reference, not a frozen copy of the body. Ea
 
 1. Align on intent: confirm what problem the skill solves and what the user would normally say that should trigger it.
 2. Choose a name: use lowercase kebab-case with letters, numbers, and hyphens only.
-3. Ensure Code capability. Project file tools are already available in Code mode; do not load a Project Files App. The Skill Authoring App has already exposed the validation tool for this session.
+3. Ensure Code capability. Project file tools are already available in Code mode; do not load a Project Files plugin. The Skill Authoring plugin has already exposed the validation tool for this session.
 4. Inspect the existing Skill under `scope="skill"` when updating one.
 5. Write `SKILL.md` with YAML frontmatter plus concise operational instructions.
 6. Add `assets/icon.svg` by default unless the user explicitly says not to.
 7. Call `builtin_skill_validate` with `skill_id`.
 8. Fix validation errors in place and validate again.
-9. Tell the user the Skill is ready and available in Settings > Knowledge.
+9. Tell the user the Skill is ready and available as a global Skill.
 
 ## Available Tools
 
@@ -55,7 +55,7 @@ The read records a registered skill reference, not a frozen copy of the body. Ea
 - Use `builtin_file_copy` with independent `from` and `to` objects, each containing `scope` and `path`. For a copy within user Skills, set both scopes to `"skill"` and use paths relative to the skills root.
 - Use `builtin_skill_validate(skill_id="<name>")` after writing.
 
-Do not delete an entire Skill or unrelated assets unless the user explicitly asks. The App's bundled authoring Skill is outside the writable `skill` scope.
+Do not delete an entire Skill or unrelated assets unless the user explicitly asks. The plugin's bundled authoring Skill is outside the writable `skill` scope.
 
 ## Minimal SKILL.md Template
 
@@ -117,7 +117,7 @@ When creating a new SVG icon:
 
 ## Anti-Patterns
 
-- Do not put app-specific endpoint instructions in a global skill.
+- Do not put plugin-specific endpoint instructions in a global skill.
 - Do not omit `description`; it is the primary trigger signal.
 - Do not make the description too broad.
 - Do not create extra files that are not directly useful to the skill.

@@ -282,6 +282,10 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 		return false
 	}
 	for _, part := range msg.Parts {
+		// Native replay must not bypass the model-only escaping below.
+		if escapeSystemReminderText(part.Text) != part.Text || escapeSystemReminderText(part.Content) != part.Content {
+			return false
+		}
 		switch part.Type {
 		case store.ContentPartToolUse, store.ContentPartToolResult:
 			if !toolAllowedForRequest(mode, tool.CurrentToolName(part.Name), allowedTools) {
@@ -583,6 +587,12 @@ func (b *Builder) providerParts(
 		}
 	}
 	flushReferences()
+	// Only canonical system messages receive an active runtime wrapper. Keep
+	// source messages intact and neutralize reserved markers in their projection.
+	for i := range out {
+		out[i].Text = escapeSystemReminderText(out[i].Text)
+		out[i].Content = escapeSystemReminderText(out[i].Content)
+	}
 	return out
 }
 

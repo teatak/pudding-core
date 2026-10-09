@@ -25,6 +25,23 @@ func SubtaskDefinitions() []provider.ToolDef {
 	}
 }
 
+func NormalizeCollaborationTool(name string) string {
+	switch name {
+	case "builtin_collaboration_list":
+		return SubtaskList
+	case "builtin_collaboration_dispatch":
+		return SubtaskDispatch
+	case "builtin_collaboration_send":
+		return SubtaskSend
+	case "builtin_collaboration_wait":
+		return SubtaskWait
+	case "builtin_collaboration_stop":
+		return SubtaskStop
+	}
+	return name
+}
+
 func IsSubtaskTool(name string) bool {
-	return name == SubtaskList || name == SubtaskDispatch || name == SubtaskSend || name == SubtaskWait || name == SubtaskStop
+	normalized := NormalizeCollaborationTool(name)
+	return normalized == SubtaskList || normalized == SubtaskDispatch || normalized == SubtaskSend || normalized == SubtaskWait || normalized == SubtaskStop
 }
