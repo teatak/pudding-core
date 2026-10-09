@@ -17,6 +17,7 @@ func (s *Server) prepareWidgetAction(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	operationID, _ := c.Param("operationID")
 	var req struct {
+		TargetID        string         `json:"targetID"`
 		RevisionHash    string         `json:"revisionHash"`
 		BindingVersion  int64          `json:"bindingVersion"`
 		ClientRequestID string         `json:"clientRequestID"`
@@ -36,7 +37,7 @@ func (s *Server) prepareWidgetAction(c *cart.Context) error {
 		c.JSON(http.StatusForbidden, map[string]string{"error": "plugin_writes_disabled"})
 		return nil
 	}
-	if w.BindingVersion != req.BindingVersion || w.ActiveRevision != req.RevisionHash {
+	if w.BindingVersion != req.BindingVersion || (req.TargetID == "" && w.ActiveRevision != req.RevisionHash) || (req.TargetID != "" && s.store.AuthorizeWidgetPage(c.Request.Context(), id, req.RevisionHash, req.TargetID) != nil) {
 		return s.studioItemError(c, store.ErrStudioItemConflict)
 	}
 	resolved, err := op.ResolveRequest(req.Params)
@@ -49,10 +50,10 @@ func (s *Server) prepareWidgetAction(c *cart.Context) error {
 	frozen, _ := json.Marshal(resolved)
 	// Only caller intent participates in idempotency, not mutable connection state.
 	intent, _ := json.Marshal(struct {
-		RevisionHash, OperationID string
-		Params                    map[string]any
-	}{req.RevisionHash, operationID, req.Params})
-	a := &store.WidgetAction{ID: store.NewID("action"), ItemID: id, ClientRequestID: req.ClientRequestID, RequestHash: fmt.Sprintf("%x", sha256.Sum256(intent)), State: "prepared", CreatedAt: time.Now().UTC(), Spec: store.WidgetActionSpec{RevisionHash: req.RevisionHash, ResourceRevision: w.Revision, BindingVersion: w.BindingVersion, OperationID: operationID, OperationHash: op.Hash(), BindingFingerprint: fingerprint, PluginID: binding.PluginID, ConnectionID: binding.ConnectionID, Description: op.Description, Params: req.Params, Request: frozen}}
+		RevisionHash, OperationID, TargetID string
+		Params                              map[string]any
+	}{req.RevisionHash, operationID, req.TargetID, req.Params})
+	a := &store.WidgetAction{ID: store.NewID("action"), ItemID: id, ClientRequestID: req.ClientRequestID, RequestHash: fmt.Sprintf("%x", sha256.Sum256(intent)), State: "prepared", CreatedAt: time.Now().UTC(), Spec: store.WidgetActionSpec{TargetID: req.TargetID, RevisionHash: req.RevisionHash, ResourceRevision: w.Revision, BindingVersion: w.BindingVersion, OperationID: operationID, OperationHash: op.Hash(), BindingFingerprint: fingerprint, PluginID: binding.PluginID, ConnectionID: binding.ConnectionID, Description: op.Description, Params: req.Params, Request: frozen}}
 	a, err = s.store.CreateWidgetAction(c.Request.Context(), a)
 	if err != nil {
 		return s.studioItemError(c, err)
@@ -101,7 +102,7 @@ func (s *Server) executeWidgetAction(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if !binding.Endpoint.WidgetWrites || fingerprint != a.Spec.BindingFingerprint || op.Hash() != a.Spec.OperationHash || w.Revision != a.Spec.ResourceRevision {
+	if !binding.Endpoint.WidgetWrites || fingerprint != a.Spec.BindingFingerprint || op.Hash() != a.Spec.OperationHash || w.BindingVersion != a.Spec.BindingVersion || (a.Spec.TargetID == "" && w.Revision != a.Spec.ResourceRevision) || (a.Spec.TargetID != "" && s.store.AuthorizeWidgetPage(ctx, id, a.Spec.RevisionHash, a.Spec.TargetID) != nil) {
 		return s.studioItemError(c, store.ErrStudioItemConflict)
 	}
 	resolved, err := op.ResolveRequest(a.Spec.Params)

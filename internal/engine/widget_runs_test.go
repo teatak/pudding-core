@@ -39,6 +39,9 @@ func notificationEngine(t *testing.T) (*Engine, *storetest.Store, context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.SelectWidgetPage(ctx, item.ID, "library", ""); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := e.OpenWidgetPage(ctx, item.ID, "library", hash, "target"); err != nil {
 		t.Fatal(err)
 	}

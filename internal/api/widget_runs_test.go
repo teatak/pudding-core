@@ -64,6 +64,7 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 	input := map[string]any{"targetID": "target", "revisionHash": hash, "bindingVersion": item.BindingVersion, "participants": []map[string]any{{"sessionID": "participant", "roles": []string{"reviewer"}}}}
 	call("POST", "/studio/items/widget/runs", input, "", "desktop", 401)
 	call("POST", "/studio/items/widget/runs", input, "token", "", 400)
+	call("POST", "/studio/items/widget/pages/select", map[string]any{"scope": "library"}, "token", "desktop", 200)
 	var opened struct {
 		Page store.WidgetPage `json:"page"`
 	}
@@ -94,11 +95,36 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 	}
 	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 200)
 	call("POST", "/sessions/outsider/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 400)
+	// A default upgrade leaves the pinned page, its run and its shared writes valid.
+	next := strings.Repeat("b", 64)
+	item, err = st.SaveStudioItemRevision(ctx, &store.StudioItemRevision{ItemID: item.ID, Hash: next, ClientRequestID: "upgrade", CreatedAt: time.Now()}, item.HeadRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = st.PutWidgetBuildReceipt(ctx, item.ID, next, []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	item.ActiveRevision = next
+	if _, err = st.UpdateStudioItem(ctx, item, item.Revision); err != nil {
+		t.Fatal(err)
+	}
+	authority := map[string]any{"revisionHash": hash, "targetID": "target"}
+	call("POST", "/studio/items/widget/pages/authorize", authority, "", "desktop", 401)
+	call("POST", "/studio/items/widget/pages/authorize", authority, "token", "desktop", 200)
+	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 200)
+	call("PUT", "/studio/items/widget/data", map[string]any{"revisionHash": hash, "targetID": "target", "expectedVersion": 0, "data": map[string]any{"keep": true}}, "token", "desktop", 200)
+	// Opening an arbitrary historical preview in another scope does not grant access.
+	call("POST", "/studio/items/widget/pages/select", map[string]any{"scope": "participant"}, "token", "desktop", 200)
+	call("POST", "/studio/items/widget/pages", map[string]any{"scope": "participant", "revisionHash": hash, "targetID": "preview"}, "token", "desktop", 200)
+	call("POST", "/studio/items/widget/pages/authorize", map[string]any{"revisionHash": hash, "targetID": "preview"}, "token", "desktop", 409)
+	call("PUT", "/studio/items/widget/data", map[string]any{"revisionHash": hash, "targetID": "preview", "expectedVersion": 1, "data": map[string]any{}}, "token", "desktop", 409)
+
 	call("PATCH", path, map[string]any{"action": "pause"}, "token", "desktop", 200)
 	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 400)
 	call("PATCH", path, map[string]any{"action": "stop"}, "token", "desktop", 200)
 	call("GET", path, nil, "token", "desktop", 400)
 	call("DELETE", "/studio/items/widget/pages", map[string]any{"scope": "library"}, "token", "desktop", 200)
+	call("POST", "/studio/items/widget/pages/authorize", authority, "token", "desktop", 409)
 	write["expectedVersion"] = 1
 	call("PUT", pagePath, write, "token", "desktop", 404)
 }

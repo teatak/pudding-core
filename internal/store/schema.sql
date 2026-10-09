@@ -438,3 +438,10 @@ CREATE TABLE widget_pages (
     interaction TEXT NOT NULL DEFAULT '',
     UNIQUE(item_id, scope, revision_hash)
 );
+
+CREATE TABLE widget_page_pins (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL,
+    revision_hash TEXT NOT NULL,
+    PRIMARY KEY(item_id, scope)
+);

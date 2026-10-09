@@ -87,7 +87,7 @@ func (s *Store) ClaimWidgetAction(ctx context.Context, wid, id string) error {
 		if err != nil {
 			return err
 		}
-		if a.State != "prepared" || w.Revision != a.Spec.ResourceRevision || w.BindingVersion != a.Spec.BindingVersion || w.ActiveRevision != a.Spec.RevisionHash {
+		if a.State != "prepared" || (a.Spec.TargetID == "" && w.Revision != a.Spec.ResourceRevision) || w.BindingVersion != a.Spec.BindingVersion || widgetRevisionAllowed(ctx, tx, wid, a.Spec.RevisionHash, a.Spec.TargetID) != nil {
 			return store.ErrStudioItemConflict
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE widget_actions SET state='executing' WHERE id=?`, id)

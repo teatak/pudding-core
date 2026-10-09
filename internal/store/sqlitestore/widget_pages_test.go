@@ -31,7 +31,7 @@ func TestWidgetPagePersistenceAndClose(t *testing.T) {
 	if err = s.SetWidgetPageInteraction(ctx, "first", json.RawMessage(`{"participants":[]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 0, json.RawMessage(`{"todos":["keep"]}`)); err != nil {
+	if _, err = s.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, json.RawMessage(`{"todos":["keep"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -72,10 +72,10 @@ func TestWidgetPagePersistenceAndClose(t *testing.T) {
 func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	s, path := openTestStore(t)
 	w := createDataWidget(t, s, "saved")
-	if _, err := s.WriteWidgetData(context.Background(), w.ID, w.ActiveRevision, 0, json.RawMessage(`{"keep":true}`)); err != nil {
+	if _, err := s.WriteWidgetData(context.Background(), w.ID, w.ActiveRevision, "", 0, json.RawMessage(`{"keep":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DROP TABLE widget_pages; PRAGMA user_version=34`); err != nil {
+	if _, err := s.db.Exec(`DROP TABLE widget_page_pins; DROP TABLE widget_pages; PRAGMA user_version=34`); err != nil {
 		t.Fatal(err)
 	}
 	injected := errors.New("injected")
@@ -98,7 +98,7 @@ func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	if err != nil || string(data.Data) != `{"keep":true}` {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "35")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "36")
 }
 
 func TestWidgetPageRevisionIsolationConcurrentWritesAndSessionCleanup(t *testing.T) {

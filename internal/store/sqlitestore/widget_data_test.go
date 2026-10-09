@@ -53,7 +53,7 @@ func TestWidgetDataSharedPersistentAndIsolated(t *testing.T) {
 		t.Fatal(initial, err)
 	}
 	data := json.RawMessage(`{"todos":[{"id":"1","text":"Buy milk","done":false}]}`)
-	saved, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 0, data)
+	saved, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, data)
 	if err != nil || saved.Version != 1 {
 		t.Fatal(saved, err)
 	}
@@ -61,10 +61,10 @@ func TestWidgetDataSharedPersistentAndIsolated(t *testing.T) {
 	if err != nil || other.Version != 0 {
 		t.Fatal("data crossed widget boundary", other, err)
 	}
-	if _, err = st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 0, json.RawMessage(`{}`)); !errors.Is(err, store.ErrWidgetDataConflict) {
+	if _, err = st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, json.RawMessage(`{}`)); !errors.Is(err, store.ErrWidgetDataConflict) {
 		t.Fatal("stale overwrite", err)
 	}
-	if _, err = st.WriteWidgetData(ctx, w.ID, strings.Repeat("b", 64), 1, json.RawMessage(`{}`)); !errors.Is(err, store.ErrStudioItemConflict) {
+	if _, err = st.WriteWidgetData(ctx, w.ID, strings.Repeat("b", 64), "", 1, json.RawMessage(`{}`)); !errors.Is(err, store.ErrStudioItemConflict) {
 		t.Fatal("inactive source wrote data", err)
 	}
 	// Activating new code changes no durable data or data version.
@@ -109,7 +109,7 @@ func TestWidgetDataSharedPersistentAndIsolated(t *testing.T) {
 	if _, err = st.GetWidgetData(ctx, w.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("archived data accessible", err)
 	}
-	if _, err = st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 1, data); !errors.Is(err, store.ErrNotFound) {
+	if _, err = st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 1, data); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("archived data writable", err)
 	}
 	w, err = st.SetStudioItemArchived(ctx, w.ID, archived.Revision, false)
@@ -137,7 +137,7 @@ func TestWidgetDataConcurrentWriteAndValidation(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Go(func() {
-			_, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 0, json.RawMessage(`{"done":true}`))
+			_, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, json.RawMessage(`{"done":true}`))
 			errs <- err
 		})
 	}
@@ -157,7 +157,7 @@ func TestWidgetDataConcurrentWriteAndValidation(t *testing.T) {
 		t.Fatal(success, conflict)
 	}
 	for _, bad := range []string{"null", "[]", "42", "{bad}", `{"text":"` + strings.Repeat("a", contracts.Widget().MaxStorageBytes) + `"}`} {
-		if _, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 1, json.RawMessage(bad)); !errors.Is(err, store.ErrInvalidWidgetData) {
+		if _, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 1, json.RawMessage(bad)); !errors.Is(err, store.ErrInvalidWidgetData) {
 			t.Fatal("invalid data accepted", err)
 		}
 	}
@@ -175,7 +175,7 @@ func TestWidgetDataConcurrentWriteAndValidation(t *testing.T) {
 func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	st, path := openTestStore(t)
 	w := createDataWidget(t, st, "existing")
-	if _, err := st.db.Exec(`DROP TABLE widget_pages; DROP TABLE widget_data; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=32`); err != nil {
+	if _, err := st.db.Exec(`DROP TABLE widget_page_pins; DROP TABLE widget_pages; DROP TABLE widget_data; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=32`); err != nil {
 		t.Fatal(err)
 	}
 	err := runSchemaMigration(st.db, 33, func(tx *sql.Tx) error {
@@ -205,5 +205,5 @@ func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	if err != nil || data.Version != 0 {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "35")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "36")
 }

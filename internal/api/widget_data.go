@@ -20,6 +20,7 @@ func (s *Server) getWidgetData(c *cart.Context) error {
 func (s *Server) writeWidgetData(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	var req struct {
+		TargetID        string          `json:"targetID"`
 		RevisionHash    string          `json:"revisionHash"`
 		ExpectedVersion *int64          `json:"expectedVersion"`
 		Data            json.RawMessage `json:"data"`
@@ -30,7 +31,7 @@ func (s *Server) writeWidgetData(c *cart.Context) error {
 	if req.ExpectedVersion == nil {
 		return badRequest(c, "expectedVersion is required")
 	}
-	data, err := s.store.WriteWidgetData(c.Request.Context(), id, req.RevisionHash, *req.ExpectedVersion, req.Data)
+	data, err := s.store.WriteWidgetData(c.Request.Context(), id, req.RevisionHash, req.TargetID, *req.ExpectedVersion, req.Data)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}

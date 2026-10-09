@@ -37,7 +37,7 @@ func (s *Store) GetWidgetData(ctx context.Context, id string) (*store.WidgetData
 
 // WriteWidgetData replaces one item-scoped JSON object using compare-and-swap.
 // No automatic write retry: a stale or uncertain caller must read the current data.
-func (s *Store) WriteWidgetData(ctx context.Context, id, revisionHash string, expected int64, input json.RawMessage) (*store.WidgetData, error) {
+func (s *Store) WriteWidgetData(ctx context.Context, id, revisionHash, targetID string, expected int64, input json.RawMessage) (*store.WidgetData, error) {
 	if expected < 0 || len(input) > contracts.Widget().MaxStorageBytes {
 		return nil, store.ErrInvalidWidgetData
 	}
@@ -55,12 +55,8 @@ func (s *Store) WriteWidgetData(ctx context.Context, id, revisionHash string, ex
 		if err != nil {
 			return err
 		}
-		var active string
-		if err := tx.QueryRowContext(ctx, `SELECT active_revision FROM studio_items WHERE id=?`, id).Scan(&active); err != nil {
+		if err := widgetRevisionAllowed(ctx, tx, id, revisionHash, targetID); err != nil {
 			return err
-		}
-		if active == "" || revisionHash != active {
-			return store.ErrStudioItemConflict
 		}
 		if current.Version != expected {
 			return store.ErrWidgetDataConflict

@@ -98,6 +98,11 @@ func (s *Store) SetWidgetPageInteraction(ctx context.Context, target string, def
 	return err
 }
 func (s *Store) CloseWidgetPages(ctx context.Context, itemID, scope string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM widget_pages WHERE item_id=? AND scope=?`, itemID, scope)
-	return err
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE item_id=? AND scope=?`, itemID, scope); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM widget_pages WHERE item_id=? AND scope=?`, itemID, scope)
+		return err
+	})
 }

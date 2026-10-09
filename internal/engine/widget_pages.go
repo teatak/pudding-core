@@ -40,7 +40,7 @@ func (e *Engine) OpenWidgetPage(ctx context.Context, itemID, scope, revision, ta
 	if err != nil {
 		return nil, nil, err
 	}
-	if item.ActiveRevision != revision || item.BindingVersion != definition.BindingVersion {
+	if e.store.AuthorizeWidgetPage(ctx, itemID, revision, target) != nil || item.BindingVersion != definition.BindingVersion {
 		return page, nil, nil
 	}
 	definition.TargetID = target
@@ -67,4 +67,20 @@ func (e *Engine) CloseWidgetPages(ctx context.Context, itemID, scope string) err
 		}
 	}
 	return nil
+}
+
+func (e *Engine) SelectWidgetPage(ctx context.Context, itemID, scope, revision string) (string, error) {
+	e.widgetRuns.Lock()
+	defer e.widgetRuns.Unlock()
+	hash, err := e.store.SelectWidgetPage(ctx, itemID, scope, revision)
+	if err != nil {
+		return "", err
+	}
+	for id, run := range e.widgetRuns.entries {
+		if run.ItemID == itemID && e.store.AuthorizeWidgetPage(ctx, itemID, run.RevisionHash, run.TargetID) != nil {
+			e.cancelWidgetRunLocked(run)
+			delete(e.widgetRuns.entries, id)
+		}
+	}
+	return hash, nil
 }

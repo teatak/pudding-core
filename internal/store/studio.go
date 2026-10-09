@@ -66,7 +66,7 @@ type StudioStore interface {
 	DocumentStore
 	TableStore
 	GetWidgetData(context.Context, string) (*WidgetData, error)
-	WriteWidgetData(context.Context, string, string, int64, json.RawMessage) (*WidgetData, error)
+	WriteWidgetData(context.Context, string, string, string, int64, json.RawMessage) (*WidgetData, error)
 	ListWidgetLinks(context.Context, string) ([]*WidgetLink, error)
 	PutWidgetLink(context.Context, *WidgetLink, int64) error
 	DeleteWidgetLink(context.Context, string, string, int64) error
@@ -104,6 +104,7 @@ const (
 // WidgetActionSpec is frozen before the trusted host asks for confirmation.
 // It contains no connection credentials.
 type WidgetActionSpec struct {
+	TargetID           string          `json:"targetID,omitempty"`
 	RevisionHash       string          `json:"revisionHash"`
 	ResourceRevision   int64           `json:"resourceRevision"`
 	BindingVersion     int64           `json:"bindingVersion"`

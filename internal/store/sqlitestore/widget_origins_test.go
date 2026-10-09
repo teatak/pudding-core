@@ -11,7 +11,7 @@ import (
 func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	st, path := openTestStore(t)
 	w := createDataWidget(t, st, "kept")
-	if _, err := st.db.Exec(`DROP TABLE widget_pages; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=33`); err != nil {
+	if _, err := st.db.Exec(`DROP TABLE widget_page_pins; DROP TABLE widget_pages; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=33`); err != nil {
 		t.Fatal(err)
 	}
 	err := runSchemaMigration(st.db, 34, func(tx *sql.Tx) error {
@@ -37,7 +37,7 @@ func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	if err != nil || got.ActiveRevision != w.ActiveRevision || got.Origin != nil {
 		t.Fatal(got, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "35")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "36")
 }
 
 func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {
@@ -48,7 +48,7 @@ func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {
 	if _, err := st.db.Exec(`UPDATE studio_items SET origin=? WHERE id=?`, origin, w.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, 0, []byte(`{"tasks":["original"]}`)); err != nil {
+	if _, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, []byte(`{"tasks":["original"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.db.Exec(`CREATE TRIGGER fail_copy BEFORE INSERT ON widget_data WHEN NEW.item_id='copy_failed' BEGIN SELECT RAISE(ABORT,'injected'); END`); err != nil {
@@ -71,7 +71,7 @@ func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {
 	if err != nil || string(snapshot.Data) != `{"tasks":["original"]}` {
 		t.Fatal(snapshot, err)
 	}
-	if _, err := st.WriteWidgetData(ctx, copy.ID, copy.ActiveRevision, snapshot.Version, []byte(`{"tasks":["custom"]}`)); err != nil {
+	if _, err := st.WriteWidgetData(ctx, copy.ID, copy.ActiveRevision, "", snapshot.Version, []byte(`{"tasks":["custom"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.ForkWidgetForEditing(ctx, w.ID, copy.ID, "copy", w.Revision); err != nil {

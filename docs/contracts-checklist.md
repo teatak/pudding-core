@@ -300,3 +300,5 @@ Opening `/studio/items/:id/draft` for a downloaded original requires `clientRequ
 分发包与目录条目的可选 `icon` 为 base64 SVG data URL，上限由 `distribution.maxIconBytes` 定义（16 KiB 原始 SVG）。Core 验证格式、大小与 SVG 根元素，安装／升级写入现有 StudioItem.icon，副本继承图标，无新增存储字段。客户端只使用 img 显示，禁止作为宿主内联 SVG 插入；不提供图标时使用通用组件图标。
 
 - Widget 页面快照：协议 20 / schema 35；`POST/DELETE /studio/items/{itemID}/pages` 显式指定打开位置 scope（会话 ID 或 library），`PUT /widget-pages/{pageID}` 带当前 targetID 与 expectedVersion。page ID 稳定，target 是可撤销执行标识。刷新/重启恢复快照和暂停的角色绑定，不重放工作；关闭清理页面，item-scoped storage 独立保留。
+
+- Widget 页面固定版本：协议 21 / schema 36；`widget_page_pins` 是内容页面源码事实源。`pages/select` 解析/显式切换本页版本，`pages/authorize` 校验 target 与 pin。升级默认版本不撤销旧页面；明确关闭/切换撤销旧执行。storage 和插件 action 传宿主 targetID，历史预览不获写权限；长期数据格式兼容由作者负责。

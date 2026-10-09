@@ -17,6 +17,8 @@ type WidgetPage struct {
 	Interaction json.RawMessage `json:"interaction,omitempty"`
 }
 type WidgetPageStore interface {
+	SelectWidgetPage(context.Context, string, string, string) (string, error)
+	AuthorizeWidgetPage(context.Context, string, string, string) error
 	OpenWidgetPage(context.Context, string, string, string, string) (*WidgetPage, error)
 	GetWidgetPageByTarget(context.Context, string) (*WidgetPage, error)
 	WriteWidgetPage(context.Context, string, string, int64, json.RawMessage) (*WidgetData, error)

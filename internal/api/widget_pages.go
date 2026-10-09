@@ -61,3 +61,35 @@ func (s *Server) closeWidgetPages(c *cart.Context) error {
 	c.JSON(http.StatusOK, map[string]bool{"closed": true})
 	return nil
 }
+
+func (s *Server) selectWidgetPage(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	var in struct {
+		Scope        string `json:"scope"`
+		RevisionHash string `json:"revisionHash"`
+	}
+	if err := decodeStudioRequest(c, &in); err != nil {
+		return badRequest(c, err.Error())
+	}
+	hash, err := s.engine.SelectWidgetPage(c.Request.Context(), id, in.Scope, in.RevisionHash)
+	if err != nil {
+		return s.studioItemError(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]string{"revisionHash": hash})
+	return nil
+}
+func (s *Server) authorizeWidgetPage(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	var in struct {
+		TargetID     string `json:"targetID"`
+		RevisionHash string `json:"revisionHash"`
+	}
+	if err := decodeStudioRequest(c, &in); err != nil {
+		return badRequest(c, err.Error())
+	}
+	if err := s.store.AuthorizeWidgetPage(c.Request.Context(), id, in.RevisionHash, in.TargetID); err != nil {
+		return s.studioItemError(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]bool{"authorized": true})
+	return nil
+}

@@ -111,6 +111,7 @@ export const widgetAction = z.object({
   state: z.enum(["prepared", "executing", "succeeded", "failed", "unknown"]),
   createdAt: z.string(),
   spec: z.object({
+    targetID: z.string().optional(),
     revisionHash: z.string(),
     resourceRevision: z.number(),
     bindingVersion: z.number(),
@@ -281,4 +282,5 @@ export const widgetPage = z.object({
  id:z.string(), itemID:z.string(), scope:z.string(), revisionHash:z.string(), targetID:z.string(),
  version:z.number().int().nonnegative(),data:z.record(z.string(),z.unknown()),
 });
+export const widgetPageSelection = z.object({revisionHash:z.string()});
 export const widgetPageOpen = z.object({page:widgetPage,run:widgetRun.nullable()});

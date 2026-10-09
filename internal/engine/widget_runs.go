@@ -91,7 +91,7 @@ func (e *Engine) CreateWidgetRun(ctx context.Context, itemID string, in WidgetRu
 	if err != nil {
 		return nil, err
 	}
-	if item.Kind != "widget" || item.Deleted || item.ArchivedAt != nil || item.ActiveRevision != in.RevisionHash || item.BindingVersion != in.BindingVersion {
+	if item.Kind != "widget" || item.Deleted || item.ArchivedAt != nil || e.store.AuthorizeWidgetPage(ctx, itemID, in.RevisionHash, in.TargetID) != nil || item.BindingVersion != in.BindingVersion {
 		return nil, ErrWidgetRun
 	}
 	seen := map[string]bool{}
@@ -174,7 +174,7 @@ func (e *Engine) widgetRunLocked(ctx context.Context, id string) (*WidgetRun, er
 		return nil, ErrWidgetRun
 	}
 	item, err := e.store.GetStudioItem(ctx, run.ItemID)
-	if err != nil || item.Deleted || item.ArchivedAt != nil || item.ActiveRevision != run.RevisionHash || item.BindingVersion != run.BindingVersion {
+	if err != nil || item.Deleted || item.ArchivedAt != nil || e.store.AuthorizeWidgetPage(ctx, run.ItemID, run.RevisionHash, run.TargetID) != nil || item.BindingVersion != run.BindingVersion {
 		e.cancelWidgetRunLocked(run)
 		delete(e.widgetRuns.entries, id)
 		return nil, ErrWidgetRun
@@ -465,7 +465,7 @@ func (e *Engine) widgetTick(now time.Time) {
 	defer e.widgetRuns.Unlock()
 	for id, run := range e.widgetRuns.entries {
 		item, err := e.store.GetStudioItem(e.auxCtx, run.ItemID)
-		if now.After(run.expires) || err != nil || item.Deleted || item.ArchivedAt != nil || item.ActiveRevision != run.RevisionHash || item.BindingVersion != run.BindingVersion {
+		if now.After(run.expires) || err != nil || item.Deleted || item.ArchivedAt != nil || e.store.AuthorizeWidgetPage(e.auxCtx, run.ItemID, run.RevisionHash, run.TargetID) != nil || item.BindingVersion != run.BindingVersion {
 			e.cancelWidgetRunLocked(run)
 			delete(e.widgetRuns.entries, id)
 			continue

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 35
+	currentSchemaVersion       = 36
 )
 
 var (
@@ -34,6 +34,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	36: migrateWidgetPagePins,
 	35: migrateWidgetPages,
 	34: migrateWidgetOrigins,
 	33: migrateWidgetData,
@@ -959,6 +960,7 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["queued_inputs"] = append(out.tables["queued_inputs"], "sort_order")
 	out.indexes = append(out.indexes, "sessions_archived_at", "library_favorites_studio", "library_favorites_web")
 	out.tables["studio_items"] = append(out.tables["studio_items"], "origin")
+	out.tables["widget_page_pins"] = []string{"item_id", "scope", "revision_hash"}
 	out.tables["widget_pages"] = []string{"id", "item_id", "scope", "revision_hash", "target_id", "version", "data", "interaction"}
 	out.indexes = append(out.indexes, "studio_items_archived_at", "studio_items_package")
 	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
