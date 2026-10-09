@@ -45,7 +45,7 @@ func notificationEngine(t *testing.T) (*Engine, *storetest.Store, context.Contex
 	if _, _, err := e.OpenWidgetPage(ctx, item.ID, "library", hash, "target"); err != nil {
 		t.Fatal(err)
 	}
-	run, err := e.CreateWidgetRun(ctx, item.ID, WidgetRunCreate{TargetID: "target", RevisionHash: item.ActiveRevision, BindingVersion: item.BindingVersion, Participants: []WidgetParticipant{{SessionID: sid, Roles: []string{"reviewer", "owner"}}, {SessionID: "second", Roles: []string{"editor"}}, {Roles: []string{"observer"}}}})
+	run, err := e.CreateWidgetRun(ctx, item.ID, WidgetRunCreate{TargetID: "target", RevisionHash: item.ActiveRevision, BindingVersion: item.BindingVersion, Participants: []WidgetParticipant{{SessionID: sid}, {SessionID: "second"}, {}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestWidgetInformScopesAndImmutableReceipts(t *testing.T) {
 	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "unrelated", ""); err == nil {
 		t.Fatal("unrelated session authorized")
 	}
-	if p, err := e.AuthorizeWidgetRun(ctx, run.ID, "sess_1", ""); err != nil || len(p.Roles) != 2 {
+	if p, err := e.AuthorizeWidgetRun(ctx, run.ID, "sess_1", ""); err != nil || p.SessionID != "sess_1" {
 		t.Fatal(p, err)
 	}
 }
@@ -388,5 +388,71 @@ func TestWidgetResultBroadcastWakesEverySessionOnce(t *testing.T) {
 		if _, err := e.NotifyWidgetRun(ctx, run.ID, n, 1, ""); !errors.Is(err, ErrWidgetRun) {
 			t.Fatal("oversized localized summary accepted", err)
 		}
+	}
+}
+
+func TestWidgetConnectionsPreserveIdentityAndRevokeRemovedParticipants(t *testing.T) {
+	e, st, ctx, run := notificationEngine(t)
+	for _, id := range []string{"third", "fourth"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Title: id, Provider: "mock", Model: "mock-model"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := WidgetNotification{ID: "invite", Audience: WidgetAudience{Kind: "all"}, Delivery: "request-action", Message: "Join when ready"}
+	if _, err := e.NotifyWidgetRun(ctx, run.ID, n, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	actionCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	unrelatedCtx, otherCancel := context.WithCancel(context.Background())
+	defer otherCancel()
+	e.running["second"] = newActiveTurn("removed-turn", cancel)
+	e.running["sess_1"] = newActiveTurn("unrelated", otherCancel)
+	e.widgetRuns.entries[run.ID].Receipts[0].Deliveries[1].TurnID = "removed-turn"
+	e.widgetRuns.entries[run.ID].Receipts[0].Deliveries[1].Status = "running"
+	next, err := e.SetWidgetParticipants(ctx, run.ID, []WidgetParticipant{{}, {SessionID: "sess_1"}, {SessionID: "third"}, {SessionID: "fourth"}})
+	if err != nil || len(next.Participants) != 4 {
+		t.Fatal(next, err)
+	}
+	if next.Participants[0].ID != run.Participants[2].ID || next.Participants[1].ID != run.Participants[0].ID {
+		t.Fatal("retained identity changed", next)
+	}
+	if actionCtx.Err() == nil || unrelatedCtx.Err() != nil {
+		t.Fatal("incorrect cancellation scope")
+	}
+	delete(e.running, "second")
+	delete(e.running, "sess_1")
+	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "second", ""); err == nil {
+		t.Fatal("removed session authorized")
+	}
+	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "third", ""); err != nil {
+		t.Fatal(err)
+	}
+	if d := next.Receipts[0].Deliveries[1]; d.Active || d.Status != "cancelled" {
+		t.Fatal(d)
+	}
+	if len(next.Receipts[0].Deliveries) != 3 {
+		t.Fatal("old notice delivered to newly connected sessions")
+	}
+	if _, err = e.SetWidgetParticipants(ctx, run.ID, []WidgetParticipant{{SessionID: "third"}, {SessionID: "third"}}); err == nil {
+		t.Fatal("duplicate sessions accepted")
+	}
+	if _, err = e.SetWidgetParticipants(ctx, run.ID, []WidgetParticipant{{SessionID: "missing"}}); err == nil {
+		t.Fatal("nonexistent session accepted")
+	}
+	if _, err = e.SetWidgetParticipants(plugin.WithRuntimeID(context.Background(), "other"), run.ID, []WidgetParticipant{{}}); err == nil {
+		t.Fatal("wrong runtime changed connections")
+	}
+	page, restored, err := e.OpenWidgetPage(ctx, run.ItemID, "library", run.RevisionHash, "restored")
+	if err != nil || restored == nil || len(restored.Participants) != 4 || restored.Participants[2].ID != next.Participants[2].ID {
+		t.Fatal(page, restored, err)
+	}
+	// A human can keep writing/queuing work while automatic session execution is paused.
+	if _, err = e.NotifyWidgetRun(ctx, restored.ID, WidgetNotification{ID: "human-update", Audience: WidgetAudience{Kind: "all"}, Delivery: "request-action", Message: "Review change"}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	e.widgetTick(time.Now())
+	if len(e.running) != 0 {
+		t.Fatal("paused run started a model")
 	}
 }

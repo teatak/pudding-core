@@ -9,7 +9,7 @@ import (
 )
 
 // OpenWidgetPage replaces the execution lease, preserving only committed state
-// and role bindings. No old notification, turn or tool call is replayed.
+// and session bindings. No old notification, turn or tool call is replayed.
 func (e *Engine) OpenWidgetPage(ctx context.Context, itemID, scope, revision, target string) (*store.WidgetPage, *WidgetRun, error) {
 	e.widgetRuns.Lock()
 	defer e.widgetRuns.Unlock()

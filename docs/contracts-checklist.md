@@ -302,3 +302,5 @@ Opening `/studio/items/:id/draft` for a downloaded original requires `clientRequ
 - Widget 页面快照：协议 20 / schema 35；`POST/DELETE /studio/items/{itemID}/pages` 显式指定打开位置 scope（会话 ID 或 library），`PUT /widget-pages/{pageID}` 带当前 targetID 与 expectedVersion。page ID 稳定，target 是可撤销执行标识。刷新/重启恢复快照和暂停的角色绑定，不重放工作；关闭清理页面，item-scoped storage 独立保留。
 
 - Widget 页面固定版本：协议 21 / schema 36；`widget_page_pins` 是内容页面源码事实源。`pages/select` 解析/显式切换本页版本，`pages/authorize` 校验 target 与 pin。升级默认版本不撤销旧页面；明确关闭/切换撤销旧执行。storage 和插件 action 传宿主 targetID，历史预览不获写权限；长期数据格式兼容由作者负责。
+
+- Widget 会话连接：协议 22 / schema 37。`PUT /widget-runs/:runID/participants` 支持增删连接、稳定保留成员身份及定向取消；宿主不保存业务 roles。SDK 候选默认只用于初选，组件自行选边、准备及通知。数据迁移只删除旧 interaction.roles，保留 state 和身份；旧 start API 的调用方需迁移。

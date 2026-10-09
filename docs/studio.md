@@ -107,3 +107,12 @@ A successful build and activation changes the default for new scopes, not existi
 `POST /studio/items/{id}/pages/authorize` validates the revision and target against a live built page and its pin. Interactions, page data writes and page-bound external actions retain authority across default changes but lose it on page close/switch or binding changes. Action specifications persist the target so a prepared action cannot execute after its page is replaced. Direct management actions without a target still require the current active source and resource revision.
 
 Shared storage remains item-scoped across coexisting versions. Authors must preserve data-format compatibility and unknown fields; CAS prevents stale writes but does not implement schema compatibility or data rollback.
+
+
+## Widget session connections (protocol 22 / schema 37)
+
+Widgets request candidates from the desktop opening context, then call `interaction.connect({sessionIDs})`. The host provides one human identity plus at most 15 explicitly selected sessions. Studio has no preferred sessions, a conversation prefers itself, and a split prefers both visible conversations. Defaults are initial UI choices, never backend focus or automatic membership.
+
+`PUT /widget-runs/:runID/participants` updates the authoritative connection set. Retained sessions keep participant IDs; removed sessions lose authorization and only this widget's pending/running work is cancelled. Page state and canonical notices remain intact; newly connected sessions never receive prior receipts. The SDK receives `connectedSessionIDs` for redisplaying existing selections. Connection alone does not trigger a model request.
+
+Core no longer stores business roles. Authors store seats, readiness, participants' decisions and phases in page state, keyed by trusted actor.participantID. The actor contains runID/participantID/notificationID, never author-supplied identity. Schema 37 removes old host roles from saved interaction JSON, preserving IDs, connections and page data (no table layout change). Refresh/restart restores the same IDs into a new paused execution; the author's continue control calls resume/onResume without replaying old work. Pause affects automatic models, while human state writes and new notices remain valid. Disconnect removes connections without clearing page data. Explicit close clears the page.

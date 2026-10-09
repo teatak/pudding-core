@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		37: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b", // Data-only: remove host business roles.
 		36: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b",
 		35: "f5647248b57335b5486ed6e27370759919749439de8c21835434465a53162c01",
 		34: "984efae9f95365ab410a01bf77d50e9bf63f79068b6a8a0e16fd32401c73177f",

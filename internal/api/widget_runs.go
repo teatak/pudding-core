@@ -104,3 +104,19 @@ func (s *Server) authorizeWidgetRun(c *cart.Context) error {
 	c.JSON(http.StatusOK, p)
 	return nil
 }
+
+func (s *Server) setWidgetParticipants(c *cart.Context) error {
+	id, _ := c.Param("runID")
+	var in struct {
+		Participants []engine.WidgetParticipant `json:"participants"`
+	}
+	if err := decodeStudioRequest(c, &in); err != nil {
+		return badRequest(c, err.Error())
+	}
+	run, err := s.engine.SetWidgetParticipants(c.Request.Context(), id, in.Participants)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+	c.JSON(http.StatusOK, run)
+	return nil
+}

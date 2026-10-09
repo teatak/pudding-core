@@ -61,7 +61,7 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 		}
 		return out.Body.Bytes()
 	}
-	input := map[string]any{"targetID": "target", "revisionHash": hash, "bindingVersion": item.BindingVersion, "participants": []map[string]any{{"sessionID": "participant", "roles": []string{"reviewer"}}}}
+	input := map[string]any{"targetID": "target", "revisionHash": hash, "bindingVersion": item.BindingVersion, "participants": []map[string]any{{"sessionID": "participant"}}}
 	call("POST", "/studio/items/widget/runs", input, "", "desktop", 401)
 	call("POST", "/studio/items/widget/runs", input, "token", "", 400)
 	call("POST", "/studio/items/widget/pages/select", map[string]any{"scope": "library"}, "token", "desktop", 200)
@@ -84,6 +84,11 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 	call("GET", path, nil, "", "desktop", 401)
 	call("GET", path, nil, "token", "other", 400)
 	call("GET", path, nil, "token", "desktop", 200)
+	members := map[string]any{"participants": []map[string]any{{"sessionID": "participant"}, {}}}
+	call("PUT", path+"/participants", members, "", "desktop", 401)
+	call("PUT", path+"/participants", members, "token", "other", 400)
+	call("PUT", path+"/participants", map[string]any{}, "token", "desktop", 400)
+	call("PUT", path+"/participants", members, "token", "desktop", 200)
 	call("PUT", path+"/requests", map[string]any{}, "token", "desktop", 400)
 	call("PUT", path+"/requests", map[string]any{"requests": []any{}}, "token", "desktop", 200)
 	n := map[string]any{"stateVersion": 0, "notification": map[string]any{"id": "notice", "audience": map[string]any{"kind": "all"}, "delivery": "inform", "topic": "update", "message": "Draft changed"}}

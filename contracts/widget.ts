@@ -87,7 +87,9 @@ export const widgetBridgeRequest = z
       "stateWrite",
       "storageRead",
       "storageWrite",
-      "interactionStart",
+      "interactionCandidates",
+      "interactionConnect",
+      "interactionControl",
       "interactionNotify",
       "interactionRequests",
     ]),
@@ -183,7 +185,6 @@ export const widgetParticipant = z.object({
   id: z.string(),
   sessionID: z.string().optional(),
   name: z.string(),
-  roles: z.array(z.string()),
 });
 export const widgetNotification = z
   .object({
@@ -244,9 +245,16 @@ export const widgetRun = z.object({
     }),
   ),
 });
-export const widgetInteractionStart = z
-  .object({ roles: z.array(z.string().trim().min(1).max(100)).min(1).max(16) })
+export const widgetInteractionConnect = z
+  .object({
+    sessionIDs: z.array(z.string().min(1)).max(15),
+  })
   .strict();
+export const widgetSessionCandidates = z.object({
+  sessions: z.array(z.object({ id: z.string(), name: z.string() })),
+  preferredSessionIDs: z.array(z.string()),
+  maxSessions: z.number().int().positive(),
+});
 export type WidgetRun = z.infer<typeof widgetRun>;
 export type WidgetParticipant = z.infer<typeof widgetParticipant>;
 
