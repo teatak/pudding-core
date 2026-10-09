@@ -4,7 +4,6 @@ import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
 	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
-	StudioList: plugin.BuiltinArtifactsID, StudioOpen: plugin.BuiltinArtifactsID,
 	DocCreate: plugin.BuiltinArtifactsID, DocRead: plugin.BuiltinArtifactsID, DocEdit: plugin.BuiltinArtifactsID,
 	TableCreate: plugin.BuiltinArtifactsID, TableRead: plugin.BuiltinArtifactsID, TableUpdate: plugin.BuiltinArtifactsID,
 	SubtaskList:       plugin.BuiltinCollaborationID,
@@ -35,7 +34,7 @@ var builtinPluginTools = map[string]string{
 }
 
 func BuiltinPluginIDForTool(name string) (string, bool) {
-	id, ok := builtinPluginTools[NormalizeStudioTool(NormalizeCollaborationTool(name))]
+	id, ok := builtinPluginTools[name]
 	return id, ok
 }
 

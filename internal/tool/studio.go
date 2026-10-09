@@ -27,7 +27,7 @@ func NormalizeStudioTool(name string) string {
 }
 
 func IsStudioTool(name string) bool {
-	switch NormalizeStudioTool(name) {
+	switch name {
 	case ArtifactList, ArtifactOpen, DocCreate, DocRead, DocEdit, TableCreate, TableRead, TableUpdate:
 		return true
 	}

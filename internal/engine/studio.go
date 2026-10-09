@@ -36,12 +36,11 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	if err != nil {
 		return respond(nil, err)
 	}
-	normalizedName := tool.NormalizeStudioTool(call.Name)
-	if normalizedName != tool.ArtifactList && call.Name != tool.DocCreate && call.Name != tool.TableCreate && args.ItemID == "" {
+	if call.Name != tool.ArtifactList && call.Name != tool.DocCreate && call.Name != tool.TableCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
 	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}
-	switch normalizedName {
+	switch call.Name {
 	case tool.TableCreate, tool.TableRead, tool.TableUpdate:
 		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
 		return respond(result, err)
