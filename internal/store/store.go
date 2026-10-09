@@ -325,11 +325,21 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 	return nil
 }
 
+// CurrentPluginID projects a persisted plugin identity to its current name.
+// Live APIs still validate against the current plugin catalog.
+func CurrentPluginID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "studio" {
+		return "artifacts"
+	}
+	return id
+}
+
 func NormalizePluginIDs(ids []string) []string {
 	seen := make(map[string]bool, len(ids))
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		id = strings.TrimSpace(id)
+		id = CurrentPluginID(id)
 		if id == "" || seen[id] {
 			continue
 		}

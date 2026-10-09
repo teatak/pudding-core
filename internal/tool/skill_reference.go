@@ -3,6 +3,8 @@ package tool
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 // SkillReference identifies registered instructions, never an arbitrary file.
@@ -38,6 +40,7 @@ func IsPluginLoad(name string) bool { return name == PluginLoad || name == legac
 // renamed under the name the same tool has now, so a model request keeps the
 // call instead of dropping it as unavailable.
 func CurrentToolName(name string) string {
+	name = NormalizeStudioTool(NormalizeCollaborationTool(name))
 	switch {
 	case name == legacyPluginLoad:
 		return PluginLoad
@@ -55,6 +58,10 @@ func CurrentToolName(name string) string {
 
 func legacyPluginReference(pluginID, skillID string) SkillReference {
 	pluginID, skillID = strings.TrimSpace(pluginID), strings.TrimSpace(skillID)
+	if pluginID == "studio" && skillID == "studio" {
+		skillID = "artifacts"
+	}
+	pluginID = store.CurrentPluginID(pluginID)
 	if renamed, ok := legacyPluginIDs[pluginID]; ok {
 		pluginID = renamed
 	}
@@ -96,6 +103,9 @@ func ReferencedSkill(name string, ok bool, content string) (SkillReference, bool
 	if ref := payload.Reference; ref != nil {
 		if ref.Kind == legacyPluginSkillReference {
 			return legacyPluginReference(ref.AppID, ref.SkillID), true
+		}
+		if ref.Kind == PluginSkillReference {
+			return legacyPluginReference(ref.PluginID, ref.SkillID), true
 		}
 		return SkillReference{Kind: ref.Kind, PluginID: ref.PluginID, SkillID: ref.SkillID}, true
 	}

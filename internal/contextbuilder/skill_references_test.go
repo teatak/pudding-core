@@ -67,6 +67,41 @@ func referencePart(name, callID, content string) provider.Part {
 	return provider.Part{Type: provider.PartToolResult, Name: name, CallID: callID, Ok: true, Content: content}
 }
 
+func TestStoredStudioSkillResolvesCurrentArtifactInstructions(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t)
+	if err := st.CreateSession(ctx, &store.Session{ID: "renamed", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"studio"}}); err != nil {
+		t.Fatal(err)
+	}
+	plugins := &referencePlugins{
+		defs: []*plugin.Definition{{ID: "artifacts", Enabled: true, RequiredMode: "chat"}},
+		docs: map[string]string{"artifacts": "CURRENT_ARTIFACT_INSTRUCTIONS"},
+	}
+	b := New(st, nil, WithSkillSources(plugins, nil))
+	req := provider.Request{Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{
+		referencePart(tool.PluginLoad, "load", `{"reference":{"kind":"plugin_skill","pluginID":"studio","skillID":"studio"}}`),
+	}}}}
+	resolved, err := b.ResolveSkillReferences(ctx, "renamed", "chat", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resolved.Messages[0].Parts[0].Content, "CURRENT_ARTIFACT_INSTRUCTIONS") {
+		t.Fatalf("old reference not resolved: %+v", resolved.Messages)
+	}
+	if !reflect.DeepEqual(plugins.reads, []string{"artifacts:artifacts"}) {
+		t.Fatalf("skill reads = %v", plugins.reads)
+	}
+	// Renaming must not bypass disabled-plugin enforcement.
+	plugins.defs[0].Enabled = false
+	resolved, err = b.ResolveSkillReferences(ctx, "renamed", "chat", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(resolved.Messages[0].Parts[0].Content, "CURRENT_ARTIFACT_INSTRUCTIONS") {
+		t.Fatal("disabled plugin instructions leaked")
+	}
+}
+
 func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)

@@ -1,6 +1,10 @@
 package plugin
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/teatak/pudding-core/internal/store"
+)
 
 const (
 	BuiltinArtifactsID       = "artifacts"
@@ -265,11 +269,7 @@ func BuiltinDefinitions() []*Definition {
 }
 
 func normalizeBuiltinPluginID(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "studio" {
-		return BuiltinArtifactsID
-	}
-	return id
+	return store.CurrentPluginID(id)
 }
 
 func BuiltinDefinition(id string) (*Definition, bool) {

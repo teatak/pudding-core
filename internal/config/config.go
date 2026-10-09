@@ -528,6 +528,25 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
+	// Migrate saved enablement once. An explicit current ID takes precedence
+	// when settings contain both names; never re-enable a disabled plugin.
+	changed := false
+	for id, enabled := range cfg.Plugins.Enabled {
+		current := store.CurrentPluginID(id)
+		if current == id {
+			continue
+		}
+		if _, exists := cfg.Plugins.Enabled[current]; !exists {
+			cfg.Plugins.Enabled[current] = enabled
+		}
+		delete(cfg.Plugins.Enabled, id)
+		changed = true
+	}
+	if changed {
+		if err := m.writeSettings(cfg); err != nil {
+			return cfg, err
+		}
+	}
 	return cfg, nil
 }
 

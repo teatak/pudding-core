@@ -42,6 +42,5 @@ func NormalizeCollaborationTool(name string) string {
 }
 
 func IsSubtaskTool(name string) bool {
-	normalized := NormalizeCollaborationTool(name)
-	return normalized == SubtaskList || normalized == SubtaskDispatch || normalized == SubtaskSend || normalized == SubtaskWait || normalized == SubtaskStop
+	return name == SubtaskList || name == SubtaskDispatch || name == SubtaskSend || name == SubtaskWait || name == SubtaskStop
 }
