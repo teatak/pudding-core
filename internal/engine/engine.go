@@ -1704,14 +1704,14 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 	runnerDefs := defs
 	defs = tool.StudioDefinitions()
 	for _, def := range runnerDefs {
-		if !tool.IsCollaborationTool(def.Name) && !tool.IsStudioTool(def.Name) {
+		if !tool.IsSubtaskTool(def.Name) && !tool.IsStudioTool(def.Name) {
 			defs = append(defs, def)
 		}
 	}
 	if owner, err := e.store.ParentSessionID(ctx, sessionID); err != nil {
 		return nil, err
 	} else if owner == "" {
-		defs = append(defs, tool.CollaborationDefinitions()...)
+		defs = append(defs, tool.SubtaskDefinitions()...)
 	}
 	coreDefs := make([]provider.ToolDef, 0, len(defs))
 	pluginDefs := make([]provider.ToolDef, 0)
@@ -2214,8 +2214,8 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	if tool.IsScheduledTaskTool(call.Name) {
 		return e.executeScheduledTask(ctx, sessionID, turnID, call)
 	}
-	if tool.IsCollaborationTool(call.Name) {
-		return e.executeCollaboration(ctx, sessionID, turnID, mode, call)
+	if tool.IsSubtaskTool(call.Name) {
+		return e.executeSubtask(ctx, sessionID, turnID, mode, call)
 	}
 	if e.tools == nil {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}

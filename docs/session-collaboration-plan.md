@@ -52,25 +52,25 @@
 
 ## 3. 当前代码基线
 
-### 能力入口：内置“协作”插件
+### 能力入口：内置“子任务调度”插件
 
-已确认选型（2026-09-21）：通过 daemon 常驻的内置插件提供协作工具，ID `collaboration`、名称“协作”，最低模式为 Work。直接复用现有插件管理页、`enabled` 配置及会话按需加载流程；不把派发能力加入所有会话常驻的 Core 工具集合。
+已确认选型（2026-09-21）：通过 daemon 常驻的内置插件提供协作工具，ID `collaboration`、当前显示名称“子任务调度”，最低模式为 Work。直接复用现有插件管理页、`enabled` 配置及会话按需加载流程；不把派发能力加入所有会话常驻的 Core 工具集合。
 
 统一命名：
 
 | 字段 | 定义 |
 | --- | --- |
-| 中文名称 | 协作 |
-| 英文名称 | Collaboration |
+| 中文名称 | 子任务调度 |
+| 英文名称 | Subagents |
 | 稳定插件 ID | `collaboration` |
 | 中文简介 | 让主会话分派子任务、跟踪执行并汇总结果。 |
 | 英文简介 | Let the main conversation delegate subtasks, track their progress, and bring results together. |
 
-插件列表、详情页、按需加载说明和 i18n 使用以上命名。底部入口继续使用“子任务”，停止操作使用“停止协作”；右侧标题使用具体子任务名称。
+插件列表、详情页、按需加载说明和 i18n 使用以上命名。底部入口继续使用“子任务”，停止操作使用“停止子任务”；右侧标题使用具体子任务名称。
 
 该选型沿用 [内置插件设计](builtin-plugins-design.md)：
 
-- 用户在“应用 → 协作”切换全局启用状态；配置唯一来源仍是 `<home>/config/settings.yaml` 中的插件 enablement。
+- 用户在“插件 → 子任务调度”切换全局启用状态；配置唯一来源仍是 `<home>/config/settings.yaml` 中的插件 enablement。
 - 插件启用、主会话已加载、模式满足要求且当前 Session 是主会话，派发工具才可见、可调用。开启插件不代表自动创建子任务，也不授予额外权限。
 - 关闭后从模型可见插件索引与后续工具 schema 中撤下；执行入口也重新检查开关，拒绝迟到的模型调用及新的派发请求，不能仅隐藏 UI。
 - 关闭插件保持已有插件的生命周期语义：已接受的子任务继续执行，已进入的等待和结果回收可以正常收尾；不会强制终止已启动资源，也不删除历史会话。
@@ -132,13 +132,13 @@
 
 ### 5.1 派发与回收
 
-1. 主模型按需加载已启用的“协作”内置插件，通过其工具派发任务，明确目标、输入和验收条件。
+1. 主模型按需加载已启用的“子任务调度”内置插件，通过其工具派发任务，明确目标、输入和验收条件。
 2. engine 校验父子边界、能力范围和并发上限，持久化派发，然后启动子会话。
 3. 主会话可继续处理独立工作，或通过等待工具让程序等待子会话事件；等待不靠反复调用模型轮询。
 4. 子会话提交输出后，engine 通过持久化轮次和消息引用回收结果；主模型判断是否整合、补充要求或重试。
 5. 主会话最终向用户交付汇总及验证结果。子会话全文保留在右侧，不自动逐条复制进主消息流。
 
-协作提供五个工具：`builtin_collaboration_list()`、`builtin_collaboration_dispatch(title, prompt)`、`builtin_collaboration_send(session_id, prompt)`、`builtin_collaboration_wait()`、`builtin_collaboration_stop()`。工具名称包含简中、繁中和英文显示文案。
+协作提供五个工具：`builtin_subtask_list()`、`builtin_subtask_dispatch(title, prompt)`、`builtin_subtask_send(session_id, prompt)`、`builtin_subtask_wait()`、`builtin_subtask_stop()`。工具名称包含简中、繁中和英文显示文案。
 
 `list` 只读取当前主会话的子任务，返回 `children` 数组（无任务时为空数组），包含 `session_id`、原始 `title`、当前 `task_title`、最新轮次 `status` / `latest_turn_id`、`summary`、`pending_approvals`、`pending_user_inputs`、`background_process_count` 和 `result_collected`。摘要在完成前描述当前任务，完成后描述最新结果；排队的新任务不沿用旧结果。其中 `status` 表示最新轮次状态，已完成的轮次仍可能有未答复问题；`pending_user_inputs` 从正式提问记录和进行中的请求派生，已排队或提交的答复不计入，超时但未答复的问题仍计入。基础任务信息与桌面 `/sessions/{id}/children` 复用同一查询，不新增任务状态表；不接受目标会话参数、不跨主会话访问、不等待执行，也不主动回收结果。
 

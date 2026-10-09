@@ -48,7 +48,7 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 }
 
 func RequiredModeForName(name string) store.AgentMode {
-	if IsCollaborationTool(name) {
+	if IsSubtaskTool(name) {
 		return store.ModeWork
 	}
 	if name == RequestCapability || name == PluginLoad || name == PluginUnload {

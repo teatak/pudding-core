@@ -17,7 +17,7 @@ import (
 
 const collaborationConcurrency = 3
 
-func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
 	fail := func(err error) tool.Result {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Content: err.Error()}
 	}
@@ -39,7 +39,7 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
 	decoder.DisallowUnknownFields()
 	var input any = &args
-	if call.Name == tool.CollaborationList {
+	if call.Name == tool.SubtaskList {
 		input = &struct{}{}
 	}
 	if err := decoder.Decode(input); err != nil {
@@ -47,7 +47,7 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 	}
 	var payload any
 	switch call.Name {
-	case tool.CollaborationList:
+	case tool.SubtaskList:
 		children, err := e.ListChildSessions(ctx, sessionID)
 		if err != nil {
 			return fail(err)
@@ -67,7 +67,7 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 			})
 		}
 		payload = map[string]any{"children": items}
-	case tool.CollaborationDispatch:
+	case tool.SubtaskDispatch:
 		if strings.TrimSpace(args.Title) == "" || utf8.RuneCountInString(args.Title) > 100 || strings.TrimSpace(args.Prompt) == "" {
 			return fail(ErrEmptyInput)
 		}
@@ -76,18 +76,18 @@ func (e *Engine) executeCollaboration(ctx context.Context, sessionID, turnID str
 			return fail(err)
 		}
 		payload = child
-	case tool.CollaborationSend:
+	case tool.SubtaskSend:
 		result, err := e.sendChild(ctx, sessionID, turnID, args.SessionID, "collaboration_"+turnID+"_"+call.CallID, args.Prompt)
 		if err != nil {
 			return fail(err)
 		}
 		payload = result
-	case tool.CollaborationWait:
+	case tool.SubtaskWait:
 		if err := e.waitForChildren(ctx, sessionID); err != nil {
 			return fail(err)
 		}
 		payload = map[string]any{"settled": true}
-	case tool.CollaborationStop:
+	case tool.SubtaskStop:
 		if err := e.StopCollaboration(ctx, sessionID); err != nil {
 			return fail(err)
 		}

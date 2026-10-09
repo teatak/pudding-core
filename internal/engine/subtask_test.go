@@ -92,7 +92,7 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, def := range defs {
-		if tool.IsCollaborationTool(def.Name) {
+		if tool.IsSubtaskTool(def.Name) {
 			t.Fatal("recursive tools exposed")
 		}
 	}
@@ -169,8 +169,8 @@ func (c *collaborationClient) Stream(ctx context.Context, req provider.Request) 
 		return mock.New(mock.WithScript([]string{"child result"}), mock.WithDelay(20*time.Millisecond)).Stream(ctx, req)
 	}
 	out := make(chan provider.Chunk, 2)
-	if !strings.Contains(body, tool.CollaborationDispatch) {
-		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "dispatch", Name: tool.CollaborationDispatch, ArgsDelta: `{"title":"Research","prompt":"CHILD"}`}}
+	if !strings.Contains(body, tool.SubtaskDispatch) {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "dispatch", Name: tool.SubtaskDispatch, ArgsDelta: `{"title":"Research","prompt":"CHILD"}`}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		text := "awaiting child"

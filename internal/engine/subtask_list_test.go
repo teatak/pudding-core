@@ -18,7 +18,7 @@ import (
 func readCollaborationList(t *testing.T, eng *Engine) []collaborationListItem {
 	t.Helper()
 	result := eng.executeAllowedTool(context.Background(), "root", "parent_turn", store.ModeWork, tool.Call{
-		Name: tool.CollaborationList, CallID: "list", Args: json.RawMessage(`{}`),
+		Name: tool.SubtaskList, CallID: "list", Args: json.RawMessage(`{}`),
 	})
 	if !result.Ok {
 		t.Fatalf("list failed: %s", result.Content)
@@ -201,7 +201,7 @@ func TestCollaborationListKeepsPluginModeAndParentBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, def := range defs {
-			if def.Name == tool.CollaborationList {
+			if def.Name == tool.SubtaskList {
 				return true
 			}
 		}
@@ -210,23 +210,23 @@ func TestCollaborationListKeepsPluginModeAndParentBoundaries(t *testing.T) {
 	if !hasList("root", store.ModeWork) {
 		t.Fatal("loaded collaboration app is missing list")
 	}
-	call := tool.Call{Name: tool.CollaborationList, CallID: "list", Args: json.RawMessage(`{}`)}
-	if hasList("root", store.ModeChat) || eng.executeCollaboration(ctx, "root", "", store.ModeChat, call).Ok {
+	call := tool.Call{Name: tool.SubtaskList, CallID: "list", Args: json.RawMessage(`{}`)}
+	if hasList("root", store.ModeChat) || eng.executeSubtask(ctx, "root", "", store.ModeChat, call).Ok {
 		t.Fatal("list bypassed the work mode gate")
 	}
 	call.Args = json.RawMessage(`{"session_id":"other"}`)
-	if eng.executeCollaboration(ctx, "root", "", store.ModeWork, call).Ok {
+	if eng.executeSubtask(ctx, "root", "", store.ModeWork, call).Ok {
 		t.Fatal("list accepted a target session override")
 	}
 	call.Args = json.RawMessage(`{}`)
 	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "child", Provider: "mock", Model: "model", LoadedPluginIDs: []string{plugin.BuiltinCollaborationID}}); err != nil {
 		t.Fatal(err)
 	}
-	if hasList("child", store.ModeWork) || eng.executeCollaboration(ctx, "child", "", store.ModeWork, call).Ok {
+	if hasList("child", store.ModeWork) || eng.executeSubtask(ctx, "child", "", store.ModeWork, call).Ok {
 		t.Fatal("child received parent collaboration access")
 	}
 	plugins.enabled.Store(false)
-	if hasList("root", store.ModeWork) || eng.executeCollaboration(ctx, "root", "", store.ModeWork, call).Ok {
+	if hasList("root", store.ModeWork) || eng.executeSubtask(ctx, "root", "", store.ModeWork, call).Ok {
 		t.Fatal("disabled collaboration app still exposes list")
 	}
 	plugins.enabled.Store(true)
@@ -234,7 +234,7 @@ func TestCollaborationListKeepsPluginModeAndParentBoundaries(t *testing.T) {
 	if _, err := st.UpdateSession(ctx, "root", store.SessionUpdate{LoadedPluginIDs: &ids}); err != nil {
 		t.Fatal(err)
 	}
-	if hasList("root", store.ModeWork) || eng.executeCollaboration(ctx, "root", "", store.ModeWork, call).Ok {
+	if hasList("root", store.ModeWork) || eng.executeSubtask(ctx, "root", "", store.ModeWork, call).Ok {
 		t.Fatal("unloaded collaboration app still exposes list")
 	}
 }
@@ -256,7 +256,7 @@ func TestCollaborationListThenSendReusesChildWithoutRequiringReuse(t *testing.T)
 	}
 	listed := readCollaborationList(t, eng)
 	args, _ := json.Marshal(map[string]string{"session_id": listed[0].SessionID, "prompt": "新任务：查询上海天气，沿用格式。"})
-	result := eng.executeAllowedTool(ctx, "root", "parent_turn", store.ModeWork, tool.Call{Name: tool.CollaborationSend, CallID: "reuse", Args: args})
+	result := eng.executeAllowedTool(ctx, "root", "parent_turn", store.ModeWork, tool.Call{Name: tool.SubtaskSend, CallID: "reuse", Args: args})
 	if !result.Ok {
 		t.Fatalf("send from list failed: %s", result.Content)
 	}
@@ -269,7 +269,7 @@ func TestCollaborationListThenSendReusesChildWithoutRequiringReuse(t *testing.T)
 	if err != nil || len(messages) != 4 {
 		t.Fatalf("reuse did not retain both turns: %d messages, %v", len(messages), err)
 	}
-	result = eng.executeAllowedTool(ctx, "root", "parent_turn", store.ModeWork, tool.Call{Name: tool.CollaborationDispatch, CallID: "new", Args: json.RawMessage(`{"title":"独立研究","prompt":"研究新的主题"}`)})
+	result = eng.executeAllowedTool(ctx, "root", "parent_turn", store.ModeWork, tool.Call{Name: tool.SubtaskDispatch, CallID: "new", Args: json.RawMessage(`{"title":"独立研究","prompt":"研究新的主题"}`)})
 	if !result.Ok {
 		t.Fatalf("idle child must not prevent a deliberate new dispatch: %s", result.Content)
 	}
