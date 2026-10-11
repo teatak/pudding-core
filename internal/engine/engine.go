@@ -615,7 +615,7 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if contextWindow > 0 {
 		percent := e.autoCompactThresholdPercent(ctx)
 		if percent > 0 {
-			threshold = compactTrigger(resolved.config, resolved.protocol, percent)
+			threshold = compactTrigger(resolved.config, percent)
 		}
 	}
 	return &SessionUsageInfo{
@@ -1329,12 +1329,19 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 		e.finishTurn(sessionID, res.Turn.ID, res.Turn.Mode, store.TurnFailed, fmt.Sprintf("%v: %v", ErrProviderConfig, err), nil)
 		return
 	}
+	profile, err := e.config.GetProviderProfile(turnCtx, res.Input.Provider)
+	if err != nil {
+		e.finishTurn(sessionID, res.Turn.ID, res.Turn.Mode, store.TurnFailed, fmt.Sprintf("%v: %v", ErrProviderConfig, err), nil)
+		return
+	}
 	resolved := &resolvedModel{
-		providerName: res.Input.Provider,
-		model:        res.Input.Model,
-		config:       cfg,
-		configJSON:   append(json.RawMessage(nil), res.Input.ModelConfig...),
-		mode:         res.Input.Mode,
+		providerName:  res.Input.Provider,
+		providerBrand: profile.Brand,
+		protocol:      profile.Protocol,
+		model:         res.Input.Model,
+		config:        cfg,
+		configJSON:    append(json.RawMessage(nil), res.Input.ModelConfig...),
+		mode:          res.Input.Mode,
 	}
 	if resolved.mode == "" {
 		resolved.mode = store.ModeChat
@@ -1400,7 +1407,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("resolve skill references: %v", err), currentMode
 		}
-		compacted, compactErr := e.compactBeforeRequest(ctx, sessionID, turnID, resolved, currentMode, req)
+		compacted, compactErr := e.prepareContextRequest(ctx, sessionID, turnID, resolved, currentMode, &req)
 		if errors.Is(compactErr, store.ErrHistoryChanged) {
 			continue
 		}

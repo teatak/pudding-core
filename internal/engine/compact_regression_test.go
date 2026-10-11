@@ -168,7 +168,7 @@ func TestCompactPreflightAppliesSteerAndDrainsQueuedInput(t *testing.T) {
 		t.Fatal("compaction lost a steer or queued input")
 	}
 	for _, req := range requests {
-		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config, "openai-compatible") {
+		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
 			t.Fatal("queued request bypassed the context budget")
 		}
 	}
@@ -269,7 +269,7 @@ func TestManualCompactKeepsGainWhenFixedOverheadExceedsCapacity(t *testing.T) {
 	calls := 0
 	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		calls++
-		if req.System != compactSystemPrompt || contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config, "openai-compatible") {
+		if req.System != compactSystemPrompt || contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
 			t.Error("only the bounded summary request may reach the provider")
 		}
 		return compactChunks(provider.Chunk{Delta: "Earlier work completed.", Done: true, Finish: provider.FinishStop}), nil
@@ -309,7 +309,7 @@ func TestCompactBatchesFitActualSummaryAboveTarget(t *testing.T) {
 	calls := 0
 	client := compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		calls++
-		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config, resolved.protocol) {
+		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
 			t.Fatal("batch exceeded input budget")
 		}
 		if calls > 1 && !strings.Contains(req.Messages[0].Text, "ROLLING_FACT") {
@@ -387,7 +387,7 @@ func TestCompactRegressionSummaryRequestFitsContextWindow(t *testing.T) {
 	for i := 0; i < count; i++ {
 		req := <-capture.reqCh
 		n := contextbuilder.EstimateRequest(req).Total()
-		if n > contextInputLimit(req.Config, "") {
+		if n > contextInputLimit(req.Config) {
 			t.Fatalf("oversized summary request: %d", n)
 		}
 		if i > 0 && !strings.Contains(req.Messages[0].Text, "Previous summary") {
@@ -512,15 +512,17 @@ func TestCompactDuringToolLoopKeepsLatestExchangeAndContinues(t *testing.T) {
 	title := "named"
 	_, _ = ms.UpdateSession(ctx, sid, store.SessionUpdate{Title: &title})
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
-		Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 16000, Limits: &store.ModelLimits{MaxOutputTokens: 1024}, Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
+		Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 16000, Limits: &store.ModelLimits{MaxOutputTokens: 16000}, Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
 		t.Fatal(err)
 	}
 	runner := &compactLargeTool{}
 	eng.tools = runner
 	normalCalls, runningCompacts := 0, 0
 	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config, "") {
-			t.Error("sent oversized request")
+		input := contextbuilder.EstimateRequest(req).Total()
+		output, ok := req.Config.MaxOutputTokens()
+		if !ok || output <= 0 || input+output > req.Config.ContextWindow {
+			t.Errorf("request exceeds window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)
 		}
 		if req.System == compactSystemPrompt {
 			if _, err := ms.RunningTurn(ctx, sid); err == nil {

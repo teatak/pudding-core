@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -136,14 +137,18 @@ func (e *Engine) generateTitle(providerName, model string, modelConfig provider.
 	if err != nil {
 		return "", err
 	}
-	ch, err := client.Stream(ctx, provider.Request{
+	req := provider.Request{
 		Model:  model,
 		System: titlerSystemPrompt,
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: fmt.Sprintf(titlerUserTemplate, userText)},
 		},
 		Config: titlerConfig(modelConfig),
-	})
+	}
+	if err := limitRequestOutput(&req, "", contextbuilder.EstimateRequest(req).Total()); err != nil {
+		return "", err
+	}
+	ch, err := client.Stream(ctx, req)
 	if err != nil {
 		return "", err
 	}

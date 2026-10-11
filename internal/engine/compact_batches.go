@@ -16,8 +16,11 @@ import (
 func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, messages []*store.Message, hint string, target int) (string, error) {
 	empty := compactSummaryRequest(resolved, "", hint, "", target)
 	limit := compactMaxInputTokens
-	if n := contextInputLimit(empty.Config, resolved.protocol); n > 0 {
-		limit = min(limit, n)
+	if empty.Config.ContextWindow > 0 {
+		// Summary batches deliberately leave room for their bounded summary,
+		// independently of the ordinary model's maximum output capability.
+		output, _ := empty.Config.MaxOutputTokens()
+		limit = min(limit, max(0, empty.Config.ContextWindow-output))
 	}
 	type record struct {
 		message *store.Message

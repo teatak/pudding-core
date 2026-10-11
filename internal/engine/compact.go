@@ -122,10 +122,10 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 		return nil, err
 	}
 	factor, _ := sessionInputCalibrationFactor(stat, resolved.providerName, resolved.model)
-	inputLimit := contextInputLimit(resolved.config, resolved.protocol)
+	inputLimit := contextInputLimit(resolved.config)
 	target := inputLimit
-	if trigger := compactTrigger(resolved.config, resolved.protocol, e.autoCompactThresholdPercent(ctx)); automatic && trigger > 0 {
-		target = trigger
+	if trigger := compactTrigger(resolved.config, e.autoCompactThresholdPercent(ctx)); automatic && trigger > 0 {
+		target = min(target, trigger)
 	}
 	if target == 0 {
 		target = calibratedTokenEstimate(before, factor)
@@ -368,8 +368,8 @@ func compactSummaryRequest(resolved *resolvedModel, history, hint, previous stri
 
 func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, req provider.Request) (string, error) {
 	estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
-	if limit := contextInputLimit(req.Config, resolved.protocol); limit > 0 && estimatedInputTokens > limit {
-		return "", ErrContextBudget
+	if err := limitRequestOutput(&req, resolved.protocol, estimatedInputTokens); err != nil {
+		return "", err
 	}
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

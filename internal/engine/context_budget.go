@@ -12,12 +12,44 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-// Reserve output plus estimation headroom. An unknown window has no inferred
-// hard limit; provider-reported usage still calibrates estimates when available.
-func contextInputLimit(cfg provider.ModelConfig, protocol string) int {
-	if cfg.ContextWindow <= 0 {
+// Input may use the window up to the last token, which must remain for output.
+// The model's maximum output capability does not reserve input capacity.
+func contextInputLimit(cfg provider.ModelConfig) int {
+	return max(0, cfg.ContextWindow-1)
+}
+
+func compactTrigger(cfg provider.ModelConfig, percent int) int {
+	if cfg.ContextWindow <= 0 || percent <= 0 {
 		return 0
 	}
+	return max(1, cfg.ContextWindow*percent/100)
+}
+
+// Apply a per-request limit without changing the model profile or a shared
+// config snapshot. Unknown windows retain the provider's configured behavior.
+func limitRequestOutput(req *provider.Request, protocol string, inputTokens int) error {
+	cfg := req.Config
+	if cfg.ContextWindow <= 0 {
+		return nil
+	}
+	remaining := cfg.ContextWindow - inputTokens
+	if remaining <= 0 {
+		return fmt.Errorf("%w: estimated input %d leaves no output space in window %d", ErrContextBudget, inputTokens, cfg.ContextWindow)
+	}
+	output := configuredOutputLimit(cfg, protocol)
+	if output <= 0 || output > remaining {
+		output = remaining
+	}
+	limits := provider.ModelLimits{}
+	if cfg.Limits != nil {
+		limits = *cfg.Limits
+	}
+	limits.MaxOutputTokens = output
+	req.Config.Limits = &limits
+	return nil
+}
+
+func configuredOutputLimit(cfg provider.ModelConfig, protocol string) int {
 	output, ok := cfg.MaxOutputTokens()
 	if !ok {
 		switch protocol {
@@ -34,37 +66,24 @@ func contextInputLimit(cfg provider.ModelConfig, protocol string) int {
 			output, _ = provider.IntOption(cfg.OpenAIOptions(), "max_completion_tokens", "max_output_tokens", "max_tokens")
 		}
 	}
-	if output <= 0 {
-		output = min(8192, max(1, cfg.ContextWindow/5))
-	}
-	return max(1, cfg.ContextWindow-output-max(1, cfg.ContextWindow/20))
+	return output
 }
 
-func compactTrigger(cfg provider.ModelConfig, protocol string, percent int) int {
-	if cfg.ContextWindow <= 0 || percent <= 0 {
-		return 0
-	}
-	return min(contextInputLimit(cfg, protocol), max(1, cfg.ContextWindow*percent/100))
-}
-
-// compactBeforeRequest covers queued turns as well as tool-loop growth. The
+// prepareContextRequest covers queued turns as well as tool-loop growth. The
 // engine calls it only after committing the preceding complete tool exchange.
-func (e *Engine) compactBeforeRequest(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, mode store.AgentMode, req provider.Request) (bool, error) {
-	hard := contextInputLimit(req.Config, resolved.protocol)
-	if hard == 0 {
+func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, mode store.AgentMode, req *provider.Request) (bool, error) {
+	if req.Config.ContextWindow <= 0 {
 		return false, nil
 	}
+	hard := contextInputLimit(req.Config)
 	stat, err := e.store.SessionUsage(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
 	factor, _ := sessionInputCalibrationFactor(stat, resolved.providerName, resolved.model)
-	tokens := calibratedTokenEstimate(contextbuilder.EstimateRequest(req).Total(), factor)
-	soft := compactTrigger(req.Config, resolved.protocol, e.autoCompactThresholdPercent(ctx))
-	if (soft == 0 || tokens < soft) && tokens <= hard {
-		return false, nil
-	}
-	if soft > 0 {
+	tokens := calibratedTokenEstimate(contextbuilder.EstimateRequest(*req).Total(), factor)
+	soft := compactTrigger(req.Config, e.autoCompactThresholdPercent(ctx))
+	if soft > 0 && tokens >= soft {
 		compactCtx, cancel := context.WithTimeout(ctx, autoCompactTimeout)
 		_, err = e.compact(compactCtx, CompactInput{SessionID: sessionID}, resolved, mode, turnID, true)
 		cancel()
@@ -76,11 +95,13 @@ func (e *Engine) compactBeforeRequest(ctx context.Context, sessionID, turnID str
 		}
 		if tokens <= hard {
 			slog.Warn("engine: pre-request compact skipped", "sessionID", sessionID, "err", err)
-			return false, nil
 		}
 	}
-	if err != nil {
-		return false, fmt.Errorf("%w: estimated input %d, available %d; compact: %v", ErrContextBudget, tokens, hard, err)
+	if tokens > hard {
+		if err != nil {
+			return false, fmt.Errorf("%w: estimated input %d, available %d; compact: %v", ErrContextBudget, tokens, hard, err)
+		}
+		return false, fmt.Errorf("%w: estimated input %d, available %d", ErrContextBudget, tokens, hard)
 	}
-	return false, fmt.Errorf("%w: estimated input %d, available %d", ErrContextBudget, tokens, hard)
+	return false, limitRequestOutput(req, resolved.protocol, tokens)
 }
