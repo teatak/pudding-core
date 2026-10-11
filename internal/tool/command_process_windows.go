@@ -23,6 +23,8 @@ func configureCommandProcess(cmd *exec.Cmd) {
 
 func configureCommandPTY(_ *exec.Cmd) {}
 
+func commandProcessSignal(*exec.Cmd) string { return "" }
+
 // attachCommandProcess runs right after Start, before PowerShell can run the
 // command and create descendants. Normal exit does not kill remaining
 // descendants, matching the POSIX process-group behaviour.

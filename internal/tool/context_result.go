@@ -84,11 +84,20 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	for _, key := range []string{
 		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
 		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
-		"exitCode", "timedOut", "cancelled", "execution", "sandboxDenied", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
+		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
 	} {
 		if value, exists := fields[key]; exists && len(value) <= 1024 {
 			preview[key] = value
 		}
+	}
+	if name == CommandRun && fields["stdout"] != nil && fields["stderr"] != nil {
+		for _, key := range []string{"stdout", "stderr"} {
+			var value string
+			if json.Unmarshal(fields[key], &value) == nil {
+				preview[key] = modelCommandOutputPreview(value)
+			}
+		}
+		return jsonString(preview)
 	}
 	var recovery map[string]json.RawMessage
 	if json.Unmarshal(fields["recovery"], &recovery) == nil && recovery != nil {
@@ -108,6 +117,35 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	preview["head"] = string(runes[:modelResultHeadChars])
 	preview["tail"] = string(runes[len(runes)-modelResultTailChars:])
 	return jsonString(preview)
+}
+
+func modelCommandOutputPreview(value string) map[string]any {
+	runes := []rune(value)
+	headChars := modelCommandExcerptChars(runes, modelResultHeadChars/2, false)
+	tailChars := modelCommandExcerptChars(runes[headChars:], modelResultTailChars/2, true)
+	return map[string]any{
+		"head": string(runes[:headChars]), "tail": string(runes[len(runes)-tailChars:]),
+		"chars": len(runes), "omitted_chars": len(runes) - headChars - tailChars,
+	}
+}
+
+// Budget the serialized strings as well as decoded text: quotes, backslashes,
+// control characters and newlines must not inflate the model preview.
+func modelCommandExcerptChars(runes []rune, budget int, tail bool) int {
+	low, high := 0, min(len(runes), budget)
+	for low < high {
+		count := (low + high + 1) / 2
+		excerpt := runes[:count]
+		if tail {
+			excerpt = runes[len(runes)-count:]
+		}
+		if utf8.RuneCountInString(jsonString(string(excerpt))) <= budget {
+			low = count
+		} else {
+			high = count - 1
+		}
+	}
+	return low
 }
 
 func numberSearchExcerpt(match map[string]json.RawMessage) bool {

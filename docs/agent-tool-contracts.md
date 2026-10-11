@@ -89,6 +89,17 @@ macOS、Linux 和 BSD 的后台命令退出时先清理原进程组的剩余成�
 
 实现：[后台进程管理](../internal/tool/background_process.go)。
 
+前台和后台命令的 `ok` 表示工具调用完成，不表示进程成功。进程结果以 `exitCode`、
+可取得的 `signal`、`error` 和超时／取消或显式停止原因表达；无输出的信号终止同样是
+已结束的异常退出。`sandboxDenied` 只附带明确的沙箱拒绝文本证据，不覆盖进程原因。
+通用 `Operation not permitted` 保留在原始日志中，不能单独判定为沙箱拒绝。
+
+验证元数据只来自静态直接调用；管道、取反、复合 shell 表达式不生成验证结论。
+Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选项。长前台结果的模型
+预览将 stdout／stderr 分别表示为 `head`、`tail`、`chars`、`omitted_chars`，并保留退出
+及执行边界元数据。`preview_only` 表示模型预览省略；`stdoutTruncated`／`stderrTruncated`
+表示执行输出本身已截断。`result_ref` 回读 canonical 结果，不恢复已被生产端截掉的输出。
+
 ## 4. 搜索与精确补丁
 
 模型看到的 `file_search` 结果会从真实 `lineStart/lineEnd/line/excerpt` 派生

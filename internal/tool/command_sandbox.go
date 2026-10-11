@@ -1,16 +1,15 @@
 package tool
 
-import (
-	"errors"
-	"strings"
-)
-
-var errSandboxDenialProbe = errors.New("sandbox denial probe")
+import "strings"
 
 func commandSandboxDenied(output string, runErr error) bool {
-	if runErr != nil {
-		output += "\n" + runErr.Error()
+	if runErr == nil {
+		return false
 	}
+	return commandSandboxDenialOutput(output + "\n" + runErr.Error())
+}
+
+func commandSandboxDenialOutput(output string) bool {
 	output = strings.ToLower(output)
 	for _, marker := range []string{
 		"sandbox_apply",
@@ -21,9 +20,7 @@ func commandSandboxDenied(output string, runErr error) bool {
 			return true
 		}
 	}
-	return runErr != nil && strings.Contains(output, "operation not permitted")
-}
-
-func commandSandboxDenialOutput(output string) bool {
-	return commandSandboxDenied(output, errSandboxDenialProbe)
+	// Generic EPERM text also comes from toolchains and host services. It is
+	// preserved in the output, but cannot establish a sandbox denial.
+	return false
 }

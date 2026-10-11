@@ -98,7 +98,11 @@ func TestCommandVerificationArgvRequiresOneStaticCommand(t *testing.T) {
 	if got := commandVerificationArgv("go test ./..."); !reflect.DeepEqual(got, []string{"go", "test", "./..."}) {
 		t.Fatalf("unexpected verification argv: %v", got)
 	}
-	for _, command := range []string{"go test ./... | tee test.log", `go test "$TARGET"`} {
+	for _, command := range []string{
+		"go test ./... | tee test.log", `go test "$TARGET"`, "! go test ./...",
+		"go test ./... | > log", "(go test ./...)", "{ go test ./...; }",
+		"go test ./...; > log", "go test ./... && true", "go test ./... || true",
+	} {
 		if got := commandVerificationArgv(command); got != nil {
 			t.Fatalf("dynamic or compound command must not become verification argv: %q %v", command, got)
 		}

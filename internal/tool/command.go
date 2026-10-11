@@ -353,9 +353,6 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	stdoutText := stdout.String()
 	stderrText := stderr.String()
 	sandboxDenied := execution != nil && execution.Sandboxed && commandSandboxDenied(stdoutText+"\n"+stderrText, runErr)
-	if sandboxDenied {
-		reason = "sandbox_denied"
-	}
 	// A normal non-zero process exit is a completed command, not a tool transport failure.
 	ok := reason == "" || reason == "non_zero_exit"
 	payload := map[string]any{
@@ -374,6 +371,11 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	if execution != nil && execution.SandboxKind != "" {
 		payload["sandboxKind"] = execution.SandboxKind
 	}
+	if execution != nil {
+		if signal := commandProcessSignal(execution.Cmd); signal != "" {
+			payload["signal"] = signal
+		}
+	}
 	if execution != nil && execution.Sandboxed {
 		payload["sandboxDenied"] = sandboxDenied
 	}
@@ -382,7 +384,7 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	if reason != "" {
 		payload["reason"] = reason
 	}
-	if runErr != nil && reason != "non_zero_exit" {
+	if runErr != nil {
 		payload["error"] = runErr.Error()
 	}
 	verificationKind := commandVerificationKind(commandVerificationArgv(args.Command))

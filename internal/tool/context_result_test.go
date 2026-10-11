@@ -203,7 +203,9 @@ func TestLargeModelResultIsBoundedAndPreservesFailure(t *testing.T) {
 	if fields["ok"] != false || fields["exitCode"] != float64(2) || fields["verificationStatus"] != "failed" || fields["stdoutTruncated"] != true || fields["preview_only"] != true {
 		t.Fatalf("failure/producer truncation metadata lost: %s", got)
 	}
-	if !utf8.ValidString(got) || utf8.RuneCountInString(fields["head"].(string)) != modelResultHeadChars || utf8.RuneCountInString(fields["tail"].(string)) != modelResultTailChars {
+	stdout := fields["stdout"].(map[string]any)
+	stderr := fields["stderr"].(map[string]any)
+	if !utf8.ValidString(got) || utf8.RuneCountInString(stdout["head"].(string)) > modelResultHeadChars/2 || utf8.RuneCountInString(stdout["tail"].(string)) > modelResultTailChars/2 || stdout["omitted_chars"].(float64) <= 0 || stderr["head"] != "last-error" || fields["head"] != nil || fields["tail"] != nil {
 		t.Fatal("invalid preview boundaries")
 	}
 	if len(got) >= len(original)/2 {
@@ -217,6 +219,41 @@ func TestLargeModelResultIsBoundedAndPreservesFailure(t *testing.T) {
 	}
 	if got := ModelResultContent(SkillRead, true, original, "t1", "c1", true); strings.Contains(got, "preview_only") {
 		t.Fatal("skill instructions were shortened")
+	}
+}
+
+func TestLargeCommandPreviewPreservesExecutionFactsAndEachStream(t *testing.T) {
+	for _, stderr := range []string{"", "short linker error", strings.Repeat("stderr 中文🙂\\\"\n", 3000)} {
+		canonical := map[string]any{
+			"ok": true, "exitCode": -1, "signal": "terminated", "error": "signal: terminated", "reason": "non_zero_exit",
+			"execution": "sandbox", "sandboxKind": "macos-seatbelt", "sandboxDenied": false, "shell": "sh", "durationMs": 123,
+			"timedOut": false, "cancelled": false, "stdoutTruncated": true, "stderrTruncated": false,
+			"command": "go test", "cwd": "/project", "verificationKind": "test", "verificationStatus": "failed",
+			"stdout": strings.Repeat("stdout 中文🙂\\\"\n", 3000), "stderr": stderr,
+		}
+		original := jsonString(canonical)
+		preview := ModelResultContent(CommandRun, true, original, "turn", "call", true)
+		fields := decodeToolResult(t, Result{Content: preview})
+		for key, value := range canonical {
+			if key == "stdout" || key == "stderr" {
+				stream := fields[key].(map[string]any)
+				head, tail := stream["head"].(string), stream["tail"].(string)
+				text := value.(string)
+				if !strings.HasPrefix(text, head) || !strings.HasSuffix(text, tail) || int(stream["chars"].(float64)) != utf8.RuneCountInString(text) || int(stream["omitted_chars"].(float64)) != utf8.RuneCountInString(text)-utf8.RuneCountInString(head)-utf8.RuneCountInString(tail) {
+					t.Fatalf("%s preview lost stream boundaries: %s", key, preview)
+				}
+				if key == "stderr" && len(stderr) < 100 && (head != stderr || tail != "" || stream["omitted_chars"] != float64(0)) {
+					t.Fatalf("short stderr should be complete: %s", preview)
+				}
+				continue
+			}
+			if string(resultJSON(fields[key])) != string(resultJSON(value)) {
+				t.Fatalf("lost %s: %s", key, preview)
+			}
+		}
+		if fields["preview_only"] != true || fields["result_ref"].(map[string]any)["call_id"] != "call" || utf8.RuneCountInString(preview) > modelResultMaxChars {
+			t.Fatalf("command preview lost readback or exceeded budget: %s", preview)
+		}
 	}
 }
 

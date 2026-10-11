@@ -42,6 +42,14 @@ func commandVerificationKind(argv []string) string {
 	}
 	op := commandOperation(argv[0])
 	args := argv[1:]
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == "--help" || arg == "-h" || arg == "--version" {
+			return ""
+		}
+	}
 	first := lowerArg(args, 0)
 	second := lowerArg(args, 1)
 	switch op {
@@ -55,6 +63,14 @@ func commandVerificationKind(argv []string) string {
 			return "build"
 		}
 	case "npm", "pnpm", "yarn", "bun":
+		// These options can return success without running the requested script.
+		for _, arg := range args {
+			if arg == "--if-present" || arg == "--dry-run" || arg == "--help" || arg == "-h" {
+				return ""
+			}
+		}
+		args = packageManagerVerificationArgs(op, args)
+		first, second = lowerArg(args, 0), lowerArg(args, 1)
 		if first == "test" {
 			return "test"
 		}
@@ -62,6 +78,23 @@ func commandVerificationKind(argv []string) string {
 			return verificationTargetKind(second)
 		}
 		return verificationTargetKind(first)
+	case "npx":
+		if first == "--yes" || first == "-y" || first == "--no-install" {
+			args = args[1:]
+		}
+		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+			return ""
+		}
+		return commandVerificationKind(args)
+	case "node":
+		for _, arg := range args {
+			if arg == "--test" {
+				return "test"
+			}
+			if !strings.HasPrefix(arg, "-") || arg == "--" || arg == "-e" || arg == "--eval" || arg == "-p" || arg == "--print" {
+				break
+			}
+		}
 	case "cargo":
 		switch first {
 		case "test":
@@ -91,6 +124,30 @@ func commandVerificationKind(argv []string) string {
 		return verificationTargetKind(first)
 	}
 	return ""
+}
+
+// Skip only known directory selectors, whose values cannot be script names.
+// Unknown leading options stay unclassified rather than guessing their arity.
+func packageManagerVerificationArgs(op string, args []string) []string {
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		flag, _, inline := strings.Cut(args[0], "=")
+		known := (op == "npm" && flag == "--prefix") ||
+			(op == "pnpm" && (flag == "--dir" || flag == "-C")) ||
+			(op == "yarn" && flag == "--cwd") ||
+			(op == "bun" && flag == "--cwd")
+		if !known {
+			return nil
+		}
+		if inline {
+			args = args[1:]
+		} else {
+			if len(args) < 2 {
+				return nil
+			}
+			args = args[2:]
+		}
+	}
+	return args
 }
 
 func lowerArg(args []string, index int) string {

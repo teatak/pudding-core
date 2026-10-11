@@ -45,7 +45,7 @@ func TestMacOSCommandAutonomyStillEnforcesSandbox(t *testing.T) {
 				ProjectDirs: []string{project}, CommandSandbox: CommandSandboxEnforce,
 			})
 			payload := decodeCommandPayload(t, result)
-			if payload.Execution != "sandbox" || payload.SandboxDenied != tc.denied || (payload.ExitCode != 0) != tc.denied {
+			if payload.Execution != "sandbox" || (payload.ExitCode != 0) != tc.denied || (tc.denied && payload.Reason != "non_zero_exit") {
 				t.Fatalf("sandbox enforcement changed: result=%+v payload=%+v", result, payload)
 			}
 		})
@@ -65,7 +65,7 @@ func TestMacOSCommandAutonomyStillEnforcesSandbox(t *testing.T) {
 	finished := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "autonomy", project, CommandSession, map[string]any{
 		"action": "poll", "process_id": started.ProcessID, "wait_ms": 2000,
 	}))
-	if finished.Running || !finished.SandboxDenied {
+	if finished.Running || finished.ExitCode == nil || *finished.ExitCode == 0 || finished.Reason != "non_zero_exit" {
 		t.Fatalf("background outside read was not denied: %+v", finished)
 	}
 }

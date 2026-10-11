@@ -20,6 +20,9 @@ type backgroundProcessPayload struct {
 	Status        string                         `json:"status"`
 	Running       bool                           `json:"running"`
 	ExitCode      *int                           `json:"exitCode"`
+	Signal        string                         `json:"signal"`
+	Reason        string                         `json:"reason"`
+	Error         string                         `json:"error"`
 	Output        []backgroundProcessOutputChunk `json:"output"`
 	OldestOffset  int64                          `json:"oldestOffset"`
 	NextOffset    int64                          `json:"nextOffset"`
@@ -500,17 +503,24 @@ func TestBackgroundProcessOutputRingUsesOffsetsAndTruncates(t *testing.T) {
 func TestBackgroundProcessDetectsSplitSandboxDenial(t *testing.T) {
 	process := &backgroundProcess{sandboxed: true}
 	writer := backgroundProcessWriter{process: process, stream: ProgressStderr}
-	if _, err := writer.Write([]byte("operation not")); err != nil {
+	if _, err := writer.Write([]byte("sandbox: de")); err != nil {
 		t.Fatal(err)
 	}
 	if process.sandboxDenialOutput {
 		t.Fatal("partial marker must not report a sandbox denial")
 	}
-	if _, err := writer.Write([]byte(" permitted")); err != nil {
+	if _, err := writer.Write([]byte("ny(1) file-read-data")); err != nil {
 		t.Fatal(err)
 	}
 	if !process.sandboxDenialOutput {
 		t.Fatal("sandbox denial split across output chunks was not detected")
+	}
+	process = &backgroundProcess{sandboxed: true}
+	writer = backgroundProcessWriter{process: process, stream: ProgressStderr}
+	_, _ = writer.Write([]byte("operation not"))
+	_, _ = writer.Write([]byte(" permitted"))
+	if process.sandboxDenialOutput {
+		t.Fatal("split generic EPERM must not become sandbox evidence")
 	}
 }
 

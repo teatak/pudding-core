@@ -46,6 +46,7 @@ type BackgroundProcessSnapshot struct {
 	Command       string     `json:"command"`
 	Shell         string     `json:"shell,omitempty"`
 	ExitCode      *int       `json:"exitCode,omitempty"`
+	Signal        string     `json:"signal,omitempty"`
 	StartedAt     time.Time  `json:"startedAt"`
 	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
 	Reason        string     `json:"reason,omitempty"`
@@ -129,6 +130,7 @@ type backgroundProcess struct {
 	mu                   sync.Mutex
 	running              bool
 	exitCode             *int
+	signal               string
 	reason               string
 	errorText            string
 	sandboxDenied        bool
@@ -664,6 +666,7 @@ func (p *backgroundProcess) wait() {
 	p.output.Finish()
 	p.running = false
 	p.exitCode = &exitCode
+	p.signal = commandProcessSignal(p.cmd)
 	p.finishedAt = now
 	switch {
 	case p.requestedStopReason != "":
@@ -673,12 +676,11 @@ func (p *backgroundProcess) wait() {
 	default:
 		p.reason = "exited"
 	}
-	if waitErr != nil && p.cmd.ProcessState == nil {
+	if waitErr != nil {
 		p.errorText = waitErr.Error()
 	}
 	if p.sandboxed && (commandSandboxDenied(p.sandboxDetectionTail+"\n"+p.errorText, waitErr) || (waitErr != nil && p.sandboxDenialOutput)) {
 		p.sandboxDenied = true
-		p.reason = "sandbox_denied"
 	}
 	p.scheduleRetentionLocked()
 	stopped := p.requestedStopReason != ""
@@ -881,6 +883,9 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 	if p.exitCode != nil {
 		payload["exitCode"] = *p.exitCode
 	}
+	if p.signal != "" {
+		payload["signal"] = p.signal
+	}
 	if !p.finishedAt.IsZero() {
 		payload["finishedAt"] = p.finishedAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -909,6 +914,7 @@ func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 		CWD:           p.cwd,
 		Command:       p.command,
 		Shell:         p.shell,
+		Signal:        p.signal,
 		StartedAt:     p.startedAt,
 		Reason:        p.reason,
 		Error:         p.errorText,

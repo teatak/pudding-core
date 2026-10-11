@@ -23,6 +23,8 @@ type commandPayload struct {
 	Shell              string              `json:"shell"`
 	CWD                string              `json:"cwd"`
 	ExitCode           int                 `json:"exitCode"`
+	Signal             string              `json:"signal"`
+	Error              string              `json:"error"`
 	Stdout             string              `json:"stdout"`
 	Stderr             string              `json:"stderr"`
 	StdoutTruncated    bool                `json:"stdoutTruncated"`
@@ -353,8 +355,14 @@ func TestCommandHelperProcess(t *testing.T) {
 		fmt.Fprintf(os.Stderr, "exit %d", code)
 		os.Exit(code)
 	case "sandbox-denied":
-		fmt.Fprint(os.Stderr, "operation not permitted")
+		fmt.Fprint(os.Stderr, "sandbox: deny(1) file-read-data")
 		os.Exit(1)
+	case "permission-error":
+		fmt.Fprint(os.Stderr, "xcrun_db: operation not permitted\nld: malformed file")
+		os.Exit(1)
+	case "sandbox-denied-wait":
+		fmt.Fprint(os.Stderr, "sandbox: deny(1) file-read-data")
+		time.Sleep(time.Minute)
 	case "flood":
 		size, _ := strconv.Atoi(args[1])
 		fmt.Fprint(os.Stdout, "stdout-head"+strings.Repeat("o", size)+"stdout-tail")

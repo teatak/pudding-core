@@ -12,6 +12,8 @@ func attachCommandProcess(*exec.Cmd) error { return nil }
 
 func releaseCommandProcess(*exec.Cmd) {}
 
+func commandProcessSignal(*exec.Cmd) string { return "" }
+
 func terminateCommandProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil

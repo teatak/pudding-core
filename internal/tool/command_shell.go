@@ -287,6 +287,14 @@ func commandVerificationArgv(command string) []string {
 	if err != nil || analysis.Dynamic || len(analysis.Commands) != 1 {
 		return nil
 	}
+	// Counting calls alone loses shell exit semantics (for example ! go test,
+	// or go test | > log). Only a direct, non-negated call owns this exit code.
+	if len(analysis.file.Stmts) != 1 || analysis.file.Stmts[0].Negated {
+		return nil
+	}
+	if _, ok := analysis.file.Stmts[0].Cmd.(*syntax.CallExpr); !ok {
+		return nil
+	}
 	return analysis.Commands[0]
 }
 

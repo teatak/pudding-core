@@ -23,6 +23,17 @@ func attachCommandProcess(*exec.Cmd) error { return nil }
 
 func releaseCommandProcess(*exec.Cmd) {}
 
+func commandProcessSignal(cmd *exec.Cmd) string {
+	if cmd == nil || cmd.ProcessState == nil {
+		return ""
+	}
+	status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return ""
+	}
+	return status.Signal().String()
+}
+
 func terminateCommandProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil

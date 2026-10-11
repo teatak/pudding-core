@@ -133,7 +133,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		ProjectDirs: []string{root},
 	})
 	payload := decodeCommandPayload(t, foreground)
-	if payload.Execution != "sandbox" || payload.SandboxKind != "test-sandbox" || !payload.SandboxDenied {
+	if payload.Execution != "sandbox" || payload.SandboxKind != "test-sandbox" || !payload.SandboxDenied || payload.Reason != "non_zero_exit" {
 		t.Fatalf("foreground sandbox metadata missing: %+v", payload)
 	}
 
@@ -159,7 +159,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		"wait_ms":    10000, // Includes PowerShell startup under x64 emulation.
 	})
 	deniedFinished := decodeBackgroundProcessPayload(t, deniedPoll)
-	if deniedFinished.Running || !deniedFinished.SandboxDenied {
+	if deniedFinished.Running || !deniedFinished.SandboxDenied || deniedFinished.Reason != "non_zero_exit" {
 		t.Fatalf("background sandbox denial metadata missing: %+v", deniedFinished)
 	}
 }

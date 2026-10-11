@@ -52,7 +52,7 @@ func TestMacOSCommandSandboxProjectBoundary(t *testing.T) {
 		Env:         mustCommandEnvironment(t),
 		ProjectDirs: []string{project},
 	})
-	if denied.exitCode == 0 || !commandSandboxDenied(denied.stdout+denied.stderr, denied.err) {
+	if denied.exitCode == 0 || denied.err == nil || strings.Contains(denied.stdout, "private") {
 		t.Fatalf("outside read was not denied: %+v", denied)
 	}
 
@@ -78,7 +78,7 @@ func TestMacOSCommandSandboxProjectBoundary(t *testing.T) {
 		Env:         mustCommandEnvironment(t),
 		ProjectDirs: []string{project},
 	})
-	if deniedHardLink.exitCode == 0 || !commandSandboxDenied(deniedHardLink.stdout+deniedHardLink.stderr, deniedHardLink.err) {
+	if deniedHardLink.exitCode == 0 || deniedHardLink.err == nil || strings.Contains(deniedHardLink.stdout, "private") {
 		t.Fatalf("hard-link escape was not denied: %+v", deniedHardLink)
 	}
 
