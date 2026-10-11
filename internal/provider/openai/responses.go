@@ -68,43 +68,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 	if c.baseURL == "" {
 		return nil, errors.New("openai responses: base url is required")
 	}
-	body := responsesRequest{
-		Model:   req.Model,
-		Stream:  true,
-		Store:   boolPtr(false),
-		Include: []string{"reasoning.encrypted_content"},
-		Input:   make([]responsesInputMessage, 0, len(req.Messages)),
-	}
-	opts := req.Config.OpenAIOptions()
-	if v, ok := provider.FloatOption(opts, "temperature"); ok {
-		body.Temperature = &v
-	}
-	if v, ok := req.Config.MaxOutputTokens(); ok {
-		body.MaxOutputTokens = &v
-	} else if v, ok := provider.IntOption(opts, "max_output_tokens", "max_completion_tokens", "max_tokens"); ok {
-		body.MaxOutputTokens = &v
-	}
-	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
-		body.Reasoning = &responsesReasoning{Effort: provider.WireReasoningEffort("openai-responses", req.Model, v)}
-	}
-	if req.System != "" {
-		body.Instructions = req.System
-	}
-	for _, msg := range req.Messages {
-		body.Input = append(body.Input, responsesInputsFor(msg)...)
-	}
-	body.Input = sanitizeResponsesToolInputs(body.Input)
-	if len(req.Tools) > 0 {
-		body.Tools = make([]responsesTool, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			body.Tools = append(body.Tools, responsesTool{
-				Type:        "function",
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.InputSchema,
-			})
-		}
-	}
+	body := responsesRequestBody(req)
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return nil, err
@@ -516,4 +480,51 @@ func responsesMediaContent(parts []provider.Part) []responsesContentPart {
 		}
 	}
 	return out
+}
+
+func responsesRequestBody(req provider.Request) responsesRequest {
+	body := responsesRequest{
+		Model:   req.Model,
+		Stream:  true,
+		Store:   boolPtr(false),
+		Include: []string{"reasoning.encrypted_content"},
+		Input:   make([]responsesInputMessage, 0, len(req.Messages)),
+	}
+	opts := req.Config.OpenAIOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
+		body.Temperature = &v
+	}
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxOutputTokens = &v
+	} else if v, ok := provider.IntOption(opts, "max_output_tokens", "max_completion_tokens", "max_tokens"); ok {
+		body.MaxOutputTokens = &v
+	}
+	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
+		body.Reasoning = &responsesReasoning{Effort: provider.WireReasoningEffort("openai-responses", req.Model, v)}
+	}
+	if req.System != "" {
+		body.Instructions = req.System
+	}
+	for _, msg := range req.Messages {
+		body.Input = append(body.Input, responsesInputsFor(msg)...)
+	}
+	body.Input = sanitizeResponsesToolInputs(body.Input)
+	if len(req.Tools) > 0 {
+		body.Tools = make([]responsesTool, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			body.Tools = append(body.Tools, responsesTool{
+				Type:        "function",
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  tool.InputSchema,
+			})
+		}
+	}
+	return body
+}
+
+// ResponsesRequestInput uses the same projection and sanitization as the HTTP request.
+func ResponsesRequestInput(req provider.Request) provider.WireInput {
+	body := responsesRequestBody(req)
+	return provider.WireInput{System: body.Instructions, Messages: body.Input, Tools: body.Tools}
 }

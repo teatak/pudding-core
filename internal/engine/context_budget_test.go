@@ -88,7 +88,7 @@ func TestContextPreflightUsesCalibratedInputWithoutEarlyCompaction(t *testing.T)
 		t.Fatal(err)
 	}
 	req := provider.Request{Config: provider.ModelConfig{ContextWindow: 100000, Limits: &provider.ModelLimits{MaxOutputTokens: 100000}}, Messages: []provider.Message{{Role: provider.RoleUser, Text: strings.Repeat("facts ", 32000)}}}
-	tokens := calibratedTokenEstimate(contextbuilder.EstimateRequest(req).Total(), 1.3)
+	tokens := calibratedTokenEstimate(requestInputTokens(req), 1.3)
 	if tokens < 50000 || tokens >= 80000 {
 		t.Fatalf("fixture must be below 80%%: %d", tokens)
 	}
@@ -137,5 +137,46 @@ func TestQueuedRequestUsesProtocolOutputLimit(t *testing.T) {
 		}
 	default:
 		t.Fatal("queued request never reached provider")
+	}
+}
+
+func requestInputTokens(req provider.Request) int {
+	e, err := contextbuilder.EstimateRequest(req, "openai-compatible")
+	if err != nil {
+		panic(err)
+	}
+	return e.Total()
+}
+
+func TestContextPreflightCountsNativeReasoningAcrossTurnBoundary(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
+	defer eng.Stop()
+	ctx := context.Background()
+	if err := ms.SetSettings(ctx, map[string]string{config.SettingCompactAutoThresholdPercent: "0"}); err != nil {
+		t.Fatal(err)
+	}
+	thought := strings.Repeat("reasoning ", 4000)
+	native, _ := json.Marshal([]any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": thought}}}, map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "answer"}}}})
+	req := provider.Request{Config: provider.ModelConfig{ContextWindow: 100000, Limits: &provider.ModelLimits{MaxOutputTokens: 100000}}, Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{{Type: provider.PartThought, Text: thought}, {Type: provider.PartText, Text: "answer"}}, Continuations: []provider.Continuation{{Kind: provider.ContinuationOpenAIResponses, Data: native}}}}}
+	resolved := &resolvedModel{providerName: "mock", model: "mock-model", protocol: "openai-responses", config: req.Config}
+	before, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Total() < 10000 {
+		t.Fatalf("native reasoning not budgeted: %+v", before)
+	}
+	for _, historical := range []bool{false, true} {
+		if historical {
+			req.Messages[0].Parts = req.Messages[0].Parts[1:]
+		}
+		compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req)
+		if err != nil || compacted {
+			t.Fatalf("compacted=%v err=%v", compacted, err)
+		}
+		output, _ := req.Config.MaxOutputTokens()
+		if output != 100000-before.Total() {
+			t.Fatalf("historical=%v output=%d input=%d", historical, output, before.Total())
+		}
 	}
 }

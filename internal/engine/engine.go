@@ -501,7 +501,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
 	// 与 turn 生命周期解耦(titler.go)。
 	if sess.Title == "" && strings.TrimSpace(in.Text) != "" {
-		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, resolved.config, in.Text)
+		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, resolved.protocol, resolved.config, in.Text)
 	}
 
 	e.wg.Add(1)
@@ -600,7 +600,10 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if err != nil {
 		return nil, err
 	}
-	estimate := contextbuilder.EstimateRequest(req)
+	estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+	if err != nil {
+		return nil, err
+	}
 	stat, err := e.store.SessionUsage(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -1433,7 +1436,11 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			"provider", resolved.providerName, "model", resolved.model, "providerCallIndex", providerCallIndex)
 		parts.BeginProviderCall(providerCallIndex)
 		providerCallIndex++
-		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
+		estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+		if err != nil {
+			return failed(fmt.Sprintf("estimate context: %v", err))
+		}
+		estimatedInputTokens := estimate.Total()
 		// Scope diagnostics to this tool-loop request. Compaction and titling
 		// retain their own contexts, without inheriting this call's attribution.
 		requestCtx := provider.WithRequestLogger(ctx, requestLogger)

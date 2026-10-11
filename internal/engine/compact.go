@@ -111,7 +111,8 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 		if err != nil {
 			return 0, err
 		}
-		return contextbuilder.EstimateRequest(req).Total(), nil
+		estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+		return estimate.Total(), err
 	}
 	before, err := project(all)
 	if err != nil {
@@ -367,7 +368,11 @@ func compactSummaryRequest(resolved *resolvedModel, history, hint, previous stri
 }
 
 func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, req provider.Request) (string, error) {
-	estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
+	estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+	if err != nil {
+		return "", err
+	}
+	estimatedInputTokens := estimate.Total()
 	if err := limitRequestOutput(&req, resolved.protocol, estimatedInputTokens); err != nil {
 		return "", err
 	}

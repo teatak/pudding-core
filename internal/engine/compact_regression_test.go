@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
-	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -168,7 +167,7 @@ func TestCompactPreflightAppliesSteerAndDrainsQueuedInput(t *testing.T) {
 		t.Fatal("compaction lost a steer or queued input")
 	}
 	for _, req := range requests {
-		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
+		if requestInputTokens(req) > contextInputLimit(req.Config) {
 			t.Fatal("queued request bypassed the context budget")
 		}
 	}
@@ -204,7 +203,7 @@ func TestCompactRegressionDoesNotExpandContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, a := contextbuilder.EstimateRequest(before).Total(), contextbuilder.EstimateRequest(after).Total()
+	b, a := requestInputTokens(before), requestInputTokens(after)
 	t.Logf("estimated request tokens before=%d after=%d", b, a)
 	if a != b {
 		t.Fatal("rejected summary changed context")
@@ -269,7 +268,7 @@ func TestManualCompactKeepsGainWhenFixedOverheadExceedsCapacity(t *testing.T) {
 	calls := 0
 	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		calls++
-		if req.System != compactSystemPrompt || contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
+		if req.System != compactSystemPrompt || requestInputTokens(req) > contextInputLimit(req.Config) {
 			t.Error("only the bounded summary request may reach the provider")
 		}
 		return compactChunks(provider.Chunk{Delta: "Earlier work completed.", Done: true, Finish: provider.FinishStop}), nil
@@ -309,7 +308,7 @@ func TestCompactBatchesFitActualSummaryAboveTarget(t *testing.T) {
 	calls := 0
 	client := compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		calls++
-		if contextbuilder.EstimateRequest(req).Total() > contextInputLimit(req.Config) {
+		if requestInputTokens(req) > contextInputLimit(req.Config) {
 			t.Fatal("batch exceeded input budget")
 		}
 		if calls > 1 && !strings.Contains(req.Messages[0].Text, "ROLLING_FACT") {
@@ -386,7 +385,7 @@ func TestCompactRegressionSummaryRequestFitsContextWindow(t *testing.T) {
 	}
 	for i := 0; i < count; i++ {
 		req := <-capture.reqCh
-		n := contextbuilder.EstimateRequest(req).Total()
+		n := requestInputTokens(req)
 		if n > contextInputLimit(req.Config) {
 			t.Fatalf("oversized summary request: %d", n)
 		}
@@ -519,7 +518,7 @@ func TestCompactDuringToolLoopKeepsLatestExchangeAndContinues(t *testing.T) {
 	eng.tools = runner
 	normalCalls, runningCompacts := 0, 0
 	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-		input := contextbuilder.EstimateRequest(req).Total()
+		input := requestInputTokens(req)
 		output, ok := req.Config.MaxOutputTokens()
 		if !ok || output <= 0 || input+output > req.Config.ContextWindow {
 			t.Errorf("request exceeds window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)

@@ -138,48 +138,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if req.Model == "" {
 		return nil, errors.New("anthropic: model is required")
 	}
-	body := messagesRequest{
-		Model:     req.Model,
-		MaxTokens: DefaultMaxTokens,
-		Stream:    true,
-		System:    req.System,
-		Messages:  make([]message, 0, len(req.Messages)),
-	}
-	opts := req.Config.AnthropicOptions()
-	if v, ok := req.Config.MaxOutputTokens(); ok {
-		body.MaxTokens = v
-	} else if v, ok := provider.IntOption(opts, "max_tokens", "max_output_tokens"); ok {
-		body.MaxTokens = v
-	}
-	if v, ok := provider.FloatOption(opts, "temperature"); ok {
-		body.Temperature = &v
-	}
-	if outputConfig, ok := opts["output_config"]; ok {
-		body.OutputConfig = outputConfig
-		if config, ok := outputConfig.(map[string]any); ok {
-			if effort, ok := provider.StringOption(config, "effort"); ok {
-				mapped := make(map[string]any, len(config))
-				for key, value := range config {
-					mapped[key] = value
-				}
-				mapped["effort"] = provider.WireReasoningEffort("anthropic", req.Model, effort)
-				body.OutputConfig = mapped
-			}
-		}
-	}
-	if len(req.Tools) > 0 {
-		body.Tools = make([]tool, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			body.Tools = append(body.Tools, tool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: t.InputSchema,
-			})
-		}
-	}
-	for _, msg := range req.Messages {
-		body.Messages = append(body.Messages, messagesFor(msg)...)
-	}
+	body := messagesRequestBody(req)
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return nil, err
@@ -586,4 +545,56 @@ func httpClient(client *http.Client) *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
+}
+
+func messagesRequestBody(req provider.Request) messagesRequest {
+	body := messagesRequest{
+		Model:     req.Model,
+		MaxTokens: DefaultMaxTokens,
+		Stream:    true,
+		System:    req.System,
+		Messages:  make([]message, 0, len(req.Messages)),
+	}
+	opts := req.Config.AnthropicOptions()
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxTokens = v
+	} else if v, ok := provider.IntOption(opts, "max_tokens", "max_output_tokens"); ok {
+		body.MaxTokens = v
+	}
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
+		body.Temperature = &v
+	}
+	if outputConfig, ok := opts["output_config"]; ok {
+		body.OutputConfig = outputConfig
+		if config, ok := outputConfig.(map[string]any); ok {
+			if effort, ok := provider.StringOption(config, "effort"); ok {
+				mapped := make(map[string]any, len(config))
+				for key, value := range config {
+					mapped[key] = value
+				}
+				mapped["effort"] = provider.WireReasoningEffort("anthropic", req.Model, effort)
+				body.OutputConfig = mapped
+			}
+		}
+	}
+	if len(req.Tools) > 0 {
+		body.Tools = make([]tool, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			body.Tools = append(body.Tools, tool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			})
+		}
+	}
+	for _, msg := range req.Messages {
+		body.Messages = append(body.Messages, messagesFor(msg)...)
+	}
+	return body
+}
+
+// RequestInput uses the same projection and sanitization as the HTTP request.
+func RequestInput(req provider.Request) provider.WireInput {
+	body := messagesRequestBody(req)
+	return provider.WireInput{System: body.System, Messages: body.Messages, Tools: body.Tools}
 }

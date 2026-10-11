@@ -163,38 +163,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if req.Model == "" {
 		return nil, errors.New("google: model is required")
 	}
-	body := generateRequest{Contents: make([]content, 0, len(req.Messages))}
-	var gen generationConfig
-	opts := req.Config.GoogleOptions()
-	if v, ok := provider.FloatOption(opts, "temperature"); ok {
-		gen.Temperature = &v
-	}
-	if v, ok := req.Config.MaxOutputTokens(); ok {
-		gen.MaxOutputTokens = &v
-	} else if v, ok := provider.IntOption(opts, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
-		gen.MaxOutputTokens = &v
-	}
-	if thinking := googleThinkingConfig(req.Model, opts); thinking != nil {
-		gen.ThinkingConfig = thinking
-	}
-	if gen.Temperature != nil || gen.MaxOutputTokens != nil || gen.ThinkingConfig != nil {
-		body.GenerationConfig = &gen
-	}
-	if req.System != "" {
-		body.SystemInstruction = &content{Parts: []part{{Text: req.System}}}
-	}
-	if len(req.Tools) > 0 {
-		declarations := make([]functionDeclaration, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			declarations = append(declarations, functionDeclaration{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  sanitizeToolParameters(t.InputSchema),
-			})
-		}
-		body.Tools = []tool{{FunctionDeclarations: declarations}}
-	}
-	body.Contents = append(body.Contents, contentsForMessages(req.Messages)...)
+	body := generateRequestBody(req)
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return nil, err
@@ -209,7 +178,11 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if c.apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", c.apiKey)
 	}
-	provider.LogRequest(ctx, c.Name(), "generationConfig.maxOutputTokens", gen.MaxOutputTokens)
+	var outputLimit *int
+	if body.GenerationConfig != nil {
+		outputLimit = body.GenerationConfig.MaxOutputTokens
+	}
+	provider.LogRequest(ctx, c.Name(), "generationConfig.maxOutputTokens", outputLimit)
 	return httpReq, nil
 }
 
@@ -802,4 +775,46 @@ func httpClient(client *http.Client) *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
+}
+
+func generateRequestBody(req provider.Request) generateRequest {
+	body := generateRequest{Contents: make([]content, 0, len(req.Messages))}
+	var gen generationConfig
+	opts := req.Config.GoogleOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
+		gen.Temperature = &v
+	}
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		gen.MaxOutputTokens = &v
+	} else if v, ok := provider.IntOption(opts, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
+		gen.MaxOutputTokens = &v
+	}
+	if thinking := googleThinkingConfig(req.Model, opts); thinking != nil {
+		gen.ThinkingConfig = thinking
+	}
+	if gen.Temperature != nil || gen.MaxOutputTokens != nil || gen.ThinkingConfig != nil {
+		body.GenerationConfig = &gen
+	}
+	if req.System != "" {
+		body.SystemInstruction = &content{Parts: []part{{Text: req.System}}}
+	}
+	if len(req.Tools) > 0 {
+		declarations := make([]functionDeclaration, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			declarations = append(declarations, functionDeclaration{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  sanitizeToolParameters(t.InputSchema),
+			})
+		}
+		body.Tools = []tool{{FunctionDeclarations: declarations}}
+	}
+	body.Contents = append(body.Contents, contentsForMessages(req.Messages)...)
+	return body
+}
+
+// RequestInput uses the same projection and sanitization as the HTTP request.
+func RequestInput(req provider.Request) provider.WireInput {
+	body := generateRequestBody(req)
+	return provider.WireInput{System: body.SystemInstruction, Messages: body.Contents, Tools: body.Tools}
 }

@@ -114,46 +114,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUs
 	if c.baseURL == "" {
 		return nil, errors.New("openai: base url is required")
 	}
-	body := chatRequest{
-		Model:    req.Model,
-		Stream:   true,
-		Messages: make([]chatMessage, 0, len(req.Messages)+1),
-	}
-	if includeUsage {
-		body.StreamOptions = &chatStreamOptions{IncludeUsage: true}
-	}
-	opts := req.Config.OpenAIOptions()
-	if v, ok := provider.FloatOption(opts, "temperature"); ok {
-		body.Temperature = &v
-	}
-	if v, ok := req.Config.MaxOutputTokens(); ok {
-		body.MaxCompletionTokens = &v
-	} else if v, ok := provider.IntOption(opts, "max_completion_tokens", "max_output_tokens", "max_tokens"); ok {
-		body.MaxCompletionTokens = &v
-	}
-	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
-		body.ReasoningEffort = provider.WireReasoningEffort("openai-compatible", req.Model, v)
-	}
-	if req.System != "" {
-		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
-	}
-	for _, msg := range req.Messages {
-		body.Messages = append(body.Messages, chatMessagesFor(msg)...)
-	}
-	body.Messages = sanitizeChatToolMessages(body.Messages)
-	if len(req.Tools) > 0 {
-		body.Tools = make([]chatTool, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			body.Tools = append(body.Tools, chatTool{
-				Type: "function",
-				Function: chatToolFunction{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters:  tool.InputSchema,
-				},
-			})
-		}
-	}
+	body := chatRequestBody(req, includeUsage)
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return nil, err
@@ -918,4 +879,57 @@ func chatMediaContent(parts []provider.Part) []chatContentPart {
 		}
 	}
 	return out
+}
+
+func chatRequestBody(req provider.Request, includeUsage bool) chatRequest {
+	body := chatRequest{
+		Model:    req.Model,
+		Stream:   true,
+		Messages: make([]chatMessage, 0, len(req.Messages)+1),
+	}
+	if includeUsage {
+		body.StreamOptions = &chatStreamOptions{IncludeUsage: true}
+	}
+	opts := req.Config.OpenAIOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
+		body.Temperature = &v
+	}
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxCompletionTokens = &v
+	} else if v, ok := provider.IntOption(opts, "max_completion_tokens", "max_output_tokens", "max_tokens"); ok {
+		body.MaxCompletionTokens = &v
+	}
+	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
+		body.ReasoningEffort = provider.WireReasoningEffort("openai-compatible", req.Model, v)
+	}
+	if req.System != "" {
+		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
+	}
+	for _, msg := range req.Messages {
+		body.Messages = append(body.Messages, chatMessagesFor(msg)...)
+	}
+	body.Messages = sanitizeChatToolMessages(body.Messages)
+	if len(req.Tools) > 0 {
+		body.Tools = make([]chatTool, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			body.Tools = append(body.Tools, chatTool{
+				Type: "function",
+				Function: chatToolFunction{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.InputSchema,
+				},
+			})
+		}
+	}
+	return body
+}
+
+// ChatRequestInput uses the same projection and sanitization as the HTTP request.
+func ChatRequestInput(req provider.Request) provider.WireInput {
+	body := chatRequestBody(req, false)
+	if req.System != "" {
+		body.Messages = body.Messages[1:]
+	}
+	return provider.WireInput{System: req.System, Messages: body.Messages, Tools: body.Tools}
 }

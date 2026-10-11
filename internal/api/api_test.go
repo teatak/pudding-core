@@ -55,6 +55,9 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 func newTestServerWithHome(t *testing.T) (*httptest.Server, store.Store, string) {
 	t.Helper()
 	ms := storetest.New(t)
+	if err := ms.PutProviderProfile(context.Background(), &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible"}); err != nil {
+		t.Fatal(err)
+	}
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, engine.WithAttachmentHome(homeDir))

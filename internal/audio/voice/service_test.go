@@ -27,6 +27,9 @@ import (
 func TestServiceSubmitsSentenceThroughEngine(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible"}); err != nil {
+		t.Fatal(err)
+	}
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"voice reply"}), mock.WithDelay(time.Millisecond))), ms)
 	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_voice", Title: "Voice", Provider: "mock", Model: "mock"}); err != nil {
@@ -163,6 +166,9 @@ func TestServiceRejectsSentenceWithoutInputOwner(t *testing.T) {
 func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible"}); err != nil {
+		t.Fatal(err)
+	}
 	hub := event.NewHub()
 	fakeASR := asr.NewFake(4)
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}

@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		38: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b", // Data-only: discard calibration made by the replaced estimator.
 		37: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b", // Data-only: remove host business roles.
 		36: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b",
 		35: "f5647248b57335b5486ed6e27370759919749439de8c21835434465a53162c01",
@@ -848,4 +849,80 @@ func openMigrationTestDB(t *testing.T, path string) *sql.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+func TestWireEstimateMigrationDiscardsOnlyOldCalibration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, st, "wire-estimate")
+	_, err = st.RecordSessionUsage(context.Background(), "wire-estimate", store.UsageRecordInput{Provider: "profile", Model: "model", EstimatedInputTokens: 437703, InputUncachedTokens: 212, InputCachedTokens: 562816, OutputContentTokens: 989, OutputReasoningTokens: 487})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = setSchemaVersion(st.db, 37); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SessionUsage(context.Background(), "wire-estimate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastEstimatedInputTokens != 0 || got.LastInputTokens() != 563028 || got.LastOutputTokens() != 1476 || got.CumulativeTotalTokens() != 564504 || got.RequestCount != 1 {
+		t.Fatalf("migration changed actual usage: %+v", got)
+	}
+	// A new request replaces calibration, and reopening must not reset it again.
+	_, err = st.RecordSessionUsage(context.Background(), "wire-estimate", store.UsageRecordInput{Provider: "profile", Model: "model", EstimatedInputTokens: 500, InputUncachedTokens: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	got, err = st.SessionUsage(context.Background(), "wire-estimate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastEstimatedInputTokens != 500 || got.CumulativeInputTokens() != 563628 {
+		t.Fatalf("new calibration lost on restart: %+v", got)
+	}
+}
+
+func TestWireEstimateMigrationRollsBackOnFailure(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "wire-estimate-rollback")
+	_, err := st.RecordSessionUsage(context.Background(), "wire-estimate-rollback", store.UsageRecordInput{EstimatedInputTokens: 100, InputUncachedTokens: 150})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = setSchemaVersion(st.db, 37); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("after reset")
+	err = runSchemaMigration(st.db, 38, func(tx *sql.Tx) error {
+		if err := schemaMigrations[38](tx); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatal(err)
+	}
+	got, err := st.SessionUsage(context.Background(), "wire-estimate-rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, _ := schemaVersion(st.db)
+	if got.LastEstimatedInputTokens != 100 || version != 37 {
+		t.Fatalf("failed migration was committed: usage=%+v version=%d", got, version)
+	}
 }

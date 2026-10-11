@@ -81,7 +81,11 @@ func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID st
 		return false, err
 	}
 	factor, _ := sessionInputCalibrationFactor(stat, resolved.providerName, resolved.model)
-	tokens := calibratedTokenEstimate(contextbuilder.EstimateRequest(*req).Total(), factor)
+	estimate, err := contextbuilder.EstimateRequest(*req, resolved.protocol)
+	if err != nil {
+		return false, err
+	}
+	tokens := calibratedTokenEstimate(estimate.Total(), factor)
 	soft := compactTrigger(req.Config, e.autoCompactThresholdPercent(ctx))
 	if soft > 0 && tokens >= soft {
 		compactCtx, cancel := context.WithTimeout(ctx, autoCompactTimeout)

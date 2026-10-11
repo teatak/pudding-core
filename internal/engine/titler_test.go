@@ -47,7 +47,7 @@ func TestGenerateTitleIgnoresThoughtChunks(t *testing.T) {
 		}))),
 		storetest.New(t),
 	)
-	got, err := eng.generateTitle("mock", "mock-model", provider.ModelConfig{}, "hi")
+	got, err := eng.generateTitle("mock", "mock-model", "openai-compatible", provider.ModelConfig{}, "hi")
 	if err != nil {
 		t.Fatal(err)
 	}

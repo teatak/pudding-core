@@ -45,7 +45,11 @@ func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, 
 			req := compactSummaryRequest(resolved, batch.String(), hint, summary, target)
 			// A generation target is advisory. Size each fragment against the
 			// actual rolling summary, including when it exceeded that target.
-			available := limit - contextbuilder.EstimateRequest(req).Total() - contextbuilder.EstimateTextTokens(compactMessageRecord(current.message, "")) - 64
+			estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
+			if err != nil {
+				return "", err
+			}
+			available := limit - estimate.Total() - provider.EstimateTextTokens(compactMessageRecord(current.message, "")) - 64
 			end := compactPrefixLength(current.text, available)
 			if end == 0 {
 				break
@@ -74,7 +78,7 @@ func compactPrefixLength(text []rune, budget int) int {
 	lo, hi := 0, len(text)
 	for lo < hi {
 		mid := lo + (hi-lo+1)/2
-		if contextbuilder.EstimateTextTokens(string(text[:mid])) <= budget {
+		if provider.EstimateTextTokens(string(text[:mid])) <= budget {
 			lo = mid
 		} else {
 			hi = mid - 1

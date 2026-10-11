@@ -60,7 +60,7 @@ const (
 
 // autoTitle 在 Submit 接受首条消息后调用(sess.Title == "" 时)。
 // provisional 同步写(本地 SQLite,纳秒级),LLM 调用异步。
-func (e *Engine) autoTitle(sessionID, providerName, model string, modelConfig provider.ModelConfig, userText string) {
+func (e *Engine) autoTitle(sessionID, providerName, model, protocol string, modelConfig provider.ModelConfig, userText string) {
 	provisional := provisionalTitleFromText(userText)
 	if provisional == "" {
 		return
@@ -80,7 +80,7 @@ func (e *Engine) autoTitle(sessionID, providerName, model string, modelConfig pr
 	go func() {
 		defer e.wg.Done()
 		startedAt := time.Now()
-		title, err := e.generateTitle(providerName, model, modelConfig, userText)
+		title, err := e.generateTitle(providerName, model, protocol, modelConfig, userText)
 		if err != nil {
 			slog.Warn(
 				"titler: generate failed, keeping provisional",
@@ -128,7 +128,7 @@ func (e *Engine) autoTitle(sessionID, providerName, model string, modelConfig pr
 
 // generateTitle 起一次裸 LLM 调用(同 session 解析出的 provider/model),
 // 收集全文后清洗截断。不产 turn、不进 messages,失败只留 provisional。
-func (e *Engine) generateTitle(providerName, model string, modelConfig provider.ModelConfig, userText string) (string, error) {
+func (e *Engine) generateTitle(providerName, model, protocol string, modelConfig provider.ModelConfig, userText string) (string, error) {
 	// 从 auxCtx 派生:Stop() 后(优雅退出)立即取消这次 LLM 调用,
 	// 不让 30s 超时拖住 engine.Wait()。
 	ctx, cancel := context.WithTimeout(e.auxCtx, titlerTimeout)
@@ -145,7 +145,11 @@ func (e *Engine) generateTitle(providerName, model string, modelConfig provider.
 		},
 		Config: titlerConfig(modelConfig),
 	}
-	if err := limitRequestOutput(&req, "", contextbuilder.EstimateRequest(req).Total()); err != nil {
+	estimate, err := contextbuilder.EstimateRequest(req, protocol)
+	if err != nil {
+		return "", err
+	}
+	if err := limitRequestOutput(&req, protocol, estimate.Total()); err != nil {
 		return "", err
 	}
 	ch, err := client.Stream(ctx, req)

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 37
+	currentSchemaVersion       = 38
 )
 
 var (
@@ -34,6 +34,10 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	38: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE session_usage SET last_estimated_input_tokens=0`)
+		return err
+	},
 	37: migrateWidgetParticipantIdentities,
 	36: migrateWidgetPagePins,
 	35: migrateWidgetPages,
