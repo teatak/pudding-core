@@ -95,7 +95,7 @@ func (s *Store) CreateTable(ctx context.Context, item *store.StudioItem, body st
 		return nil, &store.InvalidTable{Message: "table kind required"}
 	}
 	var d *store.DocumentContent
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 	}{in, in.Author})
 	requestHash := store.DocumentHash(string(payload))
 	var out *store.DocumentContent
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
 			return err
 		}

@@ -28,7 +28,7 @@ func (s *Store) SelectWidgetPage(ctx context.Context, itemID, scope, revision st
 		return "", store.ErrInvalidWidgetData
 	}
 	var selected string
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		w, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND kind='widget' AND deleted=0 AND archived_at=0`, itemID))
 		if err != nil {
 			return err
@@ -87,5 +87,7 @@ func (s *Store) AuthorizeWidgetPage(ctx context.Context, itemID, revision, targe
 	if target == "" {
 		return store.ErrStudioItemConflict
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error { return widgetRevisionAllowed(ctx, tx, itemID, revision, target) })
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return widgetRevisionAllowed(ctx, tx, itemID, revision, target)
+	})
 }

@@ -10,7 +10,7 @@ import (
 
 func (s *Store) SetStudioItemArchived(ctx context.Context, id string, expected int64, archived bool) (*store.StudioItem, error) {
 	var item *store.StudioItem
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		item, err = scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0`, id))
 		if err != nil {
@@ -41,7 +41,7 @@ func (s *Store) SetStudioItemArchived(ctx context.Context, id string, expected i
 // retryable after restart, and a tombstoned item cannot be restored meanwhile.
 func (s *Store) MarkStudioItemDeleted(ctx context.Context, id string, expected int64) (*store.StudioItem, error) {
 	var item *store.StudioItem
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		item, err = scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=?`, id))
 		if err != nil {
@@ -62,7 +62,7 @@ func (s *Store) MarkStudioItemDeleted(ctx context.Context, id string, expected i
 }
 
 func (s *Store) PurgeDeletedStudioItem(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM studio_items WHERE id=? AND deleted=1`, id)
 		return err
 	})

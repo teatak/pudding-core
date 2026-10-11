@@ -73,7 +73,7 @@ func (s *Store) PutBrowserState(ctx context.Context, in store.BrowserStateInput)
 		return nil, err
 	}
 	var out *store.BrowserState
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (s *Store) PutBrowserState(ctx context.Context, in store.BrowserStateInput)
 }
 
 func (s *Store) DeleteBrowserState(ctx context.Context, sessionID, tabID string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func (s *Store) DeleteBrowserState(ctx context.Context, sessionID, tabID string)
 }
 
 func (s *Store) ClearBrowserState(ctx context.Context, sessionID string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 			return err
 		}

@@ -16,7 +16,7 @@ import (
 // stays canonical if its ephemeral run subsequently closes or the daemon exits.
 func (s *Store) RecordWidgetNotice(ctx context.Context, in store.WidgetNoticeInput) (*store.WidgetNoticeResult, error) {
 	var out *store.WidgetNoticeResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func (s *Store) RecordWidgetNotice(ctx context.Context, in store.WidgetNoticeInp
 // turning widget-supplied text into a system instruction.
 func (s *Store) BeginWidgetTurn(ctx context.Context, in store.BeginWidgetTurnInput) (*store.BeginTurnResult, error) {
 	var out *store.BeginTurnResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}

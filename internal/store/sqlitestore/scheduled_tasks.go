@@ -64,7 +64,7 @@ func scheduledTargetTx(ctx context.Context, tx *sql.Tx, id string) error {
 }
 func (s *Store) CreateScheduledTask(ctx context.Context, t *store.ScheduledTask, session *store.Session) (*store.ScheduledTask, error) {
 	var out *store.ScheduledTask
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		prev, err := scanScheduledTask(tx.QueryRowContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE session_id=? AND request_id=?`, t.SessionID, t.RequestID))
 		if err == nil {
 			if prev.RequestHash != t.RequestHash {
@@ -124,7 +124,7 @@ func (s *Store) ListScheduledTasks(ctx context.Context, sessionID string, includ
 }
 func (s *Store) UpdateScheduledTask(ctx context.Context, id string, in store.ScheduledTaskUpdate, now time.Time) (*store.ScheduledTask, error) {
 	var out *store.ScheduledTask
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		t, err := scanScheduledTask(tx.QueryRowContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE id=?`, id))
 		if err != nil {
 			return err
@@ -168,7 +168,7 @@ func scanScheduledRun(row messageScanner) (*store.ScheduledTaskRun, error) {
 }
 func (s *Store) AcceptScheduledTask(ctx context.Context, id string, in store.ScheduledTaskAccept) (*store.ScheduledTaskRun, error) {
 	var out *store.ScheduledTaskRun
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if in.RequestID != "" {
 			prev, err := scanScheduledRun(tx.QueryRowContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE task_id=? AND trigger_key=?`, id, "manual:"+in.RequestID))
 			if err == nil {
@@ -247,7 +247,7 @@ func (s *Store) SetScheduledTaskHandoff(ctx context.Context, id, state, reason s
 	if state != "submitted" && state != "failed" {
 		return store.ErrInvalidSchedule
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE scheduled_task_runs SET handoff=?,reason=? WHERE id=? AND handoff='pending'`, state, reason, id)
 		return err
 	})

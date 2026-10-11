@@ -31,7 +31,7 @@ func widgetDataTx(ctx context.Context, tx *sql.Tx, id string) (*store.WidgetData
 
 func (s *Store) GetWidgetData(ctx context.Context, id string) (*store.WidgetData, error) {
 	var data *store.WidgetData
-	err := s.tx(ctx, func(tx *sql.Tx) (err error) { data, err = widgetDataTx(ctx, tx, id); return err })
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) (err error) { data, err = widgetDataTx(ctx, tx, id); return err })
 	return data, err
 }
 
@@ -50,7 +50,7 @@ func (s *Store) WriteWidgetData(ctx context.Context, id, revisionHash, targetID 
 		return nil, store.ErrInvalidWidgetData
 	}
 	var data *store.WidgetData
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		current, err := widgetDataTx(ctx, tx, id)
 		if err != nil {
 			return err

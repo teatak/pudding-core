@@ -50,7 +50,7 @@ func (s *Store) PutBrowserHistory(ctx context.Context, in store.BrowserHistoryIn
 		return nil, err
 	}
 	var out *store.BrowserHistoryEntry
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC()
 		id := store.NewID("history")
 		created := unixMS(now)
@@ -92,7 +92,7 @@ func (s *Store) UpdateBrowserHistoryMetadata(ctx context.Context, in store.Brows
 	if err := store.NormalizeBrowserHistoryInput(&in); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`UPDATE browser_history SET
 			   title=CASE WHEN ?<>'' THEN ? ELSE title END,
@@ -110,7 +110,7 @@ func (s *Store) DeleteBrowserHistory(ctx context.Context, historyID string) erro
 	if historyID == "" {
 		return store.ErrInvalidBrowserHistory
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `DELETE FROM browser_history WHERE id=?`, historyID)
 		if err != nil {
 			return err
@@ -127,7 +127,7 @@ func (s *Store) DeleteBrowserHistory(ctx context.Context, historyID string) erro
 }
 
 func (s *Store) ClearBrowserHistory(ctx context.Context) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM browser_history`)
 		return err
 	})

@@ -79,7 +79,7 @@ func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := errors.New("injected")
-	if err := s.tx(context.Background(), func(tx *sql.Tx) error {
+	if err := s.tx(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		if err := migrateWidgetPages(tx); err != nil {
 			return err
 		}

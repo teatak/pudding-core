@@ -386,6 +386,10 @@ func sandboxEnvironment(env []string, stateRoot string) []string {
 	out = sandboxSetEnv(out, "NPM_CONFIG_GLOBALCONFIG", filepath.Join(stateRoot, "config", "npm-global.conf"))
 	out = sandboxSetEnv(out, "PNPM_HOME", pnpmHome)
 	out = sandboxSetEnv(out, "COREPACK_HOME", filepath.Join(cacheDir, "corepack"))
+	// A new private cache has no host lastKnownGood. Use Corepack's bundled
+	// default instead of silently upgrading an unpinned project to latest.
+	// Project packageManager and explicit caller configuration still win.
+	out = sandboxSetEnvDefault(out, "COREPACK_DEFAULT_TO_LATEST", "0")
 	out = sandboxSetEnv(out, "YARN_CACHE_FOLDER", filepath.Join(cacheDir, "yarn"))
 	out = sandboxSetEnv(out, "YARN_GLOBAL_FOLDER", filepath.Join(nodeDir, "yarn-global"))
 	out = sandboxSetEnv(out, "NODE_REPL_HISTORY", filepath.Join(nodeDir, "repl_history"))

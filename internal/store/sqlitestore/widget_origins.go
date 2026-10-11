@@ -21,7 +21,7 @@ CREATE UNIQUE INDEX studio_items_package ON studio_items(json_extract(origin, '$
 // Source, provenance and item creation commit together. Activation remains an explicit build/activate step.
 func (s *Store) InstallWidgetPackage(ctx context.Context, w *store.StudioItem, expected int64) (*store.StudioItem, error) {
 	id := w.ID
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if w.Origin == nil || w.Origin.Copy || w.Kind != store.StudioItemKindWidget {
 			return errors.New("invalid package item")
 		}
@@ -79,7 +79,7 @@ func (s *Store) InstallWidgetPackage(ctx context.Context, w *store.StudioItem, e
 // ForkWidgetForEditing snapshots package content, bindings and durable data in
 // one transaction. The downloaded original retains its independent update path.
 func (s *Store) ForkWidgetForEditing(ctx context.Context, sourceID, id, name string, expected int64) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		source, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, sourceID))
 		if err != nil {
 			return err

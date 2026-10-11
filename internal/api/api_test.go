@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -3194,13 +3195,16 @@ type sseFrame struct {
 }
 
 // readSSE 读取 SSE 流直到看到 stopKind 事件或超时,返回收到的帧序列。
-func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration) []sseFrame {
+func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration, resumeID ...string) []sseFrame {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(resumeID) > 0 {
+		r.Header.Set("Last-Event-ID", resumeID[0])
 	}
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -3981,9 +3985,15 @@ func TestSubmitStreamAndResume(t *testing.T) {
 	frames := <-done
 	var kinds []string
 	seqs := map[string]bool{}
+	var lastSeq int64
 	for _, f := range frames {
 		kinds = append(kinds, f.event)
 		if f.id != "" {
+			seq, err := strconv.ParseInt(f.id, 10, 64)
+			if err != nil || seq != lastSeq+1 {
+				t.Fatalf("live lifecycle sequence must be contiguous: last=%d frame=%+v frames=%+v", lastSeq, f, frames)
+			}
+			lastSeq = seq
 			if seqs[f.id] {
 				t.Fatalf("duplicate seq %s in live stream: %+v", f.id, frames)
 			}
@@ -4002,6 +4012,10 @@ func TestSubmitStreamAndResume(t *testing.T) {
 	frames = readSSE(t, eventsURL+"&after=1", "turn.completed", 5*time.Second)
 	if len(frames) != 1 || frames[0].event != "turn.completed" || frames[0].id != "2" {
 		t.Fatalf("resume after=1 must replay exactly seq 2, got %+v", frames)
+	}
+	frames = readSSE(t, eventsURL+"&after=0", "turn.completed", 5*time.Second, "1")
+	if len(frames) != 1 || frames[0].id != "2" {
+		t.Fatalf("Last-Event-ID must replay without duplicates and override query position: %+v", frames)
 	}
 
 	// tail:无位点的全新连接不回放历史,只看到连接后的新 turn

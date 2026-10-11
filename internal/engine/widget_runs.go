@@ -501,9 +501,6 @@ func (e *Engine) deliverWidgetNoticesLocked(run *WidgetRun) {
 			} else {
 				d.Status = "informed"
 			}
-			if result.Event != nil {
-				e.hub.Publish(*result.Event)
-			}
 		}
 	}
 }
@@ -620,7 +617,7 @@ func (e *Engine) widgetTick(now time.Time) {
 				active := newActiveTurn(res.Turn.ID, cancel)
 				e.running[p.SessionID] = active
 				e.mu.Unlock()
-				e.hub.Publish(*res.StartedEvent)
+
 				e.wg.Add(1)
 				go e.runTurn(turnCtx, p.SessionID, res.Turn.ID, resolved, client, active)
 			}

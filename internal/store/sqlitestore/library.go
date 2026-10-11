@@ -32,7 +32,7 @@ func (s *Store) ListLibraryFavorites(ctx context.Context, actorSessionID string)
 	return out, rows.Err()
 }
 func (s *Store) PutLibraryFavorite(ctx context.Context, actorSessionID string, f store.LibraryFavorite) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func (s *Store) PutLibraryFavorite(ctx context.Context, actorSessionID string, f
 	})
 }
 func (s *Store) DeleteLibraryFavorite(ctx context.Context, actorSessionID, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, actorSessionID); err != nil {
 			return err
 		}

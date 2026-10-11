@@ -285,14 +285,13 @@ func (e *Engine) answerUserInput(ctx context.Context, sessionID, requestID strin
 		// that would be acknowledged but never delivered.
 		queued := store.QueuedInputQueued
 		parts := store.UserInputParts(in.Text, in.Parts)
-		updated, err := e.store.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{
+		_, err := e.store.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{
 			SessionID: sessionID, ClientMessageID: clientID, Text: &in.Text, Parts: &parts,
 			Status: &queued, RequeueCancelled: true,
 		})
 		if err != nil {
 			return nil, err
 		}
-		e.hub.Publish(*updated.Event)
 		out.Status, out.Duplicate = string(queued), false
 		e.TryDrainQueued(sessionID)
 	}

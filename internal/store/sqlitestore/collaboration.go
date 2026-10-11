@@ -15,7 +15,7 @@ func (s *Store) DispatchChild(ctx context.Context, in store.DispatchChildInput) 
 		return nil, err
 	}
 	var out *store.DispatchChildResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		parent, err := getSessionTx(ctx, tx, in.ParentSessionID)
 		if err != nil {
 			return err
@@ -89,7 +89,7 @@ func (s *Store) DispatchChild(ctx context.Context, in store.DispatchChildInput) 
 
 func (s *Store) StopCollaboration(ctx context.Context, parentID string) ([]event.Event, error) {
 	var events []event.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionAnyTx(ctx, tx, parentID); err != nil {
 			return err
 		}
@@ -161,7 +161,7 @@ func (s *Store) HasUncollectedChildResults(ctx context.Context, parentID string)
 
 func (s *Store) CollectChildResults(ctx context.Context, parentID string) ([]event.Event, error) {
 	var events []event.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, uncollectedChildTurnsSQL, parentID)
 		if err != nil {
 			return err
@@ -224,7 +224,7 @@ func (s *Store) CollectChildResults(ctx context.Context, parentID string) ([]eve
 
 func (s *Store) QueueChildInput(ctx context.Context, parentID, parentTurnID string, in store.QueueInputInput) (*store.QueueInputResult, error) {
 	var out *store.QueueInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		owner, err := parentSessionIDTx(ctx, tx, in.SessionID)
 		if err != nil {
 			return err

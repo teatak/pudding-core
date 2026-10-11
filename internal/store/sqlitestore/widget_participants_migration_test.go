@@ -26,7 +26,7 @@ func TestWidgetParticipantMigrationPreservesStateAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := errors.New("injected failure")
-	if err = s.tx(ctx, func(tx *sql.Tx) error {
+	if err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := migrateWidgetParticipantIdentities(tx); err != nil {
 			return err
 		}

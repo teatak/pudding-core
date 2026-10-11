@@ -56,7 +56,7 @@ func (s *Store) ListStudioMounts(ctx context.Context, session string) ([]*store.
 
 // Removing a session mount closes that view; the independent resource survives.
 func (s *Store) DeleteStudioMount(ctx context.Context, session, mountID string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
@@ -76,7 +76,7 @@ func (s *Store) DeleteStudioMount(ctx context.Context, session, mountID string) 
 }
 func (s *Store) OpenStudioItem(ctx context.Context, session, itemID, mountID string) (*store.StudioMount, error) {
 	var out *store.StudioMount
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, session); err != nil {
 			return err
 		}

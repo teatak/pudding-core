@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Store) CreateChildSession(ctx context.Context, parentSessionID string, child *store.Session) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		parent, err := getSessionTx(ctx, tx, parentSessionID)
 		if err != nil {
 			return err

@@ -36,7 +36,7 @@ func (s *Store) ListWidgetLinks(ctx context.Context, wid string) ([]*store.Widge
 	return out, rows.Err()
 }
 func (s *Store) PutWidgetLink(ctx context.Context, l *store.WidgetLink, expected int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		w, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, l.ItemID))
 		if err != nil {
 			return err
@@ -51,7 +51,7 @@ func (s *Store) PutWidgetLink(ctx context.Context, l *store.WidgetLink, expected
 	})
 }
 func (s *Store) DeleteWidgetLink(ctx context.Context, wid, id string, expected int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		w, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, wid))
 		if err != nil {
 			return err

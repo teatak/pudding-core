@@ -216,6 +216,7 @@ func (e *Engine) rebuildBuilder() {
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
+	s.SetEventPublisher(hub.Publish)
 	if cfg == nil {
 		cfg = emptyConfig{}
 	}
@@ -459,7 +460,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	// Keep canonical admission and runtime registration indivisible to Cancel
-	// and WaitSession. No tool execution or event publication occurs under mu.
+	// and WaitSession. Store commit publishes started without blocking under mu.
 	e.mu.Lock()
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
 		SessionID:       in.SessionID,
@@ -489,15 +490,13 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		}
 		return out, nil
 	}
-	// 先注册 cancel 再 publish started:否则收到 turn.started 立刻 cancel 的
-	// 客户端可能落在注册之前,错拿 no_running_turn。turn 生命周期长于 HTTP
-	// 请求,不继承请求 ctx;取消只走 Cancel()。
+	// BeginTurn 提交即发布 started；持有 e.mu 直到 cancel 注册完成，收到
+	// started 的取消请求会等锁而不会错拿 no_running_turn。turn 生命周期
+	// 长于 HTTP 请求，不继承请求 ctx；取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), plugin.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
-
-	e.hub.Publish(*res.StartedEvent)
 
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
 	// 与 turn 生命周期解耦(titler.go)。
@@ -559,8 +558,6 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 	active := newActiveTurn(res.Turn.ID, cancel)
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
-
-	e.hub.Publish(*res.StartedEvent)
 
 	e.wg.Add(1)
 	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client, active)
@@ -696,9 +693,6 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		return &SubmitResult{Duplicate: true, TurnID: res.ExistingTurn.ID}, nil
 	}
 	e.rememberQueuedRuntime(in.SessionID, in.ClientMessageID, plugin.RuntimeIDFromContext(ctx))
-	if res.QueuedEvent != nil {
-		e.hub.Publish(*res.QueuedEvent)
-	}
 	out := &SubmitResult{Queued: true, ClientMessageID: in.ClientMessageID, Status: string(store.QueuedInputQueued)}
 	if res.Duplicate {
 		out.Duplicate = true
@@ -1046,7 +1040,7 @@ func (e *Engine) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, t := range turns {
-		res, err := e.store.FinishTurn(ctx, store.FinishTurnInput{
+		_, err := e.store.FinishTurn(ctx, store.FinishTurnInput{
 			TurnID: t.ID,
 			Status: store.TurnFailed,
 			Error:  "interrupted by daemon restart",
@@ -1054,7 +1048,6 @@ func (e *Engine) Recover(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("recover turn %s: %w", t.ID, err)
 		}
-		e.hub.Publish(*res.FinalEvent)
 	}
 	if len(turns) > 0 {
 		slog.Info("engine: recovered interrupted turns", "count", len(turns))
@@ -1185,11 +1178,6 @@ func (e *Engine) SteerQueuedInput(ctx context.Context, sessionID, turnID, client
 			event:     res.SteeredEvent,
 		})
 	}
-	if res.UpdatedEvent != nil {
-		// 保持实时发布与持久化 seq 同序；解锁后 runTurn 可能立刻在
-		// 安全边界发布 input.steered。
-		e.hub.Publish(*res.UpdatedEvent)
-	}
 	active.mu.Unlock()
 
 	e.takeQueuedRuntime(sessionID, clientMessageID)
@@ -1277,7 +1265,7 @@ func (e *Engine) finishTurnWithInterrupted(
 	// Clear the registered turn before another admission can observe the
 	// finished canonical state and replace its completion signal.
 	e.mu.Lock()
-	res, err := e.store.FinishTurn(context.Background(), in)
+	_, err := e.store.FinishTurn(context.Background(), in)
 	e.clearRunningLocked(sessionID, turnID)
 	e.mu.Unlock()
 	if err != nil {
@@ -1290,10 +1278,7 @@ func (e *Engine) finishTurnWithInterrupted(
 		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
 		return
 	}
-	e.hub.Publish(*res.FinalEvent)
-	if res.CollaborationEvent != nil {
-		e.hub.Publish(*res.CollaborationEvent)
-	}
+
 	e.TryDrainQueued(sessionID)
 	e.childTurnFinished(sessionID, status)
 	if status == store.TurnCompleted {
@@ -1331,7 +1316,6 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	if res == nil {
 		return
 	}
-	e.hub.Publish(*res.StartedEvent)
 
 	var cfg provider.ModelConfig
 	if len(res.Input.ModelConfig) > 0 {
@@ -1578,11 +1562,6 @@ func (e *Engine) applyTurnSteers(turnID string, steers []pendingSteer) error {
 		Events:     events,
 	}); err != nil {
 		return err
-	}
-	for _, steer := range steers {
-		if steer.event != nil {
-			e.hub.Publish(*steer.event)
-		}
 	}
 	return nil
 }

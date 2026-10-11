@@ -137,9 +137,6 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	result, err := e.store.DispatchChild(ctx, store.DispatchChildInput{ParentSessionID: parentID, ParentTurnID: turnID, CallID: callID, Child: child, Input: store.QueueInputInput{SessionID: child.ID, ClientMessageID: "dispatch_" + turnID + "_" + callID, Text: prompt, Provider: resolved.providerName, Model: resolved.model, Mode: resolved.mode, ModelConfig: resolved.configJSON}})
 	if err == nil && !result.Duplicate {
 		e.rememberQueuedRuntime(child.ID, "dispatch_"+turnID+"_"+callID, plugin.RuntimeIDFromContext(ctx))
-		for _, ev := range result.Events {
-			e.hub.Publish(ev)
-		}
 	}
 	e.collaborationMu.Unlock()
 	if err != nil {
@@ -153,7 +150,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 func (e *Engine) StopCollaboration(ctx context.Context, parentID string) error {
 	e.collaborationMu.Lock()
 	defer e.collaborationMu.Unlock()
-	events, err := e.store.StopCollaboration(ctx, parentID)
+	_, err := e.store.StopCollaboration(ctx, parentID)
 	if err != nil {
 		return err
 	}
@@ -170,9 +167,6 @@ func (e *Engine) StopCollaboration(ctx context.Context, parentID string) error {
 				}
 			}
 		}
-	}
-	for _, ev := range events {
-		e.hub.Publish(ev)
 	}
 	return nil
 }
@@ -228,9 +222,6 @@ func (e *Engine) collectChildResults(ctx context.Context, parentID string) (bool
 	events, err := e.store.CollectChildResults(ctx, parentID)
 	if err != nil {
 		return false, err
-	}
-	for _, ev := range events {
-		e.hub.Publish(ev)
 	}
 	return len(events) > 0, nil
 }
@@ -347,9 +338,6 @@ func (e *Engine) sendChild(ctx context.Context, parentID, parentTurnID, childID,
 		return &SubmitResult{TurnID: result.ExistingTurn.ID, Duplicate: true}, nil
 	}
 	e.rememberQueuedRuntime(childID, clientID, plugin.RuntimeIDFromContext(ctx))
-	if result.QueuedEvent != nil {
-		e.hub.Publish(*result.QueuedEvent)
-	}
 	e.TryDrainQueued(childID)
 	return &SubmitResult{Queued: true, Duplicate: result.Duplicate, ClientMessageID: clientID, Status: string(result.Input.Status)}, nil
 }

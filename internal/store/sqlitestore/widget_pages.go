@@ -32,7 +32,7 @@ func (s *Store) OpenWidgetPage(ctx context.Context, itemID, scope, revision, tar
 		return nil, store.ErrInvalidWidgetData
 	}
 	var page *store.WidgetPage
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var found string
 		if err := tx.QueryRowContext(ctx, `SELECT r.hash FROM studio_item_revisions r JOIN studio_items i ON i.id=r.item_id WHERE i.id=? AND i.kind='widget' AND i.deleted=0 AND i.archived_at=0 AND r.hash=?`, itemID, revision).Scan(&found); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -67,7 +67,7 @@ func (s *Store) WriteWidgetPage(ctx context.Context, id, target string, expected
 		return nil, store.ErrInvalidWidgetData
 	}
 	var result *store.WidgetData
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		p, err := scanWidgetPage(tx.QueryRowContext(ctx, `SELECT `+pageColumns+` FROM widget_pages WHERE id=? AND target_id=?`, id, target))
 		if err != nil {
 			return err
@@ -98,7 +98,7 @@ func (s *Store) SetWidgetPageInteraction(ctx context.Context, target string, def
 	return err
 }
 func (s *Store) CloseWidgetPages(ctx context.Context, itemID, scope string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE item_id=? AND scope=?`, itemID, scope); err != nil {
 			return err
 		}

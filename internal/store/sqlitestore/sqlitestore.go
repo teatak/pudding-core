@@ -21,8 +21,17 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
-	mu sync.Mutex
+	db           *sql.DB
+	mu           sync.Mutex
+	publishEvent func(event.Event)
+}
+
+// SetEventPublisher installs the daemon's nonblocking event transport. It must
+// not call back into Store: commit and delivery share the store's write lock.
+func (s *Store) SetEventPublisher(publish func(event.Event)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publishEvent = publish
 }
 
 func Open(path string) (*Store, error) { return OpenWithHome(path, filepath.Dir(path)) }
@@ -113,7 +122,7 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project) error
 	if err := store.NormalizeProject(project); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now()
 		project.CreatedAt, project.UpdatedAt, project.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
@@ -155,7 +164,7 @@ func (s *Store) UpdateProject(ctx context.Context, id string, upd store.ProjectU
 		return nil, err
 	}
 	var out *store.Project
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		project, err := getProjectTx(ctx, tx, id)
 		if err != nil {
 			return err
@@ -195,7 +204,7 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 		return nil, store.ErrInvalidProject
 	}
 	var out *store.Project
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		target, err := getProjectTx(ctx, tx, targetID)
 		if err != nil {
 			return err
@@ -240,7 +249,7 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 }
 
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET project_id='' WHERE project_id=?`, id); err != nil {
 			return err
 		}
@@ -263,7 +272,7 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 	if err := store.NormalizeSessionProviderModel(sess); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return createSessionTx(ctx, tx, sess)
 	})
 }
@@ -291,7 +300,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 		return nil, err
 	}
 	var out *store.Session
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		source, err := getSessionTx(ctx, tx, in.SourceSessionID)
 		if err != nil {
 			return err
@@ -465,7 +474,7 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		return nil, err
 	}
 	var out *store.Session
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		sess, err := getSessionAnyTx(ctx, tx, id)
 		if err != nil {
 			return err
@@ -536,7 +545,7 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 
 func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, error) {
 	var out *store.Session
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if parentID, err := parentSessionIDTx(ctx, tx, id); err != nil {
 			return err
 		} else if parentID != "" {
@@ -562,7 +571,7 @@ func (s *Store) ArchiveSession(ctx context.Context, id string) (*store.Session, 
 }
 
 func (s *Store) PrepareSessionDeletion(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionAnyTx(ctx, tx, id); err != nil {
 			return err
 		}
@@ -589,7 +598,7 @@ func archiveSessionGroupTx(ctx context.Context, tx *sql.Tx, id string, now time.
 
 func (s *Store) RestoreSession(ctx context.Context, id string) (*store.Session, error) {
 	var out *store.Session
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if parentID, err := parentSessionIDTx(ctx, tx, id); err != nil {
 			return err
 		} else if parentID != "" {
@@ -655,7 +664,7 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 }
 
 func (s *Store) deleteSession(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
 			return err
 		}
@@ -703,7 +712,7 @@ func (s *Store) GrantComputerApp(ctx context.Context, sessionID, appID string) e
 	if sessionID == "" || appID == "" {
 		return store.ErrInvalidComputerAppGrant
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionAnyTx(ctx, tx, sessionID); err != nil {
 			return err
 		}
@@ -717,7 +726,7 @@ func (s *Store) GrantComputerApp(ctx context.Context, sessionID, appID string) e
 
 func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.BeginTurnResult, error) {
 	var out *store.BeginTurnResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -811,7 +820,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 
 func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInput) (*store.BeginSystemTurnResult, error) {
 	var out *store.BeginSystemTurnResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -918,7 +927,11 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 
 func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
 	var out *store.QueueInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error { var err error; out, err = queueInputTx(ctx, tx, in); return err })
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = queueInputTx(ctx, tx, in)
+		return err
+	})
 	return out, err
 }
 
@@ -1028,7 +1041,7 @@ func (s *Store) HasQueuedInputs(ctx context.Context, sessionID string) (bool, er
 
 func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInputInput) (*store.UpdateQueuedInputResult, error) {
 	var out *store.UpdateQueuedInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		input, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID)
 		if err != nil {
 			return err
@@ -1075,7 +1088,7 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 
 func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputInput) (*store.SteerQueuedInputResult, error) {
 	var out *store.SteerQueuedInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		turn, err := getTurnTx(ctx, tx, in.TurnID)
 		if err != nil {
 			return err
@@ -1181,7 +1194,7 @@ func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputI
 
 func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
 	var out *store.PromoteQueuedInputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -1298,7 +1311,7 @@ func (s *Store) QueuedSessions(ctx context.Context) ([]string, error) {
 
 func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*store.FinishTurnResult, error) {
 	var out *store.FinishTurnResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		turn, err := getTurnTx(ctx, tx, in.TurnID)
 		if err != nil {
 			return err
@@ -1392,7 +1405,7 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 
 func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputInput) (*store.AppendTurnOutputResult, error) {
 	var out *store.AppendTurnOutputResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		turn, err := getTurnTx(ctx, tx, in.TurnID)
 		if err != nil {
 			return err
@@ -1449,7 +1462,7 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 
 func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInput) (*store.AppendTurnSteerResult, error) {
 	var out *store.AppendTurnSteerResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		turn, err := getTurnTx(ctx, tx, in.TurnID)
 		if err != nil {
 			return err
@@ -1521,7 +1534,7 @@ func (s *Store) ApplyTurnSteers(ctx context.Context, in store.ApplyTurnSteersInp
 	if len(in.Events) != len(in.MessageIDs) {
 		return store.ErrNotFound
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		turn, err := getTurnTx(ctx, tx, in.TurnID)
 		if err != nil {
 			return err
@@ -1576,7 +1589,7 @@ func (s *Store) ApplyTurnSteers(ctx context.Context, in store.ApplyTurnSteersInp
 
 func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompactSummaryInput) (*store.AppendCompactSummaryResult, error) {
 	var out *store.AppendCompactSummaryResult
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
 			return err
 		}
@@ -1696,7 +1709,7 @@ func (s *Store) RecordUsage(ctx context.Context, in store.UsageRecordInput) (*st
 	outputReasoning := clampNonNegative(in.OutputReasoningTokens)
 	model := in.Model
 
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO usage(
 				hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
@@ -1787,7 +1800,7 @@ func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in sto
 	outputContent := clampNonNegative(in.OutputContentTokens)
 	outputReasoning := clampNonNegative(in.OutputReasoningTokens)
 
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 			return err
 		}
@@ -2212,7 +2225,7 @@ func (s *Store) RemoveAttachmentsByOrigin(ctx context.Context, sessionID, origin
 	sessionID = strings.TrimSpace(sessionID)
 	origin = strings.TrimSpace(origin)
 	out := &store.AttachmentCleanupResult{}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 			return err
 		}
@@ -2526,18 +2539,32 @@ func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, er
 	return project, nil
 }
 
-func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
+type transactionEventsKey struct{}
+
+func (s *Store) tx(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if err := fn(tx); err != nil {
+	var events []event.Event
+	ctx = context.WithValue(ctx, transactionEventsKey{}, &events)
+	if err := fn(ctx, tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Keep allocation, commit and nonblocking delivery under the same lock.
+	// Callers can do follow-up work after returning without reordering seq.
+	if s.publishEvent != nil {
+		for _, ev := range events {
+			s.publishEvent(ev)
+		}
+	}
+	return nil
 }
 
 func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
@@ -2727,6 +2754,10 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, ev *event.Event) error {
 	if !ev.Persistent() {
 		return nil
 	}
+	events, ok := ctx.Value(transactionEventsKey{}).(*[]event.Event)
+	if !ok {
+		return errors.New("persisted event requires a store transaction")
+	}
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(seq),0)+1 FROM events WHERE session_id=?`, ev.SessionID,
@@ -2752,6 +2783,13 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, ev *event.Event) error {
 			return err
 		}
 	}
+	// Use exactly the serialized event written to SQLite, independent of
+	// subsequent mutations to the caller's returned event or its slices.
+	var committed event.Event
+	if err := json.Unmarshal(payload, &committed); err != nil {
+		return err
+	}
+	*events = append(*events, committed)
 	return nil
 }
 

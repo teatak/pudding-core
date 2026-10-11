@@ -10,7 +10,7 @@ import (
 
 func (s *Store) ReorderQueuedInputs(ctx context.Context, sessionID string, ids []string) (*store.ReorderQueuedInputsResult, error) {
 	out := &store.ReorderQueuedInputsResult{}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 			return err
 		}

@@ -32,7 +32,7 @@ func scanWidgetAction(row messageScanner) (*store.WidgetAction, error) {
 }
 func (s *Store) CreateWidgetAction(ctx context.Context, a *store.WidgetAction) (*store.WidgetAction, error) {
 	var out *store.WidgetAction
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		old, err := scanWidgetAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM widget_actions WHERE item_id=? AND client_request_id=?`, a.ItemID, a.ClientRequestID))
 		if err == nil {
 			if old.RequestHash != a.RequestHash {
@@ -78,7 +78,7 @@ func (s *Store) ListWidgetActions(ctx context.Context, wid string) ([]*store.Wid
 	return out, rows.Err()
 }
 func (s *Store) ClaimWidgetAction(ctx context.Context, wid, id string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		a, err := scanWidgetAction(tx.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM widget_actions WHERE item_id=? AND id=?`, wid, id))
 		if err != nil {
 			return err
@@ -98,7 +98,7 @@ func (s *Store) FinishWidgetAction(ctx context.Context, wid, id, state string, r
 	if state != "succeeded" && state != "failed" && state != "unknown" {
 		return store.ErrStudioItemConflict
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		r, err := tx.ExecContext(ctx, `UPDATE widget_actions SET state=?,result=? WHERE item_id=? AND id=? AND state='executing'`, state, string(result), wid, id)
 		if err != nil {
 			return err

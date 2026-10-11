@@ -69,7 +69,7 @@ func (s *Store) GetStudioItem(ctx context.Context, id string) (*store.StudioItem
 	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, id))
 }
 func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error { return createStudioItemTx(ctx, tx, w) })
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error { return createStudioItemTx(ctx, tx, w) })
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func createStudioItemTx(ctx context.Context, tx *sql.Tx, w *store.StudioItem) er
 	return err
 }
 func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expected int64) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if w.ActiveRevision != "" {
 			var receipt string
 			if err := tx.QueryRowContext(ctx, `SELECT build_receipt FROM studio_item_revisions WHERE item_id=? AND hash=?`, w.ID, w.ActiveRevision).Scan(&receipt); err != nil {
@@ -120,7 +120,7 @@ func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expec
 	return s.GetStudioItem(ctx, w.ID)
 }
 func (s *Store) SaveStudioItemRevision(ctx context.Context, r *store.StudioItemRevision, baseHash string) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error { return saveStudioItemRevisionTx(ctx, tx, r, baseHash) })
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error { return saveStudioItemRevisionTx(ctx, tx, r, baseHash) })
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (s *Store) GetStudioItemRevision(ctx context.Context, id, hash string) (*st
 	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
 }
 func (s *Store) PutWidgetBuildReceipt(ctx context.Context, id, hash string, receipt json.RawMessage) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `UPDATE studio_item_revisions SET build_receipt=? WHERE item_id=? AND hash=?`, string(receipt), id, hash)
 		if err != nil {
 			return err

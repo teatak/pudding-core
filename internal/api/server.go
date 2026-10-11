@@ -1079,9 +1079,6 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if res.Event != nil {
-		s.hub.Publish(*res.Event)
-	}
 	if res.Input != nil && (res.Input.Status == store.QueuedInputQueued || res.Input.Status == store.QueuedInputCancelled) {
 		s.engine.TryDrainQueued(id)
 	}

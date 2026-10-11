@@ -51,7 +51,7 @@ func (s *Store) CreateDocument(ctx context.Context, item *store.StudioItem, body
 		return nil, &store.InvalidDocument{Message: "document kind required"}
 	}
 	var out *store.DocumentContent
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
 		}
@@ -100,7 +100,7 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 	}{in, in.Author})
 	requestHash := store.DocumentHash(string(payload))
 	var out *store.DocumentContent
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
 			return err
 		}

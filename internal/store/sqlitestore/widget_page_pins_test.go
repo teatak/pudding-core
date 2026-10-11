@@ -138,7 +138,7 @@ func TestWidgetPagePinsMigrationPreservesStateAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := errors.New("rollback")
-	if err = s.tx(ctx, func(tx *sql.Tx) error {
+	if err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := migrateWidgetPagePins(tx); err != nil {
 			return err
 		}

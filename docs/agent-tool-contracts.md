@@ -163,6 +163,11 @@ macOS 默认命令环境按 `DEVELOPER_DIR` 或 `xcode-select --print-path` 选�
 
 pnpm 默认 store 来自既有隔离 `PNPM_HOME`，不再向所有包管理器注入 pnpm 专用的
 `npm_config_store_dir`，也不再将这个变量视为隐式授权的沙箱路径。
+macOS 隔离的 `COREPACK_HOME` 初始没有宿主的 lastKnownGood；默认设置
+`COREPACK_DEFAULT_TO_LATEST=0`，无版本约束的项目沿用隔离缓存的已知版本（空缓存使用
+Corepack 内置版本），不自动升级到注册表最新版。项目 `packageManager`、显式版本和调用方的该环境变量仍优先，缓存只在
+原有沙箱目录内写入。旧 Corepack 对显式 pnpm 11+ 的入口不兼容需要更新 Corepack，
+不通过修改包入口或开放宿主缓存规避；见 [上游修复](https://github.com/nodejs/corepack/pull/776)。
 
 实现：[macOS 命令沙箱](../internal/tool/command_runner_darwin.go)。
 

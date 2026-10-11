@@ -24,9 +24,6 @@ func (s *Server) reorderQueuedInputs(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	for _, ev := range res.Events {
-		s.hub.Publish(ev)
-	}
 	// Moving an editing head can unblock the next queued input.
 	s.engine.TryDrainQueued(id)
 	c.JSON(http.StatusOK, map[string]any{"queuedInputs": res.Inputs})

@@ -102,6 +102,10 @@ turn.started → turn.delta / turn.tool / … → turn.completed | turn.failed |
 
 当前持久化 lifecycle 事件带 session 内单调递增 seq，作为 SSE `id`；`Last-Event-ID` 或 `?after=` 用于续传。`turn.delta`、`turn.tool` 等即时事件不落库、无 seq，不能声称断线后可逐 token 重放。历史和最终内容通过 canonical 快照恢复。
 
+持久事件由 Store 在事务提交成功后统一交给 Hub；序号分配、提交与非阻塞发布共用写锁。
+Engine 和 API 不再自行发布返回的持久事件，避免并发调用方在提交后发布颠倒、使 SSE
+去重跳过较小序号。事务回滚或提交失败不发布；即时事件仍由原调用方直接交给 Hub。
+
 新连接默认从尾部订阅；消息历史由 messages API 读取。overlay 在终态及对应 canonical 数据可见后对账清除。`turn.delta.part` 已区分 text/thought，工具流使用 `turn.tool`；原先拟议的 `partType`、`estimatedSteps` 和 `turn.progress` 不是现行协议。
 
 注意：`AGENTS.md` 第 12 条概括为“session 事件带 seq”，而实现仅持久化事件带 seq；这里明确记录该范围差异，本次整理不改协议或硬约束。

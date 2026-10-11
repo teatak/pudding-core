@@ -205,9 +205,6 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 	if err != nil {
 		return nil, err
 	}
-	if res.Event != nil {
-		e.hub.Publish(*res.Event)
-	}
 	slog.Info("engine: context compacted", "sessionID", sessionID, "beforeInputEstimate", before, "afterInputEstimate", after, "sourceMessages", len(cold), "tailMessages", len(tail))
 	return &CompactResult{TurnID: turnID, SummaryMessageID: summaryID, Status: string(res.Turn.Status),
 		SourceMessages: len(cold), TailMessages: len(tail), SummaryChars: len([]rune(summary))}, nil
