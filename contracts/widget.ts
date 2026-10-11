@@ -251,7 +251,13 @@ export const widgetInteractionConnect = z
   })
   .strict();
 export const widgetSessionCandidates = z.object({
-  sessions: z.array(z.object({ id: z.string(), name: z.string() })),
+  sessions: z.array(z.object({
+    id: z.string(), name: z.string(),
+    participantID: z.string().optional(),
+    // Host presentation metadata, derived from the session and provider config.
+    // Credentials and routing settings are never exposed to a widget.
+    model: z.object({ id: z.string(), name: z.string(), icon: z.string() }),
+  })),
   preferredSessionIDs: z.array(z.string()),
   maxSessions: z.number().int().positive(),
 });
