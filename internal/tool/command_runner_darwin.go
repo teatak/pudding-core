@@ -384,7 +384,6 @@ func sandboxEnvironment(env []string, stateRoot string) []string {
 	out = sandboxSetEnv(out, "NPM_CONFIG_PREFIX", npmPrefix)
 	out = sandboxSetEnv(out, "NPM_CONFIG_USERCONFIG", filepath.Join(stateRoot, "config", "npm-user.conf"))
 	out = sandboxSetEnv(out, "NPM_CONFIG_GLOBALCONFIG", filepath.Join(stateRoot, "config", "npm-global.conf"))
-	out = sandboxSetEnv(out, "npm_config_store_dir", filepath.Join(cacheDir, "pnpm-store"))
 	out = sandboxSetEnv(out, "PNPM_HOME", pnpmHome)
 	out = sandboxSetEnv(out, "COREPACK_HOME", filepath.Join(cacheDir, "corepack"))
 	out = sandboxSetEnv(out, "YARN_CACHE_FOLDER", filepath.Join(cacheDir, "yarn"))

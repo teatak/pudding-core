@@ -163,5 +163,5 @@ func commandEnvironment(custom map[string]string) ([]string, error) {
 		value := values[key]
 		out = append(out, value.key+"="+value.value)
 	}
-	return out, nil
+	return platformCommandEnvironment(out)
 }

@@ -1247,7 +1247,6 @@ func sandboxManagedPath(path string) bool {
 		"$COREPACK_HOME",
 		"$NODE_REPL_HISTORY",
 		"$NODE_PATH",
-		"$npm_config_store_dir",
 		"$YARN_CACHE_FOLDER",
 		"$YARN_GLOBAL_FOLDER",
 		"$PIP_CACHE_DIR",

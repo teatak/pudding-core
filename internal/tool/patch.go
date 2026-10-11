@@ -68,24 +68,33 @@ type preparedPatch struct {
 }
 
 type preparedPatchFile struct {
-	Path      string
-	Target    string
-	Operation string
-	Existed   bool
-	Delete    bool
-	OldText   string
-	NewText   string
-	OldHash   string
-	Mode      os.FileMode
-	Additions int
-	Deletions int
+	Path       string
+	Target     string
+	Operation  string
+	Existed    bool
+	Delete     bool
+	OldText    string
+	NewText    string
+	OldHash    string
+	Mode       os.FileMode
+	Additions  int
+	Deletions  int
+	LineRanges []patchLineRange
 }
 
 type patchFileView struct {
-	Path      string `json:"path"`
-	Operation string `json:"operation"`
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
+	Path       string           `json:"path"`
+	Operation  string           `json:"operation"`
+	Additions  int              `json:"additions"`
+	Deletions  int              `json:"deletions"`
+	LineRanges []patchLineRange `json:"lineRanges"`
+}
+
+// Coordinates refer to the resulting file. A zero-length range marks the
+// post-patch deletion boundary, including one past EOF; deleted files have none.
+type patchLineRange struct {
+	StartLine int `json:"startLine"`
+	LineCount int `json:"lineCount"`
 }
 
 type patchError struct {
@@ -241,12 +250,13 @@ func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 		if totalBytes > patchMaxTotalBytes {
 			return nil, newPatchLimitError("patch_too_large", "patch source and destination text exceeds 2 MiB", "combined_source_destination_bytes", "bytes", int64(totalBytes), patchMaxTotalBytes)
 		}
-		fileDiff, additions, deletions, err := buildUnifiedFileDiff(file)
+		fileDiff, additions, deletions, ranges, err := buildUnifiedFileDiff(file)
 		if err != nil {
 			return nil, newPatchError("diff_failed", err.Error())
 		}
 		file.Additions = additions
 		file.Deletions = deletions
+		file.LineRanges = ranges
 		diffs.WriteString(fileDiff)
 		if diffs.Len() > patchMaxDiffBytes {
 			return nil, newPatchLimitError("patch_diff_too_large", "review diff exceeds 256 KiB; split the change into smaller batches", "review_diff_bytes", "bytes", int64(diffs.Len()), patchMaxDiffBytes)
@@ -647,10 +657,11 @@ func patchPayload(patch *preparedPatch) map[string]any {
 	for _, file := range patch.Files {
 		destructive = destructive || file.Delete
 		files = append(files, patchFileView{
-			Path:      file.Path,
-			Operation: file.Operation,
-			Additions: file.Additions,
-			Deletions: file.Deletions,
+			Path:       file.Path,
+			Operation:  file.Operation,
+			Additions:  file.Additions,
+			Deletions:  file.Deletions,
+			LineRanges: file.LineRanges,
 		})
 	}
 	payload := map[string]any{
@@ -771,22 +782,35 @@ func patchContentHash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func buildUnifiedFileDiff(file preparedPatchFile) (string, int, int, error) {
+func buildUnifiedFileDiff(file preparedPatchFile) (string, int, int, []patchLineRange, error) {
 	dmp := diffmatchpatch.New()
 	left, right, lines := dmp.DiffLinesToChars(file.OldText, file.NewText)
 	diffs := dmp.DiffCharsToLines(dmp.DiffMain(left, right, false), lines)
 	chunks := make([]formatdiff.Chunk, 0, len(diffs))
 	additions := 0
 	deletions := 0
+	ranges := make([]patchLineRange, 0)
+	newLine := 1
+	changing := false
 	for _, item := range diffs {
+		count := patchLineCount(item.Text)
 		operation := formatdiff.Equal
+		if item.Type != diffmatchpatch.DiffEqual && !changing {
+			ranges = append(ranges, patchLineRange{StartLine: newLine})
+			changing = true
+		}
 		switch item.Type {
 		case diffmatchpatch.DiffInsert:
 			operation = formatdiff.Add
-			additions += patchLineCount(item.Text)
+			additions += count
+			ranges[len(ranges)-1].LineCount += count
+			newLine += count
 		case diffmatchpatch.DiffDelete:
 			operation = formatdiff.Delete
-			deletions += patchLineCount(item.Text)
+			deletions += count
+		case diffmatchpatch.DiffEqual:
+			newLine += count
+			changing = false
 		}
 		chunks = append(chunks, patchDiffChunk{content: item.Text, operation: operation})
 	}
@@ -805,9 +829,12 @@ func buildUnifiedFileDiff(file preparedPatchFile) (string, int, int, error) {
 	patch := patchDiffPatch{files: []formatdiff.FilePatch{patchDiffFilePatch{from: from, to: to, chunks: chunks}}}
 	var output strings.Builder
 	if err := formatdiff.NewUnifiedEncoder(&output, formatdiff.DefaultContextLines).Encode(patch); err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, nil, err
 	}
-	return output.String(), additions, deletions, nil
+	if file.Delete {
+		ranges = []patchLineRange{}
+	}
+	return output.String(), additions, deletions, ranges, nil
 }
 
 func patchLineCount(text string) int {

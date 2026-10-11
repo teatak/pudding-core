@@ -267,7 +267,7 @@ func TestLargeModelResultKeepsArgumentAndRecoveryDiagnostics(t *testing.T) {
 		"truncated": true, "padding": strings.Repeat("x", 20000),
 		"recovery": map[string]any{
 			"path": "notes.txt", "hunk": 1, "startLine": 37, "fileLineCount": 81,
-			"exactMatchCount": 1, "candidateStartLines": []int{36}, "context": strings.Repeat("y", 20000),
+			"exactMatchCount": 1, "candidates": []map[string]any{{"startLine": 36, "context": strings.Repeat("z", 20000)}}, "context": strings.Repeat("y", 20000),
 		},
 	}
 	got := ModelResultContent(FilePatch, false, jsonString(diagnostics), "t1", "c1", true)
@@ -278,10 +278,25 @@ func TestLargeModelResultKeepsArgumentAndRecoveryDiagnostics(t *testing.T) {
 		}
 	}
 	recovery := fields["recovery"].(map[string]any)
-	if recovery["path"] != "notes.txt" || recovery["exactMatchCount"] != float64(1) || string(resultJSON(recovery["candidateStartLines"])) != "[36]" || recovery["context"] != nil {
+	if recovery["path"] != "notes.txt" || recovery["exactMatchCount"] != float64(1) || string(resultJSON(recovery["candidates"])) != `[{"startLine":36}]` || recovery["context"] != nil {
 		t.Fatalf("preview discarded candidate coordinates or kept oversized context: %s", got)
 	}
 	if fields["preview_only"] != true || fields["result_ref"].(map[string]any)["call_id"] != "c1" {
 		t.Fatalf("preview lost canonical readback: %s", got)
+	}
+}
+
+func TestLargePatchPreviewKeepsReadableCandidateContext(t *testing.T) {
+	context := []map[string]any{{"line": 35, "text": "before"}, {"line": 36, "text": "old"}, {"line": 37, "text": "after"}}
+	original := jsonString(map[string]any{
+		"ok": false, "reason": "hunk_lines_mismatch", "detail": "wrong coordinates", "padding": strings.Repeat("x", 20000),
+		"recovery": map[string]any{"path": "notes.txt", "hunk": 1, "startLine": 1, "exactMatchCount": 1, "candidates": []map[string]any{{"startLine": 36, "context": context}}},
+	})
+	preview := ModelResultContent(FilePatch, false, original, "turn", "call", true)
+	fields := decodeToolResult(t, Result{Content: preview})
+	recovery := fields["recovery"].(map[string]any)
+	candidate := recovery["candidates"].([]any)[0].(map[string]any)
+	if string(resultJSON(candidate["context"])) != string(resultJSON(context)) || candidate["startLine"] != float64(36) || fields["head"] != nil || fields["tail"] != nil || len(preview) > modelResultMaxChars {
+		t.Fatalf("structured patch preview lost context or duplicated raw JSON: %s", preview)
 	}
 }

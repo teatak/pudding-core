@@ -104,13 +104,28 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 		// Keep the exact candidate coordinates even when diagnostic source lines
 		// require a preview. The canonical result remains the source for readback.
 		coordinates := make(map[string]json.RawMessage)
-		for _, key := range []string{"path", "hunk", "startLine", "fileLineCount", "exactMatchCount", "candidateStartLines", "candidatesTruncated"} {
+		for _, key := range []string{"path", "hunk", "startLine", "fileLineCount", "exactMatchCount", "candidatesTruncated", "mismatch", "context"} {
 			if value, exists := recovery[key]; exists && len(value) <= 1024 {
 				coordinates[key] = value
 			}
 		}
+		var candidates []map[string]json.RawMessage
+		if json.Unmarshal(recovery["candidates"], &candidates) == nil {
+			candidates = candidates[:min(len(candidates), patchRecoveryMaxCandidates)]
+			for _, candidate := range candidates {
+				for key, value := range candidate {
+					if (key != "startLine" && key != "context") || len(value) > 1024 {
+						delete(candidate, key)
+					}
+				}
+			}
+			coordinates["candidates"] = resultJSON(candidates)
+		}
 		if len(coordinates) > 0 {
 			preview["recovery"] = coordinates
+		}
+		if name == FilePatch {
+			return jsonString(preview)
 		}
 	}
 	runes := []rune(content)

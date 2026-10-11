@@ -20,7 +20,7 @@ type patchRecoveryPayload struct {
 		StartLine           int
 		FileLineCount       int
 		ExactMatchCount     int
-		CandidateStartLines []int
+		Candidates          []patchRecoveryCandidate
 		CandidatesTruncated bool
 		Mismatch            *struct {
 			Line              int
@@ -65,7 +65,7 @@ func TestFilePatchHunkRecoveryRequiresExplicitCorrection(t *testing.T) {
 	args := map[string]any{"scope": "project", "files": []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": hunks}}}
 	failed := patchTestCall(runner, "session_recovery", root, FilePatch, args)
 	payload := decodePatchRecovery(t, failed)
-	if payload.Recovery.Hunk != 2 || !slices.Equal(payload.Recovery.CandidateStartLines, []int{2, 4}) || !strings.Contains(payload.Hint, "disambiguate") {
+	if payload.Recovery.Hunk != 2 || !slices.Equal(patchCandidateStarts(payload.Recovery.Candidates), []int{2, 4}) || !strings.Contains(payload.Hint, "disambiguate") {
 		t.Fatalf("second hunk must report both ambiguous targets: %s", failed.Content)
 	}
 	if got := readPatchTestFile(t, path); got != original {
@@ -94,7 +94,7 @@ func TestFilePatchHunkRecoveryBounds(t *testing.T) {
 		}}},
 	})
 	r := decodePatchRecovery(t, result).Recovery
-	if r.ExactMatchCount != 7 || !slices.Equal(r.CandidateStartLines, []int{2, 3, 4, 5, 6}) || !r.CandidatesTruncated || len(r.Context) != 5 {
+	if r.ExactMatchCount != 7 || !slices.Equal(patchCandidateStarts(r.Candidates), []int{2, 3, 4, 5, 6}) || !r.CandidatesTruncated || len(r.Context) != 5 {
 		t.Fatalf("overlapping exact matches must be counted but bounded: %s", result.Content)
 	}
 	longLine := strings.Repeat("界", 1000)
@@ -208,7 +208,7 @@ func TestFilePatchHunkRecovery(t *testing.T) {
 			if payload.Reason != wantReason || r.Path != "notes.txt" || r.Hunk != 1 || r.StartLine != tc.start || r.FileLineCount != tc.lineCount {
 				t.Fatalf("incorrect recovery location: %s", result.Content)
 			}
-			if r.ExactMatchCount != len(tc.candidates) || !slices.Equal(r.CandidateStartLines, tc.candidates) || r.CandidatesTruncated {
+			if r.ExactMatchCount != len(tc.candidates) || !slices.Equal(patchCandidateStarts(r.Candidates), tc.candidates) || r.CandidatesTruncated {
 				t.Fatalf("incorrect exact candidates: %s", result.Content)
 			}
 			if tc.mismatchLine == 0 {
@@ -236,4 +236,12 @@ func TestFilePatchHunkRecovery(t *testing.T) {
 			assertNoPatchTempFiles(t, root)
 		})
 	}
+}
+
+func patchCandidateStarts(candidates []patchRecoveryCandidate) []int {
+	starts := make([]int, 0, len(candidates))
+	for _, candidate := range candidates {
+		starts = append(starts, candidate.StartLine)
+	}
+	return starts
 }

@@ -343,7 +343,7 @@ func TestMacOSCommandSandboxRunsGitStatusWithoutUserConfig(t *testing.T) {
 		Env:         mustCommandEnvironment(t),
 		ProjectDirs: []string{project},
 	})
-	if result.exitCode != 0 {
+	if result.exitCode != 0 || strings.Contains(result.stderr, "xcrun_db") || strings.Contains(strings.ToLower(result.stderr), "operation not permitted") {
 		t.Fatalf("git status failed without user config: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 	}
 }
@@ -368,22 +368,21 @@ func TestMacOSCommandSandboxEnvironmentIsolatesGitConfig(t *testing.T) {
 		}
 	}
 	wantPaths := map[string]string{
-		"GOPATH":               filepath.Join(stateRoot, "go"),
-		"GOMODCACHE":           filepath.Join(stateRoot, "go", "pkg", "mod"),
-		"GOCACHE":              filepath.Join(stateRoot, "cache", "go-build"),
-		"NPM_CONFIG_CACHE":     filepath.Join(stateRoot, "cache", "npm"),
-		"NPM_CONFIG_PREFIX":    filepath.Join(stateRoot, "node", "npm-prefix"),
-		"npm_config_store_dir": filepath.Join(stateRoot, "cache", "pnpm-store"),
-		"PNPM_HOME":            filepath.Join(stateRoot, "node", "pnpm-home"),
-		"COREPACK_HOME":        filepath.Join(stateRoot, "cache", "corepack"),
-		"YARN_CACHE_FOLDER":    filepath.Join(stateRoot, "cache", "yarn"),
-		"YARN_GLOBAL_FOLDER":   filepath.Join(stateRoot, "node", "yarn-global"),
-		"NODE_REPL_HISTORY":    filepath.Join(stateRoot, "node", "repl_history"),
-		"NODE_PATH":            filepath.Join(stateRoot, "node", "npm-prefix", "lib", "node_modules"),
-		"PIP_CACHE_DIR":        filepath.Join(stateRoot, "cache", "pip"),
-		"UV_CACHE_DIR":         filepath.Join(stateRoot, "cache", "uv"),
-		"PYTHONUSERBASE":       filepath.Join(stateRoot, "python"),
-		"PYTHONPYCACHEPREFIX":  filepath.Join(stateRoot, "cache", "python-bytecode"),
+		"GOPATH":              filepath.Join(stateRoot, "go"),
+		"GOMODCACHE":          filepath.Join(stateRoot, "go", "pkg", "mod"),
+		"GOCACHE":             filepath.Join(stateRoot, "cache", "go-build"),
+		"NPM_CONFIG_CACHE":    filepath.Join(stateRoot, "cache", "npm"),
+		"NPM_CONFIG_PREFIX":   filepath.Join(stateRoot, "node", "npm-prefix"),
+		"PNPM_HOME":           filepath.Join(stateRoot, "node", "pnpm-home"),
+		"COREPACK_HOME":       filepath.Join(stateRoot, "cache", "corepack"),
+		"YARN_CACHE_FOLDER":   filepath.Join(stateRoot, "cache", "yarn"),
+		"YARN_GLOBAL_FOLDER":  filepath.Join(stateRoot, "node", "yarn-global"),
+		"NODE_REPL_HISTORY":   filepath.Join(stateRoot, "node", "repl_history"),
+		"NODE_PATH":           filepath.Join(stateRoot, "node", "npm-prefix", "lib", "node_modules"),
+		"PIP_CACHE_DIR":       filepath.Join(stateRoot, "cache", "pip"),
+		"UV_CACHE_DIR":        filepath.Join(stateRoot, "cache", "uv"),
+		"PYTHONUSERBASE":      filepath.Join(stateRoot, "python"),
+		"PYTHONPYCACHEPREFIX": filepath.Join(stateRoot, "cache", "python-bytecode"),
 	}
 	for key, want := range wantPaths {
 		if got := sandboxEnvValue(env, key); got != want {

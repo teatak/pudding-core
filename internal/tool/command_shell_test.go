@@ -88,6 +88,12 @@ func TestAnalyzeShellCommandRejectsMalformedAndBackgroundCommands(t *testing.T) 
 	}
 }
 
+func TestRemovedPNPMStoreOverrideIsNotASandboxManagedPath(t *testing.T) {
+	if sandboxManagedPath("$npm_config_store_dir") || sandboxManagedPath("$npm_config_store_dir/package") {
+		t.Fatal("removed pnpm configuration must not remain an implicit path grant")
+	}
+}
+
 func TestCommandVerificationArgvRequiresOneStaticCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		if argv := commandVerificationArgv("go test ./..."); len(argv) != 0 {

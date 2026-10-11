@@ -14,10 +14,15 @@ type patchHunkRecovery struct {
 	StartLine           int                        `json:"startLine"`
 	FileLineCount       int                        `json:"fileLineCount"`
 	ExactMatchCount     int                        `json:"exactMatchCount"`
-	CandidateStartLines []int                      `json:"candidateStartLines"`
+	Candidates          []patchRecoveryCandidate   `json:"candidates"`
 	CandidatesTruncated bool                       `json:"candidatesTruncated,omitempty"`
 	Mismatch            *patchHunkMismatch         `json:"mismatch,omitempty"`
 	Context             []patchRecoveryContextLine `json:"context"`
+}
+
+type patchRecoveryCandidate struct {
+	StartLine int                        `json:"startLine"`
+	Context   []patchRecoveryContextLine `json:"context"`
 }
 
 type patchHunkMismatch struct {
@@ -42,10 +47,12 @@ func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg
 		Hunk:                index + 1,
 		StartLine:           hunk.StartLine,
 		FileLineCount:       len(lines),
-		CandidateStartLines: candidates,
+		Candidates:          make([]patchRecoveryCandidate, 0, len(candidates)),
 		ExactMatchCount:     count,
 		CandidatesTruncated: count > len(candidates),
-		Context:             make([]patchRecoveryContextLine, 0, patchRecoveryContextLines),
+	}
+	for _, start := range candidates {
+		recovery.Candidates = append(recovery.Candidates, patchRecoveryCandidate{StartLine: start, Context: patchRecoveryContext(lines, start-1)})
 	}
 	center := hunk.StartLine - 1
 	if mismatchOffset >= 0 {
@@ -55,13 +62,19 @@ func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg
 		mismatch.Actual, mismatch.ActualTruncated = truncateUTF8Bytes(lines[center].text, patchRecoveryLineBytes)
 		recovery.Mismatch = mismatch
 	}
+	recovery.Context = patchRecoveryContext(lines, center)
+	return &patchError{reason: reason, detail: detail, recovery: recovery}
+}
+
+func patchRecoveryContext(lines []patchTextLine, center int) []patchRecoveryContextLine {
+	context := make([]patchRecoveryContextLine, 0, patchRecoveryContextLines)
 	center = max(0, min(center, len(lines)-1))
 	end := min(len(lines), max(0, center-2)+patchRecoveryContextLines)
 	for i := max(0, end-patchRecoveryContextLines); i < end; i++ {
 		text, truncated := truncateUTF8Bytes(lines[i].text, patchRecoveryLineBytes)
-		recovery.Context = append(recovery.Context, patchRecoveryContextLine{Line: i + 1, Text: text, Truncated: truncated})
+		context = append(context, patchRecoveryContextLine{Line: i + 1, Text: text, Truncated: truncated})
 	}
-	return &patchError{reason: reason, detail: detail, recovery: recovery}
+	return context
 }
 
 func (r *patchHunkRecovery) hint() string {
