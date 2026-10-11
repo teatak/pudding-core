@@ -387,6 +387,9 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	if runErr != nil {
 		payload["error"] = runErr.Error()
 	}
+	if warning := commandPipelineWarning(args.Command); warning != nil {
+		payload["verificationWarning"] = warning
+	}
 	verificationKind := commandVerificationKind(commandVerificationArgv(args.Command))
 	if verificationKind != "" {
 		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)

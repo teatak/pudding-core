@@ -968,6 +968,7 @@ export const backgroundProcess = z.object({
   shell: z.string().optional(),
   exitCode: z.number().optional(),
   signal: z.string().optional(),
+  verificationWarning: z.object({ code: z.literal("pipeline_exit_status"), message: z.string() }).optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   reason: z.string().optional(),

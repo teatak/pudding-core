@@ -84,7 +84,7 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	for _, key := range []string{
 		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
 		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
-		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
+		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "verificationWarning", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
 	} {
 		if value, exists := fields[key]; exists && len(value) <= 1024 {
 			preview[key] = value
@@ -96,6 +96,20 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 			if json.Unmarshal(fields[key], &value) == nil {
 				preview[key] = modelCommandOutputPreview(value)
 			}
+		}
+		return jsonString(preview)
+	}
+	if name == FilePatch && ok {
+		for _, key := range []string{"status", "fileCount", "additions", "deletions", "destructive", "warnings", "widgetID", "draftHash"} {
+			if value, exists := fields[key]; exists && len(value) <= 1024 {
+				preview[key] = value
+			}
+		}
+		var files []patchFileView
+		if json.Unmarshal(fields["files"], &files) == nil {
+			shown := modelPatchFilePreviews(files)
+			preview["files"] = shown
+			preview["shown_files"] = len(shown)
 		}
 		return jsonString(preview)
 	}
@@ -132,6 +146,38 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	preview["head"] = string(runes[:modelResultHeadChars])
 	preview["tail"] = string(runes[len(runes)-modelResultTailChars:])
 	return jsonString(preview)
+}
+
+type modelPatchFilePreview struct {
+	patchFileView
+	LineRangesTruncated bool `json:"lineRangesTruncated,omitempty"`
+}
+
+func modelPatchFilePreviews(files []patchFileView) []modelPatchFilePreview {
+	shown := make([]modelPatchFilePreview, 0, len(files))
+	budget := modelResultHeadChars / max(1, len(files))
+	for _, file := range files {
+		item := modelPatchFilePreview{patchFileView: file}
+		low, high := 0, len(file.LineRanges)
+		for low < high {
+			count := (low + high + 1) / 2
+			item.LineRanges = file.LineRanges[:count]
+			item.LineRangesTruncated = count < len(file.LineRanges)
+			if utf8.RuneCountInString(jsonString(item)) <= budget {
+				low = count
+			} else {
+				high = count - 1
+			}
+		}
+		item.LineRanges = file.LineRanges[:low]
+		item.LineRangesTruncated = low < len(file.LineRanges)
+		candidate := append(shown, item)
+		if utf8.RuneCountInString(jsonString(candidate)) > modelResultHeadChars {
+			break
+		}
+		shown = candidate
+	}
+	return shown
 }
 
 func modelCommandOutputPreview(value string) map[string]any {

@@ -300,3 +300,63 @@ func TestLargePatchPreviewKeepsReadableCandidateContext(t *testing.T) {
 		t.Fatalf("structured patch preview lost context or duplicated raw JSON: %s", preview)
 	}
 }
+
+func TestLargeAppliedPatchPreviewKeepsFileRanges(t *testing.T) {
+	root := t.TempDir()
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	old, next := make([]string, 1200), make([]string, 1200)
+	for i := range old {
+		old[i] = fmt.Sprintf("original %d", i)
+		next[i] = old[i]
+		if i%2 == 0 {
+			next[i] = fmt.Sprintf("changed %d", i)
+		}
+	}
+	writeCommandTestFile(t, root, "large.txt", strings.Join(old, "\n")+"\n")
+	result := patchTestCall(runner, "preview", root, FilePatch, map[string]any{
+		"scope": "project", "files": []map[string]any{{"path": "large.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": old, "new_lines": next}}}},
+	})
+	if !result.Ok {
+		t.Fatalf("patch failed: %s", result.Content)
+	}
+	canonical := decodeToolResult(t, result)
+	preview := ModelResultContent(FilePatch, true, result.Content, "turn", "call", true)
+	fields := decodeToolResult(t, Result{Content: preview})
+	files, _ := fields["files"].([]any)
+	if fields["preview_only"] != true || fields["status"] != "applied" || len(files) != 1 {
+		t.Fatalf("applied patch preview lost structured file feedback: %.500s", preview)
+	}
+	file := files[0].(map[string]any)
+	ranges := file["lineRanges"].([]any)
+	allRanges := canonical["files"].([]any)[0].(map[string]any)["lineRanges"].([]any)
+	if file["path"] != "large.txt" || file["lineRangesTruncated"] != true || len(ranges) == 0 || len(ranges) >= len(allRanges) || string(resultJSON(ranges)) != string(resultJSON(allRanges[:len(ranges)])) {
+		t.Fatalf("ranges must be an explicitly truncated prefix of post-patch coordinates: %s", preview)
+	}
+	if fields["head"] != nil || fields["tail"] != nil || utf8.RuneCountInString(preview) > modelResultMaxChars {
+		t.Fatalf("patch preview is not structured and bounded: %s", preview)
+	}
+}
+
+func TestAppliedPatchPreviewBoundsFileMetadataWithoutTruncatingPaths(t *testing.T) {
+	files := make([]patchFileView, patchMaxFiles)
+	for i := range files {
+		files[i] = patchFileView{Path: strings.Repeat("界", 800) + fmt.Sprintf("%d.txt", i), Operation: "update", Additions: 1, Deletions: 1, LineRanges: []patchLineRange{{StartLine: 2, LineCount: 1}}}
+	}
+	canonical := jsonString(map[string]any{"ok": true, "status": "applied", "files": files, "fileCount": len(files)})
+	preview := ModelResultContent(FilePatch, true, canonical, "turn", "call", true)
+	fields := decodeToolResult(t, Result{Content: preview})
+	shown := fields["files"].([]any)
+	if len(shown) == 0 || len(shown) >= len(files) || fields["shown_files"] != float64(len(shown)) || fields["fileCount"] != float64(len(files)) || utf8.RuneCountInString(preview) > modelResultMaxChars {
+		t.Fatalf("file preview lacks bounded, explicit counts: %s", preview)
+	}
+	for i, item := range shown {
+		file := item.(map[string]any)
+		if file["path"] != files[i].Path || file["lineRangesTruncated"] != true {
+			t.Fatalf("file identity or truncation marker lost: %+v", file)
+		}
+	}
+	if ModelResultContent(FilePatch, true, canonical, "turn", "call", false) != canonical {
+		t.Fatal("patch preview requires an available canonical reader")
+	}
+}

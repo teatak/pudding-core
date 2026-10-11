@@ -37,24 +37,25 @@ const (
 var ErrBackgroundProcessNotFound = errors.New("background process not found")
 
 type BackgroundProcessSnapshot struct {
-	ProcessID     string     `json:"processID"`
-	TurnID        string     `json:"turnID,omitempty"`
-	CallID        string     `json:"callID,omitempty"`
-	Status        string     `json:"status"`
-	Running       bool       `json:"running"`
-	CWD           string     `json:"cwd"`
-	Command       string     `json:"command"`
-	Shell         string     `json:"shell,omitempty"`
-	ExitCode      *int       `json:"exitCode,omitempty"`
-	Signal        string     `json:"signal,omitempty"`
-	StartedAt     time.Time  `json:"startedAt"`
-	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
-	Reason        string     `json:"reason,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	Execution     string     `json:"execution"`
-	SandboxKind   string     `json:"sandboxKind,omitempty"`
-	SandboxDenied bool       `json:"sandboxDenied,omitempty"`
-	TTY           bool       `json:"tty,omitempty"`
+	ProcessID           string                      `json:"processID"`
+	TurnID              string                      `json:"turnID,omitempty"`
+	CallID              string                      `json:"callID,omitempty"`
+	Status              string                      `json:"status"`
+	Running             bool                        `json:"running"`
+	CWD                 string                      `json:"cwd"`
+	Command             string                      `json:"command"`
+	Shell               string                      `json:"shell,omitempty"`
+	ExitCode            *int                        `json:"exitCode,omitempty"`
+	Signal              string                      `json:"signal,omitempty"`
+	StartedAt           time.Time                   `json:"startedAt"`
+	FinishedAt          *time.Time                  `json:"finishedAt,omitempty"`
+	Reason              string                      `json:"reason,omitempty"`
+	Error               string                      `json:"error,omitempty"`
+	Execution           string                      `json:"execution"`
+	SandboxKind         string                      `json:"sandboxKind,omitempty"`
+	SandboxDenied       bool                        `json:"sandboxDenied,omitempty"`
+	TTY                 bool                        `json:"tty,omitempty"`
+	VerificationWarning *CommandVerificationWarning `json:"verificationWarning,omitempty"`
 }
 
 type BackgroundProcessOutputChunk struct {
@@ -878,6 +879,9 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 		payload["callID"] = p.callID
 	}
 	payload["command"] = p.command
+	if warning := commandPipelineWarning(p.command); warning != nil {
+		payload["verificationWarning"] = warning
+	}
 	payload["shell"] = p.shell
 	payload["tty"] = p.tty
 	if p.exitCode != nil {
@@ -906,22 +910,23 @@ func (p *backgroundProcess) snapshot() BackgroundProcessSnapshot {
 
 func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 	item := BackgroundProcessSnapshot{
-		ProcessID:     p.id,
-		TurnID:        p.turnID,
-		CallID:        p.callID,
-		Status:        p.statusLocked(),
-		Running:       p.running,
-		CWD:           p.cwd,
-		Command:       p.command,
-		Shell:         p.shell,
-		Signal:        p.signal,
-		StartedAt:     p.startedAt,
-		Reason:        p.reason,
-		Error:         p.errorText,
-		Execution:     commandExecutionLabel(p.sandboxed),
-		SandboxKind:   p.sandboxKind,
-		SandboxDenied: p.sandboxDenied,
-		TTY:           p.tty,
+		ProcessID:           p.id,
+		TurnID:              p.turnID,
+		CallID:              p.callID,
+		Status:              p.statusLocked(),
+		Running:             p.running,
+		CWD:                 p.cwd,
+		Command:             p.command,
+		Shell:               p.shell,
+		Signal:              p.signal,
+		StartedAt:           p.startedAt,
+		Reason:              p.reason,
+		Error:               p.errorText,
+		Execution:           commandExecutionLabel(p.sandboxed),
+		SandboxKind:         p.sandboxKind,
+		SandboxDenied:       p.sandboxDenied,
+		TTY:                 p.tty,
+		VerificationWarning: commandPipelineWarning(p.command),
 	}
 	if p.exitCode != nil {
 		exitCode := *p.exitCode

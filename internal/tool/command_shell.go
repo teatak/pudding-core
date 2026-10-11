@@ -298,6 +298,57 @@ func commandVerificationArgv(command string) []string {
 	return analysis.Commands[0]
 }
 
+type CommandVerificationWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func commandPipelineWarning(command string) *CommandVerificationWarning {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	analysis, err := analyzeShellCommand(command)
+	if err != nil {
+		return nil
+	}
+	found := false
+	syntax.Walk(analysis.file, func(node syntax.Node) bool {
+		if found {
+			return false
+		}
+		// Defining a function does not execute its body. Do not infer the
+		// behavior of a later call or an opaque script.
+		if _, ok := node.(*syntax.FuncDecl); ok {
+			return false
+		}
+		pipeline, ok := node.(*syntax.BinaryCmd)
+		if !ok || pipeline.Op != syntax.Pipe {
+			return true
+		}
+		// Only an upstream command loses its exit status to the next stage.
+		syntax.Walk(pipeline.X, func(node syntax.Node) bool {
+			if _, ok := node.(*syntax.FuncDecl); ok {
+				return false
+			}
+			if call, ok := node.(*syntax.CallExpr); ok {
+				argv, static := staticCallArgv(call)
+				if static && commandVerificationKind(unwrapCommand(argv)) != "" {
+					found = true
+				}
+			}
+			return !found
+		})
+		return !found
+	})
+	if !found {
+		return nil
+	}
+	return &CommandVerificationWarning{
+		Code:    "pipeline_exit_status",
+		Message: "This pipeline's shell exit code does not prove that upstream verification passed. Run the verification command directly, then use the result reader to inspect bounded output.",
+	}
+}
+
 func joinShellCommand(argv []string) string {
 	quoted := make([]string, 0, len(argv))
 	for _, arg := range argv {
