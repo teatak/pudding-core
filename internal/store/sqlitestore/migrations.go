@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 38
+	currentSchemaVersion       = 39
 )
 
 var (
@@ -34,6 +34,14 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	39: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS subtask_archives (
+    child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
+    archived_at INTEGER NOT NULL
+);
+`)
+		return err
+	},
 	38: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE session_usage SET last_estimated_input_tokens=0`)
 		return err

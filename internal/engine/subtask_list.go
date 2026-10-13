@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -11,16 +12,18 @@ import (
 
 // The model only needs task metadata, not the session's settings or grants.
 type collaborationListItem struct {
-	SessionID              string `json:"session_id"`
-	Title                  string `json:"title"`
-	TaskTitle              string `json:"task_title"`
-	Status                 string `json:"status"`
-	LatestTurnID           string `json:"latest_turn_id,omitempty"`
-	Summary                string `json:"summary,omitempty"`
-	PendingApprovals       int    `json:"pending_approvals"`
-	PendingUserInputs      int    `json:"pending_user_inputs"`
-	BackgroundProcessCount int    `json:"background_process_count"`
-	ResultCollected        bool   `json:"result_collected"`
+	ArchivedAt             *time.Time `json:"archived_at,omitempty"`
+	CanArchive             bool       `json:"can_archive"`
+	SessionID              string     `json:"session_id"`
+	Title                  string     `json:"title"`
+	TaskTitle              string     `json:"task_title"`
+	Status                 string     `json:"status"`
+	LatestTurnID           string     `json:"latest_turn_id,omitempty"`
+	Summary                string     `json:"summary,omitempty"`
+	PendingApprovals       int        `json:"pending_approvals"`
+	PendingUserInputs      int        `json:"pending_user_inputs"`
+	BackgroundProcessCount int        `json:"background_process_count"`
+	ResultCollected        bool       `json:"result_collected"`
 }
 
 // Discover unresolved question identities from canonical results and live tool
@@ -79,17 +82,24 @@ func (e *Engine) childPendingUserInputs(ctx context.Context, sessionID string) (
 // ChildSessionView is shared by the desktop snapshot and the model's list tool.
 // Task labels and results are projections of canonical session inputs and turns.
 type ChildSessionView struct {
-	Session          *store.Session `json:"session"`
-	TaskTitle        string         `json:"taskTitle"`
-	Status           string         `json:"status"`
-	LatestTurnID     string         `json:"latestTurnID,omitempty"`
-	PendingApprovals int            `json:"pendingApprovals"`
-	ResultCollected  bool           `json:"resultCollected"`
-	Summary          string         `json:"summary,omitempty"`
+	ArchivedAt        *time.Time     `json:"archivedAt,omitempty"`
+	CanArchive        bool           `json:"canArchive"`
+	PendingUserInputs int            `json:"pendingUserInputs"`
+	Session           *store.Session `json:"session"`
+	TaskTitle         string         `json:"taskTitle"`
+	Status            string         `json:"status"`
+	LatestTurnID      string         `json:"latestTurnID,omitempty"`
+	PendingApprovals  int            `json:"pendingApprovals"`
+	ResultCollected   bool           `json:"resultCollected"`
+	Summary           string         `json:"summary,omitempty"`
 }
 
 func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]ChildSessionView, error) {
 	children, err := e.store.ListChildSessions(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	archives, err := e.store.ListSubtaskArchives(ctx, parentID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +146,14 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 		if queued || child.Running {
 			view.ResultCollected = false
 		}
+		view.PendingUserInputs, err = e.childPendingUserInputs(ctx, child.ID)
+		if err != nil {
+			return nil, err
+		}
+		if at, ok := archives[child.ID]; ok {
+			view.ArchivedAt = &at
+		}
+		view.CanArchive = view.ArchivedAt == nil && view.Status == "completed" && !queued && !child.Running && view.PendingApprovals == 0 && view.PendingUserInputs == 0 && child.BackgroundProcessCount == 0
 		views = append(views, view)
 	}
 	return views, nil

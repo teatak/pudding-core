@@ -38,9 +38,17 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
 	decoder.DisallowUnknownFields()
+	var listArgs struct {
+		IncludeArchived bool `json:"include_archived"`
+	}
+	var archiveArgs struct {
+		SessionID *string `json:"session_id"`
+	}
 	var input any = &args
 	if call.Name == tool.SubtaskList {
-		input = &struct{}{}
+		input = &listArgs
+	} else if call.Name == tool.SubtaskArchive || call.Name == tool.SubtaskRestore {
+		input = &archiveArgs
 	}
 	if err := decoder.Decode(input); err != nil {
 		return fail(err)
@@ -54,16 +62,15 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 		}
 		items := make([]collaborationListItem, 0, len(children))
 		for _, child := range children {
-			pendingInputs, err := e.childPendingUserInputs(ctx, child.Session.ID)
-			if err != nil {
-				return fail(err)
+			if child.ArchivedAt != nil && !listArgs.IncludeArchived {
+				continue
 			}
 			items = append(items, collaborationListItem{
 				SessionID: child.Session.ID, Title: child.Session.Title, TaskTitle: child.TaskTitle,
 				Status: child.Status, LatestTurnID: child.LatestTurnID, Summary: child.Summary,
 				PendingApprovals: child.PendingApprovals, BackgroundProcessCount: child.Session.BackgroundProcessCount,
-				PendingUserInputs: pendingInputs,
-				ResultCollected:   child.ResultCollected,
+				PendingUserInputs: child.PendingUserInputs, ArchivedAt: child.ArchivedAt, CanArchive: child.CanArchive,
+				ResultCollected: child.ResultCollected,
 			})
 		}
 		payload = map[string]any{"children": items}
@@ -82,6 +89,20 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 			return fail(err)
 		}
 		payload = result
+	case tool.SubtaskArchive, tool.SubtaskRestore:
+		childID := ""
+		if archiveArgs.SessionID != nil {
+			childID = strings.TrimSpace(*archiveArgs.SessionID)
+			if childID == "" {
+				return fail(ErrEmptyInput)
+			}
+		} else if call.Name == tool.SubtaskRestore {
+			return fail(ErrEmptyInput)
+		}
+		if err := e.SetSubtaskArchived(ctx, sessionID, childID, call.Name == tool.SubtaskArchive); err != nil {
+			return fail(err)
+		}
+		payload = map[string]any{"updated": true}
 	case tool.SubtaskWait:
 		if err := e.waitForChildren(ctx, sessionID); err != nil {
 			return fail(err)

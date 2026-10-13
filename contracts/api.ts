@@ -59,6 +59,7 @@ export const session = z.object({
 export type Session = z.infer<typeof session>;
 
 export const childSession = z.object({
+ archivedAt: z.string().optional(), canArchive: z.boolean(), pendingUserInputs: z.number().int().nonnegative(),
  session, taskTitle: z.string(), status: z.enum(["idle", "queued", "running", "completed", "failed", "cancelled"]),
  latestTurnID: z.string().optional(), pendingApprovals: z.number().int().nonnegative(), resultCollected: z.boolean(), summary: z.string().optional(),
 });

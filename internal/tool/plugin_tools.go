@@ -11,6 +11,8 @@ var builtinPluginTools = map[string]string{
 	SubtaskSend:       plugin.BuiltinCollaborationID,
 	SubtaskWait:       plugin.BuiltinCollaborationID,
 	SubtaskStop:       plugin.BuiltinCollaborationID,
+	SubtaskArchive:    plugin.BuiltinCollaborationID,
+	SubtaskRestore:    plugin.BuiltinCollaborationID,
 	BrowserStatus:     plugin.BuiltinBrowserID,
 	BrowserOpen:       plugin.BuiltinBrowserID,
 	BrowserObserve:    plugin.BuiltinBrowserID,

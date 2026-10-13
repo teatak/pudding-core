@@ -234,6 +234,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/input-requests/:requestID").GET(s.getUserInputRequest).POST(s.actOnUserInput)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/children").GET(s.listChildSessions)
+	app.Route("/sessions/:id/children/archive").POST(s.archiveCompletedSubtasks)
+	app.Route("/sessions/:id/children/:childID/archive").POST(s.archiveSubtask)
+	app.Route("/sessions/:id/children/:childID/restore").POST(s.restoreSubtask)
 	app.Route("/sessions/:id/collaboration/stop").POST(s.stopCollaboration)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
@@ -1682,6 +1685,10 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, store.ErrInvalidSession) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
+		return nil
+	}
+	if errors.Is(err, store.ErrSubtaskArchiveBusy) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "subtask_archive_busy"})
 		return nil
 	}
 	if errors.Is(err, store.ErrInvalidSessionRelation) {

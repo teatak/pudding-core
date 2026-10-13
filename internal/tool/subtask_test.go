@@ -9,7 +9,7 @@ import (
 
 func TestSubtaskToolsRetireCollaborationNames(t *testing.T) {
 	definitions := SubtaskDefinitions()
-	for _, suffix := range []string{"list", "dispatch", "send", "wait", "stop"} {
+	for _, suffix := range []string{"list", "dispatch", "send", "wait", "stop", "archive", "restore"} {
 		name := "builtin_subtask_" + suffix
 		if !HasDefinition(definitions, name) || !IsSubtaskTool(name) || !NameAllowedForMode(store.ModeWork, name) || NameAllowedForMode(store.ModeChat, name) {
 			t.Fatalf("subtask tool is unavailable or has the wrong mode: %s", name)

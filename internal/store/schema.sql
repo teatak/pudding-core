@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS session_children (
 CREATE INDEX IF NOT EXISTS session_children_parent
     ON session_children(parent_session_id);
 
+-- Presentation-only archive; retained until its parent session is deleted.
+CREATE TABLE IF NOT EXISTS subtask_archives (
+    child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
+    archived_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS computer_app_grants (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     app_id     TEXT NOT NULL,

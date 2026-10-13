@@ -2349,6 +2349,8 @@ type Store interface {
 	// Relations remain readable while a session group is archived.
 	ParentSessionID(ctx context.Context, sessionID string) (string, error)
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]*Session, error)
+	ListSubtaskArchives(ctx context.Context, parentSessionID string) (map[string]time.Time, error)
+	SetSubtaskArchived(ctx context.Context, parentSessionID, childSessionID, expectedTurnID string, archived bool) error
 	CloneSession(ctx context.Context, in CloneSessionInput) (*Session, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
 	// ListSessions 默认只返回 active 主会话；all 包含归档及子会话，供内部维护使用。

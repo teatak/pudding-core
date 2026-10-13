@@ -2589,6 +2589,10 @@ func getSessionAnyTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session
 
 // Session activity and the project's high-water mark commit together.
 func touchSessionActivityTx(ctx context.Context, tx *sql.Tx, sessionID string, at time.Time) error {
+	// Reusing an archived child makes its new activity visible again.
+	if err := restoreSubtaskTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(at), sessionID); err != nil {
 		return err
 	}

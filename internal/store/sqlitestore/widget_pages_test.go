@@ -98,7 +98,7 @@ func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	if err != nil || string(data.Data) != `{"keep":true}` {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "38")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "39")
 }
 
 func TestWidgetPageRevisionIsolationConcurrentWritesAndSessionCleanup(t *testing.T) {

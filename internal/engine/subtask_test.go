@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +60,7 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var children []*store.Session
-	for _, id := range []string{"one", "two", "three", "four"} {
+	for _, id := range []string{"one", "two", "three"} {
 		child, err := eng.dispatchChild(ctx, "root", root.TurnID, id, id, "CHILD", store.ModeWork)
 		if err != nil {
 			t.Fatal(err)
@@ -79,8 +80,19 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 	if running != 3 {
 		t.Fatalf("running children=%d", running)
 	}
-	if queued, _ := st.HasQueuedInputs(ctx, children[3].ID); !queued {
-		t.Fatal("fourth child not queued")
+	if _, err := eng.dispatchChild(ctx, "root", root.TurnID, "four", "four", "CHILD", store.ModeWork); !errors.Is(err, store.ErrSubtaskLimit) {
+		t.Fatalf("fourth dispatch: %v", err)
+	}
+	// Previously existing children can still receive work; the concurrency
+	// cap remains independent of the new-child creation budget.
+	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "existing", Provider: "mock", Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.sendChild(ctx, "root", root.TurnID, "existing", "reuse", "CHILD"); err != nil {
+		t.Fatal(err)
+	}
+	if queued, _ := st.HasQueuedInputs(ctx, "existing"); !queued {
+		t.Fatal("reused fourth child should queue")
 	}
 	// Children do not even receive the recursive tool definitions.
 	ids := []string{plugin.BuiltinCollaborationID}

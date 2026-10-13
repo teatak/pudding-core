@@ -61,6 +61,9 @@ func (s *Store) DispatchChild(ctx context.Context, in store.DispatchChildInput) 
 		if stopped {
 			return store.ErrCollaborationStopped
 		}
+		if err := checkSubtaskBudgetTx(ctx, tx, parent.ID, turn.ID); err != nil {
+			return err
+		}
 		if err := store.PrepareChildSession(parent, in.Child); err != nil {
 			return err
 		}
