@@ -107,6 +107,9 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 			return 0, err
 		}
 		req.Config, req.Tools = resolved.config, defs
+		if err := e.appendTemporaryProjectAccess(ctx, sessionID, runningTurnID, mode, &req); err != nil {
+			return 0, err
+		}
 		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(mode), req)
 		if err != nil {
 			return 0, err

@@ -1405,6 +1405,11 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			}
 		}
 		req := baseReq
+		// Leases can be granted or revoked between tool calls without changing
+		// mode or canonical history. Refresh from execution authority each time.
+		if err := e.appendTemporaryProjectAccess(ctx, sessionID, turnID, currentMode, &req); err != nil {
+			return failed(fmt.Sprintf("build temporary access context: %v", err))
+		}
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, turnID, e.attachmentHome, resolved.config, tool.HasDefinition(req.Tools, tool.HistoryGetMessage))
 		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(currentMode), req)
 		if err != nil {
@@ -2279,12 +2284,17 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			}
 		}
 		commandGrantKey := ""
-		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun && commandAccess == nil {
+		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun {
 			if grant := tool.CommandSessionGrantForCall(call); grant != nil {
 				call.CommandGrant = grant
 				commandGrantKey = commandSandboxStateKey(project, sessionID) + ":" + grant.Key
 				e.mu.Lock()
-				granted := e.commandGrants[sessionID] == commandState && commandState.grants[commandGrantKey]
+				approvedAccess, granted := commandState.grants[commandGrantKey]
+				granted = granted && e.commandGrants[sessionID] == commandState
+				if granted && approvedAccess != nil && approvedAccess.Validate() != nil {
+					delete(commandState.grants, commandGrantKey)
+					granted = false
+				}
 				if granted {
 					commandState.reused++
 				}
@@ -2304,7 +2314,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		}
 		if result.CallID == "" && result.Name == "" && required {
 			var approved bool
-			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails, commandGrantKey, commandState)
+			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails, commandGrantKey, commandState, commandAccess)
 			if approved {
 				if call.Name == tool.CommandRun && call.CommandSandbox == tool.CommandSandboxEnforce {
 					execution, _ := tool.RequestedCommandExecution(call.Args)

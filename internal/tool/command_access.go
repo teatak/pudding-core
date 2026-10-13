@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 )
 
-// CommandProjectAccess binds a one-invocation sandbox extension to directory
-// identities. It is computed by the backend, never supplied by the model/UI.
+// CommandProjectAccess binds a command sandbox extension to directory
+// identities, including when that fixed invocation is approved for reuse.
+// It is computed by the backend, never supplied by the model/UI.
 type CommandProjectAccess struct {
 	Dirs       []string
 	identities []os.FileInfo

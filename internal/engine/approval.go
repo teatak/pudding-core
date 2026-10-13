@@ -65,6 +65,7 @@ type pendingApproval struct {
 	abandoned       bool
 	commandGrantKey string // Server-computed; never accepted from approval payloads.
 	commandState    *commandApprovalState
+	commandAccess   *tool.CommandProjectAccess
 }
 
 func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
@@ -251,7 +252,9 @@ func (e *Engine) completePendingApproval(ctx context.Context, session *store.Ses
 	}
 	delete(e.approvals, approvalID)
 	if commandGrantKey != "" && e.commandGrants[sessionID] == p.commandState && p.commandState != nil {
-		p.commandState.grants[commandGrantKey] = true
+		if p.commandAccess == nil || p.commandAccess.Validate() == nil {
+			p.commandState.grants[commandGrantKey] = p.commandAccess
+		}
 	}
 	return nil
 }
@@ -406,7 +409,7 @@ func capabilityApprovalPayload(req tool.CapabilityRequest, publicTargetMode stri
 	})
 }
 
-func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any, commandGrantKey string, commandState *commandApprovalState) (tool.Result, bool) {
+func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any, commandGrantKey string, commandState *commandApprovalState, commandAccess *tool.CommandProjectAccess) (tool.Result, bool) {
 	payload := map[string]any{
 		"toolName":  call.Name,
 		"riskClass": string(risk.Class),
@@ -437,7 +440,7 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		Payload:   mustJSON(payload),
 		CreatedAt: time.Now(),
 	}
-	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey, commandState: commandState}
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey, commandState: commandState, commandAccess: commandAccess}
 	e.mu.Lock()
 	e.approvals[approval.ID] = pending
 	if commandState != nil {

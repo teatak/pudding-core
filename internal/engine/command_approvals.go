@@ -13,9 +13,10 @@ import (
 type commandApprovalState struct {
 	context   string
 	projectID string
-	grants    map[string]bool
-	reasons   map[string]int
-	reused    int
+	// Nil means no extra directories; map membership is the grant.
+	grants  map[string]*tool.CommandProjectAccess
+	reasons map[string]int
+	reused  int
 }
 
 type CommandApprovalStatus struct {
@@ -41,7 +42,7 @@ func (e *Engine) commandApprovalState(sessionID string, project *store.Project, 
 	key := commandApprovalContext(project, roots)
 	state := e.commandGrants[sessionID]
 	if state == nil || state.context != key {
-		state = &commandApprovalState{context: key, grants: make(map[string]bool), reasons: make(map[string]int)}
+		state = &commandApprovalState{context: key, grants: make(map[string]*tool.CommandProjectAccess), reasons: make(map[string]int)}
 		if project != nil {
 			state.projectID = project.ID
 		}
