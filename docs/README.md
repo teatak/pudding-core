@@ -2,7 +2,7 @@
 
 本仓维护 daemon、公共协议、数据和工具执行。桌面 UI、Electron、Swift Helper 与应用发布见 [desktop 文档](https://github.com/teatak/pudding-desktop/blob/main/docs/README.md)。
 
-判断当前行为以 [AGENTS.md](../AGENTS.md)、当前源码／契约／测试为准；当前参考用于说明，归档用于追溯。源码与硬约束冲突时需明确记录，不能以历史方案覆盖。
+当前行为以源码、公共契约和测试为准；当前参考用于说明，归档用于追溯。[AGENTS.md](../AGENTS.md) 提供简短的协作说明和文档入口。
 
 ## 当前参考
 

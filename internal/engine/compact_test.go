@@ -8,7 +8,7 @@ import (
 )
 
 // 客户端压缩必须把 clientMessageID 落到压缩 turn 上:前端的 pending 行与 canonical
-// turn 靠它复用同一个列表项 key(硬约束 13)。没有这个键时压缩行只能卸载+挂载,
+// turn 靠它复用同一个列表项 key。没有这个键时压缩行只能卸载+挂载,
 // 贴底偏移会在压缩结束时跳一次。
 func TestCompactKeepsClientMessageIDForOverlayReconciliation(t *testing.T) {
 	ctx := context.Background()

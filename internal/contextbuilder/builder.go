@@ -1,5 +1,5 @@
 // Package contextbuilder 把 canonical messages 组装为 provider 输入。
-// context 只来自 canonical messages(AGENTS.md 硬约束 8)。可见内容使用统一
+// 对话历史来自 canonical messages。可见内容使用统一
 // canonical parts；provider 原生续接状态仅在 provider/profile、model 匹配,
 // 且其中引用的工具仍在本轮可调用时原样重放。
 package contextbuilder

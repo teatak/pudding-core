@@ -1,7 +1,7 @@
 // Package google implements the Gemini native streaming protocol
 // (generateContent / streamGenerateContent, v1beta)。
 //
-// 边界与 openai 实现一致(AGENTS.md 硬约束 9 / 17):只产模型流和
+// 边界与 openai 实现一致:只产模型流和
 // provider-native continuation、不在 client 内保存状态、不做流级重试;
 // 终止 chunk 阻塞发送。
 package google

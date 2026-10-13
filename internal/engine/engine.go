@@ -1,6 +1,6 @@
 // Package engine 实现 per-session turn 状态机,是 messages 的唯一写入方
 // (docs/archive/plans/phase-1-plan.md 第 6 节)。turn lifecycle 事件全部由本包生成,
-// provider 只供模型流(AGENTS.md 硬约束 17)。
+// provider 只供模型流。
 package engine
 
 import (

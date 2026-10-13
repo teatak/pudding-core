@@ -108,8 +108,6 @@ Engine 和 API 不再自行发布返回的持久事件，避免并发调用方�
 
 新连接默认从尾部订阅；消息历史由 messages API 读取。overlay 在终态及对应 canonical 数据可见后对账清除。`turn.delta.part` 已区分 text/thought，工具流使用 `turn.tool`；原先拟议的 `partType`、`estimatedSteps` 和 `turn.progress` 不是现行协议。
 
-注意：`AGENTS.md` 第 12 条概括为“session 事件带 seq”，而实现仅持久化事件带 seq；这里明确记录该范围差异，本次整理不改协议或硬约束。
-
 ## 9. 安全
 
 - daemon 只监听 loopback，请求按启动 token 认证；Electron 启动页面注入连接信息，前端读取后清理地址栏。
@@ -134,7 +132,7 @@ home 解析顺序为 `--home`、`PUDDING_HOME`、构建通道默认值。本地�
 
 ## 12. 验证边界
 
-多会话隔离、幂等、cancel、SSE 恢复和重启历史保持是持续契约；Go、schema、Web 与 Electron 检查按各仓 AGENTS 的实际改动范围选择。测试入口不等于本次已执行记录；纯文档整理不运行产品全量测试。
+多会话隔离、幂等、cancel、SSE 恢复和重启历史保持由对应回归测试覆盖。Core 构建与测试入口见 [README](../README.md#development)，桌面检查见 [Desktop README](https://github.com/teatak/pudding-desktop/blob/main/README.md)。测试入口不等于本次已执行记录。
 
 ## 13. 历史范围与未完成事项
 

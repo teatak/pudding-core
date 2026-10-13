@@ -1,6 +1,6 @@
 // Package provider 定义 LLM provider 契约。
 //
-// 边界(AGENTS.md 硬约束 9 / 17):
+// Provider 边界:
 //   - Client 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
 //   - 实现不得保存跨 turn 事实源,每次请求由 canonical messages + current input 构造。
 package provider

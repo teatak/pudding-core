@@ -1,6 +1,5 @@
 // Package api 注册 REST / SSE 路由(docs/technology-decisions.md 第 7 节)。
-// 所有业务端点显式带 sessionID,禁止无 session scope 的主路径接口
-// (AGENTS.md 硬约束 3 / 4)。
+// 会话端点显式带 sessionID；项目、全局配置等端点按各自资源范围定义。
 package api
 
 import (
