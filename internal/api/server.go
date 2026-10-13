@@ -239,6 +239,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
 	app.Route("/sessions/:id/command-approvals").GET(s.commandApprovals).DELETE(s.revokeCommandApprovals)
+	app.Route("/sessions/:id/computer-app-grants").GET(s.listComputerAppGrants)
+	app.Route("/sessions/:id/computer-app-grants/:appID").DELETE(s.revokeComputerAppGrant)
 	app.Route("/sessions/:id/approvals/:approvalID/approve").POST(s.approveApproval)
 	app.Route("/sessions/:id/approvals/:approvalID/deny").POST(s.denyApproval)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)

@@ -71,6 +71,11 @@ type Session struct {
 	BackgroundProcessCount int `json:"backgroundProcessCount"`
 }
 
+type ComputerAppGrant struct {
+	AppID     string    `json:"appID"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type SessionUpdate struct {
 	Title           *string    `json:"title"`
 	Provider        *string    `json:"provider"`
@@ -2359,6 +2364,8 @@ type Store interface {
 	DeleteSession(ctx context.Context, id string) error
 	HasComputerAppGrant(ctx context.Context, sessionID, appID string) (bool, error)
 	GrantComputerApp(ctx context.Context, sessionID, appID string) error
+	ListComputerAppGrants(ctx context.Context, sessionID string) ([]ComputerAppGrant, error)
+	RevokeComputerAppGrant(ctx context.Context, sessionID, appID string) error
 
 	// BeginTurn:幂等检查(clientMessageID 重复则返回 Duplicate)→ 校验无
 	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn

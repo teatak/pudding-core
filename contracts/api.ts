@@ -72,6 +72,10 @@ export const approveApprovalResponse = z.object({
 });
 export type ApproveApprovalResponse = z.infer<typeof approveApprovalResponse>;
 
+export const computerAppGrant = z.object({ appID: z.string(), createdAt: z.string() });
+export type ComputerAppGrant = z.infer<typeof computerAppGrant>;
+export const listComputerAppGrantsResponse = z.object({ grants: z.array(computerAppGrant) });
+
 export const approvalMode = z.enum(["ask", "auto", "full"]);
 export type ApprovalMode = z.infer<typeof approvalMode>;
 

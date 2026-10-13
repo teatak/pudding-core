@@ -259,6 +259,12 @@ submit 时 engine 解析成 effective model config,随 turn 写入 `turns.model_
 
 命令审批 payload 可含 `additionalProjectDirs` 与 `directoryScope: "call"`，表示仅该次调用的沙箱目录扩展。该范围由后端准备，审批请求不能通过传入 `projectDirs` 扩大它。
 
+## Computer Use 应用授权
+
+`GET /sessions/{id}/computer-app-grants` 返回 `{grants: [{appID, createdAt}]}`，时间为 RFC3339；无授权时返回空数组。`DELETE /sessions/{id}/computer-app-grants/{appID}` 幂等撤销指定应用，成功返回 204；会话不存在返回 404。两者都要求启动 token，并支持显式指定子会话。
+
+授权仍只来自 SQLite `computer_app_grants`，不增加缓存或 schema。撤销保留会话、消息及其他应用／会话的授权，重启后仍有效；后续工具调用重新走现有审批。已经通过授权检查的在途调用可以完成，撤销不关闭应用、不终止进程、不撤回已执行动作，也不改变系统权限或会话能力模式。
+
 
 ## Widget 共享运行与通知（协议 18）
 
