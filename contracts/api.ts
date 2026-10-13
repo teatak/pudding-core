@@ -2,6 +2,14 @@
 // 与 internal/api/server.go(请求/响应);字段名一一对应。
 import { z } from "zod";
 
+export const createSessionRequest = z.object({
+  clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
+  title: z.string().optional(),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  projectID: z.string().optional(),
+});
+
 export const taskSchedule = z.object({
   kind: z.enum(["once", "daily", "weekly"]), timezone: z.string(),
   at: z.string().optional(), time: z.string().optional(), weekdays: z.array(z.number().int().min(0).max(6)).optional(),

@@ -5,6 +5,8 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 26 adds optional `clientRequestID` to `POST /sessions`. Repeating a creation request returns the same current session without resetting its model, title, project or history; the first successful creation wins. The key is encoded in the existing session primary key, so concurrent retries and daemon restarts require no schema change or in-memory deduplication. Keys contain 1–200 ASCII letters, digits, underscores or hyphens. Use a new key for a new conversation and reuse it after an uncertain response. Archived sessions are not revived by replay; permanent deletion ends the key's lifetime. The existing session-scoped `clientMessageID` separately deduplicates submission. Clients relying on this behavior require protocol 26.
+
 Protocol 2 adds the external `-ui-dir` startup contract and removes mobile pairing/device-token authentication.
 Clients reject incompatible daemon handshakes rather than attaching to an older embedded-UI runtime.
 The generated client files must not be edited or committed in desktop.

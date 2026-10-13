@@ -428,10 +428,11 @@ func requestBaseURL(r *http.Request) string {
 }
 
 type createSessionReq struct {
-	Title     string `json:"title"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	ProjectID string `json:"projectID"`
+	ClientRequestID *string `json:"clientRequestID"`
+	Title           string  `json:"title"`
+	Provider        string  `json:"provider"`
+	Model           string  `json:"model"`
+	ProjectID       string  `json:"projectID"`
 }
 
 func (s *Server) createSession(c *cart.Context) error {
@@ -447,8 +448,22 @@ func (s *Server) createSession(c *cart.Context) error {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
 	}
+	if req.ClientRequestID != nil {
+		key := *req.ClientRequestID
+		if len(key) == 0 || len(key) > 200 || strings.IndexFunc(key, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+		}) >= 0 {
+			return badRequest(c, "invalid_client_request_id")
+		}
+	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
-	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
+	var err error
+	if req.ClientRequestID != nil {
+		sess, err = s.store.CreateSessionOnce(c.Request.Context(), *req.ClientRequestID, sess)
+	} else {
+		err = s.store.CreateSession(c.Request.Context(), sess)
+	}
+	if err != nil {
 		return s.fail(c, err)
 	}
 	s.enrichSessionProcesses(sess)

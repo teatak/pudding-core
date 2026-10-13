@@ -2336,6 +2336,8 @@ type Store interface {
 	DeleteProject(ctx context.Context, id string) error
 
 	CreateSession(ctx context.Context, s *Session) error
+	// CreateSessionOnce returns the current session for a durable creation key.
+	CreateSessionOnce(ctx context.Context, requestID string, s *Session) (*Session, error)
 	// CreateChildSession creates the Session and its immutable parent relation
 	// atomically. Only an active root session can own children. Execution and
 	// permission grants are not started or copied by this storage operation.
