@@ -12,7 +12,7 @@ import (
 func NextPromptDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        SetNextPrompt,
-		Description: "Optionally suggest one useful next user message for the input placeholder. Only after completing the current task: output the full final answer as normal text, then call this tool in the SAME response, with no other tools. Write a concise, ready-to-send user instruction in the user's language, not advice addressed to the user. This ends the turn without another model request. Omit when no useful next step exists; never call it instead of answering or while work remains. The suggestion is not authorization to perform that next task.",
+		Description: "Optionally suggest one useful next user message for the input placeholder. Only after completing the current task: output the full final answer as normal text, then call this tool in the SAME response, with no other tools. Write a concise, ready-to-send user instruction in the user's language, not advice addressed to the user. This ends the turn without another model request. The call and result are saved locally for the UI but omitted from later user turns' model context and history summaries; do not wait for confirmation or repeat the call to recover missing history. Tab only fills the draft; the suggestion is not a user request or authorization unless the user sends it. Omit when no useful next step exists; never call it instead of answering or while work remains.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string","minLength":1,"maxLength":200,"description":"One short next user instruction, as plain text."}},"required":["text"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}

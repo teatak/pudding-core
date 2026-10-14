@@ -174,18 +174,18 @@ func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, provid
 	assistantContinuationsAllowed := true
 	flushAssistant := func() {
 		sourceCallID, sourceTool = "", ""
-		if len(assistantParts) == 0 && len(assistantContinuations) == 0 {
-			return
-		}
 		if !assistantContinuationsAllowed {
 			assistantContinuations = nil
 		}
-		req.Messages = append(req.Messages, provider.SplitMessage(provider.Message{
-			Role:          provider.RoleAssistant,
-			Text:          textFromProviderParts(assistantParts),
-			Parts:         cloneProviderParts(assistantParts),
-			Continuations: cloneContinuations(assistantContinuations),
-		})...)
+		if len(assistantParts) > 0 || len(assistantContinuations) > 0 {
+			req.Messages = append(req.Messages, provider.SplitMessage(provider.Message{
+				Role:          provider.RoleAssistant,
+				Text:          textFromProviderParts(assistantParts),
+				Parts:         cloneProviderParts(assistantParts),
+				Continuations: cloneContinuations(assistantContinuations),
+			})...)
+		}
+		// Even an entirely filtered exchange must reset at the next user input.
 		assistantParts = nil
 		assistantContinuations = nil
 		assistantContinuationsAllowed = true
@@ -288,7 +288,7 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 		}
 		switch part.Type {
 		case store.ContentPartToolUse, store.ContentPartToolResult:
-			if !toolAllowedForRequest(mode, tool.CurrentToolName(part.Name), allowedTools) {
+			if !toolReplayedInHistory(mode, tool.CurrentToolName(part.Name), allowedTools) {
 				return false
 			}
 		}
@@ -296,7 +296,14 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 	return true
 }
 
-func toolAllowedForRequest(mode store.AgentMode, name string, allowedTools map[string]struct{}) bool {
+func toolReplayedInHistory(mode store.AgentMode, name string, allowedTools map[string]struct{}) bool {
+	// The suggestion remains in canonical history for the composer, but is not
+	// model context. This also rejects its native continuation chain above, so
+	// hidden provider state cannot reintroduce the call or shift onto another
+	// assistant segment after filtering. Other content uses canonical parts.
+	if name == tool.SetNextPrompt {
+		return false
+	}
 	if allowedTools != nil {
 		_, ok := allowedTools[name]
 		return ok
@@ -510,7 +517,7 @@ func (b *Builder) providerParts(
 		case store.ContentPartToolUse:
 			flushReferences()
 			name := tool.CurrentToolName(part.Name)
-			if !toolAllowedForRequest(mode, name, allowedTools) {
+			if !toolReplayedInHistory(mode, name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{
@@ -522,7 +529,7 @@ func (b *Builder) providerParts(
 		case store.ContentPartToolResult:
 			flushReferences()
 			name := tool.CurrentToolName(part.Name)
-			if !toolAllowedForRequest(mode, name, allowedTools) {
+			if !toolReplayedInHistory(mode, name, allowedTools) {
 				continue
 			}
 			out = append(out, provider.Part{

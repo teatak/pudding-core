@@ -116,8 +116,27 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 			if !tool.HasDefinition(requests[0].Tools, tool.SetNextPrompt) {
 				t.Fatal("suggestion tool missing")
 			}
-			// The next user request must replay paired native call/result history,
-			// even though no request was made just to acknowledge the UI tool.
+			// Canonical history still contains the paired call/result and native
+			// state, so the composer can recover the suggestion after reopening.
+			localUses, localResults, localState := 0, 0, false
+			for _, message := range turn.Messages {
+				localState = localState || message.ProviderState != nil
+				for _, part := range message.Parts {
+					if part.Name == tool.SetNextPrompt {
+						if part.Type == store.ContentPartToolUse {
+							localUses++
+						}
+						if part.Type == store.ContentPartToolResult {
+							localResults++
+						}
+					}
+				}
+			}
+			if localUses != localResults || (tc.tipResult && (localUses != 1 || !localState)) {
+				t.Fatalf("suggestion was not persisted: uses=%d results=%d native=%t", localUses, localResults, localState)
+			}
+			// No suggestion call, result or native state is sent on the next
+			// user turn, even though the tool remains available for new suggestions.
 			if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "second", Text: "谢谢"}); err != nil {
 				t.Fatal(err)
 			}
@@ -125,6 +144,9 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 			requests = client.snapshot()
 			if len(requests) != tc.calls+1 {
 				t.Fatalf("unexpected follow-up request count: %d", len(requests))
+			}
+			if !tool.HasDefinition(requests[len(requests)-1].Tools, tool.SetNextPrompt) {
+				t.Fatal("history filtering disabled new suggestions")
 			}
 			uses, results := 0, 0
 			nativeState := false
@@ -144,11 +166,11 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 					}
 				}
 			}
-			if uses != results || (tc.tipResult && uses != 1) {
-				t.Fatalf("unpaired suggestion history: uses=%d results=%d", uses, results)
+			if uses != 0 || results != 0 {
+				t.Fatalf("suggestion leaked into model history: uses=%d results=%d", uses, results)
 			}
-			if tc.tipResult && !nativeState {
-				t.Fatal("native continuation was lost before the next user request")
+			if tc.tipResult && nativeState {
+				t.Fatal("filtered suggestion retained native continuation")
 			}
 		})
 	}

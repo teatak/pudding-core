@@ -185,6 +185,27 @@ func TestCompactRegressionInputPreservesToolArguments(t *testing.T) {
 	}
 }
 
+func TestCompactExcludesNextPromptHistory(t *testing.T) {
+	msg := &store.Message{Role: store.RoleAssistant, Parts: []store.ContentPart{
+		{Type: store.ContentPartText, Text: "Task completed"},
+		{Type: store.ContentPartToolUse, Name: tool.SetNextPrompt, CallID: "ui", Args: json.RawMessage(`{"text":"SUGGESTION_ONLY"}`)},
+		{Type: store.ContentPartToolResult, Name: tool.SetNextPrompt, CallID: "ui", Ok: true, Content: `{"text":"SUGGESTION_ONLY"}`},
+		{Type: store.ContentPartToolUse, Name: tool.TimeGetCurrent, CallID: "time", Args: json.RawMessage(`{}`)},
+		{Type: store.ContentPartToolResult, Name: tool.TimeGetCurrent, CallID: "time", Ok: true, Content: `{"time":"BUSINESS_RESULT"}`},
+	}}
+	text := compactMessageText(msg)
+	if strings.Contains(text, tool.SetNextPrompt) || strings.Contains(text, "SUGGESTION_ONLY") {
+		t.Fatalf("suggestion leaked into summary input: %s", text)
+	}
+	if !strings.Contains(text, "Task completed") || !strings.Contains(text, tool.TimeGetCurrent) || !strings.Contains(text, "BUSINESS_RESULT") {
+		t.Fatalf("summary lost task context: %s", text)
+	}
+	msg.Parts = msg.Parts[1:3]
+	if got := compactMessageText(msg); got != "" {
+		t.Fatalf("suggestion-only message should be skipped: %s", got)
+	}
+}
+
 func TestCompactRegressionDoesNotExpandContext(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{strings.Repeat("verbose summary ", 400)}), mock.WithDelay(0))
 	defer eng.Stop()

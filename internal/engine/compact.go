@@ -469,6 +469,9 @@ func compactMessageText(msg *store.Message) string {
 	}
 	var text strings.Builder
 	for _, part := range msg.Parts {
+		if (part.Type == store.ContentPartToolUse || part.Type == store.ContentPartToolResult) && part.Name == tool.SetNextPrompt {
+			continue // UI-only suggestions must not reenter context through summaries.
+		}
 		switch part.Type {
 		case store.ContentPartThought:
 			continue
