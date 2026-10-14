@@ -27,6 +27,7 @@ const (
 	HistoryGetMessage = "builtin_history_get_message"
 	SkillRead         = "builtin_skill_read"
 	PlanUpdate        = "builtin_plan_update"
+	SetNextPrompt     = "builtin_set_next_prompt"
 	CodeSymbols       = "builtin_code_symbols"
 	CodeDefinition    = "builtin_code_definition"
 	CodeReferences    = "builtin_code_references"
@@ -367,6 +368,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills. Do not pass the display path."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
+		NextPromptDefinition(),
 		{
 			Name:        PlanUpdate,
 			Description: "Create or replace the progress plan for substantial multi-step work. Update only when a major step changes status. Keep exactly one ordered in_progress step while unfinished, after completed steps and before pending steps. Mark only finished work completed; report blocked or cancelled work without falsely completing its steps. Skip short or single-step work.",
@@ -719,6 +721,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.skillRead(ctx, call)
 	case PlanUpdate:
 		return planUpdate(call)
+	case SetNextPrompt:
+		return nextPrompt(call)
 	case CodeSymbols:
 		return r.codeSymbols(ctx, call)
 	case CodeDefinition:

@@ -4,7 +4,7 @@ go 1.26.0
 
 toolchain go1.26.6
 
-require github.com/teatak/cart/v3 v3.0.0
+require github.com/teatak/cart/v3 v3.1.0
 
 require (
 	github.com/coder/websocket v1.8.15

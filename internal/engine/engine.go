@@ -1472,6 +1472,21 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continuations = append(continuations, *continuation)
 		}
 		providerState := storeProviderState(resolved, continuation)
+		// A UI suggestion is an optional terminal side effect. Persist its result
+		// for the next user request, but do not spend a model request acknowledging it.
+		// Reasoning, whitespace, or text from an earlier provider call is not an answer.
+		if finish == provider.FinishToolCalls && parts.providerText &&
+			tool.HasDefinition(baseReq.Tools, tool.SetNextPrompt) && onlyNextPromptCalls(parts.PendingToolCalls()) {
+			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
+				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
+			}
+			status, msg, _, _ := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, parts)
+			if status != store.TurnRunning {
+				return status, msg, currentMode
+			}
+			providerState = nil // Already persisted with the native tool call.
+			finish = provider.FinishStop
+		}
 		if finish == "" || finish == provider.FinishStop || finish == provider.FinishLength {
 			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
@@ -2857,6 +2872,7 @@ type turnPartAccumulator struct {
 	toolKeyByIndex map[string]string
 	toolArgs       map[string]*strings.Builder
 	providerCall   int
+	providerText   bool
 }
 
 func (a *turnPartAccumulator) Reset() {
@@ -2866,10 +2882,12 @@ func (a *turnPartAccumulator) Reset() {
 	a.toolKeyByIndex = nil
 	a.toolArgs = nil
 	a.providerCall = 0
+	a.providerText = false
 }
 
 func (a *turnPartAccumulator) BeginProviderCall(index int) {
 	a.providerCall = index
+	a.providerText = false
 }
 
 func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) {
@@ -2879,6 +2897,9 @@ func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) 
 	partType := store.ContentPartText
 	if part == provider.PartThought {
 		partType = store.ContentPartThought
+	}
+	if partType == store.ContentPartText && strings.TrimSpace(delta) != "" {
+		a.providerText = true
 	}
 	last := len(a.parts) - 1
 	if last >= 0 && a.parts[last].Type == partType {
