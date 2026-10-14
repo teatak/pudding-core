@@ -1252,7 +1252,17 @@ export const pluginDefinition = z.object({
 });
 export type PluginDefinition = z.infer<typeof pluginDefinition>;
 
+export const pluginLibrarySource = z.object({
+  id: z.string(),
+  url: z.string(),
+  official: z.boolean(),
+});
+export type PluginLibrarySource = z.infer<typeof pluginLibrarySource>;
+export const pluginSourcesResponse = z.object({ sources: z.array(pluginLibrarySource) });
+
 export const installPluginRequest = z.object({
+  pluginID: z.string().optional(),
+  pluginVersion: z.string().optional(),
   packageJSON: z.string().min(1),
   packageSHA256: z.string().optional(),
   sourceURL: z.string().optional(),

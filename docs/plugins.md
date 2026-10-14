@@ -200,3 +200,9 @@ plugin's skill, for example:
   and header `X-Hotel-Code`; do not duplicate it unless the user explicitly
   wants to override the value for one call.
 ```
+
+## Third-party catalogs
+
+Protocol 27 adds `GET/POST /plugins/sources` and `DELETE /plugins/sources/:sourceID`. A source has `id`, `url`, and `official`; POST accepts `{ "url": "https://example.com/plugins/registry.json" }`. HTTPS URLs without credentials or fragments are normalized, deduplicated and persisted in `config/plugin-sources.yaml` (up to 32 third-party sources). The official source cannot be removed. Removing a source leaves installed plugin files, enablement and connections untouched. Desktop validates and fetches each catalog independently.
+
+`POST /plugins/install` accepts optional `pluginID` and `pluginVersion` assertions alongside `packageJSON`, `packageSHA256`, and `sourceURL`; mismatches fail before writing. Package locks preserve source identity across restarts. An existing plugin cannot be replaced by an installation from a different nonempty source (`409 plugin_source_conflict`), including a catalog trying to adopt a local/MCP plugin. Authored package edits keep their existing workflow. Catalog and update selection must use both local plugin ID and source URL.

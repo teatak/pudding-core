@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,8 @@ const (
 	MaxPackageJSONBytes        = 8 << 20
 	MaxPackageFiles            = 512
 )
+
+var ErrSourceConflict = errors.New("plugin is already installed from another source")
 
 var ErrPackageTooLarge = errors.New("plugin package is too large")
 
@@ -113,6 +116,11 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	dest := filepath.Join(root, pluginID)
 	oldLock, _ := readPackageLock(dest)
 	if info, statErr := os.Lstat(dest); statErr == nil {
+		// A catalog can update only its own installation, including after a restart.
+		// Authored packages (empty source) keep their existing editing workflow.
+		if sourceURL != "" && (oldLock == nil || canonicalSourceURL(oldLock.SourceURL) != canonicalSourceURL(sourceURL)) {
+			return nil, ErrSourceConflict
+		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return nil, fmt.Errorf("plugin destination %s is not a directory", dest)
 		}
@@ -345,4 +353,16 @@ func sortedPackagePaths(files map[string][]byte) []string {
 func sha256Bytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func canonicalSourceURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	u.Host = strings.ToLower(u.Host)
+	if u.Scheme == "https" && u.Port() == "443" {
+		u.Host = strings.TrimSuffix(u.Host, ":443")
+	}
+	return u.String()
 }

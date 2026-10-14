@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -50,6 +51,8 @@ type putPluginConnectionReq struct {
 }
 
 type installPluginReq struct {
+	PluginID      string `json:"pluginID"`
+	PluginVersion string `json:"pluginVersion"`
 	PackageJSON   string `json:"packageJSON"`
 	PackageSHA256 string `json:"packageSHA256"`
 	SourceURL     string `json:"sourceURL"`
@@ -122,10 +125,23 @@ func (s *Server) installPlugin(c *cart.Context) error {
 	if strings.TrimSpace(req.PackageJSON) == "" {
 		return badRequest(c, "packageJSON is required")
 	}
+	if req.PluginID != "" || req.PluginVersion != "" {
+		var pkg plugin.Package
+		if err := json.Unmarshal([]byte(req.PackageJSON), &pkg); err != nil {
+			return badRequest(c, "invalid plugin package")
+		}
+		if (req.PluginID != "" && req.PluginID != pkg.Plugin.ID) || (req.PluginVersion != "" && req.PluginVersion != pkg.Plugin.Version) {
+			return badRequest(c, "plugin package identity mismatch")
+		}
+	}
 	def, err := s.plugins.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
 	if err != nil {
 		if errors.Is(err, plugin.ErrPackageTooLarge) {
 			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "plugin_package_too_large"})
+			return nil
+		}
+		if errors.Is(err, plugin.ErrSourceConflict) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "plugin_source_conflict"})
 			return nil
 		}
 		if errors.Is(err, plugin.ErrBuiltinPlugin) {

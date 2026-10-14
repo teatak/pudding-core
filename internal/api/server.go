@@ -339,6 +339,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/plugins").GET(s.listPlugins)
+	app.Route("/plugins/sources").GET(s.listPluginSources).POST(s.addPluginSource)
+	app.Route("/plugins/sources/:sourceID").DELETE(s.removePluginSource)
 	app.Route("/plugins/install").POST(s.installPlugin)
 	app.Route("/plugins/mcp").POST(s.importMCPPlugins)
 	app.Route("/plugins/:id/enabled").PUT(s.putPluginEnabled)

@@ -529,3 +529,43 @@ func TestValidateDefinitionRejectsUnknownTokenExchangeField(t *testing.T) {
 		t.Fatalf("expected unknown field error, got %v", err)
 	}
 }
+
+func TestCatalogUpdatesPreserveSourceAndRejectCollisions(t *testing.T) {
+	root := t.TempDir()
+	source := "https://third.test/plugins/registry.json"
+	makePackage := func(version string) []byte {
+		return marshalTestPluginPackage(t, Package{
+			Kind: PluginPackageKind, SchemaVersion: PluginPackageSchemaVersion,
+			Plugin: PackagePlugin{ID: "example", Version: version},
+			Files:  []PackageFile{{Path: PluginFileName, Content: "id: example\nname: Example\nversion: " + version + "\n"}},
+		})
+	}
+	if _, err := InstallPackage(root, makePackage("1.0.0"), "", source); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(root, "example", "private-settings.json")
+	if err := os.WriteFile(unmanaged, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallPackage(root, makePackage("9.0.0"), "", "https://other.test/plugins/registry.json"); !errors.Is(err, ErrSourceConflict) {
+		t.Fatalf("collision: %v", err)
+	}
+	before, err := LoadDefinitionDir(filepath.Join(root, "example"))
+	if err != nil || before.Version != "1.0.0" || before.SourceURL != source {
+		t.Fatalf("collision modified installation: %+v %v", before, err)
+	}
+	updated, err := InstallPackage(root, makePackage("2.0.0"), "", "https://THIRD.test:443/plugins/registry.json")
+	if err != nil || updated.Version != "2.0.0" {
+		t.Fatalf("upgrade: %+v %v", updated, err)
+	}
+	if data, err := os.ReadFile(unmanaged); err != nil || string(data) != "keep" {
+		t.Fatalf("unmanaged settings lost: %s %v", data, err)
+	}
+	localRoot := t.TempDir()
+	if _, err := InstallPackage(localRoot, makePackage("1.0.0"), "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallPackage(localRoot, makePackage("2.0.0"), "", source); !errors.Is(err, ErrSourceConflict) {
+		t.Fatalf("catalog replaced a local plugin: %v", err)
+	}
+}
