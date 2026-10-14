@@ -237,7 +237,7 @@ func cleanModels(models []store.ProviderModel) []store.ProviderModel {
 		seen[m.ID] = true
 		out = append(out, m)
 	}
-	return out
+	return groupModelsByFamily(out)
 }
 
 func (s *Server) probeProviderModels(c *cart.Context) error {
