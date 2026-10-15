@@ -144,9 +144,12 @@ func (s *Store) StopCollaboration(ctx context.Context, parentID string) ([]event
 
 // The latest child turn is the result version. A new input suppresses collection
 // of the preceding turn; a delivery receipt is the canonical parent message.
+// Reset checkpoints are maintenance, not task results. Filter them after choosing
+// the latest turn so neither collection nor the wake probe falls back to old work.
 const uncollectedChildTurnsSQL = `SELECT t.id FROM session_children c JOIN turns t ON t.session_id=c.child_session_id
  WHERE c.parent_session_id=? AND t.rowid=(SELECT t2.rowid FROM turns t2 WHERE t2.session_id=c.child_session_id ORDER BY t2.created_at DESC,t2.rowid DESC LIMIT 1)
  AND t.status<>'running'
+ AND NOT EXISTS(SELECT 1 FROM messages r WHERE r.session_id=t.session_id AND r.turn_id=t.id AND r.role='summary' AND r.kind='summary' AND json_extract(r.metadata,'$.subagent_reset.version')=1)
  AND NOT EXISTS(SELECT 1 FROM queued_inputs q WHERE q.session_id=c.child_session_id AND q.status IN ('queued','editing'))
  AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id='collaboration_result_'||t.id)
  ORDER BY t.created_at,t.rowid`

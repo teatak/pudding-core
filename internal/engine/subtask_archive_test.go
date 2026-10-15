@@ -56,7 +56,7 @@ func TestSubtaskArchiveEligibilityAndModelTools(t *testing.T) {
 	if _, err := st.QueueInput(ctx, store.QueueInputInput{SessionID: "queued", ClientMessageID: "more", Text: "more work"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"approval", "question", "background", "running", "queued", "failed", "cancelled"} {
+	for _, id := range []string{"approval", "question", "background", "running", "queued"} {
 		if err := eng.SetSubtaskArchived(ctx, "root", id, true); !errors.Is(err, store.ErrSubtaskArchiveBusy) {
 			t.Errorf("archived blocked %s: %v", id, err)
 		}
@@ -64,16 +64,31 @@ func TestSubtaskArchiveEligibilityAndModelTools(t *testing.T) {
 	run := func(name, args string) tool.Result {
 		return eng.executeSubtask(ctx, "root", "parent", store.ModeWork, tool.Call{Name: name, CallID: name, Args: json.RawMessage(args)})
 	}
-	if result := run(tool.SubtaskArchive, `{}`); !result.Ok {
-		t.Fatal(result.Content)
+	for _, args := range []string{`{}`, `{"session_id":null}`, `{"session_id":" "}`} {
+		if result := run(tool.SubtaskArchive, args); result.Ok {
+			t.Fatalf("model archive accepted an implicit bulk operation: %s", args)
+		}
+	}
+	if archives, _ := st.ListSubtaskArchives(ctx, "root"); len(archives) != 0 {
+		t.Fatal("invalid model archive changed the list")
+	}
+	// The user/API bulk operation remains available independently of the model
+	// tool. It includes settled failures/cancellations and skips busy work.
+	if err := eng.SetSubtaskArchived(ctx, "root", "", true); err != nil {
+		t.Fatal(err)
 	}
 	archives, err := st.ListSubtaskArchives(ctx, "root")
-	if err != nil || len(archives) != 1 || archives["done"].IsZero() {
+	if err != nil || len(archives) != 3 {
 		t.Fatalf("batch eligibility: %v %v", archives, err)
+	}
+	for _, id := range []string{"done", "failed", "cancelled"} {
+		if archives[id].IsZero() {
+			t.Fatalf("settled %s was not archived", id)
+		}
 	}
 	items := readCollaborationList(t, eng)
 	for _, item := range items {
-		if item.SessionID == "done" {
+		if _, archived := archives[item.SessionID]; archived {
 			t.Fatal("default model list exposes archives")
 		}
 	}
@@ -84,14 +99,20 @@ func TestSubtaskArchiveEligibilityAndModelTools(t *testing.T) {
 	if !result.Ok || json.Unmarshal([]byte(result.Content), &payload) != nil || len(payload.Children) != 8 {
 		t.Fatalf("archive discovery: %+v", result)
 	}
-	if result := run(tool.SubtaskRestore, `{"session_id":"done"}`); !result.Ok {
-		t.Fatal(result.Content)
+	for _, id := range []string{"done", "failed", "cancelled"} {
+		args, _ := json.Marshal(map[string]string{"session_id": id})
+		if result := run(tool.SubtaskRestore, string(args)); !result.Ok {
+			t.Fatal(result.Content)
+		}
 	}
 	if archives, _ := st.ListSubtaskArchives(ctx, "root"); len(archives) != 0 {
 		t.Fatal("restore failed")
 	}
-	if result := run(tool.SubtaskArchive, `{"session_id":"done"}`); !result.Ok {
-		t.Fatal(result.Content)
+	for _, id := range []string{"done", "failed", "cancelled"} {
+		args, _ := json.Marshal(map[string]string{"session_id": id})
+		if result := run(tool.SubtaskArchive, string(args)); !result.Ok {
+			t.Fatal(result.Content)
+		}
 	}
 	if result := eng.executeSubtask(ctx, "done", "child-turn", store.ModeWork, tool.Call{Name: tool.SubtaskRestore, CallID: "recursive", Args: json.RawMessage(`{"session_id":"done"}`)}); result.Ok {
 		t.Fatal("child acquired parent archive controls")
