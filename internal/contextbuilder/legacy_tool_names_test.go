@@ -59,11 +59,18 @@ func TestRenamedArtifactAndSubtaskHistoryRetainsCallsAndResults(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"builtin_studio_list", "builtin_artifact_list"},
 		{"builtin_studio_open", "builtin_artifact_open"},
-		{"builtin_collaboration_list", "builtin_subtask_list"},
-		{"builtin_collaboration_dispatch", "builtin_subtask_dispatch"},
-		{"builtin_collaboration_send", "builtin_subtask_send"},
-		{"builtin_collaboration_wait", "builtin_subtask_wait"},
-		{"builtin_collaboration_stop", "builtin_subtask_stop"},
+		{"builtin_collaboration_list", "builtin_subagent_list"},
+		{"builtin_collaboration_dispatch", "builtin_subagent_dispatch"},
+		{"builtin_collaboration_send", "builtin_subagent_send"},
+		{"builtin_collaboration_wait", "builtin_subagent_wait"},
+		{"builtin_collaboration_stop", "builtin_subagent_stop"},
+		{"builtin_subtask_list", "builtin_subagent_list"},
+		{"builtin_subtask_dispatch", "builtin_subagent_dispatch"},
+		{"builtin_subtask_send", "builtin_subagent_send"},
+		{"builtin_subtask_wait", "builtin_subagent_wait"},
+		{"builtin_subtask_stop", "builtin_subagent_stop"},
+		{"builtin_subtask_archive", "builtin_subagent_archive"},
+		{"builtin_subtask_restore", "builtin_subagent_restore"},
 	} {
 		t.Run(pair[0], func(t *testing.T) {
 			history := []*store.Message{{ID: "m", SessionID: "s", TurnID: "t", Role: store.RoleAssistant, Parts: []store.ContentPart{
