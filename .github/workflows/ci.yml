@@ -19,7 +19,18 @@ jobs:
         run: |
           bash scripts/prepare-abseil.sh
           echo "PKG_CONFIG_PATH=$PWD/dist/deps/abseil/lib/pkgconfig" >> "$GITHUB_ENV"
-      - run: make test
+      - name: Test and retain diagnostic output
+        run: |
+          set -o pipefail
+          make test 2>&1 | tee "$RUNNER_TEMP/subagent-core-tests.log"
+      - name: Upload verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagent-core-verification
+          path: ${{ runner.temp }}/subagent-core-tests.log
+          retention-days: 1
+          if-no-files-found: ignore
       - run: make schema-check
       - run: make daemon
       - uses: actions/setup-node@v6
@@ -60,7 +71,18 @@ jobs:
         id: daemon-build
       - name: Verify native PowerShell and command lifecycle
         run: go test -count=1 -tags sqlite_fts5 ./internal/tool -run '^(TestPowerShell|TestWindows|TestCommandRun(UsesProjectCWDAndCapturesOutput|StreamsStdoutAndStderr|ReturnsExitCode|TimeoutKillsProcessTree|StopsOnContextCancel)|TestBackgroundProcess(StartPollStop|PipeAcceptsInput|RunsAndStopsLocalServer))'
-      - run: make test BUILDTAGS=sqlite_fts5
+      - name: Test and retain Windows diagnostic output
         if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          make test BUILDTAGS=sqlite_fts5 2>&1 | tee subagent-windows-tests.log
+      - name: Upload Windows verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagent-windows-verification
+          path: subagent-windows-tests.log
+          retention-days: 1
+          if-no-files-found: ignore
       - run: make schema-check BUILDTAGS=sqlite_fts5
         if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
