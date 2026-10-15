@@ -131,6 +131,9 @@ func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, pr
 
 func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
 	sessionID := sess.ID
+	// Cut the canonical snapshot before reference reinjection, not just before
+	// displaying messages: old skills and native continuations are task context.
+	msgs = store.SubagentContextMessages(msgs)
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
 	msgs = historyInTurnOrder(msgs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
@@ -400,6 +403,9 @@ func escapeSystemReminderText(text string) string {
 }
 
 func EffectiveMessages(msgs []*store.Message) []*store.Message {
+	// Apply before building byID: even a later compact tail may not pull a
+	// pre-reset message or summary back into the new task's context.
+	msgs = store.SubagentContextMessages(msgs)
 	compactIndex := -1
 	for i, msg := range msgs {
 		if _, ok := store.CompactMetadataFromMessage(msg); ok {
@@ -669,7 +675,7 @@ func (b *Builder) audioProviderPart(sessionID string, part store.ContentPart, cf
 		return provider.Part{}, false
 	}
 	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
+	if err != nil {
 		return provider.Part{}, false
 	}
 	return provider.Part{Type: provider.PartAudio, MIME: mime, Data: data}, true
@@ -741,7 +747,7 @@ func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) 
 	if toolPath != "" && part.Origin == attachment.OriginTemp {
 		b.WriteString("File tool scope: temp\n")
 		b.WriteString("File tool path: ")
-		b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(part.AttachmentKey)))))
+		b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(toolPath)))))
 		b.WriteByte('\n')
 	}
 	switch mediaKind {
