@@ -675,7 +675,7 @@ func (b *Builder) audioProviderPart(sessionID string, part store.ContentPart, cf
 		return provider.Part{}, false
 	}
 	data, err := os.ReadFile(path)
-	if err != nil {
+	if err != nil || len(data) == 0 {
 		return provider.Part{}, false
 	}
 	return provider.Part{Type: provider.PartAudio, MIME: mime, Data: data}, true
@@ -747,7 +747,7 @@ func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) 
 	if toolPath != "" && part.Origin == attachment.OriginTemp {
 		b.WriteString("File tool scope: temp\n")
 		b.WriteString("File tool path: ")
-		b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(toolPath)))))
+		b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(part.AttachmentKey)))))
 		b.WriteByte('\n')
 	}
 	switch mediaKind {
