@@ -244,9 +244,12 @@ func TestTemporaryDirectoriesRefreshInProviderContext(t *testing.T) {
 			client := &backgroundEngineClient{step: func(ctx context.Context, req provider.Request, step int) (<-chan provider.Chunk, error) {
 				requests = append(requests, req)
 				want := step == 2 || step == 3 && scope == ApprovalScopeSession
-				if strings.Contains(req.System, extra) != want {
-					t.Errorf("step %d: temporary directory visible=%v, want=%v", step, strings.Contains(req.System, extra), want)
-					return nil, fmt.Errorf("step %d: temporary directory visible=%v, want=%v", step, strings.Contains(req.System, extra), want)
+				// Directory access is JSON in the prompt; Windows backslashes are escaped.
+				encodedExtra, _ := json.Marshal(extra)
+				visible := strings.Contains(req.System, string(encodedExtra))
+				if visible != want {
+					t.Errorf("step %d: temporary directory visible=%v, want=%v", step, visible, want)
+					return nil, fmt.Errorf("step %d: temporary directory visible=%v, want=%v", step, visible, want)
 				}
 				switch step {
 				case 1:
