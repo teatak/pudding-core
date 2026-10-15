@@ -24,6 +24,7 @@ type Builder struct {
 	prompts        PromptSource
 	attachmentHome string
 	plugins        PluginSkillSource
+
 	skills         SkillSource
 }
 
@@ -131,6 +132,10 @@ func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, pr
 
 func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
 	sessionID := sess.ID
+	// Reset is a hard task-context boundary, unlike compaction. Filter both the
+	// ordinary history and the source used to restore historical skill calls;
+	// otherwise skill reinjection or native provider state could revive old work.
+	msgs = store.SubagentContextMessages(msgs)
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
 	msgs = historyInTurnOrder(msgs)
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
@@ -400,6 +405,9 @@ func escapeSystemReminderText(text string) string {
 }
 
 func EffectiveMessages(msgs []*store.Message) []*store.Message {
+	// Compaction and request estimation call this independently of buildMessages.
+	// A later summary must not pull a pre-reset tail message across the boundary.
+	msgs = store.SubagentContextMessages(msgs)
 	compactIndex := -1
 	for i, msg := range msgs {
 		if _, ok := store.CompactMetadataFromMessage(msg); ok {
