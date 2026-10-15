@@ -31,31 +31,10 @@ func SubtaskDefinitions() []provider.ToolDef {
 	}
 }
 
-// Historical-read compatibility only: never register or execute these aliases.
-// Retire both legacy families six calendar months after the first stable desktop
-// release containing builtin_subagent_*. Release date/deadline: pending release.
-// At that release, fill in the version and exact deadline here and in
-// docs/session-collaboration-plan.md; remove the mappings and compatibility-only
-// presentation/tests in the first maintenance release after the deadline.
-// Do not switch behavior according to the runtime clock or rewrite old messages.
+// Historical reads only. The single mapping and six-month removal milestone
+// live in subagent_compat.go; old names are never registered for execution.
 func NormalizeCollaborationTool(name string) string {
-	switch name {
-	case "builtin_collaboration_list", "builtin_subtask_list":
-		return SubtaskList
-	case "builtin_collaboration_dispatch", "builtin_subtask_dispatch":
-		return SubtaskDispatch
-	case "builtin_collaboration_send", "builtin_subtask_send":
-		return SubtaskSend
-	case "builtin_collaboration_wait", "builtin_subtask_wait":
-		return SubtaskWait
-	case "builtin_collaboration_stop", "builtin_subtask_stop":
-		return SubtaskStop
-	case "builtin_subtask_archive":
-		return SubtaskArchive
-	case "builtin_subtask_restore":
-		return SubtaskRestore
-	}
-	return name
+	return HistoricalSubagentToolName(name)
 }
 
 func IsSubtaskTool(name string) bool {
