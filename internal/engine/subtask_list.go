@@ -125,7 +125,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 			if turn.Status == store.TurnCompleted {
 				view.Summary = ""
 				for _, message := range turn.Messages {
-					if _, ok := store.SubagentResetFromMessage(message); ok {
+					if _, ok := store.SubagentResetFromMessage(&message); ok {
 						resetCheckpoint = true
 					}
 					if message.Role == store.RoleAssistant && message.Kind == store.MessageKindText && !message.Interrupted {
