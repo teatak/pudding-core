@@ -63,7 +63,7 @@ func (s *Store) SetSubtaskArchived(ctx context.Context, parentID, childID, expec
 		if err != nil {
 			return err
 		}
-		if latestID != expectedTurnID || !store.SubagentArchiveStatusEligible(status) {
+		if latestID != expectedTurnID || !store.SubagentSettledStatus(status) {
 			return store.ErrSubtaskArchiveBusy
 		}
 		var busy bool
@@ -97,9 +97,9 @@ func restoreSubtaskTx(ctx context.Context, tx *sql.Tx, childID string) error {
 	return insertEventTx(ctx, tx, &event.Event{SessionID: parentID, Kind: event.CollaborationChanged})
 }
 
-// DispatchChild invokes this inside its admission transaction, after resolving
-// duplicate tool calls and before creating either the child or its queued input.
-// Count relationships, not the visible list: archived and failed children count.
+// New-object admission calls this after its idempotency lookup. Count every
+// relationship, including archives. Old over-limit groups are never deleted;
+// the total cap does not block send, restore or reset of an existing identity.
 func checkSubtaskBudgetTx(ctx context.Context, tx *sql.Tx, parentID, turnID string) error {
 	var total int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM session_children WHERE parent_session_id=?`, parentID).Scan(&total); err != nil {
@@ -108,24 +108,46 @@ func checkSubtaskBudgetTx(ctx context.Context, tx *sql.Tx, parentID, turnID stri
 	if total >= store.SubagentTotalLimit {
 		return store.ErrSubagentTotalLimit
 	}
-	// Derive the request boundary from canonical initial user messages. System
-	// wakes, retries and form answers share the preceding request's budget. Rowid
-	// breaks same-millisecond ties; this also works across process restarts.
+	return checkSubagentFreshBudgetTx(ctx, tx, parentID, turnID)
+}
+
+// Canonical initial user messages define the request boundary. System wakes,
+// retries and form answers retain its budget. Rowid breaks millisecond ties.
+// Dispatch rows plus reset checkpoint receipts are the accounting authority;
+// no writable counter can be refunded by hiding or reusing a child.
+const subagentFreshContextCountSQL = `WITH boundary AS (
+	SELECT COALESCE(MAX(t.rowid),0) AS first_row FROM turns t
+	JOIN messages m ON m.turn_id=t.id AND m.client_message_id=t.client_message_id
+	WHERE t.session_id=? AND t.rowid<=(SELECT rowid FROM turns WHERE id=?) AND m.role='user'
+	AND t.client_message_id NOT GLOB 'input-flow-*'
+	AND NOT EXISTS(SELECT 1 FROM json_each(m.parts) p WHERE json_extract(p.value,'$.type')='form_result')
+), resets AS (
+	SELECT CASE WHEN json_valid(m.metadata) THEN m.metadata ELSE '{}' END AS metadata
+	FROM messages m JOIN session_children c ON c.child_session_id=m.session_id
+	WHERE c.parent_session_id=? AND m.role='summary' AND m.kind='summary'
+)
+SELECT (SELECT COUNT(*) FROM session_dispatches d JOIN turns t ON t.id=d.parent_turn_id
+	WHERE t.session_id=? AND t.rowid>=(SELECT first_row FROM boundary))
+	+ (SELECT COUNT(*) FROM resets r JOIN turns t ON t.id=json_extract(r.metadata,'$.subagent_reset.parent_turn_id')
+	WHERE t.session_id=? AND t.rowid>=(SELECT first_row FROM boundary)
+	AND json_extract(r.metadata,'$.subagent_reset.version')=1
+	AND json_extract(r.metadata,'$.subagent_reset.parent_session_id')=?)`
+
+func checkSubagentFreshBudgetTx(ctx context.Context, tx *sql.Tx, parentID, turnID string) error {
 	var count int
-	err := tx.QueryRowContext(ctx, `WITH boundary AS (
-		SELECT COALESCE(MAX(t.rowid),0) AS first_row FROM turns t
-		JOIN messages m ON m.turn_id=t.id AND m.client_message_id=t.client_message_id
-		WHERE t.session_id=? AND t.rowid<=(SELECT rowid FROM turns WHERE id=?) AND m.role='user'
-		AND t.client_message_id NOT GLOB 'input-flow-*'
-		AND NOT EXISTS(SELECT 1 FROM json_each(m.parts) p WHERE json_extract(p.value,'$.type')='form_result')
-	)
-	SELECT COUNT(*) FROM session_dispatches d JOIN turns t ON t.id=d.parent_turn_id
-	WHERE t.session_id=? AND t.rowid>=(SELECT first_row FROM boundary)`, parentID, turnID, parentID).Scan(&count)
-	if err != nil {
+	if err := tx.QueryRowContext(ctx, subagentFreshContextCountSQL, parentID, turnID, parentID, parentID, parentID, parentID).Scan(&count); err != nil {
 		return err
 	}
 	if count >= store.SubtaskDispatchLimit {
 		return store.ErrSubtaskLimit
 	}
 	return nil
+}
+
+func (s *Store) SubagentFreshContextCount(ctx context.Context, parentID, turnID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var count int
+	err := s.db.QueryRowContext(ctx, subagentFreshContextCountSQL, parentID, turnID, parentID, parentID, parentID, parentID).Scan(&count)
+	return count, err
 }
