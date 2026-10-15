@@ -293,7 +293,10 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 		}
 		switch part.Type {
 		case store.ContentPartToolUse, store.ContentPartToolResult:
-			if !toolReplayedInHistory(mode, tool.CurrentToolName(part.Name), allowedTools) {
+			// Native state still contains the stored name. Rebuild renamed calls
+			// from canonical parts so providers cannot replay retired tool names.
+			name := tool.CurrentToolName(part.Name)
+			if name != part.Name || !toolReplayedInHistory(mode, name, allowedTools) {
 				return false
 			}
 		}
