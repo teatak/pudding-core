@@ -63,7 +63,7 @@ func (s *Store) SetSubtaskArchived(ctx context.Context, parentID, childID, expec
 		if err != nil {
 			return err
 		}
-		if latestID != expectedTurnID || status != string(store.TurnCompleted) {
+		if latestID != expectedTurnID || !store.SubagentArchiveStatusEligible(status) {
 			return store.ErrSubtaskArchiveBusy
 		}
 		var busy bool
@@ -97,10 +97,20 @@ func restoreSubtaskTx(ctx context.Context, tx *sql.Tx, childID string) error {
 	return insertEventTx(ctx, tx, &event.Event{SessionID: parentID, Kind: event.CollaborationChanged})
 }
 
-// Derive the request boundary from canonical initial user messages. System
-// wakes, retries and form answers share the preceding request's budget. Rowid
-// breaks same-millisecond ties; this also works across process restarts.
+// DispatchChild invokes this inside its admission transaction, after resolving
+// duplicate tool calls and before creating either the child or its queued input.
+// Count relationships, not the visible list: archived and failed children count.
 func checkSubtaskBudgetTx(ctx context.Context, tx *sql.Tx, parentID, turnID string) error {
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM session_children WHERE parent_session_id=?`, parentID).Scan(&total); err != nil {
+		return err
+	}
+	if total >= store.SubagentTotalLimit {
+		return store.ErrSubagentTotalLimit
+	}
+	// Derive the request boundary from canonical initial user messages. System
+	// wakes, retries and form answers share the preceding request's budget. Rowid
+	// breaks same-millisecond ties; this also works across process restarts.
 	var count int
 	err := tx.QueryRowContext(ctx, `WITH boundary AS (
 		SELECT COALESCE(MAX(t.rowid),0) AS first_row FROM turns t
