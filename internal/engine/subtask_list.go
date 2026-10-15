@@ -153,7 +153,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 		if at, ok := archives[child.ID]; ok {
 			view.ArchivedAt = &at
 		}
-		view.CanArchive = view.ArchivedAt == nil && view.Status == "completed" && !queued && !child.Running && view.PendingApprovals == 0 && view.PendingUserInputs == 0 && child.BackgroundProcessCount == 0
+		view.CanArchive = view.ArchivedAt == nil && view.LatestTurnID != "" && store.SubagentArchiveStatusEligible(view.Status) && !queued && !child.Running && view.PendingApprovals == 0 && view.PendingUserInputs == 0 && child.BackgroundProcessCount == 0
 		views = append(views, view)
 	}
 	return views, nil
