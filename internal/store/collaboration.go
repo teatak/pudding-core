@@ -10,12 +10,14 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 )
 
-// New children are budgeted per user request, including automatic continuations.
+// Dispatches and resets share one budget per user request, including automatic
+// continuations. Archives do not refund either the total or fresh-context limit.
 const SubtaskDispatchLimit = 3
+const SubagentTotalLimit = 24
 
-var ErrSubtaskLimit = errors.New("subtask creation limit reached (3 per user request); continue in the main conversation or reuse a suitable existing child; archiving does not restore this budget")
-var ErrSubtaskArchiveBusy = errors.New("subtask must be completed with no running or queued work, approvals, unanswered questions, or background processes before archiving")
-
+var ErrSubtaskLimit = errors.New("subagent fresh-context limit reached (3 creations or resets per user request); continue in the main conversation or send related work without resetting; archiving does not restore this budget")
+var ErrSubagentTotalLimit = errors.New("subagent total limit reached (24 per parent, including archived); list with include_archived=true and send to a suitable existing subagent, or reset an idle one for independent work; archiving does not free a slot")
+var ErrSubtaskArchiveBusy = errors.New("subagent must be settled with no running or queued work, approvals, unanswered questions, or background processes before archiving")
 var ErrCollaborationStopped = errors.New("store: collaboration stopped")
 
 // Dispatch identity belongs to the originating tool call. Execution state stays
@@ -40,6 +42,10 @@ func ValidateDispatchChild(in DispatchChildInput) error {
 		return ErrInvalidSessionRelation
 	}
 	return nil
+}
+
+func SubagentSettledStatus(status string) bool {
+	return status == string(TurnCompleted) || status == string(TurnFailed) || status == string(TurnCancelled)
 }
 
 // ChildResultMessage is a delivery receipt as well as canonical parent context.
