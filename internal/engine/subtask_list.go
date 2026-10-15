@@ -14,6 +14,7 @@ import (
 type collaborationListItem struct {
 	ArchivedAt             *time.Time `json:"archived_at,omitempty"`
 	CanArchive             bool       `json:"can_archive"`
+	CanReset               bool       `json:"can_reset"`
 	SessionID              string     `json:"session_id"`
 	Title                  string     `json:"title"`
 	TaskTitle              string     `json:"task_title"`
@@ -115,6 +116,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 			return nil, err
 		}
 		taskSummary := view.Summary
+		resetCheckpoint := false
 		if len(page.Turns) > 0 {
 			// A page of size one still includes the whole retry chain, oldest first.
 			turn := page.Turns[len(page.Turns)-1]
@@ -123,6 +125,9 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 			if turn.Status == store.TurnCompleted {
 				view.Summary = ""
 				for _, message := range turn.Messages {
+					if _, ok := store.SubagentResetFromMessage(message); ok {
+						resetCheckpoint = true
+					}
 					if message.Role == store.RoleAssistant && message.Kind == store.MessageKindText && !message.Interrupted {
 						view.Summary = childTextExcerpt(message.Text, 96)
 					}
@@ -130,6 +135,12 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 			}
 			_, err := e.store.GetMessage(ctx, parentID, "collaboration_result_"+turn.ID)
 			view.ResultCollected = err == nil
+			if resetCheckpoint {
+				// A maintenance checkpoint is not a completed user task or a result
+				// awaiting collection. Do not advertise the preceding task's result.
+				view.Status, view.Summary, taskSummary = "idle", "", ""
+				view.TaskTitle, view.ResultCollected = child.Title, true
+			}
 		}
 		inputs, err := e.store.ListQueuedInputs(ctx, child.ID)
 		if err != nil {
@@ -153,7 +164,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 		if at, ok := archives[child.ID]; ok {
 			view.ArchivedAt = &at
 		}
-		view.CanArchive = view.ArchivedAt == nil && view.LatestTurnID != "" && store.SubagentArchiveStatusEligible(view.Status) && !queued && !child.Running && view.PendingApprovals == 0 && view.PendingUserInputs == 0 && child.BackgroundProcessCount == 0
+		view.CanArchive = view.ArchivedAt == nil && view.LatestTurnID != "" && (resetCheckpoint || store.SubagentSettledStatus(view.Status)) && !queued && !child.Running && view.PendingApprovals == 0 && view.PendingUserInputs == 0 && child.BackgroundProcessCount == 0
 		views = append(views, view)
 	}
 	return views, nil
