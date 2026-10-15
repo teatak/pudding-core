@@ -35,6 +35,7 @@ func (e *Engine) childPendingUserInputs(ctx context.Context, sessionID string) (
 	if err != nil {
 		return 0, err
 	}
+	messages = store.SubagentContextMessages(messages)
 	needsAnswer := func(status string) bool {
 		return status == "waiting" || status == "awaiting_user" || status == "timeout"
 	}
@@ -125,7 +126,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 			if turn.Status == store.TurnCompleted {
 				view.Summary = ""
 				for _, message := range turn.Messages {
-					if _, ok := store.SubagentResetFromMessage(&message); ok {
+					if _, ok := store.SubagentResetFromMessage(message); ok {
 						resetCheckpoint = true
 					}
 					if message.Role == store.RoleAssistant && message.Kind == store.MessageKindText && !message.Interrupted {
