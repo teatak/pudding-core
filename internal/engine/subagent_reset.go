@@ -83,7 +83,7 @@ func (e *Engine) resetSubagent(ctx context.Context, parentID, parentTurnID, call
 		// Reserve the existing context-maintenance guard, so a compaction cannot
 		// start between the idle check and reset commit. No LLM compaction is run.
 		e.mu.Lock()
-		if e.compacting[childID] {
+		if e.compacting[childID] || e.running[childID] != nil {
 			e.mu.Unlock()
 			return nil, store.ErrSubagentResetBusy
 		}
@@ -125,12 +125,12 @@ func (e *Engine) resetSubagent(ctx context.Context, parentID, parentTurnID, call
 }
 
 func (e *Engine) subagentCanReset(child ChildSessionView) bool {
-	if child.LatestTurnID == "" || !store.SubagentSettledStatus(child.Status) ||
+	if child.LatestTurnID == "" || (!store.SubagentSettledStatus(child.Status) && child.Status != "idle") ||
 		child.Session.Running || child.PendingApprovals != 0 || child.PendingUserInputs != 0 ||
 		child.Session.BackgroundProcessCount != 0 || !child.ResultCollected {
 		return false
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return !e.compacting[child.Session.ID]
+	return !e.compacting[child.Session.ID] && e.running[child.Session.ID] == nil
 }
