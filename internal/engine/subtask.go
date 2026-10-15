@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -21,6 +22,9 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 	fail := func(err error) tool.Result {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Content: err.Error()}
 	}
+	if !tool.IsSubtaskTool(call.Name) {
+		return fail(errors.New("unknown subagent tool"))
+	}
 	owner, err := e.store.ParentSessionID(ctx, sessionID)
 	if err != nil {
 		return fail(err)
@@ -31,88 +35,89 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinCollaborationID, mode) {
 		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinCollaborationID)
 	}
-	var args struct {
-		Title     string `json:"title"`
-		Prompt    string `json:"prompt"`
-		SessionID string `json:"session_id"`
+	var dispatchArgs struct {
+		Title  string `json:"title"`
+		Prompt string `json:"prompt"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
-	decoder.DisallowUnknownFields()
+	var sendArgs struct {
+		SessionID      string `json:"session_id"`
+		Prompt         string `json:"prompt"`
+		ResetContext   bool   `json:"reset_context"`
+		ExpectedTurnID string `json:"expected_turn_id"`
+	}
+	var resetArgs struct {
+		SessionID      string `json:"session_id"`
+		ExpectedTurnID string `json:"expected_turn_id"`
+	}
 	var listArgs struct {
 		IncludeArchived bool `json:"include_archived"`
 	}
 	var archiveArgs struct {
-		SessionID *string `json:"session_id"`
+		SessionID string `json:"session_id"`
 	}
-	var input any = &args
-	if call.Name == tool.SubtaskList {
+	var emptyArgs struct{}
+	var input any = &emptyArgs
+	switch call.Name {
+	case tool.SubtaskList:
 		input = &listArgs
-	} else if call.Name == tool.SubtaskArchive || call.Name == tool.SubtaskRestore {
+	case tool.SubtaskDispatch:
+		input = &dispatchArgs
+	case tool.SubtaskSend:
+		input = &sendArgs
+	case tool.SubtaskReset:
+		input = &resetArgs
+	case tool.SubtaskArchive, tool.SubtaskRestore:
 		input = &archiveArgs
 	}
+	decoder := json.NewDecoder(strings.NewReader(string(call.Args)))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(input); err != nil {
 		return fail(err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fail(errors.New("expected one JSON argument object"))
 	}
 	var payload any
 	switch call.Name {
 	case tool.SubtaskList:
-		children, err := e.ListChildSessions(ctx, sessionID)
-		if err != nil {
-			return fail(err)
-		}
-		items := make([]collaborationListItem, 0, len(children))
-		for _, child := range children {
-			if child.ArchivedAt != nil && !listArgs.IncludeArchived {
-				continue
-			}
-			items = append(items, collaborationListItem{
-				SessionID: child.Session.ID, Title: child.Session.Title, TaskTitle: child.TaskTitle,
-				Status: child.Status, LatestTurnID: child.LatestTurnID, Summary: child.Summary,
-				PendingApprovals: child.PendingApprovals, BackgroundProcessCount: child.Session.BackgroundProcessCount,
-				PendingUserInputs: child.PendingUserInputs, ArchivedAt: child.ArchivedAt, CanArchive: child.CanArchive,
-				ResultCollected: child.ResultCollected,
-			})
-		}
-		payload = map[string]any{"children": items}
+		payload, err = e.listSubagents(ctx, sessionID, turnID, listArgs.IncludeArchived)
 	case tool.SubtaskDispatch:
-		if strings.TrimSpace(args.Title) == "" || utf8.RuneCountInString(args.Title) > 100 || strings.TrimSpace(args.Prompt) == "" {
+		if strings.TrimSpace(dispatchArgs.Title) == "" || utf8.RuneCountInString(dispatchArgs.Title) > 100 || strings.TrimSpace(dispatchArgs.Prompt) == "" {
 			return fail(ErrEmptyInput)
 		}
-		child, err := e.dispatchChild(ctx, sessionID, turnID, call.CallID, args.Title, args.Prompt, mode)
-		if err != nil {
-			return fail(err)
-		}
-		payload = child
+		payload, err = e.dispatchChild(ctx, sessionID, turnID, call.CallID, dispatchArgs.Title, dispatchArgs.Prompt, mode)
 	case tool.SubtaskSend:
-		result, err := e.sendChild(ctx, sessionID, turnID, args.SessionID, "collaboration_"+turnID+"_"+call.CallID, args.Prompt)
-		if err != nil {
-			return fail(err)
-		}
-		payload = result
-	case tool.SubtaskArchive, tool.SubtaskRestore:
-		childID := ""
-		if archiveArgs.SessionID != nil {
-			childID = strings.TrimSpace(*archiveArgs.SessionID)
-			if childID == "" {
-				return fail(ErrEmptyInput)
-			}
-		} else if call.Name == tool.SubtaskRestore {
+		if strings.TrimSpace(sendArgs.SessionID) == "" || strings.TrimSpace(sendArgs.Prompt) == "" {
 			return fail(ErrEmptyInput)
 		}
-		if err := e.SetSubtaskArchived(ctx, sessionID, childID, call.Name == tool.SubtaskArchive); err != nil {
-			return fail(err)
+		if sendArgs.ResetContext {
+			payload, err = e.resetChild(ctx, store.SubagentResetInput{ParentSessionID: sessionID, ParentTurnID: turnID,
+				CallID: call.CallID, SessionID: sendArgs.SessionID, ExpectedTurnID: sendArgs.ExpectedTurnID}, &sendArgs.Prompt, mode)
+		} else {
+			if sendArgs.ExpectedTurnID != "" {
+				return fail(errors.New("expected_turn_id is only accepted with reset_context=true"))
+			}
+			payload, err = e.sendChild(ctx, sessionID, turnID, sendArgs.SessionID, "collaboration_"+turnID+"_"+call.CallID, sendArgs.Prompt)
 		}
-		payload = map[string]any{"updated": true}
+	case tool.SubtaskReset:
+		payload, err = e.resetChild(ctx, store.SubagentResetInput{ParentSessionID: sessionID, ParentTurnID: turnID,
+			CallID: call.CallID, SessionID: resetArgs.SessionID, ExpectedTurnID: resetArgs.ExpectedTurnID}, nil, mode)
+	case tool.SubtaskArchive, tool.SubtaskRestore:
+		childID := strings.TrimSpace(archiveArgs.SessionID)
+		if childID == "" {
+			return fail(ErrEmptyInput)
+		}
+		err = e.SetSubtaskArchived(ctx, sessionID, childID, call.Name == tool.SubtaskArchive)
+		payload = map[string]any{"updated": true, "session_id": childID}
 	case tool.SubtaskWait:
-		if err := e.waitForChildren(ctx, sessionID); err != nil {
-			return fail(err)
-		}
+		err = e.waitForChildren(ctx, sessionID)
 		payload = map[string]any{"settled": true}
 	case tool.SubtaskStop:
-		if err := e.StopCollaboration(ctx, sessionID); err != nil {
-			return fail(err)
-		}
+		err = e.StopCollaboration(ctx, sessionID)
 		payload = map[string]any{"stopped": true}
+	}
+	if err != nil {
+		return fail(err)
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{CallID: call.CallID, Name: call.Name, Ok: true, Content: string(content)}
