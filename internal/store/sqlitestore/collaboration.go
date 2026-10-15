@@ -103,7 +103,7 @@ func (s *Store) StopCollaboration(ctx context.Context, parentID string) ([]event
 		if owner != "" {
 			return store.ErrInvalidSessionRelation
 		}
-		// A durable barrier covers both accepted dispatches and a dispatch racing the stop.
+		// A durable barrier covers accepted dispatches and a racing dispatch/reset.
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO collaboration_stops(parent_turn_id)
     SELECT id FROM turns WHERE session_id=? AND (status='running' OR id IN
     (SELECT d.parent_turn_id FROM session_dispatches d JOIN session_children c ON c.child_session_id=d.child_session_id WHERE c.parent_session_id=?))`, parentID, parentID); err != nil {
@@ -142,11 +142,14 @@ func (s *Store) StopCollaboration(ctx context.Context, parentID string) ([]event
 	return events, err
 }
 
-// The latest child turn is the result version. A new input suppresses collection
-// of the preceding turn; a delivery receipt is the canonical parent message.
+// Latest child turn is the result version. Reset checkpoints are maintenance,
+// not task results; they must neither be collected nor automatically wake a parent.
 const uncollectedChildTurnsSQL = `SELECT t.id FROM session_children c JOIN turns t ON t.session_id=c.child_session_id
  WHERE c.parent_session_id=? AND t.rowid=(SELECT t2.rowid FROM turns t2 WHERE t2.session_id=c.child_session_id ORDER BY t2.created_at DESC,t2.rowid DESC LIMIT 1)
  AND t.status<>'running'
+ AND NOT EXISTS(SELECT 1 FROM messages r WHERE r.session_id=t.session_id AND r.turn_id=t.id
+   AND r.role='summary' AND r.kind='summary'
+   AND json_extract(CASE WHEN json_valid(r.metadata) THEN r.metadata ELSE '{}' END,'$.subagent_reset.version')=1)
  AND NOT EXISTS(SELECT 1 FROM queued_inputs q WHERE q.session_id=c.child_session_id AND q.status IN ('queued','editing'))
  AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id='collaboration_result_'||t.id)
  ORDER BY t.created_at,t.rowid`
