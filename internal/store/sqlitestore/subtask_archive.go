@@ -63,7 +63,7 @@ func (s *Store) SetSubtaskArchived(ctx context.Context, parentID, childID, expec
 		if err != nil {
 			return err
 		}
-		if latestID != expectedTurnID || !store.SubagentArchiveStatusEligible(status) {
+		if latestID != expectedTurnID || !store.SubagentSettledStatus(status) {
 			return store.ErrSubtaskArchiveBusy
 		}
 		var busy bool
@@ -108,24 +108,5 @@ func checkSubtaskBudgetTx(ctx context.Context, tx *sql.Tx, parentID, turnID stri
 	if total >= store.SubagentTotalLimit {
 		return store.ErrSubagentTotalLimit
 	}
-	// Derive the request boundary from canonical initial user messages. System
-	// wakes, retries and form answers share the preceding request's budget. Rowid
-	// breaks same-millisecond ties; this also works across process restarts.
-	var count int
-	err := tx.QueryRowContext(ctx, `WITH boundary AS (
-		SELECT COALESCE(MAX(t.rowid),0) AS first_row FROM turns t
-		JOIN messages m ON m.turn_id=t.id AND m.client_message_id=t.client_message_id
-		WHERE t.session_id=? AND t.rowid<=(SELECT rowid FROM turns WHERE id=?) AND m.role='user'
-		AND t.client_message_id NOT GLOB 'input-flow-*'
-		AND NOT EXISTS(SELECT 1 FROM json_each(m.parts) p WHERE json_extract(p.value,'$.type')='form_result')
-	)
-	SELECT COUNT(*) FROM session_dispatches d JOIN turns t ON t.id=d.parent_turn_id
-	WHERE t.session_id=? AND t.rowid>=(SELECT first_row FROM boundary)`, parentID, turnID, parentID).Scan(&count)
-	if err != nil {
-		return err
-	}
-	if count >= store.SubtaskDispatchLimit {
-		return store.ErrSubtaskLimit
-	}
-	return nil
+	return checkSubagentFreshContextBudgetTx(ctx, tx, parentID, turnID)
 }
