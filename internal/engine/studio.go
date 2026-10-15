@@ -18,6 +18,10 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	respond := func(value any, err error) tool.Result {
 		if err != nil {
 			value = map[string]any{"error": err.Error()}
+			var locked *store.DocumentLocked
+			if errors.As(err, &locked) {
+				value = map[string]any{"error": "document_locked", "operationID": locked.OperationID}
+			}
 			var cellConflict *store.TableCellConflict
 			if errors.As(err, &cellConflict) {
 				value = map[string]any{"error": "cell_conflict", "rowID": cellConflict.RowID, "columnID": cellConflict.ColumnID}
@@ -99,7 +103,21 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		}
 		return respond(result, nil)
 	case tool.DocEdit:
-		doc, err := e.store.WriteDocument(ctx, args.ItemID, store.DocumentWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author})
+		if args.Action == "begin" || args.Action == "renew" || args.Action == "cancel" {
+			hash := ""
+			if args.ExpectedHash != nil {
+				hash = *args.ExpectedHash
+			}
+			op, err := e.store.ChangeDocumentEdit(ctx, args.ItemID, store.DocumentEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Author: author})
+			return respond(op, err)
+		}
+		if args.Action != "" && args.Action != "commit" {
+			return respond(nil, errors.New("invalid document edit action"))
+		}
+		if args.Action == "commit" && args.Replacement == nil {
+			return respond(nil, errors.New("commit requires replacement"))
+		}
+		doc, err := e.store.WriteDocument(ctx, args.ItemID, store.DocumentWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement})
 		if err != nil {
 			return respond(nil, err)
 		}

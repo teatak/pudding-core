@@ -85,11 +85,17 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 	if in.UndoRevision != "" {
 		modes++
 	}
+	if in.Replacement != nil {
+		modes++
+	}
+	if (in.Replacement != nil) != (in.OperationID != "" && in.LeaseToken != "") || (in.Replacement == nil && (in.OperationID != "" || in.LeaseToken != "")) {
+		return nil, &store.InvalidDocument{Message: "replacement requires operationID and leaseToken together"}
+	}
 	if in.UndoRevision != "" && in.Author.Kind != "user" {
 		return nil, &store.InvalidDocument{Message: "undo is a user operation"}
 	}
 	if modes != 1 || (in.PreserveOnly && (in.Body == nil || in.Author.Kind != "user")) {
-		return nil, &store.InvalidDocument{Message: "provide exactly one of body, edits, restoreRevision or undoRevision"}
+		return nil, &store.InvalidDocument{Message: "provide exactly one of body, edits, restoreRevision, undoRevision or replacement"}
 	}
 	if (in.Body != nil || in.RestoreRevision != "") && in.ExpectedHash == nil {
 		return nil, &store.InvalidDocument{Message: "expectedHash is required for replacement or restore"}
@@ -128,6 +134,17 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 			return &store.ContentConflict{CurrentHash: current.ContentHash}
 		}
 		body := current.Body
+		var operation *store.DocumentEditOperation
+		if in.Replacement != nil {
+			operation, err = loadDocumentEditTx(ctx, tx, id, in.OperationID)
+			if err != nil {
+				return err
+			}
+			if err = checkDocumentEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
+				return err
+			}
+			body = body[:operation.From] + *in.Replacement + body[operation.To:]
+		}
 		if in.Body != nil {
 			body = *in.Body
 		}
@@ -166,12 +183,28 @@ func (s *Store) WriteDocument(ctx context.Context, id string, in store.DocumentW
 		if err := store.ValidateDocument(body); err != nil {
 			return err
 		}
+		if !in.PreserveOnly {
+			if err := guardDocumentEditsTx(ctx, tx, id, current.Body, body, in.OperationID, time.Now().UnixMilli()); err != nil {
+				return err
+			}
+		}
 		out = &store.DocumentContent{ItemID: id, Body: body, ContentHash: store.DocumentHash(body), RevisionID: current.RevisionID}
 		if err := saveNativeContentTx(ctx, tx, out, in, requestHash); err != nil {
 			return err
 		}
 		if in.PreserveOnly {
 			out = current
+		}
+		if operation != nil {
+			operation.State = "committed"
+			operation.To = operation.From + len(*in.Replacement)
+			operation.ContentHash = out.ContentHash
+			operation.RevisionID = out.RevisionID
+			operation.UpdatedAt = time.Now().UnixMilli()
+			operation.Sequence++
+			if err := saveDocumentEditTx(ctx, tx, operation); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

@@ -376,6 +376,22 @@ CREATE TABLE studio_item_saves (
     PRIMARY KEY(item_id, client_request_id)
 );
 
+CREATE TABLE studio_document_edits (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX studio_document_edits_item ON studio_document_edits(item_id,state,updated_at);
+CREATE TABLE studio_document_edit_requests (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    client_request_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    result TEXT NOT NULL,
+    PRIMARY KEY(item_id,client_request_id)
+);
+
 CREATE TABLE widget_actions (
  id TEXT PRIMARY KEY,
  item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,

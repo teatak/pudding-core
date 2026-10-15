@@ -53,4 +53,25 @@ func TestDocumentAPIAndWidgetBoundary(t *testing.T) {
 	}
 	call("GET", path+"/assets/not-a-hash.png", nil, 400)
 	call("POST", "/studio/items", []byte(`{"kind":"unsupported","name":"Invalid kind"}`), 400)
+	leaseBody, _ := json.Marshal(map[string]any{"clientRequestID": "begin", "action": "begin", "expectedHash": doc.ContentHash, "target": "Updated"})
+	var op store.DocumentEditOperation
+	if err := json.Unmarshal(call("POST", path+"/edit-operations", leaseBody, 200), &op); err != nil || op.LeaseToken == "" {
+		t.Fatal("missing lease", err)
+	}
+	state := call("GET", path+"/edit-operations", nil, 200)
+	if bytes.Contains(state, []byte("leaseToken")) || bytes.Contains(state, []byte(`"target"`)) {
+		t.Fatal("snapshot exposed capability", string(state))
+	}
+	locked := call("PUT", path+"/content", []byte(`{"clientRequestID":"blocked","edits":[{"old":"Updated","new":"overlap"}]}`), 409)
+	if !bytes.Contains(locked, []byte("document_locked")) {
+		t.Fatal("wrong conflict", string(locked))
+	}
+	commit, _ := json.Marshal(map[string]any{"clientRequestID": "commit", "operationID": op.ID, "leaseToken": op.LeaseToken, "replacement": "Done"})
+	call("PUT", path+"/content", commit, 200)
+	call("PUT", path+"/content", commit, 200)
+	cancel, _ := json.Marshal(map[string]any{"clientRequestID": "cancel", "action": "cancel", "operationID": op.ID})
+	terminal := call("POST", path+"/edit-operations", cancel, 200)
+	if !bytes.Contains(terminal, []byte(`"state":"committed"`)) {
+		t.Fatal("late cancel changed committed result", string(terminal))
+	}
 }

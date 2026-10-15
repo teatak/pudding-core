@@ -51,6 +51,29 @@ func (s *Server) writeDocument(c *cart.Context) error {
 	c.JSON(http.StatusOK, d)
 	return nil
 }
+func (s *Server) getDocumentEditState(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	state, err := s.store.GetDocumentEditState(c.Request.Context(), id)
+	if err != nil {
+		return s.studioItemError(c, err)
+	}
+	c.JSON(http.StatusOK, state)
+	return nil
+}
+func (s *Server) changeDocumentEdit(c *cart.Context) error {
+	id, _ := c.Param("itemID")
+	var in store.DocumentEditRequest
+	if err := decodeNativeContentRequest(c, &in); err != nil {
+		return badRequest(c, err.Error())
+	}
+	in.Author = store.ContentAuthor{Kind: "user"}
+	op, err := s.store.ChangeDocumentEdit(c.Request.Context(), id, in)
+	if err != nil {
+		return s.studioItemError(c, err)
+	}
+	c.JSON(http.StatusOK, op)
+	return nil
+}
 func (s *Server) renameStudioItem(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	var in struct {

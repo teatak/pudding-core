@@ -32,6 +32,9 @@ type DocumentEdit struct {
 }
 
 type DocumentWrite struct {
+	OperationID     string         `json:"operationID,omitempty"`
+	LeaseToken      string         `json:"leaseToken,omitempty"`
+	Replacement     *string        `json:"replacement,omitempty"`
 	ClientRequestID string         `json:"clientRequestID"`
 	ExpectedHash    *string        `json:"expectedHash,omitempty"`
 	Body            *string        `json:"body,omitempty"`
@@ -45,6 +48,7 @@ type DocumentWrite struct {
 }
 
 type DocumentStore interface {
+	DocumentEditOperationStore
 	CreateDocument(context.Context, *StudioItem, string, ContentAuthor) (*DocumentContent, error)
 	GetDocument(context.Context, string) (*DocumentContent, error)
 	WriteDocument(context.Context, string, DocumentWrite) (*DocumentContent, error)

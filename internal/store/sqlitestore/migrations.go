@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 39
+	currentSchemaVersion       = 40
 )
 
 var (
@@ -34,6 +34,24 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	40: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS studio_document_edits (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS studio_document_edits_item ON studio_document_edits(item_id,state,updated_at);
+CREATE TABLE IF NOT EXISTS studio_document_edit_requests (
+    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+    client_request_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    result TEXT NOT NULL,
+    PRIMARY KEY(item_id,client_request_id)
+);`)
+		return err
+	},
 	39: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS subtask_archives (
     child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,

@@ -63,8 +63,27 @@ export const documentContent = z.object({
 export type DocumentContent = z.infer<typeof documentContent>;
 export type DocumentEdit = { old: string; new: string };
 export type DocumentWrite = {
+  operationID?: string; leaseToken?: string; replacement?: string;
   clientRequestID: string; expectedHash?: string; body?: string;
   edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
+};
+
+// Source offsets are zero-based UTF-8 bytes, with an exclusive end.
+export const documentEditOperation = z.object({
+  operationID: z.string(), itemID: z.string(), state: z.enum(["active", "committed", "cancelled", "expired"]),
+  from: z.number().int().nonnegative(), to: z.number().int().nonnegative(),
+  contentHash: itemHash, revisionID: itemHash.optional(),
+  author: z.object({ kind: z.enum(["user", "session"]), sessionID: z.string().optional(), turnID: z.string().optional() }),
+  createdAt: z.number(), updatedAt: z.number(), expiresAt: z.number(), sequence: z.number().int(),
+  leaseToken: z.string().optional(), target: z.string().optional(),
+});
+export const documentEditState = z.object({ contentHash: itemHash, operations: z.array(documentEditOperation) });
+export type DocumentEditOperation = z.infer<typeof documentEditOperation>;
+export type DocumentEditState = z.infer<typeof documentEditState>;
+export type DocumentEditRequest = {
+  action: "begin" | "renew" | "cancel"; clientRequestID: string;
+  operationID?: string; leaseToken?: string; expectedHash?: string;
+  from?: number; to?: number; target?: string;
 };
 
 export const tableCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);

@@ -80,4 +80,15 @@ func TestStudioChatToolsWithoutDesktop(t *testing.T) {
 	if doc.Body != "甲\n\nAI 修改" {
 		t.Fatal(doc.Body)
 	}
+	lease := run(tool.DocEdit, "begin", map[string]any{"item_id": created.ItemID, "action": "begin", "expected_hash": doc.ContentHash, "target": "AI 修改"})
+	var op store.DocumentEditOperation
+	if err := json.Unmarshal([]byte(lease.Content), &op); err != nil || op.LeaseToken == "" {
+		t.Fatal("missing lease", lease.Content, err)
+	}
+	run(tool.DocEdit, "renew", map[string]any{"item_id": created.ItemID, "action": "renew", "operation_id": op.ID, "lease_token": op.LeaseToken})
+	run(tool.DocEdit, "commit", map[string]any{"item_id": created.ItemID, "action": "commit", "operation_id": op.ID, "lease_token": op.LeaseToken, "replacement": "AI 完成🙂"})
+	doc, _ = st.GetDocument(ctx, created.ItemID)
+	if doc.Body != "甲\n\nAI 完成🙂" {
+		t.Fatal("leased tool commit failed", doc.Body)
+	}
 }

@@ -41,6 +41,11 @@ func decodeStudioRequest(c *cart.Context, target any) error {
 	return widget.DecodeStrict(data, target)
 }
 func (s *Server) studioItemError(c *cart.Context, err error) error {
+	var locked *store.DocumentLocked
+	if errors.As(err, &locked) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "document_locked", "operationID": locked.OperationID})
+		return nil
+	}
 	var conflict *store.ContentConflict
 	if errors.As(err, &conflict) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "content_conflict", "currentHash": conflict.CurrentHash})
