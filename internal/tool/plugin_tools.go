@@ -4,8 +4,8 @@ import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
 	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
-	RichDocumentRead: plugin.BuiltinDOCXID, RichDocumentCreate: plugin.BuiltinDOCXID, RichDocumentEdit: plugin.BuiltinDOCXID,
-	DocCreate: plugin.BuiltinMarkdownID, DocRead: plugin.BuiltinMarkdownID, DocEdit: plugin.BuiltinMarkdownID,
+	DocumentRead: plugin.BuiltinDocumentAuthoringID, DocumentCreate: plugin.BuiltinDocumentAuthoringID, DocumentEdit: plugin.BuiltinDocumentAuthoringID,
+	NoteCreate: plugin.BuiltinNoteAuthoringID, NoteRead: plugin.BuiltinNoteAuthoringID, NoteEdit: plugin.BuiltinNoteAuthoringID,
 	TableCreate: plugin.BuiltinTablesID, TableRead: plugin.BuiltinTablesID, TableUpdate: plugin.BuiltinTablesID,
 	SubtaskList:       plugin.BuiltinCollaborationID,
 	SubtaskDispatch:   plugin.BuiltinCollaborationID,
@@ -38,7 +38,7 @@ var builtinPluginTools = map[string]string{
 }
 
 func BuiltinPluginIDForTool(name string) (string, bool) {
-	id, ok := builtinPluginTools[name]
+	id, ok := builtinPluginTools[NormalizeLegacyNoteTool(name)]
 	return id, ok
 }
 

@@ -62,6 +62,9 @@ func TestRenamedArtifactAndSubtaskHistoryRetainsCallsAndResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pair := range [][2]string{
+		{"builtin_doc_create", "builtin_note_create"},
+		{"builtin_doc_read", "builtin_note_read"},
+		{"builtin_doc_edit", "builtin_note_edit"},
 		{"builtin_studio_list", "builtin_artifact_list"},
 		{"builtin_studio_open", "builtin_artifact_open"},
 		{"builtin_collaboration_list", "builtin_subagent_list"},
@@ -116,7 +119,7 @@ func TestRenamedArtifactAndSubtaskHistoryRetainsCallsAndResults(t *testing.T) {
 
 // Check the wire representation because providers prefer native continuations
 // over the canonical parts where historical tool names are translated.
-func TestSubagentHistoryToolNamesAcrossProviderContinuations(t *testing.T) {
+func TestRenamedToolNamesAcrossProviderContinuations(t *testing.T) {
 	for _, protocol := range []struct {
 		kind, text, call string
 		wire             func(provider.Request) provider.WireInput
@@ -126,7 +129,21 @@ func TestSubagentHistoryToolNamesAcrossProviderContinuations(t *testing.T) {
 		{provider.ContinuationAnthropic, `[{"type":"text","text":%q}]`, `[{"type":"text","text":"native-call"},{"type":"tool_use","id":"subagent-call","name":%q,"input":{"prompt":"task-prompt"}}]`, anthropic.RequestInput},
 		{provider.ContinuationGoogle, `[{"text":%q}]`, `[{"text":"native-call"},{"functionCall":{"id":"subagent-call","name":%q,"args":{"prompt":"task-prompt"}}}]`, google.RequestInput},
 	} {
-		for _, storedName := range []string{"builtin_subtask_dispatch", "builtin_collaboration_dispatch", "builtin_subagent_dispatch"} {
+		for _, pair := range [][2]string{
+			{"builtin_subtask_dispatch", "builtin_subagent_dispatch"},
+			{"builtin_collaboration_dispatch", "builtin_subagent_dispatch"},
+			{"builtin_subagent_dispatch", "builtin_subagent_dispatch"},
+			{"builtin_doc_create", "builtin_note_create"},
+			{"builtin_doc_read", "builtin_note_read"},
+			{"builtin_doc_edit", "builtin_note_edit"},
+			{"builtin_note_create", "builtin_note_create"},
+			{"builtin_note_read", "builtin_note_read"},
+			{"builtin_note_edit", "builtin_note_edit"},
+			{"builtin_document_create", "builtin_document_create"},
+			{"builtin_document_read", "builtin_document_read"},
+			{"builtin_document_edit", "builtin_document_edit"},
+		} {
+			storedName, currentName := pair[0], pair[1]
 			t.Run(protocol.kind+"/"+storedName, func(t *testing.T) {
 				ctx := context.Background()
 				st := storetest.New(t)
@@ -153,7 +170,6 @@ func TestSubagentHistoryToolNamesAcrossProviderContinuations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				const currentName = "builtin_subagent_dispatch"
 				req, err := New(st, nil).BuildForProviderWithHistory(ctx, "s", "test", "model", "work", []provider.ToolDef{{Name: currentName}}, history, provider.ModelConfig{})
 				if err != nil {
 					t.Fatal(err)
@@ -162,7 +178,7 @@ func TestSubagentHistoryToolNamesAcrossProviderContinuations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, retired := range []string{"builtin_subtask_dispatch", "builtin_collaboration_dispatch"} {
+				for _, retired := range []string{"builtin_subtask_dispatch", "builtin_collaboration_dispatch", "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"} {
 					if strings.Contains(string(wire), retired) {
 						t.Fatalf("retired tool name survived native replay: %s", wire)
 					}

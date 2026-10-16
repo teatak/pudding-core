@@ -21,7 +21,7 @@ func nativeUndoSourceTx(ctx context.Context, tx *sql.Tx, itemID, head, revision 
 		return "", "", err
 	}
 	if author != "session" || parent == "" {
-		return "", "", &store.InvalidDocument{Message: "undo requires an AI edit with a parent version"}
+		return "", "", &store.InvalidContent{Message: "undo requires an AI edit with a parent version"}
 	}
 	var present int
 	err = tx.QueryRowContext(ctx, `WITH RECURSIVE ancestry(hash,parent_revision) AS (

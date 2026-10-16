@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestRichDocumentSchemasHaveValidRequiredLists(t *testing.T) {
+func TestDocumentSchemasHaveValidRequiredLists(t *testing.T) {
 	var visit func(any)
 	visit = func(value any) {
 		switch v := value.(type) {
@@ -24,7 +24,7 @@ func TestRichDocumentSchemasHaveValidRequiredLists(t *testing.T) {
 			}
 		}
 	}
-	for _, def := range RichDocumentDefinitions() {
+	for _, def := range DocumentDefinitions() {
 		var schema map[string]any
 		if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
 			t.Fatal(err)

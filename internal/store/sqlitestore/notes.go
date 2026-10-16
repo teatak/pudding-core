@@ -1,0 +1,187 @@
+package sqlitestore
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/teatak/pudding-core/internal/store"
+)
+
+const noteSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='doc' AND w.deleted=0 AND w.archived_at=0`
+
+func (s *Store) GetNote(ctx context.Context, id string) (*store.NoteContent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return scanContentSnapshot(s.db.QueryRowContext(ctx, noteSelect, id))
+}
+
+func (s *Store) CreateNote(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor) (*store.NoteContent, error) {
+	if err := store.ValidateNote(body); err != nil {
+		return nil, err
+	}
+	if item.Kind != store.StudioItemKindNote {
+		return nil, &store.InvalidContent{Message: "document kind required"}
+	}
+	var out *store.NoteContent
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := validateContentAuthor(ctx, tx, author); err != nil {
+			return err
+		}
+		if err := createStudioItemTx(ctx, tx, item); err != nil {
+			return err
+		}
+		hash := store.ContentHash(body)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO studio_item_content(item_id,body,content_hash) VALUES(?,?,?)`, item.ID, body, hash); err != nil {
+			return err
+		}
+		out = &store.NoteContent{ItemID: item.ID, Body: body, ContentHash: hash}
+		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: "create", Author: author}, "")
+	})
+	return out, err
+}
+
+func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*store.NoteContent, error) {
+	if in.ClientRequestID == "" || len(in.ClientRequestID) > 200 {
+		return nil, &store.InvalidContent{Message: "clientRequestID is required (max 200 bytes)"}
+	}
+	modes := 0
+	if in.Body != nil {
+		modes++
+	}
+	if len(in.Edits) > 0 {
+		modes++
+	}
+	if in.RestoreRevision != "" {
+		modes++
+	}
+	if in.UndoRevision != "" {
+		modes++
+	}
+	if in.Replacement != nil {
+		modes++
+	}
+	if (in.Replacement != nil) != (in.OperationID != "" && in.LeaseToken != "") || (in.Replacement == nil && (in.OperationID != "" || in.LeaseToken != "")) {
+		return nil, &store.InvalidContent{Message: "replacement requires operationID and leaseToken together"}
+	}
+	if in.UndoRevision != "" && in.Author.Kind != "user" {
+		return nil, &store.InvalidContent{Message: "undo is a user operation"}
+	}
+	if modes != 1 || (in.PreserveOnly && (in.Body == nil || in.Author.Kind != "user")) {
+		return nil, &store.InvalidContent{Message: "provide exactly one of body, edits, restoreRevision, undoRevision or replacement"}
+	}
+	if (in.Body != nil || in.RestoreRevision != "") && in.ExpectedHash == nil {
+		return nil, &store.InvalidContent{Message: "expectedHash is required for replacement or restore"}
+	}
+	payload, _ := json.Marshal(struct {
+		Write  store.NoteWrite
+		Author store.ContentAuthor
+	}{in, in.Author})
+	requestHash := store.ContentHash(string(payload))
+	var out *store.NoteContent
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
+			return err
+		}
+		current, err := scanContentSnapshot(tx.QueryRowContext(ctx, noteSelect, id))
+		if err != nil {
+			return err
+		}
+		var savedHash, savedRevision string
+		err = tx.QueryRowContext(ctx, `SELECT request_hash,hash FROM studio_item_saves WHERE item_id=? AND client_request_id=?`, id, in.ClientRequestID).Scan(&savedHash, &savedRevision)
+		if err == nil {
+			if savedHash != requestHash {
+				return &store.InvalidContent{Message: "clientRequestID reused with different content"}
+			}
+			if in.PreserveOnly {
+				out = current
+				return nil
+			}
+			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
+			return err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if !in.PreserveOnly && in.ExpectedHash != nil && *in.ExpectedHash != current.ContentHash {
+			return &store.ContentConflict{CurrentHash: current.ContentHash}
+		}
+		body := current.Body
+		var operation *store.NoteEditOperation
+		if in.Replacement != nil {
+			operation, err = loadNoteEditTx(ctx, tx, id, in.OperationID)
+			if err != nil {
+				return err
+			}
+			if err = checkNoteEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
+				return err
+			}
+			body = body[:operation.From] + *in.Replacement + body[operation.To:]
+		}
+		if in.Body != nil {
+			body = *in.Body
+		}
+		if len(in.Edits) > 0 {
+			body, err = store.ApplyNoteEdits(body, in.Edits)
+			if err != nil {
+				return err
+			}
+		}
+		if in.RestoreRevision != "" {
+			var content sql.NullString
+			if err := tx.QueryRowContext(ctx, `SELECT content FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, in.RestoreRevision).Scan(&content); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return store.ErrNotFound
+				}
+				return err
+			}
+			if !content.Valid {
+				return &store.InvalidContent{Message: "revision has no document content"}
+			}
+			body = content.String
+		}
+
+		if in.UndoRevision != "" {
+			before, after, err := nativeUndoSourceTx(ctx, tx, id, current.RevisionID, in.UndoRevision)
+			if err == nil {
+				body, err = store.UndoNote(before, after, current.Body)
+			}
+			if errors.Is(err, store.ErrUndoConflict) {
+				return &store.ContentConflict{CurrentHash: current.ContentHash}
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if err := store.ValidateNote(body); err != nil {
+			return err
+		}
+		if !in.PreserveOnly {
+			if err := guardNoteEditsTx(ctx, tx, id, current.Body, body, in.OperationID, time.Now().UnixMilli()); err != nil {
+				return err
+			}
+		}
+		out = &store.NoteContent{ItemID: id, Body: body, ContentHash: store.ContentHash(body), RevisionID: current.RevisionID}
+		if err := saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: in.ClientRequestID, Author: in.Author, PreserveOnly: in.PreserveOnly}, requestHash); err != nil {
+			return err
+		}
+		if in.PreserveOnly {
+			out = current
+		}
+		if operation != nil {
+			operation.State = "committed"
+			operation.To = operation.From + len(*in.Replacement)
+			operation.ContentHash = out.ContentHash
+			operation.RevisionID = out.RevisionID
+			operation.UpdatedAt = time.Now().UnixMilli()
+			operation.Sequence++
+			if err := saveNoteEditTx(ctx, tx, operation); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
+}

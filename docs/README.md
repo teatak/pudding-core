@@ -44,3 +44,5 @@
 ## Studio
 
 [Studio 内容契约](studio.md)：原生文档与小组件、正文并发和版本作者、Chat 工具、v25 及 v26→v30 合并升级、插件查询与确认操作；产品操作与验收由 Desktop 文档维护。
+
+[内容命名约定](content-naming.md)：Core 的 `note` / `document` 文件、类型、执行路径与协议／历史兼容边界。

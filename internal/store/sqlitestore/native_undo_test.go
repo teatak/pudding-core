@@ -16,24 +16,24 @@ func TestNativeUndoIsAtomicIdempotentAndAttributed(t *testing.T) {
 		t.Fatal(err)
 	}
 	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
-	doc, err := s.CreateDocument(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Doc"}, "First\n\nLast", user)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Doc"}, "First\n\nLast", user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	edited, err := s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "ai", Edits: []store.DocumentEdit{{Old: "First", New: "Revised"}}, Author: ai})
+	edited, err := s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "ai", Edits: []store.NoteEdit{{Old: "First", New: "Revised"}}, Author: ai})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "human", Edits: []store.DocumentEdit{{Old: "Last", New: "Human"}}, Author: user})
+	_, err = s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "human", Edits: []store.NoteEdit{{Old: "Last", New: "Human"}}, Author: user})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := store.DocumentWrite{ClientRequestID: "undo", UndoRevision: edited.RevisionID, Author: user}
-	undone, err := s.WriteDocument(ctx, "doc", request)
+	request := store.NoteWrite{ClientRequestID: "undo", UndoRevision: edited.RevisionID, Author: user}
+	undone, err := s.WriteNote(ctx, "doc", request)
 	if err != nil || undone.Body != "First\n\nHuman" || undone.RevisionID == doc.RevisionID {
 		t.Fatal(undone, err)
 	}
-	retry, err := s.WriteDocument(ctx, "doc", request)
+	retry, err := s.WriteNote(ctx, "doc", request)
 	if err != nil || retry.RevisionID != undone.RevisionID {
 		t.Fatal(retry, err)
 	}
@@ -41,7 +41,7 @@ func TestNativeUndoIsAtomicIdempotentAndAttributed(t *testing.T) {
 	if len(revisions) != 4 || revisions[0].Author.Kind != "user" {
 		t.Fatal(revisions)
 	}
-	if _, err = s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "again", UndoRevision: edited.RevisionID, Author: user}); err == nil {
+	if _, err = s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "again", UndoRevision: edited.RevisionID, Author: user}); err == nil {
 		t.Fatal("undo replay accepted")
 	}
 	_, err = s.CreateTable(ctx, &store.StudioItem{ID: "table", Kind: "table", Name: "Table"}, tableFixture(), user)

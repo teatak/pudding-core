@@ -11,7 +11,7 @@ import (
 
 const tableSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='table' AND w.deleted=0 AND w.archived_at=0`
 
-func tableFromContent(d *store.DocumentContent) (*store.TableContent, error) {
+func tableFromContent(d *store.ContentSnapshot) (*store.TableContent, error) {
 	var body store.TableBody
 	if err := json.Unmarshal([]byte(d.Body), &body); err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func tableFromContent(d *store.DocumentContent) (*store.TableContent, error) {
 func (s *Store) GetTable(ctx context.Context, id string) (*store.TableContent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	d, err := scanDocument(s.db.QueryRowContext(ctx, tableSelect, id))
+	d, err := scanContentSnapshot(s.db.QueryRowContext(ctx, tableSelect, id))
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *Store) CreateTable(ctx context.Context, item *store.StudioItem, body st
 	if item.Kind != store.StudioItemKindTable {
 		return nil, &store.InvalidTable{Message: "table kind required"}
 	}
-	var d *store.DocumentContent
+	var d *store.ContentSnapshot
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
@@ -103,14 +103,14 @@ func (s *Store) CreateTable(ctx context.Context, item *store.StudioItem, body st
 			return err
 		}
 		raw, _ := json.Marshal(body)
-		d = &store.DocumentContent{ItemID: item.ID, Body: string(raw), ContentHash: store.DocumentHash(string(raw))}
+		d = &store.ContentSnapshot{ItemID: item.ID, Body: string(raw), ContentHash: store.ContentHash(string(raw))}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO studio_item_content(item_id,body,content_hash) VALUES(?,?,?)`, item.ID, d.Body, d.ContentHash); err != nil {
 			return err
 		}
 		if err := recordTableIDs(ctx, tx, item.ID, body, nil, false, nil); err != nil {
 			return err
 		}
-		return saveNativeContentTx(ctx, tx, d, store.DocumentWrite{ClientRequestID: "create", Author: author}, "")
+		return saveNativeContentTx(ctx, tx, d, nativeContentSave{ClientRequestID: "create", Author: author}, "")
 	})
 	if err != nil {
 		return nil, err
@@ -144,13 +144,13 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 		Write  store.TableWrite
 		Author store.ContentAuthor
 	}{in, in.Author})
-	requestHash := store.DocumentHash(string(payload))
-	var out *store.DocumentContent
+	requestHash := store.ContentHash(string(payload))
+	var out *store.ContentSnapshot
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
 			return err
 		}
-		current, err := scanDocument(tx.QueryRowContext(ctx, tableSelect, id))
+		current, err := scanContentSnapshot(tx.QueryRowContext(ctx, tableSelect, id))
 		if err != nil {
 			return err
 		}
@@ -160,7 +160,7 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 			if savedHash != requestHash {
 				return &store.InvalidTable{Message: "clientRequestID reused with different operations"}
 			}
-			out, err = scanDocument(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
+			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -217,8 +217,8 @@ func (s *Store) WriteTable(ctx context.Context, id string, in store.TableWrite) 
 			return err
 		}
 		raw, _ := json.Marshal(body)
-		out = &store.DocumentContent{ItemID: id, Body: string(raw), ContentHash: store.DocumentHash(string(raw)), RevisionID: current.RevisionID}
-		return saveNativeContentTx(ctx, tx, out, store.DocumentWrite{ClientRequestID: in.ClientRequestID, Author: in.Author}, requestHash)
+		out = &store.ContentSnapshot{ItemID: id, Body: string(raw), ContentHash: store.ContentHash(string(raw)), RevisionID: current.RevisionID}
+		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: in.ClientRequestID, Author: in.Author}, requestHash)
 	})
 	if err != nil {
 		return nil, err

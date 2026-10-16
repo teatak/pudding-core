@@ -4,11 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -18,7 +14,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	respond := func(value any, err error) tool.Result {
 		if err != nil {
 			value = map[string]any{"error": err.Error()}
-			var locked *store.DocumentLocked
+			var locked *store.NoteLocked
 			if errors.As(err, &locked) {
 				value = map[string]any{"error": "document_locked", "operationID": locked.OperationID}
 			}
@@ -36,18 +32,17 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		out.Ok = err == nil
 		return out
 	}
-	if call.Name == tool.RichDocumentRead || call.Name == tool.RichDocumentCreate || call.Name == tool.RichDocumentEdit {
-		value, err := e.executeRichDocument(ctx, sessionID, turnID, call)
+	if call.Name == tool.DocumentRead || call.Name == tool.DocumentCreate || call.Name == tool.DocumentEdit {
+		value, err := e.executeDocument(ctx, sessionID, turnID, call)
 		return respond(value, err)
 	}
 	args, err := tool.DecodeStudioArgs(call.Args)
 	if err != nil {
 		return respond(nil, err)
 	}
-	if call.Name != tool.ArtifactList && call.Name != tool.DocCreate && call.Name != tool.TableCreate && args.ItemID == "" {
+	if call.Name != tool.ArtifactList && call.Name != tool.NoteCreate && call.Name != tool.TableCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
-	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}
 	switch call.Name {
 	case tool.TableCreate, tool.TableRead, tool.TableUpdate:
 		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
@@ -67,65 +62,9 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	case tool.ArtifactOpen:
 		mount, err := e.store.OpenStudioItem(ctx, sessionID, args.ItemID, store.NewID("mount"))
 		return respond(mount, err)
-	case tool.DocCreate:
-		name := strings.TrimSpace(args.Name)
-		if name == "" || len(name) > 200 || args.Body == nil {
-			return respond(nil, errors.New("name (max 200 bytes) and body are required"))
-		}
-		// A retried call reuses the item created by this exact canonical tool call.
-		id := "doc_" + store.DocumentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
-		doc, err := e.store.GetDocument(ctx, id)
-		if errors.Is(err, store.ErrNotFound) {
-			now := time.Now().UTC()
-			doc, err = e.store.CreateDocument(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindDoc, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
-		}
-		if err != nil {
-			return respond(nil, err)
-		}
-		mount, err := e.store.OpenStudioItem(ctx, sessionID, id, store.NewID("mount"))
-		if err != nil {
-			return respond(nil, err)
-		}
-		return respond(map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": doc.ContentHash, "revisionID": doc.RevisionID}, nil)
-	case tool.DocRead:
-		doc, err := e.store.GetDocument(ctx, args.ItemID)
-		if err != nil {
-			return respond(nil, err)
-		}
-		if args.Limit == 0 {
-			args.Limit = 16000
-		}
-		if args.Offset < 0 || args.Limit < 1 || args.Limit > contracts.Studio().MaxReadBytes/utf8.UTFMax {
-			return respond(nil, errors.New("invalid document read range"))
-		}
-		chars := []rune(doc.Body)
-		start := min(args.Offset, len(chars))
-		end := min(start+args.Limit, len(chars))
-		result := map[string]any{"itemID": doc.ItemID, "body": string(chars[start:end]), "contentHash": doc.ContentHash, "revisionID": doc.RevisionID, "offset": start, "totalCharacters": len(chars)}
-		if end < len(chars) {
-			result["nextOffset"] = end
-		}
-		return respond(result, nil)
-	case tool.DocEdit:
-		if args.Action == "begin" || args.Action == "renew" || args.Action == "cancel" {
-			hash := ""
-			if args.ExpectedHash != nil {
-				hash = *args.ExpectedHash
-			}
-			op, err := e.store.ChangeDocumentEdit(ctx, args.ItemID, store.DocumentEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Author: author})
-			return respond(op, err)
-		}
-		if args.Action != "" && args.Action != "commit" {
-			return respond(nil, errors.New("invalid document edit action"))
-		}
-		if args.Action == "commit" && args.Replacement == nil {
-			return respond(nil, errors.New("commit requires replacement"))
-		}
-		doc, err := e.store.WriteDocument(ctx, args.ItemID, store.DocumentWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement})
-		if err != nil {
-			return respond(nil, err)
-		}
-		return respond(map[string]any{"itemID": doc.ItemID, "contentHash": doc.ContentHash, "revisionID": doc.RevisionID}, nil)
+	case tool.NoteCreate, tool.NoteRead, tool.NoteEdit:
+		value, err := e.executeNote(ctx, sessionID, turnID, call, args)
+		return respond(value, err)
 	}
 	return respond(nil, errors.New("unknown Studio tool"))
 }

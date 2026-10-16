@@ -1,0 +1,115 @@
+{
+  "blob": {
+    "hash": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    "type": "image/png",
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+  },
+  "document": {
+    "itemID": "rich_legacy",
+    "body": {
+      "schemaVersion": 1,
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "blockId": "block_50d4786ca3e87e040df1976aea2e4709"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Edited document"
+              },
+              {
+                "type": "image",
+                "attrs": {
+                  "assetId": "image"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "page": {
+        "width": 11906,
+        "height": 16838,
+        "top": 1440,
+        "right": 1440,
+        "bottom": 1440,
+        "left": 1440
+      },
+      "assets": [
+        {
+          "id": "image",
+          "hash": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+          "type": "image/png"
+        }
+      ],
+      "warnings": []
+    },
+    "contentHash": "3b0a312ddeb4e3d1af391a28d7f0432f7e5f96d9476aa59ec9552273250e2550",
+    "revisionID": "26051d7d18ab5be76748c052dd460f18496acdfeb45034380999b3dbc5b8619b"
+  },
+  "documentWrite": {
+    "clientRequestID": "document-save",
+    "expectedHash": "859cdcca54fafb2b13475f6c00a466c15acd1903acfdf2370b616c07006745c6",
+    "body": {
+      "schemaVersion": 1,
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "attrs": {
+              "blockId": "block_50d4786ca3e87e040df1976aea2e4709"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Edited document"
+              },
+              {
+                "type": "image",
+                "attrs": {
+                  "assetId": "image"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "page": {
+        "width": 11906,
+        "height": 16838,
+        "top": 1440,
+        "right": 1440,
+        "bottom": 1440,
+        "left": 1440
+      },
+      "assets": [
+        {
+          "id": "image",
+          "hash": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+          "type": "image/png"
+        }
+      ],
+      "warnings": []
+    }
+  },
+  "note": {
+    "itemID": "doc_legacy",
+    "body": "Edited note\n\nKeep this.\n",
+    "contentHash": "ee2d904e8637e45548334f3ebbd8e649ce9a8a8b366e95cc3391d49e7592df9e",
+    "revisionID": "92892fe4064952727649f40304bbd1adcff664da39f106cbcd61dfaca9c18d5f"
+  },
+  "noteWrite": {
+    "clientRequestID": "note-save",
+    "edits": [
+      {
+        "old": "Original note",
+        "new": "Edited note"
+      }
+    ]
+  }
+}

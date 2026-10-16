@@ -21,7 +21,7 @@ func (e *Engine) executeTable(ctx context.Context, sessionID, turnID string, cal
 		if name == "" || len(name) > 200 || args.Table == nil {
 			return nil, errors.New("name (max 200 bytes) and table are required")
 		}
-		id := "table_" + store.DocumentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
+		id := "table_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
 		table, err := e.store.GetTable(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
 			now := time.Now().UTC()

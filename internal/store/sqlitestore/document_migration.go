@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func migrateRichDocuments(tx *sql.Tx) error {
+func migrateDocuments(tx *sql.Tx) error {
 	var ddl string
 	if err := tx.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='studio_items'`).Scan(&ddl); err != nil {
 		return err

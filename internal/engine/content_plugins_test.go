@@ -18,10 +18,10 @@ import (
 
 func TestContentPluginsLoadIndependently(t *testing.T) {
 	groups := map[string][]string{
-		plugin.BuiltinArtifactsID: {tool.ArtifactList, tool.ArtifactOpen},
-		plugin.BuiltinMarkdownID:  {tool.DocCreate, tool.DocRead, tool.DocEdit},
-		plugin.BuiltinDOCXID:      {tool.RichDocumentCreate, tool.RichDocumentRead, tool.RichDocumentEdit},
-		plugin.BuiltinTablesID:    {tool.TableCreate, tool.TableRead, tool.TableUpdate},
+		plugin.BuiltinArtifactsID:         {tool.ArtifactList, tool.ArtifactOpen},
+		plugin.BuiltinNoteAuthoringID:     {tool.NoteCreate, tool.NoteRead, tool.NoteEdit},
+		plugin.BuiltinDocumentAuthoringID: {tool.DocumentCreate, tool.DocumentRead, tool.DocumentEdit},
+		plugin.BuiltinTablesID:            {tool.TableCreate, tool.TableRead, tool.TableUpdate},
 	}
 	for id, want := range groups {
 		t.Run(id, func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestContentPluginsLoadIndependently(t *testing.T) {
 			// A second content capability can coexist, without coupling either switch.
 			other := plugin.BuiltinArtifactsID
 			if id == other {
-				other = plugin.BuiltinMarkdownID
+				other = plugin.BuiltinNoteAuthoringID
 			}
 			load(other)
 			assertTools(id, other)
@@ -123,7 +123,7 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 		}
 	}
 	parts := &turnPartAccumulator{}
-	for index, name := range []string{tool.DocCreate, tool.RichDocumentRead, tool.TableCreate} {
+	for index, name := range []string{tool.NoteCreate, tool.DocumentRead, tool.TableCreate} {
 		if tool.HasDefinition(defs, name) {
 			t.Fatal("historical load exposed type tool", name)
 		}
@@ -148,5 +148,74 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 	items, err := st.ListStudioItems(ctx, store.StudioItemsActive)
 	if err != nil || len(items) != 0 {
 		t.Fatal("unloaded creation changed data", items, err)
+	}
+}
+
+func TestLegacyNoteAliasesRespectPluginAvailability(t *testing.T) {
+	for _, scenario := range []struct {
+		name, reason                     string
+		loaded, disabled, omitDefinition bool
+	}{
+		{name: "not loaded", reason: "plugin_not_loaded"},
+		{name: "disabled after request", loaded: true, disabled: true, reason: "plugin_disabled"},
+		{name: "not offered", loaded: true, omitDefinition: true, reason: "plugin_tool_unavailable"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := storetest.New(t)
+			cfg := config.NewManager(t.TempDir())
+			if err := cfg.Prepare(); err != nil {
+				t.Fatal(err)
+			}
+			plugins := plugin.NewService(t.TempDir(), cfg)
+			e := New(st, event.NewHub(), nil, st, WithPlugins(plugins))
+			var loaded []string
+			if scenario.loaded {
+				loaded = []string{plugin.BuiltinNoteAuthoringID}
+			}
+			if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: loaded}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: "s", TurnID: "turn", UserMessageID: "u", ClientMessageID: "i", UserText: "Create a document"}); err != nil {
+				t.Fatal(err)
+			}
+			defs, err := e.toolDefinitions(ctx, "s", store.ModeChat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.disabled {
+				if _, err := plugins.SetEnabled(ctx, plugin.BuiltinNoteAuthoringID, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario.omitDefinition {
+				defs = nil
+			}
+			parts := &turnPartAccumulator{}
+			for index, name := range []string{tool.NoteCreate, "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"} {
+				parts.AppendTool(provider.ToolCallChunk{Index: index, CallID: name, Name: name, ArgsDelta: `{"name":"Blocked","body":"must not write","item_id":"missing"}`})
+			}
+			status, message, _, _ := e.executePendingTools(ctx, "s", "turn", store.ModeChat, defs, parts)
+			if status != store.TurnRunning {
+				t.Fatal(status, message)
+			}
+			count := 0
+			for _, part := range parts.Parts() {
+				if part.Type != store.ContentPartToolResult {
+					continue
+				}
+				count++
+				if part.Ok || part.Name != part.CallID || !strings.Contains(part.Content, `"reason":"`+scenario.reason+`"`) {
+					t.Fatalf("alias bypassed canonical availability: %+v", part)
+				}
+			}
+			if count != 4 {
+				t.Fatal("missing results", count)
+			}
+			items, err := st.ListStudioItems(ctx, store.StudioItemsActive)
+			if err != nil || len(items) != 0 {
+				t.Fatal("blocked aliases changed data", items, err)
+			}
+		})
 	}
 }

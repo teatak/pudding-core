@@ -2,76 +2,49 @@ package api
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
-func TestDocumentAPIAndWidgetBoundary(t *testing.T) {
+func TestDocumentAPIBoundaries(t *testing.T) {
 	st := storetest.New(t)
 	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("token", nil)
-	call := func(method, path string, body []byte, status int) []byte {
+	call := func(method, path string, body any, status int) []byte {
 		t.Helper()
-		r := httptest.NewRequest(method, path, bytes.NewReader(body))
-		r.Header.Set("Authorization", "Bearer token")
-		out := httptest.NewRecorder()
-		handler.ServeHTTP(out, r)
-		if out.Code != status {
-			t.Fatalf("%s %s: %d %s; want %d", method, path, out.Code, out.Body.String(), status)
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(method, path, bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != status {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
 		}
-		return out.Body.Bytes()
+		return rec.Body.Bytes()
 	}
 	var item store.StudioItem
-	if err := json.Unmarshal(call("POST", "/studio/items", []byte(`{"kind":"doc","name":"Notes","body":"# Hello\n\nInitial"}`), 201), &item); err != nil {
-		t.Fatal(err)
-	}
-	path := "/studio/items/" + item.ID
+	json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "rich-document", "name": "DOCX"}, 201), &item)
 	var doc store.DocumentContent
-	json.Unmarshal(call("GET", path+"/content", nil, 200), &doc)
-	body, _ := json.Marshal(map[string]any{"clientRequestID": "save", "body": "# Updated", "expectedHash": doc.ContentHash})
-	json.Unmarshal(call("PUT", path+"/content", body, 200), &doc)
-	call("PUT", path+"/content", []byte(`{"clientRequestID":"stale","body":"oops","expectedHash":"stale"}`), 409)
-	response := call("GET", path+"/revisions/"+doc.RevisionID, nil, 200)
-	if !strings.Contains(string(response), `"body":"# Updated"`) {
-		t.Fatal("revision missing body", string(response))
+	path := "/studio/items/" + item.ID
+	json.Unmarshal(call("GET", path+"/rich-content", nil, 200), &doc)
+	if doc.Body.SchemaVersion != 1 || doc.Body.Body.Type != "doc" {
+		t.Fatal("missing structured source")
 	}
-	call("POST", path+"/draft", []byte(`{}`), 400)
-	call("POST", path+"/activate", []byte(`{}`), 400)
-	call("POST", path+"/assets", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`), 400)
-	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
-	var asset struct {
-		Path string `json:"path"`
-	}
-	json.Unmarshal(call("POST", path+"/assets", png, 201), &asset)
-	if got := call("GET", path+"/"+asset.Path, nil, 200); !bytes.Equal(got, png) {
-		t.Fatal("asset changed")
-	}
-	call("GET", path+"/assets/not-a-hash.png", nil, 400)
-	call("POST", "/studio/items", []byte(`{"kind":"unsupported","name":"Invalid kind"}`), 400)
-	leaseBody, _ := json.Marshal(map[string]any{"clientRequestID": "begin", "action": "begin", "expectedHash": doc.ContentHash, "target": "Updated"})
-	var op store.DocumentEditOperation
-	if err := json.Unmarshal(call("POST", path+"/edit-operations", leaseBody, 200), &op); err != nil || op.LeaseToken == "" {
-		t.Fatal("missing lease", err)
-	}
-	state := call("GET", path+"/edit-operations", nil, 200)
-	if bytes.Contains(state, []byte("leaseToken")) || bytes.Contains(state, []byte(`"target"`)) {
-		t.Fatal("snapshot exposed capability", string(state))
-	}
-	locked := call("PUT", path+"/content", []byte(`{"clientRequestID":"blocked","edits":[{"old":"Updated","new":"overlap"}]}`), 409)
-	if !bytes.Contains(locked, []byte("document_locked")) {
-		t.Fatal("wrong conflict", string(locked))
-	}
-	commit, _ := json.Marshal(map[string]any{"clientRequestID": "commit", "operationID": op.ID, "leaseToken": op.LeaseToken, "replacement": "Done"})
-	call("PUT", path+"/content", commit, 200)
-	call("PUT", path+"/content", commit, 200)
-	cancel, _ := json.Marshal(map[string]any{"clientRequestID": "cancel", "action": "cancel", "operationID": op.ID})
-	terminal := call("POST", path+"/edit-operations", cancel, 200)
-	if !bytes.Contains(terminal, []byte(`"state":"committed"`)) {
-		t.Fatal("late cancel changed committed result", string(terminal))
-	}
+	call("GET", path+"/content", nil, 404)
+	call("PUT", path+"/content", map[string]any{"clientRequestID": "md", "body": "overwrite", "expectedHash": doc.ContentHash}, 404)
+	call("POST", path+"/draft", map[string]any{}, 400)
+	write := store.DocumentWrite{ClientRequestID: "save", ExpectedHash: doc.ContentHash, Body: &doc.Body}
+	saved := call("PUT", path+"/rich-content", write, 200)
+	call("PUT", path+"/rich-content", write, 200)
+	write.ExpectedHash = string(bytes.Repeat([]byte("a"), 64))
+	write.ClientRequestID = "stale"
+	call("PUT", path+"/rich-content", write, 409)
+	json.Unmarshal(saved, &doc)
+	call("GET", path+"/revisions/"+doc.RevisionID, nil, 200)
+	call("GET", path+"/rich-assets/not-a-hash", nil, 400)
+	call("POST", "/studio/items", map[string]any{"kind": "rich-document", "name": "Unsupported", "body": map[string]any{"schemaVersion": 2}}, 400)
+	call("POST", "/studio/items", map[string]any{"kind": "doc", "name": "MD", "body": "# original"}, 201)
 }

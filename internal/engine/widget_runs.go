@@ -447,7 +447,7 @@ func (e *Engine) SetWidgetRequests(ctx context.Context, id string, keys []Widget
 	return cloneWidgetRun(run), nil
 }
 func noticeKey(run *WidgetRun, r *WidgetReceipt, d *WidgetDelivery) string {
-	return "widget:" + store.DocumentHash(run.ID+"\x00"+r.ID+"\x00"+d.ParticipantID)
+	return "widget:" + store.ContentHash(run.ID+"\x00"+r.ID+"\x00"+d.ParticipantID)
 }
 func (e *Engine) deliverWidgetNoticesLocked(run *WidgetRun) {
 	// A failed canonical write holds later notices for that recipient only.

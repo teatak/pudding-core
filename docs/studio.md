@@ -1,8 +1,8 @@
 # Studio item contract
 
-Protocol 12 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `doc` for native GFM Markdown, `table` for typed tabular data, or `widget` for LLM-authored React source packages built by Desktop. Shared schemas live in `contracts/studio.ts` (items, documents, tables and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
+Protocol 12 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `doc` for Notes (native GFM Markdown), `rich-document` for Documents (structured page-layout content), `table` for typed tabular data, or `widget` for LLM-authored React source packages built by Desktop. Shared schemas live in `contracts/studio.ts` (items, documents, tables and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
 
-An item has an integer optimistic `revision`, a `headRevision` and optional `sourceSessionID`. Widgets additionally use `activeRevision` source hashes, source-slot `bindings` and `bindingVersion`. Document and table heads refer to immutable snapshot IDs; their content hash is separate. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.
+An item has an integer optimistic `revision`, a `headRevision` and optional `sourceSessionID`. Widgets additionally use `activeRevision` source hashes, source-slot `bindings` and `bindingVersion`. Note, document and table heads refer to immutable snapshot IDs; their content hash is separate. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.
 
 Every widget revision references an immutable package of `widget.json` plus `src/*.tsx`. Manifest sources name an installed plugin endpoint as `{pluginID, endpoint}`, and generated code imports `@pudding/widget`. New activation requests require a matching build receipt. Revision reads return `kind`, `revision`, `package` and `manifest`.
 
@@ -10,8 +10,9 @@ Every widget revision references an immutable package of `widget.json` plus `src
 
 All routes require the loopback startup token.
 
-- `GET/POST /studio/items`, `GET/PATCH/DELETE /studio/items/{id}`, `PATCH /studio/items/{id}/appearance`. Creation accepts `kind`, `name`, optional `sourceSessionID`, and an optional `body` (Markdown string for a document, structured JSON object for a table). Rename requires `name` and `expectedRevision`.
-- `GET /studio/items/{id}/content` reads a native document or table. `PUT` writes documents; `POST /studio/items/{id}/operations` writes tables. `POST /studio/items/{id}/assets` stores a raw raster upload; `GET /studio/items/{id}/assets/{filename}` reads it with the startup token.
+- `GET/POST /studio/items`, `GET/PATCH/DELETE /studio/items/{id}`, `PATCH /studio/items/{id}/appearance`. Creation accepts `kind`, `name`, optional `sourceSessionID`, and an optional `body` (Markdown string for a note, structured JSON object for a table or document); Documents also accept optional `blobs`. Rename requires `name` and `expectedRevision`.
+- `GET /studio/items/{id}/content` reads a note or table. `PUT` writes notes; `POST /studio/items/{id}/operations` writes tables. `POST /studio/items/{id}/assets` stores a raw raster upload; `GET /studio/items/{id}/assets/{filename}` reads it with the startup token.
+- `GET/PUT /studio/items/{id}/rich-content` reads/writes structured Documents; `GET /studio/items/{id}/rich-assets/{hash}` reads retained document assets and original DOCX blobs. These historical paths remain unchanged.
 - `POST/GET /studio/items/{id}/draft` starts or reads the persistent widget working copy, initialized from the current source head. `GET/PUT /studio/items/{id}/draft/file` reads or edits one file; writes require the previous `draftHash`, and `null` deletes. An incomplete draft is allowed. `POST /studio/items/{id}/draft/commit` validates the complete package, publishes one immutable revision and advances the source head only when it still matches the draft's base. Draft conflicts return `currentDraftHash`; source conflicts return `currentRevision` and `currentHeadRevision`. Drafts live under `<home>/studio/<id>/draft`.
 - `GET /studio/items/{id}/revisions`, `GET /studio/items/{id}/revisions/{hash}`.
 - `POST /studio/items/{id}/build-receipts`, `POST /studio/items/{id}/activate`, `PUT /studio/items/{id}/bindings`.
@@ -21,7 +22,7 @@ All routes require the loopback startup token.
 - `GET/POST /studio/items/{id}/links`, `DELETE /studio/items/{id}/links/{linkID}`.
 - `POST /sessions/{id}/studio/items/{itemID}/open` opens or reuses a session mount; `GET /sessions/{id}/studio/mounts` lists them and `DELETE /sessions/{id}/studio/mounts/{mountID}` removes one mount. Global deletion removes the item from all views. Library favorites reference the item as `studio:<id>`.
 
-All native content and widget operations validate the item kind. Documents and tables do not have builds, activation, plugin bindings or widget drafts.
+All native content and widget operations validate the item kind. Notes, Documents and tables do not have builds, activation, plugin bindings or widget drafts.
 
 ## Archives
 
@@ -29,27 +30,56 @@ Protocol 12 / schema v30 adds `archivedAt` to all three item kinds. `GET /studio
 
 The daemon checks at startup and hourly, permanently deleting items archived for at least 30 days. `DELETE /studio/items/{id}` with `expectedRevision` is immediate permanent deletion. Cleanup first records an inaccessible tombstone, removes `<home>/studio/<id>` (including assets and widget files), then deletes the database row with cascading dependent history and references. Filesystem failures leave the tombstone for the next cleanup; restoring or changing the item after a cleanup scan invalidates its revision and prevents stale deletion. Desktop normal removal uses archive without confirmation after saving local drafts; only permanent deletion asks for confirmation.
 
-## Native documents
+## Native notes
 
-The working Markdown and its SHA-256 content hash live in SQLite `studio_item_content`. Each write atomically updates that body, the item head and an immutable `studio_item_revisions` snapshot with an author (`user`, or trusted session ID + turn ID). Storing the body with its versions keeps a document write in one transaction; there is no second filesystem copy of the working Markdown. Revision IDs include the parent and request ID, so restoring identical content creates a new version. Revision lists omit bodies; individual revision reads return `{kind, revision}` with `revision.body`. Deleting the origin session does not remove content or historical authorship.
+The working Markdown and its SHA-256 content hash live in SQLite `studio_item_content`. Each write atomically updates that body, the item head and an immutable `studio_item_revisions` snapshot with an author (`user`, or trusted session ID + turn ID). Storing the body with its versions keeps a note write in one transaction; there is no second filesystem copy of the working Markdown. Revision IDs include the parent and request ID, so restoring identical content creates a new version. Revision lists omit bodies; individual revision reads return `{kind, revision}` with `revision.body`. Deleting the origin session does not remove content or historical authorship.
 
 Writes require `clientRequestID` and exactly one of `body`, `edits`, `restoreRevision`, `undoRevision` or lease-bound `replacement`. Full replacement and restore require `expectedHash`; stale content returns 409 `{error: "content_conflict", currentHash}`. Anchor edits resolve every `old` string against the latest body, require a unique non-overlapping match and apply atomically, so unrelated human changes remain intact. The same request ID and payload return the original write result without applying it again; reuse with different content is rejected.
 
 Desktop seals each human editing pause after 1 second; every persisted human save is already a version before a later AI edit or restore. `preserveOnly: true` archives an unsaved human body without replacing the working content, then returns the current body for the load-latest conflict action. AI tools cannot use this option. Saving the local body after a conflict explicitly compares against a fresh hash; both authors' versions remain available.
 
-`contracts/studio.json` bounds a document at 2 MiB UTF-8, a raster asset at 10 MiB and one edit call at 100 anchors. Tool reads accept Unicode character offsets and limits (default 16000, at most 16384 characters / 64 KiB) and return `nextOffset` when needed. PNG, JPEG, GIF and WebP uploads are detected from their bytes and atomically stored at `<home>/studio/<id>/content/assets/<sha256>.<ext>`. Markdown uses relative `assets/...` paths. Desktop fetches these authenticated assets as blobs, suppresses remote image requests and never executes raw HTML. Export returns the Markdown source unchanged.
+`contracts/studio.json` bounds a note at 2 MiB UTF-8, a raster asset at 10 MiB and one edit call at 100 anchors. Tool reads accept Unicode character offsets and limits (default 16000, at most 16384 characters / 64 KiB) and return `nextOffset` when needed. PNG, JPEG, GIF and WebP uploads are detected from their bytes and atomically stored at `<home>/studio/<id>/content/assets/<sha256>.<ext>`. Markdown uses relative `assets/...` paths. Desktop fetches these authenticated assets as blobs, suppresses remote image requests and never executes raw HTML. Export returns the Markdown source unchanged.
 
-The optional Core `artifacts` plugin exposes only `builtin_artifact_list` and `builtin_artifact_open`. The independent `markdown` plugin exposes `builtin_doc_create`, `builtin_doc_read` and `builtin_doc_edit`; `tables` owns `builtin_table_create/read/update`; `docx` owns `builtin_rich_document_create/read/edit`. Each plugin loads its own tools and Skill in Chat mode. A known content ID does not require loading `artifacts` or sibling plugins. Tools execute in Core with explicit session and turn scope, without Desktop or per-write approval; scheduled turns and child sessions use the same path. Creation opens a mount and returns `itemID`, `mountID`, `contentHash` and `revisionID`. Content is read explicitly through tools, not injected into system instructions. There is no AI deletion tool. Widget source editing remains a Code-mode capability of `widget-authoring`.
+The optional Core `artifacts` plugin exposes only `builtin_artifact_list` and `builtin_artifact_open`. The independent `markdown` plugin exposes `builtin_note_create`, `builtin_note_read` and `builtin_note_edit`; `tables` owns `builtin_table_create/read/update`; `docx` owns `builtin_document_create/read/edit`. Each plugin loads its own tools and Skill in Chat mode. A known content ID does not require loading `artifacts` or sibling plugins. Tools execute in Core with explicit session and turn scope, without Desktop or per-write approval; scheduled turns and child sessions use the same path. Creation opens a mount and returns `itemID`, `mountID`, `contentHash` and `revisionID`. Content is read explicitly through tools, not injected into system instructions. There is no AI deletion tool. Widget source editing remains a Code-mode capability of `widget-authoring`.
 
-### Document range leases (protocol 28 / schema 40)
+### Tool names and legacy doc retirement
 
-`GET /studio/items/{id}/edit-operations` returns active/recent terminal operations and a content hash, without lease tokens or target text. `POST` supports `begin`, `renew` and `cancel`; authenticated user cancellation may omit a token. Model callers use the same actions through `builtin_doc_edit`, with session/turn ownership determined by Core.
+Core files, types and functions follow `note` / `document`; shared persistence uses `content`. See [Content naming](content-naming.md) for source paths, protocol exceptions and historical-data regression fixtures.
 
-`begin` accepts `expectedHash` and either a unique `target` or a zero-based, half-open UTF-8 byte range `from`/`to` (not the Unicode offsets used by DocRead). Bounds must be Unicode boundaries, nonempty and at most 64 KiB. Up to eight non-overlapping leases may coexist. A lease lasts two minutes, renewable up to fifteen minutes from creation. State survives restart and expiration is checked on access.
+Studio Notes is the lightweight Markdown editor; Studio Documents is the structured page-layout editor with DOCX import/export. They keep separate creation/import entries and independently loaded plugins. Plugin and Skill names are Note Authoring and Document Authoring; creation entries and content labels stay Notes and Documents. Chinese UI names are localized; model-facing instructions remain English.
+
+| Product | Plugin ID | Canonical tools |
+| --- | --- | --- |
+| Notes | `markdown` | `builtin_note_create/read/edit` |
+| Documents | `docx` | `builtin_document_create/read/edit` |
+| Content Library | `artifacts` | `builtin_artifact_list/open` |
+
+Release audit: the latest stable Desktop [v0.5.0](https://github.com/teatak/pudding/releases/tag/v0.5.0), published 2026-10-08, pins Core `1571c7bacc4aa7f9e2dd7b9e75329d0ef0f2011e` and shipped only `builtin_doc_create/read/edit` for Markdown. `builtin_rich_document_*` and the intermediate Markdown `builtin_document_*` names were not released; they have no compatibility aliases. `builtin_document_*` now exclusively edits structured Documents, never Markdown.
+
+`internal/tool/note_compat.go` maps exactly those three released `builtin_doc_*` names to `builtin_note_*`. New tool catalogs and model instructions expose only canonical names. Legacy calls retain the same plugin loading, enablement and capability checks; stored call/result identities are preserved. History is translated when building model context (including provider continuations), without rewriting original records. Desktop `web/src/lib/noteToolCompat.ts` covers tool labels, events and editing state.
+
+Retain this compatibility for six **calendar months after the first stable Desktop release containing this rename**, not after the discussion or commit date. Fill in this record and both compatibility-file comments at release time:
+
+| Field | Record |
+| --- | --- |
+| First stable release | Pending first stable release of this change |
+| Release date | Pending first stable release of this change |
+| Remove-after date | Release date plus six calendar months; clamp to month end if needed |
+| Removal release | First maintenance release on or after the remove-after date |
+
+At retirement remove the exact legacy map and its execution, capability, plugin ownership, history and Desktop display/event/editing callers, plus compatibility-only tests. Retain canonical `note_*`/`document_*` tests and unrelated tool compatibility. Do not add a runtime clock gate or rewrite saved history. After retirement, old names are no longer executable or replayable as current tools; old history remains stored and uses generic UI fallback.
+
+This is a tool/product rename only. Plugin IDs (`markdown`, `docx`), stored kinds (`doc`, `rich-document`), IDs, `@doc` references, Markdown source, structured body/versions and `.md`/`.docx` formats remain unchanged. New notes use a notebook icon; documents use a page icon. Desktop presents the old default note icon as a notebook without changing stored data or other custom icons.
+
+### Note range leases (protocol 28 / schema 40)
+
+`GET /studio/items/{id}/edit-operations` returns active/recent terminal operations and a content hash, without lease tokens or target text. `POST` supports `begin`, `renew` and `cancel`; authenticated user cancellation may omit a token. Model callers use the same actions through `builtin_note_edit`, with session/turn ownership determined by Core.
+
+`begin` accepts `expectedHash` and either a unique `target` or a zero-based, half-open UTF-8 byte range `from`/`to` (not the Unicode offsets used by `builtin_note_read`). Bounds must be Unicode boundaries, nonempty and at most 64 KiB. Up to eight non-overlapping leases may coexist. A lease lasts two minutes, renewable up to fifteen minutes from creation. State survives restart and expiration is checked on access.
 
 Commit uses `PUT .../content` with `operationID`, `leaseToken`, `replacement` and a request ID, or the tool's `action: commit`. Owner, token, expiration and unchanged target are checked in the same short SQLite transaction that writes the new revision and marks the operation committed. Replayed commits return their original result without moving the head. Cancel/renew cannot resurrect terminal operations.
 
-All working-body writes, including legacy anchor edits, replacement, restore and selective undo, check active ranges. Unrelated changes rebase leases; touching a protected range or its boundary returns `409 document_locked`. `preserveOnly` does not change the working body. These leases currently apply to Studio documents; they do not lock project files or external filesystem writers.
+All working-body writes, including legacy anchor edits, replacement, restore and selective undo, check active ranges. Unrelated changes rebase leases; touching a protected range or its boundary returns `409 document_locked`. `preserveOnly` does not change the working body. These leases currently apply to Studio Notes; they do not lock structured Documents, project files or external filesystem writers.
 
 ## Native tables
 
@@ -59,15 +89,15 @@ All working-body writes, including legacy anchor edits, replacement, restore and
 
 Every successful write atomically updates content/hash/head, immutable version, author and request fingerprint. Retrying the same ID/payload returns the original result without replaying it over newer edits. Reuse with different operations is rejected. Restore requires `expectedHash` and appends a new version; it never rewinds the history. Optional expected hashes produce `content_conflict`; stale cell expectations produce `cell_conflict` with row/column IDs.
 
-The Chat-mode `studio` plugin also exposes `builtin_table_create`, `builtin_table_read` and `builtin_table_update`. Creation opens a mount. Reading accepts optional row/column IDs, then applies offset/limit to selected rows in canonical order; responses provide `nextOffset`, identity metadata and JSON or CSV. Writes run entirely in Core with trusted session/turn authorship, without Desktop or per-write approval. `@table/<id>(name)` references the item.
+The independent Chat-mode `tables` plugin exposes `builtin_table_create`, `builtin_table_read` and `builtin_table_update`. Creation opens a mount. Reading accepts optional row/column IDs, then applies offset/limit to selected rows in canonical order; responses provide `nextOffset`, identity metadata and JSON or CSV. Writes run entirely in Core with trusted session/turn authorship, without Desktop or per-write approval. `@table/<id>(name)` references the item.
 
 Limits come from `contracts/studio.json`: 10,000 rows, 100 columns, 10 MiB serialized JSON, 64 KiB per string cell, 1,000 operations per batch and 200 rows / 1 MiB per tool read. Column names and select options are at most 200 UTF-8 bytes; at most 100 distinct nonempty select options. Oversized read rows require a narrower column selection. There are no formulas, filter views or merged cells.
 
 ## Selective AI undo
 
-Protocol 11 adds `undoRevision` to the existing document and table write requests; table writes may also specify `rowID`. This is a user-only operation, not an AI tool. The selected immutable version must belong to this item, have session authorship and a parent, and be in the current head's ancestry. The before/after pair comes from canonical snapshots, never from Desktop state. AI creations have no parent and cannot be undone by deleting content.
+Protocol 11 adds `undoRevision` to the existing note and table write requests; table writes may also specify `rowID`. This is a user-only operation, not an AI tool. The selected immutable version must belong to this item, have session authorship and a parent, and be in the current head's ancestry. The before/after pair comes from canonical snapshots, never from Desktop state. AI creations have no parent and cannot be undone by deleting content.
 
-Within one transaction, Core maps the inverse onto current content and appends a user-authored version. Documents use exact character changes: later disjoint edits are retained, overlapping edits (including ambiguous insertion boundaries) reject the operation. Tables compare stable IDs and individual cells/column fields. A row undo only applies to changed cells in a row present before and after, with unchanged columns in the selected change. Row/column additions, deletions and order changes use whole-change undo; later structural changes that make the order ambiguous cause a conflict. Restoring a deleted row/column revives its original identity.
+Within one transaction, Core maps the inverse onto current content and appends a user-authored version. Notes use exact character changes: later disjoint edits are retained, overlapping edits (including ambiguous insertion boundaries) reject the operation. Tables compare stable IDs and individual cells/column fields. A row undo only applies to changed cells in a row present before and after, with unchanged columns in the selected change. Row/column additions, deletions and order changes use whole-change undo; later structural changes that make the order ambiguous cause a conflict. Restoring a deleted row/column revives its original identity.
 
 Conflicts return `content_conflict` and do not write any content or version. Repeating an identical request ID/payload returns its saved result. A new request against an already reverted change is checked against current content and may conflict; this also applies to whole-change undo after one of its rows was reverted. No force or fuzzy merge mode is provided. This uses the native content and immutable version tables in schema v30.
 
@@ -132,8 +162,8 @@ Core no longer stores business roles. Authors store seats, readiness, participan
 
 ## Content plugin split
 
-The UI keeps a flat plugin list: Content Browser (`artifacts`), Markdown Authoring (`markdown`), DOCX Documents (`docx`) and Table Authoring (`tables`). Enablement and session loading are independent. Loading one plugin never implicitly loads another; already loaded plugins remain until explicitly unloaded.
+The UI keeps a flat plugin list: Content Library (`artifacts`), Note Authoring (`markdown`), Document Authoring (`docx`) and Table Authoring (`tables`). Enablement and session loading are independent. Loading one plugin never implicitly loads another; already loaded plugins remain until explicitly unloaded.
 
 On upgrade, `plugins.content_plugins_split` records the one-time settings migration: explicit `artifacts` enablement (including the legacy `studio` alias) is copied to new type plugins only where they have no explicit value. Later enable/disable changes do not propagate. Historical loaded `studio`/`artifacts` sessions retain only common list/open access and load type capabilities on demand. Stored content, revisions and historical tool names are unchanged.
 
-DOCX uses structured `rich-document` content. Its AI tools create documents, read text/outlines/nodes and apply atomic local body operations with CAS, immutable session-authored history and selective user undo. Headers/footers, layout and unmentioned assets are preserved; AI range leases and complex layout edits remain deferred. Native typed tables are not XLSX workbooks. Tables embedded in Markdown or DOCX remain part of their owning documents.
+The Documents editor uses structured `rich-document` content with DOCX import/export. Its AI tools create documents, read text/outlines/nodes and apply atomic local body operations with CAS, immutable session-authored history and selective user undo. Headers/footers, layout and unmentioned assets are preserved; AI range leases and complex layout edits remain deferred. Native typed tables are not XLSX workbooks. Tables embedded in Markdown or DOCX remain part of their owning documents.

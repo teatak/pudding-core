@@ -7,39 +7,39 @@ import (
 
 // Selective inverse: retain later edits outside the fields/blocks changed by AI.
 // Ambiguous structural changes or overlapping text edits fail without writing.
-func UndoRichDocument(beforeRaw, afterRaw string, current RichDocumentBody) (RichDocumentBody, error) {
-	var before, after RichDocumentBody
+func UndoDocument(beforeRaw, afterRaw string, current DocumentBody) (DocumentBody, error) {
+	var before, after DocumentBody
 	if err := json.Unmarshal([]byte(beforeRaw), &before); err != nil {
 		return current, err
 	}
 	if err := json.Unmarshal([]byte(afterRaw), &after); err != nil {
 		return current, err
 	}
-	before = AnchorRichBody(before)
-	after = AnchorRichBody(after)
-	out := AnchorRichBody(current)
+	before = AnchorDocumentBody(before)
+	after = AnchorDocumentBody(after)
+	out := AnchorDocumentBody(current)
 	// Only body operations are available to AI in this phase.
 	b, a := before, after
-	b.Body = RichNode{}
-	a.Body = RichNode{}
-	if !richEqual(b, a) {
+	b.Body = DocumentNode{}
+	a.Body = DocumentNode{}
+	if !documentEqual(b, a) {
 		return current, ErrUndoConflict
 	}
-	node, err := undoRichNode(before.Body, after.Body, out.Body)
+	node, err := undoDocumentNode(before.Body, after.Body, out.Body)
 	if err != nil {
 		return current, err
 	}
 	out.Body = node
-	if richEqual(out, current) {
+	if documentEqual(out, current) {
 		return current, ErrUndoConflict
 	}
-	return out, ValidateRichEditBody(out)
+	return out, ValidateDocumentEditBody(out)
 }
-func undoRichNode(before, after, current RichNode) (RichNode, error) {
-	if richNodesEquivalent(before, after) {
+func undoDocumentNode(before, after, current DocumentNode) (DocumentNode, error) {
+	if documentNodesEquivalent(before, after) {
 		return current, nil
 	}
-	if richNodesEquivalent(after, current) {
+	if documentNodesEquivalent(after, current) {
 		return before, nil
 	}
 	out := current
@@ -55,30 +55,30 @@ func undoRichNode(before, after, current RichNode) (RichNode, error) {
 		}
 		out.Text = before.Text
 	}
-	bn, an, cn := normalizedRichNode(before), normalizedRichNode(after), normalizedRichNode(current)
-	if !richEqual(bn.Attrs, an.Attrs) {
-		if !richEqual(cn.Attrs, an.Attrs) {
+	bn, an, cn := normalizedDocumentNode(before), normalizedDocumentNode(after), normalizedDocumentNode(current)
+	if !documentEqual(bn.Attrs, an.Attrs) {
+		if !documentEqual(cn.Attrs, an.Attrs) {
 			return current, ErrUndoConflict
 		}
 		out.Attrs = before.Attrs
 	}
-	if !richEqual(bn.Marks, an.Marks) {
-		if !richEqual(cn.Marks, an.Marks) {
+	if !documentEqual(bn.Marks, an.Marks) {
+		if !documentEqual(cn.Marks, an.Marks) {
 			return current, ErrUndoConflict
 		}
 		out.Marks = before.Marks
 	}
-	if !richEqual(bn.Content, an.Content) {
+	if !documentEqual(bn.Content, an.Content) {
 		if current.Type != after.Type {
 			return current, ErrUndoConflict
 		}
 		if after.Type == "paragraph" || after.Type == "heading" || after.Type == "codeBlock" {
-			if !richEqual(cn.Content, an.Content) {
+			if !documentEqual(cn.Content, an.Content) {
 				return current, ErrUndoConflict
 			}
 			out.Content = before.Content
 		} else {
-			children, err := undoRichChildren(before.Content, after.Content, current.Content)
+			children, err := undoDocumentChildren(before.Content, after.Content, current.Content)
 			if err != nil {
 				return current, err
 			}
@@ -87,10 +87,10 @@ func undoRichNode(before, after, current RichNode) (RichNode, error) {
 	}
 	return out, nil
 }
-func keyedRich(nodes []RichNode) (map[string]RichNode, bool) {
-	result := map[string]RichNode{}
+func keyedDocument(nodes []DocumentNode) (map[string]DocumentNode, bool) {
+	result := map[string]DocumentNode{}
 	for _, n := range nodes {
-		id := richID(n)
+		id := documentID(n)
 		if id == "" {
 			return nil, false
 		}
@@ -101,23 +101,23 @@ func keyedRich(nodes []RichNode) (map[string]RichNode, bool) {
 	}
 	return result, true
 }
-func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
-	if richChildrenEquivalent(before, after) {
+func undoDocumentChildren(before, after, current []DocumentNode) ([]DocumentNode, error) {
+	if documentChildrenEquivalent(before, after) {
 		return current, nil
 	}
-	if richChildrenEquivalent(after, current) {
+	if documentChildrenEquivalent(after, current) {
 		return before, nil
 	}
-	b, bk := keyedRich(before)
-	a, ak := keyedRich(after)
-	c, ck := keyedRich(current)
+	b, bk := keyedDocument(before)
+	a, ak := keyedDocument(after)
+	c, ck := keyedDocument(current)
 	if !bk || !ak || !ck {
 		if len(before) != len(after) || len(after) != len(current) {
 			return nil, ErrUndoConflict
 		}
-		out := append([]RichNode{}, current...)
+		out := append([]DocumentNode{}, current...)
 		for i := range out {
-			n, err := undoRichNode(before[i], after[i], out[i])
+			n, err := undoDocumentNode(before[i], after[i], out[i])
 			if err != nil {
 				return nil, err
 			}
@@ -128,32 +128,32 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 	// Shared siblings must keep their order. Reordering is deliberately conservative.
 	var oldOrder, newOrder []string
 	for _, n := range before {
-		if _, ok := a[richID(n)]; ok {
-			oldOrder = append(oldOrder, richID(n))
+		if _, ok := a[documentID(n)]; ok {
+			oldOrder = append(oldOrder, documentID(n))
 		}
 	}
 	for _, n := range after {
-		if _, ok := b[richID(n)]; ok {
-			newOrder = append(newOrder, richID(n))
+		if _, ok := b[documentID(n)]; ok {
+			newOrder = append(newOrder, documentID(n))
 		}
 	}
-	if !richEqual(oldOrder, newOrder) {
+	if !documentEqual(oldOrder, newOrder) {
 		return nil, ErrUndoConflict
 	}
 	for id, n := range a {
 		latest, present := c[id]
 		old, existed := b[id]
 		if !existed {
-			if !present || !richNodesEquivalent(n, latest) {
+			if !present || !documentNodesEquivalent(n, latest) {
 				return nil, ErrUndoConflict
 			}
-		} else if !richNodesEquivalent(old, n) && !present {
+		} else if !documentNodesEquivalent(old, n) && !present {
 			return nil, ErrUndoConflict
 		}
 	}
-	out := []RichNode{}
+	out := []DocumentNode{}
 	for _, n := range current {
-		id := richID(n)
+		id := documentID(n)
 		an, inAfter := a[id]
 		bn, inBefore := b[id]
 		if inAfter && !inBefore {
@@ -163,7 +163,7 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 			return nil, ErrUndoConflict
 		}
 		if inBefore && inAfter {
-			updated, err := undoRichNode(bn, an, n)
+			updated, err := undoDocumentNode(bn, an, n)
 			if err != nil {
 				return nil, err
 			}
@@ -172,7 +172,7 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 		out = append(out, n)
 	}
 	for i, n := range before {
-		if _, ok := a[richID(n)]; ok {
+		if _, ok := a[documentID(n)]; ok {
 			continue
 		}
 		// Reinsert immediately before the nearest surviving next sibling, otherwise
@@ -180,7 +180,7 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 		index := -1
 		for j := i + 1; j < len(before) && index < 0; j++ {
 			for k, x := range out {
-				if richID(x) == richID(before[j]) {
+				if documentID(x) == documentID(before[j]) {
 					index = k
 					break
 				}
@@ -189,7 +189,7 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 		if index < 0 {
 			for j := i - 1; j >= 0 && index < 0; j-- {
 				for k, x := range out {
-					if richID(x) == richID(before[j]) {
+					if documentID(x) == documentID(before[j]) {
 						index = k + 1
 						break
 					}
@@ -202,28 +202,28 @@ func undoRichChildren(before, after, current []RichNode) ([]RichNode, error) {
 			}
 			index = 0
 		}
-		next := append([]RichNode{}, out[:index]...)
+		next := append([]DocumentNode{}, out[:index]...)
 		next = append(next, n)
 		out = append(next, out[index:]...)
 	}
 	return out, nil
 }
 
-func richNodesEquivalent(a, b RichNode) bool {
-	return richEqual(normalizedRichNode(a), normalizedRichNode(b))
+func documentNodesEquivalent(a, b DocumentNode) bool {
+	return documentEqual(normalizedDocumentNode(a), normalizedDocumentNode(b))
 }
-func richChildrenEquivalent(a, b []RichNode) bool {
-	return richNodesEquivalent(RichNode{Content: a}, RichNode{Content: b})
+func documentChildrenEquivalent(a, b []DocumentNode) bool {
+	return documentNodesEquivalent(DocumentNode{Content: a}, DocumentNode{Content: b})
 }
 
 // Tiptap fills defaults, orders marks and joins adjacent text runs on a human
 // save. Compare these equivalent representations without rewriting storage or
 // treating actual text/style changes as safe to undo.
-func normalizedRichNode(n RichNode) RichNode {
+func normalizedDocumentNode(n DocumentNode) DocumentNode {
 	out := n
 	out.Attrs = nil
 	for k, v := range n.Attrs {
-		if v == nil || k == "textAlign" && v == "left" || k == "level" && n.Type == "heading" && richEqual(v, 1) || k == "start" && n.Type == "orderedList" && richEqual(v, 1) || (k == "rowspan" || k == "colspan") && richEqual(v, 1) {
+		if v == nil || k == "textAlign" && v == "left" || k == "level" && n.Type == "heading" && documentEqual(v, 1) || k == "start" && n.Type == "orderedList" && documentEqual(v, 1) || (k == "rowspan" || k == "colspan") && documentEqual(v, 1) {
 			continue
 		}
 		if out.Attrs == nil {
@@ -233,7 +233,7 @@ func normalizedRichNode(n RichNode) RichNode {
 	}
 	out.Marks = nil
 	for _, m := range n.Marks {
-		mark := RichMark{Type: m.Type}
+		mark := DocumentMark{Type: m.Type}
 		for k, v := range m.Attrs {
 			if v == nil || m.Type == "link" && (k == "target" && v == "_blank" || k == "rel" && v == "noopener noreferrer nofollow") {
 				continue
@@ -248,8 +248,8 @@ func normalizedRichNode(n RichNode) RichNode {
 	sort.Slice(out.Marks, func(i, j int) bool { return out.Marks[i].Type < out.Marks[j].Type })
 	out.Content = nil
 	for _, c := range n.Content {
-		child := normalizedRichNode(c)
-		if l := len(out.Content); l > 0 && child.Type == "text" && out.Content[l-1].Type == "text" && richEqual(child.Marks, out.Content[l-1].Marks) && richEqual(child.Attrs, out.Content[l-1].Attrs) {
+		child := normalizedDocumentNode(c)
+		if l := len(out.Content); l > 0 && child.Type == "text" && out.Content[l-1].Type == "text" && documentEqual(child.Marks, out.Content[l-1].Marks) && documentEqual(child.Attrs, out.Content[l-1].Attrs) {
 			out.Content[l-1].Text += child.Text
 		} else {
 			out.Content = append(out.Content, child)

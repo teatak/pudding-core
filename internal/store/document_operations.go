@@ -7,105 +7,105 @@ import (
 	"strings"
 )
 
-// Rich edits address body blocks, never derived page numbers or plain-text read offsets.
-type RichOperation struct {
+// Document edits address body blocks, never derived page numbers or plain-text read offsets.
+type DocumentOperation struct {
 	Kind      string         `json:"kind"`
 	BlockID   string         `json:"block_id"`
 	OldText   string         `json:"old_text,omitempty"`
 	Text      *string        `json:"text,omitempty"`
-	Content   []RichNode     `json:"content,omitempty"`
-	Marks     []RichMark     `json:"marks,omitempty"`
+	Content   []DocumentNode `json:"content,omitempty"`
+	Marks     []DocumentMark `json:"marks,omitempty"`
 	Placement string         `json:"placement,omitempty"`
 	NodeType  string         `json:"node_type,omitempty"`
 	Attrs     map[string]any `json:"attrs,omitempty"`
 }
 
-func richEqual(a, b any) bool {
+func documentEqual(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
 }
-func richCopy(body RichDocumentBody) RichDocumentBody {
+func documentCopy(body DocumentBody) DocumentBody {
 	raw, _ := json.Marshal(body)
-	var out RichDocumentBody
+	var out DocumentBody
 	_ = json.Unmarshal(raw, &out)
 	return out
 }
-func richHasID(kind string) bool {
+func documentHasID(kind string) bool {
 	switch kind {
 	case "paragraph", "heading", "blockquote", "codeBlock", "bulletList", "orderedList", "listItem", "table":
 		return true
 	}
 	return false
 }
-func richID(n RichNode) string { id, _ := n.Attrs["blockId"].(string); return id }
+func documentID(n DocumentNode) string { id, _ := n.Attrs["blockId"].(string); return id }
 
 // Legacy blocks without IDs receive deterministic anchors in read projections.
 // Reading never writes; an edit persists these same IDs, not new random IDs.
-func AnchorRichBody(body RichDocumentBody) RichDocumentBody {
-	out := richCopy(body)
+func AnchorDocumentBody(body DocumentBody) DocumentBody {
+	out := documentCopy(body)
 	raw, _ := json.Marshal(body.Body)
-	richIDs(&out.Body, DocumentHash(string(raw)), "body", false)
+	documentIDs(&out.Body, ContentHash(string(raw)), "body", false)
 	return out
 }
-func richIDs(n *RichNode, seed, path string, replace bool) {
-	if richHasID(n.Type) && (replace || richID(*n) == "") {
+func documentIDs(n *DocumentNode, seed, path string, replace bool) {
+	if documentHasID(n.Type) && (replace || documentID(*n) == "") {
 		if n.Attrs == nil {
 			n.Attrs = map[string]any{}
 		}
-		n.Attrs["blockId"] = "block_" + DocumentHash(seed + "/" + path)[:32]
+		n.Attrs["blockId"] = "block_" + ContentHash(seed + "/" + path)[:32]
 	}
 	for i := range n.Content {
-		richIDs(&n.Content[i], seed, fmt.Sprintf("%s/%d", path, i), replace)
+		documentIDs(&n.Content[i], seed, fmt.Sprintf("%s/%d", path, i), replace)
 	}
 }
-func NewRichBody(nodes []RichNode, seed string) (RichDocumentBody, error) {
-	body := EmptyRichDocument()
+func NewDocumentBody(nodes []DocumentNode, seed string) (DocumentBody, error) {
+	body := EmptyDocument()
 	if len(nodes) == 0 {
-		return body, invalidRich("content must contain at least one block")
+		return body, invalidDocument("content must contain at least one block")
 	}
-	if err := validateGeneratedRichNodes(nodes); err != nil {
+	if err := validateGeneratedDocumentNodes(nodes); err != nil {
 		return body, err
 	}
 	body.Body.Content = nodes
-	body = richCopy(body)
-	richIDs(&body.Body, seed, "body", true)
-	if err := ValidateRichEditBody(body); err != nil {
+	body = documentCopy(body)
+	documentIDs(&body.Body, seed, "body", true)
+	if err := ValidateDocumentEditBody(body); err != nil {
 		return body, err
 	}
 	return body, nil
 }
 
 // Additional shape checks prevent the editor from silently repairing AI output.
-func ValidateRichEditBody(body RichDocumentBody) error {
-	if err := ValidateRichDocument(body); err != nil {
+func ValidateDocumentEditBody(body DocumentBody) error {
+	if err := ValidateDocument(body); err != nil {
 		return err
 	}
-	var visit func(RichNode) error
-	visit = func(n RichNode) error {
+	var visit func(DocumentNode) error
+	visit = func(n DocumentNode) error {
 		switch n.Type {
 		case "doc", "blockquote", "bulletList", "orderedList", "listItem", "table", "tableRow", "tableCell", "tableHeader":
 			if len(n.Content) == 0 {
-				return invalidRich("empty container: " + n.Type)
+				return invalidDocument("empty container: " + n.Type)
 			}
 		}
 		if n.Type == "listItem" && n.Content[0].Type != "paragraph" {
-			return invalidRich("list items must start with a paragraph")
+			return invalidDocument("list items must start with a paragraph")
 		}
 		if n.Type == "codeBlock" {
 			for _, c := range n.Content {
 				if len(c.Marks) > 0 {
-					return invalidRich("code blocks cannot contain marks")
+					return invalidDocument("code blocks cannot contain marks")
 				}
 			}
 		}
 		if n.Type == "table" {
-			if err := validateRichTable(n); err != nil {
+			if err := validateDocumentTable(n); err != nil {
 				return err
 			}
 		}
 		if n.Type != "text" && len(n.Marks) > 0 {
-			return invalidRich("marks require a text node")
+			return invalidDocument("marks require a text node")
 		}
 		for _, c := range n.Content {
 			if err := visit(c); err != nil {
@@ -117,55 +117,55 @@ func ValidateRichEditBody(body RichDocumentBody) error {
 	return visit(body.Body)
 }
 
-type richLocation struct {
-	parent *RichNode
+type documentLocation struct {
+	parent *DocumentNode
 	index  int
 }
 
-func findRichBlock(root *RichNode, id string) *richLocation {
+func findDocumentBlock(root *DocumentNode, id string) *documentLocation {
 	for i := range root.Content {
-		if richID(root.Content[i]) == id {
-			return &richLocation{root, i}
+		if documentID(root.Content[i]) == id {
+			return &documentLocation{root, i}
 		}
-		if found := findRichBlock(&root.Content[i], id); found != nil {
+		if found := findDocumentBlock(&root.Content[i], id); found != nil {
 			return found
 		}
 	}
 	return nil
 }
 
-func ApplyRichOperations(body RichDocumentBody, ops []RichOperation, seed string) (RichDocumentBody, error) {
+func ApplyDocumentOperations(body DocumentBody, ops []DocumentOperation, seed string) (DocumentBody, error) {
 	if len(ops) == 0 || len(ops) > 100 {
-		return body, invalidRich("supply 1–100 operations")
+		return body, invalidDocument("supply 1–100 operations")
 	}
-	out := AnchorRichBody(body)
+	out := AnchorDocumentBody(body)
 	for i, op := range ops {
-		if err := validateRichOperation(op); err != nil {
+		if err := validateDocumentOperation(op); err != nil {
 			return body, err
 		}
-		if err := validateGeneratedRichNodes(op.Content); err != nil {
+		if err := validateGeneratedDocumentNodes(op.Content); err != nil {
 			return body, err
 		}
 		if op.BlockID == "" {
-			return body, invalidRich("block_id is required")
+			return body, invalidDocument("block_id is required")
 		}
-		loc := findRichBlock(&out.Body, op.BlockID)
+		loc := findDocumentBlock(&out.Body, op.BlockID)
 		if loc == nil {
-			return body, invalidRich("body block not found: " + op.BlockID)
+			return body, invalidDocument("body block not found: " + op.BlockID)
 		}
 		node := &loc.parent.Content[loc.index]
 		switch op.Kind {
 		case "replace_text", "format_text":
-			if err := editRichText(node, op); err != nil {
+			if err := editDocumentText(node, op); err != nil {
 				return body, err
 			}
 		case "set_block":
 			if node.Type != "paragraph" && node.Type != "heading" {
-				return body, invalidRich("set_block requires a paragraph or heading")
+				return body, invalidDocument("set_block requires a paragraph or heading")
 			}
 			if op.NodeType != "" {
 				if op.NodeType != "paragraph" && op.NodeType != "heading" {
-					return body, invalidRich("unsupported block type")
+					return body, invalidDocument("unsupported block type")
 				}
 				node.Type = op.NodeType
 			}
@@ -177,7 +177,7 @@ func ApplyRichOperations(body RichDocumentBody, ops []RichOperation, seed string
 			}
 			for key, value := range op.Attrs {
 				if key != "textAlign" && key != "level" || key == "level" && node.Type != "heading" {
-					return body, invalidRich("unsupported block format")
+					return body, invalidDocument("unsupported block format")
 				}
 				node.Attrs[key] = value
 			}
@@ -186,35 +186,35 @@ func ApplyRichOperations(body RichDocumentBody, ops []RichOperation, seed string
 			}
 		case "insert_blocks", "replace_block", "delete_block":
 			if op.Kind == "delete_block" && len(op.Content) > 0 || op.Kind != "delete_block" && len(op.Content) == 0 {
-				return body, invalidRich("invalid block content")
+				return body, invalidDocument("invalid block content")
 			}
 			nodes := op.Content
 			raw, _ := json.Marshal(nodes)
 			_ = json.Unmarshal(raw, &nodes)
 			for j := range nodes {
-				richIDs(&nodes[j], seed, fmt.Sprintf("%d/%d", i, j), true)
+				documentIDs(&nodes[j], seed, fmt.Sprintf("%d/%d", i, j), true)
 			}
 			start, end := loc.index, loc.index+1
 			if op.Kind == "insert_blocks" {
 				if op.Placement != "before" && op.Placement != "after" {
-					return body, invalidRich("placement must be before or after")
+					return body, invalidDocument("placement must be before or after")
 				}
 				if op.Placement == "after" {
 					start++
 				}
 				end = start
-			} else if op.Kind == "replace_block" && richHasID(nodes[0].Type) {
+			} else if op.Kind == "replace_block" && documentHasID(nodes[0].Type) {
 				nodes[0].Attrs["blockId"] = op.BlockID
 			}
-			next := append([]RichNode{}, loc.parent.Content[:start]...)
+			next := append([]DocumentNode{}, loc.parent.Content[:start]...)
 			next = append(next, nodes...)
 			next = append(next, loc.parent.Content[end:]...)
 			loc.parent.Content = next
 		default:
-			return body, invalidRich("unsupported rich operation: " + op.Kind)
+			return body, invalidDocument("unsupported rich operation: " + op.Kind)
 		}
 	}
-	if err := ValidateRichEditBody(out); err != nil {
+	if err := ValidateDocumentEditBody(out); err != nil {
 		return body, err
 	}
 	return out, nil
@@ -222,10 +222,10 @@ func ApplyRichOperations(body RichDocumentBody, ops []RichOperation, seed string
 
 // Validate supplied attributes against their node type; otherwise Tiptap would
 // silently discard unsupported formatting after the next human keystroke.
-func validateGeneratedRichNodes(nodes []RichNode) error {
+func validateGeneratedDocumentNodes(nodes []DocumentNode) error {
 	for _, n := range nodes {
 		for key := range n.Attrs {
-			allowed := key == "blockId" && richHasID(n.Type)
+			allowed := key == "blockId" && documentHasID(n.Type)
 			switch n.Type {
 			case "paragraph", "heading":
 				allowed = allowed || key == "textAlign" || key == "level" && n.Type == "heading"
@@ -239,19 +239,19 @@ func validateGeneratedRichNodes(nodes []RichNode) error {
 				allowed = key == "assetId" || key == "alt" || key == "width"
 			}
 			if !allowed {
-				return invalidRich("attribute " + key + " is not supported on " + n.Type)
+				return invalidDocument("attribute " + key + " is not supported on " + n.Type)
 			}
 		}
-		if err := validateGeneratedRichNodes(n.Content); err != nil {
+		if err := validateGeneratedDocumentNodes(n.Content); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func editRichText(node *RichNode, op RichOperation) error {
+func editDocumentText(node *DocumentNode, op DocumentOperation) error {
 	if node.Type != "paragraph" && node.Type != "heading" && node.Type != "codeBlock" {
-		return invalidRich("text operations require a paragraph, heading or code block")
+		return invalidDocument("text operations require a paragraph, heading or code block")
 	}
 	// Object boundaries cannot be crossed by a text operation.
 	text := ""
@@ -263,11 +263,11 @@ func editRichText(node *RichNode, op RichOperation) error {
 		}
 	}
 	if op.OldText == "" || strings.ContainsRune(op.OldText, 0) || strings.Count(text, op.OldText) != 1 {
-		return invalidRich("old_text must match exactly once within the block")
+		return invalidDocument("old_text must match exactly once within the block")
 	}
 	from := strings.Index(text, op.OldText)
 	to := from + len(op.OldText)
-	var before, selected, after []RichNode
+	var before, selected, after []DocumentNode
 	at := 0
 	for _, n := range node.Content {
 		length := len(n.Text)
@@ -281,7 +281,7 @@ func editRichText(node *RichNode, op RichOperation) error {
 			after = append(after, n)
 		} else {
 			if n.Type != "text" {
-				return invalidRich("cannot replace an inline object as text")
+				return invalidDocument("cannot replace an inline object as text")
 			}
 			if at < from {
 				p := n
@@ -299,10 +299,10 @@ func editRichText(node *RichNode, op RichOperation) error {
 		}
 		at = end
 	}
-	var replacement []RichNode
+	var replacement []DocumentNode
 	if op.Kind == "format_text" {
 		if node.Type == "codeBlock" && len(op.Marks) > 0 {
-			return invalidRich("code blocks cannot contain formatted text")
+			return invalidDocument("code blocks cannot contain formatted text")
 		}
 		replacement = selected
 		for i := range replacement {
@@ -310,21 +310,21 @@ func editRichText(node *RichNode, op RichOperation) error {
 		}
 	} else {
 		if (op.Text == nil) == (len(op.Content) == 0) {
-			return invalidRich("replace_text requires text or inline content")
+			return invalidDocument("replace_text requires text or inline content")
 		}
 		if op.Text != nil {
 			for _, n := range selected {
 				if !reflect.DeepEqual(n.Marks, selected[0].Marks) {
-					return invalidRich("mixed formatting: supply explicit inline content instead of text")
+					return invalidDocument("mixed formatting: supply explicit inline content instead of text")
 				}
 			}
 			if *op.Text != "" {
-				replacement = []RichNode{{Type: "text", Text: *op.Text, Marks: selected[0].Marks}}
+				replacement = []DocumentNode{{Type: "text", Text: *op.Text, Marks: selected[0].Marks}}
 			}
 		} else {
 			for _, n := range op.Content {
 				if n.Type != "text" && n.Type != "hardBreak" {
-					return invalidRich("replacement inline content supports text and hardBreak")
+					return invalidDocument("replacement inline content supports text and hardBreak")
 				}
 			}
 			replacement = op.Content
@@ -334,7 +334,7 @@ func editRichText(node *RichNode, op RichOperation) error {
 	return nil
 }
 
-func validateRichOperation(op RichOperation) error {
+func validateDocumentOperation(op DocumentOperation) error {
 	allowed := map[string]bool{"kind": true, "block_id": true}
 	fields := map[string][]string{
 		"replace_text": {"old_text", "text", "content"}, "format_text": {"old_text", "marks"},
@@ -342,7 +342,7 @@ func validateRichOperation(op RichOperation) error {
 	}
 	list, ok := fields[op.Kind]
 	if !ok {
-		return invalidRich("unknown operation")
+		return invalidDocument("unknown operation")
 	}
 	for _, k := range list {
 		allowed[k] = true
@@ -352,20 +352,20 @@ func validateRichOperation(op RichOperation) error {
 	_ = json.Unmarshal(raw, &values)
 	for k := range values {
 		if !allowed[k] {
-			return invalidRich("unexpected operation field: " + k)
+			return invalidDocument("unexpected operation field: " + k)
 		}
 	}
 	if op.Kind == "format_text" && op.Marks == nil {
-		return invalidRich("marks is required; use [] to remove formatting")
+		return invalidDocument("marks is required; use [] to remove formatting")
 	}
 	if op.Kind == "set_block" && op.NodeType == "" && len(op.Attrs) == 0 {
-		return invalidRich("set_block requires a type or attributes")
+		return invalidDocument("set_block requires a type or attributes")
 	}
 	return nil
 }
 
-func validateRichTable(table RichNode) error {
-	number := func(n RichNode, key string) int {
+func validateDocumentTable(table DocumentNode) error {
+	number := func(n DocumentNode, key string) int {
 		v := n.Attrs[key]
 		if v == nil {
 			return 1
@@ -383,7 +383,7 @@ func validateRichTable(table RichNode) error {
 		width += number(cell, "colspan")
 	}
 	if width < 1 || width > 1000 {
-		return invalidRich("invalid table width")
+		return invalidDocument("invalid table width")
 	}
 	occupied := make([]int, width)
 	for rowIndex, row := range table.Content {
@@ -394,11 +394,11 @@ func validateRichTable(table RichNode) error {
 			}
 			span, rows := number(cell, "colspan"), number(cell, "rowspan")
 			if col+span > width || rowIndex+rows > len(table.Content) {
-				return invalidRich("invalid table spans")
+				return invalidDocument("invalid table spans")
 			}
 			for j := col; j < col+span; j++ {
 				if occupied[j] > rowIndex {
-					return invalidRich("overlapping table cells")
+					return invalidDocument("overlapping table cells")
 				}
 				occupied[j] = rowIndex + rows
 			}
@@ -406,7 +406,7 @@ func validateRichTable(table RichNode) error {
 		}
 		for _, until := range occupied {
 			if until <= rowIndex {
-				return invalidRich("table rows must fill the same columns")
+				return invalidDocument("table rows must fill the same columns")
 			}
 		}
 	}

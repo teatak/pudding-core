@@ -7,17 +7,17 @@ import (
 )
 
 const (
-	BuiltinArtifactsID       = "artifacts"
-	BuiltinStudioID          = BuiltinArtifactsID
-	BuiltinMarkdownID        = "markdown"
-	BuiltinDOCXID            = "docx"
-	BuiltinTablesID          = "tables"
-	BuiltinCollaborationID   = "collaboration"
-	BuiltinBrowserID         = "browser"
-	BuiltinSkillAuthoringID  = "skill-authoring"
-	BuiltinPluginAuthoringID = "plugin-authoring"
-	BuiltinCaptureID         = "capture"
-	BuiltinComputerUseID     = "computer-use"
+	BuiltinArtifactsID         = "artifacts"
+	BuiltinStudioID            = BuiltinArtifactsID
+	BuiltinNoteAuthoringID     = "markdown"
+	BuiltinDocumentAuthoringID = "docx"
+	BuiltinTablesID            = "tables"
+	BuiltinCollaborationID     = "collaboration"
+	BuiltinBrowserID           = "browser"
+	BuiltinSkillAuthoringID    = "skill-authoring"
+	BuiltinPluginAuthoringID   = "plugin-authoring"
+	BuiltinCaptureID           = "capture"
+	BuiltinComputerUseID       = "computer-use"
 )
 
 const (
@@ -49,12 +49,12 @@ type builtinDefinition struct {
 }
 
 var builtinDefinitions = []builtinDefinition{
-	contentBuiltin(BuiltinArtifactsID, "Content Browser", "List and open existing Studio content of any type.",
+	contentBuiltin(BuiltinArtifactsID, "Content Library", "List and open existing Studio content of any type.",
 		[]string{"builtin_artifact_list", "builtin_artifact_open"}, contentBrowserInstructions),
-	contentBuiltin(BuiltinMarkdownID, "Markdown Authoring", "Create, read and edit native Studio Markdown documents.",
-		[]string{"builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"}, markdownInstructions),
-	contentBuiltin(BuiltinDOCXID, "DOCX Documents", "Create, read and locally edit structured DOCX documents with recoverable versions.",
-		[]string{"builtin_rich_document_create", "builtin_rich_document_read", "builtin_rich_document_edit"}, docxInstructions),
+	contentBuiltin(BuiltinNoteAuthoringID, "Note Authoring", "Create, read and edit lightweight Studio notes with Markdown support.",
+		[]string{"builtin_note_create", "builtin_note_read", "builtin_note_edit"}, noteInstructions),
+	contentBuiltin(BuiltinDocumentAuthoringID, "Document Authoring", "Create, read and locally edit structured Documents with recoverable versions and DOCX import/export.",
+		[]string{"builtin_document_create", "builtin_document_read", "builtin_document_edit"}, documentInstructions),
 	contentBuiltin(BuiltinTablesID, "Table Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
 		[]string{"builtin_table_create", "builtin_table_read", "builtin_table_update"}, tableInstructions),
 	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,

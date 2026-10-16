@@ -100,7 +100,7 @@ func TestTableConcurrentEditsAtomicityAndHistory(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(after, restored) {
 		t.Fatal("restart lost table", err)
 	}
-	if _, err := s.GetDocument(ctx, "table"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.GetNote(ctx, "table"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("table exposed as document")
 	}
 }

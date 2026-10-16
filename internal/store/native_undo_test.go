@@ -6,19 +6,19 @@ import (
 	"testing"
 )
 
-func TestUndoDocumentPreservesDisjointEditsAndRejectsOverlap(t *testing.T) {
+func TestUndoNotePreservesDisjointEditsAndRejectsOverlap(t *testing.T) {
 	before := "Header\n\nFirst paragraph.\n\nLast paragraph.\n"
 	after := "Header\n\nAI revised first.\n\nLast paragraph.\n"
 	current := "Human header\n\nAI revised first.\n\nHuman revised last.\n"
-	got, err := UndoDocument(before, after, current)
+	got, err := UndoNote(before, after, current)
 	if err != nil || got != "Human header\n\nFirst paragraph.\n\nHuman revised last.\n" {
 		t.Fatalf("%q %v", got, err)
 	}
-	if _, err = UndoDocument(before, after, "Header\n\nHuman replaced first.\n\nLast paragraph.\n"); !errors.Is(err, ErrUndoConflict) {
+	if _, err = UndoNote(before, after, "Header\n\nHuman replaced first.\n\nLast paragraph.\n"); !errors.Is(err, ErrUndoConflict) {
 		t.Fatal(err)
 	}
 	for _, pair := range [][2]string{{"中文😀 原文\n\n尾段", "中文😀 改写\n\n尾段"}, {"one\n\nend", "one\n\nAI added\n\nend"}, {"one\n\nAI deletes\n\nend", "one\n\nend"}} {
-		got, err = UndoDocument(pair[0], pair[1], pair[1])
+		got, err = UndoNote(pair[0], pair[1], pair[1])
 		if err != nil || got != pair[0] {
 			t.Fatalf("%q %v", got, err)
 		}

@@ -12,7 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func (e *Engine) readRichDocument(ctx context.Context, args tool.RichDocumentArgs) (any, error) {
+func (e *Engine) readDocument(ctx context.Context, args tool.DocumentArgs) (any, error) {
 	if args.Format == "" {
 		args.Format = "text"
 	}
@@ -33,7 +33,7 @@ func (e *Engine) readRichDocument(ctx context.Context, args tool.RichDocumentArg
 		return nil, errors.New("invalid rich document read range")
 	}
 	// This checks kind and active/deleted state even for historical reads.
-	doc, err := e.store.GetRichDocument(ctx, args.ItemID)
+	doc, err := e.store.GetDocument(ctx, args.ItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,14 +45,14 @@ func (e *Engine) readRichDocument(ctx context.Context, args tool.RichDocumentArg
 		if revision.Body == nil {
 			return nil, errors.New("structured revision content missing")
 		}
-		var body store.RichDocumentBody
+		var body store.DocumentBody
 		if err := json.Unmarshal([]byte(*revision.Body), &body); err != nil {
 			return nil, err
 		}
-		doc = &store.RichDocumentContent{ItemID: args.ItemID, Body: body, ContentHash: revision.ContentHash, RevisionID: revision.Hash}
+		doc = &store.DocumentContent{ItemID: args.ItemID, Body: body, ContentHash: revision.ContentHash, RevisionID: revision.Hash}
 	}
 	if args.Format != "text" {
-		doc.Body = store.AnchorRichBody(doc.Body)
+		doc.Body = store.AnchorDocumentBody(doc.Body)
 	}
 	region, variant := args.Region, args.Variant
 	if region == "" {
@@ -90,11 +90,11 @@ func (e *Engine) readRichDocument(ctx context.Context, args tool.RichDocumentArg
 		return nil, errors.New("invalid document region")
 	}
 	if args.Format != "text" {
-		return richStructuredRead(doc, node, args, region, variant)
+		return documentStructuredRead(doc, node, args, region, variant)
 	}
 	text := ""
 	if node != nil {
-		text = richDocumentText(*node)
+		text = documentText(*node)
 	}
 	chars := []rune(text)
 	start := min(args.Offset, len(chars))
@@ -108,7 +108,7 @@ func (e *Engine) readRichDocument(ctx context.Context, args tool.RichDocumentArg
 	return result, nil
 }
 
-func richDocumentText(node store.RichNode) string {
+func documentText(node store.DocumentNode) string {
 	switch node.Type {
 	case "text":
 		return node.Text
@@ -131,33 +131,33 @@ func richDocumentText(node store.RichNode) string {
 	}
 	parts := make([]string, len(node.Content))
 	for i, child := range node.Content {
-		parts[i] = richDocumentText(child)
+		parts[i] = documentText(child)
 	}
 	return strings.Join(parts, separator)
 }
 
-func (e *Engine) executeRichDocument(ctx context.Context, sessionID, turnID string, call tool.Call) (any, error) {
-	args, err := tool.DecodeRichDocumentArgs(call.Args)
+func (e *Engine) executeDocument(ctx context.Context, sessionID, turnID string, call tool.Call) (any, error) {
+	args, err := tool.DecodeDocumentArgs(call.Args)
 	if err != nil {
 		return nil, err
 	}
-	if call.Name == tool.RichDocumentRead {
-		return e.readRichDocument(ctx, args)
+	if call.Name == tool.DocumentRead {
+		return e.readDocument(ctx, args)
 	}
 	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}
-	var doc *store.RichDocumentContent
-	if call.Name == tool.RichDocumentCreate {
+	var doc *store.DocumentContent
+	if call.Name == tool.DocumentCreate {
 		name := strings.TrimSpace(args.Name)
 		if name == "" || len(name) > 200 {
 			return nil, errors.New("name is required (max 200 bytes)")
 		}
-		id := "rich_" + store.DocumentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
-		body, err := store.NewRichBody(args.Content, id)
+		id := "rich_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
+		body, err := store.NewDocumentBody(args.Content, id)
 		if err != nil {
 			return nil, err
 		}
 		now := time.Now().UTC()
-		doc, err = e.store.CreateRichDocument(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindRichDocument, Name: name, Icon: "file-text", IconColor: "blue", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, body, nil, author)
+		doc, err = e.store.CreateDocument(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindDocument, Name: name, Icon: "file-text", IconColor: "blue", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, body, nil, author)
 		if err != nil {
 			return nil, err
 		}
@@ -170,7 +170,7 @@ func (e *Engine) executeRichDocument(ctx context.Context, sessionID, turnID stri
 	if args.ItemID == "" {
 		return nil, errors.New("item_id is required")
 	}
-	doc, err = e.store.WriteRichDocument(ctx, args.ItemID, store.RichDocumentWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Operations: args.Operations, Author: author})
+	doc, err = e.store.WriteDocument(ctx, args.ItemID, store.DocumentWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Operations: args.Operations, Author: author})
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +181,14 @@ func (e *Engine) executeRichDocument(ctx context.Context, sessionID, turnID stri
 	return map[string]any{"itemID": doc.ItemID, "contentHash": doc.ContentHash, "revisionID": doc.RevisionID, "changedBlockIDs": changed}, nil
 }
 
-func richStructuredRead(doc *store.RichDocumentContent, root *store.RichNode, args tool.RichDocumentArgs, region, variant string) (any, error) {
+func documentStructuredRead(doc *store.DocumentContent, root *store.DocumentNode, args tool.DocumentArgs, region, variant string) (any, error) {
 	type block struct {
-		BlockID  string          `json:"blockID,omitempty"`
-		ParentID string          `json:"parentID,omitempty"`
-		Type     string          `json:"type"`
-		Text     string          `json:"text"`
-		Node     *store.RichNode `json:"node,omitempty"`
-		Editable bool            `json:"editable"`
+		BlockID  string              `json:"blockID,omitempty"`
+		ParentID string              `json:"parentID,omitempty"`
+		Type     string              `json:"type"`
+		Text     string              `json:"text"`
+		Node     *store.DocumentNode `json:"node,omitempty"`
+		Editable bool                `json:"editable"`
 	}
 	all := []block{}
 	selected := map[string]bool{}
@@ -198,8 +198,8 @@ func richStructuredRead(doc *store.RichDocumentContent, root *store.RichNode, ar
 		}
 		selected[id] = true
 	}
-	var visit func(store.RichNode, string, bool)
-	visit = func(n store.RichNode, parent string, top bool) {
+	var visit func(store.DocumentNode, string, bool)
+	visit = func(n store.DocumentNode, parent string, top bool) {
 		id, _ := n.Attrs["blockId"].(string)
 		if id != "" || top {
 			include := args.Format == "outline" || top
@@ -207,7 +207,7 @@ func richStructuredRead(doc *store.RichDocumentContent, root *store.RichNode, ar
 				include = selected[id]
 			}
 			if include {
-				text := richDocumentText(n)
+				text := documentText(n)
 				entry := block{BlockID: id, ParentID: parent, Type: n.Type, Text: text, Editable: region == "body" && id != ""}
 				if args.Format == "blocks" {
 					entry.Node = &n

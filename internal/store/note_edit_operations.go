@@ -6,7 +6,7 @@ import (
 )
 
 // Ranges use zero-based UTF-8 byte offsets, with an exclusive end.
-type DocumentEditOperation struct {
+type NoteEditOperation struct {
 	ID          string        `json:"operationID"`
 	ItemID      string        `json:"itemID"`
 	State       string        `json:"state"`
@@ -23,7 +23,7 @@ type DocumentEditOperation struct {
 	Target      string        `json:"target,omitempty"`
 }
 
-type DocumentEditRequest struct {
+type NoteEditRequest struct {
 	Action          string        `json:"action"`
 	ClientRequestID string        `json:"clientRequestID"`
 	OperationID     string        `json:"operationID,omitempty"`
@@ -35,31 +35,31 @@ type DocumentEditRequest struct {
 	Author          ContentAuthor `json:"-"`
 }
 
-type DocumentEditState struct {
-	ContentHash string                  `json:"contentHash"`
-	Operations  []DocumentEditOperation `json:"operations"`
+type NoteEditState struct {
+	ContentHash string              `json:"contentHash"`
+	Operations  []NoteEditOperation `json:"operations"`
 }
 
-type DocumentEditOperationStore interface {
-	ChangeDocumentEdit(context.Context, string, DocumentEditRequest) (*DocumentEditOperation, error)
-	GetDocumentEditState(context.Context, string) (*DocumentEditState, error)
+type NoteEditOperationStore interface {
+	ChangeNoteEdit(context.Context, string, NoteEditRequest) (*NoteEditOperation, error)
+	GetNoteEditState(context.Context, string) (*NoteEditState, error)
 }
 
-type DocumentLocked struct{ OperationID string }
+type NoteLocked struct{ OperationID string }
 
-func (e *DocumentLocked) Error() string {
+func (e *NoteLocked) Error() string {
 	return "document range is locked by another editing operation"
 }
 
-func ValidDocumentRange(body string, from, to int) bool {
+func ValidNoteRange(body string, from, to int) bool {
 	return from >= 0 && to > from && to <= len(body) &&
 		(from == 0 || utf8.RuneStart(body[from])) && (to == len(body) || utf8.RuneStart(body[to]))
 }
 
 // Map only disjoint changes. Boundary edits are conservative: deleting a newline
 // or inserting at the edge can change the protected paragraph's structure.
-func MapDocumentRange(before, after string, from, to int) (int, int, bool) {
-	if !ValidDocumentRange(before, from, to) {
+func MapNoteRange(before, after string, from, to int) (int, int, bool) {
+	if !ValidNoteRange(before, from, to) {
 		return 0, 0, false
 	}
 	boundaries := []int{0}

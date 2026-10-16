@@ -2,134 +2,186 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestDocumentConcurrentEditingVersionsAndRestart(t *testing.T) {
+func TestDocumentPersistenceAssetsConflicts(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	createTestSession(t, s, "writer")
-	if _, err = s.BeginTurn(ctx, store.BeginTurnInput{SessionID: "writer", TurnID: "turn", UserMessageID: "message", ClientMessageID: "input", UserText: "edit"}); err != nil {
-		t.Fatal(err)
+	defer func() { s.Close() }()
+	body := store.EmptyDocument()
+	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	hash := store.ContentHash(string(data))
+	body.Assets = []store.DocumentAsset{{ID: "image", Hash: hash, Type: "image/png"}}
+	body.Body.Content[0].Content = []store.DocumentNode{{Type: "text", Text: "结构化正文🙂"}, {Type: "image", Attrs: map[string]any{"assetId": "image"}}}
+	blobs := []store.DocumentBlob{{Hash: hash, Type: "image/png", Data: data}}
+	failed := &store.StudioItem{ID: "failed", Kind: store.StudioItemKindDocument, Name: "Failed"}
+	if _, err = s.CreateDocument(ctx, failed, body, nil); err == nil {
+		t.Fatal("missing asset accepted")
 	}
-	user := store.ContentAuthor{Kind: "user"}
-	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
-	doc, err := s.CreateDocument(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes", SourceSessionID: "writer"}, "One\n\nTwo\n", user)
+	if _, err = s.GetStudioItem(ctx, "failed"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("failed import left item", err)
+	}
+	d, err := s.CreateDocument(ctx, &store.StudioItem{ID: "rich", Kind: store.StudioItemKindDocument, Name: "Rich"}, body, blobs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := *doc
-	humanBody := "Human one\n\nTwo\n"
-	doc, err = s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "human", Body: &humanBody, ExpectedHash: &doc.ContentHash, Author: user})
+	initial := *d
+	body.Body.Content[0].Content[0].Text = "已编辑"
+	write := store.DocumentWrite{ClientRequestID: "save", ExpectedHash: d.ContentHash, Body: &body}
+	d, err = s.WriteDocument(ctx, "rich", write)
 	if err != nil {
 		t.Fatal(err)
 	}
-	edit := store.DocumentWrite{ClientRequestID: "ai", Edits: []store.DocumentEdit{{Old: "Two", New: "AI two"}}, Author: ai}
-	doc, err = s.WriteDocument(ctx, "doc", edit)
-	if err != nil {
-		t.Fatal(err)
+	retry, err := s.WriteDocument(ctx, "rich", write)
+	if err != nil || retry.RevisionID != d.RevisionID {
+		t.Fatal("idempotency", err)
 	}
-	if doc.Body != "Human one\n\nAI two\n" {
-		t.Fatal("concurrent edits lost", doc.Body)
+	write.ClientRequestID = "stale"
+	if _, err = s.WriteDocument(ctx, "rich", write); err == nil {
+		t.Fatal("stale write accepted")
 	}
-	if _, err = s.WriteDocument(ctx, "doc", edit); err != nil {
-		t.Fatal("retry not idempotent", err)
+	write.ClientRequestID = "save"
+	write.ExpectedHash = d.ContentHash
+	if _, err = s.WriteDocument(ctx, "rich", write); err == nil {
+		t.Fatal("request id reused")
 	}
-	edit.Edits[0].New = "changed retry"
-	if _, err = s.WriteDocument(ctx, "doc", edit); err == nil {
-		t.Fatal("request ID reuse accepted")
+	if _, err = s.GetNote(ctx, "rich"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("rich document entered markdown API", err)
 	}
-	dirty := "Unsaved human buffer"
-	var conflict *store.ContentConflict
-	if _, err = s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "conflict", Body: &dirty, ExpectedHash: &initial.ContentHash, Author: user}); !errors.As(err, &conflict) || conflict.CurrentHash != doc.ContentHash {
-		t.Fatal("missing conflict", err)
-	}
-	preserved, err := s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "preserve", Body: &dirty, ExpectedHash: &initial.ContentHash, PreserveOnly: true, Author: user})
-	if err != nil || preserved.Body != doc.Body {
-		t.Fatal("preserve replaced working body", preserved, err)
-	}
-	restored, err := s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: "restore", RestoreRevision: initial.RevisionID, ExpectedHash: &doc.ContentHash, Author: user})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restored.Body != initial.Body || restored.RevisionID == initial.RevisionID {
-		t.Fatal("restore reused old version", restored)
-	}
-	edit.Edits[0].New = "AI two"
-	retried, err := s.WriteDocument(ctx, "doc", edit)
-	if err != nil || *retried != *doc {
-		t.Fatal("retry must return the original write, not a later author's version", retried, err)
-	}
-	revisions, err := s.ListStudioItemRevisions(ctx, "doc")
-	if err != nil || len(revisions) != 5 {
-		t.Fatal("history lost", len(revisions), err)
-	}
-	seenAI, seenDirty := false, false
-	for _, r := range revisions {
-		full, err := s.GetStudioItemRevision(ctx, "doc", r.Hash)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if r.Body != nil {
-			t.Fatal("list includes full body")
-		}
-		seenAI = seenAI || (r.Author.Kind == "session" && r.Author.SessionID == "writer" && r.Author.TurnID == "turn")
-		seenDirty = seenDirty || *full.Body == dirty
-	}
-	if !seenAI || !seenDirty {
-		t.Fatal("author or dirty buffer lost")
-	}
-	if err = s.DeleteSession(ctx, "writer"); err != nil {
-		t.Fatal(err)
+	other := store.EmptyDocument()
+	other.Assets = body.Assets
+	if _, err = s.CreateDocument(ctx, &store.StudioItem{ID: "other", Kind: store.StudioItemKindDocument, Name: "Other"}, other, nil); err == nil {
+		t.Fatal("cross-item asset reference accepted")
 	}
 	s.Close()
 	s, err = Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-	persisted, err := s.GetDocument(ctx, "doc")
-	if err != nil || *persisted != *restored {
-		t.Fatal("restart lost document", persisted, err)
+	saved, err := s.GetDocument(ctx, "rich")
+	if err != nil || saved.Body.Body.Content[0].Content[0].Text != "已编辑" {
+		t.Fatal("restart lost content", err)
+	}
+	asset, err := s.GetDocumentBlob(ctx, "rich", hash)
+	if err != nil || string(asset.Data) != string(data) {
+		t.Fatal("restart lost image", err)
+	}
+	restored, err := s.WriteDocument(ctx, "rich", store.DocumentWrite{ClientRequestID: "restore", ExpectedHash: saved.ContentHash, RestoreRevision: initial.RevisionID})
+	if err != nil || restored.ContentHash != initial.ContentHash {
+		t.Fatal("restore", err)
+	}
+	body.Body.Content[0].Content[0].Marks = []store.DocumentMark{{Type: "link", Attrs: map[string]any{"href": "javascript:alert(1)"}}}
+	if _, err = s.WriteDocument(ctx, "rich", store.DocumentWrite{ClientRequestID: "unsafe", ExpectedHash: restored.ContentHash, Body: &body}); err == nil {
+		t.Fatal("unsafe link saved")
 	}
 }
-
-func TestDocumentEditsAreAtomicAndSizeBounded(t *testing.T) {
-	s, _ := openTestStore(t)
-	ctx := context.Background()
-	author := store.ContentAuthor{Kind: "user"}
-	doc, err := s.CreateDocument(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes"}, "alpha beta alpha", author)
+func TestDocumentMigrationPreservesMarkdownAndForeignKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, edits := range [][]store.DocumentEdit{
-		{{Old: "alpha", New: "ambiguous"}},
-		{{Old: "beta", New: "first"}, {Old: "missing", New: "second"}},
-		{{Old: "alpha beta", New: "first"}, {Old: "beta alpha", New: "second"}},
-		{{Old: "beta", New: strings.Repeat("x", contracts.Studio().MaxDocumentBytes)}},
-	} {
-		if _, err := s.WriteDocument(ctx, "doc", store.DocumentWrite{ClientRequestID: store.NewID("write"), Edits: edits, Author: author}); err == nil {
-			t.Fatal("invalid edits accepted", i)
-		}
-		after, _ := s.GetDocument(ctx, "doc")
-		if *after != *doc {
-			t.Fatal("partial write", i)
-		}
+	schema := strings.Replace(store.SchemaSQL, "'widget','rich-document'", "'widget'", 1)
+	schema = schema[:strings.LastIndex(schema, "CREATE TABLE studio_rich_blobs")]
+	if _, err = db.Exec(schema + `PRAGMA user_version=40;`); err != nil {
+		t.Fatal(err)
 	}
-	if _, err = s.CreateDocument(ctx, &store.StudioItem{ID: "large", Kind: "doc", Name: "Too large"}, strings.Repeat("x", contracts.Studio().MaxDocumentBytes+1), author); err == nil {
-		t.Fatal("oversized document accepted")
+	db.Close()
+	// Insert a real v40 item and its dependent content/revision before migration.
+	db, err = sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err = s.GetStudioItem(ctx, "large"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("failed create left an item")
+	_, err = db.Exec(`INSERT INTO studio_items(id,kind,name,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at)VALUES('md','doc','MD',2,'revision','','{}',1,0,1,1);
+ INSERT INTO studio_item_content(item_id,body,content_hash)VALUES('md',?,'hash');
+ INSERT INTO studio_item_revisions(item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content)VALUES('md','revision','','create',1,'null',?);`, "# 原文\r\n\n_keep_  \n", "# 原文\r\n\n_keep_  \n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	d, err := s.GetNote(context.Background(), "md")
+	if err != nil || d.Body != "# 原文\r\n\n_keep_  \n" || d.RevisionID != "revision" {
+		t.Fatal("Markdown changed", d, err)
+	}
+	revision, err := s.GetStudioItemRevision(context.Background(), "md", "revision")
+	if err != nil || *revision.Body != d.Body {
+		t.Fatal("history lost", err)
+	}
+	var foreignKeys int
+	s.db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys)
+	if foreignKeys != 1 {
+		t.Fatal("foreign keys not restored")
+	}
+	if _, err = s.db.Exec(`DELETE FROM studio_items WHERE id='md'`); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	s.db.QueryRow(`SELECT COUNT(*) FROM studio_item_content WHERE item_id='md'`).Scan(&count)
+	if count != 0 {
+		t.Fatal("foreign key cascade broken")
+	}
+}
+
+func TestDocumentLayoutUpgradeAndRestore(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "pudding.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	legacy := store.EmptyDocument()
+	initial, err := s.CreateDocument(ctx, &store.StudioItem{ID: "layout", Kind: store.StudioItemKindDocument, Name: "Layout"}, legacy, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.GetDocument(ctx, "layout")
+	if err != nil || read.ContentHash != initial.ContentHash || read.Body.SchemaVersion != 1 {
+		t.Fatal("read rewrote legacy body", err)
+	}
+	empty := store.DocumentNode{Type: "doc", Content: []store.DocumentNode{{Type: "paragraph"}}}
+	next := legacy
+	next.SchemaVersion = 2
+	next.HeaderFooter = &store.DocumentHeaderFooter{Header: store.DocumentRegionVariants{Default: empty}, Footer: store.DocumentRegionVariants{Default: store.DocumentNode{Type: "doc", Content: []store.DocumentNode{{Type: "paragraph", Content: []store.DocumentNode{{Type: "text", Text: "第"}, {Type: "pageNumber"}, {Type: "totalPages"}}}}}}, HeaderDistance: 720, FooterDistance: 720}
+	next.Page.Width, next.Page.Height = next.Page.Height, next.Page.Width
+	saved, err := s.WriteDocument(ctx, "layout", store.DocumentWrite{ClientRequestID: "layout", ExpectedHash: initial.ContentHash, Body: &next})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err = s.GetDocument(ctx, "layout")
+	if err != nil || read.Body.HeaderFooter == nil || read.Body.Page.Width != 16838 || read.ContentHash != saved.ContentHash {
+		t.Fatal("layout lost", err)
+	}
+	bad := next
+	copied := *next.HeaderFooter
+	bad.HeaderFooter = &copied
+	bad.HeaderFooter.HeaderDistance = bad.Page.Top + 1
+	if store.ValidateDocument(bad) == nil {
+		t.Fatal("overlapping header distance accepted")
+	}
+	bad = next
+	bad.Body = store.DocumentNode{Type: "doc", Content: []store.DocumentNode{{Type: "paragraph", Content: []store.DocumentNode{{Type: "pageNumber"}}}}}
+	if store.ValidateDocument(bad) == nil {
+		t.Fatal("page field accepted in main body")
+	}
+	restored, err := s.WriteDocument(ctx, "layout", store.DocumentWrite{ClientRequestID: "restore-layout", ExpectedHash: saved.ContentHash, RestoreRevision: initial.RevisionID})
+	if err != nil || restored.ContentHash != initial.ContentHash || restored.Body.HeaderFooter != nil {
+		t.Fatal("v1 restore changed", err)
 	}
 }

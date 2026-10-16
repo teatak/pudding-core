@@ -41,7 +41,7 @@ func decodeStudioRequest(c *cart.Context, target any) error {
 	return widget.DecodeStrict(data, target)
 }
 func (s *Server) studioItemError(c *cart.Context, err error) error {
-	var locked *store.DocumentLocked
+	var locked *store.NoteLocked
 	if errors.As(err, &locked) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "document_locked", "operationID": locked.OperationID})
 		return nil
@@ -60,7 +60,7 @@ func (s *Server) studioItemError(c *cart.Context, err error) error {
 	if errors.As(err, &invalidTable) {
 		return badRequest(c, invalidTable.Error())
 	}
-	var invalid *store.InvalidDocument
+	var invalid *store.InvalidContent
 	if errors.As(err, &invalid) {
 		return badRequest(c, invalid.Error())
 	}
@@ -105,13 +105,13 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 }
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
-		Name            string           `json:"name"`
-		Kind            string           `json:"kind"`
-		Body            json.RawMessage  `json:"body,omitempty"`
-		Blobs           []store.RichBlob `json:"blobs,omitempty"`
-		SourceSessionID string           `json:"sourceSessionID,omitempty"`
-		Icon            string           `json:"icon,omitempty"`
-		IconColor       string           `json:"iconColor,omitempty"`
+		Name            string               `json:"name"`
+		Kind            string               `json:"kind"`
+		Body            json.RawMessage      `json:"body,omitempty"`
+		Blobs           []store.DocumentBlob `json:"blobs,omitempty"`
+		SourceSessionID string               `json:"sourceSessionID,omitempty"`
+		Icon            string               `json:"icon,omitempty"`
+		IconColor       string               `json:"iconColor,omitempty"`
 	}
 	if err := decodeNativeContentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -123,10 +123,10 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if !validItemAppearance(req.Icon, req.IconColor) {
 		return badRequest(c, "invalid item appearance")
 	}
-	if req.Kind != store.StudioItemKindDoc && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindTable && req.Kind != store.StudioItemKindRichDocument {
+	if req.Kind != store.StudioItemKindNote && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindTable && req.Kind != store.StudioItemKindDocument {
 		return badRequest(c, "kind must be doc, table, widget or rich-document")
 	}
-	if req.Kind != store.StudioItemKindRichDocument && len(req.Blobs) > 0 {
+	if req.Kind != store.StudioItemKindDocument && len(req.Blobs) > 0 {
 		return badRequest(c, "blobs require rich-document")
 	}
 	if req.Kind == store.StudioItemKindWidget && len(req.Body) > 0 {
@@ -135,9 +135,9 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	now := time.Now().UTC()
 	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
 	var err error
-	if req.Kind == store.StudioItemKindDoc {
+	if req.Kind == store.StudioItemKindNote {
 		if w.Icon == "" {
-			w.Icon = "file-text"
+			w.Icon = "notebook-text"
 		}
 		var body string
 		if len(req.Body) > 0 {
@@ -145,12 +145,12 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 				return badRequest(c, "document body must be a string")
 			}
 		}
-		_, err = s.store.CreateDocument(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
+		_, err = s.store.CreateNote(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
-	} else if req.Kind == store.StudioItemKindRichDocument {
-		body := store.EmptyRichDocument()
+	} else if req.Kind == store.StudioItemKindDocument {
+		body := store.EmptyDocument()
 		if len(req.Body) > 0 {
 			if e := widget.DecodeStrict(req.Body, &body); e != nil {
 				return badRequest(c, e.Error())
@@ -159,7 +159,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		if w.Icon == "" {
 			w.Icon = "file-text"
 		}
-		_, err = s.store.CreateRichDocument(c.Request.Context(), w, body, req.Blobs)
+		_, err = s.store.CreateDocument(c.Request.Context(), w, body, req.Blobs)
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
@@ -258,7 +258,7 @@ func (s *Server) getStudioItemRevision(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if w.Kind == store.StudioItemKindDoc || w.Kind == store.StudioItemKindTable || w.Kind == store.StudioItemKindRichDocument {
+	if w.Kind == store.StudioItemKindNote || w.Kind == store.StudioItemKindTable || w.Kind == store.StudioItemKindDocument {
 		c.JSON(http.StatusOK, map[string]any{"kind": w.Kind, "revision": r})
 		return nil
 	}

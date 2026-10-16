@@ -2121,6 +2121,10 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Name:      call.Name,
 			Phase:     "running",
 		})
+		// Preserve the stored call/result identity while authorizing and executing
+		// legacy document calls against the canonical tool definition.
+		storedName := call.Name
+		call.Name = tool.NormalizeLegacyNoteTool(call.Name)
 		var result tool.Result
 		if call.Name == tool.RequestCapability {
 			var requestedMode store.AgentMode
@@ -2188,8 +2192,8 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		if result.CallID == "" {
 			result.CallID = call.CallID
 		}
-		if result.Name == "" {
-			result.Name = call.Name
+		if storedName != call.Name || result.Name == "" {
+			result.Name = storedName
 		}
 		parts.AppendToolResult(result)
 		parts.AppendAttachments(result.ContextAttachments)
@@ -2221,6 +2225,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	call.Name = tool.NormalizeLegacyNoteTool(call.Name)
 	if tool.IsStudioTool(call.Name) {
 		return e.executeStudio(ctx, sessionID, turnID, call)
 	}
@@ -3104,6 +3109,23 @@ func requestMessagesWithTurnParts(
 }
 
 func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) *provider.Message {
+	// Legacy note calls may arrive within this turn as well as saved history.
+	// Rebuild their whole continuation chain from projected parts so opaque
+	// provider state cannot reintroduce the old names. Keep stored parts intact.
+	cloned := false
+	for i, part := range parts {
+		if part.Type != store.ContentPartToolUse && part.Type != store.ContentPartToolResult {
+			continue
+		}
+		if name := tool.NormalizeLegacyNoteTool(part.Name); name != part.Name {
+			if !cloned {
+				parts = append([]store.ContentPart(nil), parts...)
+				cloned = true
+			}
+			parts[i].Name = name
+			continuations = nil
+		}
+	}
 	providerParts := providerPartsFromCurrentTurn(parts, sessionID, turnID, attachmentHome, cfg, canReadResult)
 	if len(providerParts) == 0 {
 		return nil
