@@ -175,7 +175,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 			}
 		}
 		if w.Icon == "" {
-			w.Icon = "table"
+			w.Icon = "sheet"
 		}
 		_, err = s.store.CreateSheet(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
 		if err == nil {

@@ -33,7 +33,7 @@ func TestStudioArchiveLifecycleAndRetention(t *testing.T) {
 		}
 		return out.Body.Bytes()
 	}
-	for _, kind := range []string{"note", "table", "widget"} {
+	for _, kind := range []string{"note", "sheet", "table", "widget"} {
 		t.Run(kind, func(t *testing.T) {
 			var item store.StudioItem
 			if err := json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": kind, "name": "Archive fixture"}, 201), &item); err != nil {

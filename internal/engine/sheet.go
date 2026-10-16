@@ -36,7 +36,7 @@ func (e *Engine) executeSheet(ctx context.Context, sessionID, turnID string, cal
 		table, err := e.store.GetSheet(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
 			now := time.Now().UTC()
-			table, err = e.store.CreateSheet(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindSheet, Name: name, Icon: "table", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Sheet, author)
+			table, err = e.store.CreateSheet(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindSheet, Name: name, Icon: "sheet", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Sheet, author)
 		}
 		if err != nil {
 			return nil, err
