@@ -18,7 +18,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 			if errors.As(err, &locked) {
 				value = map[string]any{"error": "document_locked", "operationID": locked.OperationID}
 			}
-			var cellConflict *store.TableCellConflict
+			var cellConflict *store.SheetCellConflict
 			if errors.As(err, &cellConflict) {
 				value = map[string]any{"error": "cell_conflict", "rowID": cellConflict.RowID, "columnID": cellConflict.ColumnID}
 			}
@@ -40,16 +40,18 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	if err != nil {
 		return respond(nil, err)
 	}
-	if call.Name != tool.ArtifactList && call.Name != tool.NoteCreate && call.Name != tool.TableCreate && args.ItemID == "" {
+	if call.Name != tool.ArtifactList && call.Name != tool.NoteCreate && call.Name != tool.SheetCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
 	switch call.Name {
-	case tool.TableCreate, tool.TableRead, tool.TableUpdate:
-		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
+	case tool.SheetCreate, tool.SheetRead, tool.SheetEdit:
+		result, err := e.executeSheet(ctx, sessionID, turnID, call, args)
 		return respond(result, err)
 	case tool.ArtifactList:
 		kind := args.Kind
 		switch kind {
+		case "table":
+			kind = store.StudioItemKindSheet
 		case "doc":
 			kind = store.StudioItemKindNote
 		case "rich-document":

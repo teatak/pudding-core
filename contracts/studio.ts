@@ -13,7 +13,7 @@ export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const studioItem = z.object({
   origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
-  kind: z.enum(["note", "table", "widget", "document"]),
+  kind: z.enum(["note", "sheet", "widget", "document"]),
   name: z.string(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),
@@ -86,32 +86,32 @@ export type DocumentEditRequest = {
   from?: number; to?: number; target?: string;
 };
 
-export const tableCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
-export const tableColumn = z.object({
+export const sheetCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
+export const sheetColumn = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(200),
   type: z.enum(["text", "number", "date", "select", "checkbox", "link"]),
   options: z.array(z.string()).optional(),
 }).strict();
-export const tableRow = z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), cells: z.record(z.string(), tableCell) }).strict();
-export const tableBody = z.object({ columns: z.array(tableColumn), rows: z.array(tableRow) }).strict();
-export const tableContent = z.object({ itemID: z.string(), body: tableBody, contentHash: itemHash, revisionID: itemHash });
-export const tableOperation = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("set_cell"), rowID: z.string(), columnID: z.string(), value: tableCell, expected: tableCell.optional() }).strict(),
-  z.object({ kind: z.literal("add_row"), row: tableRow, beforeID: z.string().optional() }).strict(),
+export const sheetRow = z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), cells: z.record(z.string(), sheetCell) }).strict();
+export const sheetBody = z.object({ columns: z.array(sheetColumn), rows: z.array(sheetRow) }).strict();
+export const sheetContent = z.object({ itemID: z.string(), body: sheetBody, contentHash: itemHash, revisionID: itemHash });
+export const sheetOperation = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set_cell"), rowID: z.string(), columnID: z.string(), value: sheetCell, expected: sheetCell.optional() }).strict(),
+  z.object({ kind: z.literal("add_row"), row: sheetRow, beforeID: z.string().optional() }).strict(),
   z.object({ kind: z.literal("delete_row"), rowID: z.string() }).strict(),
   z.object({ kind: z.literal("move_row"), rowID: z.string(), beforeID: z.string().optional() }).strict(),
-  z.object({ kind: z.literal("add_column"), column: tableColumn, beforeID: z.string().optional() }).strict(),
-  z.object({ kind: z.literal("update_column"), columnID: z.string(), column: tableColumn }).strict(),
+  z.object({ kind: z.literal("add_column"), column: sheetColumn, beforeID: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("update_column"), columnID: z.string(), column: sheetColumn }).strict(),
   z.object({ kind: z.literal("delete_column"), columnID: z.string() }).strict(),
   z.object({ kind: z.literal("move_column"), columnID: z.string(), beforeID: z.string().optional() }).strict(),
 ]);
-export type TableCell = z.infer<typeof tableCell>;
-export type TableColumn = z.infer<typeof tableColumn>;
-export type TableRow = z.infer<typeof tableRow>;
-export type TableBody = z.infer<typeof tableBody>;
-export type TableContent = z.infer<typeof tableContent>;
-export type TableOperation = z.infer<typeof tableOperation>;
-export type TableWrite = { clientRequestID: string; operations?: TableOperation[]; restoreRevision?: string; expectedHash?: string; undoRevision?: string; rowID?: string };
+export type SheetCell = z.infer<typeof sheetCell>;
+export type SheetColumn = z.infer<typeof sheetColumn>;
+export type SheetRow = z.infer<typeof sheetRow>;
+export type SheetBody = z.infer<typeof sheetBody>;
+export type SheetContent = z.infer<typeof sheetContent>;
+export type SheetOperation = z.infer<typeof sheetOperation>;
+export type SheetWrite = { clientRequestID: string; operations?: SheetOperation[]; restoreRevision?: string; expectedHash?: string; undoRevision?: string; rowID?: string };
 
 // Rich documents retain structured content and owned, immutable binary assets.
 export type RichNode = { type: string; attrs?: Record<string, unknown>; text?: string; content?: RichNode[]; marks?: {type: string; attrs?: Record<string, unknown>}[] };

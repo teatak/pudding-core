@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 41
+	currentSchemaVersion       = 42
 )
 
 var (
@@ -34,6 +34,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	42: migrateSheets,
 	41: migrateDocuments,
 	40: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS studio_document_edits (
@@ -719,16 +720,6 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 				return err
 			}
 		}
-	} else if version == 41 {
-		var legacy int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='studio_items' AND sql LIKE '%rich-document%'`).Scan(&legacy); err == nil && legacy == 0 {
-			_ = db.QueryRow(`SELECT COUNT(*) FROM studio_items WHERE kind IN ('doc','rich-document')`).Scan(&legacy)
-		}
-		if legacy > 0 {
-			if err := runSchemaMigration(db, 41, migrateDocuments); err != nil {
-				return err
-			}
-		}
 	}
 	if err := validateCurrentSchema(db); err != nil {
 		return fmt.Errorf("%w: schema v%d failed validation: %v", ErrUnsupportedSchema, currentSchemaVersion, err)
@@ -784,7 +775,7 @@ func setSchemaVersion(db *sql.DB, version int) error {
 func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) error {
 	// Rebuilding the parent table must not cascade-delete dependent content.
 	// Startup has exclusive access and this pool has a single connection.
-	if version == 41 {
+	if version == 41 || version == 42 {
 		if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 			return err
 		}
@@ -982,7 +973,7 @@ var currentSchemaContract = func() schemaContract {
 		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
 		"studio_item_content":   {"item_id", "body", "content_hash"},
 		"studio_rich_blobs":     {"item_id", "hash", "mime", "data"},
-		"studio_table_ids":      {"item_id", "entity_kind", "entity_id"},
+		"studio_sheet_ids":      {"item_id", "entity_kind", "entity_id"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
 		"studio_item_saves":     {"item_id", "client_request_id", "hash", "request_hash"},
@@ -1017,7 +1008,7 @@ var currentSchemaContract = func() schemaContract {
 	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
-	out.forbiddenTables = []string{"project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches",
+	out.forbiddenTables = []string{"studio_table_ids", "project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches",
 		"canvas_resources", "canvas_revisions", "canvas_saves", "canvas_actions", "canvas_links", "canvas_mounts"}
 	return out
 }()

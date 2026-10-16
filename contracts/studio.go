@@ -9,13 +9,13 @@ import (
 var studioJSON []byte
 
 type StudioPolicy struct {
-	MaxTableRows       int `json:"maxTableRows"`
-	MaxTableColumns    int `json:"maxTableColumns"`
-	MaxTableBytes      int `json:"maxTableBytes"`
-	MaxTableCellBytes  int `json:"maxTableCellBytes"`
-	MaxTableOperations int `json:"maxTableOperations"`
-	MaxTableReadRows   int `json:"maxTableReadRows"`
-	MaxTableReadBytes  int `json:"maxTableReadBytes"`
+	MaxSheetRows       int `json:"maxSheetRows"`
+	MaxSheetColumns    int `json:"maxSheetColumns"`
+	MaxSheetBytes      int `json:"maxSheetBytes"`
+	MaxSheetCellBytes  int `json:"maxSheetCellBytes"`
+	MaxSheetOperations int `json:"maxSheetOperations"`
+	MaxSheetReadRows   int `json:"maxSheetReadRows"`
+	MaxSheetReadBytes  int `json:"maxSheetReadBytes"`
 	MaxDocumentBytes   int `json:"maxDocumentBytes"`
 	MaxAssetBytes      int `json:"maxAssetBytes"`
 	MaxDocumentEdits   int `json:"maxDocumentEdits"`
@@ -28,7 +28,7 @@ var studioPolicy = func() StudioPolicy {
 	if err := json.Unmarshal(studioJSON, &p); err != nil {
 		panic(err)
 	}
-	if p.MaxTableRows < 1 || p.MaxTableColumns < 1 || p.MaxTableBytes < 1 || p.MaxTableCellBytes < 1 || p.MaxTableOperations < 1 || p.MaxTableReadRows < 1 || p.MaxTableReadBytes < 1 || p.MaxDocumentBytes < 1 || p.MaxAssetBytes < 1 || p.MaxDocumentEdits < 1 || p.MaxReadBytes < 4 || p.AutosaveMS < 1 {
+	if p.MaxSheetRows < 1 || p.MaxSheetColumns < 1 || p.MaxSheetBytes < 1 || p.MaxSheetCellBytes < 1 || p.MaxSheetOperations < 1 || p.MaxSheetReadRows < 1 || p.MaxSheetReadBytes < 1 || p.MaxDocumentBytes < 1 || p.MaxAssetBytes < 1 || p.MaxDocumentEdits < 1 || p.MaxReadBytes < 4 || p.AutosaveMS < 1 {
 		panic("invalid studio policy")
 	}
 	return p

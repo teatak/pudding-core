@@ -12,8 +12,8 @@ Canonical IDs, agreed 2026-10-16:
 
 All other plugin IDs stay unchanged. This is a plugin-identity rename, not a
 product, content-kind, tool, format, API-route or database-schema rename.
-In particular, `sheet-authoring` owns the existing native `table` content and
-`builtin_table_*` tools; it does not introduce XLSX workbooks or formulas.
+The subsequent [sheet rename](sheets.md) gives `sheet-authoring` native `sheet` content and
+`builtin_sheet_*` tools; it does not introduce XLSX workbooks or formulas.
 
 ## Compatibility
 

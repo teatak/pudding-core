@@ -164,7 +164,7 @@ func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	table, err := st.CreateTable(ctx, &store.StudioItem{ID: "table", Kind: "table", Name: "Data"}, tableFixture(), user)
+	table, err := st.CreateSheet(ctx, &store.StudioItem{ID: "table", Kind: "sheet", Name: "Data"}, sheetFixture(), user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(reopenedDoc, doc) {
 		t.Fatal("document content or version lost", reopenedDoc, err)
 	}
-	reopenedTable, err := st.GetTable(ctx, "table")
+	reopenedTable, err := st.GetSheet(ctx, "table")
 	if err != nil || !reflect.DeepEqual(reopenedTable, table) {
 		t.Fatal("table content or version lost", reopenedTable, err)
 	}
@@ -279,7 +279,7 @@ func TestStudioMigrationLateFailureRollsBackWholeUpgrade(t *testing.T) {
 		assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM studio_item_revisions", "2")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT archived_at FROM studio_items WHERE id='canvas_w'", "0")
-		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM sqlite_master WHERE name IN ('studio_item_content','studio_table_ids')", "2")
+		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM sqlite_master WHERE name IN ('studio_item_content','studio_sheet_ids')", "2")
 		assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
 		if err := st.Close(); err != nil {
 			t.Fatal(err)

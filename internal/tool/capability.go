@@ -48,7 +48,7 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 }
 
 func RequiredModeForName(name string) store.AgentMode {
-	name = NormalizeLegacyNoteTool(name)
+	name = NormalizeLegacyContentTool(name)
 	if IsSubtaskTool(name) {
 		return store.ModeWork
 	}

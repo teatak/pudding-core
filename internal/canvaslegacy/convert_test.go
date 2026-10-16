@@ -45,7 +45,7 @@ func TestConvertContent(t *testing.T) {
 	}
 }
 func TestConversionErrorsAbort(t *testing.T) {
-	for _, c := range []store.CanvasContent{{Kind: "unknown", Item: json.RawMessage(`{}`)}, {Kind: "table", Item: json.RawMessage(`invalid`)}} {
+	for _, c := range []store.CanvasContent{{Kind: "unknown", Item: json.RawMessage(`{}`)}, {Kind: "sheet", Item: json.RawMessage(`invalid`)}} {
 		if _, err := Convert(c, func(string) (string, error) { return "", errors.New("missing image") }); err == nil {
 			t.Fatal("expected conversion failure", c)
 		}

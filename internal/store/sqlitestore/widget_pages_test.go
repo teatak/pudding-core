@@ -71,6 +71,7 @@ func TestWidgetPagePersistenceAndClose(t *testing.T) {
 }
 func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	s, path := openTestStore(t)
+	useLegacySheetFixture(t, s.db)
 	w := createDataWidget(t, s, "saved")
 	if _, err := s.WriteWidgetData(context.Background(), w.ID, w.ActiveRevision, "", 0, json.RawMessage(`{"keep":true}`)); err != nil {
 		t.Fatal(err)
@@ -98,7 +99,7 @@ func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	if err != nil || string(data.Data) != `{"keep":true}` {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "41")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "42")
 }
 
 func TestWidgetPageRevisionIsolationConcurrentWritesAndSessionCleanup(t *testing.T) {

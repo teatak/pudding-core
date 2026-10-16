@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -20,12 +21,12 @@ func NormalizeStudioTool(name string) string {
 	case StudioOpen:
 		return ArtifactOpen
 	}
-	return NormalizeLegacyNoteTool(name)
+	return NormalizeLegacyContentTool(name)
 }
 
 func IsStudioTool(name string) bool {
-	switch NormalizeLegacyNoteTool(name) {
-	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, DocumentRead, DocumentCreate, DocumentEdit, NoteEdit, TableCreate, TableRead, TableUpdate:
+	switch NormalizeLegacyContentTool(name) {
+	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, DocumentRead, DocumentCreate, DocumentEdit, NoteEdit, SheetCreate, SheetRead, SheetEdit:
 		return true
 	}
 	return false
@@ -33,9 +34,9 @@ func IsStudioTool(name string) bool {
 
 func StudioDefinitions() []provider.ToolDef {
 	return append([]provider.ToolDef{
-		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), Documents (document), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","document","table","widget"]}},"additionalProperties":false}`)},
+		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), Documents (document), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","document","sheet","widget"]}},"additionalProperties":false}`)},
 		{Name: ArtifactOpen, Capability: store.ModeChat, Description: "Open existing artifact content in this conversation. Returns a session mount referring to the same global item; it does not copy the content.", InputSchema: json.RawMessage(`{"type":"object","properties":{"item_id":{"type":"string"}},"required":["item_id"],"additionalProperties":false}`)},
-	}, append(NoteDefinitions(), append(TableDefinitions(), DocumentDefinitions()...)...)...)
+	}, append(NoteDefinitions(), append(SheetDefinitions(), DocumentDefinitions()...)...)...)
 }
 
 type StudioArgs struct {
@@ -46,8 +47,9 @@ type StudioArgs struct {
 	From         int                    `json:"from"`
 	To           int                    `json:"to"`
 	Replacement  *string                `json:"replacement"`
-	Table        *store.TableBody       `json:"table"`
-	Operations   []store.TableOperation `json:"operations"`
+	Sheet        *store.SheetBody       `json:"sheet"`
+	LegacyTable  *store.SheetBody       `json:"table"`
+	Operations   []store.SheetOperation `json:"operations"`
 	RowIDs       []string               `json:"row_ids"`
 	ColumnIDs    []string               `json:"column_ids"`
 	Format       string                 `json:"format"`
@@ -67,5 +69,21 @@ type StudioArgs struct {
 func DecodeStudioArgs(raw json.RawMessage) (StudioArgs, error) {
 	var args StudioArgs
 	err := decodeStructToolArgs(raw, &args)
-	return args, err
+	if err != nil {
+		return args, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return args, err
+	}
+	_, current := fields["sheet"]
+	_, legacy := fields["table"]
+	if current && legacy {
+		return args, errors.New("provide sheet only; table is a legacy alias")
+	}
+	if legacy {
+		args.Sheet = args.LegacyTable
+		args.LegacyTable = nil
+	}
+	return args, nil
 }

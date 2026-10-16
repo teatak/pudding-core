@@ -17,100 +17,100 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 )
 
-const StudioItemKindTable = "table"
+const StudioItemKindSheet = "sheet"
 
-type TableColumn struct {
+type SheetColumn struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Type    string   `json:"type"`
 	Options []string `json:"options,omitempty"`
 }
-type TableRow struct {
+type SheetRow struct {
 	ID    string         `json:"id"`
 	Cells map[string]any `json:"cells"`
 }
-type TableBody struct {
-	Columns []TableColumn `json:"columns"`
-	Rows    []TableRow    `json:"rows"`
+type SheetBody struct {
+	Columns []SheetColumn `json:"columns"`
+	Rows    []SheetRow    `json:"rows"`
 }
-type TableContent struct {
+type SheetContent struct {
 	ItemID      string    `json:"itemID"`
-	Body        TableBody `json:"body"`
+	Body        SheetBody `json:"body"`
 	ContentHash string    `json:"contentHash"`
 	RevisionID  string    `json:"revisionID"`
 }
 
 // IDs identify entities; beforeID controls order only and omitted means append.
 // expected is optional: absent is last-writer-wins, null compares an empty cell.
-type TableOperation struct {
+type SheetOperation struct {
 	Kind     string          `json:"kind"`
 	RowID    string          `json:"rowID,omitempty"`
 	ColumnID string          `json:"columnID,omitempty"`
 	Value    json.RawMessage `json:"value,omitempty"`
 	Expected json.RawMessage `json:"expected,omitempty"`
-	Row      *TableRow       `json:"row,omitempty"`
-	Column   *TableColumn    `json:"column,omitempty"`
+	Row      *SheetRow       `json:"row,omitempty"`
+	Column   *SheetColumn    `json:"column,omitempty"`
 	BeforeID string          `json:"beforeID,omitempty"`
 }
-type TableWrite struct {
+type SheetWrite struct {
 	ClientRequestID string           `json:"clientRequestID"`
-	Operations      []TableOperation `json:"operations,omitempty"`
+	Operations      []SheetOperation `json:"operations,omitempty"`
 	RestoreRevision string           `json:"restoreRevision,omitempty"`
 	UndoRevision    string           `json:"undoRevision,omitempty"`
 	RowID           string           `json:"rowID,omitempty"`
 	ExpectedHash    *string          `json:"expectedHash,omitempty"`
 	Author          ContentAuthor    `json:"-"`
 }
-type TableStore interface {
-	CreateTable(context.Context, *StudioItem, TableBody, ContentAuthor) (*TableContent, error)
-	GetTable(context.Context, string) (*TableContent, error)
-	WriteTable(context.Context, string, TableWrite) (*TableContent, error)
+type SheetStore interface {
+	CreateSheet(context.Context, *StudioItem, SheetBody, ContentAuthor) (*SheetContent, error)
+	GetSheet(context.Context, string) (*SheetContent, error)
+	WriteSheet(context.Context, string, SheetWrite) (*SheetContent, error)
 }
-type InvalidTable struct{ Message string }
+type InvalidSheet struct{ Message string }
 
-func (e *InvalidTable) Error() string { return e.Message }
+func (e *InvalidSheet) Error() string { return e.Message }
 
-type TableCellConflict struct{ RowID, ColumnID string }
+type SheetCellConflict struct{ RowID, ColumnID string }
 
-func (e *TableCellConflict) Error() string {
+func (e *SheetCellConflict) Error() string {
 	return fmt.Sprintf("cell changed: row %s, column %s", e.RowID, e.ColumnID)
 }
-func tableError(format string, args ...any) error { return &InvalidTable{fmt.Sprintf(format, args...)} }
+func sheetError(format string, args ...any) error { return &InvalidSheet{fmt.Sprintf(format, args...)} }
 
-var tableID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
+var sheetID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
 
-func ValidateTable(body TableBody) error {
+func ValidateSheet(body SheetBody) error {
 	p := contracts.Studio()
 	if body.Columns == nil || body.Rows == nil {
-		return tableError("columns and rows must be arrays")
+		return sheetError("columns and rows must be arrays")
 	}
-	if len(body.Columns) > p.MaxTableColumns || len(body.Rows) > p.MaxTableRows {
-		return tableError("table exceeds limits: at most %d columns and %d rows", p.MaxTableColumns, p.MaxTableRows)
+	if len(body.Columns) > p.MaxSheetColumns || len(body.Rows) > p.MaxSheetRows {
+		return sheetError("table exceeds limits: at most %d columns and %d rows", p.MaxSheetColumns, p.MaxSheetRows)
 	}
-	columns := map[string]TableColumn{}
+	columns := map[string]SheetColumn{}
 	for _, c := range body.Columns {
-		if !tableID.MatchString(c.ID) {
-			return tableError("invalid column ID: %s", c.ID)
+		if !sheetID.MatchString(c.ID) {
+			return sheetError("invalid column ID: %s", c.ID)
 		}
 		if _, exists := columns[c.ID]; exists {
-			return tableError("duplicate column ID: %s", c.ID)
+			return sheetError("duplicate column ID: %s", c.ID)
 		}
 		if strings.TrimSpace(c.Name) == "" || len(c.Name) > 200 || !utf8.ValidString(c.Name) {
-			return tableError("column name must be UTF-8, nonempty and at most 200 bytes")
+			return sheetError("column name must be UTF-8, nonempty and at most 200 bytes")
 		}
 		if !slices.Contains([]string{"text", "number", "date", "select", "checkbox", "link"}, c.Type) {
-			return tableError("invalid column type: %s", c.Type)
+			return sheetError("invalid column type: %s", c.Type)
 		}
 		if c.Type != "select" && len(c.Options) > 0 {
-			return tableError("options are only allowed on select columns")
+			return sheetError("options are only allowed on select columns")
 		}
 		if len(c.Options) > 100 {
-			return tableError("select column exceeds 100 options")
+			return sheetError("select column exceeds 100 options")
 		}
 		seen := map[string]bool{}
 		for _, option := range c.Options {
 			if option == "" || len(option) > 200 || !utf8.ValidString(option) || seen[option] {
-				return tableError("select options must be unique nonempty UTF-8 strings (max 200 bytes)")
+				return sheetError("select options must be unique nonempty UTF-8 strings (max 200 bytes)")
 			}
 			seen[option] = true
 		}
@@ -118,39 +118,39 @@ func ValidateTable(body TableBody) error {
 	}
 	rows := map[string]bool{}
 	for _, r := range body.Rows {
-		if !tableID.MatchString(r.ID) || rows[r.ID] {
-			return tableError("invalid or duplicate row ID: %s", r.ID)
+		if !sheetID.MatchString(r.ID) || rows[r.ID] {
+			return sheetError("invalid or duplicate row ID: %s", r.ID)
 		}
 		rows[r.ID] = true
 		if r.Cells == nil {
-			return tableError("row %s cells must be an object", r.ID)
+			return sheetError("row %s cells must be an object", r.ID)
 		}
 		for id, value := range r.Cells {
 			c, ok := columns[id]
 			if !ok {
-				return tableError("row %s references missing column %s", r.ID, id)
+				return sheetError("row %s references missing column %s", r.ID, id)
 			}
-			if err := ValidateTableCell(c, value); err != nil {
-				return tableError("row %s, column %s: %s", r.ID, c.Name, err)
+			if err := ValidateSheetCell(c, value); err != nil {
+				return sheetError("row %s, column %s: %s", r.ID, c.Name, err)
 			}
 		}
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return tableError("invalid table JSON: %s", err)
+		return sheetError("invalid table JSON: %s", err)
 	}
-	if len(raw) > p.MaxTableBytes {
-		return tableError("table exceeds %d bytes", p.MaxTableBytes)
+	if len(raw) > p.MaxSheetBytes {
+		return sheetError("table exceeds %d bytes", p.MaxSheetBytes)
 	}
 	return nil
 }
-func ValidateTableCell(c TableColumn, value any) error {
+func ValidateSheetCell(c SheetColumn, value any) error {
 	if value == nil {
 		return nil
 	}
 	text, isText := value.(string)
-	if isText && (!utf8.ValidString(text) || len(text) > contracts.Studio().MaxTableCellBytes) {
-		return tableError("cell text exceeds size limit or is not UTF-8")
+	if isText && (!utf8.ValidString(text) || len(text) > contracts.Studio().MaxSheetCellBytes) {
+		return sheetError("cell text exceeds size limit or is not UTF-8")
 	}
 	valid := false
 	switch c.Type {
@@ -175,19 +175,19 @@ func ValidateTableCell(c TableColumn, value any) error {
 		}
 	}
 	if !valid {
-		return tableError("invalid %s value", c.Type)
+		return sheetError("invalid %s value", c.Type)
 	}
 	return nil
 }
 
 // Apply to a clone and validate once at the end. Column conversions and their
 // cell replacements can therefore be one atomic operation, with no partial edits.
-func ApplyTableOperations(body TableBody, ops []TableOperation) (TableBody, error) {
-	if len(ops) < 1 || len(ops) > contracts.Studio().MaxTableOperations {
-		return TableBody{}, tableError("operation count must be 1–%d", contracts.Studio().MaxTableOperations)
+func ApplySheetOperations(body SheetBody, ops []SheetOperation) (SheetBody, error) {
+	if len(ops) < 1 || len(ops) > contracts.Studio().MaxSheetOperations {
+		return SheetBody{}, sheetError("operation count must be 1–%d", contracts.Studio().MaxSheetOperations)
 	}
 	raw, _ := json.Marshal(body)
-	var out TableBody
+	var out SheetBody
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return out, err
 	}
@@ -200,28 +200,28 @@ func ApplyTableOperations(body TableBody, ops []TableOperation) (TableBody, erro
 		seenColumns[c.ID] = true
 	}
 	for _, op := range ops {
-		row := slices.IndexFunc(out.Rows, func(r TableRow) bool { return r.ID == op.RowID })
-		col := slices.IndexFunc(out.Columns, func(c TableColumn) bool { return c.ID == op.ColumnID })
+		row := slices.IndexFunc(out.Rows, func(r SheetRow) bool { return r.ID == op.RowID })
+		col := slices.IndexFunc(out.Columns, func(c SheetColumn) bool { return c.ID == op.ColumnID })
 		switch op.Kind {
 		case "set_cell":
 			if row < 0 || col < 0 {
-				return out, tableError("cell target was deleted: row %s, column %s", op.RowID, op.ColumnID)
+				return out, sheetError("cell target was deleted: row %s, column %s", op.RowID, op.ColumnID)
 			}
 			if len(op.Value) == 0 {
-				return out, tableError("set_cell requires value (null clears the cell)")
+				return out, sheetError("set_cell requires value (null clears the cell)")
 			}
 			if len(op.Expected) > 0 {
 				var expected any
 				if err := json.Unmarshal(op.Expected, &expected); err != nil {
-					return out, tableError("invalid expected value")
+					return out, sheetError("invalid expected value")
 				}
 				if !reflect.DeepEqual(out.Rows[row].Cells[op.ColumnID], expected) {
-					return out, &TableCellConflict{op.RowID, op.ColumnID}
+					return out, &SheetCellConflict{op.RowID, op.ColumnID}
 				}
 			}
 			var value any
 			if err := json.Unmarshal(op.Value, &value); err != nil {
-				return out, tableError("invalid cell value")
+				return out, sheetError("invalid cell value")
 			}
 			if value == nil {
 				delete(out.Rows[row].Cells, op.ColumnID)
@@ -230,24 +230,24 @@ func ApplyTableOperations(body TableBody, ops []TableOperation) (TableBody, erro
 			}
 		case "add_row":
 			if op.Row == nil || op.Row.Cells == nil || seenRows[op.Row.ID] {
-				return out, tableError("add_row requires a new row ID and cells object")
+				return out, sheetError("add_row requires a new row ID and cells object")
 			}
 			seenRows[op.Row.ID] = true
 			at := len(out.Rows)
 			if op.BeforeID != "" {
-				at = slices.IndexFunc(out.Rows, func(r TableRow) bool { return r.ID == op.BeforeID })
+				at = slices.IndexFunc(out.Rows, func(r SheetRow) bool { return r.ID == op.BeforeID })
 				if at < 0 {
-					return out, tableError("row order target was deleted: %s", op.BeforeID)
+					return out, sheetError("row order target was deleted: %s", op.BeforeID)
 				}
 			}
 			cells := map[string]any{}
 			for k, v := range op.Row.Cells {
 				cells[k] = v
 			}
-			out.Rows = slices.Insert(out.Rows, at, TableRow{ID: op.Row.ID, Cells: cells})
+			out.Rows = slices.Insert(out.Rows, at, SheetRow{ID: op.Row.ID, Cells: cells})
 		case "delete_row", "move_row":
 			if row < 0 {
-				return out, tableError("row was deleted: %s", op.RowID)
+				return out, sheetError("row was deleted: %s", op.RowID)
 			}
 			if op.Kind == "move_row" && op.BeforeID == op.RowID {
 				continue
@@ -257,34 +257,34 @@ func ApplyTableOperations(body TableBody, ops []TableOperation) (TableBody, erro
 			if op.Kind == "move_row" {
 				at := len(out.Rows)
 				if op.BeforeID != "" {
-					at = slices.IndexFunc(out.Rows, func(r TableRow) bool { return r.ID == op.BeforeID })
+					at = slices.IndexFunc(out.Rows, func(r SheetRow) bool { return r.ID == op.BeforeID })
 					if at < 0 {
-						return out, tableError("row order target was deleted: %s", op.BeforeID)
+						return out, sheetError("row order target was deleted: %s", op.BeforeID)
 					}
 				}
 				out.Rows = slices.Insert(out.Rows, at, r)
 			}
 		case "add_column":
 			if op.Column == nil || seenColumns[op.Column.ID] {
-				return out, tableError("add_column requires a new column ID")
+				return out, sheetError("add_column requires a new column ID")
 			}
 			seenColumns[op.Column.ID] = true
 			at := len(out.Columns)
 			if op.BeforeID != "" {
-				at = slices.IndexFunc(out.Columns, func(c TableColumn) bool { return c.ID == op.BeforeID })
+				at = slices.IndexFunc(out.Columns, func(c SheetColumn) bool { return c.ID == op.BeforeID })
 				if at < 0 {
-					return out, tableError("column order target was deleted: %s", op.BeforeID)
+					return out, sheetError("column order target was deleted: %s", op.BeforeID)
 				}
 			}
 			out.Columns = slices.Insert(out.Columns, at, *op.Column)
 		case "update_column":
 			if col < 0 || op.Column == nil || op.Column.ID != op.ColumnID {
-				return out, tableError("update_column requires an existing column and the same ID")
+				return out, sheetError("update_column requires an existing column and the same ID")
 			}
 			out.Columns[col] = *op.Column
 		case "delete_column", "move_column":
 			if col < 0 {
-				return out, tableError("column was deleted: %s", op.ColumnID)
+				return out, sheetError("column was deleted: %s", op.ColumnID)
 			}
 			if op.Kind == "move_column" && op.BeforeID == op.ColumnID {
 				continue
@@ -298,23 +298,23 @@ func ApplyTableOperations(body TableBody, ops []TableOperation) (TableBody, erro
 			} else {
 				at := len(out.Columns)
 				if op.BeforeID != "" {
-					at = slices.IndexFunc(out.Columns, func(c TableColumn) bool { return c.ID == op.BeforeID })
+					at = slices.IndexFunc(out.Columns, func(c SheetColumn) bool { return c.ID == op.BeforeID })
 					if at < 0 {
-						return out, tableError("column order target was deleted: %s", op.BeforeID)
+						return out, sheetError("column order target was deleted: %s", op.BeforeID)
 					}
 				}
 				out.Columns = slices.Insert(out.Columns, at, c)
 			}
 		default:
-			return out, tableError("unknown table operation: %s", op.Kind)
+			return out, sheetError("unknown table operation: %s", op.Kind)
 		}
-		if len(out.Rows) > contracts.Studio().MaxTableRows || len(out.Columns) > contracts.Studio().MaxTableColumns {
-			return out, tableError("table row or column limit exceeded")
+		if len(out.Rows) > contracts.Studio().MaxSheetRows || len(out.Columns) > contracts.Studio().MaxSheetColumns {
+			return out, sheetError("table row or column limit exceeded")
 		}
 	}
-	return out, ValidateTable(out)
+	return out, ValidateSheet(out)
 }
-func TableCSV(body TableBody) (string, error) {
+func SheetCSV(body SheetBody) (string, error) {
 	var output strings.Builder
 	w := csv.NewWriter(&output)
 	header := make([]string, len(body.Columns))

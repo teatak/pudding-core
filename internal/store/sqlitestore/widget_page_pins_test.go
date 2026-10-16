@@ -125,6 +125,7 @@ func TestWidgetPagesPinVersionsAcrossUpgradeAndRestart(t *testing.T) {
 }
 func TestWidgetPagePinsMigrationPreservesStateAndRollsBack(t *testing.T) {
 	s, path := openTestStore(t)
+	useLegacySheetFixture(t, s.db)
 	ctx := context.Background()
 	w := createDataWidget(t, s, "saved")
 	page, err := s.OpenWidgetPage(ctx, w.ID, "library", w.ActiveRevision, "old-target")

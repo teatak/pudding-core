@@ -182,7 +182,7 @@ func useV24CanvasFixture(t *testing.T, db *sql.DB) {
  DROP TABLE widget_page_pins; DROP TABLE widget_pages; DROP TABLE widget_data;
  DROP TABLE remote_identity; DROP TABLE remote_pairings; DROP TABLE remote_devices;
  DROP TABLE library_recent_opens;DROP TABLE library_favorites;DROP TABLE studio_mounts;
- DROP TABLE studio_table_ids;DROP TABLE studio_item_content;DROP TABLE widget_actions;DROP TABLE widget_links;DROP TABLE studio_item_saves;DROP TABLE studio_item_revisions;DROP TABLE studio_items;
+ DROP TABLE studio_sheet_ids;DROP TABLE studio_item_content;DROP TABLE widget_actions;DROP TABLE widget_links;DROP TABLE studio_item_saves;DROP TABLE studio_item_revisions;DROP TABLE studio_items;
  ALTER TABLE sessions RENAME COLUMN loaded_plugin_ids TO loaded_app_ids;`); err != nil {
 		t.Fatal(err)
 	}

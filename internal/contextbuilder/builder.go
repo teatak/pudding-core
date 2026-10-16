@@ -25,7 +25,7 @@ type Builder struct {
 	attachmentHome string
 	plugins        PluginSkillSource
 
-	skills         SkillSource
+	skills SkillSource
 }
 
 const noImageComputerUseGuidance = "The current model cannot receive image inputs. Do not request Computer Use screenshots for your own visual inspection because the screenshot bytes will not be visible to you. Capture one only when the user explicitly asks to receive a screenshot."
@@ -296,7 +296,7 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 			// Native state still contains the stored name. Rebuild renamed calls
 			// from canonical parts so providers cannot replay retired tool names.
 			name := tool.CurrentToolName(part.Name)
-			if name != part.Name || !toolReplayedInHistory(mode, name, allowedTools) {
+			if name != part.Name || string(tool.CurrentSheetToolArgs(part.Name, part.Args)) != string(part.Args) || !toolReplayedInHistory(mode, name, allowedTools) {
 				return false
 			}
 		}
@@ -535,7 +535,7 @@ func (b *Builder) providerParts(
 				Type:   provider.PartToolUse,
 				CallID: part.CallID,
 				Name:   name,
-				Args:   append([]byte(nil), part.Args...),
+				Args:   append([]byte(nil), tool.CurrentSheetToolArgs(part.Name, part.Args)...),
 			})
 		case store.ContentPartToolResult:
 			flushReferences()

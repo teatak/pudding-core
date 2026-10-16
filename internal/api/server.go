@@ -196,7 +196,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/studio/items/:itemID/document-content").GET(s.getDocument).PUT(s.writeDocument)
 	app.Route("/studio/items/:itemID/document-assets/:hash").GET(s.getDocumentBlob)
 	app.Route("/studio/items/:itemID/edit-operations").GET(s.getNoteEditState).POST(s.changeNoteEdit)
-	app.Route("/studio/items/:itemID/operations").POST(s.writeTable)
+	app.Route("/studio/items/:itemID/operations").POST(s.writeSheet)
 	app.Route("/studio/items/:itemID/assets").POST(s.uploadNoteAsset)
 	app.Route("/studio/items/:itemID/assets/:filename").GET(s.getNoteAsset)
 	app.Route("/studio/items/:itemID/appearance").PATCH(s.patchStudioItemAppearance)
