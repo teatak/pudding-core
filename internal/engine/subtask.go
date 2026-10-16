@@ -110,6 +110,7 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 				return fail(err)
 			}
 			payload.(map[string]any)["fresh_context_used"] = used
+			payload.(map[string]any)["fresh_context_remaining"] = max(0, store.SubtaskDispatchLimit-used)
 		}
 	case tool.SubtaskDispatch:
 		if strings.TrimSpace(dispatchArgs.Title) == "" || utf8.RuneCountInString(dispatchArgs.Title) > 100 || strings.TrimSpace(dispatchArgs.Prompt) == "" {
