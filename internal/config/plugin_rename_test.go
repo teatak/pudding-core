@@ -30,7 +30,7 @@ func TestStudioEnablementMigratesAndCurrentValueWins(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if v, ok := enabled["artifacts"]; !ok || v != tt.want {
+				if v, ok := enabled["artifact"]; !ok || v != tt.want {
 					t.Fatalf("enablement = %v", enabled)
 				}
 				if _, ok := enabled["studio"]; ok {

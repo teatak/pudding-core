@@ -58,9 +58,7 @@ func CurrentToolName(name string) string {
 
 func legacyPluginReference(pluginID, skillID string) SkillReference {
 	pluginID, skillID = strings.TrimSpace(pluginID), strings.TrimSpace(skillID)
-	if pluginID == "studio" && skillID == "studio" {
-		skillID = "artifacts"
-	}
+	skillID = store.CurrentPluginSkillID(pluginID, skillID)
 	pluginID = store.CurrentPluginID(pluginID)
 	if renamed, ok := legacyPluginIDs[pluginID]; ok {
 		pluginID = renamed

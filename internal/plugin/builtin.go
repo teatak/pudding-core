@@ -7,12 +7,12 @@ import (
 )
 
 const (
-	BuiltinArtifactsID         = "artifacts"
+	BuiltinArtifactsID         = "artifact"
 	BuiltinStudioID            = BuiltinArtifactsID
-	BuiltinNoteAuthoringID     = "markdown"
-	BuiltinDocumentAuthoringID = "docx"
-	BuiltinTablesID            = "tables"
-	BuiltinCollaborationID     = "collaboration"
+	BuiltinNoteAuthoringID     = "note-authoring"
+	BuiltinDocumentAuthoringID = "document-authoring"
+	BuiltinTablesID            = "sheet-authoring"
+	BuiltinCollaborationID     = "subagent"
 	BuiltinBrowserID           = "browser"
 	BuiltinSkillAuthoringID    = "skill-authoring"
 	BuiltinPluginAuthoringID   = "plugin-authoring"
@@ -59,8 +59,8 @@ var builtinDefinitions = []builtinDefinition{
 		[]string{"builtin_table_create", "builtin_table_read", "builtin_table_update"}, tableInstructions),
 	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,
 		Tools:  []ToolRef{{Name: "builtin_subagent_list"}, {Name: "builtin_subagent_dispatch"}, {Name: "builtin_subagent_send"}, {Name: "builtin_subagent_wait"}, {Name: "builtin_subagent_stop"}, {Name: "builtin_subagent_archive"}, {Name: "builtin_subagent_restore"}, {Name: "builtin_subagent_reset"}},
-		Skills: []SkillRef{{ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/collaboration/SKILL.md"}}},
-		skills: map[string]SkillDetail{BuiltinCollaborationID: {ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/collaboration/SKILL.md", Content: `# Subagents
+		Skills: []SkillRef{{ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md"}}},
+		skills: map[string]SkillDetail{BuiltinCollaborationID: {ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md", Content: `# Subagents
 
 Use child conversations for bounded work that can make useful progress independently. Supply the objective, relevant context, constraints, and expected output in the dispatch prompt. Children do not inherit the main conversation history or temporary approvals. Use only the current builtin_subagent_* tools.
 
@@ -295,7 +295,7 @@ func IsReservedID(id string) bool {
 
 func ReadBuiltinSkill(pluginID, selector string) (*SkillDetail, bool) {
 	pluginID = normalizeBuiltinPluginID(pluginID)
-	selector = strings.TrimSpace(selector)
+	selector = store.CurrentPluginSkillID(pluginID, selector)
 	for _, item := range builtinDefinitions {
 		if item.definition.ID != pluginID {
 			continue
