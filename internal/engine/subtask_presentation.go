@@ -13,6 +13,10 @@ func (e *Engine) setChildTask(ctx context.Context, view *ChildSessionView, page 
 		for i := len(page.Turns) - 1; i >= 0; i-- {
 			messages := page.Turns[i].Messages
 			for j := len(messages) - 1; j >= 0; j-- {
+				if _, reset := store.SubagentResetFromMessage(messages[j]); reset {
+					view.TaskTitle, view.Summary = "", ""
+					return nil
+				}
 				if childTaskInput(messages[j]) {
 					view.setTask(messages[j].Text, page.HasMore || i > 0 || j > 0)
 					return nil
@@ -23,7 +27,7 @@ func (e *Engine) setChildTask(ctx context.Context, view *ChildSessionView, page 
 			break
 		}
 		// A form reply or system continuation is not a new task. Read back to
-		// the actual task input rather than restoring the first session title.
+		// the actual task input, but never cross a context reset checkpoint.
 		var err error
 		page, err = e.store.ListTurnsPage(ctx, view.Session.ID, page.Turns[0].ID, 1)
 		if err != nil {

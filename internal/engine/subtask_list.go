@@ -140,7 +140,7 @@ func (e *Engine) ListChildSessions(ctx context.Context, parentID string) ([]Chil
 				// A maintenance checkpoint is not a completed user task or a result
 				// awaiting collection. Do not advertise the preceding task's result.
 				view.Status, view.Summary, taskSummary = "idle", "", ""
-				view.TaskTitle, view.ResultCollected = child.Title, true
+				view.TaskTitle, view.ResultCollected = "", true
 			}
 		}
 		inputs, err := e.store.ListQueuedInputs(ctx, child.ID)
