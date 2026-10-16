@@ -3,7 +3,6 @@ package tool
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -30,8 +29,8 @@ func DecodePluginLoadRequest(raw json.RawMessage) (PluginLoadRequest, error) {
 	if len(raw) == 0 || json.Unmarshal(raw, &request) != nil {
 		return request, errors.New("plugin load arguments must be a JSON object")
 	}
-	request.PluginID = strings.TrimSpace(request.PluginID)
-	request.SkillID = strings.TrimSpace(request.SkillID)
+	request.PluginID = store.CurrentPluginID(request.PluginID)
+	request.SkillID = store.CurrentPluginSkillID(request.PluginID, request.SkillID)
 	if request.PluginID == "" {
 		return request, errors.New("plugin_id is required")
 	}

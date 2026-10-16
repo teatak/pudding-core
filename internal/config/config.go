@@ -306,7 +306,7 @@ func (m *Manager) ListPluginEnablement(_ context.Context) (map[string]bool, erro
 }
 
 func (m *Manager) SetPluginEnabled(_ context.Context, id string, enabled bool) error {
-	id = strings.TrimSpace(id)
+	id = store.CurrentPluginID(id)
 	if id == "" {
 		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
 	}
@@ -327,7 +327,7 @@ func (m *Manager) SetPluginEnabled(_ context.Context, id string, enabled bool) e
 }
 
 func (m *Manager) DeletePluginEnablement(_ context.Context, id string) error {
-	id = strings.TrimSpace(id)
+	id = store.CurrentPluginID(id)
 	if id == "" {
 		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
 	}
@@ -529,10 +529,17 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
-	// Migrate saved enablement once. An explicit current ID takes precedence
-	// when settings contain both names; never re-enable a disabled plugin.
+	// Migrate saved enablement once. Explicit canonical settings win. Sorting
+	// also gives the newer legacy "artifacts" switch precedence over "studio"
+	// when neither has an explicit "artifact" setting; map order must not decide.
 	changed := false
-	for id, enabled := range cfg.Plugins.Enabled {
+	ids := make([]string, 0, len(cfg.Plugins.Enabled))
+	for id := range cfg.Plugins.Enabled {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		enabled := cfg.Plugins.Enabled[id]
 		current := store.CurrentPluginID(id)
 		if current == id {
 			continue
@@ -546,8 +553,8 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 	// Inherit the former all-content switch only on upgrade. Subsequent toggles
 	// are independent; loading the old plugin never loads the new capabilities.
 	if !cfg.Plugins.ContentPluginsSplit {
-		if enabled, exists := cfg.Plugins.Enabled["artifacts"]; exists {
-			for _, id := range []string{"markdown", "docx", "tables"} {
+		if enabled, exists := cfg.Plugins.Enabled["artifact"]; exists {
+			for _, id := range []string{"note-authoring", "document-authoring", "sheet-authoring"} {
 				if _, explicit := cfg.Plugins.Enabled[id]; !explicit {
 					cfg.Plugins.Enabled[id] = enabled
 				}

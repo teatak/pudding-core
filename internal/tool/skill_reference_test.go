@@ -28,7 +28,7 @@ func TestReferencedStudioSkillUsesArtifactIdentity(t *testing.T) {
 	for _, kind := range []string{PluginSkillReference, legacyPluginSkillReference} {
 		content := `{"reference":{"kind":"` + kind + `","pluginID":"studio","appID":"studio","skillID":"studio"}}`
 		got, ok := ReferencedSkill(PluginLoad, true, content)
-		want := SkillReference{Kind: PluginSkillReference, PluginID: "artifacts", SkillID: "artifacts"}
+		want := SkillReference{Kind: PluginSkillReference, PluginID: "artifact", SkillID: "artifact"}
 		if !ok || got != want {
 			t.Fatalf("reference = %+v, %v", got, ok)
 		}
@@ -62,5 +62,23 @@ func TestReferencedSkillReadsPluginResultsStoredUnderAppNames(t *testing.T) {
 	// A new result never carries a body without a reference.
 	if _, ok := ReferencedSkill(PluginLoad, true, `{"pluginID":"github","skillID":"issues","content":"body"}`); ok {
 		t.Fatal("unreferenced plugin result was projected")
+	}
+}
+
+func TestRenamedPluginHistoryIsProjectedWithoutChangingSource(t *testing.T) {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "note-authoring", "docx": "document-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
+		content := `{"reference":{"kind":"plugin_skill","pluginID":"` + old + `","skillID":"` + old + `"},"content":"OLD_BODY"}`
+		got, ok := ReferencedSkill(PluginLoad, true, content)
+		if !ok || got.PluginID != current || got.SkillID != current {
+			t.Fatal(got, ok)
+		}
+		global, ok := ReferencedSkill(SkillRead, true, `{"reference":{"kind":"skill","skillID":"`+old+`"}}`)
+		if !ok || global.SkillID != old {
+			t.Fatal("global skill renamed", global)
+		}
+		custom, ok := ReferencedSkill(PluginLoad, true, `{"reference":{"kind":"plugin_skill","pluginID":"custom","skillID":"`+old+`"}}`)
+		if !ok || custom.SkillID != old {
+			t.Fatal("custom skill renamed", custom)
+		}
 	}
 }

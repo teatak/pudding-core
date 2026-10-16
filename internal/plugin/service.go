@@ -256,7 +256,7 @@ func applyEnabledOverride(def *Definition, enabled map[string]bool) {
 }
 
 func (s *Service) definition(ctx context.Context, id string) (*Definition, error) {
-	id = strings.TrimSpace(id)
+	id = normalizeBuiltinPluginID(id)
 	if !pluginIDPattern.MatchString(id) {
 		return nil, ErrInvalidID
 	}
