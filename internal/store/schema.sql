@@ -331,7 +331,7 @@ CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(ha
 
 CREATE TABLE studio_items (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('doc','table','widget','rich-document')),
+    kind TEXT NOT NULL CHECK(kind IN ('note','table','widget','document')),
     name TEXT NOT NULL,
     icon TEXT NOT NULL DEFAULT '',
     icon_color TEXT NOT NULL DEFAULT '',

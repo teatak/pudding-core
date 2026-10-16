@@ -719,6 +719,16 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 				return err
 			}
 		}
+	} else if version == 41 {
+		var legacy int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='studio_items' AND sql LIKE '%rich-document%'`).Scan(&legacy); err == nil && legacy == 0 {
+			_ = db.QueryRow(`SELECT COUNT(*) FROM studio_items WHERE kind IN ('doc','rich-document')`).Scan(&legacy)
+		}
+		if legacy > 0 {
+			if err := runSchemaMigration(db, 41, migrateDocuments); err != nil {
+				return err
+			}
+		}
 	}
 	if err := validateCurrentSchema(db); err != nil {
 		return fmt.Errorf("%w: schema v%d failed validation: %v", ErrUnsupportedSchema, currentSchemaVersion, err)

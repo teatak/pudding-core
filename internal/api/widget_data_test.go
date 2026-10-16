@@ -81,7 +81,7 @@ func TestWidgetDataAPI(t *testing.T) {
 	}
 	call("PUT", path, map[string]any{"revisionHash": strings.Repeat("b", 64), "expectedVersion": 1, "data": map[string]any{}}, "fixture-token", 409)
 	call("GET", "/studio/items/missing/data", nil, "fixture-token", 404)
-	if _, err = st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Doc"}, "body", store.ContentAuthor{Kind: "user"}); err != nil {
+	if _, err = st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Doc"}, "body", store.ContentAuthor{Kind: "user"}); err != nil {
 		t.Fatal(err)
 	}
 	call("GET", "/studio/items/doc/data", nil, "fixture-token", 400)

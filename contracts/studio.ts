@@ -13,7 +13,7 @@ export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const studioItem = z.object({
   origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
-  kind: z.enum(["doc", "table", "widget", "rich-document"]),
+  kind: z.enum(["note", "table", "widget", "document"]),
   name: z.string(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),

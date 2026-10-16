@@ -27,7 +27,7 @@ func TestNoteEditLeaseAtomicCommitAndRestart(t *testing.T) {
 	}
 	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
 	body := "前言🙂\r\n\r\n目标段落。\r\n\r\nEnd\r\n"
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes", SourceSessionID: "writer"}, body, user)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes", SourceSessionID: "writer"}, body, user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestNoteEditExpiryCancelAndValidation(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTestStore(t)
 	user := store.ContentAuthor{Kind: "user"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "lease", Kind: "doc", Name: "Lease"}, "中文🙂\n\nSame\n\nSame\n", user)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "lease", Kind: "note", Name: "Lease"}, "中文🙂\n\nSame\n\nSame\n", user)
 	if err != nil {
 		t.Fatal(err)
 	}

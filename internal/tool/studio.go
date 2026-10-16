@@ -33,7 +33,7 @@ func IsStudioTool(name string) bool {
 
 func StudioDefinitions() []provider.ToolDef {
 	return append([]provider.ToolDef{
-		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (doc), Documents (rich-document), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["doc","rich-document","table","widget"]}},"additionalProperties":false}`)},
+		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), Documents (document), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","document","table","widget"]}},"additionalProperties":false}`)},
 		{Name: ArtifactOpen, Capability: store.ModeChat, Description: "Open existing artifact content in this conversation. Returns a session mount referring to the same global item; it does not copy the content.", InputSchema: json.RawMessage(`{"type":"object","properties":{"item_id":{"type":"string"}},"required":["item_id"],"additionalProperties":false}`)},
 	}, append(NoteDefinitions(), append(TableDefinitions(), DocumentDefinitions()...)...)...)
 }

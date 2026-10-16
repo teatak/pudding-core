@@ -9,8 +9,7 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 )
 
-// The persisted kind is a protocol identity; do not rename it with the product.
-const StudioItemKindNote = "doc"
+const StudioItemKindNote = "note"
 
 // NoteContent is the UTF-8 Markdown view of a native content snapshot.
 type NoteContent = ContentSnapshot

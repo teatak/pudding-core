@@ -9,7 +9,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const documentSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='rich-document' AND w.deleted=0 AND w.archived_at=0`
+const documentSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='document' AND w.deleted=0 AND w.archived_at=0`
 
 func documentFromContent(d *store.ContentSnapshot) (*store.DocumentContent, error) {
 	var body store.DocumentBody
@@ -81,7 +81,7 @@ func documentAssetsTx(ctx context.Context, tx *sql.Tx, id string, body store.Doc
 }
 func (s *Store) CreateDocument(ctx context.Context, item *store.StudioItem, body store.DocumentBody, blobs []store.DocumentBlob, authors ...store.ContentAuthor) (*store.DocumentContent, error) {
 	if item.Kind != store.StudioItemKindDocument {
-		return nil, &store.InvalidContent{Message: "rich-document kind required"}
+		return nil, &store.InvalidContent{Message: "document kind required"}
 	}
 	if err := store.ValidateDocument(body); err != nil {
 		return nil, err
@@ -258,7 +258,7 @@ func (s *Store) GetDocumentBlob(ctx context.Context, id, hash string) (*store.Do
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	blob := &store.DocumentBlob{Hash: hash}
-	err := s.db.QueryRowContext(ctx, `SELECT b.mime,b.data FROM studio_rich_blobs b JOIN studio_items w ON w.id=b.item_id WHERE b.item_id=? AND b.hash=? AND w.kind='rich-document' AND w.deleted=0 AND w.archived_at=0`, id, hash).Scan(&blob.Type, &blob.Data)
+	err := s.db.QueryRowContext(ctx, `SELECT b.mime,b.data FROM studio_rich_blobs b JOIN studio_items w ON w.id=b.item_id WHERE b.item_id=? AND b.hash=? AND w.kind='document' AND w.deleted=0 AND w.archived_at=0`, id, hash).Scan(&blob.Type, &blob.Data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

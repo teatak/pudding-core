@@ -124,10 +124,10 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		return badRequest(c, "invalid item appearance")
 	}
 	if req.Kind != store.StudioItemKindNote && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindTable && req.Kind != store.StudioItemKindDocument {
-		return badRequest(c, "kind must be doc, table, widget or rich-document")
+		return badRequest(c, "kind must be note, table, widget or document")
 	}
 	if req.Kind != store.StudioItemKindDocument && len(req.Blobs) > 0 {
-		return badRequest(c, "blobs require rich-document")
+		return badRequest(c, "blobs require document")
 	}
 	if req.Kind == store.StudioItemKindWidget && len(req.Body) > 0 {
 		return badRequest(c, "widget cannot have a content body")

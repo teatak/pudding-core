@@ -14,8 +14,7 @@ import (
 	"strings"
 )
 
-// The persisted kind is a protocol identity; do not rename it with the product.
-const StudioItemKindDocument = "rich-document"
+const StudioItemKindDocument = "document"
 const DOCXMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 const MaxDocumentBytes = 2 << 20
 const MaxDocumentBlobBytes = 20 << 20

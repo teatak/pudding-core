@@ -30,17 +30,21 @@ func migrateDocuments(tx *sql.Tx) error {
 		return err
 	}
 	ddl = strings.Replace(ddl, "studio_items", "studio_items_rich", 1)
-	old := "'doc','table','widget'"
-	if !strings.Contains(ddl, old) {
-		return fmt.Errorf("unexpected Studio kind constraint")
+	replaced := false
+	for _, old := range []string{"'doc','table','widget','rich-document'", "'doc','table','widget'", "'note','table','widget','document'"} {
+		if strings.Contains(ddl, old) {
+			ddl = strings.Replace(ddl, old, "'note','table','widget','document'", 1)
+			replaced = true
+			break
+		}
 	}
-	if !strings.Contains(ddl, "'rich-document'") {
-		ddl = strings.Replace(ddl, old, old+",'rich-document'", 1)
+	if !replaced {
+		return fmt.Errorf("unexpected Studio kind constraint")
 	}
 	if _, err = tx.Exec(ddl); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`INSERT INTO studio_items_rich SELECT * FROM studio_items; DROP TABLE studio_items; ALTER TABLE studio_items_rich RENAME TO studio_items;`); err != nil {
+	if _, err = tx.Exec(`INSERT INTO studio_items_rich SELECT id,CASE kind WHEN 'doc' THEN 'note' WHEN 'rich-document' THEN 'document' ELSE kind END,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin FROM studio_items; DROP TABLE studio_items; ALTER TABLE studio_items_rich RENAME TO studio_items;`); err != nil {
 		return err
 	}
 	for _, query := range indexes {

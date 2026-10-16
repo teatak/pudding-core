@@ -93,7 +93,7 @@ func TestDocumentMigrationPreservesMarkdownAndForeignKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.Replace(store.SchemaSQL, "'widget','rich-document'", "'widget'", 1)
+	schema := strings.Replace(store.SchemaSQL, "'note','table','widget','document'", "'doc','table','widget'", 1)
 	schema = schema[:strings.LastIndex(schema, "CREATE TABLE studio_rich_blobs")]
 	if _, err = db.Exec(schema + `PRAGMA user_version=40;`); err != nil {
 		t.Fatal(err)

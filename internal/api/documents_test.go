@@ -26,10 +26,10 @@ func TestDocumentAPIBoundaries(t *testing.T) {
 		return rec.Body.Bytes()
 	}
 	var item store.StudioItem
-	json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "rich-document", "name": "DOCX"}, 201), &item)
+	json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "document", "name": "DOCX"}, 201), &item)
 	var doc store.DocumentContent
 	path := "/studio/items/" + item.ID
-	json.Unmarshal(call("GET", path+"/rich-content", nil, 200), &doc)
+	json.Unmarshal(call("GET", path+"/document-content", nil, 200), &doc)
 	if doc.Body.SchemaVersion != 1 || doc.Body.Body.Type != "doc" {
 		t.Fatal("missing structured source")
 	}
@@ -37,14 +37,14 @@ func TestDocumentAPIBoundaries(t *testing.T) {
 	call("PUT", path+"/content", map[string]any{"clientRequestID": "md", "body": "overwrite", "expectedHash": doc.ContentHash}, 404)
 	call("POST", path+"/draft", map[string]any{}, 400)
 	write := store.DocumentWrite{ClientRequestID: "save", ExpectedHash: doc.ContentHash, Body: &doc.Body}
-	saved := call("PUT", path+"/rich-content", write, 200)
-	call("PUT", path+"/rich-content", write, 200)
+	saved := call("PUT", path+"/document-content", write, 200)
+	call("PUT", path+"/document-content", write, 200)
 	write.ExpectedHash = string(bytes.Repeat([]byte("a"), 64))
 	write.ClientRequestID = "stale"
-	call("PUT", path+"/rich-content", write, 409)
+	call("PUT", path+"/document-content", write, 409)
 	json.Unmarshal(saved, &doc)
 	call("GET", path+"/revisions/"+doc.RevisionID, nil, 200)
-	call("GET", path+"/rich-assets/not-a-hash", nil, 400)
-	call("POST", "/studio/items", map[string]any{"kind": "rich-document", "name": "Unsupported", "body": map[string]any{"schemaVersion": 2}}, 400)
-	call("POST", "/studio/items", map[string]any{"kind": "doc", "name": "MD", "body": "# original"}, 201)
+	call("GET", path+"/document-assets/not-a-hash", nil, 400)
+	call("POST", "/studio/items", map[string]any{"kind": "document", "name": "Unsupported", "body": map[string]any{"schemaVersion": 2}}, 400)
+	call("POST", "/studio/items", map[string]any{"kind": "note", "name": "MD", "body": "# original"}, 201)
 }

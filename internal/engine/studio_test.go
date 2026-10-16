@@ -97,7 +97,7 @@ func testStudioChatTools(t *testing.T, legacy bool) {
 	}
 	mounts, _ := st.ListStudioMounts(ctx, "writer")
 	others, _ := st.ListStudioMounts(ctx, "other")
-	if len(mounts) != 1 || len(others) != 0 || mounts[0].Kind != "doc" {
+	if len(mounts) != 1 || len(others) != 0 || mounts[0].Kind != "note" {
 		t.Fatal("mount scope incorrect")
 	}
 	revisions, _ := st.ListStudioItemRevisions(ctx, created.ItemID)

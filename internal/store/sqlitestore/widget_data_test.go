@@ -164,7 +164,7 @@ func TestWidgetDataConcurrentWriteAndValidation(t *testing.T) {
 	if _, err := st.GetWidgetData(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Doc"}, "body", store.ContentAuthor{Kind: "user"}); err != nil {
+	if _, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Doc"}, "body", store.ContentAuthor{Kind: "user"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.GetWidgetData(ctx, "doc"); !errors.Is(err, store.ErrNotFound) {

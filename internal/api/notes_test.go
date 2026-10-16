@@ -27,7 +27,7 @@ func TestNoteAPIAndWidgetBoundary(t *testing.T) {
 		return out.Body.Bytes()
 	}
 	var item store.StudioItem
-	if err := json.Unmarshal(call("POST", "/studio/items", []byte(`{"kind":"doc","name":"Notes","body":"# Hello\n\nInitial"}`), 201), &item); err != nil {
+	if err := json.Unmarshal(call("POST", "/studio/items", []byte(`{"kind":"note","name":"Notes","body":"# Hello\n\nInitial"}`), 201), &item); err != nil {
 		t.Fatal(err)
 	}
 	path := "/studio/items/" + item.ID

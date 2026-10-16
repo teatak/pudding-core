@@ -16,7 +16,7 @@ func TestNativeUndoIsAtomicIdempotentAndAttributed(t *testing.T) {
 		t.Fatal(err)
 	}
 	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Doc"}, "First\n\nLast", user)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Doc"}, "First\n\nLast", user)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -160,7 +160,7 @@ func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
 	})
 	ctx := context.Background()
 	user := store.ContentAuthor{Kind: "user"}
-	doc, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes"}, "Keep document", user)
+	doc, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "Keep document", user)
 	if err != nil {
 		t.Fatal(err)
 	}

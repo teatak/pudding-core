@@ -14,7 +14,7 @@ func TestStudioArchiveRetainsContentAndRejectsStaleCleanup(t *testing.T) {
 	ctx := context.Background()
 	createTestSession(t, st, "owner")
 	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
-	_, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Kept", CreatedAt: created, UpdatedAt: created}, "Keep my text", store.ContentAuthor{Kind: "user"})
+	_, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Kept", CreatedAt: created, UpdatedAt: created}, "Keep my text", store.ContentAuthor{Kind: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}

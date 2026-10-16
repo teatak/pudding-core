@@ -24,7 +24,7 @@ func TestNoteConcurrentEditingVersionsAndRestart(t *testing.T) {
 	}
 	user := store.ContentAuthor{Kind: "user"}
 	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes", SourceSessionID: "writer"}, "One\n\nTwo\n", user)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes", SourceSessionID: "writer"}, "One\n\nTwo\n", user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestNoteEditsAreAtomicAndSizeBounded(t *testing.T) {
 	s, _ := openTestStore(t)
 	ctx := context.Background()
 	author := store.ContentAuthor{Kind: "user"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "doc", Name: "Notes"}, "alpha beta alpha", author)
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "alpha beta alpha", author)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestNoteEditsAreAtomicAndSizeBounded(t *testing.T) {
 			t.Fatal("partial write", i)
 		}
 	}
-	if _, err = s.CreateNote(ctx, &store.StudioItem{ID: "large", Kind: "doc", Name: "Too large"}, strings.Repeat("x", contracts.Studio().MaxDocumentBytes+1), author); err == nil {
+	if _, err = s.CreateNote(ctx, &store.StudioItem{ID: "large", Kind: "note", Name: "Too large"}, strings.Repeat("x", contracts.Studio().MaxDocumentBytes+1), author); err == nil {
 		t.Fatal("oversized document accepted")
 	}
 	if _, err = s.GetStudioItem(ctx, "large"); !errors.Is(err, store.ErrNotFound) {

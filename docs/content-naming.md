@@ -31,10 +31,10 @@ The following are identities or serialized contracts, not product names:
 
 | Boundary | Preserved value |
 | --- | --- |
-| Stored kinds | `StudioItemKindNote = "doc"`, `StudioItemKindDocument = "rich-document"` |
-| Content IDs and references | `doc_…`, `rich_…`, `@doc` and existing selections/mounts |
+| Stored kinds | `StudioItemKindNote = "note"`, `StudioItemKindDocument = "document"` (migrated from `doc` and `rich-document` in schema v41) |
+| Content IDs and references | `doc_…`, `rich_…`, `@note` (with backward-compatible parsing for historical `@doc`, `kind="doc"` and `kind="rich-document"`) |
 | Plugin and Skill IDs | `markdown`, `docx`; existing enablement and session loading |
-| HTTP | `/content`, `/edit-operations`, `/assets`, `/rich-content`, `/rich-assets` |
+| HTTP | `/content`, `/edit-operations`, `/assets`, `/document-content`, `/document-assets` |
 | Wire errors | Including `document_locked` and `content_conflict` |
 | Public TypeScript contracts | Existing `DocumentContent` (Notes), `RichDocumentContent` (Documents), schema names and JSON keys |
 | Limits contract | Existing `maxDocumentBytes` / `MaxDocumentBytes`, `maxDocumentEdits` / `MaxDocumentEdits` for Notes |

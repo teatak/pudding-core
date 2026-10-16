@@ -28,6 +28,9 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA ignore_check_constraints=ON"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys=ON"); err != nil {
 			return err

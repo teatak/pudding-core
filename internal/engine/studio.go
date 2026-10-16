@@ -48,13 +48,20 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		result, err := e.executeTable(ctx, sessionID, turnID, call, args)
 		return respond(result, err)
 	case tool.ArtifactList:
+		kind := args.Kind
+		switch kind {
+		case "doc":
+			kind = store.StudioItemKindNote
+		case "rich-document":
+			kind = store.StudioItemKindDocument
+		}
 		items, err := e.store.ListStudioItems(ctx, store.StudioItemsActive)
 		if err != nil {
 			return respond(nil, err)
 		}
 		filtered := []map[string]any{}
 		for _, item := range items {
-			if args.Kind == "" || args.Kind == item.Kind {
+			if kind == "" || kind == item.Kind {
 				filtered = append(filtered, map[string]any{"id": item.ID, "kind": item.Kind, "name": item.Name, "updatedAt": item.UpdatedAt})
 			}
 		}
