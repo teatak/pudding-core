@@ -63,6 +63,8 @@ func TestRenamedArtifactAndSubtaskHistoryRetainsCallsAndResults(t *testing.T) {
 	}
 	for _, pair := range [][2]string{
 		{"builtin_doc_create", "builtin_note_create"},
+		{"builtin_table_read", "builtin_sheet_read"},
+		{"builtin_table_update", "builtin_sheet_edit"},
 		{"builtin_doc_read", "builtin_note_read"},
 		{"builtin_doc_edit", "builtin_note_edit"},
 		{"builtin_studio_list", "builtin_artifact_list"},
@@ -134,6 +136,8 @@ func TestRenamedToolNamesAcrossProviderContinuations(t *testing.T) {
 			{"builtin_collaboration_dispatch", "builtin_subagent_dispatch"},
 			{"builtin_subagent_dispatch", "builtin_subagent_dispatch"},
 			{"builtin_doc_create", "builtin_note_create"},
+			{"builtin_table_read", "builtin_sheet_read"},
+			{"builtin_table_update", "builtin_sheet_edit"},
 			{"builtin_doc_read", "builtin_note_read"},
 			{"builtin_doc_edit", "builtin_note_edit"},
 			{"builtin_note_create", "builtin_note_create"},

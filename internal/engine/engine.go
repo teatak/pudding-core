@@ -2122,9 +2122,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Phase:     "running",
 		})
 		// Preserve the stored call/result identity while authorizing and executing
-		// legacy document calls against the canonical tool definition.
+		// legacy content calls against the canonical tool definition.
 		storedName := call.Name
-		call.Name = tool.NormalizeLegacyNoteTool(call.Name)
+		call.Name = tool.NormalizeLegacyContentTool(call.Name)
 		var result tool.Result
 		if call.Name == tool.RequestCapability {
 			var requestedMode store.AgentMode
@@ -2225,7 +2225,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
-	call.Name = tool.NormalizeLegacyNoteTool(call.Name)
+	call.Name = tool.NormalizeLegacyContentTool(call.Name)
 	if tool.IsStudioTool(call.Name) {
 		return e.executeStudio(ctx, sessionID, turnID, call)
 	}
@@ -3109,7 +3109,7 @@ func requestMessagesWithTurnParts(
 }
 
 func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) *provider.Message {
-	// Legacy note calls may arrive within this turn as well as saved history.
+	// Legacy content calls may arrive within this turn as well as saved history.
 	// Rebuild their whole continuation chain from projected parts so opaque
 	// provider state cannot reintroduce the old names. Keep stored parts intact.
 	cloned := false
@@ -3117,12 +3117,15 @@ func currentTurnProviderMessage(parts []store.ContentPart, continuations []provi
 		if part.Type != store.ContentPartToolUse && part.Type != store.ContentPartToolResult {
 			continue
 		}
-		if name := tool.NormalizeLegacyNoteTool(part.Name); name != part.Name {
+		name := tool.NormalizeLegacyContentTool(part.Name)
+		args := tool.CurrentSheetToolArgs(part.Name, part.Args)
+		if name != part.Name || string(args) != string(part.Args) {
 			if !cloned {
 				parts = append([]store.ContentPart(nil), parts...)
 				cloned = true
 			}
 			parts[i].Name = name
+			parts[i].Args = args
 			continuations = nil
 		}
 	}

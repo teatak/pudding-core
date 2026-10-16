@@ -44,35 +44,35 @@ func TestNativeUndoIsAtomicIdempotentAndAttributed(t *testing.T) {
 	if _, err = s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "again", UndoRevision: edited.RevisionID, Author: user}); err == nil {
 		t.Fatal("undo replay accepted")
 	}
-	_, err = s.CreateTable(ctx, &store.StudioItem{ID: "table", Kind: "table", Name: "Table"}, tableFixture(), user)
+	_, err = s.CreateSheet(ctx, &store.StudioItem{ID: "table", Kind: "sheet", Name: "Table"}, sheetFixture(), user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	table, err := s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "ai", Operations: []store.TableOperation{tableCell("r", "a", "AI")}, Author: ai})
+	table, err := s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "ai", Operations: []store.SheetOperation{sheetCell("r", "a", "AI")}, Author: ai})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "human", Operations: []store.TableOperation{tableCell("r", "b", float64(9))}, Author: user})
+	_, err = s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "human", Operations: []store.SheetOperation{sheetCell("r", "b", float64(9))}, Author: user})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "undo", UndoRevision: table.RevisionID, RowID: "r", Author: user})
+	out, err := s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "undo", UndoRevision: table.RevisionID, RowID: "r", Author: user})
 	if err != nil || out.Body.Rows[0].Cells["a"] != "Original" || out.Body.Rows[0].Cells["b"] != float64(9) {
 		t.Fatal(out, err)
 	}
 	var conflict *store.ContentConflict
-	if _, err = s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "again", UndoRevision: table.RevisionID, RowID: "r", Author: user}); !errors.As(err, &conflict) {
+	if _, err = s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "again", UndoRevision: table.RevisionID, RowID: "r", Author: user}); !errors.As(err, &conflict) {
 		t.Fatal(err)
 	}
-	deleted, err := s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "delete", Operations: []store.TableOperation{{Kind: "delete_row", RowID: "r"}}, Author: ai})
+	deleted, err := s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "delete", Operations: []store.SheetOperation{{Kind: "delete_row", RowID: "r"}}, Author: ai})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err = s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "undo-delete", UndoRevision: deleted.RevisionID, Author: user})
+	out, err = s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "undo-delete", UndoRevision: deleted.RevisionID, Author: user})
 	if err != nil || len(out.Body.Rows) != 1 {
 		t.Fatal(out, err)
 	}
-	if _, err = s.WriteTable(ctx, "table", store.TableWrite{ClientRequestID: "cross-item", UndoRevision: edited.RevisionID, Author: user}); !errors.Is(err, store.ErrNotFound) {
+	if _, err = s.WriteSheet(ctx, "table", store.SheetWrite{ClientRequestID: "cross-item", UndoRevision: edited.RevisionID, Author: user}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal(err)
 	}
 }

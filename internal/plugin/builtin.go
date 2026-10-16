@@ -11,7 +11,7 @@ const (
 	BuiltinStudioID            = BuiltinArtifactsID
 	BuiltinNoteAuthoringID     = "note-authoring"
 	BuiltinDocumentAuthoringID = "document-authoring"
-	BuiltinTablesID            = "sheet-authoring"
+	BuiltinSheetAuthoringID    = "sheet-authoring"
 	BuiltinCollaborationID     = "subagent"
 	BuiltinBrowserID           = "browser"
 	BuiltinSkillAuthoringID    = "skill-authoring"
@@ -55,8 +55,8 @@ var builtinDefinitions = []builtinDefinition{
 		[]string{"builtin_note_create", "builtin_note_read", "builtin_note_edit"}, noteInstructions),
 	contentBuiltin(BuiltinDocumentAuthoringID, "Document Authoring", "Create, read and locally edit structured Documents with recoverable versions and DOCX import/export.",
 		[]string{"builtin_document_create", "builtin_document_read", "builtin_document_edit"}, documentInstructions),
-	contentBuiltin(BuiltinTablesID, "Table Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
-		[]string{"builtin_table_create", "builtin_table_read", "builtin_table_update"}, tableInstructions),
+	contentBuiltin(BuiltinSheetAuthoringID, "Sheet Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
+		[]string{"builtin_sheet_create", "builtin_sheet_read", "builtin_sheet_edit"}, sheetInstructions),
 	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,
 		Tools:  []ToolRef{{Name: "builtin_subagent_list"}, {Name: "builtin_subagent_dispatch"}, {Name: "builtin_subagent_send"}, {Name: "builtin_subagent_wait"}, {Name: "builtin_subagent_stop"}, {Name: "builtin_subagent_archive"}, {Name: "builtin_subagent_restore"}, {Name: "builtin_subagent_reset"}},
 		Skills: []SkillRef{{ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md"}}},

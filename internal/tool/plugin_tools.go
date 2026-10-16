@@ -6,7 +6,7 @@ var builtinPluginTools = map[string]string{
 	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
 	DocumentRead: plugin.BuiltinDocumentAuthoringID, DocumentCreate: plugin.BuiltinDocumentAuthoringID, DocumentEdit: plugin.BuiltinDocumentAuthoringID,
 	NoteCreate: plugin.BuiltinNoteAuthoringID, NoteRead: plugin.BuiltinNoteAuthoringID, NoteEdit: plugin.BuiltinNoteAuthoringID,
-	TableCreate: plugin.BuiltinTablesID, TableRead: plugin.BuiltinTablesID, TableUpdate: plugin.BuiltinTablesID,
+	SheetCreate: plugin.BuiltinSheetAuthoringID, SheetRead: plugin.BuiltinSheetAuthoringID, SheetEdit: plugin.BuiltinSheetAuthoringID,
 	SubtaskList:       plugin.BuiltinCollaborationID,
 	SubtaskDispatch:   plugin.BuiltinCollaborationID,
 	SubtaskSend:       plugin.BuiltinCollaborationID,
@@ -38,7 +38,7 @@ var builtinPluginTools = map[string]string{
 }
 
 func BuiltinPluginIDForTool(name string) (string, bool) {
-	id, ok := builtinPluginTools[NormalizeLegacyNoteTool(name)]
+	id, ok := builtinPluginTools[NormalizeLegacyContentTool(name)]
 	return id, ok
 }
 

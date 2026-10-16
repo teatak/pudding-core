@@ -92,7 +92,7 @@ func undoValue(before any, beforeOK bool, after any, afterOK bool, current any, 
 	}
 	return nil, false, ErrUndoConflict
 }
-func columnValues(columns []TableColumn) (map[string]any, []string) {
+func columnValues(columns []SheetColumn) (map[string]any, []string) {
 	out := map[string]any{}
 	ids := []string{}
 	for _, c := range columns {
@@ -101,7 +101,7 @@ func columnValues(columns []TableColumn) (map[string]any, []string) {
 	}
 	return out, ids
 }
-func rowValues(rows []TableRow) (map[string]any, []string) {
+func rowValues(rows []SheetRow) (map[string]any, []string) {
 	out := map[string]any{}
 	ids := []string{}
 	for _, r := range rows {
@@ -127,34 +127,34 @@ func undoOrder(before, after, current []string) ([]string, error) {
 	// not change this sequence and remain eligible for selective undo.
 	return nil, ErrUndoConflict
 }
-func UndoTable(before, after, current TableBody, rowID string) (TableBody, error) {
+func UndoSheet(before, after, current SheetBody, rowID string) (SheetBody, error) {
 	bRows, bOrder := rowValues(before.Rows)
 	aRows, aOrder := rowValues(after.Rows)
 	cRows, cOrder := rowValues(current.Rows)
 	if rowID != "" {
 		if !reflect.DeepEqual(before.Columns, after.Columns) {
-			return TableBody{}, &InvalidTable{"row undo requires unchanged columns; undo the complete change instead"}
+			return SheetBody{}, &InvalidSheet{"row undo requires unchanged columns; undo the complete change instead"}
 		}
 		b, bok := bRows[rowID]
 		a, aok := aRows[rowID]
 		c, cok := cRows[rowID]
 		if !bok || !aok || reflect.DeepEqual(b, a) {
-			return TableBody{}, &InvalidTable{"row undo requires changed cells in an existing row"}
+			return SheetBody{}, &InvalidSheet{"row undo requires changed cells in an existing row"}
 		}
 		value, _, err := undoValue(b, true, a, true, c, cok)
 		if err != nil {
-			return TableBody{}, err
+			return SheetBody{}, err
 		}
 		cRows[rowID] = value
 	} else {
 		rows, _, err := undoValue(bRows, true, aRows, true, cRows, true)
 		if err != nil {
-			return TableBody{}, err
+			return SheetBody{}, err
 		}
 		cRows = rows.(map[string]any)
 		cOrder, err = undoOrder(bOrder, aOrder, cOrder)
 		if err != nil {
-			return TableBody{}, err
+			return SheetBody{}, err
 		}
 	}
 	bCols, bColOrder := columnValues(before.Columns)
@@ -163,29 +163,29 @@ func UndoTable(before, after, current TableBody, rowID string) (TableBody, error
 	if rowID == "" {
 		cols, _, err := undoValue(bCols, true, aCols, true, cCols, true)
 		if err != nil {
-			return TableBody{}, err
+			return SheetBody{}, err
 		}
 		cCols = cols.(map[string]any)
 		cColOrder, err = undoOrder(bColOrder, aColOrder, cColOrder)
 		if err != nil {
-			return TableBody{}, err
+			return SheetBody{}, err
 		}
 	}
-	out := TableBody{Columns: []TableColumn{}, Rows: []TableRow{}}
+	out := SheetBody{Columns: []SheetColumn{}, Rows: []SheetRow{}}
 	for _, id := range cColOrder {
 		c := cCols[id].(map[string]any)
-		out.Columns = append(out.Columns, TableColumn{ID: id, Name: c["name"].(string), Type: c["type"].(string), Options: c["options"].([]string)})
+		out.Columns = append(out.Columns, SheetColumn{ID: id, Name: c["name"].(string), Type: c["type"].(string), Options: c["options"].([]string)})
 	}
 	for _, id := range cOrder {
-		out.Rows = append(out.Rows, TableRow{ID: id, Cells: cRows[id].(map[string]any)})
+		out.Rows = append(out.Rows, SheetRow{ID: id, Cells: cRows[id].(map[string]any)})
 	}
 	// Stable deterministic traversal above follows current/baseline orders; map
 	// iteration never decides table ordering or the resulting serialized hash.
-	if err := ValidateTable(out); err != nil {
-		return TableBody{}, ErrUndoConflict
+	if err := ValidateSheet(out); err != nil {
+		return SheetBody{}, ErrUndoConflict
 	}
 	if reflect.DeepEqual(out, current) {
-		return TableBody{}, &InvalidTable{"version has no content changes"}
+		return SheetBody{}, &InvalidSheet{"version has no content changes"}
 	}
 	return out, nil
 }

@@ -4,11 +4,11 @@
   "maxDocumentEdits": 100,
   "maxReadBytes": 65536,
   "autosaveMS": 1000,
-  "maxTableRows": 10000,
-  "maxTableColumns": 100,
-  "maxTableBytes": 10485760,
-  "maxTableCellBytes": 65536,
-  "maxTableOperations": 1000,
-  "maxTableReadRows": 200,
-  "maxTableReadBytes": 1048576
+  "maxSheetRows": 10000,
+  "maxSheetColumns": 100,
+  "maxSheetBytes": 10485760,
+  "maxSheetCellBytes": 65536,
+  "maxSheetOperations": 1000,
+  "maxSheetReadRows": 200,
+  "maxSheetReadBytes": 1048576
 }

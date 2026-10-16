@@ -12,8 +12,8 @@ func (s *Server) getStudioContent(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if item.Kind == store.StudioItemKindTable {
-		table, err := s.store.GetTable(c.Request.Context(), id)
+	if item.Kind == store.StudioItemKindSheet {
+		table, err := s.store.GetSheet(c.Request.Context(), id)
 		if err != nil {
 			return s.studioItemError(c, err)
 		}
@@ -22,14 +22,14 @@ func (s *Server) getStudioContent(c *cart.Context) error {
 	}
 	return s.getNote(c)
 }
-func (s *Server) writeTable(c *cart.Context) error {
+func (s *Server) writeSheet(c *cart.Context) error {
 	id, _ := c.Param("itemID")
-	var in store.TableWrite
+	var in store.SheetWrite
 	if err := decodeNativeContentRequest(c, &in); err != nil {
 		return badRequest(c, err.Error())
 	}
 	in.Author = store.ContentAuthor{Kind: "user"}
-	table, err := s.store.WriteTable(c.Request.Context(), id, in)
+	table, err := s.store.WriteSheet(c.Request.Context(), id, in)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}

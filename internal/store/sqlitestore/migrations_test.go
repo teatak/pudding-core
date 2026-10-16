@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		42: "511c62986235e2974808665a359ac9c9275952897f51069e107a889ca16aef0c",
 		41: "292fe8ba61b7cf7a1f15d47af1f029403749d3162d918aeff5a0cf44772cf97a",
 		40: "3b56701abaee68d57c3ca56e8adb724e872dececfa6443407b1b9cc9756214e6",
 		39: "054017d2e390bbc3483527e4efef6f7ac5606559abccc2231ac1634fe8137fbf",
@@ -860,6 +861,7 @@ func TestWireEstimateMigrationDiscardsOnlyOldCalibration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	useLegacySheetFixture(t, st.db)
 	createTestSession(t, st, "wire-estimate")
 	_, err = st.RecordSessionUsage(context.Background(), "wire-estimate", store.UsageRecordInput{Provider: "profile", Model: "model", EstimatedInputTokens: 437703, InputUncachedTokens: 212, InputCachedTokens: 562816, OutputContentTokens: 989, OutputReasoningTokens: 487})
 	if err != nil {

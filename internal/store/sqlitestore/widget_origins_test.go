@@ -10,6 +10,7 @@ import (
 
 func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	st, path := openTestStore(t)
+	useLegacySheetFixture(t, st.db)
 	w := createDataWidget(t, st, "kept")
 	if _, err := st.db.Exec(`DROP TABLE widget_page_pins; DROP TABLE widget_pages; DROP INDEX studio_items_package; ALTER TABLE studio_items DROP COLUMN origin; PRAGMA user_version=33`); err != nil {
 		t.Fatal(err)
@@ -37,7 +38,7 @@ func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	if err != nil || got.ActiveRevision != w.ActiveRevision || got.Origin != nil {
 		t.Fatal(got, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "41")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "42")
 }
 
 func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {

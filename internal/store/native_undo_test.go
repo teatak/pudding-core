@@ -25,28 +25,28 @@ func TestUndoNotePreservesDisjointEditsAndRejectsOverlap(t *testing.T) {
 	}
 }
 func TestUndoTableRowsPreserveLaterCellsAndGuardStructure(t *testing.T) {
-	before := TableBody{Columns: []TableColumn{{ID: "a", Name: "A", Type: "text"}, {ID: "b", Name: "B", Type: "text"}}, Rows: []TableRow{{ID: "r1", Cells: map[string]any{"a": "old", "b": "old"}}, {ID: "r2", Cells: map[string]any{"a": "old"}}}}
-	after := TableBody{Columns: before.Columns, Rows: []TableRow{{ID: "r1", Cells: map[string]any{"a": "AI", "b": "old"}}, {ID: "r2", Cells: map[string]any{"a": "AI"}}}}
-	current := TableBody{Columns: before.Columns, Rows: []TableRow{{ID: "r1", Cells: map[string]any{"a": "AI", "b": "Human"}}, {ID: "r2", Cells: map[string]any{"a": "AI"}}}}
-	got, err := UndoTable(before, after, current, "r1")
+	before := SheetBody{Columns: []SheetColumn{{ID: "a", Name: "A", Type: "text"}, {ID: "b", Name: "B", Type: "text"}}, Rows: []SheetRow{{ID: "r1", Cells: map[string]any{"a": "old", "b": "old"}}, {ID: "r2", Cells: map[string]any{"a": "old"}}}}
+	after := SheetBody{Columns: before.Columns, Rows: []SheetRow{{ID: "r1", Cells: map[string]any{"a": "AI", "b": "old"}}, {ID: "r2", Cells: map[string]any{"a": "AI"}}}}
+	current := SheetBody{Columns: before.Columns, Rows: []SheetRow{{ID: "r1", Cells: map[string]any{"a": "AI", "b": "Human"}}, {ID: "r2", Cells: map[string]any{"a": "AI"}}}}
+	got, err := UndoSheet(before, after, current, "r1")
 	if err != nil || got.Rows[0].Cells["a"] != "old" || got.Rows[0].Cells["b"] != "Human" || got.Rows[1].Cells["a"] != "AI" {
 		t.Fatal(got, err)
 	}
-	got, err = UndoTable(before, after, current, "")
+	got, err = UndoSheet(before, after, current, "")
 	if err != nil || got.Rows[1].Cells["a"] != "old" || got.Rows[0].Cells["b"] != "Human" {
 		t.Fatal(got, err)
 	}
 	current.Rows[0].Cells["a"] = "Newer"
-	if _, err = UndoTable(before, after, current, "r1"); !errors.Is(err, ErrUndoConflict) {
+	if _, err = UndoSheet(before, after, current, "r1"); !errors.Is(err, ErrUndoConflict) {
 		t.Fatal(err)
 	}
-	deleted := TableBody{Columns: before.Columns, Rows: before.Rows[:1]}
-	got, err = UndoTable(before, deleted, deleted, "")
+	deleted := SheetBody{Columns: before.Columns, Rows: before.Rows[:1]}
+	got, err = UndoSheet(before, deleted, deleted, "")
 	if err != nil || !reflect.DeepEqual(got, before) {
 		t.Fatal(got, err)
 	}
-	moved := TableBody{Columns: before.Columns, Rows: []TableRow{before.Rows[1], before.Rows[0]}}
-	got, err = UndoTable(before, moved, moved, "")
+	moved := SheetBody{Columns: before.Columns, Rows: []SheetRow{before.Rows[1], before.Rows[0]}}
+	got, err = UndoSheet(before, moved, moved, "")
 	if err != nil || !reflect.DeepEqual(got, before) {
 		t.Fatal(got, err)
 	}

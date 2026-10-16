@@ -24,6 +24,7 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { s.Close() }()
+	useLegacySheetFixture(t, s.db)
 	fixture, err := os.ReadFile("testdata/content_naming_legacy.sql")
 	if err != nil {
 		t.Fatal(err)

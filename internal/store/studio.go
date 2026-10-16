@@ -65,7 +65,7 @@ type StudioStore interface {
 	InstallWidgetPackage(context.Context, *StudioItem, int64) (*StudioItem, error)
 	NoteStore
 	DocumentStore
-	TableStore
+	SheetStore
 	GetWidgetData(context.Context, string) (*WidgetData, error)
 	WriteWidgetData(context.Context, string, string, string, int64, json.RawMessage) (*WidgetData, error)
 	ListWidgetLinks(context.Context, string) ([]*WidgetLink, error)

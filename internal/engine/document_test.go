@@ -145,7 +145,7 @@ func TestDocumentCreateStructuredEdit(t *testing.T) {
 	if unchanged.RevisionID != latest.RevisionID || len(revisions) != 2 {
 		t.Fatal("failed batch wrote history")
 	}
-	for _, name := range []string{tool.NoteCreate, tool.TableCreate} {
+	for _, name := range []string{tool.NoteCreate, tool.SheetCreate} {
 		if r := run(name, "foreign", map[string]any{}); r.Ok {
 			t.Fatal("unloaded plugin ran", name)
 		}

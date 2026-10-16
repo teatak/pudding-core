@@ -331,7 +331,7 @@ CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(ha
 
 CREATE TABLE studio_items (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('note','table','widget','document')),
+    kind TEXT NOT NULL CHECK(kind IN ('note','sheet','widget','document')),
     name TEXT NOT NULL,
     icon TEXT NOT NULL DEFAULT '',
     icon_color TEXT NOT NULL DEFAULT '',
@@ -413,7 +413,7 @@ CREATE TABLE widget_links (
  UNIQUE(item_id,left_entity,right_entity)
 );
 
-CREATE TABLE studio_table_ids (
+CREATE TABLE studio_sheet_ids (
     item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
     entity_kind TEXT NOT NULL,
     entity_id TEXT NOT NULL,

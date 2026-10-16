@@ -9,6 +9,7 @@ import (
 
 func TestWidgetParticipantMigrationPreservesStateAndRollsBack(t *testing.T) {
 	s, path := openTestStore(t)
+	useLegacySheetFixture(t, s.db)
 	ctx := context.Background()
 	w := createDataWidget(t, s, "identity")
 	page, err := s.OpenWidgetPage(ctx, w.ID, "library", w.ActiveRevision, "old")
@@ -41,7 +42,7 @@ func TestWidgetParticipantMigrationPreservesStateAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "41")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "42")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT json_extract(interaction,'$.participants[0].id') FROM widget_pages", "p")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM widget_pages WHERE json_type(interaction,'$.participants[0].roles') IS NOT NULL", "0")
 	restored, err := s.OpenWidgetPage(ctx, w.ID, "library", w.ActiveRevision, "new")
