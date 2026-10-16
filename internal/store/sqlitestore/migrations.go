@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 40
+	currentSchemaVersion       = 41
 )
 
 var (
@@ -34,6 +34,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 var schemaMigrations = map[int]schemaMigration{
+	41: migrateRichDocuments,
 	40: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS studio_document_edits (
     id TEXT PRIMARY KEY,
@@ -771,6 +772,14 @@ func setSchemaVersion(db *sql.DB, version int) error {
 }
 
 func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) error {
+	// Rebuilding the parent table must not cascade-delete dependent content.
+	// Startup has exclusive access and this pool has a single connection.
+	if version == 41 {
+		if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+			return err
+		}
+		defer db.Exec(`PRAGMA foreign_keys=ON`)
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("sqlite: begin migration to v%d: %w", version, err)
@@ -962,6 +971,7 @@ var currentSchemaContract = func() schemaContract {
 		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
 		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
 		"studio_item_content":   {"item_id", "body", "content_hash"},
+		"studio_rich_blobs":     {"item_id", "hash", "mime", "data"},
 		"studio_table_ids":      {"item_id", "entity_kind", "entity_id"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},

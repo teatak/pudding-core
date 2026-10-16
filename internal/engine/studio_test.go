@@ -20,7 +20,7 @@ func TestStudioChatToolsWithoutDesktop(t *testing.T) {
 	for _, id := range []string{"writer", "other"} {
 		loaded := []string{}
 		if id == "writer" {
-			loaded = []string{plugin.BuiltinStudioID}
+			loaded = []string{plugin.BuiltinMarkdownID}
 		}
 		if err := st.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock", LoadedPluginIDs: loaded}); err != nil {
 			t.Fatal(err)
@@ -33,9 +33,9 @@ func TestStudioChatToolsWithoutDesktop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, def := range tool.StudioDefinitions() {
-		if !tool.HasDefinition(defs, def.Name) {
-			t.Fatal("Chat tool missing", def.Name)
+	for _, name := range []string{tool.DocCreate, tool.DocRead, tool.DocEdit} {
+		if !tool.HasDefinition(defs, name) {
+			t.Fatal("Chat tool missing", name)
 		}
 	}
 	other, _ := eng.toolDefinitions(ctx, "other", store.ModeChat)

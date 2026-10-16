@@ -36,6 +36,10 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		out.Ok = err == nil
 		return out
 	}
+	if call.Name == tool.RichDocumentRead || call.Name == tool.RichDocumentCreate || call.Name == tool.RichDocumentEdit {
+		value, err := e.executeRichDocument(ctx, sessionID, turnID, call)
+		return respond(value, err)
+	}
 	args, err := tool.DecodeStudioArgs(call.Args)
 	if err != nil {
 		return respond(nil, err)

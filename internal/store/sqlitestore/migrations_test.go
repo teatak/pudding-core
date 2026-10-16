@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		41: "3d39b6b223566eb5372b7ec7b5aacfc3e6eca7064b111ffac5da5330bcb93892",
 		40: "3b56701abaee68d57c3ca56e8adb724e872dececfa6443407b1b9cc9756214e6",
 		39: "054017d2e390bbc3483527e4efef6f7ac5606559abccc2231ac1634fe8137fbf",
 		38: "dbd5d613660b2abb102c65e73b34f57a72d4e3791e30b113665696a46c6c618b", // Data-only: discard calibration made by the replaced estimator.

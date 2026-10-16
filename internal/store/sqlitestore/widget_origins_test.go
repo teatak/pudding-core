@@ -37,7 +37,7 @@ func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	if err != nil || got.ActiveRevision != w.ActiveRevision || got.Origin != nil {
 		t.Fatal(got, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "40")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "41")
 }
 
 func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {

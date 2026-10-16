@@ -286,6 +286,7 @@ type editorSettingsYAML struct {
 }
 
 type pluginsSettingsYAML struct {
+	ContentPluginsSplit bool            `yaml:"content_plugins_split,omitempty"`
 	ShowPreviewVersions *bool           `yaml:"show_preview_versions,omitempty"`
 	Enabled             map[string]bool `yaml:"enabled,omitempty"`
 }
@@ -540,6 +541,19 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 			cfg.Plugins.Enabled[current] = enabled
 		}
 		delete(cfg.Plugins.Enabled, id)
+		changed = true
+	}
+	// Inherit the former all-content switch only on upgrade. Subsequent toggles
+	// are independent; loading the old plugin never loads the new capabilities.
+	if !cfg.Plugins.ContentPluginsSplit {
+		if enabled, exists := cfg.Plugins.Enabled["artifacts"]; exists {
+			for _, id := range []string{"markdown", "docx", "tables"} {
+				if _, explicit := cfg.Plugins.Enabled[id]; !explicit {
+					cfg.Plugins.Enabled[id] = enabled
+				}
+			}
+		}
+		cfg.Plugins.ContentPluginsSplit = true
 		changed = true
 	}
 	if changed {

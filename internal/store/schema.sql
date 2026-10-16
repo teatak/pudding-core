@@ -331,7 +331,7 @@ CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending ON scheduled_task_runs(ha
 
 CREATE TABLE studio_items (
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK(kind IN ('doc','table','widget')),
+    kind TEXT NOT NULL CHECK(kind IN ('doc','table','widget','rich-document')),
     name TEXT NOT NULL,
     icon TEXT NOT NULL DEFAULT '',
     icon_color TEXT NOT NULL DEFAULT '',
@@ -466,4 +466,10 @@ CREATE TABLE widget_page_pins (
     scope TEXT NOT NULL,
     revision_hash TEXT NOT NULL,
     PRIMARY KEY(item_id, scope)
+);
+
+CREATE TABLE studio_rich_blobs (
+ item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
+ hash TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL,
+ PRIMARY KEY(item_id,hash)
 );

@@ -16,7 +16,7 @@ func TestTableChatToolsAndCSVWithoutDesktop(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)
 	eng := New(st, event.NewHub(), nil, st, WithPlugins(plugin.NewService(t.TempDir(), nil)))
-	if err := st.CreateSession(ctx, &store.Session{ID: "writer", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{plugin.BuiltinStudioID}}); err != nil {
+	if err := st.CreateSession(ctx, &store.Session{ID: "writer", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{plugin.BuiltinTablesID}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: "writer", TurnID: "turn", UserMessageID: "message", ClientMessageID: "input", UserText: "table"}); err != nil {

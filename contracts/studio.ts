@@ -13,7 +13,7 @@ export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const studioItem = z.object({
   origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
-  kind: z.enum(["doc", "table", "widget"]),
+  kind: z.enum(["doc", "table", "widget", "rich-document"]),
   name: z.string(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),
@@ -112,3 +112,27 @@ export type TableBody = z.infer<typeof tableBody>;
 export type TableContent = z.infer<typeof tableContent>;
 export type TableOperation = z.infer<typeof tableOperation>;
 export type TableWrite = { clientRequestID: string; operations?: TableOperation[]; restoreRevision?: string; expectedHash?: string; undoRevision?: string; rowID?: string };
+
+// Rich documents retain structured content and owned, immutable binary assets.
+export type RichNode = { type: string; attrs?: Record<string, unknown>; text?: string; content?: RichNode[]; marks?: {type: string; attrs?: Record<string, unknown>}[] };
+export const richNode: z.ZodType<RichNode> = z.lazy(() => z.object({type:z.string(),attrs:z.record(z.string(),z.unknown()).optional(),text:z.string().optional(),content:z.array(richNode).optional(),marks:z.array(z.object({type:z.string(),attrs:z.record(z.string(),z.unknown()).optional()})).optional()}));
+export const richDocumentBody = z.object({
+ schemaVersion:z.union([z.literal(1),z.literal(2)]),body:richNode,
+ headerFooter:z.object({header:z.object({default:richNode,first:richNode.optional(),even:richNode.optional()}),footer:z.object({default:richNode,first:richNode.optional(),even:richNode.optional()}),headerDistance:z.number().int().nonnegative(),footerDistance:z.number().int().nonnegative(),differentFirstPage:z.boolean(),differentOddEven:z.boolean()}).optional(),
+ page:z.object({width:z.number().int(),height:z.number().int(),top:z.number().int(),right:z.number().int(),bottom:z.number().int(),left:z.number().int()}),
+ assets:z.array(z.object({id:z.string(),hash:itemHash,type:z.enum(["image/png","image/jpeg","image/gif"]),width:z.number().optional(),height:z.number().optional()})),
+ warnings:z.array(z.string()),original:z.object({name:z.string(),hash:itemHash}).optional(),
+});
+export type RichDocumentBody = z.infer<typeof richDocumentBody>;
+export const richDocumentContent=z.object({itemID:z.string(),body:richDocumentBody,contentHash:itemHash,revisionID:itemHash});
+export type RichDocumentContent=z.infer<typeof richDocumentContent>;
+export type RichBlob={hash:string;type:string;data:string};
+export type RichOperation = { block_id: string } & (
+ | {kind:"replace_text";old_text:string;text?:string;content?:RichNode[]}
+ | {kind:"format_text";old_text:string;marks:NonNullable<RichNode["marks"]>}
+ | {kind:"set_block";node_type?:"paragraph"|"heading";attrs?:{level?:number;textAlign?:"left"|"center"|"right"|"justify"}}
+ | {kind:"insert_blocks";placement:"before"|"after";content:RichNode[]}
+ | {kind:"replace_block";content:RichNode[]}
+ | {kind:"delete_block"}
+);
+export type RichDocumentWrite={clientRequestID:string;expectedHash:string;body?:RichDocumentBody;blobs?:RichBlob[];restoreRevision?:string;undoRevision?:string;operations?:RichOperation[]};

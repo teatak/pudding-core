@@ -17,7 +17,7 @@ import (
 
 func decodeNativeContentRequest(c *cart.Context, target any) error {
 	// JSON escaping may expand each UTF-8 byte to six ASCII bytes.
-	limit := max(contracts.Studio().MaxDocumentBytes, contracts.Studio().MaxTableBytes)*6 + 65536
+	limit := max(max(contracts.Studio().MaxDocumentBytes, contracts.Studio().MaxTableBytes)*6, store.MaxRichAssetsBytes*4/3+store.MaxRichDocumentBytes*6) + 65536
 	data, err := io.ReadAll(io.LimitReader(c.Request.Body, int64(limit+1)))
 	if err != nil {
 		return err

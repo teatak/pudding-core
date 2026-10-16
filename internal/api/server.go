@@ -193,6 +193,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/studio/items/:itemID/archive").POST(s.archiveStudioItem)
 	app.Route("/studio/items/:itemID/restore").POST(s.restoreStudioItem)
 	app.Route("/studio/items/:itemID/content").GET(s.getStudioContent).PUT(s.writeDocument)
+	app.Route("/studio/items/:itemID/rich-content").GET(s.getRichDocument).PUT(s.writeRichDocument)
+	app.Route("/studio/items/:itemID/rich-assets/:hash").GET(s.getRichBlob)
 	app.Route("/studio/items/:itemID/edit-operations").GET(s.getDocumentEditState).POST(s.changeDocumentEdit)
 	app.Route("/studio/items/:itemID/operations").POST(s.writeTable)
 	app.Route("/studio/items/:itemID/assets").POST(s.uploadDocumentAsset)
