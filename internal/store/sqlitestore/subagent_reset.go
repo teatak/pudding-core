@@ -181,7 +181,9 @@ func (s *Store) ResetSubagent(ctx context.Context, in store.SubagentResetInput) 
 			}
 			out.Queued, out.ClientMessageID = true, in.Input.ClientMessageID
 		}
-		if err := insertEventTx(ctx, tx, &event.Event{SessionID: child.ID, TurnID: resetTurnID, Kind: event.TurnCompleted, AssistantMessageID: resetMessageID}); err != nil {
+		// Maintenance refreshes canonical history without announcing a finished
+		// task. The paired desktop refreshes turns on collaboration changes.
+		if err := insertEventTx(ctx, tx, &event.Event{SessionID: child.ID, Kind: event.CollaborationChanged}); err != nil {
 			return err
 		}
 		return insertEventTx(ctx, tx, &event.Event{SessionID: parent.ID, Kind: event.CollaborationChanged})
