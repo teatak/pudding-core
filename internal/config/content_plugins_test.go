@@ -12,9 +12,9 @@ func TestContentPluginEnablementSplitsOnce(t *testing.T) {
 		want       map[string]bool
 	}{
 		{"default", "    browser: false\n", map[string]bool{}},
-		{"disabled", "    artifacts: false\n", map[string]bool{"markdown": false, "docx": false, "tables": false}},
-		{"legacy disabled", "    studio: false\n", map[string]bool{"markdown": false, "docx": false, "tables": false}},
-		{"explicit wins", "    artifacts: true\n    docx: false\n", map[string]bool{"markdown": true, "docx": false, "tables": true}},
+		{"disabled", "    artifacts: false\n", map[string]bool{"note-authoring": false, "document-authoring": false, "sheet-authoring": false}},
+		{"legacy disabled", "    studio: false\n", map[string]bool{"note-authoring": false, "document-authoring": false, "sheet-authoring": false}},
+		{"explicit wins", "    artifacts: true\n    docx: false\n", map[string]bool{"note-authoring": true, "document-authoring": false, "sheet-authoring": true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -30,32 +30,32 @@ func TestContentPluginEnablementSplitsOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range []string{"markdown", "docx", "tables"} {
+			for _, id := range []string{"note-authoring", "document-authoring", "sheet-authoring"} {
 				want, exists := tc.want[id]
 				if value, ok := got[id]; ok != exists || value != want {
 					t.Fatalf("%s = %v; want %v", id, got, tc.want)
 				}
 			}
-			if err := m.SetPluginEnabled(ctx, "artifacts", false); err != nil {
+			if err := m.SetPluginEnabled(ctx, "artifact", false); err != nil {
 				t.Fatal(err)
 			}
-			if err := m.SetPluginEnabled(ctx, "markdown", true); err != nil {
+			if err := m.SetPluginEnabled(ctx, "note-authoring", true); err != nil {
 				t.Fatal(err)
 			}
-			if err := m.DeletePluginEnablement(ctx, "tables"); err != nil {
+			if err := m.DeletePluginEnablement(ctx, "sheet-authoring"); err != nil {
 				t.Fatal(err)
 			}
 			got, err = NewManager(home).ListPluginEnablement(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !got["markdown"] || got["artifacts"] {
+			if !got["note-authoring"] || got["artifact"] {
 				t.Fatal("switches not independent", got)
 			}
-			if _, exists := got["tables"]; exists {
+			if _, exists := got["sheet-authoring"]; exists {
 				t.Fatal("migration repeated after restart", got)
 			}
-			if got["docx"] != tc.want["docx"] {
+			if got["document-authoring"] != tc.want["document-authoring"] {
 				t.Fatal("sibling switch changed", got)
 			}
 		})

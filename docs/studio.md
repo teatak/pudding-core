@@ -40,7 +40,7 @@ Desktop seals each human editing pause after 1 second; every persisted human sav
 
 `contracts/studio.json` bounds a note at 2 MiB UTF-8, a raster asset at 10 MiB and one edit call at 100 anchors. Tool reads accept Unicode character offsets and limits (default 16000, at most 16384 characters / 64 KiB) and return `nextOffset` when needed. PNG, JPEG, GIF and WebP uploads are detected from their bytes and atomically stored at `<home>/studio/<id>/content/assets/<sha256>.<ext>`. Markdown uses relative `assets/...` paths. Desktop fetches these authenticated assets as blobs, suppresses remote image requests and never executes raw HTML. Export returns the Markdown source unchanged.
 
-The optional Core `artifacts` plugin exposes only `builtin_artifact_list` and `builtin_artifact_open`. The independent `markdown` plugin exposes `builtin_note_create`, `builtin_note_read` and `builtin_note_edit`; `tables` owns `builtin_table_create/read/update`; `docx` owns `builtin_document_create/read/edit`. Each plugin loads its own tools and Skill in Chat mode. A known content ID does not require loading `artifacts` or sibling plugins. Tools execute in Core with explicit session and turn scope, without Desktop or per-write approval; scheduled turns and child sessions use the same path. Creation opens a mount and returns `itemID`, `mountID`, `contentHash` and `revisionID`. Content is read explicitly through tools, not injected into system instructions. There is no AI deletion tool. Widget source editing remains a Code-mode capability of `widget-authoring`.
+The optional Core `artifact` plugin exposes only `builtin_artifact_list` and `builtin_artifact_open`. The independent `note-authoring` plugin exposes `builtin_note_create`, `builtin_note_read` and `builtin_note_edit`; `sheet-authoring` owns `builtin_table_create/read/update`; `document-authoring` owns `builtin_document_create/read/edit`. Each plugin loads its own tools and Skill in Chat mode. A known content ID does not require loading `artifact` or sibling plugins. Tools execute in Core with explicit session and turn scope, without Desktop or per-write approval; scheduled turns and child sessions use the same path. Creation opens a mount and returns `itemID`, `mountID`, `contentHash` and `revisionID`. Content is read explicitly through tools, not injected into system instructions. There is no AI deletion tool. Widget source editing remains a Code-mode capability of `widget-authoring`.
 
 ### Tool names and legacy doc retirement
 
@@ -50,9 +50,9 @@ Studio Notes is the lightweight Markdown editor; Studio Documents is the structu
 
 | Product | Plugin ID | Canonical tools |
 | --- | --- | --- |
-| Notes | `markdown` | `builtin_note_create/read/edit` |
-| Documents | `docx` | `builtin_document_create/read/edit` |
-| Content Library | `artifacts` | `builtin_artifact_list/open` |
+| Notes | `note-authoring` | `builtin_note_create/read/edit` |
+| Documents | `document-authoring` | `builtin_document_create/read/edit` |
+| Content Library | `artifact` | `builtin_artifact_list/open` |
 
 Release audit: the latest stable Desktop [v0.5.0](https://github.com/teatak/pudding/releases/tag/v0.5.0), published 2026-10-08, pins Core `1571c7bacc4aa7f9e2dd7b9e75329d0ef0f2011e` and shipped only `builtin_doc_create/read/edit` for Markdown. `builtin_rich_document_*` and the intermediate Markdown `builtin_document_*` names were not released; they have no compatibility aliases. `builtin_document_*` now exclusively edits structured Documents, never Markdown.
 
@@ -69,7 +69,7 @@ Retain this compatibility for six **calendar months after the first stable Deskt
 
 At retirement remove the exact legacy map and its execution, capability, plugin ownership, history and Desktop display/event/editing callers, plus compatibility-only tests. Retain canonical `note_*`/`document_*` tests and unrelated tool compatibility. Do not add a runtime clock gate or rewrite saved history. After retirement, old names are no longer executable or replayable as current tools; old history remains stored and uses generic UI fallback.
 
-Plugin IDs (`markdown`, `docx`), item IDs, Markdown source, structured body/versions and `.md`/`.docx` formats remain unchanged; stored kinds are `note` and `document`, and mentions use `@note/<id>` (while accepting historical `@doc/<id>` and `doc`/`rich-document` references). New notes use a notebook icon; documents use a page icon. Desktop presents the old default note icon as a notebook without changing stored data or other custom icons.
+Plugin IDs now use `note-authoring` and `document-authoring` with [legacy identity compatibility](plugin-ids.md). Item IDs, Markdown source, structured body/versions and `.md`/`.docx` formats remain unchanged; stored kinds are `note` and `document`, and mentions use `@note/<id>` (while accepting historical `@doc/<id>` and `doc`/`rich-document` references). New notes use a notebook icon; documents use a page icon. Desktop presents the old default note icon as a notebook without changing stored data or other custom icons.
 
 ### Note range leases (protocol 28 / schema 40)
 
@@ -89,7 +89,7 @@ All working-body writes, including legacy anchor edits, replacement, restore and
 
 Every successful write atomically updates content/hash/head, immutable version, author and request fingerprint. Retrying the same ID/payload returns the original result without replaying it over newer edits. Reuse with different operations is rejected. Restore requires `expectedHash` and appends a new version; it never rewinds the history. Optional expected hashes produce `content_conflict`; stale cell expectations produce `cell_conflict` with row/column IDs.
 
-The independent Chat-mode `tables` plugin exposes `builtin_table_create`, `builtin_table_read` and `builtin_table_update`. Creation opens a mount. Reading accepts optional row/column IDs, then applies offset/limit to selected rows in canonical order; responses provide `nextOffset`, identity metadata and JSON or CSV. Writes run entirely in Core with trusted session/turn authorship, without Desktop or per-write approval. `@table/<id>(name)` references the item.
+The independent Chat-mode `sheet-authoring` plugin exposes `builtin_table_create`, `builtin_table_read` and `builtin_table_update`. Creation opens a mount. Reading accepts optional row/column IDs, then applies offset/limit to selected rows in canonical order; responses provide `nextOffset`, identity metadata and JSON or CSV. Writes run entirely in Core with trusted session/turn authorship, without Desktop or per-write approval. `@table/<id>(name)` references the item.
 
 Limits come from `contracts/studio.json`: 10,000 rows, 100 columns, 10 MiB serialized JSON, 64 KiB per string cell, 1,000 operations per batch and 200 rows / 1 MiB per tool read. Column names and select options are at most 200 UTF-8 bytes; at most 100 distinct nonempty select options. Oversized read rows require a narrower column selection. There are no formulas, filter views or merged cells.
 
@@ -162,8 +162,8 @@ Core no longer stores business roles. Authors store seats, readiness, participan
 
 ## Content plugin split
 
-The UI keeps a flat plugin list: Content Library (`artifacts`), Note Authoring (`markdown`), Document Authoring (`docx`) and Table Authoring (`tables`). Enablement and session loading are independent. Loading one plugin never implicitly loads another; already loaded plugins remain until explicitly unloaded.
+The UI keeps a flat plugin list: Content Library (`artifact`), Note Authoring (`note-authoring`), Document Authoring (`document-authoring`) and Table Authoring (`sheet-authoring`). Enablement and session loading are independent. Loading one plugin never implicitly loads another; already loaded plugins remain until explicitly unloaded.
 
-On upgrade, `plugins.content_plugins_split` records the one-time settings migration: explicit `artifacts` enablement (including the legacy `studio` alias) is copied to new type plugins only where they have no explicit value. Later enable/disable changes do not propagate. Historical loaded `studio`/`artifacts` sessions retain only common list/open access and load type capabilities on demand. Stored content, revisions and historical tool names are unchanged.
+On upgrade, `plugins.content_plugins_split` records the one-time settings migration: explicit `artifact` enablement (including the legacy `studio` alias) is copied to new type plugins only where they have no explicit value. Later enable/disable changes do not propagate. Historical loaded `studio`/`artifact` sessions retain only common list/open access and load type capabilities on demand. Stored content, revisions and historical tool names are unchanged.
 
 The Documents editor uses structured `document` content with DOCX import/export. Its AI tools create documents, read text/outlines/nodes and apply atomic local body operations with CAS, immutable session-authored history and selective user undo. Headers/footers, layout and unmentioned assets are preserved; AI range leases and complex layout edits remain deferred. Native typed tables are not XLSX workbooks. Tables embedded in Markdown or DOCX remain part of their owning documents.

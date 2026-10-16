@@ -74,8 +74,8 @@ func TestStoredStudioSkillResolvesCurrentArtifactInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	plugins := &referencePlugins{
-		defs: []*plugin.Definition{{ID: "artifacts", Enabled: true, RequiredMode: "chat"}},
-		docs: map[string]string{"artifacts": "CURRENT_ARTIFACT_INSTRUCTIONS"},
+		defs: []*plugin.Definition{{ID: "artifact", Enabled: true, RequiredMode: "chat"}},
+		docs: map[string]string{"artifact": "CURRENT_ARTIFACT_INSTRUCTIONS"},
 	}
 	b := New(st, nil, WithSkillSources(plugins, nil))
 	req := provider.Request{Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{
@@ -88,7 +88,7 @@ func TestStoredStudioSkillResolvesCurrentArtifactInstructions(t *testing.T) {
 	if !strings.Contains(resolved.Messages[0].Parts[0].Content, "CURRENT_ARTIFACT_INSTRUCTIONS") {
 		t.Fatalf("old reference not resolved: %+v", resolved.Messages)
 	}
-	if !reflect.DeepEqual(plugins.reads, []string{"artifacts:artifacts"}) {
+	if !reflect.DeepEqual(plugins.reads, []string{"artifact:artifact"}) {
 		t.Fatalf("skill reads = %v", plugins.reads)
 	}
 	// Renaming must not bypass disabled-plugin enforcement.
