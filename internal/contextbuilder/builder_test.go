@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/plugin"
@@ -55,7 +56,7 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	if !strings.Contains(req.System, "You are Pudding") || !strings.Contains(req.System, "请尽量简短。") {
 		t.Fatalf("unexpected system prompt: %q", req.System)
 	}
-	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "hi") || !strings.Contains(req.Messages[0].Text, "<message-meta>") {
 		t.Fatalf("unexpected messages: %+v", req.Messages)
 	}
 }
@@ -922,7 +923,7 @@ func TestBuildSkipsASRAudioAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[0].Text != "识别文本" {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || !strings.Contains(req.Messages[0].Parts[0].Text, "识别文本") {
 		t.Fatalf("asr audio should not enter provider context: %+v", req.Messages)
 	}
 }
@@ -993,7 +994,7 @@ func TestBuildFallsBackToVoiceTranscriptWhenAudioUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[0].Text != "降级文字" {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || !strings.Contains(req.Messages[0].Parts[0].Text, "降级文字") {
 		t.Fatalf("unsupported voice input should use ASR transcript: %+v", req.Messages)
 	}
 }
@@ -1227,7 +1228,11 @@ func TestBuildUsesLatestCompactBoundary(t *testing.T) {
 	}
 	got := make([]string, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		got = append(got, msg.Text)
+		text := msg.Text
+		if idx := strings.Index(text, "</message-meta>\n"); strings.HasPrefix(text, "<message-meta>\n") && idx != -1 {
+			text = text[idx+len("</message-meta>\n"):]
+		}
+		got = append(got, text)
 	}
 	want := []string{"summary of old history", "tail user", "tail assistant", "after compact"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -1302,4 +1307,51 @@ func testMessageIDByText(t *testing.T, msgs []*store.Message, text string) strin
 	}
 	t.Fatalf("message text %q not found in %+v", text, msgs)
 	return ""
+}
+
+func TestBuildUserMessageTime(t *testing.T) {
+	ms := storetest.New(t)
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	testTime := time.Date(2026, 10, 17, 16, 20, 0, 0, time.FixedZone("CST", 8*3600))
+	msgs := []*store.Message{
+		{
+			ID:        "m1",
+			SessionID: "s1",
+			TurnID:    "t1",
+			Role:      store.RoleUser,
+			Parts:     []store.ContentPart{{Type: store.ContentPartText, Text: "hello world"}},
+			CreatedAt: testTime,
+		},
+		{
+			ID:        "m2",
+			SessionID: "s1",
+			TurnID:    "t2",
+			Role:      store.RoleUser,
+			Parts:     []store.ContentPart{{Type: store.ContentPartText, Text: "zero time message"}},
+		},
+	}
+
+	b := New(ms, staticPrompt{})
+	req, err := b.BuildForProviderWithHistory(ctx, "s1", "mock", "mock", string(store.ModeChat), nil, msgs, provider.ModelConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(req.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(req.Messages))
+	}
+
+	expectedPrefix := "<message-meta>\ntime: 2026-10-17 16:20:00 +08:00\n</message-meta>\n"
+	if req.Messages[0].Text != expectedPrefix+"hello world" {
+		t.Fatalf("expected message with time prefix, got: %q", req.Messages[0].Text)
+	}
+
+	// Zero time message should have no prefix
+	if req.Messages[1].Text != "zero time message" {
+		t.Fatalf("expected zero-time message without prefix, got: %q", req.Messages[1].Text)
+	}
 }

@@ -7,10 +7,12 @@ package contextbuilder
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/prompt"
@@ -200,6 +202,7 @@ func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, provid
 		case store.RoleUser:
 			flushAssistant()
 			parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
+			parts = withUserMessageMeta(parts, m.CreatedAt)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 		case store.RoleSystem:
 			flushAssistant()
@@ -403,6 +406,8 @@ func escapeSystemReminderText(text string) string {
 	replacer := strings.NewReplacer(
 		"<system-reminder>", "<system-reminder escaped>",
 		"</system-reminder>", "</system-reminder escaped>",
+		"<message-meta>", "<message-meta escaped>",
+		"</message-meta>", "</message-meta escaped>",
 	)
 	return replacer.Replace(text)
 }
@@ -832,4 +837,21 @@ func cloneProviderParts(parts []provider.Part) []provider.Part {
 		out = append(out, cp)
 	}
 	return out
+}
+
+func withUserMessageMeta(parts []provider.Part, createdAt time.Time) []provider.Part {
+	if createdAt.IsZero() {
+		return parts
+	}
+	prefix := fmt.Sprintf("<message-meta>\ntime: %s\n</message-meta>\n", createdAt.Format("2006-01-02 15:04:05 -07:00"))
+	for i, part := range parts {
+		if part.Type == provider.PartText {
+			if strings.HasPrefix(part.Text, "<message-meta>") {
+				return parts
+			}
+			parts[i].Text = prefix + part.Text
+			return parts
+		}
+	}
+	return parts
 }

@@ -359,9 +359,9 @@ func TestSteerContinuesCurrentTurnWithCanonicalUserInput(t *testing.T) {
 	}
 	second := requests[1].Messages
 	if len(second) != 3 ||
-		second[0].Role != provider.RoleUser || second[0].Text != "initial" ||
+		second[0].Role != provider.RoleUser || !strings.Contains(second[0].Text, "initial") ||
 		second[1].Role != provider.RoleAssistant || second[1].Text != "first answer" ||
-		second[2].Role != provider.RoleUser || second[2].Text != "change direction" {
+		second[2].Role != provider.RoleUser || !strings.Contains(second[2].Text, "change direction") {
 		t.Fatalf("steered request order is wrong: %+v", second)
 	}
 	page, err := ms.ListTurnsPage(ctx, sess.ID, "", 0)
