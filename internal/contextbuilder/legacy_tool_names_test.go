@@ -62,11 +62,17 @@ func TestRenamedArtifactAndSubtaskHistoryRetainsCallsAndResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pair := range [][2]string{
-		{"builtin_doc_create", "builtin_note_create"},
+		{"builtin_doc_create", "builtin_page_create"},
 		{"builtin_table_read", "builtin_sheet_read"},
 		{"builtin_table_update", "builtin_sheet_edit"},
-		{"builtin_doc_read", "builtin_note_read"},
-		{"builtin_doc_edit", "builtin_note_edit"},
+		{"builtin_doc_read", "builtin_page_read"},
+		{"builtin_doc_edit", "builtin_page_edit"},
+		{"builtin_note_create", "builtin_page_create"},
+		{"builtin_note_read", "builtin_page_read"},
+		{"builtin_note_edit", "builtin_page_edit"},
+		{"builtin_page_create", "builtin_page_create"},
+		{"builtin_page_read", "builtin_page_read"},
+		{"builtin_page_edit", "builtin_page_edit"},
 		{"builtin_studio_list", "builtin_artifact_list"},
 		{"builtin_studio_open", "builtin_artifact_open"},
 		{"builtin_collaboration_list", "builtin_subagent_list"},
@@ -135,14 +141,17 @@ func TestRenamedToolNamesAcrossProviderContinuations(t *testing.T) {
 			{"builtin_subtask_dispatch", "builtin_subagent_dispatch"},
 			{"builtin_collaboration_dispatch", "builtin_subagent_dispatch"},
 			{"builtin_subagent_dispatch", "builtin_subagent_dispatch"},
-			{"builtin_doc_create", "builtin_note_create"},
+			{"builtin_doc_create", "builtin_page_create"},
 			{"builtin_table_read", "builtin_sheet_read"},
 			{"builtin_table_update", "builtin_sheet_edit"},
-			{"builtin_doc_read", "builtin_note_read"},
-			{"builtin_doc_edit", "builtin_note_edit"},
-			{"builtin_note_create", "builtin_note_create"},
-			{"builtin_note_read", "builtin_note_read"},
-			{"builtin_note_edit", "builtin_note_edit"},
+			{"builtin_doc_read", "builtin_page_read"},
+			{"builtin_doc_edit", "builtin_page_edit"},
+			{"builtin_note_create", "builtin_page_create"},
+			{"builtin_note_read", "builtin_page_read"},
+			{"builtin_note_edit", "builtin_page_edit"},
+			{"builtin_page_create", "builtin_page_create"},
+			{"builtin_page_read", "builtin_page_read"},
+			{"builtin_page_edit", "builtin_page_edit"},
 		} {
 			storedName, currentName := pair[0], pair[1]
 			t.Run(protocol.kind+"/"+storedName, func(t *testing.T) {
@@ -179,7 +188,7 @@ func TestRenamedToolNamesAcrossProviderContinuations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, retired := range []string{"builtin_subtask_dispatch", "builtin_collaboration_dispatch", "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"} {
+				for _, retired := range []string{"builtin_subtask_dispatch", "builtin_collaboration_dispatch", "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit", "builtin_note_create", "builtin_note_read", "builtin_note_edit"} {
 					if strings.Contains(string(wire), retired) {
 						t.Fatalf("retired tool name survived native replay: %s", wire)
 					}

@@ -47,6 +47,7 @@ func TestBuildReplaysNotificationDuringToolCall(t *testing.T) {
 	if len(before) != 4 || before[2].Text != "Action finished" {
 		t.Fatalf("fixture must reproduce interleaved history: %+v", before)
 	}
+	wantNotice := fmt.Sprintf("<message-meta>\ntime: %s\n</message-meta>\nAction finished", before[2].CreatedAt.Format("2006-01-02 15:04:05 -07:00"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Input []struct {
@@ -77,7 +78,7 @@ func TestBuildReplaysNotificationDuringToolCall(t *testing.T) {
 					http.Error(w, "No tool output found for tool call call_action", 400)
 					return
 				}
-				if item.Content == "Action finished" {
+				if item.Content == wantNotice {
 					notices++
 				}
 			}

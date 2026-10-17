@@ -59,7 +59,7 @@ PRAGMA user_version=42;`); err != nil {
 	defer s.Close()
 
 	// 1. Version and Pragmas
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "43")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
 	assertWorkspaceMigrationValue(t, s.db, "PRAGMA foreign_keys", "1")
 	assertWorkspaceMigrationValue(t, s.db, "PRAGMA integrity_check", "ok")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
