@@ -760,7 +760,7 @@ func setSchemaVersion(db *sql.DB, version int) error {
 func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) error {
 	// Rebuilding the parent table must not cascade-delete dependent content.
 	// Startup has exclusive access and this pool has a single connection.
-	if version == 41 || version == 42 {
+	if version == 41 || version == 42 || version == 43 {
 		if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 			return err
 		}
