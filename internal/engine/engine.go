@@ -3114,6 +3114,11 @@ func currentTurnProviderMessage(parts []store.ContentPart, continuations []provi
 	// provider state cannot reintroduce the old names. Keep stored parts intact.
 	cloned := false
 	for i, part := range parts {
+		// Native replay would restore the unescaped assistant text. Rebuild
+		// the chain from projected parts, as the historical builder does.
+		if part.Type == store.ContentPartText && contextbuilder.EscapeSourceText(part.Text) != part.Text {
+			continuations = nil
+		}
 		if part.Type != store.ContentPartToolUse && part.Type != store.ContentPartToolResult {
 			continue
 		}
@@ -3180,6 +3185,14 @@ func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, turnID, 
 		case store.ContentPartAttachment:
 			attachmentParts := providerAttachmentParts(sessionID, part, attachmentHome, cfg)
 			out = append(out, provider.AttributeToolAttachments(attachmentParts, sourceCallID, sourceTool, part.AttachmentCreatedAt)...)
+		}
+	}
+	for i := range out {
+		switch out[i].Type {
+		case provider.PartText:
+			out[i].Text = contextbuilder.EscapeSourceText(out[i].Text)
+		case provider.PartToolResult:
+			out[i].Content = contextbuilder.EscapeSourceText(out[i].Content)
 		}
 	}
 	return out
