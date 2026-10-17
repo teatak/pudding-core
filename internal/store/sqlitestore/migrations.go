@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 43
+	currentSchemaVersion       = 44
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished document migrations 40–41 are consolidated into destination 42.
 var schemaMigrations = map[int]schemaMigration{
+	44: migratePageEdits,
 	43: migratePages,
 	42: migrateSheets,
 	41: func(tx *sql.Tx) error { return nil },
@@ -988,7 +989,10 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["studio_items"] = append(out.tables["studio_items"], "origin")
 	out.tables["widget_page_pins"] = []string{"item_id", "scope", "revision_hash"}
 	out.tables["widget_pages"] = []string{"id", "item_id", "scope", "revision_hash", "target_id", "version", "data", "interaction"}
+	out.tables["studio_document_edits"] = []string{"id", "item_id", "state", "updated_at", "payload"}
+	out.tables["studio_document_edit_requests"] = []string{"item_id", "client_request_id", "request_hash", "result"}
 	out.indexes = append(out.indexes, "studio_items_archived_at", "studio_items_package")
+	out.indexes = append(out.indexes, "studio_document_edits_item")
 	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")

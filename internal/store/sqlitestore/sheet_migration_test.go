@@ -48,7 +48,7 @@ func TestSheetMigrationV41PreservesContentAndDependents(t *testing.T) {
 	}
 	defer s.Close()
 	checks := [][2]string{
-		{"PRAGMA user_version", "43"}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
+		{"PRAGMA user_version", "44"}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
 		{"SELECT count(*) FROM pragma_foreign_key_check", "0"},
 		{"SELECT count(*) FROM sqlite_master WHERE name='studio_table_ids'", "0"},
 		{"SELECT count(*) FROM studio_sheet_ids", "3"},
@@ -153,7 +153,7 @@ func TestSheetMigrationRetainsEarlyV41DocumentRepair(t *testing.T) {
 	}
 	defer s.Close()
 	assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='old'", "page")
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "43")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
 }
 
 // Earlier migration tests need an actual pre-sheet schema, not a v42 database

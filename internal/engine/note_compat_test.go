@@ -27,12 +27,12 @@ func TestLegacyNoteCurrentTurnContinuations(t *testing.T) {
 		{provider.ContinuationGoogle, `[{"functionCall":{"id":"call","name":%q,"args":{}}}]`, google.RequestInput},
 	} {
 		for _, action := range []string{"create", "read", "edit"} {
-			for _, prefix := range []string{"doc", "note", "document"} {
+			for _, prefix := range []string{"doc", "note", "page", "document"} {
 				name := "builtin_" + prefix + "_" + action
 				t.Run(protocol.kind+"/"+name, func(t *testing.T) {
 					current := name
-					if prefix == "doc" {
-						current = "builtin_note_" + action
+					if prefix == "doc" || prefix == "note" {
+						current = "builtin_page_" + action
 					}
 					parts := []store.ContentPart{
 						{Type: store.ContentPartToolUse, Name: name, CallID: "call", Args: json.RawMessage(`{}`)},
@@ -43,7 +43,7 @@ func TestLegacyNoteCurrentTurnContinuations(t *testing.T) {
 					messages := requestMessagesWithTurnParts(nil, parts, continuations, "s", "t", "", provider.ModelConfig{}, false)
 					count := 0
 					for _, message := range messages {
-						if prefix == "doc" && len(message.Continuations) != 0 {
+						if name != current && len(message.Continuations) != 0 {
 							t.Fatal("legacy native state survived projection")
 						}
 						for _, part := range message.Parts {
@@ -56,7 +56,7 @@ func TestLegacyNoteCurrentTurnContinuations(t *testing.T) {
 						}
 					}
 					wire, err := json.Marshal(protocol.wire(provider.Request{Messages: messages}).Messages)
-					if err != nil || count != 2 || !strings.Contains(string(wire), current) || strings.Contains(string(wire), "builtin_doc_") {
+					if err != nil || count != 2 || !strings.Contains(string(wire), current) || strings.Contains(string(wire), "builtin_doc_") || strings.Contains(string(wire), "builtin_note_") {
 						t.Fatalf("incorrect continuation: %s, %v", wire, err)
 					}
 					after, _ := json.Marshal([]any{parts, continuations})

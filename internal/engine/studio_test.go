@@ -15,16 +15,12 @@ import (
 )
 
 func TestStudioChatToolsWithoutDesktop(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		name := "canonical"
-		if legacy {
-			name = "legacy"
-		}
-		t.Run(name, func(t *testing.T) { testStudioChatTools(t, legacy) })
+	for _, prefix := range []string{"page", "note", "doc"} {
+		t.Run(prefix, func(t *testing.T) { testStudioChatTools(t, prefix) })
 	}
 }
 
-func testStudioChatTools(t *testing.T, legacy bool) {
+func testStudioChatTools(t *testing.T, prefix string) {
 	ctx := context.Background()
 	st := storetest.New(t)
 	eng := New(st, event.NewHub(), nil, st, WithPlugins(plugin.NewService(t.TempDir(), nil)))
@@ -56,9 +52,7 @@ func testStudioChatTools(t *testing.T, legacy bool) {
 	run := func(name, id string, args any) tool.Result {
 		t.Helper()
 		raw, _ := json.Marshal(args)
-		if legacy {
-			name = strings.Replace(name, "builtin_note_", "builtin_doc_", 1)
-		}
+		name = strings.Replace(name, "builtin_page_", "builtin_"+prefix+"_", 1)
 		parts := &turnPartAccumulator{}
 		parts.AppendTool(provider.ToolCallChunk{Index: 0, CallID: id, Name: name, ArgsDelta: string(raw)})
 		status, message, _, _ := eng.executePendingTools(ctx, "writer", "turn", store.ModeChat, defs, parts)
@@ -82,10 +76,10 @@ func testStudioChatTools(t *testing.T, legacy bool) {
 		ContentHash string `json:"contentHash"`
 	}
 	json.Unmarshal([]byte(result.Content), &created)
-	originalLegacy := legacy
-	legacy = false // Retry an old create under the canonical name without duplicating the item.
+	originalPrefix := prefix
+	prefix = "page" // Retry an old create under the canonical name without duplicating the item.
 	run(tool.NoteCreate, "create", map[string]any{"name": "Notes", "body": "甲\n\n乙"})
-	legacy = originalLegacy
+	prefix = originalPrefix
 	items, _ := st.ListStudioItems(ctx, store.StudioItemsActive)
 	if len(items) != 1 {
 		t.Fatal("retry created duplicate document")
@@ -97,7 +91,7 @@ func testStudioChatTools(t *testing.T, legacy bool) {
 	}
 	mounts, _ := st.ListStudioMounts(ctx, "writer")
 	others, _ := st.ListStudioMounts(ctx, "other")
-	if len(mounts) != 1 || len(others) != 0 || mounts[0].Kind != "note" {
+	if len(mounts) != 1 || len(others) != 0 || mounts[0].Kind != "page" {
 		t.Fatal("mount scope incorrect")
 	}
 	revisions, _ := st.ListStudioItemRevisions(ctx, created.ItemID)
