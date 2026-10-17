@@ -307,7 +307,7 @@ export const studioMount = z.object({
   sourceSessionID: z.string().optional(),
   createdBySessionID: z.string().optional(),
   updatedBySessionID: z.string().optional(),
-  kind: z.enum(["note", "sheet", "widget", "document"]),
+  kind: z.preprocess((v) => (v === "doc" || v === "note" ? "page" : v), z.enum(["page", "sheet", "widget"])),
   title: z.string().optional(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),

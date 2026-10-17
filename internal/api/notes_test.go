@@ -30,7 +30,11 @@ func TestNoteAPIAndWidgetBoundary(t *testing.T) {
 	if err := json.Unmarshal(call("POST", "/studio/items", []byte(`{"kind":"note","name":"Notes","body":"# Hello\n\nInitial"}`), 201), &item); err != nil {
 		t.Fatal(err)
 	}
+	if item.Kind != "page" {
+		t.Fatalf("expected kind page, got %s", item.Kind)
+	}
 	path := "/studio/items/" + item.ID
+
 	var doc store.NoteContent
 	json.Unmarshal(call("GET", path+"/content", nil, 200), &doc)
 	body, _ := json.Marshal(map[string]any{"clientRequestID": "save", "body": "# Updated", "expectedHash": doc.ContentHash})
