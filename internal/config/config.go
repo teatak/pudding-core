@@ -554,7 +554,7 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 	// are independent; loading the old plugin never loads the new capabilities.
 	if !cfg.Plugins.ContentPluginsSplit {
 		if enabled, exists := cfg.Plugins.Enabled["artifact"]; exists {
-			for _, id := range []string{"note-authoring", "document-authoring", "sheet-authoring"} {
+			for _, id := range []string{"page-authoring", "sheet-authoring"} {
 				if _, explicit := cfg.Plugins.Enabled[id]; !explicit {
 					cfg.Plugins.Enabled[id] = enabled
 				}

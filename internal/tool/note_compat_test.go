@@ -9,9 +9,12 @@ import (
 
 func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T) {
 	for old, current := range map[string]string{
-		"builtin_doc_create": NoteCreate,
-		"builtin_doc_read":   NoteRead,
-		"builtin_doc_edit":   NoteEdit,
+		"builtin_doc_create":  PageCreate,
+		"builtin_doc_read":    PageRead,
+		"builtin_doc_edit":    PageEdit,
+		"builtin_note_create": PageCreate,
+		"builtin_note_read":   PageRead,
+		"builtin_note_edit":   PageEdit,
 	} {
 		if !HasDefinition(BuiltinDefinitions(), current) || HasDefinition(BuiltinDefinitions(), old) {
 			t.Fatalf("catalog must advertise only %s", current)
@@ -28,19 +31,9 @@ func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T
 			}
 		}
 	}
-	for _, name := range []string{"builtin_doc_delete", "builtin_doc_create_extra", DocumentCreate, DocumentRead, NoteEdit} {
+	for _, name := range []string{"builtin_doc_delete", "builtin_doc_create_extra", NoteEdit} {
 		if NormalizeLegacyNoteTool(name) != name {
 			t.Fatalf("unexpected alias: %s", name)
-		}
-	}
-	for _, action := range []string{"create", "read", "edit"} {
-		current := "builtin_document_" + action
-		old := "builtin_rich_document_" + action
-		if owner, ok := BuiltinPluginIDForTool(current); !ok || owner != plugin.BuiltinDocumentAuthoringID || !HasDefinition(BuiltinDefinitions(), current) {
-			t.Fatalf("structured document ownership missing: %s", current)
-		}
-		if _, ok := BuiltinPluginIDForTool(old); ok || IsStudioTool(old) || HasDefinition(BuiltinDefinitions(), old) || CurrentToolName(old) != old {
-			t.Fatalf("unreleased name must not acquire an alias: %s", old)
 		}
 	}
 

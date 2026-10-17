@@ -6,7 +6,14 @@ import (
 )
 
 func TestCanonicalPluginIDsAndOwnedSkillSelectors(t *testing.T) {
-	for old, current := range map[string]string{"studio": "artifact", "artifacts": "artifact", "markdown": "note-authoring", "docx": "document-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
+	for old, current := range map[string]string{
+		"studio":         "artifact",
+		"artifacts":      "artifact",
+		"markdown":       "page-authoring",
+		"note-authoring": "page-authoring",
+		"tables":         "sheet-authoring",
+		"collaboration":  "subagent",
+	} {
 		t.Run(old, func(t *testing.T) {
 			if got := CurrentPluginID(" " + old + " "); got != current || CurrentPluginID(got) != current {
 				t.Fatal(got)
@@ -32,10 +39,10 @@ func TestCanonicalPluginIDsAndOwnedSkillSelectors(t *testing.T) {
 			t.Fatal("unrelated identity changed", id)
 		}
 	}
-	if CurrentPluginSkillID("note-authoring", "docx") != "docx" {
+	if CurrentPluginSkillID("page-authoring", "tables") != "tables" {
 		t.Fatal("a different owner's skill was accepted")
 	}
-	if CurrentPluginSkillID("note-authoring", "skills/../markdown/SKILL.md") != "skills/../markdown/SKILL.md" {
+	if CurrentPluginSkillID("page-authoring", "skills/../markdown/SKILL.md") != "skills/../markdown/SKILL.md" {
 		t.Fatal("unexpected path normalization")
 	}
 }

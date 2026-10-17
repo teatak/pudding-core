@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 42
+	currentSchemaVersion       = 43
 )
 
 var (
@@ -33,27 +33,12 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
+// Unpublished document migrations 40–41 are consolidated into destination 42.
 var schemaMigrations = map[int]schemaMigration{
+	43: migratePages,
 	42: migrateSheets,
-	41: migrateDocuments,
-	40: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS studio_document_edits (
-    id TEXT PRIMARY KEY,
-    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
-    state TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    payload TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS studio_document_edits_item ON studio_document_edits(item_id,state,updated_at);
-CREATE TABLE IF NOT EXISTS studio_document_edit_requests (
-    item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,
-    client_request_id TEXT NOT NULL,
-    request_hash TEXT NOT NULL,
-    result TEXT NOT NULL,
-    PRIMARY KEY(item_id,client_request_id)
-);`)
-		return err
-	},
+	41: func(tx *sql.Tx) error { return nil },
+	40: func(tx *sql.Tx) error { return nil },
 	39: func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS subtask_archives (
     child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
@@ -972,7 +957,6 @@ var currentSchemaContract = func() schemaContract {
 		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
 		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
 		"studio_item_content":   {"item_id", "body", "content_hash"},
-		"studio_rich_blobs":     {"item_id", "hash", "mime", "data"},
 		"studio_sheet_ids":      {"item_id", "entity_kind", "entity_id"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},

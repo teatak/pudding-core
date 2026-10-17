@@ -66,7 +66,7 @@ func TestReferencedSkillReadsPluginResultsStoredUnderAppNames(t *testing.T) {
 }
 
 func TestRenamedPluginHistoryIsProjectedWithoutChangingSource(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "note-authoring", "docx": "document-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
 		content := `{"reference":{"kind":"plugin_skill","pluginID":"` + old + `","skillID":"` + old + `"},"content":"OLD_BODY"}`
 		got, ok := ReferencedSkill(PluginLoad, true, content)
 		if !ok || got.PluginID != current || got.SkillID != current {

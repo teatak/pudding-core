@@ -9,7 +9,7 @@ import (
 )
 
 func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "note-authoring", "docx": "document-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
 		for _, explicit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/canonical=%v", old, explicit), func(t *testing.T) {
 				ctx := context.Background()

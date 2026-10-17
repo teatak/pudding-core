@@ -26,7 +26,7 @@ func NormalizeStudioTool(name string) string {
 
 func IsStudioTool(name string) bool {
 	switch NormalizeLegacyContentTool(name) {
-	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, DocumentRead, DocumentCreate, DocumentEdit, NoteEdit, SheetCreate, SheetRead, SheetEdit:
+	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, NoteEdit, SheetCreate, SheetRead, SheetEdit:
 		return true
 	}
 	return false
@@ -34,9 +34,9 @@ func IsStudioTool(name string) bool {
 
 func StudioDefinitions() []provider.ToolDef {
 	return append([]provider.ToolDef{
-		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), Documents (document), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","document","sheet","widget"]}},"additionalProperties":false}`)},
+		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","sheet","widget"]}},"additionalProperties":false}`)},
 		{Name: ArtifactOpen, Capability: store.ModeChat, Description: "Open existing artifact content in this conversation. Returns a session mount referring to the same global item; it does not copy the content.", InputSchema: json.RawMessage(`{"type":"object","properties":{"item_id":{"type":"string"}},"required":["item_id"],"additionalProperties":false}`)},
-	}, append(NoteDefinitions(), append(SheetDefinitions(), DocumentDefinitions()...)...)...)
+	}, append(NoteDefinitions(), SheetDefinitions()...)...)
 }
 
 type StudioArgs struct {
@@ -54,8 +54,6 @@ type StudioArgs struct {
 	ColumnIDs    []string               `json:"column_ids"`
 	Format       string                 `json:"format"`
 	RevisionID   string                 `json:"revision_id"`
-	Region       string                 `json:"region"`
-	Variant      string                 `json:"variant"`
 	ItemID       string                 `json:"item_id"`
 	Kind         string                 `json:"kind"`
 	Name         string                 `json:"name"`

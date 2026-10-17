@@ -20,7 +20,6 @@ func TestContentPluginsLoadIndependently(t *testing.T) {
 	groups := map[string][]string{
 		plugin.BuiltinArtifactsID:         {tool.ArtifactList, tool.ArtifactOpen},
 		plugin.BuiltinNoteAuthoringID:     {tool.NoteCreate, tool.NoteRead, tool.NoteEdit},
-		plugin.BuiltinDocumentAuthoringID: {tool.DocumentCreate, tool.DocumentRead, tool.DocumentEdit},
 		plugin.BuiltinSheetAuthoringID:    {tool.SheetCreate, tool.SheetRead, tool.SheetEdit},
 	}
 	for id, want := range groups {
@@ -123,7 +122,7 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 		}
 	}
 	parts := &turnPartAccumulator{}
-	for index, name := range []string{tool.NoteCreate, tool.DocumentRead, tool.SheetCreate} {
+	for index, name := range []string{tool.NoteCreate, tool.SheetCreate} {
 		if tool.HasDefinition(defs, name) {
 			t.Fatal("historical load exposed type tool", name)
 		}
@@ -142,7 +141,7 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 			}
 		}
 	}
-	if count != 3 {
+	if count != 2 {
 		t.Fatal("missing rejected tool results", count)
 	}
 	items, err := st.ListStudioItems(ctx, store.StudioItemsActive)

@@ -13,7 +13,7 @@ export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const studioItem = z.object({
   origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
-  kind: z.enum(["note", "sheet", "widget", "document"]),
+  kind: z.preprocess((v) => (v === "doc" || v === "note" ? "page" : v), z.enum(["page", "sheet", "widget"])),
   name: z.string(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),
@@ -57,19 +57,19 @@ export const studioItemRevisionsResponse = z.object({
 export type StudioItem = z.infer<typeof studioItem>;
 export type StudioItemRevision = z.infer<typeof studioItemRevision>;
 
-export const documentContent = z.object({
+export const pageContent = z.object({
   itemID: z.string(), body: z.string(), contentHash: itemHash, revisionID: itemHash,
 });
-export type DocumentContent = z.infer<typeof documentContent>;
-export type DocumentEdit = { old: string; new: string };
-export type DocumentWrite = {
+export type PageContent = z.infer<typeof pageContent>;
+export type PageEdit = { old: string; new: string };
+export type PageWrite = {
   operationID?: string; leaseToken?: string; replacement?: string;
   clientRequestID: string; expectedHash?: string; body?: string;
-  edits?: DocumentEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
+  edits?: PageEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
 };
 
 // Source offsets are zero-based UTF-8 bytes, with an exclusive end.
-export const documentEditOperation = z.object({
+export const pageEditOperation = z.object({
   operationID: z.string(), itemID: z.string(), state: z.enum(["active", "committed", "cancelled", "expired"]),
   from: z.number().int().nonnegative(), to: z.number().int().nonnegative(),
   contentHash: itemHash, revisionID: itemHash.optional(),
@@ -77,14 +77,35 @@ export const documentEditOperation = z.object({
   createdAt: z.number(), updatedAt: z.number(), expiresAt: z.number(), sequence: z.number().int(),
   leaseToken: z.string().optional(), target: z.string().optional(),
 });
-export const documentEditState = z.object({ contentHash: itemHash, operations: z.array(documentEditOperation) });
-export type DocumentEditOperation = z.infer<typeof documentEditOperation>;
-export type DocumentEditState = z.infer<typeof documentEditState>;
-export type DocumentEditRequest = {
+export const pageEditState = z.object({ contentHash: itemHash, operations: z.array(pageEditOperation) });
+export type PageEditOperation = z.infer<typeof pageEditOperation>;
+export type PageEditState = z.infer<typeof pageEditState>;
+export type PageEditRequest = {
   action: "begin" | "renew" | "cancel"; clientRequestID: string;
   operationID?: string; leaseToken?: string; expectedHash?: string;
   from?: number; to?: number; target?: string;
 };
+
+// Compatibility aliases
+export const noteContent = pageContent;
+export type NoteContent = PageContent;
+export type NoteEdit = PageEdit;
+export type NoteWrite = PageWrite;
+export const noteEditOperation = pageEditOperation;
+export const noteEditState = pageEditState;
+export type NoteEditOperation = PageEditOperation;
+export type NoteEditState = PageEditState;
+export type NoteEditRequest = PageEditRequest;
+
+export const documentContent = pageContent;
+export type DocumentContent = PageContent;
+export type DocumentEdit = PageEdit;
+export type DocumentWrite = PageWrite;
+export const documentEditOperation = pageEditOperation;
+export const documentEditState = pageEditState;
+export type DocumentEditOperation = PageEditOperation;
+export type DocumentEditState = PageEditState;
+export type DocumentEditRequest = PageEditRequest;
 
 export const sheetCell = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
 export const sheetColumn = z.object({
@@ -112,27 +133,3 @@ export type SheetBody = z.infer<typeof sheetBody>;
 export type SheetContent = z.infer<typeof sheetContent>;
 export type SheetOperation = z.infer<typeof sheetOperation>;
 export type SheetWrite = { clientRequestID: string; operations?: SheetOperation[]; restoreRevision?: string; expectedHash?: string; undoRevision?: string; rowID?: string };
-
-// Rich documents retain structured content and owned, immutable binary assets.
-export type RichNode = { type: string; attrs?: Record<string, unknown>; text?: string; content?: RichNode[]; marks?: {type: string; attrs?: Record<string, unknown>}[] };
-export const richNode: z.ZodType<RichNode> = z.lazy(() => z.object({type:z.string(),attrs:z.record(z.string(),z.unknown()).optional(),text:z.string().optional(),content:z.array(richNode).optional(),marks:z.array(z.object({type:z.string(),attrs:z.record(z.string(),z.unknown()).optional()})).optional()}));
-export const richDocumentBody = z.object({
- schemaVersion:z.union([z.literal(1),z.literal(2)]),body:richNode,
- headerFooter:z.object({header:z.object({default:richNode,first:richNode.optional(),even:richNode.optional()}),footer:z.object({default:richNode,first:richNode.optional(),even:richNode.optional()}),headerDistance:z.number().int().nonnegative(),footerDistance:z.number().int().nonnegative(),differentFirstPage:z.boolean(),differentOddEven:z.boolean()}).optional(),
- page:z.object({width:z.number().int(),height:z.number().int(),top:z.number().int(),right:z.number().int(),bottom:z.number().int(),left:z.number().int()}),
- assets:z.array(z.object({id:z.string(),hash:itemHash,type:z.enum(["image/png","image/jpeg","image/gif"]),width:z.number().optional(),height:z.number().optional()})),
- warnings:z.array(z.string()),original:z.object({name:z.string(),hash:itemHash}).optional(),
-});
-export type RichDocumentBody = z.infer<typeof richDocumentBody>;
-export const richDocumentContent=z.object({itemID:z.string(),body:richDocumentBody,contentHash:itemHash,revisionID:itemHash});
-export type RichDocumentContent=z.infer<typeof richDocumentContent>;
-export type RichBlob={hash:string;type:string;data:string};
-export type RichOperation = { block_id: string } & (
- | {kind:"replace_text";old_text:string;text?:string;content?:RichNode[]}
- | {kind:"format_text";old_text:string;marks:NonNullable<RichNode["marks"]>}
- | {kind:"set_block";node_type?:"paragraph"|"heading";attrs?:{level?:number;textAlign?:"left"|"center"|"right"|"justify"}}
- | {kind:"insert_blocks";placement:"before"|"after";content:RichNode[]}
- | {kind:"replace_block";content:RichNode[]}
- | {kind:"delete_block"}
-);
-export type RichDocumentWrite={clientRequestID:string;expectedHash:string;body?:RichDocumentBody;blobs?:RichBlob[];restoreRevision?:string;undoRevision?:string;operations?:RichOperation[]};

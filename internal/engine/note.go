@@ -21,11 +21,11 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			return nil, errors.New("name (max 200 bytes) and body are required")
 		}
 		// A retried call reuses the item created by this exact canonical tool call.
-		id := "doc_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
+		id := "page_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
 		note, err := e.store.GetNote(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
 			now := time.Now().UTC()
-			note, err = e.store.CreateNote(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindNote, Name: name, Icon: "notebook-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
+			note, err = e.store.CreateNote(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindPage, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
 		}
 		if err != nil {
 			return nil, err
@@ -75,5 +75,5 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 		}
 		return map[string]any{"itemID": note.ItemID, "contentHash": note.ContentHash, "revisionID": note.RevisionID}, nil
 	}
-	return nil, errors.New("unknown note tool")
+	return nil, errors.New("unknown page tool")
 }

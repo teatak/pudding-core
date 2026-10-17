@@ -108,7 +108,6 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		Name            string               `json:"name"`
 		Kind            string               `json:"kind"`
 		Body            json.RawMessage      `json:"body,omitempty"`
-		Blobs           []store.DocumentBlob `json:"blobs,omitempty"`
 		SourceSessionID string               `json:"sourceSessionID,omitempty"`
 		Icon            string               `json:"icon,omitempty"`
 		IconColor       string               `json:"iconColor,omitempty"`
@@ -116,9 +115,11 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if err := decodeNativeContentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	// Legacy kind input is accepted only at the API boundary; storage emits sheet.
+	// Legacy kind input is accepted only at the API boundary; storage emits sheet and page.
 	if req.Kind == "table" {
 		req.Kind = store.StudioItemKindSheet
+	} else if req.Kind == "doc" || req.Kind == "note" {
+		req.Kind = store.StudioItemKindPage
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" || len(req.Name) > 200 {
@@ -127,11 +128,8 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if !validItemAppearance(req.Icon, req.IconColor) {
 		return badRequest(c, "invalid item appearance")
 	}
-	if req.Kind != store.StudioItemKindNote && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindSheet && req.Kind != store.StudioItemKindDocument {
-		return badRequest(c, "kind must be note, sheet, widget or document")
-	}
-	if req.Kind != store.StudioItemKindDocument && len(req.Blobs) > 0 {
-		return badRequest(c, "blobs require document")
+	if req.Kind != store.StudioItemKindPage && req.Kind != store.StudioItemKindWidget && req.Kind != store.StudioItemKindSheet {
+		return badRequest(c, "kind must be page, sheet or widget")
 	}
 	if req.Kind == store.StudioItemKindWidget && len(req.Body) > 0 {
 		return badRequest(c, "widget cannot have a content body")
@@ -139,9 +137,9 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	now := time.Now().UTC()
 	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
 	var err error
-	if req.Kind == store.StudioItemKindNote {
+	if req.Kind == store.StudioItemKindPage {
 		if w.Icon == "" {
-			w.Icon = "notebook-text"
+			w.Icon = "file-text"
 		}
 		var body string
 		if len(req.Body) > 0 {
@@ -150,20 +148,6 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 			}
 		}
 		_, err = s.store.CreateNote(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
-		if err == nil {
-			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
-		}
-	} else if req.Kind == store.StudioItemKindDocument {
-		body := store.EmptyDocument()
-		if len(req.Body) > 0 {
-			if e := widget.DecodeStrict(req.Body, &body); e != nil {
-				return badRequest(c, e.Error())
-			}
-		}
-		if w.Icon == "" {
-			w.Icon = "file-text"
-		}
-		_, err = s.store.CreateDocument(c.Request.Context(), w, body, req.Blobs)
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
@@ -262,7 +246,7 @@ func (s *Server) getStudioItemRevision(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if w.Kind == store.StudioItemKindNote || w.Kind == store.StudioItemKindSheet || w.Kind == store.StudioItemKindDocument {
+	if w.Kind == store.StudioItemKindPage || w.Kind == "note" || w.Kind == store.StudioItemKindSheet {
 		c.JSON(http.StatusOK, map[string]any{"kind": w.Kind, "revision": r})
 		return nil
 	}

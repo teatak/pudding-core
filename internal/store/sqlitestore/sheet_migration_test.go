@@ -14,7 +14,7 @@ import (
 
 // Build the exact v41 shape from today's schema for isolated legacy fixtures.
 func sheetLegacySchema() string {
-	return strings.ReplaceAll(strings.Replace(store.SchemaSQL, "'note','sheet','widget','document'", "'note','table','widget','document'", 1), "studio_sheet_ids", "studio_table_ids")
+	return strings.ReplaceAll(strings.Replace(store.SchemaSQL, "'page','sheet','widget'", "'note','table','widget'", 1), "studio_sheet_ids", "studio_table_ids")
 }
 
 func TestSheetMigrationV41PreservesContentAndDependents(t *testing.T) {
@@ -48,7 +48,7 @@ func TestSheetMigrationV41PreservesContentAndDependents(t *testing.T) {
 	}
 	defer s.Close()
 	checks := [][2]string{
-		{"PRAGMA user_version", "42"}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
+		{"PRAGMA user_version", "43"}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
 		{"SELECT count(*) FROM pragma_foreign_key_check", "0"},
 		{"SELECT count(*) FROM sqlite_master WHERE name='studio_table_ids'", "0"},
 		{"SELECT count(*) FROM studio_sheet_ids", "3"},
@@ -142,7 +142,7 @@ func TestSheetMigrationFailureRollsBackSchemaAndVersion(t *testing.T) {
 func TestSheetMigrationRetainsEarlyV41DocumentRepair(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "early-v41.db")
 	db := openMigrationTestDB(t, path)
-	old := strings.Replace(sheetLegacySchema(), "'note','table','widget','document'", "'doc','table','widget','rich-document'", 1)
+	old := strings.Replace(sheetLegacySchema(), "'note','table','widget'", "'doc','table','widget'", 1)
 	if _, err := db.Exec(old + `INSERT INTO studio_items(id,kind,name,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at)VALUES('old','doc','Old',1,'','','{}',1,0,1,1);PRAGMA user_version=41;`); err != nil {
 		t.Fatal(err)
 	}
@@ -152,8 +152,8 @@ func TestSheetMigrationRetainsEarlyV41DocumentRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='old'", "note")
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "42")
+	assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='old'", "page")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "43")
 }
 
 // Earlier migration tests need an actual pre-sheet schema, not a v42 database
@@ -199,7 +199,7 @@ func useLegacySheetFixture(t *testing.T, db *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ddl = strings.Replace(ddl, "'note','sheet','widget','document'", "'note','table','widget','document'", 1)
+	ddl = strings.Replace(ddl, "'page','sheet','widget'", "'note','table','widget'", 1)
 	if _, err := tx.Exec(`DROP TABLE studio_items`); err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestRenamedBuiltinCatalogAndLegacySkillSelectors(t *testing.T) {
-	aliases := map[string]string{"studio": "artifact", "artifacts": "artifact", "markdown": "note-authoring", "docx": "document-authoring", "tables": "sheet-authoring", "collaboration": "subagent"}
+	aliases := map[string]string{"studio": "artifact", "artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent"}
 	defs := BuiltinDefinitions()
 	seen := map[string]bool{}
 	for _, def := range defs {
@@ -35,7 +35,7 @@ func TestRenamedBuiltinCatalogAndLegacySkillSelectors(t *testing.T) {
 			}
 		})
 	}
-	if _, ok := ReadBuiltinSkill("note-authoring", "docx"); ok {
+	if _, ok := ReadBuiltinSkill("page-authoring", "tables"); ok {
 		t.Fatal("wrong owner's skill resolved")
 	}
 }

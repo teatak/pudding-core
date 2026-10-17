@@ -11,10 +11,8 @@ func CurrentPluginID(id string) string {
 	switch id {
 	case "studio", "artifacts":
 		return "artifact"
-	case "markdown":
-		return "note-authoring"
-	case "docx":
-		return "document-authoring"
+	case "markdown", "note-authoring":
+		return "page-authoring"
 	case "tables":
 		return "sheet-authoring"
 	case "collaboration":
@@ -29,7 +27,7 @@ func CurrentPluginID(id string) string {
 func CurrentPluginSkillID(pluginID, selector string) string {
 	pluginID, selector = CurrentPluginID(pluginID), strings.TrimSpace(selector)
 	switch pluginID {
-	case "artifact", "note-authoring", "document-authoring", "sheet-authoring", "subagent":
+	case "artifact", "page-authoring", "sheet-authoring", "subagent":
 	default:
 		return selector
 	}

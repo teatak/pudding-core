@@ -10,7 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const noteSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='note' AND w.deleted=0 AND w.archived_at=0`
+const noteSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind IN ('page','note') AND w.deleted=0 AND w.archived_at=0`
 
 func (s *Store) GetNote(ctx context.Context, id string) (*store.NoteContent, error) {
 	s.mu.Lock()
@@ -22,8 +22,11 @@ func (s *Store) CreateNote(ctx context.Context, item *store.StudioItem, body str
 	if err := store.ValidateNote(body); err != nil {
 		return nil, err
 	}
-	if item.Kind != store.StudioItemKindNote {
+	if item.Kind != store.StudioItemKindPage && item.Kind != "note" {
 		return nil, &store.InvalidContent{Message: "document kind required"}
+	}
+	if item.Kind == "note" {
+		item.Kind = store.StudioItemKindPage
 	}
 	var out *store.NoteContent
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {

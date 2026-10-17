@@ -50,7 +50,7 @@ func TestRenamedPluginLoadsReopenWithoutRewritingHistoryOrRows(t *testing.T) {
 	if err := st.CreateSession(ctx, &store.Session{ID: "legacy-plugins", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	old := `["studio","artifacts","markdown","note-authoring","docx","tables","collaboration","custom"]`
+	old := `["studio","artifacts","markdown","note-authoring","tables","collaboration","custom"]`
 	if _, err := st.db.Exec(`UPDATE sessions SET loaded_plugin_ids=? WHERE id='legacy-plugins'`, old); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRenamedPluginLoadsReopenWithoutRewritingHistoryOrRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := store.NormalizePluginIDs([]string{"artifact", "note-authoring", "document-authoring", "sheet-authoring", "subagent", "custom"})
+	want := store.NormalizePluginIDs([]string{"artifact", "note-authoring", "sheet-authoring", "subagent", "custom"})
 	if !sameStrings(got.LoadedPluginIDs, want) {
 		t.Fatal(got.LoadedPluginIDs)
 	}

@@ -9,24 +9,30 @@ import (
 	"github.com/teatak/pudding-core/contracts"
 )
 
-const StudioItemKindNote = "note"
+const (
+	StudioItemKindPage = "page"
+	StudioItemKindNote = "page"
+)
 
-// NoteContent is the UTF-8 Markdown view of a native content snapshot.
+// PageContent is the UTF-8 Markdown view of a native content snapshot.
+type PageContent = ContentSnapshot
 type NoteContent = ContentSnapshot
 
-type NoteEdit struct {
+type PageEdit struct {
 	Old string `json:"old"`
 	New string `json:"new"`
 }
 
-type NoteWrite struct {
+type NoteEdit = PageEdit
+
+type PageWrite struct {
 	OperationID     string     `json:"operationID,omitempty"`
 	LeaseToken      string     `json:"leaseToken,omitempty"`
 	Replacement     *string    `json:"replacement,omitempty"`
 	ClientRequestID string     `json:"clientRequestID"`
 	ExpectedHash    *string    `json:"expectedHash,omitempty"`
 	Body            *string    `json:"body,omitempty"`
-	Edits           []NoteEdit `json:"edits,omitempty"`
+	Edits           []PageEdit `json:"edits,omitempty"`
 	RestoreRevision string     `json:"restoreRevision,omitempty"`
 	UndoRevision    string     `json:"undoRevision,omitempty"`
 	// PreserveOnly archives a dirty editor buffer before loading the latest body.
@@ -35,12 +41,16 @@ type NoteWrite struct {
 	Author       ContentAuthor `json:"-"`
 }
 
+type NoteWrite = PageWrite
+
 type NoteStore interface {
 	NoteEditOperationStore
 	CreateNote(context.Context, *StudioItem, string, ContentAuthor) (*NoteContent, error)
 	GetNote(context.Context, string) (*NoteContent, error)
 	WriteNote(context.Context, string, NoteWrite) (*NoteContent, error)
 }
+
+type PageStore = NoteStore
 
 func ValidateNote(body string) error {
 	if !utf8.ValidString(body) {

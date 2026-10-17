@@ -26,7 +26,7 @@ func TestSheetAliasesShareCanonicalPermissionsAndCatalog(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"builtin_table_edit", "builtin_table_create_extra", "builtin_sheet_update", "builtin_document_edit"} {
+	for _, name := range []string{"builtin_table_edit", "builtin_table_create_extra", "builtin_sheet_update"} {
 		if NormalizeLegacyContentTool(name) != name {
 			t.Fatal("invented alias", name)
 		}
@@ -55,7 +55,7 @@ func TestSheetCreateArgumentProjectionIsExactAndNonMutating(t *testing.T) {
 			t.Fatal("ambiguous fields accepted", raw)
 		}
 	}
-	if string(CurrentSheetToolArgs(DocumentCreate, old)) != before {
-		t.Fatal("document payload changed")
+	if string(CurrentSheetToolArgs(NoteCreate, old)) != before {
+		t.Fatal("note payload changed")
 	}
 }

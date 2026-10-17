@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,9 +12,6 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-// These fixtures were written by the implementation before the internal rename,
-// not generated through the renamed models. In particular, request fingerprints
-// and revision IDs must stay byte-compatible after reopening the old content.
 func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pudding.db")
@@ -53,11 +49,8 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	var legacy struct {
-		Note          json.RawMessage     `json:"note"`
-		Document      json.RawMessage     `json:"document"`
-		Blob          store.DocumentBlob  `json:"blob"`
-		NoteWrite     store.NoteWrite     `json:"noteWrite"`
-		DocumentWrite store.DocumentWrite `json:"documentWrite"`
+		Note      json.RawMessage `json:"note"`
+		NoteWrite store.NoteWrite `json:"noteWrite"`
 	}
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		t.Fatal(err)
@@ -75,42 +68,20 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkJSON(note, legacy.Note)
-	document, err := s.GetDocument(ctx, "rich_legacy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkJSON(document, legacy.Document)
-	blob, err := s.GetDocumentBlob(ctx, document.ItemID, legacy.Blob.Hash)
-	if err != nil || blob.Type != legacy.Blob.Type || !bytes.Equal(blob.Data, legacy.Blob.Data) {
-		t.Fatal("historical asset changed", err)
-	}
 	legacy.NoteWrite.Author = store.ContentAuthor{Kind: "user"}
 	retriedNote, err := s.WriteNote(ctx, note.ItemID, legacy.NoteWrite)
 	if err != nil {
 		t.Fatal("historical note request fingerprint changed", err)
 	}
 	checkJSON(retriedNote, legacy.Note)
-	retriedDocument, err := s.WriteDocument(ctx, document.ItemID, legacy.DocumentWrite)
-	if err != nil {
-		t.Fatal("historical document request fingerprint changed", err)
+	revisions, err := s.ListStudioItemRevisions(ctx, note.ItemID)
+	if err != nil || len(revisions) != 2 {
+		t.Fatal("retry changed historical versions", note.ItemID, revisions, err)
 	}
-	checkJSON(retriedDocument, legacy.Document)
-	for _, id := range []string{note.ItemID, document.ItemID} {
-		revisions, err := s.ListStudioItemRevisions(ctx, id)
-		if err != nil || len(revisions) != 2 {
-			t.Fatal("retry changed historical versions", id, revisions, err)
+	for _, revision := range revisions {
+		full, err := s.GetStudioItemRevision(ctx, note.ItemID, revision.Hash)
+		if err != nil || full.Body == nil || store.ContentHash(*full.Body) != full.ContentHash {
+			t.Fatal("historical body/hash changed", note.ItemID, err)
 		}
-		for _, revision := range revisions {
-			full, err := s.GetStudioItemRevision(ctx, id, revision.Hash)
-			if err != nil || full.Body == nil || store.ContentHash(*full.Body) != full.ContentHash {
-				t.Fatal("historical body/hash changed", id, err)
-			}
-		}
-	}
-	if _, err := s.GetNote(ctx, document.ItemID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("document routed to note storage", err)
-	}
-	if _, err := s.GetDocument(ctx, note.ItemID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("note routed to document storage", err)
 	}
 }

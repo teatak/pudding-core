@@ -17,19 +17,6 @@ func migrateSheets(tx *sql.Tx) error {
 	if err := readDDL(); err != nil {
 		return err
 	}
-	// Some development v41 databases still use the pre-Notes/Documents spelling.
-	// Preserve their existing repair path before applying the v42 kind change.
-	if strings.Contains(ddl, "'doc'") || strings.Contains(ddl, "'rich-document'") {
-		if err := migrateDocuments(tx); err != nil {
-			return err
-		}
-		if err := readDDL(); err != nil {
-			return err
-		}
-	}
-	if !strings.Contains(ddl, "'note','table','widget','document'") {
-		return fmt.Errorf("unexpected Studio kind constraint before sheet migration")
-	}
 	rows, err := tx.Query(`SELECT sql FROM sqlite_master WHERE tbl_name='studio_items' AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name`)
 	if err != nil {
 		return err
@@ -49,16 +36,34 @@ func migrateSheets(tx *sql.Tx) error {
 		return err
 	}
 	ddl = strings.Replace(ddl, "studio_items", "studio_items_sheet", 1)
-	ddl = strings.Replace(ddl, "'note','table','widget','document'", "'note','sheet','widget','document'", 1)
+	replaced := false
+	for _, old := range []string{"'page','sheet','widget'", "'note','sheet','widget'", "'note','table','widget'", "'doc','table','widget'"} {
+		if strings.Contains(ddl, old) {
+			ddl = strings.Replace(ddl, old, "'page','sheet','widget'", 1)
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		return fmt.Errorf("unexpected Studio kind constraint before sheet migration")
+	}
 	if _, err := tx.Exec(ddl); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO studio_items_sheet (rowid,id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin)
- SELECT rowid,id,CASE kind WHEN 'table' THEN 'sheet' WHEN 'doc' THEN 'note' WHEN 'rich-document' THEN 'document' ELSE kind END,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin FROM studio_items;
- DROP TABLE studio_items;
- ALTER TABLE studio_items_sheet RENAME TO studio_items;
- ALTER TABLE studio_table_ids RENAME TO studio_sheet_ids;`); err != nil {
+ SELECT rowid,id,CASE kind WHEN 'table' THEN 'sheet' WHEN 'doc' THEN 'page' WHEN 'note' THEN 'page' ELSE kind END,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin FROM studio_items;
+DROP TABLE studio_items;
+ALTER TABLE studio_items_sheet RENAME TO studio_items;`); err != nil {
 		return err
+	}
+	var hasTableIDs int
+	if err := tx.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='studio_table_ids'`).Scan(&hasTableIDs); err != nil {
+		return err
+	}
+	if hasTableIDs > 0 {
+		if _, err := tx.Exec(`ALTER TABLE studio_table_ids RENAME TO studio_sheet_ids`); err != nil {
+			return err
+		}
 	}
 	for _, query := range objects {
 		if _, err := tx.Exec(query); err != nil {

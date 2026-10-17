@@ -143,9 +143,6 @@ func TestRenamedToolNamesAcrossProviderContinuations(t *testing.T) {
 			{"builtin_note_create", "builtin_note_create"},
 			{"builtin_note_read", "builtin_note_read"},
 			{"builtin_note_edit", "builtin_note_edit"},
-			{"builtin_document_create", "builtin_document_create"},
-			{"builtin_document_read", "builtin_document_read"},
-			{"builtin_document_edit", "builtin_document_edit"},
 		} {
 			storedName, currentName := pair[0], pair[1]
 			t.Run(protocol.kind+"/"+storedName, func(t *testing.T) {

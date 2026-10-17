@@ -13,12 +13,12 @@ package tool
 // Release version/date: pending first stable release of this change.
 func NormalizeLegacyNoteTool(name string) string {
 	switch name {
-	case "builtin_doc_create":
-		return NoteCreate
-	case "builtin_doc_read":
-		return NoteRead
-	case "builtin_doc_edit":
-		return NoteEdit
+	case "builtin_doc_create", "builtin_note_create":
+		return PageCreate
+	case "builtin_doc_read", "builtin_note_read":
+		return PageRead
+	case "builtin_doc_edit", "builtin_note_edit":
+		return PageEdit
 	}
 	return name
 }

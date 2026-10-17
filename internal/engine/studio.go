@@ -32,15 +32,11 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		out.Ok = err == nil
 		return out
 	}
-	if call.Name == tool.DocumentRead || call.Name == tool.DocumentCreate || call.Name == tool.DocumentEdit {
-		value, err := e.executeDocument(ctx, sessionID, turnID, call)
-		return respond(value, err)
-	}
 	args, err := tool.DecodeStudioArgs(call.Args)
 	if err != nil {
 		return respond(nil, err)
 	}
-	if call.Name != tool.ArtifactList && call.Name != tool.NoteCreate && call.Name != tool.SheetCreate && args.ItemID == "" {
+	if call.Name != tool.ArtifactList && call.Name != tool.PageCreate && call.Name != tool.NoteCreate && call.Name != tool.SheetCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
 	switch call.Name {
@@ -52,10 +48,8 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 		switch kind {
 		case "table":
 			kind = store.StudioItemKindSheet
-		case "doc":
-			kind = store.StudioItemKindNote
-		case "rich-document":
-			kind = store.StudioItemKindDocument
+		case "doc", "note":
+			kind = store.StudioItemKindPage
 		}
 		items, err := e.store.ListStudioItems(ctx, store.StudioItemsActive)
 		if err != nil {
@@ -71,7 +65,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	case tool.ArtifactOpen:
 		mount, err := e.store.OpenStudioItem(ctx, sessionID, args.ItemID, store.NewID("mount"))
 		return respond(mount, err)
-	case tool.NoteCreate, tool.NoteRead, tool.NoteEdit:
+	case tool.PageCreate, tool.PageRead, tool.PageEdit:
 		value, err := e.executeNote(ctx, sessionID, turnID, call, args)
 		return respond(value, err)
 	}

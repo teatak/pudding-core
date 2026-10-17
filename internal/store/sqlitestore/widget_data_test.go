@@ -206,5 +206,5 @@ func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	if err != nil || data.Version != 0 {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "42")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "43")
 }
