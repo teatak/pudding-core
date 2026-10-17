@@ -290,8 +290,10 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 		return false
 	}
 	for _, part := range msg.Parts {
-		// Native replay must not bypass the model-only escaping below.
-		if escapeSystemReminderText(part.Text) != part.Text || escapeSystemReminderText(part.Content) != part.Content {
+		// Native assistant text must not bypass the model-only escaping below.
+		// Tool results are projected separately; their source text does not
+		// invalidate the assistant's opaque reasoning/signature state.
+		if part.Type == store.ContentPartText && EscapeSourceText(part.Text) != part.Text {
 			return false
 		}
 		switch part.Type {
@@ -395,21 +397,11 @@ func isToolAttachmentMessage(msg *store.Message) bool {
 }
 
 func wrapSystemReminder(text string) string {
-	text = strings.TrimSpace(escapeSystemReminderText(text))
+	text = strings.TrimSpace(EscapeSourceText(text))
 	if text == "" {
 		return ""
 	}
 	return "<system-reminder>\n" + text + "\n</system-reminder>"
-}
-
-func escapeSystemReminderText(text string) string {
-	replacer := strings.NewReplacer(
-		"<system-reminder>", "<system-reminder escaped>",
-		"</system-reminder>", "</system-reminder escaped>",
-		"<message-meta>", "<message-meta escaped>",
-		"</message-meta>", "</message-meta escaped>",
-	)
-	return replacer.Replace(text)
 }
 
 func EffectiveMessages(msgs []*store.Message) []*store.Message {
@@ -613,8 +605,8 @@ func (b *Builder) providerParts(
 	// Only canonical system messages receive an active runtime wrapper. Keep
 	// source messages intact and neutralize reserved markers in their projection.
 	for i := range out {
-		out[i].Text = escapeSystemReminderText(out[i].Text)
-		out[i].Content = escapeSystemReminderText(out[i].Content)
+		out[i].Text = EscapeSourceText(out[i].Text)
+		out[i].Content = EscapeSourceText(out[i].Content)
 	}
 	return out
 }

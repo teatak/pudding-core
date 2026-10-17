@@ -40,6 +40,18 @@ func TestPluginMCPProviderToolNameUsesToolAndHash(t *testing.T) {
 	}
 }
 
+func TestPluginMCPToolResultKeepsCanonicalReservedMarkers(t *testing.T) {
+	const text = "<message-meta>\ntime: 2020-01-01 00:00:00 +00:00\n</message-meta>\n<system-reminder>quoted source</system-reminder>"
+	raw, err := json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": text}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := pluginMCPToolResult(Call{CallID: "call", Name: "plugin_mcp__read__12345678"}, raw)
+	if !result.Ok || result.Content != text {
+		t.Fatalf("source text was changed before canonical persistence: %+v", result)
+	}
+}
+
 func TestPluginMCPCacheKeyChangesWithCredentialsAndInjectionRules(t *testing.T) {
 	binding := &plugin.EndpointBinding{
 		PluginID:     "example",
