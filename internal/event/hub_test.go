@@ -56,7 +56,7 @@ func TestHubCancelClosesAndRemovesSubscriber(t *testing.T) {
 	hub.Publish(Event{SessionID: "session", Seq: 1})
 }
 
-func TestNoteArgumentSnapshotsJoinReconnectAndTermination(t *testing.T) {
+func TestPageArgumentSnapshotsJoinReconnectAndTermination(t *testing.T) {
 	h := NewHub()
 	ev := Event{Kind: TurnTool, SessionID: "s", TurnID: "t", CallID: "c", Name: "builtin_page_edit", Phase: "streaming_args", ArgsDelta: `{"replacement":"`}
 	h.Publish(ev)
@@ -86,20 +86,20 @@ func TestNoteArgumentSnapshotsJoinReconnectAndTermination(t *testing.T) {
 		t.Fatalf("terminal preview replayed %+v", ev)
 	default:
 	}
-	if len(h.noteStreams) != 0 {
+	if len(h.pageStreams) != 0 {
 		t.Fatal("terminal stream retained")
 	}
 }
 
-func TestNoteArgumentSnapshotsBoundMemoryAndIgnoreOtherTools(t *testing.T) {
+func TestPageArgumentSnapshotsBoundMemoryAndIgnoreOtherTools(t *testing.T) {
 	h := NewHub()
 	ev := Event{Kind: TurnTool, SessionID: "s", TurnID: "t", CallID: "c", Name: "unrelated", Phase: "streaming_args", ArgsDelta: "x"}
 	h.Publish(ev)
-	if len(h.noteStreams) != 0 {
+	if len(h.pageStreams) != 0 {
 		t.Fatal("captured unrelated tool")
 	}
 	ev.Name = "builtin_note_edit"
-	ev.ArgsDelta = strings.Repeat("x", maxNoteArgumentBytes+1)
+	ev.ArgsDelta = strings.Repeat("x", maxPageArgumentBytes+1)
 	h.Publish(ev)
 	ev.ArgsDelta = "suffix"
 	h.Publish(ev)
@@ -112,7 +112,7 @@ func TestNoteArgumentSnapshotsBoundMemoryAndIgnoreOtherTools(t *testing.T) {
 	}
 	ev.Phase = "error"
 	h.Publish(ev)
-	if len(h.noteStreams) != 0 {
+	if len(h.pageStreams) != 0 {
 		t.Fatal("failed stream retained")
 	}
 }

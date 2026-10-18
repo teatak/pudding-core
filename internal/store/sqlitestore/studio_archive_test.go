@@ -14,12 +14,12 @@ func TestStudioArchiveRetainsContentAndRejectsStaleCleanup(t *testing.T) {
 	ctx := context.Background()
 	createTestSession(t, st, "owner")
 	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
-	_, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Kept", CreatedAt: created, UpdatedAt: created}, "Keep my text", store.ContentAuthor{Kind: "user"})
+	_, err := st.CreatePage(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Kept", CreatedAt: created, UpdatedAt: created}, "Keep my text", store.ContentAuthor{Kind: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	item, _ := st.GetStudioItem(ctx, "doc")
-	body, _ := st.GetNote(ctx, "doc")
+	body, _ := st.GetPage(ctx, "doc")
 	if _, err := st.OpenStudioItem(ctx, "owner", "doc", "view"); err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +37,11 @@ func TestStudioArchiveRetainsContentAndRejectsStaleCleanup(t *testing.T) {
 	if err != nil || retry.Revision != archived.Revision || !retry.ArchivedAt.Equal(*archived.ArchivedAt) {
 		t.Fatal("archive retry changed retention", retry, err)
 	}
-	if _, err := st.GetNote(ctx, "doc"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetPage(ctx, "doc"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("archive remained readable", err)
 	}
 	late := "late"
-	if _, err := st.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "late", ExpectedHash: &body.ContentHash, Body: &late, Author: store.ContentAuthor{Kind: "user"}}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: "late", ExpectedHash: &body.ContentHash, Body: &late, Author: store.ContentAuthor{Kind: "user"}}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("archive accepted a write", err)
 	}
 	active, _ := st.ListStudioItems(ctx, store.StudioItemsActive)
@@ -73,7 +73,7 @@ func TestStudioArchiveRetainsContentAndRejectsStaleCleanup(t *testing.T) {
 	if _, err := st.MarkStudioItemDeleted(ctx, "doc", archived.Revision); !errors.Is(err, store.ErrStudioItemConflict) {
 		t.Fatal("stale cleanup deleted restored item", err)
 	}
-	after, err := st.GetNote(ctx, "doc")
+	after, err := st.GetPage(ctx, "doc")
 	if err != nil || *after != *body {
 		t.Fatal("restoration changed content", after, err)
 	}

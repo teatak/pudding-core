@@ -14,57 +14,57 @@ import (
 	"github.com/teatak/pudding-core/internal/widget"
 )
 
-func (s *Server) getNote(c *cart.Context) error {
+func (s *Server) getPage(c *cart.Context) error {
 	id, _ := c.Param("itemID")
-	d, err := s.store.GetNote(c.Request.Context(), id)
+	d, err := s.store.GetPage(c.Request.Context(), id)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
 	c.JSON(http.StatusOK, d)
 	return nil
 }
-func (s *Server) writeNote(c *cart.Context) error {
+func (s *Server) writePage(c *cart.Context) error {
 	id, _ := c.Param("itemID")
-	var in store.NoteWrite
+	var in store.PageWrite
 	if err := decodeNativeContentRequest(c, &in); err != nil {
 		return badRequest(c, err.Error())
 	}
 	in.Author = store.ContentAuthor{Kind: "user"}
-	d, err := s.store.WriteNote(c.Request.Context(), id, in)
+	d, err := s.store.WritePage(c.Request.Context(), id, in)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
 	c.JSON(http.StatusOK, d)
 	return nil
 }
-func (s *Server) getNoteEditState(c *cart.Context) error {
+func (s *Server) getPageEditState(c *cart.Context) error {
 	id, _ := c.Param("itemID")
-	state, err := s.store.GetNoteEditState(c.Request.Context(), id)
+	state, err := s.store.GetPageEditState(c.Request.Context(), id)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
 	c.JSON(http.StatusOK, state)
 	return nil
 }
-func (s *Server) changeNoteEdit(c *cart.Context) error {
+func (s *Server) changePageEdit(c *cart.Context) error {
 	id, _ := c.Param("itemID")
-	var in store.NoteEditRequest
+	var in store.PageEditRequest
 	if err := decodeNativeContentRequest(c, &in); err != nil {
 		return badRequest(c, err.Error())
 	}
 	in.Author = store.ContentAuthor{Kind: "user"}
-	op, err := s.store.ChangeNoteEdit(c.Request.Context(), id, in)
+	op, err := s.store.ChangePageEdit(c.Request.Context(), id, in)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
 	c.JSON(http.StatusOK, op)
 	return nil
 }
-func (s *Server) uploadNoteAsset(c *cart.Context) error {
+func (s *Server) uploadPageAsset(c *cart.Context) error {
 	widget.DraftMu.Lock()
 	defer widget.DraftMu.Unlock()
 	id, _ := c.Param("itemID")
-	if _, err := s.store.GetNote(c.Request.Context(), id); err != nil {
+	if _, err := s.store.GetPage(c.Request.Context(), id); err != nil {
 		return s.studioItemError(c, err)
 	}
 	limit := contracts.Studio().MaxAssetBytes
@@ -107,10 +107,10 @@ func (s *Server) uploadNoteAsset(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) getNoteAsset(c *cart.Context) error {
+func (s *Server) getPageAsset(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	name, _ := c.Param("filename")
-	if _, err := s.store.GetNote(c.Request.Context(), id); err != nil {
+	if _, err := s.store.GetPage(c.Request.Context(), id); err != nil {
 		return s.studioItemError(c, err)
 	}
 	hash, ext, ok := strings.Cut(name, ".")

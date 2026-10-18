@@ -2,7 +2,7 @@ package store
 
 // Map an exact inverse through later, disjoint edits. Never apply fuzzy patches:
 // an overlap rejects the complete operation rather than overwriting newer text.
-func UndoNote(before, after, current string) (string, error) {
+func UndoPage(before, after, current string) (string, error) {
 	inverse, later := textChanges(after, before), textChanges(after, current)
 	if len(inverse) == 0 {
 		return "", &InvalidContent{"version has no content changes"}
@@ -26,5 +26,5 @@ func UndoNote(before, after, current string) (string, error) {
 		out = append(out[:c.start], append(c.text, out[c.end:]...)...)
 	}
 	result := string(out)
-	return result, ValidateNote(result)
+	return result, ValidatePage(result)
 }

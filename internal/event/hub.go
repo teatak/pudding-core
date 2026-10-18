@@ -16,11 +16,11 @@ import (
 type Hub struct {
 	mu          sync.Mutex
 	subs        map[string]map[chan Event]struct{}
-	noteStreams map[string]*noteArgumentStream
+	pageStreams map[string]*pageArgumentStream
 }
 
 func NewHub() *Hub {
-	return &Hub{subs: make(map[string]map[chan Event]struct{}), noteStreams: make(map[string]*noteArgumentStream)}
+	return &Hub{subs: make(map[string]map[chan Event]struct{}), pageStreams: make(map[string]*pageArgumentStream)}
 }
 
 const subscriberBuffer = 64
@@ -35,8 +35,8 @@ func (h *Hub) Subscribe(sessionID string) (<-chan Event, func()) {
 		h.subs[sessionID] = set
 	}
 	set[ch] = struct{}{}
-	h.pruneNoteStreams()
-	for _, stream := range h.noteStreams {
+	h.prunePageStreams()
+	for _, stream := range h.pageStreams {
 		if stream.event.SessionID == sessionID && !stream.overflow {
 			snapshot := stream.event
 			snapshot.ArgsDelta = ""
@@ -57,7 +57,7 @@ func (h *Hub) Subscribe(sessionID string) (<-chan Event, func()) {
 func (h *Hub) Publish(ev Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.captureNoteStream(ev)
+	h.capturePageStream(ev)
 	for ch := range h.subs[ev.SessionID] {
 		select {
 		case ch <- ev:
@@ -80,31 +80,31 @@ func (h *Hub) remove(sessionID string, ch chan Event) {
 	close(ch)
 }
 
-// Only an in-progress note commit needs replay before a complete canonical tool
+// Only an in-progress Page commit needs replay before a complete canonical tool
 // call exists. This is transient view state, not document content or history.
 // Bound both memory and age; no polling goroutine and no per-token persistence.
-type noteArgumentStream struct {
+type pageArgumentStream struct {
 	event     Event
 	arguments strings.Builder
 	updated   time.Time
 	overflow  bool
 }
 
-const maxNoteStreams = 32
-const maxNoteArgumentBytes = 256 * 1024
+const maxPageStreams = 32
+const maxPageArgumentBytes = 256 * 1024
 
-func (h *Hub) pruneNoteStreams() {
-	for key, stream := range h.noteStreams {
+func (h *Hub) prunePageStreams() {
+	for key, stream := range h.pageStreams {
 		if time.Since(stream.updated) > 2*time.Minute {
-			delete(h.noteStreams, key)
+			delete(h.pageStreams, key)
 		}
 	}
 }
-func (h *Hub) captureNoteStream(ev Event) {
+func (h *Hub) capturePageStream(ev Event) {
 	if ev.Kind == TurnCompleted || ev.Kind == TurnFailed || ev.Kind == TurnCancelled {
-		for key, stream := range h.noteStreams {
+		for key, stream := range h.pageStreams {
 			if stream.event.SessionID == ev.SessionID && stream.event.TurnID == ev.TurnID {
-				delete(h.noteStreams, key)
+				delete(h.pageStreams, key)
 			}
 		}
 		return
@@ -114,33 +114,33 @@ func (h *Hub) captureNoteStream(ev Event) {
 	}
 	key := ev.SessionID + "\x00" + ev.TurnID + "\x00" + ev.CallID
 	if ev.Phase != "streaming_args" {
-		delete(h.noteStreams, key)
+		delete(h.pageStreams, key)
 		return
 	}
-	stream := h.noteStreams[key]
+	stream := h.pageStreams[key]
 	if stream == nil {
 		if ev.Name != "builtin_page_edit" && ev.Name != "builtin_note_edit" && ev.Name != "builtin_doc_edit" {
 			return
 		}
-		h.pruneNoteStreams()
-		if len(h.noteStreams) >= maxNoteStreams {
+		h.prunePageStreams()
+		if len(h.pageStreams) >= maxPageStreams {
 			oldest := ""
 			var at time.Time
-			for k, s := range h.noteStreams {
+			for k, s := range h.pageStreams {
 				if oldest == "" || s.updated.Before(at) {
 					oldest, at = k, s.updated
 				}
 			}
-			delete(h.noteStreams, oldest)
+			delete(h.pageStreams, oldest)
 		}
-		stream = &noteArgumentStream{event: Event{Kind: ev.Kind, SessionID: ev.SessionID, TurnID: ev.TurnID, CallID: ev.CallID, Name: ev.Name, Phase: ev.Phase}}
-		h.noteStreams[key] = stream
+		stream = &pageArgumentStream{event: Event{Kind: ev.Kind, SessionID: ev.SessionID, TurnID: ev.TurnID, CallID: ev.CallID, Name: ev.Name, Phase: ev.Phase}}
+		h.pageStreams[key] = stream
 	}
 	stream.updated = time.Now()
 	if stream.overflow {
 		return
 	}
-	if stream.arguments.Len()+len(ev.ArgsDelta) > maxNoteArgumentBytes {
+	if stream.arguments.Len()+len(ev.ArgsDelta) > maxPageArgumentBytes {
 		stream.overflow = true
 		stream.arguments.Reset()
 		return

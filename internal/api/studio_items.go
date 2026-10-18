@@ -41,7 +41,7 @@ func decodeStudioRequest(c *cart.Context, target any) error {
 	return widget.DecodeStrict(data, target)
 }
 func (s *Server) studioItemError(c *cart.Context, err error) error {
-	var locked *store.NoteLocked
+	var locked *store.PageLocked
 	if errors.As(err, &locked) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "document_locked", "operationID": locked.OperationID})
 		return nil
@@ -105,12 +105,12 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 }
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
-		Name            string               `json:"name"`
-		Kind            string               `json:"kind"`
-		Body            json.RawMessage      `json:"body,omitempty"`
-		SourceSessionID string               `json:"sourceSessionID,omitempty"`
-		Icon            string               `json:"icon,omitempty"`
-		IconColor       string               `json:"iconColor,omitempty"`
+		Name            string          `json:"name"`
+		Kind            string          `json:"kind"`
+		Body            json.RawMessage `json:"body,omitempty"`
+		SourceSessionID string          `json:"sourceSessionID,omitempty"`
+		Icon            string          `json:"icon,omitempty"`
+		IconColor       string          `json:"iconColor,omitempty"`
 	}
 	if err := decodeNativeContentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -147,7 +147,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 				return badRequest(c, "document body must be a string")
 			}
 		}
-		_, err = s.store.CreateNote(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
+		_, err = s.store.CreatePage(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}

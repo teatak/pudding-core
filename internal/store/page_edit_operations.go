@@ -5,15 +5,15 @@ import (
 	"unicode/utf8"
 )
 
-type NoteEditRange struct {
+type PageEditRange struct {
 	From   int    `json:"from,omitempty"`
 	To     int    `json:"to,omitempty"`
 	Target string `json:"target,omitempty"`
 }
 
 // Ranges use zero-based UTF-8 byte offsets, with an exclusive end.
-type NoteEditOperation struct {
-	Ranges      []NoteEditRange `json:"ranges,omitempty"`
+type PageEditOperation struct {
+	Ranges      []PageEditRange `json:"ranges,omitempty"`
 	ID          string          `json:"operationID"`
 	ItemID      string          `json:"itemID"`
 	State       string          `json:"state"`
@@ -30,8 +30,8 @@ type NoteEditOperation struct {
 	Target      string          `json:"target,omitempty"`
 }
 
-type NoteEditRequest struct {
-	Ranges          []NoteEditRange `json:"ranges,omitempty"`
+type PageEditRequest struct {
+	Ranges          []PageEditRange `json:"ranges,omitempty"`
 	Action          string          `json:"action"`
 	ClientRequestID string          `json:"clientRequestID"`
 	OperationID     string          `json:"operationID,omitempty"`
@@ -43,31 +43,31 @@ type NoteEditRequest struct {
 	Author          ContentAuthor   `json:"-"`
 }
 
-type NoteEditState struct {
+type PageEditState struct {
 	ContentHash string              `json:"contentHash"`
-	Operations  []NoteEditOperation `json:"operations"`
+	Operations  []PageEditOperation `json:"operations"`
 }
 
-type NoteEditOperationStore interface {
-	ChangeNoteEdit(context.Context, string, NoteEditRequest) (*NoteEditOperation, error)
-	GetNoteEditState(context.Context, string) (*NoteEditState, error)
+type PageEditOperationStore interface {
+	ChangePageEdit(context.Context, string, PageEditRequest) (*PageEditOperation, error)
+	GetPageEditState(context.Context, string) (*PageEditState, error)
 }
 
-type NoteLocked struct{ OperationID string }
+type PageLocked struct{ OperationID string }
 
-func (e *NoteLocked) Error() string {
+func (e *PageLocked) Error() string {
 	return "document range is locked by another editing operation"
 }
 
-func ValidNoteRange(body string, from, to int) bool {
+func ValidPageRange(body string, from, to int) bool {
 	return from >= 0 && to >= from && to <= len(body) &&
 		(from == len(body) || utf8.RuneStart(body[from])) && (to == len(body) || utf8.RuneStart(body[to]))
 }
 
 // Map only disjoint changes. Boundary edits are conservative: deleting a newline
 // or inserting at the edge can change the protected paragraph's structure.
-func MapNoteRange(before, after string, from, to int) (int, int, bool) {
-	ranges, conflict := MapNoteRanges(before, after, []NoteEditRange{{From: from, To: to}})
+func MapPageRange(before, after string, from, to int) (int, int, bool) {
+	ranges, conflict := MapPageRanges(before, after, []PageEditRange{{From: from, To: to}})
 	if conflict >= 0 {
 		return 0, 0, false
 	}
@@ -76,7 +76,7 @@ func MapNoteRange(before, after string, from, to int) (int, int, bool) {
 
 // One diff for the entire batch, including unrelated concurrent reservations.
 // The conflict index identifies the owning operation without repeating the diff.
-func MapNoteRanges(before, after string, ranges []NoteEditRange) ([]NoteEditRange, int) {
+func MapPageRanges(before, after string, ranges []PageEditRange) ([]PageEditRange, int) {
 	if len(ranges) == 0 {
 		return ranges, -1
 	}
@@ -85,9 +85,9 @@ func MapNoteRanges(before, after string, ranges []NoteEditRange) ([]NoteEditRang
 		boundaries = append(boundaries, at+utf8.RuneLen(r))
 	}
 	changes := textChanges(before, after)
-	out := append([]NoteEditRange(nil), ranges...)
+	out := append([]PageEditRange(nil), ranges...)
 	for i, r := range ranges {
-		if !ValidNoteRange(before, r.From, r.To) {
+		if !ValidPageRange(before, r.From, r.To) {
 			return nil, i
 		}
 		shift := 0
@@ -108,13 +108,13 @@ func MapNoteRanges(before, after string, ranges []NoteEditRange) ([]NoteEditRang
 
 // Legacy single-range operations remain readable without a migration. From/To
 // cover the batch for older clients; current clients protect only its ranges.
-func (op *NoteEditOperation) EditRanges() []NoteEditRange {
+func (op *PageEditOperation) EditRanges() []PageEditRange {
 	if len(op.Ranges) > 0 {
 		return op.Ranges
 	}
-	return []NoteEditRange{{From: op.From, To: op.To, Target: op.Target}}
+	return []PageEditRange{{From: op.From, To: op.To, Target: op.Target}}
 }
-func (op *NoteEditOperation) SetRanges(ranges []NoteEditRange) {
+func (op *PageEditOperation) SetRanges(ranges []PageEditRange) {
 	op.From, op.To = ranges[0].From, ranges[len(ranges)-1].To
 	if len(op.Ranges) > 0 || len(ranges) > 1 {
 		op.Ranges = ranges

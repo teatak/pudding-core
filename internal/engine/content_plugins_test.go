@@ -19,7 +19,7 @@ import (
 func TestContentPluginsLoadIndependently(t *testing.T) {
 	groups := map[string][]string{
 		plugin.BuiltinArtifactsID:      {tool.ArtifactList, tool.ArtifactOpen},
-		plugin.BuiltinNoteAuthoringID:  {tool.NoteCreate, tool.NoteRead, tool.NoteEdit, tool.NoteRename},
+		plugin.BuiltinPageAuthoringID:  {tool.PageCreate, tool.PageRead, tool.PageEdit, tool.PageRename},
 		plugin.BuiltinSheetAuthoringID: {tool.SheetCreate, tool.SheetRead, tool.SheetEdit},
 	}
 	for id, want := range groups {
@@ -79,7 +79,7 @@ func TestContentPluginsLoadIndependently(t *testing.T) {
 			// A second content capability can coexist, without coupling either switch.
 			other := plugin.BuiltinArtifactsID
 			if id == other {
-				other = plugin.BuiltinNoteAuthoringID
+				other = plugin.BuiltinPageAuthoringID
 			}
 			load(other)
 			assertTools(id, other)
@@ -122,7 +122,7 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 		}
 	}
 	parts := &turnPartAccumulator{}
-	for index, name := range []string{tool.NoteCreate, tool.SheetCreate} {
+	for index, name := range []string{tool.PageCreate, tool.SheetCreate} {
 		if tool.HasDefinition(defs, name) {
 			t.Fatal("historical load exposed type tool", name)
 		}
@@ -150,7 +150,7 @@ func TestLegacyContentPluginCannotExecuteTypeTools(t *testing.T) {
 	}
 }
 
-func TestLegacyNoteAliasesRespectPluginAvailability(t *testing.T) {
+func TestLegacyPageAliasesRespectPluginAvailability(t *testing.T) {
 	for _, scenario := range []struct {
 		name, reason                     string
 		loaded, disabled, omitDefinition bool
@@ -170,7 +170,7 @@ func TestLegacyNoteAliasesRespectPluginAvailability(t *testing.T) {
 			e := New(st, event.NewHub(), nil, st, WithPlugins(plugins))
 			var loaded []string
 			if scenario.loaded {
-				loaded = []string{plugin.BuiltinNoteAuthoringID}
+				loaded = []string{plugin.BuiltinPageAuthoringID}
 			}
 			if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", LoadedPluginIDs: loaded}); err != nil {
 				t.Fatal(err)
@@ -183,7 +183,7 @@ func TestLegacyNoteAliasesRespectPluginAvailability(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario.disabled {
-				if _, err := plugins.SetEnabled(ctx, plugin.BuiltinNoteAuthoringID, false); err != nil {
+				if _, err := plugins.SetEnabled(ctx, plugin.BuiltinPageAuthoringID, false); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -191,7 +191,7 @@ func TestLegacyNoteAliasesRespectPluginAvailability(t *testing.T) {
 				defs = nil
 			}
 			parts := &turnPartAccumulator{}
-			for index, name := range []string{tool.NoteCreate, "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"} {
+			for index, name := range []string{tool.PageCreate, "builtin_doc_create", "builtin_doc_read", "builtin_doc_edit"} {
 				parts.AppendTool(provider.ToolCallChunk{Index: index, CallID: name, Name: name, ArgsDelta: `{"name":"Blocked","body":"must not write","item_id":"missing"}`})
 			}
 			status, message, _, _ := e.executePendingTools(ctx, "s", "turn", store.ModeChat, defs, parts)

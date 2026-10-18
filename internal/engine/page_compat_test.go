@@ -16,7 +16,7 @@ import (
 
 // Legacy execution is allowed for six months; every following model request
 // uses the canonical names, including the current turn's native continuation.
-func TestLegacyNoteCurrentTurnContinuations(t *testing.T) {
+func TestLegacyPageCurrentTurnContinuations(t *testing.T) {
 	for _, protocol := range []struct {
 		kind, native string
 		wire         func(provider.Request) provider.WireInput

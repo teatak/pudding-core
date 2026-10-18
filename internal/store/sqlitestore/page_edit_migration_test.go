@@ -81,23 +81,23 @@ func TestPageEditMigrationRepairsSkippedTables(t *testing.T) {
 			assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
 			assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='doc_legacy'", "page")
 			assertWorkspaceMigrationValue(t, s.db, "SELECT request_hash FROM studio_item_saves WHERE item_id='doc_legacy'", "legacy-request")
-			doc, err := s.GetNote(ctx, "doc_legacy")
+			doc, err := s.GetPage(ctx, "doc_legacy")
 			if err != nil || doc.Body != pageEditLegacyBody || doc.ContentHash != store.ContentHash(pageEditLegacyBody) || doc.RevisionID != "legacy-revision" {
 				t.Fatal("migration changed the Page snapshot", doc, err)
 			}
 			user := store.ContentAuthor{Kind: "user"}
 			body := pageEditLegacyBody + "Human footer\r\n"
-			write := store.NoteWrite{ClientRequestID: "save", Body: &body, ExpectedHash: &doc.ContentHash, Author: user}
-			saved, err := s.WriteNote(ctx, doc.ItemID, write)
+			write := store.PageWrite{ClientRequestID: "save", Body: &body, ExpectedHash: &doc.ContentHash, Author: user}
+			saved, err := s.WritePage(ctx, doc.ItemID, write)
 			if err != nil {
 				t.Fatal("save after migration", err)
 			}
-			begin := store.NoteEditRequest{Action: "begin", ClientRequestID: "begin", ExpectedHash: saved.ContentHash, Target: "目标段落。", Author: user}
-			op, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
+			begin := store.PageEditRequest{Action: "begin", ClientRequestID: "begin", ExpectedHash: saved.ContentHash, Target: "目标段落。", Author: user}
+			op, err := s.ChangePageEdit(ctx, doc.ItemID, begin)
 			if err != nil {
 				t.Fatal("begin after migration", err)
 			}
-			state, err := s.GetNoteEditState(ctx, doc.ItemID)
+			state, err := s.GetPageEditState(ctx, doc.ItemID)
 			if err != nil || len(state.Operations) != 1 || state.Operations[0].ID != op.ID {
 				t.Fatal("read edit state after migration", state, err)
 			}
@@ -108,20 +108,20 @@ func TestPageEditMigrationRepairsSkippedTables(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			retry, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
+			retry, err := s.ChangePageEdit(ctx, doc.ItemID, begin)
 			if err != nil || !reflect.DeepEqual(retry, op) {
 				t.Fatal("lease retry changed after restart", retry, err)
 			}
 			replacement := "完成。"
-			committed, err := s.WriteNote(ctx, doc.ItemID, store.NoteWrite{ClientRequestID: "commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &replacement, Author: user})
+			committed, err := s.WritePage(ctx, doc.ItemID, store.PageWrite{ClientRequestID: "commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &replacement, Author: user})
 			if err != nil || committed.Body != strings.Replace(body, begin.Target, replacement, 1) {
 				t.Fatal("commit after restart", committed, err)
 			}
-			replayed, err := s.WriteNote(ctx, doc.ItemID, write)
+			replayed, err := s.WritePage(ctx, doc.ItemID, write)
 			if err != nil || *replayed != *saved {
 				t.Fatal("save retry lost its original result", replayed, err)
 			}
-			current, err := s.GetNote(ctx, doc.ItemID)
+			current, err := s.GetPage(ctx, doc.ItemID)
 			if err != nil || *current != *committed {
 				t.Fatal("save replay moved the head", current, err)
 			}
@@ -147,12 +147,12 @@ func TestPageEditMigrationPreservesExistingLeaseAndRequest(t *testing.T) {
 		}
 	}()
 	user := store.ContentAuthor{Kind: "user"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "page", Kind: store.StudioItemKindPage, Name: "Page"}, pageEditLegacyBody, user)
+	doc, err := s.CreatePage(ctx, &store.StudioItem{ID: "page", Kind: store.StudioItemKindPage, Name: "Page"}, pageEditLegacyBody, user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	begin := store.NoteEditRequest{Action: "begin", ClientRequestID: "begin", ExpectedHash: doc.ContentHash, Target: "目标段落。", Author: user}
-	op, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
+	begin := store.PageEditRequest{Action: "begin", ClientRequestID: "begin", ExpectedHash: doc.ContentHash, Target: "目标段落。", Author: user}
+	op, err := s.ChangePageEdit(ctx, doc.ItemID, begin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,16 +179,16 @@ func TestPageEditMigrationPreservesExistingLeaseAndRequest(t *testing.T) {
 	assertWorkspaceMigrationValue(t, s.db, "SELECT request_hash FROM studio_document_edit_requests", requestHash)
 	assertWorkspaceMigrationValue(t, s.db, "SELECT result FROM studio_document_edit_requests", result)
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='studio_document_edits_item'", "1")
-	retry, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
+	retry, err := s.ChangePageEdit(ctx, doc.ItemID, begin)
 	if err != nil || !reflect.DeepEqual(retry, op) {
 		t.Fatal("migration changed the idempotent lease result", retry, err)
 	}
-	var locked *store.NoteLocked
-	if _, err := s.WriteNote(ctx, doc.ItemID, store.NoteWrite{ClientRequestID: "conflicting", Edits: []store.NoteEdit{{Old: "目标段落。", New: "wrong"}}, Author: user}); !errors.As(err, &locked) {
+	var locked *store.PageLocked
+	if _, err := s.WritePage(ctx, doc.ItemID, store.PageWrite{ClientRequestID: "conflicting", Edits: []store.PageEdit{{Old: "目标段落。", New: "wrong"}}, Author: user}); !errors.As(err, &locked) {
 		t.Fatal("migration lost the active lease", err)
 	}
 	replacement := "完成。"
-	if _, err := s.WriteNote(ctx, doc.ItemID, store.NoteWrite{ClientRequestID: "commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &replacement, Author: user}); err != nil {
+	if _, err := s.WritePage(ctx, doc.ItemID, store.PageWrite{ClientRequestID: "commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &replacement, Author: user}); err != nil {
 		t.Fatal("retained lease cannot commit", err)
 	}
 }
@@ -218,7 +218,7 @@ func TestPageEditMigrationFailureRollsBack(t *testing.T) {
 		t.Fatal("retry after rollback", err)
 	}
 	defer s.Close()
-	if _, err := s.GetNoteEditState(context.Background(), "doc_legacy"); err != nil {
+	if _, err := s.GetPageEditState(context.Background(), "doc_legacy"); err != nil {
 		t.Fatal("retry did not repair Page editing", err)
 	}
 }

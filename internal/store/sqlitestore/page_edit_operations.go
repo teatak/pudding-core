@@ -12,10 +12,10 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const noteEditLease = 2 * time.Minute
-const noteEditMaxLifetime = 15 * time.Minute
+const pageEditLease = 2 * time.Minute
+const pageEditMaxLifetime = 15 * time.Minute
 
-func loadNoteEditTx(ctx context.Context, tx *sql.Tx, itemID, id string) (*store.NoteEditOperation, error) {
+func loadPageEditTx(ctx context.Context, tx *sql.Tx, itemID, id string) (*store.PageEditOperation, error) {
 	var raw string
 	if err := tx.QueryRowContext(ctx, `SELECT payload FROM studio_document_edits WHERE item_id=? AND id=?`, itemID, id).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -23,12 +23,12 @@ func loadNoteEditTx(ctx context.Context, tx *sql.Tx, itemID, id string) (*store.
 		}
 		return nil, err
 	}
-	var op store.NoteEditOperation
+	var op store.PageEditOperation
 	err := json.Unmarshal([]byte(raw), &op)
 	return &op, err
 }
 
-func saveNoteEditTx(ctx context.Context, tx *sql.Tx, op *store.NoteEditOperation) error {
+func savePageEditTx(ctx context.Context, tx *sql.Tx, op *store.PageEditOperation) error {
 	raw, err := json.Marshal(op)
 	if err != nil {
 		return err
@@ -38,19 +38,19 @@ ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_a
 	return err
 }
 
-func activeNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64) ([]store.NoteEditOperation, error) {
+func activePageEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64) ([]store.PageEditOperation, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM studio_document_edits WHERE item_id=? AND state='active'`, itemID)
 	if err != nil {
 		return nil, err
 	}
-	all := []store.NoteEditOperation{}
+	all := []store.PageEditOperation{}
 	for rows.Next() {
 		var raw string
 		if err = rows.Scan(&raw); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		var op store.NoteEditOperation
+		var op store.PageEditOperation
 		if err = json.Unmarshal([]byte(raw), &op); err != nil {
 			rows.Close()
 			return nil, err
@@ -62,7 +62,7 @@ func activeNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64
 	if err != nil {
 		return nil, err
 	}
-	active := []store.NoteEditOperation{}
+	active := []store.PageEditOperation{}
 	for _, op := range all {
 		ended := false
 		if op.Author.Kind == "session" {
@@ -79,7 +79,7 @@ func activeNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64
 			}
 			op.UpdatedAt = now
 			op.Sequence++
-			if err = saveNoteEditTx(ctx, tx, &op); err != nil {
+			if err = savePageEditTx(ctx, tx, &op); err != nil {
 				return nil, err
 			}
 		} else {
@@ -89,7 +89,7 @@ func activeNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64
 	return active, nil
 }
 
-func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.NoteEditRequest) (*store.NoteEditOperation, error) {
+func (s *Store) ChangePageEdit(ctx context.Context, itemID string, in store.PageEditRequest) (*store.PageEditOperation, error) {
 	if in.ClientRequestID == "" || len(in.ClientRequestID) > 200 {
 		return nil, &store.InvalidContent{Message: "clientRequestID is required (max 200 bytes)"}
 	}
@@ -97,16 +97,16 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 		return nil, &store.InvalidContent{Message: "invalid editing operation action"}
 	}
 	payload, _ := json.Marshal(struct {
-		Input  store.NoteEditRequest
+		Input  store.PageEditRequest
 		Author store.ContentAuthor
 	}{in, in.Author})
 	requestHash := store.ContentHash(string(payload))
-	var out *store.NoteEditOperation
+	var out *store.PageEditOperation
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
 			return err
 		}
-		doc, err := scanContentSnapshot(tx.QueryRowContext(ctx, noteSelect, itemID))
+		doc, err := scanContentSnapshot(tx.QueryRowContext(ctx, pageSelect, itemID))
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 			return err
 		}
 		now := time.Now().UnixMilli()
-		active, err := activeNoteEditsTx(ctx, tx, itemID, now)
+		active, err := activePageEditsTx(ctx, tx, itemID, now)
 		if err != nil {
 			return err
 		}
@@ -139,9 +139,9 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 			if in.ExpectedHash == "" || in.ExpectedHash != doc.ContentHash {
 				return &store.ContentConflict{CurrentHash: doc.ContentHash}
 			}
-			ranges := append([]store.NoteEditRange(nil), in.Ranges...)
+			ranges := append([]store.PageEditRange(nil), in.Ranges...)
 			if len(ranges) == 0 {
-				ranges = []store.NoteEditRange{{From: in.From, To: in.To, Target: in.Target}}
+				ranges = []store.PageEditRange{{From: in.From, To: in.To, Target: in.Target}}
 			} else if in.Target != "" || in.From != 0 || in.To != 0 {
 				return &store.InvalidContent{Message: "provide ranges or a single target, not both"}
 			}
@@ -159,7 +159,7 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 					r.To = r.From + len(r.Target)
 				}
 				total += r.To - r.From
-				if !store.ValidNoteRange(doc.Body, r.From, r.To) || total > contracts.Studio().MaxReadBytes {
+				if !store.ValidPageRange(doc.Body, r.From, r.To) || total > contracts.Studio().MaxReadBytes {
 					return &store.InvalidContent{Message: "invalid UTF-8 editing ranges (maximum total 64 KiB)"}
 				}
 				if i > 0 && ranges[i-1].To >= r.From {
@@ -172,18 +172,18 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 				for _, op := range active {
 					for _, other := range op.EditRanges() {
 						if r.From <= other.To && r.To >= other.From {
-							return &store.NoteLocked{OperationID: op.ID}
+							return &store.PageLocked{OperationID: op.ID}
 						}
 					}
 				}
 			}
-			out = &store.NoteEditOperation{ID: store.NewID("edit"), ItemID: itemID, State: "active", ContentHash: doc.ContentHash, Author: in.Author, CreatedAt: now, UpdatedAt: now, ExpiresAt: now + noteEditLease.Milliseconds(), Sequence: 1, LeaseToken: store.NewID("lease")}
+			out = &store.PageEditOperation{ID: store.NewID("edit"), ItemID: itemID, State: "active", ContentHash: doc.ContentHash, Author: in.Author, CreatedAt: now, UpdatedAt: now, ExpiresAt: now + pageEditLease.Milliseconds(), Sequence: 1, LeaseToken: store.NewID("lease")}
 			if len(in.Ranges) > 0 {
 				out.Ranges = ranges
 			}
 			out.SetRanges(ranges)
 		} else {
-			out, err = loadNoteEditTx(ctx, tx, itemID, in.OperationID)
+			out, err = loadPageEditTx(ctx, tx, itemID, in.OperationID)
 			if err != nil {
 				return err
 			}
@@ -197,7 +197,7 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 				if in.Action == "cancel" {
 					out.State = "cancelled"
 				} else {
-					out.ExpiresAt = min(now+noteEditLease.Milliseconds(), out.CreatedAt+noteEditMaxLifetime.Milliseconds())
+					out.ExpiresAt = min(now+pageEditLease.Milliseconds(), out.CreatedAt+pageEditMaxLifetime.Milliseconds())
 					if out.ExpiresAt <= now {
 						return &store.InvalidContent{Message: "editing operation reached its lifetime limit"}
 					}
@@ -206,7 +206,7 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 				return &store.InvalidContent{Message: "editing operation is no longer active"}
 			}
 		}
-		if err = saveNoteEditTx(ctx, tx, out); err != nil {
+		if err = savePageEditTx(ctx, tx, out); err != nil {
 			return err
 		}
 		resultBytes, _ := json.Marshal(out)
@@ -216,16 +216,16 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 	return out, err
 }
 
-func (s *Store) GetNoteEditState(ctx context.Context, itemID string) (*store.NoteEditState, error) {
-	out := &store.NoteEditState{Operations: []store.NoteEditOperation{}}
+func (s *Store) GetPageEditState(ctx context.Context, itemID string) (*store.PageEditState, error) {
+	out := &store.PageEditState{Operations: []store.PageEditOperation{}}
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		doc, err := scanContentSnapshot(tx.QueryRowContext(ctx, noteSelect, itemID))
+		doc, err := scanContentSnapshot(tx.QueryRowContext(ctx, pageSelect, itemID))
 		if err != nil {
 			return err
 		}
 		out.ContentHash = doc.ContentHash
 		now := time.Now().UnixMilli()
-		if _, err = activeNoteEditsTx(ctx, tx, itemID, now); err != nil {
+		if _, err = activePageEditsTx(ctx, tx, itemID, now); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT payload FROM studio_document_edits WHERE item_id=? AND (state='active' OR updated_at>?) ORDER BY updated_at DESC LIMIT 32`, itemID, now-int64(time.Minute/time.Millisecond))
@@ -238,7 +238,7 @@ func (s *Store) GetNoteEditState(ctx context.Context, itemID string) (*store.Not
 			if err = rows.Scan(&raw); err != nil {
 				return err
 			}
-			var op store.NoteEditOperation
+			var op store.PageEditOperation
 			if err = json.Unmarshal([]byte(raw), &op); err != nil {
 				return err
 			}
@@ -254,7 +254,7 @@ func (s *Store) GetNoteEditState(ctx context.Context, itemID string) (*store.Not
 	return out, err
 }
 
-func checkNoteEditCommit(op *store.NoteEditOperation, in store.NoteWrite, body string, now int64) error {
+func checkPageEditCommit(op *store.PageEditOperation, in store.PageWrite, body string, now int64) error {
 	if op.State == "cancelled" {
 		return &store.InvalidContent{Message: "editing operation was cancelled; do not retry this edit without a new user request"}
 	}
@@ -265,19 +265,19 @@ func checkNoteEditCommit(op *store.NoteEditOperation, in store.NoteWrite, body s
 		return &store.InvalidContent{Message: "editing operation owner or lease does not match"}
 	}
 	for _, r := range op.EditRanges() {
-		if !store.ValidNoteRange(body, r.From, r.To) || body[r.From:r.To] != r.Target {
+		if !store.ValidPageRange(body, r.From, r.To) || body[r.From:r.To] != r.Target {
 			return &store.ContentConflict{CurrentHash: store.ContentHash(body)}
 		}
 	}
 	return nil
 }
 
-func guardNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID, before, after, ownID string, now int64) error {
-	active, err := activeNoteEditsTx(ctx, tx, itemID, now)
+func guardPageEditsTx(ctx context.Context, tx *sql.Tx, itemID, before, after, ownID string, now int64) error {
+	active, err := activePageEditsTx(ctx, tx, itemID, now)
 	if err != nil {
 		return err
 	}
-	var all []store.NoteEditRange
+	var all []store.PageEditRange
 	var owners []string
 	for _, op := range active {
 		if op.ID == ownID {
@@ -288,9 +288,9 @@ func guardNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID, before, after, ow
 			owners = append(owners, op.ID)
 		}
 	}
-	mapped, conflict := store.MapNoteRanges(before, after, all)
+	mapped, conflict := store.MapPageRanges(before, after, all)
 	if conflict >= 0 {
-		return &store.NoteLocked{OperationID: owners[conflict]}
+		return &store.PageLocked{OperationID: owners[conflict]}
 	}
 	offset := 0
 	for _, op := range active {
@@ -303,7 +303,7 @@ func guardNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID, before, after, ow
 		op.ContentHash = store.ContentHash(after)
 		op.UpdatedAt = now
 		op.Sequence++
-		if err = saveNoteEditTx(ctx, tx, &op); err != nil {
+		if err = savePageEditTx(ctx, tx, &op); err != nil {
 			return err
 		}
 	}

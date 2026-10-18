@@ -11,19 +11,15 @@ import (
 
 const (
 	StudioItemKindPage = "page"
-	StudioItemKindNote = "page"
 )
 
 // PageContent is the UTF-8 Markdown view of a native content snapshot.
 type PageContent = ContentSnapshot
-type NoteContent = ContentSnapshot
 
 type PageEdit struct {
 	Old string `json:"old"`
 	New string `json:"new"`
 }
-
-type NoteEdit = PageEdit
 
 type PageWrite struct {
 	Replacements    []string   `json:"replacements,omitempty"`
@@ -42,18 +38,14 @@ type PageWrite struct {
 	Author       ContentAuthor `json:"-"`
 }
 
-type NoteWrite = PageWrite
-
-type NoteStore interface {
-	NoteEditOperationStore
-	CreateNote(context.Context, *StudioItem, string, ContentAuthor) (*NoteContent, error)
-	GetNote(context.Context, string) (*NoteContent, error)
-	WriteNote(context.Context, string, NoteWrite) (*NoteContent, error)
+type PageStore interface {
+	PageEditOperationStore
+	CreatePage(context.Context, *StudioItem, string, ContentAuthor) (*PageContent, error)
+	GetPage(context.Context, string) (*PageContent, error)
+	WritePage(context.Context, string, PageWrite) (*PageContent, error)
 }
 
-type PageStore = NoteStore
-
-func ValidateNote(body string) error {
+func ValidatePage(body string) error {
 	if !utf8.ValidString(body) {
 		return &InvalidContent{"document must be UTF-8"}
 	}
@@ -65,7 +57,7 @@ func ValidateNote(body string) error {
 
 // Resolve all anchors against the same body before applying any change. A failed
 // or overlapping anchor rejects the whole operation, including earlier edits.
-func ApplyNoteEdits(body string, edits []NoteEdit) (string, error) {
+func ApplyPageEdits(body string, edits []PageEdit) (string, error) {
 	if len(edits) == 0 || len(edits) > contracts.Studio().MaxDocumentEdits {
 		return "", &InvalidContent{"invalid edit count"}
 	}
@@ -94,5 +86,5 @@ func ApplyNoteEdits(body string, edits []NoteEdit) (string, error) {
 	}
 	out.WriteString(body[cursor:])
 	result := out.String()
-	return result, ValidateNote(result)
+	return result, ValidatePage(result)
 }
