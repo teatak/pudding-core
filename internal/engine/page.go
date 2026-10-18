@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -11,6 +12,39 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
+
+// Current model calls must reserve a range before generating text. Prompt-only
+// guidance is insufficient: existing conversations may repeat one-shot writes
+// from their history, bypassing the caret, cancellation and streaming events.
+// Check the original name after authorization, before alias normalization loses
+// that distinction. Released doc/note calls retain their legacy payloads.
+func (e *Engine) checkPageAuthoringCall(ctx context.Context, sessionID, turnID, originalName string, call tool.Call) *tool.Result {
+	if originalName != tool.PageCreate && originalName != tool.PageEdit {
+		return nil
+	}
+	args, err := tool.DecodeStudioArgs(call.Args)
+	if err != nil {
+		return nil // The regular handler reports malformed arguments.
+	}
+	message := ""
+	if originalName == tool.PageEdit && (args.Action == "" || args.Body != nil || args.Edits != nil) {
+		message = "No content was changed. page_edit requires action=begin before action=commit; body and edits are no longer accepted. Read the current page, begin with expected_hash and the unique target (or ranges for disjoint passages), then commit with operation_id, lease_token and replacement/replacements. For an empty page use from=0,to=0; for an append use from=to=bodyBytes; for an entire rewrite use from=0,to=bodyBytes. Do not repeat one-shot writes from earlier conversation history."
+	}
+	if originalName == tool.PageCreate && args.Body != nil && *args.Body != "" {
+		// Preserve an idempotent retry of a creation already saved by an older
+		// version, including a retry under the canonical name of a legacy call.
+		id := "page_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
+		if _, err := e.store.GetPage(ctx, id); err == nil {
+			return nil
+		}
+		message = "No page was created. Create with body set to an empty string, then begin an edit with the returned itemID/contentHash and from=0,to=0; write the content through commit replacement. This keeps first-draft writing visible and cancellable."
+	}
+	if message == "" {
+		return nil
+	}
+	content, _ := json.Marshal(map[string]string{"error": "page_edit_requires_begin", "message": message})
+	return &tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: string(content)}
+}
 
 func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call tool.Call, args tool.StudioArgs) (any, error) {
 	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}

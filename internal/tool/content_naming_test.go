@@ -3,9 +3,35 @@ package tool
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestPageCatalogRequiresStagedWriting(t *testing.T) {
+	for _, def := range PageDefinitions() {
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		switch def.Name {
+		case PageEdit:
+			if !slices.Contains(schema.Required, "action") || schema.Properties["body"] != nil || schema.Properties["edits"] != nil {
+				t.Fatal("catalog permits invisible one-shot edits")
+			}
+		case PageCreate:
+			var body struct {
+				Enum []string `json:"enum"`
+			}
+			if err := json.Unmarshal(schema.Properties["body"], &body); err != nil || !reflect.DeepEqual(body.Enum, []string{""}) {
+				t.Fatal("creation must start empty")
+			}
+		}
+	}
+}
 
 func TestStudioCatalogAdvertisesPageAndSheet(t *testing.T) {
 	seen := map[string]bool{}

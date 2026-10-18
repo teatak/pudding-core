@@ -2147,6 +2147,8 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				result = toolNotAllowedResult(call, nextMode)
 			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode) {
 				result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
+			} else if rejected := e.checkPageAuthoringCall(ctx, sessionID, turnID, storedName, call); rejected != nil {
+				result = *rejected
 			} else {
 				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}

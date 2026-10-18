@@ -70,12 +70,24 @@ func testStudioChatTools(t *testing.T, prefix string) {
 		t.Fatal("missing result")
 		return tool.Result{}
 	}
-	result := run(tool.PageCreate, "create", map[string]any{"name": "Notes", "body": "甲\n\n乙"})
+	initialBody := "甲\n\n乙"
+	if prefix == "page" {
+		initialBody = ""
+	}
+	result := run(tool.PageCreate, "create", map[string]any{"name": "Notes", "body": initialBody})
 	var created struct {
 		ItemID      string `json:"itemID"`
 		ContentHash string `json:"contentHash"`
 	}
 	json.Unmarshal([]byte(result.Content), &created)
+	var op store.PageEditOperation
+	if prefix == "page" {
+		lease := run(tool.PageEdit, "initial-begin", map[string]any{"item_id": created.ItemID, "action": "begin", "expected_hash": created.ContentHash, "from": 0, "to": 0})
+		if err := json.Unmarshal([]byte(lease.Content), &op); err != nil {
+			t.Fatal(err)
+		}
+		run(tool.PageEdit, "initial-commit", map[string]any{"item_id": created.ItemID, "action": "commit", "operation_id": op.ID, "lease_token": op.LeaseToken, "replacement": "甲\n\n乙"})
+	}
 	originalPrefix := prefix
 	prefix = "page" // Retry an old create under the canonical name without duplicating the item.
 	run(tool.PageCreate, "create", map[string]any{"name": "Notes", "body": "甲\n\n乙"})
@@ -84,7 +96,16 @@ func testStudioChatTools(t *testing.T, prefix string) {
 	if len(items) != 1 {
 		t.Fatal("retry created duplicate document")
 	}
-	run(tool.PageEdit, "edit", map[string]any{"item_id": created.ItemID, "edits": []map[string]string{{"old": "乙", "new": "AI 修改"}}})
+	if prefix == "page" {
+		note, _ := st.GetPage(ctx, created.ItemID)
+		lease := run(tool.PageEdit, "edit-begin", map[string]any{"item_id": created.ItemID, "action": "begin", "expected_hash": note.ContentHash, "target": "乙"})
+		if err := json.Unmarshal([]byte(lease.Content), &op); err != nil {
+			t.Fatal(err)
+		}
+		run(tool.PageEdit, "edit", map[string]any{"item_id": created.ItemID, "action": "commit", "operation_id": op.ID, "lease_token": op.LeaseToken, "replacement": "AI 修改"})
+	} else {
+		run(tool.PageEdit, "edit", map[string]any{"item_id": created.ItemID, "edits": []map[string]string{{"old": "乙", "new": "AI 修改"}}})
+	}
 	read := run(tool.PageRead, "read", map[string]any{"item_id": created.ItemID, "offset": 0, "limit": 2})
 	if !strings.Contains(read.Content, `"nextOffset":2`) {
 		t.Fatal("read pagination missing", read.Content)
@@ -103,7 +124,11 @@ func testStudioChatTools(t *testing.T, prefix string) {
 		t.Fatal("mount scope incorrect")
 	}
 	revisions, _ := st.ListStudioItemRevisions(ctx, created.ItemID)
-	if len(revisions) != 2 || revisions[0].Author.SessionID != "writer" || revisions[0].Author.TurnID != "turn" {
+	wantRevisions := 2
+	if prefix == "page" {
+		wantRevisions++
+	}
+	if len(revisions) != wantRevisions || revisions[0].Author.SessionID != "writer" || revisions[0].Author.TurnID != "turn" {
 		t.Fatal("wrong version authors", revisions)
 	}
 	doc, _ := st.GetPage(ctx, created.ItemID)
@@ -111,7 +136,6 @@ func testStudioChatTools(t *testing.T, prefix string) {
 		t.Fatal(doc.Body)
 	}
 	lease := run(tool.PageEdit, "begin", map[string]any{"item_id": created.ItemID, "action": "begin", "expected_hash": doc.ContentHash, "target": "AI 修改"})
-	var op store.PageEditOperation
 	if err := json.Unmarshal([]byte(lease.Content), &op); err != nil || op.LeaseToken == "" {
 		t.Fatal("missing lease", lease.Content, err)
 	}
