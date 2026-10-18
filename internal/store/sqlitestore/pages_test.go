@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestPageConcurrentEditingVersionsAndRestart(t *testing.T) {
 	}
 	edit.Edits[0].New = "AI two"
 	retried, err := s.WritePage(ctx, "doc", edit)
-	if err != nil || *retried != *doc {
+	if err != nil || !reflect.DeepEqual(retried, doc) {
 		t.Fatal("retry must return the original write, not a later author's version", retried, err)
 	}
 	revisions, err := s.ListStudioItemRevisions(ctx, "doc")
@@ -99,7 +100,7 @@ func TestPageConcurrentEditingVersionsAndRestart(t *testing.T) {
 	}
 	defer s.Close()
 	persisted, err := s.GetPage(ctx, "doc")
-	if err != nil || *persisted != *restored {
+	if err != nil || !reflect.DeepEqual(persisted, restored) {
 		t.Fatal("restart lost document", persisted, err)
 	}
 }
@@ -122,7 +123,7 @@ func TestPageEditsAreAtomicAndSizeBounded(t *testing.T) {
 			t.Fatal("invalid edits accepted", i)
 		}
 		after, _ := s.GetPage(ctx, "doc")
-		if *after != *doc {
+		if !reflect.DeepEqual(after, doc) {
 			t.Fatal("partial write", i)
 		}
 	}

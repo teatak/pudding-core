@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 44
+	currentSchemaVersion       = 45
 )
 
 var (
@@ -36,6 +36,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished document migrations 40–41 are consolidated into destination 42.
 var schemaMigrations = map[int]schemaMigration{
 	44: migratePageEdits,
+	45: migratePageDocuments,
 	43: migratePages,
 	42: migrateSheets,
 	41: func(tx *sql.Tx) error { return nil },
@@ -956,8 +957,8 @@ var currentSchemaContract = func() schemaContract {
 		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
 		"collaboration_stops":   {"parent_turn_id"},
 		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
-		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id"},
-		"studio_item_content":   {"item_id", "body", "content_hash"},
+		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id", "content_format"},
+		"studio_item_content":   {"item_id", "body", "content_hash", "content_format"},
 		"studio_sheet_ids":      {"item_id", "entity_kind", "entity_id"},
 		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
 		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},

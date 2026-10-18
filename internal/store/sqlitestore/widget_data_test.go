@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -206,5 +207,5 @@ func TestWidgetDataMigrationPreservesItemsAndRollsBack(t *testing.T) {
 	if err != nil || data.Version != 0 {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 }

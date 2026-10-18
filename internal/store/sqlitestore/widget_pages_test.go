@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/teatak/pudding-core/internal/store"
 	"strings"
 	"sync"
@@ -99,7 +100,7 @@ func TestWidgetPageMigrationRollbackAndPreservation(t *testing.T) {
 	if err != nil || string(data.Data) != `{"keep":true}` {
 		t.Fatal(data, err)
 	}
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 }
 
 func TestWidgetPageRevisionIsolationConcurrentWritesAndSessionCleanup(t *testing.T) {

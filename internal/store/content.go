@@ -13,13 +13,14 @@ type ContentAuthor struct {
 	TurnID    string `json:"turnID,omitempty"`
 }
 
-// ContentSnapshot is the persisted UTF-8 body and version envelope shared by
-// Pages (Markdown) and Sheets (JSON bodies). It is not an editor model.
+// ContentSnapshot exposes a compatibility body and version envelope. Pages
+// persist Structure and derive Markdown Body; Sheets keep their JSON bodies.
 type ContentSnapshot struct {
-	ItemID      string `json:"itemID"`
-	Body        string `json:"body"`
-	ContentHash string `json:"contentHash"`
-	RevisionID  string `json:"revisionID"`
+	ItemID      string        `json:"itemID"`
+	Body        string        `json:"body"`
+	ContentHash string        `json:"contentHash"`
+	RevisionID  string        `json:"revisionID"`
+	Structure   *PageDocument `json:"structure,omitempty"`
 }
 
 type ContentConflict struct{ CurrentHash string }

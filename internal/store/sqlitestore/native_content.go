@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -19,9 +20,13 @@ type nativeContentSave struct {
 
 func scanContentSnapshot(row messageScanner) (*store.ContentSnapshot, error) {
 	d := &store.ContentSnapshot{}
-	err := row.Scan(&d.ItemID, &d.Body, &d.ContentHash, &d.RevisionID)
+	var format string
+	err := row.Scan(&d.ItemID, &d.Body, &d.ContentHash, &d.RevisionID, &format)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
+	}
+	if err == nil {
+		d.Body, d.Structure, err = store.DecodeStoredContent(d.ItemID, d.Body, format)
 	}
 	return d, err
 }
@@ -45,10 +50,18 @@ func validateContentAuthor(ctx context.Context, tx *sql.Tx, author store.Content
 // Each debounced human save seals that editing pause. AI writes and restores
 // always append a version, even when restoring a previously seen body.
 func saveNativeContentTx(ctx context.Context, tx *sql.Tx, d *store.ContentSnapshot, in nativeContentSave, requestHash string) error {
+	raw, format := d.Body, "plain"
+	if d.Structure != nil {
+		data, err := json.Marshal(d.Structure)
+		if err != nil {
+			return err
+		}
+		raw, format = string(data), store.PageDocumentFormat
+	}
 	parent := d.RevisionID
 	revision := store.ContentHash(d.ItemID + "\x00" + parent + "\x00" + in.ClientRequestID + "\x00" + d.ContentHash)
 	now := unixMS(time.Now().UTC())
-	_, err := tx.ExecContext(ctx, `INSERT INTO studio_item_revisions(item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id) VALUES(?,?,?,?,?,'',?,?,?,?,?)`, d.ItemID, revision, parent, in.ClientRequestID, now, d.Body, d.ContentHash, in.Author.Kind, in.Author.SessionID, in.Author.TurnID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO studio_item_revisions(item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id,content_format) VALUES(?,?,?,?,?,'',?,?,?,?,?,?)`, d.ItemID, revision, parent, in.ClientRequestID, now, raw, d.ContentHash, in.Author.Kind, in.Author.SessionID, in.Author.TurnID, format)
 	if err != nil {
 		return err
 	}
@@ -58,7 +71,7 @@ func saveNativeContentTx(ctx context.Context, tx *sql.Tx, d *store.ContentSnapsh
 	if in.PreserveOnly {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE studio_item_content SET body=?,content_hash=? WHERE item_id=?`, d.Body, d.ContentHash, d.ItemID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE studio_item_content SET body=?,content_hash=?,content_format=? WHERE item_id=?`, raw, d.ContentHash, format, d.ItemID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE studio_items SET head_revision=?,revision=revision+1,updated_at=? WHERE id=?`, revision, now, d.ItemID); err != nil {

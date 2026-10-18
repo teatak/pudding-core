@@ -11,7 +11,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const pageSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind IN ('page','note') AND w.deleted=0 AND w.archived_at=0`
+const pageSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision,c.content_format FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind IN ('page','note') AND w.deleted=0 AND w.archived_at=0`
 
 func (s *Store) GetPage(ctx context.Context, id string) (*store.PageContent, error) {
 	s.mu.Lock()
@@ -41,7 +41,7 @@ func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body str
 		if _, err := tx.ExecContext(ctx, `INSERT INTO studio_item_content(item_id,body,content_hash) VALUES(?,?,?)`, item.ID, body, hash); err != nil {
 			return err
 		}
-		out = &store.PageContent{ItemID: item.ID, Body: body, ContentHash: hash}
+		out = &store.PageContent{ItemID: item.ID, Body: body, ContentHash: hash, Structure: store.LegacyPageDocument(item.ID, body)}
 		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: "create", Author: author}, "")
 	})
 	return out, err
@@ -107,7 +107,7 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 				out = current
 				return nil
 			}
-			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
+			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -117,6 +117,7 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 			return &store.ContentConflict{CurrentHash: current.ContentHash}
 		}
 		body := current.Body
+		var undoStructure *store.PageDocument
 		var operation *store.PageEditOperation
 		if leased {
 			if in.Author.Kind == "session" {
@@ -135,7 +136,8 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 			if err = checkPageEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
 				return err
 			}
-			ranges := operation.EditRanges()
+			ranges := append([]store.PageEditRange(nil), operation.EditRanges()...)
+			originalRanges := append([]store.PageEditRange(nil), ranges...)
 			replacements := in.Replacements
 			if in.Replacement != nil {
 				replacements = []string{*in.Replacement}
@@ -156,6 +158,11 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 			}
 			result.WriteString(body[cursor:])
 			body = result.String()
+			previous := current.Structure
+			if previous == nil {
+				previous = store.LegacyPageDocument(id, current.Body)
+			}
+			in.BlockHints = store.PageIdentityHintsAfterEdits(previous, body, originalRanges, replacements)
 			operation.SetRanges(ranges)
 		}
 		if in.Body != nil {
@@ -169,7 +176,8 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 		}
 		if in.RestoreRevision != "" {
 			var content sql.NullString
-			if err := tx.QueryRowContext(ctx, `SELECT content FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, in.RestoreRevision).Scan(&content); err != nil {
+			var format string
+			if err := tx.QueryRowContext(ctx, `SELECT content,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, in.RestoreRevision).Scan(&content, &format); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return store.ErrNotFound
 				}
@@ -178,13 +186,41 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 			if !content.Valid {
 				return &store.InvalidContent{Message: "revision has no document content"}
 			}
-			body = content.String
+			var restored *store.PageDocument
+			body, restored, err = store.DecodeStoredContent(id, content.String, format)
+			if err != nil {
+				return err
+			}
+			if restored != nil {
+				in.BlockHints = restored.Hints()
+			}
 		}
 
 		if in.UndoRevision != "" {
 			before, after, err := nativeUndoSourceTx(ctx, tx, id, current.RevisionID, in.UndoRevision)
 			if err == nil {
-				body, err = store.UndoPage(before, after, current.Body)
+				var rawBefore, formatBefore, rawAfter, formatAfter string
+				err = tx.QueryRowContext(ctx, `SELECT b.content,b.content_format,a.content,a.content_format FROM studio_item_revisions a JOIN studio_item_revisions b ON b.item_id=a.item_id AND b.hash=a.parent_revision WHERE a.item_id=? AND a.hash=?`, id, in.UndoRevision).Scan(&rawBefore, &formatBefore, &rawAfter, &formatAfter)
+				if err == nil && formatAfter == store.PageDocumentFormat {
+					_, beforeDoc, decodeErr := store.DecodeStoredContent(id, rawBefore, formatBefore)
+					err = decodeErr
+					if beforeDoc == nil && err == nil {
+						beforeDoc = store.LegacyPageDocument(id, before)
+					}
+					_, afterDoc, decodeErr := store.DecodeStoredContent(id, rawAfter, formatAfter)
+					if err == nil {
+						err = decodeErr
+					}
+					if err == nil {
+						undoStructure, err = store.UndoPageDocument(beforeDoc, afterDoc, current.Structure)
+						if err == nil {
+							body = undoStructure.Markdown()
+							in.BlockHints = undoStructure.Hints()
+						}
+					}
+				} else if err == nil {
+					body, err = store.UndoPage(before, after, current.Body)
+				}
 			}
 			if errors.Is(err, store.ErrUndoConflict) {
 				return &store.ContentConflict{CurrentHash: current.ContentHash}
@@ -201,7 +237,16 @@ func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*
 				return err
 			}
 		}
-		out = &store.PageContent{ItemID: id, Body: body, ContentHash: store.ContentHash(body), RevisionID: current.RevisionID}
+		previous := current.Structure
+		if previous == nil {
+			previous = store.LegacyPageDocument(id, current.Body)
+		}
+		structure, err := store.ReconcilePageDocument(body, previous, in.BlockHints)
+		if err != nil {
+			return err
+		}
+
+		out = &store.PageContent{ItemID: id, Body: body, ContentHash: store.ContentHash(body), RevisionID: current.RevisionID, Structure: structure}
 		if err := saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: in.ClientRequestID, Author: in.Author, PreserveOnly: in.PreserveOnly}, requestHash); err != nil {
 			return err
 		}

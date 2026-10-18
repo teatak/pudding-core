@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		45: "876bbae46aabf9cfe082c3f7fdd063b2a55fa2c9c4e708454559a458f4ce106c",
 		44: "56b3ae2f6ba13df9dfe4ed2ff024748299458cc2be346b280fc7d317e2d7f897", // Repair skipped Page edit tables; the canonical schema is unchanged.
 		43: "56b3ae2f6ba13df9dfe4ed2ff024748299458cc2be346b280fc7d317e2d7f897",
 		42: "511c62986235e2974808665a359ac9c9275952897f51069e107a889ca16aef0c",

@@ -57,12 +57,17 @@ export const studioItemRevisionsResponse = z.object({
 export type StudioItem = z.infer<typeof studioItem>;
 export type StudioItemRevision = z.infer<typeof studioItemRevision>;
 
+export const pageBlock = z.object({ id:z.string(), type:z.string(), version:z.number().int().positive(), markdown:z.string() });
+export const pageDocument = z.object({ schemaVersion:z.literal(1), generation:z.number().int().positive(), prefix:z.string(), blocks:z.array(pageBlock) });
+export type PageDocument = z.infer<typeof pageDocument>;
+export type PageBlockHint = {id:string;from:number;to:number};
 export const pageContent = z.object({
-  itemID: z.string(), body: z.string(), contentHash: itemHash, revisionID: itemHash,
+  itemID: z.string(), body: z.string(), contentHash: itemHash, revisionID: itemHash, structure:pageDocument.optional(),
 });
 export type PageContent = z.infer<typeof pageContent>;
 export type PageEdit = { old: string; new: string };
 export type PageWrite = {
+ blockHints?:PageBlockHint[];
   operationID?: string; leaseToken?: string; replacement?: string; replacements?: string[];
   clientRequestID: string; expectedHash?: string; body?: string;
   edits?: PageEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
@@ -83,6 +88,7 @@ export const pageEditState = z.object({ contentHash: itemHash, operations: z.arr
 export type PageEditOperation = z.infer<typeof pageEditOperation>;
 export type PageEditState = z.infer<typeof pageEditState>;
 export type PageEditRequest = {
+ blocks?: {blockID:string;version:number;placement?:"replace"|"before"|"after"}[];
   action: "begin" | "renew" | "cancel"; clientRequestID: string;
   operationID?: string; leaseToken?: string; expectedHash?: string;
   from?: number; to?: number; target?: string; ranges?: { from?: number; to?: number; target?: string }[];

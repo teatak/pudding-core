@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -48,7 +49,7 @@ func TestSheetMigrationV41PreservesContentAndDependents(t *testing.T) {
 	}
 	defer s.Close()
 	checks := [][2]string{
-		{"PRAGMA user_version", "44"}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
+		{"PRAGMA user_version", fmt.Sprint(currentSchemaVersion)}, {"PRAGMA foreign_keys", "1"}, {"PRAGMA integrity_check", "ok"},
 		{"SELECT count(*) FROM pragma_foreign_key_check", "0"},
 		{"SELECT count(*) FROM sqlite_master WHERE name='studio_table_ids'", "0"},
 		{"SELECT count(*) FROM studio_sheet_ids", "3"},
@@ -58,7 +59,7 @@ func TestSheetMigrationV41PreservesContentAndDependents(t *testing.T) {
 		{"SELECT revision||'|'||updated_at||'|'||head_revision FROM studio_items WHERE id='table_saved'", "2|2|rev"},
 		{"SELECT request_hash FROM studio_item_saves WHERE item_id='table_saved'", "keep-request-hash"},
 		{"SELECT text FROM messages WHERE id='m'", "builtin_table_update @table/table_saved"},
-		{"SELECT body FROM studio_item_content WHERE item_id='note'", "| a | b |"},
+		{"SELECT json_extract(body,'$.blocks[0].markdown') FROM studio_item_content WHERE item_id='note'", "| a | b |"},
 		{"SELECT item_id FROM studio_mounts WHERE id='mount'", "table_saved"},
 		{"SELECT saved_item_id FROM library_favorites WHERE id='favorite'", "table_saved"},
 	}
@@ -153,7 +154,7 @@ func TestSheetMigrationRetainsEarlyV41DocumentRepair(t *testing.T) {
 	}
 	defer s.Close()
 	assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='old'", "page")
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 }
 
 // Earlier migration tests need an actual pre-sheet schema, not a v42 database

@@ -118,11 +118,11 @@ func TestPageEditMigrationRepairsSkippedTables(t *testing.T) {
 				t.Fatal("commit after restart", committed, err)
 			}
 			replayed, err := s.WritePage(ctx, doc.ItemID, write)
-			if err != nil || *replayed != *saved {
+			if err != nil || !reflect.DeepEqual(replayed, saved) {
 				t.Fatal("save retry lost its original result", replayed, err)
 			}
 			current, err := s.GetPage(ctx, doc.ItemID)
-			if err != nil || *current != *committed {
+			if err != nil || !reflect.DeepEqual(current, committed) {
 				t.Fatal("save replay moved the head", current, err)
 			}
 			revision, err := s.GetStudioItemRevision(ctx, doc.ItemID, "legacy-revision")

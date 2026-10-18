@@ -31,16 +31,17 @@ type PageEditOperation struct {
 }
 
 type PageEditRequest struct {
-	Ranges          []PageEditRange `json:"ranges,omitempty"`
-	Action          string          `json:"action"`
-	ClientRequestID string          `json:"clientRequestID"`
-	OperationID     string          `json:"operationID,omitempty"`
-	LeaseToken      string          `json:"leaseToken,omitempty"`
-	ExpectedHash    string          `json:"expectedHash,omitempty"`
-	From            int             `json:"from,omitempty"`
-	To              int             `json:"to,omitempty"`
-	Target          string          `json:"target,omitempty"`
-	Author          ContentAuthor   `json:"-"`
+	Blocks          []PageBlockTarget `json:"blocks,omitempty"`
+	Ranges          []PageEditRange   `json:"ranges,omitempty"`
+	Action          string            `json:"action"`
+	ClientRequestID string            `json:"clientRequestID"`
+	OperationID     string            `json:"operationID,omitempty"`
+	LeaseToken      string            `json:"leaseToken,omitempty"`
+	ExpectedHash    string            `json:"expectedHash,omitempty"`
+	From            int               `json:"from,omitempty"`
+	To              int               `json:"to,omitempty"`
+	Target          string            `json:"target,omitempty"`
+	Author          ContentAuthor     `json:"-"`
 }
 
 type PageEditState struct {

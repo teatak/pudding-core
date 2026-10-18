@@ -9,7 +9,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const sheetSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='sheet' AND w.deleted=0 AND w.archived_at=0`
+const sheetSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision,c.content_format FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind='sheet' AND w.deleted=0 AND w.archived_at=0`
 
 func sheetFromContent(d *store.ContentSnapshot) (*store.SheetContent, error) {
 	var body store.SheetBody
@@ -160,7 +160,7 @@ func (s *Store) WriteSheet(ctx context.Context, id string, in store.SheetWrite) 
 			if savedHash != requestHash {
 				return &store.InvalidSheet{Message: "clientRequestID reused with different operations"}
 			}
-			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
+			out, err = scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT item_id,content,content_hash,hash,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, savedRevision))
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {

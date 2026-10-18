@@ -136,14 +136,33 @@ func (s *Store) ChangePageEdit(ctx context.Context, itemID string, in store.Page
 					return &store.InvalidContent{Message: "editing turn has ended"}
 				}
 			}
-			if in.ExpectedHash == "" || in.ExpectedHash != doc.ContentHash {
-				return &store.ContentConflict{CurrentHash: doc.ContentHash}
-			}
-			ranges := append([]store.PageEditRange(nil), in.Ranges...)
-			if len(ranges) == 0 {
-				ranges = []store.PageEditRange{{From: in.From, To: in.To, Target: in.Target}}
-			} else if in.Target != "" || in.From != 0 || in.To != 0 {
-				return &store.InvalidContent{Message: "provide ranges or a single target, not both"}
+			var ranges []store.PageEditRange
+			if len(in.Blocks) > 0 {
+				if len(in.Blocks) > 8 || len(in.Ranges) > 0 || in.Target != "" || in.From != 0 || in.To != 0 {
+					return &store.InvalidContent{Message: "provide blocks or source ranges, not both"}
+				}
+				structure := doc.Structure
+				if structure == nil {
+					structure = store.LegacyPageDocument(itemID, doc.Body)
+				}
+				ranges, err = structure.ResolveTargets(in.Blocks)
+				if err != nil {
+					var conflict *store.ContentConflict
+					if errors.As(err, &conflict) {
+						conflict.CurrentHash = doc.ContentHash
+					}
+					return err
+				}
+			} else {
+				if in.ExpectedHash == "" || in.ExpectedHash != doc.ContentHash {
+					return &store.ContentConflict{CurrentHash: doc.ContentHash}
+				}
+				ranges = append([]store.PageEditRange(nil), in.Ranges...)
+				if len(ranges) == 0 {
+					ranges = []store.PageEditRange{{From: in.From, To: in.To, Target: in.Target}}
+				} else if in.Target != "" || in.From != 0 || in.To != 0 {
+					return &store.InvalidContent{Message: "provide ranges or a single target, not both"}
+				}
 			}
 			if len(ranges) > 8 || len(active) >= 8 {
 				return &store.InvalidContent{Message: "too many active editing ranges"}
@@ -178,7 +197,7 @@ func (s *Store) ChangePageEdit(ctx context.Context, itemID string, in store.Page
 				}
 			}
 			out = &store.PageEditOperation{ID: store.NewID("edit"), ItemID: itemID, State: "active", ContentHash: doc.ContentHash, Author: in.Author, CreatedAt: now, UpdatedAt: now, ExpiresAt: now + pageEditLease.Milliseconds(), Sequence: 1, LeaseToken: store.NewID("lease")}
-			if len(in.Ranges) > 0 {
+			if len(in.Ranges) > 0 || len(in.Blocks) > 0 {
 				out.Ranges = ranges
 			}
 			out.SetRanges(ranges)

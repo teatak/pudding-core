@@ -22,16 +22,17 @@ type PageEdit struct {
 }
 
 type PageWrite struct {
-	Replacements    []string   `json:"replacements,omitempty"`
-	OperationID     string     `json:"operationID,omitempty"`
-	LeaseToken      string     `json:"leaseToken,omitempty"`
-	Replacement     *string    `json:"replacement,omitempty"`
-	ClientRequestID string     `json:"clientRequestID"`
-	ExpectedHash    *string    `json:"expectedHash,omitempty"`
-	Body            *string    `json:"body,omitempty"`
-	Edits           []PageEdit `json:"edits,omitempty"`
-	RestoreRevision string     `json:"restoreRevision,omitempty"`
-	UndoRevision    string     `json:"undoRevision,omitempty"`
+	BlockHints      []PageBlockHint `json:"blockHints,omitempty"`
+	Replacements    []string        `json:"replacements,omitempty"`
+	OperationID     string          `json:"operationID,omitempty"`
+	LeaseToken      string          `json:"leaseToken,omitempty"`
+	Replacement     *string         `json:"replacement,omitempty"`
+	ClientRequestID string          `json:"clientRequestID"`
+	ExpectedHash    *string         `json:"expectedHash,omitempty"`
+	Body            *string         `json:"body,omitempty"`
+	Edits           []PageEdit      `json:"edits,omitempty"`
+	RestoreRevision string          `json:"restoreRevision,omitempty"`
+	UndoRevision    string          `json:"undoRevision,omitempty"`
 	// PreserveOnly archives a dirty editor buffer before loading the latest body.
 	// It never replaces the working content or changes its head.
 	PreserveOnly bool          `json:"preserveOnly,omitempty"`

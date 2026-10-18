@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ func TestStudioArchiveRetainsContentAndRejectsStaleCleanup(t *testing.T) {
 		t.Fatal("stale cleanup deleted restored item", err)
 	}
 	after, err := st.GetPage(ctx, "doc")
-	if err != nil || *after != *body {
+	if err != nil || !reflect.DeepEqual(after, body) {
 		t.Fatal("restoration changed content", after, err)
 	}
 	mounts, _ = st.ListStudioMounts(ctx, "owner")

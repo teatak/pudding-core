@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/teatak/pudding-core/internal/store"
 	"testing"
 )
@@ -38,7 +39,7 @@ func TestWidgetOriginMigrationPreservesDataAndRollsBack(t *testing.T) {
 	if err != nil || got.ActiveRevision != w.ActiveRevision || got.Origin != nil {
 		t.Fatal(got, err)
 	}
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 }
 
 func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {

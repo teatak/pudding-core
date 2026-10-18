@@ -11,9 +11,9 @@ import (
 // Reconstruct a change only from immutable canonical versions of this item.
 // Preserved drafts and versions on another item cannot be undo sources.
 func nativeUndoSourceTx(ctx context.Context, tx *sql.Tx, itemID, head, revision string) (string, string, error) {
-	var before, after string
+	var before, after, beforeFormat, afterFormat string
 	var author, parent string
-	err := tx.QueryRowContext(ctx, `SELECT content,author_kind,parent_revision FROM studio_item_revisions WHERE item_id=? AND hash=?`, itemID, revision).Scan(&after, &author, &parent)
+	err := tx.QueryRowContext(ctx, `SELECT content,author_kind,parent_revision,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, itemID, revision).Scan(&after, &author, &parent, &afterFormat)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", store.ErrNotFound
 	}
@@ -34,6 +34,12 @@ func nativeUndoSourceTx(ctx context.Context, tx *sql.Tx, itemID, head, revision 
 	if present == 0 {
 		return "", "", store.ErrUndoConflict
 	}
-	err = tx.QueryRowContext(ctx, `SELECT content FROM studio_item_revisions WHERE item_id=? AND hash=?`, itemID, parent).Scan(&before)
+	err = tx.QueryRowContext(ctx, `SELECT content,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, itemID, parent).Scan(&before, &beforeFormat)
+	if err == nil {
+		before, _, err = store.DecodeStoredContent(itemID, before, beforeFormat)
+	}
+	if err == nil {
+		after, _, err = store.DecodeStoredContent(itemID, after, afterFormat)
+	}
 	return before, after, err
 }

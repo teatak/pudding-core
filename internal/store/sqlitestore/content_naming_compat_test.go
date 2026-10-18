@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -32,7 +33,10 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys=ON"); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, string(fixture))
+		// The frozen dump predates explicit format columns; keep its value bytes.
+		sqlText := strings.ReplaceAll(string(fixture), `INSERT INTO "studio_item_content" VALUES`, `INSERT INTO "studio_item_content"(item_id,body,content_hash) VALUES`)
+		sqlText = strings.ReplaceAll(sqlText, `INSERT INTO "studio_item_revisions" VALUES`, `INSERT INTO "studio_item_revisions"(item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id) VALUES`)
+		_, err := tx.ExecContext(ctx, sqlText)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -57,6 +61,11 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 	}
 	checkJSON := func(got any, want json.RawMessage) {
 		t.Helper()
+		if snapshot, ok := got.(*store.ContentSnapshot); ok {
+			legacyView := *snapshot
+			legacyView.Structure = nil
+			got = &legacyView
+		}
 		raw, err := json.Marshal(got)
 		var compact bytes.Buffer
 		if err != nil || json.Compact(&compact, want) != nil || !bytes.Equal(raw, compact.Bytes()) {

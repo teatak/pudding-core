@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -59,7 +60,7 @@ PRAGMA user_version=42;`); err != nil {
 	defer s.Close()
 
 	// 1. Version and Pragmas
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", strconv.Itoa(currentSchemaVersion))
 	assertWorkspaceMigrationValue(t, s.db, "PRAGMA foreign_keys", "1")
 	assertWorkspaceMigrationValue(t, s.db, "PRAGMA integrity_check", "ok")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
@@ -70,7 +71,7 @@ PRAGMA user_version=42;`); err != nil {
 	assertWorkspaceMigrationValue(t, s.db, "SELECT kind FROM studio_items WHERE id='legacy_widget'", "widget")
 
 	// 3. Dependent content & revisions preserved 100%
-	assertWorkspaceMigrationValue(t, s.db, "SELECT body FROM studio_item_content WHERE item_id='legacy_note'", "# 笔记正文")
+	assertWorkspaceMigrationValue(t, s.db, "SELECT json_extract(body,'$.blocks[0].markdown') FROM studio_item_content WHERE item_id='legacy_note'", "# 笔记正文")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT body FROM studio_item_content WHERE item_id='legacy_sheet'", `{"columns":[],"rows":[]}`)
 	assertWorkspaceMigrationValue(t, s.db, "SELECT body FROM studio_item_content WHERE item_id='legacy_widget'", "<html>widget</html>")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM studio_item_revisions WHERE item_id='legacy_note'", "1")

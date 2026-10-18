@@ -166,8 +166,9 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 	var created int64
 	var receipt string
 	var body sql.NullString
+	var format string
 	var author store.ContentAuthor
-	if err := row.Scan(&r.ItemID, &r.Hash, &r.ParentRevision, &r.ClientRequestID, &created, &receipt, &body, &r.ContentHash, &author.Kind, &author.SessionID, &author.TurnID); err != nil {
+	if err := row.Scan(&r.ItemID, &r.Hash, &r.ParentRevision, &r.ClientRequestID, &created, &receipt, &body, &r.ContentHash, &author.Kind, &author.SessionID, &author.TurnID, &format); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -175,7 +176,11 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 	}
 	r.CreatedAt = time.UnixMilli(created).UTC()
 	if body.Valid {
-		r.Body = &body.String
+		decoded, _, err := store.DecodeStoredContent(r.ItemID, body.String, format)
+		if err != nil {
+			return nil, err
+		}
+		r.Body = &decoded
 	}
 	if author.Kind != "" {
 		r.Author = &author
@@ -189,7 +194,7 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*store.StudioItemRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,NULL,content_hash,author_kind,author_session_id,author_turn_id FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,rowid DESC`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,NULL,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,rowid DESC`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +213,7 @@ func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*stor
 func (s *Store) GetStudioItemRevision(ctx context.Context, id, hash string) (*store.StudioItemRevision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
+	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
 }
 func (s *Store) PutWidgetBuildReceipt(ctx context.Context, id, hash string, receipt json.RawMessage) error {
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {

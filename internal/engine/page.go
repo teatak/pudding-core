@@ -84,6 +84,19 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 		start := min(args.Offset, len(chars))
 		end := min(start+args.Limit, len(chars))
 		result := map[string]any{"itemID": page.ItemID, "body": string(chars[start:end]), "contentHash": page.ContentHash, "revisionID": page.RevisionID, "offset": start, "totalCharacters": len(chars), "bodyBytes": len(page.Body)}
+		structure := page.Structure
+		if structure == nil {
+			structure = store.LegacyPageDocument(page.ItemID, page.Body)
+		}
+		blockInfo := []map[string]any{}
+		byteStart, byteEnd := len(string(chars[:start])), len(string(chars[:end]))
+		for i, h := range structure.Hints() {
+			if h.To > byteStart && h.From < byteEnd {
+				b := structure.Blocks[i]
+				blockInfo = append(blockInfo, map[string]any{"id": b.ID, "type": b.Type, "version": b.Version, "from": h.From, "to": h.To, "complete": h.From >= byteStart && h.To <= byteEnd})
+			}
+		}
+		result["blocks"] = blockInfo
 		if end < len(chars) {
 			result["nextOffset"] = end
 		}
@@ -94,7 +107,7 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 			if args.ExpectedHash != nil {
 				hash = *args.ExpectedHash
 			}
-			op, err := e.store.ChangePageEdit(ctx, args.ItemID, store.PageEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Ranges: args.Ranges, Author: author})
+			op, err := e.store.ChangePageEdit(ctx, args.ItemID, store.PageEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Ranges: args.Ranges, Blocks: args.Blocks, Author: author})
 			return op, err
 		}
 		if args.Action != "" && args.Action != "commit" {

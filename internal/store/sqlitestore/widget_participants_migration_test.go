@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestWidgetParticipantMigrationPreservesStateAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", "44")
+	assertWorkspaceMigrationValue(t, s.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 	assertWorkspaceMigrationValue(t, s.db, "SELECT json_extract(interaction,'$.participants[0].id') FROM widget_pages", "p")
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM widget_pages WHERE json_type(interaction,'$.participants[0].roles') IS NOT NULL", "0")
 	restored, err := s.OpenWidgetPage(ctx, w.ID, "library", w.ActiveRevision, "new")

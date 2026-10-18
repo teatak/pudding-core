@@ -360,13 +360,15 @@ CREATE TABLE studio_item_revisions (
     author_kind TEXT NOT NULL DEFAULT '',
     author_session_id TEXT NOT NULL DEFAULT '',
     author_turn_id TEXT NOT NULL DEFAULT '',
+    content_format TEXT NOT NULL DEFAULT 'plain',
     PRIMARY KEY(item_id, hash),
     UNIQUE(item_id, client_request_id)
 );
 CREATE TABLE studio_item_content (
     item_id TEXT PRIMARY KEY REFERENCES studio_items(id) ON DELETE CASCADE,
     body TEXT NOT NULL,
-    content_hash TEXT NOT NULL
+    content_hash TEXT NOT NULL,
+    content_format TEXT NOT NULL DEFAULT 'plain'
 );
 CREATE TABLE studio_item_saves (
     item_id TEXT NOT NULL REFERENCES studio_items(id) ON DELETE CASCADE,

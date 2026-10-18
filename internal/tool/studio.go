@@ -41,30 +41,31 @@ func StudioDefinitions() []provider.ToolDef {
 }
 
 type StudioArgs struct {
-	Ranges       []store.PageEditRange  `json:"ranges"`
-	Replacements []string               `json:"replacements"`
-	Action       string                 `json:"action"`
-	OperationID  string                 `json:"operation_id"`
-	LeaseToken   string                 `json:"lease_token"`
-	Target       string                 `json:"target"`
-	From         int                    `json:"from"`
-	To           int                    `json:"to"`
-	Replacement  *string                `json:"replacement"`
-	Sheet        *store.SheetBody       `json:"sheet"`
-	LegacyTable  *store.SheetBody       `json:"table"`
-	Operations   []store.SheetOperation `json:"operations"`
-	RowIDs       []string               `json:"row_ids"`
-	ColumnIDs    []string               `json:"column_ids"`
-	Format       string                 `json:"format"`
-	RevisionID   string                 `json:"revision_id"`
-	ItemID       string                 `json:"item_id"`
-	Kind         string                 `json:"kind"`
-	Name         string                 `json:"name"`
-	Body         *string                `json:"body"`
-	Edits        []store.PageEdit       `json:"edits"`
-	ExpectedHash *string                `json:"expected_hash"`
-	Offset       int                    `json:"offset"`
-	Limit        int                    `json:"limit"`
+	Blocks       []store.PageBlockTarget `json:"blocks"`
+	Ranges       []store.PageEditRange   `json:"ranges"`
+	Replacements []string                `json:"replacements"`
+	Action       string                  `json:"action"`
+	OperationID  string                  `json:"operation_id"`
+	LeaseToken   string                  `json:"lease_token"`
+	Target       string                  `json:"target"`
+	From         int                     `json:"from"`
+	To           int                     `json:"to"`
+	Replacement  *string                 `json:"replacement"`
+	Sheet        *store.SheetBody        `json:"sheet"`
+	LegacyTable  *store.SheetBody        `json:"table"`
+	Operations   []store.SheetOperation  `json:"operations"`
+	RowIDs       []string                `json:"row_ids"`
+	ColumnIDs    []string                `json:"column_ids"`
+	Format       string                  `json:"format"`
+	RevisionID   string                  `json:"revision_id"`
+	ItemID       string                  `json:"item_id"`
+	Kind         string                  `json:"kind"`
+	Name         string                  `json:"name"`
+	Body         *string                 `json:"body"`
+	Edits        []store.PageEdit        `json:"edits"`
+	ExpectedHash *string                 `json:"expected_hash"`
+	Offset       int                     `json:"offset"`
+	Limit        int                     `json:"limit"`
 }
 
 func DecodeStudioArgs(raw json.RawMessage) (StudioArgs, error) {
