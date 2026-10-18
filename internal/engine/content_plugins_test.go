@@ -18,9 +18,9 @@ import (
 
 func TestContentPluginsLoadIndependently(t *testing.T) {
 	groups := map[string][]string{
-		plugin.BuiltinArtifactsID:         {tool.ArtifactList, tool.ArtifactOpen},
-		plugin.BuiltinNoteAuthoringID:     {tool.NoteCreate, tool.NoteRead, tool.NoteEdit},
-		plugin.BuiltinSheetAuthoringID:    {tool.SheetCreate, tool.SheetRead, tool.SheetEdit},
+		plugin.BuiltinArtifactsID:      {tool.ArtifactList, tool.ArtifactOpen},
+		plugin.BuiltinNoteAuthoringID:  {tool.NoteCreate, tool.NoteRead, tool.NoteEdit, tool.NoteRename},
+		plugin.BuiltinSheetAuthoringID: {tool.SheetCreate, tool.SheetRead, tool.SheetEdit},
 	}
 	for id, want := range groups {
 		t.Run(id, func(t *testing.T) {
