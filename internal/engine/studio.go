@@ -36,7 +36,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	if err != nil {
 		return respond(nil, err)
 	}
-	if call.Name != tool.ArtifactList && call.Name != tool.PageCreate && call.Name != tool.PageCreate && call.Name != tool.SheetCreate && args.ItemID == "" {
+	if call.Name != tool.ArtifactList && call.Name != tool.PageCreate && call.Name != tool.SheetCreate && args.ItemID == "" {
 		return respond(nil, errors.New("item_id is required"))
 	}
 	switch call.Name {
