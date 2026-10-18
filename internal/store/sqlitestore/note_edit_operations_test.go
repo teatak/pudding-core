@@ -280,3 +280,64 @@ func TestNoteBatchStreamCommitUndoAndCancellation(t *testing.T) {
 		}
 	}
 }
+
+func TestNoteInsertionPointsCommitCancelAndUndo(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		at         int
+	}{
+		{"empty", "", 0}, {"inline", "Hello world.\n\nLast.\n", 6},
+		{"between", "Hello world.\n\nLast.\n", 14}, {"append", "Hello.\n", 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s, _ := openTestStore(t)
+			user := store.ContentAuthor{Kind: "user"}
+			createTestSession(t, s, "insert-writer")
+			if _, err := s.BeginTurn(ctx, store.BeginTurnInput{SessionID: "insert-writer", TurnID: "insert-turn", UserMessageID: "message", ClientMessageID: "input", UserText: "insert"}); err != nil {
+				t.Fatal(err)
+			}
+			ai := store.ContentAuthor{Kind: "session", SessionID: "insert-writer", TurnID: "insert-turn"}
+			doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "insert", Kind: "page", Name: "Insertion"}, tc.body, user)
+			if err != nil {
+				t.Fatal(err)
+			}
+			begin := store.NoteEditRequest{Action: "begin", ClientRequestID: "begin", ExpectedHash: doc.ContentHash, From: tc.at, To: tc.at, Author: ai}
+			op, err := s.ChangeNoteEdit(ctx, "insert", begin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			overlap := begin
+			overlap.ClientRequestID = "overlap"
+			var locked *store.NoteLocked
+			if _, err = s.ChangeNoteEdit(ctx, "insert", overlap); !errors.As(err, &locked) {
+				t.Fatal("insertion point was not protected", err)
+			}
+			bad := tc.body[:tc.at] + "Human" + tc.body[tc.at:]
+			if _, err = s.WriteNote(ctx, "insert", store.NoteWrite{ClientRequestID: "bad", Body: &bad, ExpectedHash: &doc.ContentHash, Author: user}); !errors.As(err, &locked) {
+				t.Fatal("insertion lock bypass", err)
+			}
+			text := "New 中文🙂\n\n"
+			written, err := s.WriteNote(ctx, "insert", store.NoteWrite{ClientRequestID: "commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &text, Author: ai})
+			if err != nil || written.Body != tc.body[:tc.at]+text+tc.body[tc.at:] {
+				t.Fatal("insertion", written, err)
+			}
+			undone, err := s.WriteNote(ctx, "insert", store.NoteWrite{ClientRequestID: "undo", UndoRevision: written.RevisionID, Author: user})
+			if err != nil || undone.Body != tc.body {
+				t.Fatal("undo insertion", undone, err)
+			}
+			begin.ClientRequestID = "begin-again"
+			begin.ExpectedHash = undone.ContentHash
+			op, err = s.ChangeNoteEdit(ctx, "insert", begin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.ChangeNoteEdit(ctx, "insert", store.NoteEditRequest{Action: "cancel", ClientRequestID: "cancel", OperationID: op.ID, Author: user}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.WriteNote(ctx, "insert", store.NoteWrite{ClientRequestID: "late", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacement: &text, Author: ai}); err == nil {
+				t.Fatal("cancelled insertion accepted")
+			}
+		})
+	}
+}

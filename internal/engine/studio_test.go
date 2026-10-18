@@ -121,4 +121,23 @@ func testStudioChatTools(t *testing.T, prefix string) {
 	if doc.Body != "甲\n\nAI 完成🙂" {
 		t.Fatal("leased tool commit failed", doc.Body)
 	}
+	// Appending Chinese/emoji text must use the authoritative UTF-8 endpoint,
+	// including when the model only reads a small page of Unicode characters.
+	read = run(tool.NoteRead, "read-end", map[string]any{"item_id": created.ItemID, "limit": 1})
+	var endpoint struct {
+		BodyBytes   int    `json:"bodyBytes"`
+		ContentHash string `json:"contentHash"`
+	}
+	if err := json.Unmarshal([]byte(read.Content), &endpoint); err != nil || endpoint.BodyBytes != len(doc.Body) {
+		t.Fatal("full byte length missing from paginated read", read.Content, err)
+	}
+	lease = run(tool.NoteEdit, "append-begin", map[string]any{"item_id": created.ItemID, "action": "begin", "expected_hash": endpoint.ContentHash, "from": endpoint.BodyBytes, "to": endpoint.BodyBytes})
+	if err := json.Unmarshal([]byte(lease.Content), &op); err != nil || op.From != len(doc.Body) || op.To != op.From {
+		t.Fatal("append must reserve only the endpoint", lease.Content, err)
+	}
+	appended := run(tool.NoteEdit, "append-commit", map[string]any{"item_id": created.ItemID, "action": "commit", "operation_id": op.ID, "lease_token": op.LeaseToken, "replacement": "\n\n新增🙂"})
+	final, _ := st.GetNote(ctx, created.ItemID)
+	if err := json.Unmarshal([]byte(appended.Content), &endpoint); err != nil || final.Body != doc.Body+"\n\n新增🙂" || endpoint.BodyBytes != len(final.Body) {
+		t.Fatal("append result must preserve the prefix and return its new byte length", appended.Content, err)
+	}
 }

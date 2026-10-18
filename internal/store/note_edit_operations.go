@@ -60,8 +60,8 @@ func (e *NoteLocked) Error() string {
 }
 
 func ValidNoteRange(body string, from, to int) bool {
-	return from >= 0 && to > from && to <= len(body) &&
-		(from == 0 || utf8.RuneStart(body[from])) && (to == len(body) || utf8.RuneStart(body[to]))
+	return from >= 0 && to >= from && to <= len(body) &&
+		(from == len(body) || utf8.RuneStart(body[from])) && (to == len(body) || utf8.RuneStart(body[to]))
 }
 
 // Map only disjoint changes. Boundary edits are conservative: deleting a newline

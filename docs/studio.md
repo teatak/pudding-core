@@ -175,3 +175,12 @@ The Documents editor uses structured `document` content with DOCX import/export.
 ### Native sheet identity
 
 Standalone tables now use `sheet` in tools, API contracts, storage interfaces and database kinds (schema v42 / protocol 31). See [Sheets](sheets.md) for the complete compatibility and retirement contract. Embedded document/Markdown tables are unchanged.
+
+
+### Page 插入点与编辑过程
+
+Page create/read/edit 的工具结果提供 `bodyBytes`，始终为整篇正文的 UTF-8 字节长度（分页读取也不变）。模型追加时直接使用该值作为 begin 的 from/to，只提交新增文字及分段换行，避免计算中文/emoji 字节数或重复替换未改动的末段。旧结果字段和参数保持兼容。
+
+`page_edit begin` 支持 `from == to` 的 UTF-8 字节边界作为插入点，覆盖空页、段中、段间与文末追加；插入点同样参与范围锁、冲突检测、取消、整批提交和选择性撤销。相邻段落推荐使用同一个连续范围，不相邻范围仍分别保护，前端以单光标依次展示。新建写作先创建空页，再用插入点提交第一稿；原有直接携带正文的创建及旧编辑调用继续可用。
+
+成功的 `commit` 工具回复附带脱敏的 `editState` 最终范围快照，供前端在刷新正文前对齐展示位置；写入不会等待前端动画。回复不包含范围原文和租约令牌，不能据此继续提交。

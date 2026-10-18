@@ -34,7 +34,7 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": note.ContentHash, "revisionID": note.RevisionID}, nil
+		return map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": note.ContentHash, "revisionID": note.RevisionID, "bodyBytes": len(note.Body)}, nil
 	case tool.NoteRead:
 		note, err := e.store.GetNote(ctx, args.ItemID)
 		if err != nil {
@@ -49,7 +49,7 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 		chars := []rune(note.Body)
 		start := min(args.Offset, len(chars))
 		end := min(start+args.Limit, len(chars))
-		result := map[string]any{"itemID": note.ItemID, "body": string(chars[start:end]), "contentHash": note.ContentHash, "revisionID": note.RevisionID, "offset": start, "totalCharacters": len(chars)}
+		result := map[string]any{"itemID": note.ItemID, "body": string(chars[start:end]), "contentHash": note.ContentHash, "revisionID": note.RevisionID, "offset": start, "totalCharacters": len(chars), "bodyBytes": len(note.Body)}
 		if end < len(chars) {
 			result["nextOffset"] = end
 		}
@@ -73,7 +73,16 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"itemID": note.ItemID, "contentHash": note.ContentHash, "revisionID": note.RevisionID}, nil
+		result := map[string]any{"itemID": note.ItemID, "contentHash": note.ContentHash, "revisionID": note.RevisionID, "bodyBytes": len(note.Body)}
+		if args.Action == "commit" {
+			// Deliver final anchors with the success event, before the renderer
+			// refreshes the body. This prevents a fast commit from flashing the
+			// entire replacement while its typewriter presentation catches up.
+			if snapshot, snapshotErr := e.store.GetNoteEditState(ctx, args.ItemID); snapshotErr == nil {
+				result["editState"] = snapshot
+			}
+		}
+		return result, nil
 	case tool.NoteRename:
 		name := strings.TrimSpace(args.Name)
 		if name == "" || len(name) > 200 {
