@@ -26,7 +26,7 @@ func TestLegacyNoteCurrentTurnContinuations(t *testing.T) {
 		{provider.ContinuationAnthropic, `[{"type":"tool_use","id":"call","name":%q,"input":{}}]`, anthropic.RequestInput},
 		{provider.ContinuationGoogle, `[{"functionCall":{"id":"call","name":%q,"args":{}}}]`, google.RequestInput},
 	} {
-		for _, action := range []string{"create", "read", "edit"} {
+		for _, action := range []string{"create", "read", "edit", "rename"} {
 			for _, prefix := range []string{"doc", "note", "page", "document"} {
 				name := "builtin_" + prefix + "_" + action
 				t.Run(protocol.kind+"/"+name, func(t *testing.T) {
