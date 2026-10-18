@@ -51,8 +51,8 @@ type builtinDefinition struct {
 var builtinDefinitions = []builtinDefinition{
 	contentBuiltin(BuiltinArtifactsID, "Content Library", "List and open existing Studio content of any type.",
 		[]string{"builtin_artifact_list", "builtin_artifact_open"}, contentBrowserInstructions),
-	contentBuiltin(BuiltinPageAuthoringID, "Page Authoring", "Create, read and edit lightweight Studio pages with Markdown support.",
-		[]string{"builtin_page_create", "builtin_page_read", "builtin_page_edit"}, noteInstructions),
+	contentBuiltin(BuiltinPageAuthoringID, "Page Authoring", "Create, read, edit and rename lightweight Studio pages with Markdown support.",
+		[]string{"builtin_page_create", "builtin_page_read", "builtin_page_edit", "builtin_page_rename"}, noteInstructions),
 	contentBuiltin(BuiltinSheetAuthoringID, "Sheet Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
 		[]string{"builtin_sheet_create", "builtin_sheet_read", "builtin_sheet_edit"}, sheetInstructions),
 	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,

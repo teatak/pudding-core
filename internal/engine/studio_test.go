@@ -40,7 +40,7 @@ func testStudioChatTools(t *testing.T, prefix string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{tool.NoteCreate, tool.NoteRead, tool.NoteEdit} {
+	for _, name := range []string{tool.NoteCreate, tool.NoteRead, tool.NoteEdit, tool.NoteRename} {
 		if !tool.HasDefinition(defs, name) {
 			t.Fatal("Chat tool missing", name)
 		}
@@ -88,6 +88,14 @@ func testStudioChatTools(t *testing.T, prefix string) {
 	read := run(tool.NoteRead, "read", map[string]any{"item_id": created.ItemID, "offset": 0, "limit": 2})
 	if !strings.Contains(read.Content, `"nextOffset":2`) {
 		t.Fatal("read pagination missing", read.Content)
+	}
+	renameRes := run(tool.NoteRename, "rename", map[string]any{"item_id": created.ItemID, "name": "Renamed Page"})
+	if !strings.Contains(renameRes.Content, `"name":"Renamed Page"`) {
+		t.Fatal("rename result missing new name", renameRes.Content)
+	}
+	renamedItem, err := st.GetStudioItem(ctx, created.ItemID)
+	if err != nil || renamedItem.Name != "Renamed Page" {
+		t.Fatal("renamed item check failed", renamedItem, err)
 	}
 	mounts, _ := st.ListStudioMounts(ctx, "writer")
 	others, _ := st.ListStudioMounts(ctx, "other")

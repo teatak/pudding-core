@@ -26,7 +26,7 @@ func NormalizeStudioTool(name string) string {
 
 func IsStudioTool(name string) bool {
 	switch NormalizeLegacyContentTool(name) {
-	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, NoteEdit, SheetCreate, SheetRead, SheetEdit:
+	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, NoteEdit, NoteRename, SheetCreate, SheetRead, SheetEdit:
 		return true
 	}
 	return false

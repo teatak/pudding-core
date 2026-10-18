@@ -74,6 +74,24 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			return nil, err
 		}
 		return map[string]any{"itemID": note.ItemID, "contentHash": note.ContentHash, "revisionID": note.RevisionID}, nil
+	case tool.NoteRename:
+		name := strings.TrimSpace(args.Name)
+		if name == "" || len(name) > 200 {
+			return nil, errors.New("name is required (max 200 bytes)")
+		}
+		item, err := e.store.GetStudioItem(ctx, args.ItemID)
+		if err != nil {
+			return nil, err
+		}
+		if item.Kind != store.StudioItemKindPage {
+			return nil, errors.New("item is not a page")
+		}
+		item.Name = name
+		updated, err := e.store.UpdateStudioItem(ctx, item, item.Revision)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"itemID": updated.ID, "name": updated.Name, "revision": updated.Revision}, nil
 	}
 	return nil, errors.New("unknown page tool")
 }

@@ -65,7 +65,7 @@ func (e *Engine) executeStudio(ctx context.Context, sessionID, turnID string, ca
 	case tool.ArtifactOpen:
 		mount, err := e.store.OpenStudioItem(ctx, sessionID, args.ItemID, store.NewID("mount"))
 		return respond(mount, err)
-	case tool.PageCreate, tool.PageRead, tool.PageEdit:
+	case tool.PageCreate, tool.PageRead, tool.PageEdit, tool.PageRename:
 		value, err := e.executeNote(ctx, sessionID, turnID, call, args)
 		return respond(value, err)
 	}

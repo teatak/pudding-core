@@ -12,9 +12,11 @@ func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T
 		"builtin_doc_create":  PageCreate,
 		"builtin_doc_read":    PageRead,
 		"builtin_doc_edit":    PageEdit,
+		"builtin_doc_rename":  PageRename,
 		"builtin_note_create": PageCreate,
 		"builtin_note_read":   PageRead,
 		"builtin_note_edit":   PageEdit,
+		"builtin_note_rename": PageRename,
 	} {
 		if !HasDefinition(BuiltinDefinitions(), current) || HasDefinition(BuiltinDefinitions(), old) {
 			t.Fatalf("catalog must advertise only %s", current)

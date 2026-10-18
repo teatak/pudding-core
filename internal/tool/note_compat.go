@@ -19,6 +19,8 @@ func NormalizeLegacyNoteTool(name string) string {
 		return PageRead
 	case "builtin_doc_edit", "builtin_note_edit":
 		return PageEdit
+	case "builtin_doc_rename", "builtin_note_rename":
+		return PageRename
 	}
 	return name
 }
