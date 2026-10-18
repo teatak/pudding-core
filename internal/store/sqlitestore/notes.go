@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -66,7 +67,11 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 	if in.Replacement != nil {
 		modes++
 	}
-	if (in.Replacement != nil) != (in.OperationID != "" && in.LeaseToken != "") || (in.Replacement == nil && (in.OperationID != "" || in.LeaseToken != "")) {
+	if in.Replacements != nil {
+		modes++
+	}
+	leased := in.Replacement != nil || in.Replacements != nil
+	if leased != (in.OperationID != "" && in.LeaseToken != "") || (!leased && (in.OperationID != "" || in.LeaseToken != "")) {
 		return nil, &store.InvalidContent{Message: "replacement requires operationID and leaseToken together"}
 	}
 	if in.UndoRevision != "" && in.Author.Kind != "user" {
@@ -113,7 +118,16 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 		}
 		body := current.Body
 		var operation *store.NoteEditOperation
-		if in.Replacement != nil {
+		if leased {
+			if in.Author.Kind == "session" {
+				turn, err := getTurnTx(ctx, tx, in.Author.TurnID)
+				if err != nil {
+					return err
+				}
+				if turn.Status != store.TurnRunning {
+					return &store.InvalidContent{Message: "editing turn has ended"}
+				}
+			}
 			operation, err = loadNoteEditTx(ctx, tx, id, in.OperationID)
 			if err != nil {
 				return err
@@ -121,7 +135,28 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 			if err = checkNoteEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
 				return err
 			}
-			body = body[:operation.From] + *in.Replacement + body[operation.To:]
+			ranges := operation.EditRanges()
+			replacements := in.Replacements
+			if in.Replacement != nil {
+				replacements = []string{*in.Replacement}
+			}
+			if len(replacements) != len(ranges) {
+				return &store.InvalidContent{Message: "one replacement per reserved range is required"}
+			}
+			var result strings.Builder
+			cursor, shift := 0, 0
+			for i, r := range ranges {
+				result.WriteString(body[cursor:r.From])
+				result.WriteString(replacements[i])
+				cursor = r.To
+				ranges[i].From = r.From + shift
+				ranges[i].To = ranges[i].From + len(replacements[i])
+				ranges[i].Target = ""
+				shift += len(replacements[i]) - (r.To - r.From)
+			}
+			result.WriteString(body[cursor:])
+			body = result.String()
+			operation.SetRanges(ranges)
 		}
 		if in.Body != nil {
 			body = *in.Body
@@ -175,7 +210,6 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 		}
 		if operation != nil {
 			operation.State = "committed"
-			operation.To = operation.From + len(*in.Replacement)
 			operation.ContentHash = out.ContentHash
 			operation.RevisionID = out.RevisionID
 			operation.UpdatedAt = time.Now().UnixMilli()

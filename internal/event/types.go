@@ -77,6 +77,7 @@ type Event struct {
 	CallID             string          `json:"callID,omitempty"` // turn.tool 专用
 	Name               string          `json:"name,omitempty"`
 	Phase              string          `json:"phase,omitempty"`
+	ArgsText           string          `json:"argsText,omitempty"` // reconnect snapshot; replaces accumulated arguments
 	ArgsDelta          string          `json:"argsDelta,omitempty"`
 	Stream             string          `json:"stream,omitempty"`
 	Ok                 *bool           `json:"ok,omitempty"`

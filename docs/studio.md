@@ -79,6 +79,10 @@ Plugin IDs now use `note-authoring` and `document-authoring` with [legacy identi
 
 Commit uses `PUT .../content` with `operationID`, `leaseToken`, `replacement` and a request ID, or the tool's `action: commit`. Owner, token, expiration and unchanged target are checked in the same short SQLite transaction that writes the new revision and marks the operation committed. Replayed commits return their original result without moving the head. Cancel/renew cannot resurrect terminal operations.
 
+A batch `begin` may instead supply `ranges: [{target, from?, to?}, ...]` (at most eight, disjoint and in document order, total target text at most 64 KiB). Commit supplies `replacements: [text, ...]` in matching order; an empty string deletes that passage. The entire batch shares one lease, cancellation and immutable revision. Selective `undoRevision` restores the whole batch while preserving disjoint later writes. Existing single-range requests and stored operations remain readable without a migration; `from/to` on a batch cover its outer bounds for older clients, while `ranges` carry precise locks. Public snapshots redact every target and the lease token. Ended model turns cannot begin or commit leases; reading active operations retires their abandoned reservations.
+
+The editor can preview incremental `turn.tool` `streaming_args` for a lease-bound commit. Tools should emit `item_id`, `action`, `operation_id`, `lease_token` before `replacement/replacements`; providers without argument deltas still commit correctly. Incomplete arguments are presentation only: Core never writes partial text. Cancelling a reservation rejects a later commit even if model generation continues. Tool aliases retain this behavior.
+
 All working-body writes, including legacy anchor edits, replacement, restore and selective undo, check active ranges. Unrelated changes rebase leases; touching a protected range or its boundary returns `409 document_locked`. `preserveOnly` does not change the working body. These leases currently apply to Studio Notes; they do not lock structured Documents, project files or external filesystem writers.
 
 ## Native tables

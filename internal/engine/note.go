@@ -60,16 +60,16 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			if args.ExpectedHash != nil {
 				hash = *args.ExpectedHash
 			}
-			op, err := e.store.ChangeNoteEdit(ctx, args.ItemID, store.NoteEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Author: author})
+			op, err := e.store.ChangeNoteEdit(ctx, args.ItemID, store.NoteEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Ranges: args.Ranges, Author: author})
 			return op, err
 		}
 		if args.Action != "" && args.Action != "commit" {
 			return nil, errors.New("invalid document edit action")
 		}
-		if args.Action == "commit" && args.Replacement == nil {
+		if args.Action == "commit" && args.Replacement == nil && args.Replacements == nil {
 			return nil, errors.New("commit requires replacement")
 		}
-		note, err := e.store.WriteNote(ctx, args.ItemID, store.NoteWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement})
+		note, err := e.store.WriteNote(ctx, args.ItemID, store.NoteWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement, Replacements: args.Replacements})
 		if err != nil {
 			return nil, err
 		}

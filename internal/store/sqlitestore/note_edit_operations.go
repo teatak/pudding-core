@@ -64,8 +64,19 @@ func activeNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID string, now int64
 	}
 	active := []store.NoteEditOperation{}
 	for _, op := range all {
-		if op.ExpiresAt <= now {
+		ended := false
+		if op.Author.Kind == "session" {
+			turn, err := getTurnTx(ctx, tx, op.Author.TurnID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, err
+			}
+			ended = err != nil || turn.Status != store.TurnRunning
+		}
+		if op.ExpiresAt <= now || ended {
 			op.State = "expired"
+			if ended {
+				op.State = "cancelled"
+			}
 			op.UpdatedAt = now
 			op.Sequence++
 			if err = saveNoteEditTx(ctx, tx, &op); err != nil {
@@ -116,32 +127,61 @@ func (s *Store) ChangeNoteEdit(ctx context.Context, itemID string, in store.Note
 			return err
 		}
 		if in.Action == "begin" {
+			if in.Author.Kind == "session" {
+				turn, err := getTurnTx(ctx, tx, in.Author.TurnID)
+				if err != nil {
+					return err
+				}
+				if turn.Status != store.TurnRunning {
+					return &store.InvalidContent{Message: "editing turn has ended"}
+				}
+			}
 			if in.ExpectedHash == "" || in.ExpectedHash != doc.ContentHash {
 				return &store.ContentConflict{CurrentHash: doc.ContentHash}
 			}
-			from, to := in.From, in.To
-			if to == 0 && in.Target != "" {
-				from = strings.Index(doc.Body, in.Target)
-				if from < 0 || strings.Contains(doc.Body[from+1:], in.Target) {
-					return &store.InvalidContent{Message: "target must occur exactly once, or supply an exact UTF-8 byte range"}
+			ranges := append([]store.NoteEditRange(nil), in.Ranges...)
+			if len(ranges) == 0 {
+				ranges = []store.NoteEditRange{{From: in.From, To: in.To, Target: in.Target}}
+			} else if in.Target != "" || in.From != 0 || in.To != 0 {
+				return &store.InvalidContent{Message: "provide ranges or a single target, not both"}
+			}
+			if len(ranges) > 8 || len(active) >= 8 {
+				return &store.InvalidContent{Message: "too many active editing ranges"}
+			}
+			total := 0
+			for i := range ranges {
+				r := &ranges[i]
+				if r.To == 0 && r.Target != "" {
+					r.From = strings.Index(doc.Body, r.Target)
+					if r.From < 0 || strings.Contains(doc.Body[r.From+1:], r.Target) {
+						return &store.InvalidContent{Message: "target must occur exactly once, or supply an exact UTF-8 byte range"}
+					}
+					r.To = r.From + len(r.Target)
 				}
-				to = from + len(in.Target)
-			}
-			if !store.ValidNoteRange(doc.Body, from, to) || to-from > contracts.Studio().MaxReadBytes {
-				return &store.InvalidContent{Message: "invalid UTF-8 editing range (maximum 64 KiB)"}
-			}
-			if in.Target != "" && doc.Body[from:to] != in.Target {
-				return &store.ContentConflict{CurrentHash: doc.ContentHash}
-			}
-			if len(active) >= 8 {
-				return &store.InvalidContent{Message: "too many active document edits"}
-			}
-			for _, op := range active {
-				if from <= op.To && to >= op.From {
-					return &store.NoteLocked{OperationID: op.ID}
+				total += r.To - r.From
+				if !store.ValidNoteRange(doc.Body, r.From, r.To) || total > contracts.Studio().MaxReadBytes {
+					return &store.InvalidContent{Message: "invalid UTF-8 editing ranges (maximum total 64 KiB)"}
+				}
+				if i > 0 && ranges[i-1].To >= r.From {
+					return &store.InvalidContent{Message: "ranges must be disjoint and in document order"}
+				}
+				if r.Target != "" && doc.Body[r.From:r.To] != r.Target {
+					return &store.ContentConflict{CurrentHash: doc.ContentHash}
+				}
+				r.Target = doc.Body[r.From:r.To]
+				for _, op := range active {
+					for _, other := range op.EditRanges() {
+						if r.From <= other.To && r.To >= other.From {
+							return &store.NoteLocked{OperationID: op.ID}
+						}
+					}
 				}
 			}
-			out = &store.NoteEditOperation{ID: store.NewID("edit"), ItemID: itemID, State: "active", From: from, To: to, Target: doc.Body[from:to], ContentHash: doc.ContentHash, Author: in.Author, CreatedAt: now, UpdatedAt: now, ExpiresAt: now + noteEditLease.Milliseconds(), Sequence: 1, LeaseToken: store.NewID("lease")}
+			out = &store.NoteEditOperation{ID: store.NewID("edit"), ItemID: itemID, State: "active", ContentHash: doc.ContentHash, Author: in.Author, CreatedAt: now, UpdatedAt: now, ExpiresAt: now + noteEditLease.Milliseconds(), Sequence: 1, LeaseToken: store.NewID("lease")}
+			if len(in.Ranges) > 0 {
+				out.Ranges = ranges
+			}
+			out.SetRanges(ranges)
 		} else {
 			out, err = loadNoteEditTx(ctx, tx, itemID, in.OperationID)
 			if err != nil {
@@ -204,6 +244,9 @@ func (s *Store) GetNoteEditState(ctx context.Context, itemID string) (*store.Not
 			}
 			op.LeaseToken = ""
 			op.Target = ""
+			for i := range op.Ranges {
+				op.Ranges[i].Target = ""
+			}
 			out.Operations = append(out.Operations, op)
 		}
 		return rows.Err()
@@ -212,14 +255,19 @@ func (s *Store) GetNoteEditState(ctx context.Context, itemID string) (*store.Not
 }
 
 func checkNoteEditCommit(op *store.NoteEditOperation, in store.NoteWrite, body string, now int64) error {
+	if op.State == "cancelled" {
+		return &store.InvalidContent{Message: "editing operation was cancelled; do not retry this edit without a new user request"}
+	}
 	if op.State != "active" || op.ExpiresAt <= now {
 		return &store.InvalidContent{Message: "editing lease expired or operation already ended"}
 	}
 	if op.Author != in.Author || in.LeaseToken == "" || op.LeaseToken != in.LeaseToken {
 		return &store.InvalidContent{Message: "editing operation owner or lease does not match"}
 	}
-	if !store.ValidNoteRange(body, op.From, op.To) || body[op.From:op.To] != op.Target {
-		return &store.ContentConflict{CurrentHash: store.ContentHash(body)}
+	for _, r := range op.EditRanges() {
+		if !store.ValidNoteRange(body, r.From, r.To) || body[r.From:r.To] != r.Target {
+			return &store.ContentConflict{CurrentHash: store.ContentHash(body)}
+		}
 	}
 	return nil
 }
@@ -229,16 +277,29 @@ func guardNoteEditsTx(ctx context.Context, tx *sql.Tx, itemID, before, after, ow
 	if err != nil {
 		return err
 	}
+	var all []store.NoteEditRange
+	var owners []string
 	for _, op := range active {
 		if op.ID == ownID {
 			continue
 		}
-		from, to, ok := store.MapNoteRange(before, after, op.From, op.To)
-		if !ok {
-			return &store.NoteLocked{OperationID: op.ID}
+		for _, r := range op.EditRanges() {
+			all = append(all, r)
+			owners = append(owners, op.ID)
 		}
-		op.From = from
-		op.To = to
+	}
+	mapped, conflict := store.MapNoteRanges(before, after, all)
+	if conflict >= 0 {
+		return &store.NoteLocked{OperationID: owners[conflict]}
+	}
+	offset := 0
+	for _, op := range active {
+		if op.ID == ownID {
+			continue
+		}
+		count := len(op.EditRanges())
+		op.SetRanges(mapped[offset : offset+count])
+		offset += count
 		op.ContentHash = store.ContentHash(after)
 		op.UpdatedAt = now
 		op.Sequence++

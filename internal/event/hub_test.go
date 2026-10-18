@@ -1,6 +1,9 @@
 package event
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A full subscriber is closed rather than skipped: a skipped persisted event
 // would be passed by the next event's Last-Event-ID and never replayed.
@@ -51,4 +54,65 @@ func TestHubCancelClosesAndRemovesSubscriber(t *testing.T) {
 		t.Fatalf("cancelled subscriber must be removed: %+v", hub.subs)
 	}
 	hub.Publish(Event{SessionID: "session", Seq: 1})
+}
+
+func TestNoteArgumentSnapshotsJoinReconnectAndTermination(t *testing.T) {
+	h := NewHub()
+	ev := Event{Kind: TurnTool, SessionID: "s", TurnID: "t", CallID: "c", Name: "builtin_page_edit", Phase: "streaming_args", ArgsDelta: `{"replacement":"`}
+	h.Publish(ev)
+	ev.ArgsDelta = "partial"
+	h.Publish(ev)
+	ch, cancel := h.Subscribe("s")
+	snapshot := <-ch
+	if snapshot.ArgsText != `{"replacement":"partial` || snapshot.ArgsDelta != "" || snapshot.Seq != 0 {
+		t.Fatalf("bad snapshot: %+v", snapshot)
+	}
+	ev.ArgsDelta = " more"
+	h.Publish(ev)
+	if delta := <-ch; delta.ArgsDelta != " more" || delta.ArgsText != "" {
+		t.Fatalf("bad delta: %+v", delta)
+	}
+	cancel()
+	ch, cancel = h.Subscribe("s")
+	defer cancel()
+	if snapshot = <-ch; snapshot.ArgsText != `{"replacement":"partial more` {
+		t.Fatal("reconnect lost prefix")
+	}
+	h.Publish(Event{Kind: TurnCancelled, SessionID: "s", TurnID: "t"})
+	next, stop := h.Subscribe("s")
+	defer stop()
+	select {
+	case ev := <-next:
+		t.Fatalf("terminal preview replayed %+v", ev)
+	default:
+	}
+	if len(h.noteStreams) != 0 {
+		t.Fatal("terminal stream retained")
+	}
+}
+
+func TestNoteArgumentSnapshotsBoundMemoryAndIgnoreOtherTools(t *testing.T) {
+	h := NewHub()
+	ev := Event{Kind: TurnTool, SessionID: "s", TurnID: "t", CallID: "c", Name: "unrelated", Phase: "streaming_args", ArgsDelta: "x"}
+	h.Publish(ev)
+	if len(h.noteStreams) != 0 {
+		t.Fatal("captured unrelated tool")
+	}
+	ev.Name = "builtin_note_edit"
+	ev.ArgsDelta = strings.Repeat("x", maxNoteArgumentBytes+1)
+	h.Publish(ev)
+	ev.ArgsDelta = "suffix"
+	h.Publish(ev)
+	ch, cancel := h.Subscribe("s")
+	defer cancel()
+	select {
+	case <-ch:
+		t.Fatal("replayed incomplete oversized prefix")
+	default:
+	}
+	ev.Phase = "error"
+	h.Publish(ev)
+	if len(h.noteStreams) != 0 {
+		t.Fatal("failed stream retained")
+	}
 }

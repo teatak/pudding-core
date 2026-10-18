@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -108,7 +109,7 @@ func TestPageEditMigrationRepairsSkippedTables(t *testing.T) {
 				t.Fatal(err)
 			}
 			retry, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
-			if err != nil || *retry != *op {
+			if err != nil || !reflect.DeepEqual(retry, op) {
 				t.Fatal("lease retry changed after restart", retry, err)
 			}
 			replacement := "完成。"
@@ -179,7 +180,7 @@ func TestPageEditMigrationPreservesExistingLeaseAndRequest(t *testing.T) {
 	assertWorkspaceMigrationValue(t, s.db, "SELECT result FROM studio_document_edit_requests", result)
 	assertWorkspaceMigrationValue(t, s.db, "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='studio_document_edits_item'", "1")
 	retry, err := s.ChangeNoteEdit(ctx, doc.ItemID, begin)
-	if err != nil || *retry != *op {
+	if err != nil || !reflect.DeepEqual(retry, op) {
 		t.Fatal("migration changed the idempotent lease result", retry, err)
 	}
 	var locked *store.NoteLocked

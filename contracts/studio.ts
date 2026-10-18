@@ -63,13 +63,15 @@ export const pageContent = z.object({
 export type PageContent = z.infer<typeof pageContent>;
 export type PageEdit = { old: string; new: string };
 export type PageWrite = {
-  operationID?: string; leaseToken?: string; replacement?: string;
+  operationID?: string; leaseToken?: string; replacement?: string; replacements?: string[];
   clientRequestID: string; expectedHash?: string; body?: string;
   edits?: PageEdit[]; restoreRevision?: string; preserveOnly?: boolean; undoRevision?: string;
 };
 
 // Source offsets are zero-based UTF-8 bytes, with an exclusive end.
+export const pageEditRange = z.object({ from: z.number().int().nonnegative().default(0), to: z.number().int().nonnegative().default(0), target: z.string().optional() });
 export const pageEditOperation = z.object({
+  ranges: z.array(pageEditRange).optional(),
   operationID: z.string(), itemID: z.string(), state: z.enum(["active", "committed", "cancelled", "expired"]),
   from: z.number().int().nonnegative(), to: z.number().int().nonnegative(),
   contentHash: itemHash, revisionID: itemHash.optional(),
@@ -83,7 +85,7 @@ export type PageEditState = z.infer<typeof pageEditState>;
 export type PageEditRequest = {
   action: "begin" | "renew" | "cancel"; clientRequestID: string;
   operationID?: string; leaseToken?: string; expectedHash?: string;
-  from?: number; to?: number; target?: string;
+  from?: number; to?: number; target?: string; ranges?: { from?: number; to?: number; target?: string }[];
 };
 
 // Compatibility aliases

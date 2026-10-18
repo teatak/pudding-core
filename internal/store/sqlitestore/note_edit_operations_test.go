@@ -175,3 +175,108 @@ func TestNoteEditExpiryCancelAndValidation(t *testing.T) {
 		t.Fatal("cancelled commit accepted")
 	}
 }
+
+func TestNoteBatchStreamCommitUndoAndCancellation(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTestStore(t)
+	user := store.ContentAuthor{Kind: "user"}
+	createTestSession(t, s, "batch-writer")
+	_, err := s.BeginTurn(ctx, store.BeginTurnInput{SessionID: "batch-writer", TurnID: "batch-turn", UserMessageID: "batch-message", ClientMessageID: "batch-input", UserText: "edit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ai := store.ContentAuthor{Kind: "session", SessionID: "batch-writer", TurnID: "batch-turn"}
+	body := "Intro🙂\r\n\r\nFirst old.\r\n\r\nHuman middle.\r\n\r\nSecond old.\r\n\r\nEnd.\r\n"
+	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "batch", Kind: "page", Name: "Batch"}, body, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin := store.NoteEditRequest{Action: "begin", ClientRequestID: "batch-begin", ExpectedHash: doc.ContentHash, Ranges: []store.NoteEditRange{{Target: "First old."}, {Target: "Second old."}}, Author: ai}
+	op, err := s.ChangeNoteEdit(ctx, "batch", begin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.GetNoteEditState(ctx, "batch")
+	if err != nil || len(snapshot.Operations[0].Ranges) != 2 {
+		t.Fatal(snapshot, err)
+	}
+	for _, r := range snapshot.Operations[0].Ranges {
+		if r.Target != "" {
+			t.Fatal("snapshot leaks target")
+		}
+	}
+	// Typing in the gap remains possible while both outer passages are reserved.
+	human := strings.Replace(body, "Human middle.", "Human middle expanded independently.", 1)
+	doc, err = s.WriteNote(ctx, "batch", store.NoteWrite{ClientRequestID: "batch-human", Body: &human, ExpectedHash: &doc.ContentHash, Author: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := store.NoteWrite{ClientRequestID: "batch-commit", OperationID: op.ID, LeaseToken: op.LeaseToken, Replacements: []string{"First new🙂.\r\n\r\nAnother new paragraph.", ""}, Author: ai}
+	bad := commit
+	bad.ClientRequestID = "bad-batch"
+	bad.Replacements = []string{"Only first"}
+	if _, err = s.WriteNote(ctx, "batch", bad); err == nil {
+		t.Fatal("partial batch committed")
+	}
+	unchanged, _ := s.GetNote(ctx, "batch")
+	if unchanged.Body != human {
+		t.Fatal("failed batch changed body")
+	}
+	saved, err := s.WriteNote(ctx, "batch", commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(strings.Replace(human, "First old.", commit.Replacements[0], 1), "Second old.", "", 1)
+	if saved.Body != want {
+		t.Fatal("lost gap edit", saved.Body)
+	}
+	// Later user edits survive one undo of the complete two-range replacement.
+	later := want + "User footer.\r\n"
+	_, err = s.WriteNote(ctx, "batch", store.NoteWrite{ClientRequestID: "batch-later", Body: &later, ExpectedHash: &saved.ContentHash, Author: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	undone, err := s.WriteNote(ctx, "batch", store.NoteWrite{ClientRequestID: "batch-undo", UndoRevision: saved.RevisionID, Author: user})
+	if err != nil || undone.Body != human+"User footer.\r\n" {
+		t.Fatal("batch undo", undone, err)
+	}
+	begin.ClientRequestID = "cancel-begin"
+	begin.ExpectedHash = undone.ContentHash
+	op, err = s.ChangeNoteEdit(ctx, "batch", begin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.ChangeNoteEdit(ctx, "batch", store.NoteEditRequest{Action: "cancel", ClientRequestID: "batch-cancel", OperationID: op.ID, Author: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit.ClientRequestID = "cancelled-commit"
+	commit.OperationID = op.ID
+	commit.LeaseToken = op.LeaseToken
+	if _, err = s.WriteNote(ctx, "batch", commit); err == nil {
+		t.Fatal("cancelled batch committed")
+	}
+	begin.ClientRequestID = "stopped-begin"
+	op, err = s.ChangeNoteEdit(ctx, "batch", begin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.FinishTurn(ctx, store.FinishTurnInput{TurnID: "batch-turn", Status: store.TurnCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	commit.ClientRequestID = "stopped-commit"
+	commit.OperationID = op.ID
+	commit.LeaseToken = op.LeaseToken
+	if _, err = s.WriteNote(ctx, "batch", commit); err == nil {
+		t.Fatal("stopped turn committed")
+	}
+	snapshot, err = s.GetNoteEditState(ctx, "batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range snapshot.Operations {
+		if r.State == "active" {
+			t.Fatal("stopped turn kept a lock")
+		}
+	}
+}

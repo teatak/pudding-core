@@ -40,6 +40,8 @@ func StudioDefinitions() []provider.ToolDef {
 }
 
 type StudioArgs struct {
+	Ranges       []store.NoteEditRange  `json:"ranges"`
+	Replacements []string               `json:"replacements"`
 	Action       string                 `json:"action"`
 	OperationID  string                 `json:"operation_id"`
 	LeaseToken   string                 `json:"lease_token"`

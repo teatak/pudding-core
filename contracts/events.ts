@@ -43,6 +43,7 @@ export const turnToolEvent = z.object({
   name: z.string().optional(),
   phase: z.enum(["streaming_args", "running", "output", "ok", "error"]),
   argsDelta: z.string().optional(),
+  argsText: z.string().optional(), // Transient reconnect snapshot, replacing the accumulated arguments.
   stream: z.enum(["stdout", "stderr"]).optional(),
   ok: z.boolean().optional(),
   content: z.string().optional(),

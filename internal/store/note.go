@@ -26,6 +26,7 @@ type PageEdit struct {
 type NoteEdit = PageEdit
 
 type PageWrite struct {
+	Replacements    []string   `json:"replacements,omitempty"`
 	OperationID     string     `json:"operationID,omitempty"`
 	LeaseToken      string     `json:"leaseToken,omitempty"`
 	Replacement     *string    `json:"replacement,omitempty"`
