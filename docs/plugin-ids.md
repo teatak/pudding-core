@@ -1,19 +1,17 @@
 # Built-in plugin IDs
 
-Canonical IDs, agreed 2026-10-16:
+Current canonical IDs, updated 2026-10-18:
 
 | Previous ID | Canonical ID | Default Skill ID |
 | --- | --- | --- |
 | `artifacts` (earlier `studio`) | `artifact` | `artifact` |
-| `markdown` | `note-authoring` | `note-authoring` |
-| `docx` | `document-authoring` | `document-authoring` |
+| `markdown`, `note-authoring` | `page-authoring` | `page-authoring` |
 | `tables` | `sheet-authoring` | `sheet-authoring` |
 | `collaboration` | `subagent` | `subagent` |
 
-All other plugin IDs stay unchanged. This is a plugin-identity rename, not a
-product, content-kind, tool, format, API-route or database-schema rename.
-The subsequent [sheet rename](sheets.md) gives `sheet-authoring` native `sheet` content and
-`builtin_sheet_*` tools; it does not introduce XLSX workbooks or formulas.
+The earlier `docx` / `document-authoring` product is not part of the current Page/Sheet catalog. Do not relabel its retained structured data as Markdown. Canonical content kinds, references and tool names are listed in [Content naming](content-naming.md).
+
+The [Sheet rename](sheets.md) gives `sheet-authoring` native `sheet` content and `builtin_sheet_*` tools; it does not introduce XLSX workbooks or formulas. Markdown tables remain part of a Page body.
 
 ## Compatibility
 
@@ -35,12 +33,14 @@ Desktop shares one local identity adapter for builtin labels, icons and alias
 search; installed plugin metadata is not relabeled or rewritten.
 
 Ship the paired Core and Desktop changes together by pinning the Core source
-in `core.lock.json`. There is no database migration or protocol-version bump.
+in `core.lock.json`. Do not infer a need to rewrite database history from a
+plugin identity rename.
 
 ## Retirement record
 
 Retain these runtime aliases for six calendar months after the **first stable
-Desktop release containing this rename**, not six months after this discussion.
+Desktop release containing the corresponding rename**, not six months after
+its discussion or commit.
 
 | Field | Value |
 | --- | --- |

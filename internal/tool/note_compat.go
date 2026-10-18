@@ -1,15 +1,15 @@
 package tool
 
-// NormalizeLegacyNoteTool accepts only the three doc names shipped in Desktop v0.5.0.
-// Catalogs advertise note names only; aliases use the same permission checks.
-// Documents owns document names. Unreleased rich_document names have no aliases.
+// NormalizeLegacyNoteTool projects the exact doc/note compatibility names to
+// Page tools. Catalogs advertise builtin_page_* only, including rename; aliases
+// pass through the same loading, ownership and capability checks. Unreleased
+// rich_document and structured document names are not Markdown Page aliases.
 //
-// Retirement: six calendar months after the first stable desktop release that
-// contains builtin_note_*. At that release, record its version, release date
-// and remove-after date in docs/studio.md (Tool names and legacy doc retirement).
-// Remove this map, its execution/ownership/history callers and the desktop
-// noteToolCompat.ts callers/tests in the first maintenance release on/after
-// that date. Do not use a runtime date gate or rewrite stored history.
+// Retirement: six calendar months after the first stable Desktop release that
+// contains the Page rename. Record its version, release date and remove-after
+// date in docs/plugin-ids.md and docs/studio.md at release time. Retire executable
+// aliases and alias-only callers/tests together; do not add a runtime date gate
+// or rewrite original tool history, content hashes or retry fingerprints.
 // Release version/date: pending first stable release of this change.
 func NormalizeLegacyNoteTool(name string) string {
 	switch name {
