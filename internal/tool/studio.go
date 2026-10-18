@@ -3,6 +3,7 @@ package tool
 import (
 	"encoding/json"
 	"errors"
+
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -26,7 +27,7 @@ func NormalizeStudioTool(name string) string {
 
 func IsStudioTool(name string) bool {
 	switch NormalizeLegacyContentTool(name) {
-	case ArtifactList, ArtifactOpen, NoteCreate, NoteRead, NoteEdit, NoteRename, SheetCreate, SheetRead, SheetEdit:
+	case ArtifactList, ArtifactOpen, PageCreate, PageRead, PageEdit, PageRename, SheetCreate, SheetRead, SheetEdit:
 		return true
 	}
 	return false
@@ -34,21 +35,21 @@ func IsStudioTool(name string) bool {
 
 func StudioDefinitions() []provider.ToolDef {
 	return append([]provider.ToolDef{
-		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Notes (note), tables and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["note","sheet","widget"]}},"additionalProperties":false}`)},
+		{Name: ArtifactList, Capability: store.ModeChat, Description: "List global artifacts: Pages (page), Sheets (sheet) and widgets, with their names, IDs, kinds and update times. Content is independent of projects.", InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["page","sheet","widget"]}},"additionalProperties":false}`)},
 		{Name: ArtifactOpen, Capability: store.ModeChat, Description: "Open existing artifact content in this conversation. Returns a session mount referring to the same global item; it does not copy the content.", InputSchema: json.RawMessage(`{"type":"object","properties":{"item_id":{"type":"string"}},"required":["item_id"],"additionalProperties":false}`)},
-	}, append(NoteDefinitions(), SheetDefinitions()...)...)
+	}, append(PageDefinitions(), SheetDefinitions()...)...)
 }
 
 type StudioArgs struct {
-	Ranges       []store.NoteEditRange  `json:"ranges"`
-	Replacements []string               `json:"replacements"`
-	Action       string                 `json:"action"`
-	OperationID  string                 `json:"operation_id"`
-	LeaseToken   string                 `json:"lease_token"`
-	Target       string                 `json:"target"`
-	From         int                    `json:"from"`
-	To           int                    `json:"to"`
-	Replacement  *string                `json:"replacement"`
+	Ranges       []store.NoteEditRange `json:"ranges"`
+	Replacements []string              `json:"replacements"`
+	Action       string                `json:"action"`
+	OperationID  string                `json:"operation_id"`
+	LeaseToken   string                `json:"lease_token"`
+	Target       string                `json:"target"`
+	From         int                   `json:"from"`
+	To           int                   `json:"to"`
+	Replacement  *string               `json:"replacement"`
 	Sheet        *store.SheetBody       `json:"sheet"`
 	LegacyTable  *store.SheetBody       `json:"table"`
 	Operations   []store.SheetOperation `json:"operations"`
@@ -60,7 +61,7 @@ type StudioArgs struct {
 	Kind         string                 `json:"kind"`
 	Name         string                 `json:"name"`
 	Body         *string                `json:"body"`
-	Edits        []store.NoteEdit       `json:"edits"`
+	Edits        []store.PageEdit        `json:"edits"`
 	ExpectedHash *string                `json:"expected_hash"`
 	Offset       int                    `json:"offset"`
 	Limit        int                    `json:"limit"`
