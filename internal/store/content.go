@@ -14,7 +14,7 @@ type ContentAuthor struct {
 }
 
 // ContentSnapshot is the persisted UTF-8 body and version envelope shared by
-// Notes, Documents (JSON bodies), and native tables. It is not an editor model.
+// Pages (Markdown) and Sheets (JSON bodies). It is not an editor model.
 type ContentSnapshot struct {
 	ItemID      string `json:"itemID"`
 	Body        string `json:"body"`

@@ -22,10 +22,10 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 		}
 		// A retried call reuses the item created by this exact canonical tool call.
 		id := "page_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
-		note, err := e.store.GetPage(ctx, id)
+		page, err := e.store.GetPage(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
 			now := time.Now().UTC()
-			note, err = e.store.CreatePage(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindPage, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
+			page, err = e.store.CreatePage(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindPage, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
 		}
 		if err != nil {
 			return nil, err
@@ -34,9 +34,9 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": note.ContentHash, "revisionID": note.RevisionID, "bodyBytes": len(note.Body)}, nil
+		return map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": page.ContentHash, "revisionID": page.RevisionID, "bodyBytes": len(page.Body)}, nil
 	case tool.PageRead:
-		note, err := e.store.GetPage(ctx, args.ItemID)
+		page, err := e.store.GetPage(ctx, args.ItemID)
 		if err != nil {
 			return nil, err
 		}
@@ -46,10 +46,10 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 		if args.Offset < 0 || args.Limit < 1 || args.Limit > contracts.Studio().MaxReadBytes/utf8.UTFMax {
 			return nil, errors.New("invalid document read range")
 		}
-		chars := []rune(note.Body)
+		chars := []rune(page.Body)
 		start := min(args.Offset, len(chars))
 		end := min(start+args.Limit, len(chars))
-		result := map[string]any{"itemID": note.ItemID, "body": string(chars[start:end]), "contentHash": note.ContentHash, "revisionID": note.RevisionID, "offset": start, "totalCharacters": len(chars), "bodyBytes": len(note.Body)}
+		result := map[string]any{"itemID": page.ItemID, "body": string(chars[start:end]), "contentHash": page.ContentHash, "revisionID": page.RevisionID, "offset": start, "totalCharacters": len(chars), "bodyBytes": len(page.Body)}
 		if end < len(chars) {
 			result["nextOffset"] = end
 		}
@@ -69,11 +69,11 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 		if args.Action == "commit" && args.Replacement == nil && args.Replacements == nil {
 			return nil, errors.New("commit requires replacement")
 		}
-		note, err := e.store.WritePage(ctx, args.ItemID, store.PageWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement, Replacements: args.Replacements})
+		page, err := e.store.WritePage(ctx, args.ItemID, store.PageWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement, Replacements: args.Replacements})
 		if err != nil {
 			return nil, err
 		}
-		result := map[string]any{"itemID": note.ItemID, "contentHash": note.ContentHash, "revisionID": note.RevisionID, "bodyBytes": len(note.Body)}
+		result := map[string]any{"itemID": page.ItemID, "contentHash": page.ContentHash, "revisionID": page.RevisionID, "bodyBytes": len(page.Body)}
 		if args.Action == "commit" {
 			// Deliver final anchors with the success event, before the renderer
 			// refreshes the body. This prevents a fast commit from flashing the

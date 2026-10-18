@@ -80,7 +80,7 @@ func (h *Hub) remove(sessionID string, ch chan Event) {
 	close(ch)
 }
 
-// Only an in-progress note commit needs replay before a complete canonical tool
+// Only an in-progress Page commit needs replay before a complete canonical tool
 // call exists. This is transient view state, not document content or history.
 // Bound both memory and age; no polling goroutine and no per-token persistence.
 type pageArgumentStream struct {
