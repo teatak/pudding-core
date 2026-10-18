@@ -11,16 +11,16 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const noteSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind IN ('page','note') AND w.deleted=0 AND w.archived_at=0`
+const pageSelect = `SELECT w.id,c.body,c.content_hash,w.head_revision FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=? AND w.kind IN ('page','note') AND w.deleted=0 AND w.archived_at=0`
 
-func (s *Store) GetNote(ctx context.Context, id string) (*store.NoteContent, error) {
+func (s *Store) GetPage(ctx context.Context, id string) (*store.PageContent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return scanContentSnapshot(s.db.QueryRowContext(ctx, noteSelect, id))
+	return scanContentSnapshot(s.db.QueryRowContext(ctx, pageSelect, id))
 }
 
-func (s *Store) CreateNote(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor) (*store.NoteContent, error) {
-	if err := store.ValidateNote(body); err != nil {
+func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor) (*store.PageContent, error) {
+	if err := store.ValidatePage(body); err != nil {
 		return nil, err
 	}
 	if item.Kind != store.StudioItemKindPage && item.Kind != "note" {
@@ -29,7 +29,7 @@ func (s *Store) CreateNote(ctx context.Context, item *store.StudioItem, body str
 	if item.Kind == "note" {
 		item.Kind = store.StudioItemKindPage
 	}
-	var out *store.NoteContent
+	var out *store.PageContent
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
@@ -41,13 +41,13 @@ func (s *Store) CreateNote(ctx context.Context, item *store.StudioItem, body str
 		if _, err := tx.ExecContext(ctx, `INSERT INTO studio_item_content(item_id,body,content_hash) VALUES(?,?,?)`, item.ID, body, hash); err != nil {
 			return err
 		}
-		out = &store.NoteContent{ItemID: item.ID, Body: body, ContentHash: hash}
+		out = &store.PageContent{ItemID: item.ID, Body: body, ContentHash: hash}
 		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: "create", Author: author}, "")
 	})
 	return out, err
 }
 
-func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*store.NoteContent, error) {
+func (s *Store) WritePage(ctx context.Context, id string, in store.PageWrite) (*store.PageContent, error) {
 	if in.ClientRequestID == "" || len(in.ClientRequestID) > 200 {
 		return nil, &store.InvalidContent{Message: "clientRequestID is required (max 200 bytes)"}
 	}
@@ -84,16 +84,16 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 		return nil, &store.InvalidContent{Message: "expectedHash is required for replacement or restore"}
 	}
 	payload, _ := json.Marshal(struct {
-		Write  store.NoteWrite
+		Write  store.PageWrite
 		Author store.ContentAuthor
 	}{in, in.Author})
 	requestHash := store.ContentHash(string(payload))
-	var out *store.NoteContent
+	var out *store.PageContent
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, in.Author); err != nil {
 			return err
 		}
-		current, err := scanContentSnapshot(tx.QueryRowContext(ctx, noteSelect, id))
+		current, err := scanContentSnapshot(tx.QueryRowContext(ctx, pageSelect, id))
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 			return &store.ContentConflict{CurrentHash: current.ContentHash}
 		}
 		body := current.Body
-		var operation *store.NoteEditOperation
+		var operation *store.PageEditOperation
 		if leased {
 			if in.Author.Kind == "session" {
 				turn, err := getTurnTx(ctx, tx, in.Author.TurnID)
@@ -128,11 +128,11 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 					return &store.InvalidContent{Message: "editing turn has ended"}
 				}
 			}
-			operation, err = loadNoteEditTx(ctx, tx, id, in.OperationID)
+			operation, err = loadPageEditTx(ctx, tx, id, in.OperationID)
 			if err != nil {
 				return err
 			}
-			if err = checkNoteEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
+			if err = checkPageEditCommit(operation, in, body, time.Now().UnixMilli()); err != nil {
 				return err
 			}
 			ranges := operation.EditRanges()
@@ -162,7 +162,7 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 			body = *in.Body
 		}
 		if len(in.Edits) > 0 {
-			body, err = store.ApplyNoteEdits(body, in.Edits)
+			body, err = store.ApplyPageEdits(body, in.Edits)
 			if err != nil {
 				return err
 			}
@@ -184,7 +184,7 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 		if in.UndoRevision != "" {
 			before, after, err := nativeUndoSourceTx(ctx, tx, id, current.RevisionID, in.UndoRevision)
 			if err == nil {
-				body, err = store.UndoNote(before, after, current.Body)
+				body, err = store.UndoPage(before, after, current.Body)
 			}
 			if errors.Is(err, store.ErrUndoConflict) {
 				return &store.ContentConflict{CurrentHash: current.ContentHash}
@@ -193,15 +193,15 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 				return err
 			}
 		}
-		if err := store.ValidateNote(body); err != nil {
+		if err := store.ValidatePage(body); err != nil {
 			return err
 		}
 		if !in.PreserveOnly {
-			if err := guardNoteEditsTx(ctx, tx, id, current.Body, body, in.OperationID, time.Now().UnixMilli()); err != nil {
+			if err := guardPageEditsTx(ctx, tx, id, current.Body, body, in.OperationID, time.Now().UnixMilli()); err != nil {
 				return err
 			}
 		}
-		out = &store.NoteContent{ItemID: id, Body: body, ContentHash: store.ContentHash(body), RevisionID: current.RevisionID}
+		out = &store.PageContent{ItemID: id, Body: body, ContentHash: store.ContentHash(body), RevisionID: current.RevisionID}
 		if err := saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: in.ClientRequestID, Author: in.Author, PreserveOnly: in.PreserveOnly}, requestHash); err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (s *Store) WriteNote(ctx context.Context, id string, in store.NoteWrite) (*
 			operation.RevisionID = out.RevisionID
 			operation.UpdatedAt = time.Now().UnixMilli()
 			operation.Sequence++
-			if err := saveNoteEditTx(ctx, tx, operation); err != nil {
+			if err := savePageEditTx(ctx, tx, operation); err != nil {
 				return err
 			}
 		}

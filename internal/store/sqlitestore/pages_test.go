@@ -11,7 +11,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestNoteConcurrentEditingVersionsAndRestart(t *testing.T) {
+func TestPageConcurrentEditingVersionsAndRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	s, err := Open(path)
@@ -24,41 +24,41 @@ func TestNoteConcurrentEditingVersionsAndRestart(t *testing.T) {
 	}
 	user := store.ContentAuthor{Kind: "user"}
 	ai := store.ContentAuthor{Kind: "session", SessionID: "writer", TurnID: "turn"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes", SourceSessionID: "writer"}, "One\n\nTwo\n", user)
+	doc, err := s.CreatePage(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes", SourceSessionID: "writer"}, "One\n\nTwo\n", user)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initial := *doc
 	humanBody := "Human one\n\nTwo\n"
-	doc, err = s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "human", Body: &humanBody, ExpectedHash: &doc.ContentHash, Author: user})
+	doc, err = s.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: "human", Body: &humanBody, ExpectedHash: &doc.ContentHash, Author: user})
 	if err != nil {
 		t.Fatal(err)
 	}
-	edit := store.NoteWrite{ClientRequestID: "ai", Edits: []store.NoteEdit{{Old: "Two", New: "AI two"}}, Author: ai}
-	doc, err = s.WriteNote(ctx, "doc", edit)
+	edit := store.PageWrite{ClientRequestID: "ai", Edits: []store.PageEdit{{Old: "Two", New: "AI two"}}, Author: ai}
+	doc, err = s.WritePage(ctx, "doc", edit)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if doc.Body != "Human one\n\nAI two\n" {
 		t.Fatal("concurrent edits lost", doc.Body)
 	}
-	if _, err = s.WriteNote(ctx, "doc", edit); err != nil {
+	if _, err = s.WritePage(ctx, "doc", edit); err != nil {
 		t.Fatal("retry not idempotent", err)
 	}
 	edit.Edits[0].New = "changed retry"
-	if _, err = s.WriteNote(ctx, "doc", edit); err == nil {
+	if _, err = s.WritePage(ctx, "doc", edit); err == nil {
 		t.Fatal("request ID reuse accepted")
 	}
 	dirty := "Unsaved human buffer"
 	var conflict *store.ContentConflict
-	if _, err = s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "conflict", Body: &dirty, ExpectedHash: &initial.ContentHash, Author: user}); !errors.As(err, &conflict) || conflict.CurrentHash != doc.ContentHash {
+	if _, err = s.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: "conflict", Body: &dirty, ExpectedHash: &initial.ContentHash, Author: user}); !errors.As(err, &conflict) || conflict.CurrentHash != doc.ContentHash {
 		t.Fatal("missing conflict", err)
 	}
-	preserved, err := s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "preserve", Body: &dirty, ExpectedHash: &initial.ContentHash, PreserveOnly: true, Author: user})
+	preserved, err := s.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: "preserve", Body: &dirty, ExpectedHash: &initial.ContentHash, PreserveOnly: true, Author: user})
 	if err != nil || preserved.Body != doc.Body {
 		t.Fatal("preserve replaced working body", preserved, err)
 	}
-	restored, err := s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: "restore", RestoreRevision: initial.RevisionID, ExpectedHash: &doc.ContentHash, Author: user})
+	restored, err := s.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: "restore", RestoreRevision: initial.RevisionID, ExpectedHash: &doc.ContentHash, Author: user})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestNoteConcurrentEditingVersionsAndRestart(t *testing.T) {
 		t.Fatal("restore reused old version", restored)
 	}
 	edit.Edits[0].New = "AI two"
-	retried, err := s.WriteNote(ctx, "doc", edit)
+	retried, err := s.WritePage(ctx, "doc", edit)
 	if err != nil || *retried != *doc {
 		t.Fatal("retry must return the original write, not a later author's version", retried, err)
 	}
@@ -98,35 +98,35 @@ func TestNoteConcurrentEditingVersionsAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	persisted, err := s.GetNote(ctx, "doc")
+	persisted, err := s.GetPage(ctx, "doc")
 	if err != nil || *persisted != *restored {
 		t.Fatal("restart lost document", persisted, err)
 	}
 }
 
-func TestNoteEditsAreAtomicAndSizeBounded(t *testing.T) {
+func TestPageEditsAreAtomicAndSizeBounded(t *testing.T) {
 	s, _ := openTestStore(t)
 	ctx := context.Background()
 	author := store.ContentAuthor{Kind: "user"}
-	doc, err := s.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "alpha beta alpha", author)
+	doc, err := s.CreatePage(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "alpha beta alpha", author)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, edits := range [][]store.NoteEdit{
+	for i, edits := range [][]store.PageEdit{
 		{{Old: "alpha", New: "ambiguous"}},
 		{{Old: "beta", New: "first"}, {Old: "missing", New: "second"}},
 		{{Old: "alpha beta", New: "first"}, {Old: "beta alpha", New: "second"}},
 		{{Old: "beta", New: strings.Repeat("x", contracts.Studio().MaxDocumentBytes)}},
 	} {
-		if _, err := s.WriteNote(ctx, "doc", store.NoteWrite{ClientRequestID: store.NewID("write"), Edits: edits, Author: author}); err == nil {
+		if _, err := s.WritePage(ctx, "doc", store.PageWrite{ClientRequestID: store.NewID("write"), Edits: edits, Author: author}); err == nil {
 			t.Fatal("invalid edits accepted", i)
 		}
-		after, _ := s.GetNote(ctx, "doc")
+		after, _ := s.GetPage(ctx, "doc")
 		if *after != *doc {
 			t.Fatal("partial write", i)
 		}
 	}
-	if _, err = s.CreateNote(ctx, &store.StudioItem{ID: "large", Kind: "note", Name: "Too large"}, strings.Repeat("x", contracts.Studio().MaxDocumentBytes+1), author); err == nil {
+	if _, err = s.CreatePage(ctx, &store.StudioItem{ID: "large", Kind: "note", Name: "Too large"}, strings.Repeat("x", contracts.Studio().MaxDocumentBytes+1), author); err == nil {
 		t.Fatal("oversized document accepted")
 	}
 	if _, err = s.GetStudioItem(ctx, "large"); !errors.Is(err, store.ErrNotFound) {

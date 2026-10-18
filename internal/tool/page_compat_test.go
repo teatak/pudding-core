@@ -7,7 +7,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T) {
+func TestLegacyPageAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T) {
 	for old, current := range map[string]string{
 		"builtin_doc_create":  PageCreate,
 		"builtin_doc_read":    PageRead,
@@ -22,10 +22,10 @@ func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T
 			t.Fatalf("catalog must advertise only %s", current)
 		}
 		for _, name := range []string{old, current} {
-			if CurrentToolName(name) != current || NormalizeLegacyNoteTool(name) != current || !IsStudioTool(name) {
+			if CurrentToolName(name) != current || NormalizeLegacyPageTool(name) != current || !IsStudioTool(name) {
 				t.Fatalf("alias routing failed for %s", name)
 			}
-			if owner, ok := BuiltinPluginIDForTool(name); !ok || owner != plugin.BuiltinNoteAuthoringID {
+			if owner, ok := BuiltinPluginIDForTool(name); !ok || owner != plugin.BuiltinPageAuthoringID {
 				t.Fatalf("wrong alias ownership: %s, %s", name, owner)
 			}
 			if RequiredModeForName(name) != store.ModeChat {
@@ -33,8 +33,8 @@ func TestLegacyNoteAliasesShareOwnershipWithoutDuplicateDefinitions(t *testing.T
 			}
 		}
 	}
-	for _, name := range []string{"builtin_doc_delete", "builtin_doc_create_extra", NoteEdit} {
-		if NormalizeLegacyNoteTool(name) != name {
+	for _, name := range []string{"builtin_doc_delete", "builtin_doc_create_extra", PageEdit} {
+		if NormalizeLegacyPageTool(name) != name {
 			t.Fatalf("unexpected alias: %s", name)
 		}
 	}

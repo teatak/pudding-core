@@ -4,7 +4,7 @@ import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
 	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
-	NoteCreate: plugin.BuiltinNoteAuthoringID, NoteRead: plugin.BuiltinNoteAuthoringID, NoteEdit: plugin.BuiltinNoteAuthoringID, NoteRename: plugin.BuiltinNoteAuthoringID,
+	PageCreate: plugin.BuiltinPageAuthoringID, PageRead: plugin.BuiltinPageAuthoringID, PageEdit: plugin.BuiltinPageAuthoringID, PageRename: plugin.BuiltinPageAuthoringID,
 	SheetCreate: plugin.BuiltinSheetAuthoringID, SheetRead: plugin.BuiltinSheetAuthoringID, SheetEdit: plugin.BuiltinSheetAuthoringID,
 	SubtaskList:       plugin.BuiltinCollaborationID,
 	SubtaskDispatch:   plugin.BuiltinCollaborationID,

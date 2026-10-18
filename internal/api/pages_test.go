@@ -12,7 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
-func TestNoteAPIAndWidgetBoundary(t *testing.T) {
+func TestPageAPIAndWidgetBoundary(t *testing.T) {
 	st := storetest.New(t)
 	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("token", nil)
 	call := func(method, path string, body []byte, status int) []byte {
@@ -35,7 +35,7 @@ func TestNoteAPIAndWidgetBoundary(t *testing.T) {
 	}
 	path := "/studio/items/" + item.ID
 
-	var doc store.NoteContent
+	var doc store.PageContent
 	json.Unmarshal(call("GET", path+"/content", nil, 200), &doc)
 	body, _ := json.Marshal(map[string]any{"clientRequestID": "save", "body": "# Updated", "expectedHash": doc.ContentHash})
 	json.Unmarshal(call("PUT", path+"/content", body, 200), &doc)
@@ -58,7 +58,7 @@ func TestNoteAPIAndWidgetBoundary(t *testing.T) {
 	call("GET", path+"/assets/not-a-hash.png", nil, 400)
 	call("POST", "/studio/items", []byte(`{"kind":"unsupported","name":"Invalid kind"}`), 400)
 	leaseBody, _ := json.Marshal(map[string]any{"clientRequestID": "begin", "action": "begin", "expectedHash": doc.ContentHash, "target": "Updated"})
-	var op store.NoteEditOperation
+	var op store.PageEditOperation
 	if err := json.Unmarshal(call("POST", path+"/edit-operations", leaseBody, 200), &op); err != nil || op.LeaseToken == "" {
 		t.Fatal("missing lease", err)
 	}

@@ -50,7 +50,7 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 	}
 	var legacy struct {
 		Note      json.RawMessage `json:"note"`
-		NoteWrite store.NoteWrite `json:"noteWrite"`
+		PageWrite store.PageWrite `json:"noteWrite"`
 	}
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		t.Fatal(err)
@@ -63,17 +63,17 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 			t.Fatalf("historical wire payload changed: %s; error: %v", raw, err)
 		}
 	}
-	note, err := s.GetNote(ctx, "doc_legacy")
+	note, err := s.GetPage(ctx, "doc_legacy")
 	if err != nil {
 		t.Fatal(err)
 	}
 	checkJSON(note, legacy.Note)
-	legacy.NoteWrite.Author = store.ContentAuthor{Kind: "user"}
-	retriedNote, err := s.WriteNote(ctx, note.ItemID, legacy.NoteWrite)
+	legacy.PageWrite.Author = store.ContentAuthor{Kind: "user"}
+	retriedPage, err := s.WritePage(ctx, note.ItemID, legacy.PageWrite)
 	if err != nil {
 		t.Fatal("historical note request fingerprint changed", err)
 	}
-	checkJSON(retriedNote, legacy.Note)
+	checkJSON(retriedPage, legacy.Note)
 	revisions, err := s.ListStudioItemRevisions(ctx, note.ItemID)
 	if err != nil || len(revisions) != 2 {
 		t.Fatal("retry changed historical versions", note.ItemID, revisions, err)

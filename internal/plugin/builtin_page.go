@@ -1,6 +1,6 @@
 package plugin
 
-const noteInstructions = `# Page Authoring
+const pageInstructions = `# Page Authoring
 
 Page is the lightweight Studio editor with Markdown import/export. Use its localized product name, Page, in the user's language. Use native Studio pages for Markdown writing that people can edit directly, without compiling a React widget. Project .md files remain project files unless explicitly imported.
 Use builtin_page_create/read/edit/rename for Pages (kind=page). Use builtin_page_rename to change a page's display title.

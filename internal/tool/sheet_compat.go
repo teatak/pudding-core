@@ -16,7 +16,7 @@ func NormalizeLegacyContentTool(name string) string {
 	case "builtin_table_update":
 		return SheetEdit
 	default:
-		return NormalizeLegacyNoteTool(name)
+		return NormalizeLegacyPageTool(name)
 	}
 }
 

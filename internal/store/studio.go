@@ -63,7 +63,7 @@ type StudioStore interface {
 	WidgetPageStore
 	ForkWidgetForEditing(context.Context, string, string, string, int64) (*StudioItem, error)
 	InstallWidgetPackage(context.Context, *StudioItem, int64) (*StudioItem, error)
-	NoteStore
+	PageStore
 	SheetStore
 	GetWidgetData(context.Context, string) (*WidgetData, error)
 	WriteWidgetData(context.Context, string, string, string, int64, json.RawMessage) (*WidgetData, error)

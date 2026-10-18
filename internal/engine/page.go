@@ -12,20 +12,20 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call tool.Call, args tool.StudioArgs) (any, error) {
+func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call tool.Call, args tool.StudioArgs) (any, error) {
 	author := store.ContentAuthor{Kind: "session", SessionID: sessionID, TurnID: turnID}
 	switch call.Name {
-	case tool.NoteCreate:
+	case tool.PageCreate:
 		name := strings.TrimSpace(args.Name)
 		if name == "" || len(name) > 200 || args.Body == nil {
 			return nil, errors.New("name (max 200 bytes) and body are required")
 		}
 		// A retried call reuses the item created by this exact canonical tool call.
 		id := "page_" + store.ContentHash(sessionID + "\x00" + turnID + "\x00" + call.CallID)[:32]
-		note, err := e.store.GetNote(ctx, id)
+		note, err := e.store.GetPage(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
 			now := time.Now().UTC()
-			note, err = e.store.CreateNote(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindPage, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
+			note, err = e.store.CreatePage(ctx, &store.StudioItem{ID: id, Kind: store.StudioItemKindPage, Name: name, Icon: "file-text", SourceSessionID: sessionID, CreatedAt: now, UpdatedAt: now}, *args.Body, author)
 		}
 		if err != nil {
 			return nil, err
@@ -35,8 +35,8 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			return nil, err
 		}
 		return map[string]any{"itemID": id, "mountID": mount.ID, "contentHash": note.ContentHash, "revisionID": note.RevisionID, "bodyBytes": len(note.Body)}, nil
-	case tool.NoteRead:
-		note, err := e.store.GetNote(ctx, args.ItemID)
+	case tool.PageRead:
+		note, err := e.store.GetPage(ctx, args.ItemID)
 		if err != nil {
 			return nil, err
 		}
@@ -54,13 +54,13 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			result["nextOffset"] = end
 		}
 		return result, nil
-	case tool.NoteEdit:
+	case tool.PageEdit:
 		if args.Action == "begin" || args.Action == "renew" || args.Action == "cancel" {
 			hash := ""
 			if args.ExpectedHash != nil {
 				hash = *args.ExpectedHash
 			}
-			op, err := e.store.ChangeNoteEdit(ctx, args.ItemID, store.NoteEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Ranges: args.Ranges, Author: author})
+			op, err := e.store.ChangePageEdit(ctx, args.ItemID, store.PageEditRequest{Action: args.Action, ClientRequestID: turnID + "/" + call.CallID, OperationID: args.OperationID, LeaseToken: args.LeaseToken, ExpectedHash: hash, From: args.From, To: args.To, Target: args.Target, Ranges: args.Ranges, Author: author})
 			return op, err
 		}
 		if args.Action != "" && args.Action != "commit" {
@@ -69,7 +69,7 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 		if args.Action == "commit" && args.Replacement == nil && args.Replacements == nil {
 			return nil, errors.New("commit requires replacement")
 		}
-		note, err := e.store.WriteNote(ctx, args.ItemID, store.NoteWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement, Replacements: args.Replacements})
+		note, err := e.store.WritePage(ctx, args.ItemID, store.PageWrite{ClientRequestID: turnID + "/" + call.CallID, ExpectedHash: args.ExpectedHash, Body: args.Body, Edits: args.Edits, Author: author, OperationID: args.OperationID, LeaseToken: args.LeaseToken, Replacement: args.Replacement, Replacements: args.Replacements})
 		if err != nil {
 			return nil, err
 		}
@@ -78,12 +78,12 @@ func (e *Engine) executeNote(ctx context.Context, sessionID, turnID string, call
 			// Deliver final anchors with the success event, before the renderer
 			// refreshes the body. This prevents a fast commit from flashing the
 			// entire replacement while its typewriter presentation catches up.
-			if snapshot, snapshotErr := e.store.GetNoteEditState(ctx, args.ItemID); snapshotErr == nil {
+			if snapshot, snapshotErr := e.store.GetPageEditState(ctx, args.ItemID); snapshotErr == nil {
 				result["editState"] = snapshot
 			}
 		}
 		return result, nil
-	case tool.NoteRename:
+	case tool.PageRename:
 		name := strings.TrimSpace(args.Name)
 		if name == "" || len(name) > 200 {
 			return nil, errors.New("name is required (max 200 bytes)")

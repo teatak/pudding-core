@@ -1,6 +1,6 @@
 package tool
 
-// NormalizeLegacyNoteTool projects the exact doc/note compatibility names to
+// NormalizeLegacyPageTool projects the exact doc/note compatibility names to
 // Page tools. Catalogs advertise builtin_page_* only, including rename; aliases
 // pass through the same loading, ownership and capability checks. Unreleased
 // rich_document and structured document names are not Markdown Page aliases.
@@ -11,7 +11,7 @@ package tool
 // aliases and alias-only callers/tests together; do not add a runtime date gate
 // or rewrite original tool history, content hashes or retry fingerprints.
 // Release version/date: pending first stable release of this change.
-func NormalizeLegacyNoteTool(name string) string {
+func NormalizeLegacyPageTool(name string) string {
 	switch name {
 	case "builtin_doc_create", "builtin_note_create":
 		return PageCreate

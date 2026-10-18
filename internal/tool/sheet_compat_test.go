@@ -55,7 +55,7 @@ func TestSheetCreateArgumentProjectionIsExactAndNonMutating(t *testing.T) {
 			t.Fatal("ambiguous fields accepted", raw)
 		}
 	}
-	if string(CurrentSheetToolArgs(NoteCreate, old)) != before {
+	if string(CurrentSheetToolArgs(PageCreate, old)) != before {
 		t.Fatal("note payload changed")
 	}
 }

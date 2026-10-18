@@ -160,7 +160,7 @@ func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
 	})
 	ctx := context.Background()
 	user := store.ContentAuthor{Kind: "user"}
-	doc, err := st.CreateNote(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "Keep document", user)
+	doc, err := st.CreatePage(ctx, &store.StudioItem{ID: "doc", Kind: "note", Name: "Notes"}, "Keep document", user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestStudioMigrationNativeContentAndArchivesSurviveReopen(t *testing.T) {
 	if _, err := st.SetStudioItemArchived(ctx, "doc", archived[0].Revision, false); err != nil {
 		t.Fatal(err)
 	}
-	reopenedDoc, err := st.GetNote(ctx, "doc")
+	reopenedDoc, err := st.GetPage(ctx, "doc")
 	if err != nil || !reflect.DeepEqual(reopenedDoc, doc) {
 		t.Fatal("document content or version lost", reopenedDoc, err)
 	}

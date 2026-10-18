@@ -20,7 +20,7 @@ func (s *Server) getStudioContent(c *cart.Context) error {
 		c.JSON(http.StatusOK, table)
 		return nil
 	}
-	return s.getNote(c)
+	return s.getPage(c)
 }
 func (s *Server) writeSheet(c *cart.Context) error {
 	id, _ := c.Param("itemID")
