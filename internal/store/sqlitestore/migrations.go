@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 46
+	currentSchemaVersion       = 47
 )
 
 var (
@@ -35,6 +35,9 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished document migrations 40–41 are consolidated into destination 42.
 var schemaMigrations = map[int]schemaMigration{
+	// v47 was used by a withdrawn experiment. Keep the version accepted without
+	// creating its table; existing experimental data is left untouched.
+	47: func(*sql.Tx) error { return nil },
 	44: migratePageEdits,
 	45: migratePageDocuments,
 	46: migratePageNames,

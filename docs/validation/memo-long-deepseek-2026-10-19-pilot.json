@@ -1,0 +1,1910 @@
+{
+  "fixtureVersion": "incident-chain-v1",
+  "requestedModel": "deepseek-flash",
+  "generatedAt": "2026-10-19T07:41:45.656086Z",
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "pricingDate": "2026-10-19",
+  "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+  "plannedPairs": 4,
+  "runs": [
+    {
+      "sample": 0,
+      "memo": false,
+      "startedAt": "2026-10-19T07:41:45.65619Z",
+      "main": {
+        "requests": 11,
+        "businessCalls": 10,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 26192,
+          "InputCachedTokens": 176640,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1477,
+          "OutputReasoningTokens": 2188
+        },
+        "estimatedUSDAtPeakRates": 0.013315440000000001,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 11,
+        "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":17,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":60,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3e593d63f0.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":103,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_313cd310af.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":146,\"verdict\":\"ok\",\"evidence_file\":\"evidence_12ce6b036b.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":189,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961b17ecde.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":59,\"verdict\":\"ok\",\"evidence_file\":\"evidence_1b4fe8415f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":102,\"verdict\":\"ok\",\"evidence_file\":\"evidence_d6dc8ca914.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":145,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5e901fb5c9.log\"}],\"total_delay_ms\":821,\"failed_stage\":\"3\",\"repair\":\"refresh-route-generation-20\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 224,
+          "InputCachedTokens": 33920,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 13,
+          "OutputReasoningTokens": 105
+        },
+        "estimatedUSDAtPeakRates": 0.00041232000000000004,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "audit-ce181cc62e3911a47c"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 989,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2694,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 98,
+            "OutputReasoningTokens": 11
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1476,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2157,
+            "InputCachedTokens": 7680,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 111,
+            "OutputReasoningTokens": 86
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2109,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 222,
+            "InputCachedTokens": 9856,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 130,
+            "OutputReasoningTokens": 215
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1166,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 975,
+            "InputCachedTokens": 10368,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 122,
+            "OutputReasoningTokens": 39
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1320,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2932,
+            "InputCachedTokens": 11392,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1972,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2832,
+            "InputCachedTokens": 14464,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 121,
+            "OutputReasoningTokens": 202
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1848,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2895,
+            "InputCachedTokens": 17536,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 120,
+            "OutputReasoningTokens": 154
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1017,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2910,
+            "InputCachedTokens": 20608,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 122,
+            "OutputReasoningTokens": 28
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1120,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2931,
+            "InputCachedTokens": 23552,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 120,
+            "OutputReasoningTokens": 25
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1144,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2816,
+            "InputCachedTokens": 26624,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 122,
+            "OutputReasoningTokens": 27
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 6738,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2828,
+            "InputCachedTokens": 29568,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 292,
+            "OutputReasoningTokens": 1379
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1225,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 224,
+            "InputCachedTokens": 33920,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 13,
+            "OutputReasoningTokens": 105
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T07:42:08.004267Z",
+      "main": {
+        "requests": 12,
+        "businessCalls": 18,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 21656,
+          "InputCachedTokens": 189056,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1565,
+          "OutputReasoningTokens": 2503
+        },
+        "estimatedUSDAtPeakRates": 0.012512735999999998,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 11,
+        "answer": "I'll start by locating entry.log and reading the trace."
+      },
+      "followup": {
+        "requests": 0,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 0,
+          "InputCachedTokens": 0,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 0,
+          "OutputReasoningTokens": 0
+        },
+        "estimatedUSDAtPeakRates": 0,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 0,
+        "answer": ""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 687,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3173,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 66,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1280,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 213,
+            "InputCachedTokens": 8064,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 58,
+            "OutputReasoningTokens": 114
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1994,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2224,
+            "InputCachedTokens": 8448,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 90,
+            "OutputReasoningTokens": 207
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1401,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1911,
+            "InputCachedTokens": 10880,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 66,
+            "OutputReasoningTokens": 64
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1116,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2370,
+            "InputCachedTokens": 12800,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 98,
+            "OutputReasoningTokens": 11
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1364,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1282,
+            "InputCachedTokens": 15232,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 164,
+            "OutputReasoningTokens": 84
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1325,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1790,
+            "InputCachedTokens": 16640,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 168,
+            "OutputReasoningTokens": 75
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 981,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1788,
+            "InputCachedTokens": 18560,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 166,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1262,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1727,
+            "InputCachedTokens": 20480,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 170,
+            "OutputReasoningTokens": 23
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1765,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1677,
+            "InputCachedTokens": 22400,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 166,
+            "OutputReasoningTokens": 188
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1141,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1782,
+            "InputCachedTokens": 24320,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 170,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 8967,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1719,
+            "InputCachedTokens": 26240,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 183,
+            "OutputReasoningTokens": 1693
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true,
+      "error": "main turn status: failed"
+    },
+    {
+      "sample": 1,
+      "memo": true,
+      "startedAt": "2026-10-19T07:42:31.43522Z",
+      "main": {
+        "requests": 12,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 15290,
+          "InputCachedTokens": 166912,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1052,
+          "OutputReasoningTokens": 903
+        },
+        "estimatedUSDAtPeakRates": 0.007934472,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 11,
+        "answer": "I'll start by exploring the project structure and reading entry.log."
+      },
+      "followup": {
+        "requests": 0,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 0,
+          "InputCachedTokens": 0,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 0,
+          "OutputReasoningTokens": 0
+        },
+        "estimatedUSDAtPeakRates": 0,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 0,
+        "answer": ""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 855,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3173,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 67,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1353,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 214,
+            "InputCachedTokens": 8064,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 58,
+            "OutputReasoningTokens": 99
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1763,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2339,
+            "InputCachedTokens": 8320,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 90,
+            "OutputReasoningTokens": 224
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1186,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1134,
+            "InputCachedTokens": 10880,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 66,
+            "OutputReasoningTokens": 137
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1712,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2301,
+            "InputCachedTokens": 12160,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 98,
+            "OutputReasoningTokens": 194
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1118,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1087,
+            "InputCachedTokens": 14720,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 95,
+            "OutputReasoningTokens": 26
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1212,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 530,
+            "InputCachedTokens": 15872,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 95,
+            "OutputReasoningTokens": 23
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1216,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1057,
+            "InputCachedTokens": 16512,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 29
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1682,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 509,
+            "InputCachedTokens": 17664,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 21
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1276,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1192,
+            "InputCachedTokens": 18176,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 96,
+            "OutputReasoningTokens": 106
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1030,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 592,
+            "InputCachedTokens": 19456,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 96,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1080,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1162,
+            "InputCachedTokens": 20096,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true,
+      "error": "main turn status: failed"
+    },
+    {
+      "sample": 1,
+      "memo": false,
+      "startedAt": "2026-10-19T07:42:47.051108Z",
+      "main": {
+        "requests": 11,
+        "businessCalls": 10,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 26080,
+          "InputCachedTokens": 182912,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1601,
+          "OutputReasoningTokens": 1841
+        },
+        "estimatedUSDAtPeakRates": 0.013051871999999999,
+        "correct": true,
+        "checksPassed": 11,
+        "checksTotal": 11,
+        "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":48,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":91,\"verdict\":\"ok\",\"evidence_file\":\"evidence_a2a0c73db3.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":134,\"verdict\":\"ok\",\"evidence_file\":\"evidence_55163cd527.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":177,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_26e4936f76.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":47,\"verdict\":\"ok\",\"evidence_file\":\"evidence_aab10acf46.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":90,\"verdict\":\"ok\",\"evidence_file\":\"evidence_0d88902ff2.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":133,\"verdict\":\"ok\",\"evidence_file\":\"evidence_470e45294a.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":176,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3dac140d56.log\"}],\"total_delay_ms\":896,\"failed_stage\":4,\"repair\":\"refresh-route-generation-27\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 232,
+          "InputCachedTokens": 33664,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 13,
+          "OutputReasoningTokens": 223
+        },
+        "estimatedUSDAtPeakRates": 0.000554784,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "audit-b60e222047cb451c0b"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 943,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2694,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 114,
+            "OutputReasoningTokens": 13
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1038,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2047,
+            "InputCachedTokens": 7808,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 111,
+            "OutputReasoningTokens": 86
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 6816,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 240,
+            "InputCachedTokens": 9856,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 130,
+            "OutputReasoningTokens": 1084
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1053,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 947,
+            "InputCachedTokens": 11264,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 138,
+            "OutputReasoningTokens": 35
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1356,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2916,
+            "InputCachedTokens": 12288,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 135,
+            "OutputReasoningTokens": 55
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1098,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2843,
+            "InputCachedTokens": 15360,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 137,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1449,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2889,
+            "InputCachedTokens": 18304,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 136,
+            "OutputReasoningTokens": 44
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1543,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2937,
+            "InputCachedTokens": 21248,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 137,
+            "OutputReasoningTokens": 21
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1016,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2836,
+            "InputCachedTokens": 24320,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 136,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 933,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2857,
+            "InputCachedTokens": 27264,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 137,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2981,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2874,
+            "InputCachedTokens": 30208,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 290,
+            "OutputReasoningTokens": 447
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1582,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 232,
+            "InputCachedTokens": 33664,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 13,
+            "OutputReasoningTokens": 223
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "sample": 2,
+      "memo": false,
+      "startedAt": "2026-10-19T07:43:09.044152Z",
+      "main": {
+        "requests": 10,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 25956,
+          "InputCachedTokens": 180864,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1002,
+          "OutputReasoningTokens": 4233
+        },
+        "estimatedUSDAtPeakRates": 0.015153984,
+        "correct": true,
+        "checksPassed": 11,
+        "checksTotal": 11,
+        "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":79,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":122,\"verdict\":\"ok\",\"evidence_file\":\"evidence_cd3cf9d4e6.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":165,\"verdict\":\"ok\",\"evidence_file\":\"evidence_b53f802c12.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":35,\"verdict\":\"ok\",\"evidence_file\":\"evidence_ed93e427ae.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":78,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_2375878b33.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":121,\"verdict\":\"ok\",\"evidence_file\":\"evidence_c050485f4e.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":164,\"verdict\":\"ok\",\"evidence_file\":\"evidence_e7d08590c2.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":34,\"verdict\":\"ok\",\"evidence_file\":\"evidence_480aecc9b1.log\"}],\"total_delay_ms\":798,\"failed_stage\":5,\"repair\":\"refresh-route-generation-34\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 221,
+          "InputCachedTokens": 35328,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 14,
+          "OutputReasoningTokens": 134
+        },
+        "estimatedUSDAtPeakRates": 0.000455868,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "audit-9c23205be4030963c2"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 769,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2694,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 74,
+            "OutputReasoningTokens": 6
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1276,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2886,
+            "InputCachedTokens": 7680,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 83,
+            "OutputReasoningTokens": 80
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1073,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2929,
+            "InputCachedTokens": 10624,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 20
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 959,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2895,
+            "InputCachedTokens": 13568,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 713,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2859,
+            "InputCachedTokens": 16512,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1086,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2846,
+            "InputCachedTokens": 19456,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 39
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1565,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2833,
+            "InputCachedTokens": 22400,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 81,
+            "OutputReasoningTokens": 137
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1035,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2920,
+            "InputCachedTokens": 25344,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 81,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 5086,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2880,
+            "InputCachedTokens": 28288,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 72,
+            "OutputReasoningTokens": 930
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 14447,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 214,
+            "InputCachedTokens": 32000,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 291,
+            "OutputReasoningTokens": 2967
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1544,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 221,
+            "InputCachedTokens": 35328,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 14,
+            "OutputReasoningTokens": 134
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "sample": 2,
+      "memo": true,
+      "startedAt": "2026-10-19T07:43:38.762337Z",
+      "main": {
+        "requests": 10,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 28654,
+          "InputCachedTokens": 181888,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 1470,
+          "OutputReasoningTokens": 1618
+        },
+        "estimatedUSDAtPeakRates": 0.013393128,
+        "correct": true,
+        "checksPassed": 11,
+        "checksTotal": 11,
+        "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":79,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":122,\"verdict\":\"ok\",\"evidence_file\":\"evidence_cd3cf9d4e6.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":165,\"verdict\":\"ok\",\"evidence_file\":\"evidence_b53f802c12.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":35,\"verdict\":\"ok\",\"evidence_file\":\"evidence_ed93e427ae.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":78,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_2375878b33.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":121,\"verdict\":\"ok\",\"evidence_file\":\"evidence_c050485f4e.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":164,\"verdict\":\"ok\",\"evidence_file\":\"evidence_e7d08590c2.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":34,\"verdict\":\"ok\",\"evidence_file\":\"evidence_480aecc9b1.log\"}],\"total_delay_ms\":798,\"failed_stage\":5,\"repair\":\"refresh-route-generation-34\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 26330,
+          "InputCachedTokens": 8064,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 14,
+          "OutputReasoningTokens": 247
+        },
+        "estimatedUSDAtPeakRates": 0.008260584000000001,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "audit-9c23205be4030963c2"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1229,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3172,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 212,
+            "OutputReasoningTokens": 13
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1570,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2330,
+            "InputCachedTokens": 8320,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 129,
+            "OutputReasoningTokens": 175
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2805,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1494,
+            "InputCachedTokens": 10880,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 122,
+            "OutputReasoningTokens": 448
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1568,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3060,
+            "InputCachedTokens": 12928,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 144
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1145,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3151,
+            "InputCachedTokens": 16128,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 20
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1129,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3120,
+            "InputCachedTokens": 19328,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1056,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3110,
+            "InputCachedTokens": 22528,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 46
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1158,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3103,
+            "InputCachedTokens": 25728,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 120,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1127,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3075,
+            "InputCachedTokens": 28928,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 120,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 5142,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3039,
+            "InputCachedTokens": 32128,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 291,
+            "OutputReasoningTokens": 716
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1870,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 26330,
+            "InputCachedTokens": 8064,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 14,
+            "OutputReasoningTokens": 247
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "sample": 3,
+      "memo": true,
+      "startedAt": "2026-10-19T07:43:58.81147Z",
+      "main": {
+        "requests": 12,
+        "businessCalls": 15,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 24225,
+          "InputCachedTokens": 219264,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2251,
+          "OutputReasoningTokens": 6473
+        },
+        "estimatedUSDAtPeakRates": 0.019051883999999998,
+        "correct": true,
+        "checksPassed": 11,
+        "checksTotal": 11,
+        "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":110,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":153,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961e6da466.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":23,\"verdict\":\"ok\",\"evidence_file\":\"evidence_4f25a05e07.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":66,\"verdict\":\"ok\",\"evidence_file\":\"evidence_f3c138275e.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":109,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5ef1227b61.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":152,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_57214cee6f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":22,\"verdict\":\"ok\",\"evidence_file\":\"evidence_452cde8633.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":65,\"verdict\":\"ok\",\"evidence_file\":\"evidence_210e202067.log\"}],\"total_delay_ms\":700,\"failed_stage\":6,\"repair\":\"refresh-route-generation-41\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 22198,
+          "InputCachedTokens": 8064,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 14,
+          "OutputReasoningTokens": 147
+        },
+        "estimatedUSDAtPeakRates": 0.006900984,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "audit-75b40dac7a490df123"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1184,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3172,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 115,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1216,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2314,
+            "InputCachedTokens": 8192,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 55,
+            "OutputReasoningTokens": 120
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 3167,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 231,
+            "InputCachedTokens": 10496,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 129,
+            "OutputReasoningTokens": 481
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1249,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1095,
+            "InputCachedTokens": 11264,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 65
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2343,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3168,
+            "InputCachedTokens": 12416,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 121,
+            "OutputReasoningTokens": 272
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1763,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3143,
+            "InputCachedTokens": 15872,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 119,
+            "OutputReasoningTokens": 148
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2892,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3114,
+            "InputCachedTokens": 19200,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 262,
+            "OutputReasoningTokens": 298
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1791,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1726,
+            "InputCachedTokens": 22784,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 262,
+            "OutputReasoningTokens": 24
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2343,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1749,
+            "InputCachedTokens": 24704,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 260,
+            "OutputReasoningTokens": 242
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 4752,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1701,
+            "InputCachedTokens": 26880,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 258,
+            "OutputReasoningTokens": 669
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 8825,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1688,
+            "InputCachedTokens": 29440,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 262,
+            "OutputReasoningTokens": 1641
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 14134,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1124,
+            "InputCachedTokens": 33024,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 289,
+            "OutputReasoningTokens": 2513
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1924,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 22198,
+            "InputCachedTokens": 8064,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 14,
+            "OutputReasoningTokens": 147
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "sample": 3,
+      "memo": false,
+      "startedAt": "2026-10-19T07:44:46.620235Z",
+      "main": {
+        "requests": 12,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 26487,
+          "InputCachedTokens": 205440,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 927,
+          "OutputReasoningTokens": 1364
+        },
+        "estimatedUSDAtPeakRates": 0.01192794,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 11,
+        "answer": ""
+      },
+      "followup": {
+        "requests": 0,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 0,
+          "InputCachedTokens": 0,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 0,
+          "OutputReasoningTokens": 0
+        },
+        "estimatedUSDAtPeakRates": 0,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 0,
+        "answer": ""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1112,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2694,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 74,
+            "OutputReasoningTokens": 8
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1250,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2130,
+            "InputCachedTokens": 7680,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 54,
+            "OutputReasoningTokens": 121
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1432,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 175,
+            "InputCachedTokens": 9856,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 90,
+            "OutputReasoningTokens": 105
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1019,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1013,
+            "InputCachedTokens": 10112,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 58
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1047,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2947,
+            "InputCachedTokens": 11136,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 82,
+            "OutputReasoningTokens": 22
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 830,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2921,
+            "InputCachedTokens": 14080,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 658,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2886,
+            "InputCachedTokens": 17024,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 81,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1793,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2856,
+            "InputCachedTokens": 19968,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 81,
+            "OutputReasoningTokens": 173
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1760,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2873,
+            "InputCachedTokens": 23040,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 80,
+            "OutputReasoningTokens": 173
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1145,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2863,
+            "InputCachedTokens": 26112,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 79,
+            "OutputReasoningTokens": 81
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 3579,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2880,
+            "InputCachedTokens": 29056,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 72,
+            "OutputReasoningTokens": 581
+          },
+          "releasedResults": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1039,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 249,
+            "InputCachedTokens": 32384,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 74,
+            "OutputReasoningTokens": 5
+          },
+          "releasedResults": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true,
+      "error": "main turn status: failed"
+    }
+  ]
+}

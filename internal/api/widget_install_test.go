@@ -94,12 +94,17 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	if stored, err := st.GetStudioItem(context.Background(), w.ID); err != nil || stored.Icon != "component" {
 		t.Fatal("icon not persisted", err)
 	}
-	next := distributionFixture(t, "2.0.0", "export default ()=> <p>Two</p>")
+	next := distributionFixture(t, "2.0.0-preview.1", "export default ()=> <p>Two</p>")
+	next["preview"] = true
+	next["channel"] = "preview"
 	next["icon"] = icon
 	previousActive := w.ActiveRevision
 	w = install(request(next, "upgrade", "upgrade-1", &w))
-	if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != "2.0.0" {
+	if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != "2.0.0-preview.1" || !w.Origin.Preview {
 		t.Fatal("upgrade activated or failed to stage", w)
+	}
+	if stored, err := st.GetStudioItem(context.Background(), w.ID); err != nil || !stored.Origin.Preview {
+		t.Fatal("preview marker not persisted", stored, err)
 	}
 	data, _ := st.GetWidgetData(context.Background(), w.ID)
 	if !bytes.Contains(data.Data, []byte("Keep me")) {
@@ -112,7 +117,7 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	openRequest := map[string]any{"clientRequestID": "first-edit-0001", "copyName": "Todo copy"}
 	json.Unmarshal(call("POST", base+"/draft", openRequest, 200), &opened)
 	custom := opened.Widget
-	if custom.ID == w.ID || !custom.Origin.Copy || custom.ActiveRevision != w.ActiveRevision || custom.Icon != icon {
+	if custom.ID == w.ID || !custom.Origin.Copy || !custom.Origin.Preview || custom.ActiveRevision != w.ActiveRevision || custom.Icon != icon {
 		t.Fatal("not an independent copy", custom)
 	}
 	var retried struct {
@@ -149,6 +154,9 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	third := distributionFixture(t, "3.0.0", "export default ()=> <p>Three</p>")
 	call("POST", "/studio/items/install", request(third, "upgrade", "copy-upgrade", &custom), 409)
 	w = install(request(third, "upgrade", "upgrade-original", &w))
+	if w.Origin.Preview {
+		t.Fatal("stable release retained preview marker", w.Origin)
+	}
 	originalDraft, err := widget.ReadDraft(home, w.ID)
 	if !os.IsNotExist(err) {
 		t.Fatal("original acquired an editing draft", originalDraft, err)

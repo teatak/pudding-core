@@ -1,0 +1,88 @@
+[
+  {
+    "task": "widget-original",
+    "enabled": true,
+    "facts": 9,
+    "citations": 9,
+    "total": 9,
+    "answerAvailable": true,
+    "wrongFacts": [],
+    "unavailableFacts": [],
+    "invalidCitations": [],
+    "followup": true,
+    "attempts": 1,
+    "applied": 0,
+    "requests": [
+      4,
+      1
+    ],
+    "peakUSD": 0.034865052,
+    "schemaVersion": "summarize-results-v3-probe",
+    "opportunities": [
+      {
+        "request": 2,
+        "phase": "main",
+        "visibleResults": 4,
+        "contentBytes": 22670
+      },
+      {
+        "request": 3,
+        "phase": "main",
+        "visibleResults": 8,
+        "contentBytes": 55759
+      }
+    ],
+    "controls": [
+      {
+        "request": 3,
+        "phase": "main",
+        "carrier": {
+          "id": "call_00_LDchhr3vhbYYf5WHAUN72281",
+          "name": "builtin_file_slice",
+          "arguments": "{\"end\": 260, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139, \"summarize_results\": {\"result_refs\": [{\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_00_WhImgA0q0rYcPPqcct413211\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_01_ZlUINouZSRIrIxevMY4Q3177\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_02_YJRg7pTg8AVj35tePk3j7167\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_03_U3529vTxHqhnRXOO6WWt4853\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_00_hIysnE26lbW18Dkv493H8128\"}], \"summary\": \"widget_install.go: NormalizeWidgetRegistryURL at L40; install dedupe scan L75-91 (matches origin registryURL+packageID, non-copy, active+archived; archived -> conflict L83-85; active -> 200 cached L86-87); upgrade guard L97-99 rejects nil/Copy/diverged head/stale revision; draft check L100-108 returns 409 {\\\"error\\\":\\\"widget_local_changes\\\"} when DraftHash!=HeadRevision, removes unmodified draft root L109-116; WritePackage L119; InstallWidgetPackage stores Origin PackageHash=req.PackageHash, SourceHash=hash L127. distribution.go: https not checked; outer hash L41-44; per-file hash check L80-85 rejects mismatch; inventory length L77. store: expected==0 lookup by registryURL/packageID/copy=0 L30; archived/deleted conflict L35-36; same version different PackageHash conflict L50-53; same version+hash no-op L54; upgrade base=HeadRevision L56; revision insert L62-65; UPDATE only origin/icon L70. config: scheme must be https L30. API test: duplicate install same ID L73-76; upgrade keeps ActiveRevision L101-105; data 'Keep me' L109-112; copy upgrade 409 L154-155; archived install 409 L173-174; file changed rejected L58 distribution_test.\"}}"
+        },
+        "summaryChars": 1143
+      }
+    ],
+    "repeatedIdenticalCalls": 0,
+    "businessCalls": 9,
+    "readbackCalls": 0,
+    "acceptedSummaries": 0,
+    "invalidControls": 1,
+    "skipped": {},
+    "releasedSent": 0,
+    "instructionPresentEveryRequest": true,
+    "meteringOK": true,
+    "error": null,
+    "usage": {
+      "runs": 1,
+      "adoptedTasks": 0,
+      "releasedTasks": 0,
+      "attempts": 1,
+      "invalid": 1,
+      "acceptedSummaries": 0,
+      "releasedResults": 0,
+      "facts": 9,
+      "factsTotal": 9,
+      "citations": 9,
+      "citationsTotal": 9,
+      "followups": 1,
+      "mainRequests": 4,
+      "followupRequests": 1,
+      "businessCalls": 9,
+      "readbacks": 0,
+      "inputCached": 123392,
+      "inputUncached": 29881,
+      "outputContent": 3511,
+      "outputReasoning": 17456,
+      "peakUSD": 0.034865052,
+      "meteringOK": true,
+      "unmeteredRequests": 0,
+      "completedMainTasks": 1,
+      "errors": [],
+      "costIsLowerBound": false,
+      "answeredFactsTotal": 9
+    },
+    "caveat": "One run per cell. Timing variant also changes the user workflow. No statistical adoption or savings claim."
+  }
+]

@@ -1,0 +1,299 @@
+{
+  "groups": {
+    "off": {
+      "runs": 4,
+      "adoptedTasks": 0,
+      "releasedTasks": 0,
+      "attempts": 0,
+      "invalid": 0,
+      "acceptedSummaries": 0,
+      "releasedResults": 0,
+      "facts": 27,
+      "factsTotal": 36,
+      "citations": 27,
+      "citationsTotal": 36,
+      "followups": 3,
+      "mainRequests": 23,
+      "followupRequests": 3,
+      "businessCalls": 40,
+      "readbacks": 0,
+      "inputCached": 506624,
+      "inputUncached": 108731,
+      "outputContent": 8753,
+      "outputReasoning": 40925,
+      "peakUSD": 0.09527264399999999,
+      "meteringOK": false,
+      "unmeteredRequests": 1,
+      "completedMainTasks": 3,
+      "errors": [
+        {
+          "task": "draft-restart",
+          "error": "main turn status: failed"
+        }
+      ],
+      "costIsLowerBound": true,
+      "answeredFactsTotal": 27
+    },
+    "on": {
+      "runs": 4,
+      "adoptedTasks": 0,
+      "releasedTasks": 0,
+      "attempts": 0,
+      "invalid": 0,
+      "acceptedSummaries": 0,
+      "releasedResults": 0,
+      "facts": 36,
+      "factsTotal": 36,
+      "citations": 36,
+      "citationsTotal": 36,
+      "followups": 4,
+      "mainRequests": 24,
+      "followupRequests": 4,
+      "businessCalls": 42,
+      "readbacks": 0,
+      "inputCached": 708480,
+      "inputUncached": 131262,
+      "outputContent": 11376,
+      "outputReasoning": 57798,
+      "peakUSD": 0.12663828,
+      "meteringOK": true,
+      "unmeteredRequests": 0,
+      "completedMainTasks": 4,
+      "errors": [],
+      "costIsLowerBound": false,
+      "answeredFactsTotal": 36
+    }
+  },
+  "rows": [
+    {
+      "task": "draft-restart",
+      "enabled": false,
+      "facts": 0,
+      "citations": 0,
+      "total": 9,
+      "answerAvailable": false,
+      "wrongFacts": [],
+      "unavailableFacts": [
+        "storage",
+        "debounce_ms",
+        "unfinished_upload_restored",
+        "empty_queue_edit_restored",
+        "retry_same_message_id",
+        "late_ack_keeps_new_text",
+        "bad_entry_blocks_all",
+        "delete_failure_keeps_draft",
+        "new_conversation_retry_id"
+      ],
+      "invalidCitations": [],
+      "followup": false,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        4,
+        0
+      ],
+      "peakUSD": 0.008089812
+    },
+    {
+      "task": "draft-restart",
+      "enabled": true,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        8,
+        1
+      ],
+      "peakUSD": 0.04160816399999999
+    },
+    {
+      "task": "attachment-acknowledgement",
+      "enabled": true,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        6,
+        1
+      ],
+      "peakUSD": 0.029968128
+    },
+    {
+      "task": "attachment-acknowledgement",
+      "enabled": false,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        7,
+        1
+      ],
+      "peakUSD": 0.02881458
+    },
+    {
+      "task": "widget-install-upgrade",
+      "enabled": false,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        5,
+        1
+      ],
+      "peakUSD": 0.02856588
+    },
+    {
+      "task": "widget-install-upgrade",
+      "enabled": true,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        4,
+        1
+      ],
+      "peakUSD": 0.029237052
+    },
+    {
+      "task": "history-result-readback",
+      "enabled": true,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        6,
+        1
+      ],
+      "peakUSD": 0.025824936000000003
+    },
+    {
+      "task": "history-result-readback",
+      "enabled": false,
+      "facts": 9,
+      "citations": 9,
+      "total": 9,
+      "answerAvailable": true,
+      "wrongFacts": [],
+      "unavailableFacts": [],
+      "invalidCitations": [],
+      "followup": true,
+      "attempts": 0,
+      "applied": 0,
+      "requests": [
+        7,
+        1
+      ],
+      "peakUSD": 0.029802372
+    }
+  ],
+  "completePairComparison": {
+    "taskIDs": [
+      "attachment-acknowledgement",
+      "widget-install-upgrade",
+      "history-result-readback"
+    ],
+    "groups": {
+      "off": {
+        "runs": 3,
+        "adoptedTasks": 0,
+        "releasedTasks": 0,
+        "attempts": 0,
+        "invalid": 0,
+        "acceptedSummaries": 0,
+        "releasedResults": 0,
+        "facts": 27,
+        "factsTotal": 27,
+        "citations": 27,
+        "citationsTotal": 27,
+        "followups": 3,
+        "mainRequests": 19,
+        "followupRequests": 3,
+        "businessCalls": 31,
+        "readbacks": 0,
+        "inputCached": 473472,
+        "inputUncached": 86452,
+        "outputContent": 7922,
+        "outputReasoning": 40750,
+        "peakUSD": 0.08718283199999999,
+        "meteringOK": true,
+        "unmeteredRequests": 0,
+        "completedMainTasks": 3,
+        "errors": [],
+        "costIsLowerBound": false,
+        "answeredFactsTotal": 27
+      },
+      "on": {
+        "runs": 3,
+        "adoptedTasks": 0,
+        "releasedTasks": 0,
+        "attempts": 0,
+        "invalid": 0,
+        "acceptedSummaries": 0,
+        "releasedResults": 0,
+        "facts": 27,
+        "factsTotal": 27,
+        "citations": 27,
+        "citationsTotal": 27,
+        "followups": 3,
+        "mainRequests": 16,
+        "followupRequests": 3,
+        "businessCalls": 31,
+        "readbacks": 0,
+        "inputCached": 484736,
+        "inputUncached": 100887,
+        "outputContent": 8335,
+        "outputReasoning": 34878,
+        "peakUSD": 0.085030116,
+        "meteringOK": true,
+        "unmeteredRequests": 0,
+        "completedMainTasks": 3,
+        "errors": [],
+        "costIsLowerBound": false,
+        "answeredFactsTotal": 27
+      }
+    },
+    "costChangePercent": -2.469197146520752
+  }
+}

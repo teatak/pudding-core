@@ -1,0 +1,529 @@
+{
+  "version": "repository-review-v1",
+  "harnessVersion": "5",
+  "arm": "memo",
+  "httpTimeoutSeconds": 240,
+  "phaseTimeoutSeconds": 600,
+  "generatedAt": "2026-10-19T10:16:13.856015Z",
+  "manifestSHA256": "a3418bae3357779dad174eec34af97fdbd554ac3cfe72c32b1ce2c9cd5fae54c",
+  "schemaVersion": "summarize-results-v2-brief",
+  "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep summary brief, usually 1-3 short sentences: only the selected results' facts, identifiers and source references needed later, not a process recap or copied result bodies. Never exceed 800 characters; select fewer results if their necessary evidence will not fit. Copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003cknown facts; next focus\u003e\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 1,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": [
+    {
+      "taskID": "attachment-acknowledgement",
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T10:16:13.85672Z",
+      "main": {
+        "requests": 4,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 31016,
+          "InputCachedTokens": 70400,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 3550,
+          "OutputReasoningTokens": 13552
+        },
+        "estimatedUSDAtPeakRates": 0.030249599999999998,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\n  \"answers\": {\n    \"empty_file_uploaded\": false,\n    \"failed_payload_retained\": true,\n    \"success_payload_retained\": false,\n    \"late_upload_revives_removed\": false,\n    \"double_retry_requests\": 1,\n    \"replacement_kept_after_ack\": true,\n    \"changed_input_reuses_message_id\": false,\n    \"queue_key_is_session_id\": false,\n    \"order_deduplicated\": true\n  },\n  \"evidence\": {\n    \"empty_file_uploaded\": [\n      {\n        \"file\": \"desktop/web/src/lib/attachmentUploads.ts\",\n        \"start_line\": 54,\n        \"end_line\": 55,\n        \"quote\": \"    const items = files.flatMap((file, index): DraftAttachment[] =\u003e {\\n      if (!file.size) return [];\"\n      }\n    ],\n    \"failed_payload_retained\": [\n      {\n        \"file\": \"desktop/web/src/lib/attachmentUploads.ts\",\n        \"start_line\": 42,\n        \"end_line\": 42,\n        \"quote\": \"      const failed: DraftAttachment = { ...attempt, status: \\\"error\\\", errorKey: target.sessionID === \\\"draft\\\" \u0026\u0026 error instanceof APIError \u0026\u0026 error.status === 404 ? \\\"composer.draftUploadUnavailable\\\" : \\\"composer.uploadFailed\\\" };\"\n      },\n      {\n        \"file\": \"desktop/web/test/attachment-uploads.test.ts\",\n        \"start_line\": 47,\n        \"end_line\": 47,\n        \"quote\": \"    assert.equal(failed.status, \\\"error\\\"); assert.equal(failed.file, file);\"\n      }\n    ],\n    \"success_payload_retained\": [\n      {\n        \"file\": \"desktop/web/src/lib/attachmentUploads.ts\",\n        \"start_line\": 37,\n        \"end_line\": 37,\n        \"quote\": \"      const { file: _file, upload: _target, errorKey: _error, ...retained } = attempt;\"\n      }\n    ],\n    \"late_upload_revives_removed\": [\n      {\n        \"file\": \"desktop/web/src/lib/attachmentUploads.ts\",\n        \"start_line\": 38,\n        \"end_line\": 40,\n        \"quote\": \"      setAttachments(current =\u003e !current.includes(attempt) ? current : current.map(item =\u003e item === attempt\\n        ? { ...retained, attachment, name: attachment.name, size: attachment.size, status: \\\"uploaded\\\" }\\n        : item));\"\n      }\n    ],\n    \"double_retry_requests\": [\n      {\n        \"file\": \"desktop/web/src/lib/attachmentUploads.ts\",\n        \"start_line\": 72,\n        \"end_line\": 78,\n        \"quote\": \"      const item = current.find(item =\u003e item.id === id \u0026\u0026 item.status === \\\"error\\\" \u0026\u0026 item.file \u0026\u0026 item.upload);\\n      if (!item) return current;\\n      attempt = { ...item, status: \\\"uploading\\\", errorKey: undefined };\\n      return current.map(entry =\u003e entry === item ? attempt! : entry);\\n    });\\n    // Claim the item synchronously: a second click sees uploading and is ignored.\\n    if (attempt) void upload(attempt);\"\n      },\n      {\n        \"file\": \"desktop/web/test/attachment-uploads.test.ts\",\n        \"start_line\": 50,\n        \"end_line\": 51,\n        \"quote\": \"    uploader.retryAttachment(id); uploader.retryAttachment(id);\\n    assert.equal(current().attachments[0].status, \\\"uploading\\\"); assert.equal(calls.length, 2);\"\n      }\n    ],\n    \"replacement_kept_after_ack\": [\n      {\n        \"file\": \"desktop/web/src/state/draftStore.ts\",\n        \"start_line\": 127,\n        \"end_line\": 129,\n        \"quote\": \"    // Entries are immutable: additions and replacements (including uploads\\n    // completing later) belong to the next draft, even if their IDs match.\\n    const attachments = current.attachments.filter((item) =\u003e !snapshot.attachments.includes(item));\"\n      },\n      {\n        \"file\": \"desktop/web/test/draft-acknowledgement.test.ts\",\n        \"start_line\": 69,\n        \"end_line\": 71,\n        \"quote\": \"    state.acknowledgeSubmission(\\\"chat\\\", sent);\\n    assert.equal(content().text, \\\"\\\");\\n    assert.deepEqual(content().attachments, [replacement]);\"\n      }\n    ],\n    \"changed_input_reuses_message_id\": [\n      {\n        \"file\": \"desktop/web/src/state/draftStore.ts\",\n        \"start_line\": 113,\n        \"end_line\": 116,\n        \"quote\": \"    const sameConversation = previous \u0026\u0026 previous.input.projectID === input.projectID \u0026\u0026 previous.input.widgetDraft === input.widgetDraft;\\n    const submission = {\\n      clientRequestID: sameConversation ? previous.clientRequestID : newClientID(),\\n      clientMessageID: sameConversation \u0026\u0026 previous.input.text === input.text \u0026\u0026 JSON.stringify(previous.input.parts) === JSON.stringify(input.parts) ? previous.clientMessageID : newClientID(),\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 135,\n        \"end_line\": 139,\n        \"quote\": \"    const { submission: previous, ...content } = get().ensure(draftKey);\\n    // A lost response can still mean Core accepted the request. Only an\\n    // unchanged retry may reuse that request's idempotency key.\\n    if (previous \u0026\u0026 sameSubmissionContent(previous, content)) return previous;\\n    const submission = { ...content, clientMessageID: previous ? newClientID() : content.clientMessageID };\"\n      },\n      {\n        \"file\": \"desktop/web/test/session-draft-submission.test.ts\",\n        \"start_line\": 92,\n        \"end_line\": 94,\n        \"quote\": \"    edit();\\n    const changed = state.prepareSubmission(\\\"a\\\");\\n    assert.notEqual(changed.clientMessageID, original.clientMessageID);\"\n      }\n    ],\n    \"queue_key_is_session_id\": [\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 262,\n        \"end_line\": 264,\n        \"quote\": \"// Local draft key only; it must never be passed as a business sessionID.\\nexport function queuedDraftKey(sessionID: string, clientMessageID: string) {\\n  return JSON.stringify([sessionID, clientMessageID]);\"\n      }\n    ],\n    \"order_deduplicated\": [\n      {\n        \"file\": \"desktop/web/src/lib/submitParts.ts\",\n        \"start_line\": 31,\n        \"end_line\": 52,\n        \"quote\": \"  for (const orderItem of partOrder) {\\n    if (orderItem.type === \\\"attachment\\\") {\\n      const item = attachmentsByID.get(orderItem.id);\\n      if (item \u0026\u0026 !seenAttachments.has(item.id)) {\\n        seenAttachments.add(item.id);\\n        out.push({ type: \\\"attachment\\\", item });\\n      }\\n      continue;\\n    }\\n    if (orderItem.type === \\\"local_folder\\\") {\\n      const item = foldersByID.get(orderItem.id);\\n      if (item \u0026\u0026 !seenFolders.has(item.id)) {\\n        seenFolders.add(item.id);\\n        out.push({ type: \\\"local_folder\\\", item });\\n      }\\n      continue;\\n    }\\n    const item = projectReferencesByID.get(orderItem.id);\\n    if (item \u0026\u0026 !seenProjectReferences.has(item.id)) {\\n      seenProjectReferences.add(item.id);\\n      out.push({ type: \\\"project_reference\\\", item });\\n    }\"\n      }\n    ]\n  },\n  \"explanation\": \"上传层先过滤空文件，并把 File、upload 目标封在不可变条目中；失败时通过展开 attempt 保留重试负载，成功时显式剥离 file/upload。异步上传回调只更新当前数组仍以对象身份包含的原条目，所以删除卡片、切换/清空草稿或用同 ID 新对象替换后，旧请求的晚到成功或失败都不会复活旧条目；双重试时第一次同步把状态改为 uploading，第二次找不到 error 条目，因此只新增一次请求。两个草稿 store 的确认都按对象身份过滤发送快照：快照后新增的条目、同 ID 替换的新对象以及改动过的文本会保留；文本只在最终字符串仍等于快照时清空。关键风险是发送时已在快照内但仍 uploading 的附件：若确认先到，它会被当作已消费移除，随后上传成功因 includes 检查失败而不会恢复；若上传成功先到，新 uploaded 对象不属于快照，确认后会保留。clientMessageID 的复用基于内容签名，改动 text/parts（会话版还包括各卡片列表）会换新 ID；新会话版只比较 text/parts，未进入 parts 的未完成上传不会触发换 ID。queuedDraftKey 只是 sessionID 与 clientMessageID 的本地复合键，不能当业务 sessionID。orderedDraftItems 分别按附件、文件夹、项目引用类型去重，先按 partOrder 输出可用项，再补入未列入顺序的项。回归测试与上述实现一致，但结论以源码路径为准。\" \n}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 231,
+          "InputCachedTokens": 52736,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 72
+        },
+        "estimatedUSDAtPeakRates": 0.000484116,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "\"composer.draftUploadUnavailable\""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2857,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3737,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 519,
+            "OutputReasoningTokens": 65
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "63ed6ea7521b54442c90b46717aa74d602e59aeb32fa42afd13d449daa88813d",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_TN6kkGuPKSf514iwUA0x8395",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/lib/attachmentUploads.ts\", \"start\": 1, \"end\": 90}"
+            },
+            {
+              "id": "call_01_lFeyrmQ3LuQ2ulK70xwU3896",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/state/draftStore.ts\", \"start\": 1, \"end\": 151}"
+            },
+            {
+              "id": "call_02_mh4DT51wivmlUDb5UzWi7871",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/state/sessionDraftStore.ts\", \"start\": 1, \"end\": 313}"
+            },
+            {
+              "id": "call_03_291A1Gk3xOgWscmLU5va6863",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/lib/submitParts.ts\", \"start\": 1, \"end\": 98}"
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 3074,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 9439,
+            "InputCachedTokens": 9216,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 787,
+            "OutputReasoningTokens": 36
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "63ed6ea7521b54442c90b46717aa74d602e59aeb32fa42afd13d449daa88813d",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_rMCem025OXa8Zf7cIlj01081",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/state/sessionDraftStore.ts\", \"start\": 100, \"end\": 220}"
+            },
+            {
+              "id": "call_01_iLqOifr0XwZzTimG7yot2978",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/src/state/sessionDraftStore.ts\", \"start\": 221, \"end\": 313}"
+            },
+            {
+              "id": "call_02_5hkG44BtIWBafjwal7Jw0026",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/test/attachment-uploads.test.ts\", \"start\": 1, \"end\": 132}"
+            },
+            {
+              "id": "call_03_XfSs0v01N52ZbkBlnf0i2985",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/test/draft-acknowledgement.test.ts\", \"start\": 1, \"end\": 160}"
+            },
+            {
+              "id": "call_04_vEzIEearM2iyX9kEhDpZ9400",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/test/session-draft-submission.test.ts\", \"start\": 1, \"end\": 125}"
+            },
+            {
+              "id": "call_05_vIEFPioM7PVS9MXlaFO73340",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/test/queued-draft-acknowledgement.test.ts\", \"start\": 1, \"end\": 84}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_TN6kkGuPKSf514iwUA0x8395"
+              },
+              "view": "content",
+              "contentBytes": 5229
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_lFeyrmQ3LuQ2ulK70xwU3896"
+              },
+              "view": "content",
+              "contentBytes": 7976
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_mh4DT51wivmlUDb5UzWi7871"
+              },
+              "view": "content",
+              "contentBytes": 8857
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_291A1Gk3xOgWscmLU5va6863"
+              },
+              "view": "content",
+              "contentBytes": 4407
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 8362,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 15867,
+            "InputCachedTokens": 19456,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 140,
+            "OutputReasoningTokens": 1392
+          },
+          "releasedResults": 0,
+          "referencedResults": 10,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "63ed6ea7521b54442c90b46717aa74d602e59aeb32fa42afd13d449daa88813d",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_2tMAV00hymUV1PC56GnK7650",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-539939328/desktop/web/test/draft-acknowledgement.test.ts\", \"start\": 77, \"end\": 139}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_TN6kkGuPKSf514iwUA0x8395"
+              },
+              "view": "content",
+              "contentBytes": 5229
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_lFeyrmQ3LuQ2ulK70xwU3896"
+              },
+              "view": "content",
+              "contentBytes": 7976
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_mh4DT51wivmlUDb5UzWi7871"
+              },
+              "view": "content",
+              "contentBytes": 8857
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_291A1Gk3xOgWscmLU5va6863"
+              },
+              "view": "content",
+              "contentBytes": 4407
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_rMCem025OXa8Zf7cIlj01081"
+              },
+              "view": "content",
+              "contentBytes": 5938
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_iLqOifr0XwZzTimG7yot2978"
+              },
+              "view": "content",
+              "contentBytes": 4657
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_5hkG44BtIWBafjwal7Jw0026"
+              },
+              "view": "content",
+              "contentBytes": 10424
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_XfSs0v01N52ZbkBlnf0i2985"
+              },
+              "view": "content",
+              "contentBytes": 9073
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_04_vEzIEearM2iyX9kEhDpZ9400"
+              },
+              "view": "content",
+              "contentBytes": 7983
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_05_vIEFPioM7PVS9MXlaFO73340"
+              },
+              "view": "content",
+              "contentBytes": 6925
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 60475,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1973,
+            "InputCachedTokens": 36736,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 2104,
+            "OutputReasoningTokens": 12059
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "63ed6ea7521b54442c90b46717aa74d602e59aeb32fa42afd13d449daa88813d",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_TN6kkGuPKSf514iwUA0x8395"
+              },
+              "view": "content",
+              "contentBytes": 5229
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_lFeyrmQ3LuQ2ulK70xwU3896"
+              },
+              "view": "content",
+              "contentBytes": 7976
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_mh4DT51wivmlUDb5UzWi7871"
+              },
+              "view": "content",
+              "contentBytes": 8857
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_291A1Gk3xOgWscmLU5va6863"
+              },
+              "view": "content",
+              "contentBytes": 4407
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_rMCem025OXa8Zf7cIlj01081"
+              },
+              "view": "content",
+              "contentBytes": 5938
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_iLqOifr0XwZzTimG7yot2978"
+              },
+              "view": "content",
+              "contentBytes": 4657
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_5hkG44BtIWBafjwal7Jw0026"
+              },
+              "view": "content",
+              "contentBytes": 10424
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_XfSs0v01N52ZbkBlnf0i2985"
+              },
+              "view": "content",
+              "contentBytes": 9073
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_04_vEzIEearM2iyX9kEhDpZ9400"
+              },
+              "view": "content",
+              "contentBytes": 7983
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_05_vIEFPioM7PVS9MXlaFO73340"
+              },
+              "view": "content",
+              "contentBytes": 6925
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_2tMAV00hymUV1PC56GnK7650"
+              },
+              "view": "content",
+              "contentBytes": 5527
+            }
+          ]
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1164,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 231,
+            "InputCachedTokens": 52736,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 72
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "63ed6ea7521b54442c90b46717aa74d602e59aeb32fa42afd13d449daa88813d",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_TN6kkGuPKSf514iwUA0x8395"
+              },
+              "view": "content",
+              "contentBytes": 5229
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_lFeyrmQ3LuQ2ulK70xwU3896"
+              },
+              "view": "content",
+              "contentBytes": 7976
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_mh4DT51wivmlUDb5UzWi7871"
+              },
+              "view": "content",
+              "contentBytes": 8857
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_291A1Gk3xOgWscmLU5va6863"
+              },
+              "view": "content",
+              "contentBytes": 4407
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_rMCem025OXa8Zf7cIlj01081"
+              },
+              "view": "content",
+              "contentBytes": 5938
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_01_iLqOifr0XwZzTimG7yot2978"
+              },
+              "view": "content",
+              "contentBytes": 4657
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_02_5hkG44BtIWBafjwal7Jw0026"
+              },
+              "view": "content",
+              "contentBytes": 10424
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_03_XfSs0v01N52ZbkBlnf0i2985"
+              },
+              "view": "content",
+              "contentBytes": 9073
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_04_vEzIEearM2iyX9kEhDpZ9400"
+              },
+              "view": "content",
+              "contentBytes": 7983
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_05_vIEFPioM7PVS9MXlaFO73340"
+              },
+              "view": "content",
+              "contentBytes": 6925
+            },
+            {
+              "ref": {
+                "turn_id": "turn_efff4f57fdcdee20",
+                "call_id": "call_00_2tMAV00hymUV1PC56GnK7650"
+              },
+              "view": "content",
+              "contentBytes": 5527
+            }
+          ]
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    }
+  ]
+}

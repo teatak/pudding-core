@@ -55,9 +55,10 @@ func TestEstimateMatchesTransmittedInputAndRetainsNativeReasoningAcrossTurns(t *
 			}
 			var transmitted []byte
 			h := &http.Client{Transport: estimateTransport(func(r *http.Request) (*http.Response, error) {
-				transmitted, err = io.ReadAll(r.Body)
-				if err != nil {
-					return nil, err
+				var readErr error
+				transmitted, readErr = io.ReadAll(r.Body)
+				if readErr != nil {
+					return nil, readErr
 				}
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 			})}

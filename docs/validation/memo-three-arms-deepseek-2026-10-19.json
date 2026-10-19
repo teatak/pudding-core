@@ -1,0 +1,3761 @@
+{
+  "fixtureVersion": "incident-chain-v1",
+  "order": "rotating three arms",
+  "plannedRuns": 12,
+  "binarySHA256": {
+    "legacy": "5464b57b0395350d42512da9b76f664fce8acfc1e280291aed34bcba676c982d",
+    "candidate": "087b9827804a2482f7d76d70c5ab54d9a2c5250163d14f04bdf121e09cd57622"
+  },
+  "runs": [
+    {
+      "sample": 0,
+      "arm": "baseline",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "baseline",
+        "sampleStart": 0,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7100, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:04:06.821471Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 0,
+            "memo": false,
+            "startedAt": "2026-10-19T08:04:06.821775Z",
+            "main": {
+              "requests": 9,
+              "businessCalls": 8,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 25480,
+                "InputCachedTokens": 149888,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1060,
+                "OutputReasoningTokens": 366
+              },
+              "estimatedUSDAtPeakRates": 0.010254528,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":17,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":60,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3e593d63f0.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":103,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_313cd310af.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":146,\"verdict\":\"ok\",\"evidence_file\":\"evidence_12ce6b036b.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":189,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961b17ecde.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":59,\"verdict\":\"ok\",\"evidence_file\":\"evidence_1b4fe8415f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":102,\"verdict\":\"ok\",\"evidence_file\":\"evidence_d6dc8ca914.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":145,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5e901fb5c9.log\"}],\"total_delay_ms\":821,\"failed_stage\":3,\"repair\":\"refresh-route-generation-20\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 241,
+                "InputCachedTokens": 31488,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 13,
+                "OutputReasoningTokens": 48
+              },
+              "estimatedUSDAtPeakRates": 0.000334428,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-ce181cc62e3911a47c"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2106,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2741,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 90,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1369,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2825,
+                  "InputCachedTokens": 7808,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 37
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2600,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2834,
+                  "InputCachedTokens": 10752,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 95,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3353,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2834,
+                  "InputCachedTokens": 13696,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 84
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1236,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2881,
+                  "InputCachedTokens": 16640,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 21
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1506,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2865,
+                  "InputCachedTokens": 19584,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 21
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1096,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2853,
+                  "InputCachedTokens": 22528,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1068,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2834,
+                  "InputCachedTokens": 25472,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2376,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2813,
+                  "InputCachedTokens": 28416,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 292,
+                  "OutputReasoningTokens": 131
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1142,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 241,
+                  "InputCachedTokens": 31488,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 48
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 0,
+      "arm": "legacy",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "memo",
+        "sampleStart": 0,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7100, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:04:24.867324Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 0,
+            "memo": true,
+            "startedAt": "2026-10-19T08:04:24.867778Z",
+            "main": {
+              "requests": 9,
+              "businessCalls": 8,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 28042,
+                "InputCachedTokens": 161408,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1380,
+                "OutputReasoningTokens": 1467
+              },
+              "estimatedUSDAtPeakRates": 0.012797447999999998,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":17,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":60,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3e593d63f0.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":103,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_313cd310af.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":146,\"verdict\":\"ok\",\"evidence_file\":\"evidence_12ce6b036b.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":189,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961b17ecde.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":59,\"verdict\":\"ok\",\"evidence_file\":\"evidence_1b4fe8415f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":102,\"verdict\":\"ok\",\"evidence_file\":\"evidence_d6dc8ca914.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":145,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5e901fb5c9.log\"}],\"total_delay_ms\":821,\"failed_stage\":3,\"repair\":\"refresh-route-generation-20\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 216,
+                "InputCachedTokens": 35200,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 13,
+                "OutputReasoningTokens": 69
+              },
+              "estimatedUSDAtPeakRates": 0.0003744,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-ce181cc62e3911a47c"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1102,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3221,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 130,
+                  "OutputReasoningTokens": 12
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1518,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3053,
+                  "InputCachedTokens": 8320,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 138,
+                  "OutputReasoningTokens": 70
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1483,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3102,
+                  "InputCachedTokens": 11520,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 30
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1404,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3120,
+                  "InputCachedTokens": 14720,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 72
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 709,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3033,
+                  "InputCachedTokens": 18048,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 27
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1683,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3157,
+                  "InputCachedTokens": 21120,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 138,
+                  "OutputReasoningTokens": 30
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1359,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3163,
+                  "InputCachedTokens": 24320,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 28
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1184,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3161,
+                  "InputCachedTokens": 27520,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 138,
+                  "OutputReasoningTokens": 31
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 6009,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3032,
+                  "InputCachedTokens": 30848,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 292,
+                  "OutputReasoningTokens": 1167
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1051,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 216,
+                  "InputCachedTokens": 35200,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 69
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 0,
+      "arm": "candidate",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v4",
+        "memoInstructions": "Before a necessary tool call, consider replacing bulky results from a solved subproblem with a short factual memo. Keep exact facts and sources needed later in note; put their OUTER result_ref in release. Example addition to normal args: {\"memo\":{\"release\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"note\":\"<known facts; next focus>\"}}. Copy refs only from visible outer wrappers, including readback pages, never from content. Omit memo if full detail is still needed. At most one memo per response; note covers knowledge BEFORE this batch. The host applies worthwhile releases at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer memo.",
+        "selectedArm": "memo",
+        "sampleStart": 0,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7100, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:04:43.358696Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 0,
+            "memo": true,
+            "startedAt": "2026-10-19T08:04:43.359026Z",
+            "main": {
+              "requests": 9,
+              "businessCalls": 8,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 27957,
+                "InputCachedTokens": 160640,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1244,
+                "OutputReasoningTokens": 1507
+              },
+              "estimatedUSDAtPeakRates": 0.012652140000000001,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":17,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":60,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3e593d63f0.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":103,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_313cd310af.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":146,\"verdict\":\"ok\",\"evidence_file\":\"evidence_12ce6b036b.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":189,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961b17ecde.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":59,\"verdict\":\"ok\",\"evidence_file\":\"evidence_1b4fe8415f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":102,\"verdict\":\"ok\",\"evidence_file\":\"evidence_d6dc8ca914.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":145,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5e901fb5c9.log\"}],\"total_delay_ms\":821,\"failed_stage\":3,\"repair\":\"refresh-route-generation-20\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 248,
+                "InputCachedTokens": 34944,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 13,
+                "OutputReasoningTokens": 312
+              },
+              "estimatedUSDAtPeakRates": 0.0006740639999999999,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-ce181cc62e3911a47c"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1437,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3173,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 113,
+                  "OutputReasoningTokens": 12
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1884,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3107,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 121,
+                  "OutputReasoningTokens": 118
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1180,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3047,
+                  "InputCachedTokens": 11520,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 118,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1891,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3156,
+                  "InputCachedTokens": 14592,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 120,
+                  "OutputReasoningTokens": 141
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1292,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3113,
+                  "InputCachedTokens": 17920,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 119,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1154,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3078,
+                  "InputCachedTokens": 21120,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 121,
+                  "OutputReasoningTokens": 22
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1085,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3047,
+                  "InputCachedTokens": 24320,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 119,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1380,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3137,
+                  "InputCachedTokens": 27392,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 121,
+                  "OutputReasoningTokens": 22
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 6833,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3099,
+                  "InputCachedTokens": 30592,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 292,
+                  "OutputReasoningTokens": 1132
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 2551,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 248,
+                  "InputCachedTokens": 34944,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 312
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 1,
+      "arm": "legacy",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "memo",
+        "sampleStart": 1,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7137, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:05:04.307772Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 1,
+            "memo": true,
+            "startedAt": "2026-10-19T08:05:04.308213Z",
+            "main": {
+              "requests": 12,
+              "businessCalls": 20,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 36292,
+                "InputCachedTokens": 167168,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 3432,
+                "OutputReasoningTokens": 4645
+              },
+              "estimatedUSDAtPeakRates": 0.021583008,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\n  \"records\": [\n    {\n      \"stage\": 1,\n      \"service\": \"edge\",\n      \"elapsed_ms\": 48,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"entry.log\"\n    },\n    {\n      \"stage\": 2,\n      \"service\": \"session\",\n      \"elapsed_ms\": 91,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_a2a0c73db3.log\"\n    },\n    {\n      \"stage\": 3,\n      \"service\": \"policy\",\n      \"elapsed_ms\": 134,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_55163cd527.log\"\n    },\n    {\n      \"stage\": 4,\n      \"service\": \"routing\",\n      \"elapsed_ms\": 177,\n      \"verdict\": \"stale_route_generation\",\n      \"evidence_file\": \"evidence_26e4936f76.log\"\n    },\n    {\n      \"stage\": 5,\n      \"service\": \"quota\",\n      \"elapsed_ms\": 47,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_aab10acf46.log\"\n    },\n    {\n      \"stage\": 6,\n      \"service\": \"resolver\",\n      \"elapsed_ms\": 90,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_0d88902ff2.log\"\n    },\n    {\n      \"stage\": 7,\n      \"service\": \"storage\",\n      \"elapsed_ms\": 133,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_470e45294a.log\"\n    },\n    {\n      \"stage\": 8,\n      \"service\": \"response\",\n      \"elapsed_ms\": 176,\n      \"verdict\": \"ok\",\n      \"evidence_file\": \"evidence_3dac140d56.log\"\n    }\n  ],\n  \"total_delay_ms\": 896,\n  \"failed_stage\": 4,\n  \"repair\": \"refresh-route-generation-27\"\n}"
+            },
+            "followup": {
+              "requests": 2,
+              "businessCalls": 1,
+              "readbackCalls": 1,
+              "usage": {
+                "InputUncachedTokens": 469,
+                "InputCachedTokens": 55168,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 150,
+                "OutputReasoningTokens": 334
+              },
+              "estimatedUSDAtPeakRates": 0.001052508,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-b60e222047cb451c0b"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1204,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3221,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 83,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1298,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3127,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 105,
+                  "OutputReasoningTokens": 96
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1834,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3043,
+                  "InputCachedTokens": 11520,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 238,
+                  "OutputReasoningTokens": 22
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1730,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3367,
+                  "InputCachedTokens": 11520,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 244,
+                  "OutputReasoningTokens": 21
+                },
+                "releasedResults": 1,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2757,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3605,
+                  "InputCachedTokens": 11648,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 276,
+                  "OutputReasoningTokens": 251
+                },
+                "releasedResults": 2,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2083,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3800,
+                  "InputCachedTokens": 12032,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 294,
+                  "OutputReasoningTokens": 37
+                },
+                "releasedResults": 3,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2307,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3565,
+                  "InputCachedTokens": 12672,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 302,
+                  "OutputReasoningTokens": 139
+                },
+                "releasedResults": 4,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3961,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3692,
+                  "InputCachedTokens": 13056,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 331,
+                  "OutputReasoningTokens": 432
+                },
+                "releasedResults": 5,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 7491,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 4008,
+                  "InputCachedTokens": 13568,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 122,
+                  "OutputReasoningTokens": 1293
+                },
+                "releasedResults": 6,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 10672,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1148,
+                  "InputCachedTokens": 18944,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 892,
+                  "OutputReasoningTokens": 1735
+                },
+                "releasedResults": 6,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3220,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3292,
+                  "InputCachedTokens": 22656,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 447
+                },
+                "releasedResults": 6,
+                "referencedResults": 19,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2601,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 424,
+                  "InputCachedTokens": 26368,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 448,
+                  "OutputReasoningTokens": 172
+                },
+                "releasedResults": 6,
+                "referencedResults": 20,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 2018,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 225,
+                  "InputCachedTokens": 27264,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 279
+                },
+                "releasedResults": 6,
+                "referencedResults": 20,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1574,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 244,
+                  "InputCachedTokens": 27904,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 55
+                },
+                "releasedResults": 6,
+                "referencedResults": 21,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 6,
+            "invalidMemos": 0,
+            "acceptedNotes": 6,
+            "applied": 6,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 1,
+      "arm": "candidate",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v4",
+        "memoInstructions": "Before a necessary tool call, consider replacing bulky results from a solved subproblem with a short factual memo. Keep exact facts and sources needed later in note; put their OUTER result_ref in release. Example addition to normal args: {\"memo\":{\"release\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"note\":\"<known facts; next focus>\"}}. Copy refs only from visible outer wrappers, including readback pages, never from content. Omit memo if full detail is still needed. At most one memo per response; note covers knowledge BEFORE this batch. The host applies worthwhile releases at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer memo.",
+        "selectedArm": "memo",
+        "sampleStart": 1,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7137, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:05:49.472584Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 1,
+            "memo": true,
+            "startedAt": "2026-10-19T08:05:49.47306Z",
+            "main": {
+              "requests": 17,
+              "businessCalls": 16,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 30541,
+                "InputCachedTokens": 356224,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 2242,
+                "OutputReasoningTokens": 3165
+              },
+              "estimatedUSDAtPeakRates": 0.017788044000000003,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":48,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":91,\"verdict\":\"ok\",\"evidence_file\":\"evidence_a2a0c73db3.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":134,\"verdict\":\"ok\",\"evidence_file\":\"evidence_55163cd527.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":177,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_26e4936f76.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":47,\"verdict\":\"ok\",\"evidence_file\":\"evidence_aab10acf46.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":90,\"verdict\":\"ok\",\"evidence_file\":\"evidence_0d88902ff2.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":133,\"verdict\":\"ok\",\"evidence_file\":\"evidence_470e45294a.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":176,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3dac140d56.log\"}],\"total_delay_ms\":896,\"failed_stage\":4,\"repair\":\"refresh-route-generation-27\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 156,
+                "InputCachedTokens": 39680,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 13,
+                "OutputReasoningTokens": 123
+              },
+              "estimatedUSDAtPeakRates": 0.00044808,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-b60e222047cb451c0b"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1033,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3174,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 107,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1379,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2295,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 157,
+                  "OutputReasoningTokens": 39
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 976,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1094,
+                  "InputCachedTokens": 10624,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 106,
+                  "OutputReasoningTokens": 17
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1428,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2302,
+                  "InputCachedTokens": 11776,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 138,
+                  "OutputReasoningTokens": 22
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1362,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1073,
+                  "InputCachedTokens": 14208,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 103,
+                  "OutputReasoningTokens": 10
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 891,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2261,
+                  "InputCachedTokens": 15360,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1263,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1155,
+                  "InputCachedTokens": 17664,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 105,
+                  "OutputReasoningTokens": 12
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1223,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2349,
+                  "InputCachedTokens": 18816,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 18
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1673,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1139,
+                  "InputCachedTokens": 21248,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 104,
+                  "OutputReasoningTokens": 137
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1181,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2330,
+                  "InputCachedTokens": 22528,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 21
+                },
+                "releasedResults": 0,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1961,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1099,
+                  "InputCachedTokens": 24960,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 105,
+                  "OutputReasoningTokens": 157
+                },
+                "releasedResults": 0,
+                "referencedResults": 10,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1165,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2310,
+                  "InputCachedTokens": 26240,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 15
+                },
+                "releasedResults": 0,
+                "referencedResults": 11,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1220,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1076,
+                  "InputCachedTokens": 28672,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 104,
+                  "OutputReasoningTokens": 11
+                },
+                "releasedResults": 0,
+                "referencedResults": 12,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1318,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2266,
+                  "InputCachedTokens": 29824,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 13,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1351,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1157,
+                  "InputCachedTokens": 32128,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 105,
+                  "OutputReasoningTokens": 12
+                },
+                "releasedResults": 0,
+                "referencedResults": 14,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1311,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2352,
+                  "InputCachedTokens": 33280,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 15,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 13099,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1109,
+                  "InputCachedTokens": 35712,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 290,
+                  "OutputReasoningTokens": 2648
+                },
+                "releasedResults": 0,
+                "referencedResults": 16,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1049,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 156,
+                  "InputCachedTokens": 39680,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 123
+                },
+                "releasedResults": 0,
+                "referencedResults": 16,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 1,
+      "arm": "baseline",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "baseline",
+        "sampleStart": 1,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7137, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:06:24.724357Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 1,
+            "memo": false,
+            "startedAt": "2026-10-19T08:06:24.724786Z",
+            "main": {
+              "requests": 17,
+              "businessCalls": 16,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 27592,
+                "InputCachedTokens": 323968,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1577,
+                "OutputReasoningTokens": 475
+              },
+              "estimatedUSDAtPeakRates": 0.012683808,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":48,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":91,\"verdict\":\"ok\",\"evidence_file\":\"evidence_a2a0c73db3.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":134,\"verdict\":\"ok\",\"evidence_file\":\"evidence_55163cd527.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":177,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_26e4936f76.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":47,\"verdict\":\"ok\",\"evidence_file\":\"evidence_aab10acf46.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":90,\"verdict\":\"ok\",\"evidence_file\":\"evidence_0d88902ff2.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":133,\"verdict\":\"ok\",\"evidence_file\":\"evidence_470e45294a.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":176,\"verdict\":\"ok\",\"evidence_file\":\"evidence_3dac140d56.log\"}],\"total_delay_ms\":896,\"failed_stage\":4,\"repair\":\"refresh-route-generation-27\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 169,
+                "InputCachedTokens": 33408,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 13,
+                "OutputReasoningTokens": 60
+              },
+              "estimatedUSDAtPeakRates": 0.000338748,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-b60e222047cb451c0b"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1018,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2741,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 69,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1205,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2162,
+                  "InputCachedTokens": 7680,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 90,
+                  "OutputReasoningTokens": 81
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1202,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 928,
+                  "InputCachedTokens": 9984,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 66,
+                  "OutputReasoningTokens": 86
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1149,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2120,
+                  "InputCachedTokens": 11008,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 826,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 967,
+                  "InputCachedTokens": 13184,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 63,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1841,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2057,
+                  "InputCachedTokens": 14208,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 95,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 807,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1012,
+                  "InputCachedTokens": 16256,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 65,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 976,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2108,
+                  "InputCachedTokens": 17280,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1353,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 962,
+                  "InputCachedTokens": 19456,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 79
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 982,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2135,
+                  "InputCachedTokens": 20480,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1212,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 965,
+                  "InputCachedTokens": 22656,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 65,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 924,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2062,
+                  "InputCachedTokens": 23680,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1565,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1022,
+                  "InputCachedTokens": 25728,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1038,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2115,
+                  "InputCachedTokens": 26752,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 993,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1073,
+                  "InputCachedTokens": 28800,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 65,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1049,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2169,
+                  "InputCachedTokens": 29824,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1948,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 994,
+                  "InputCachedTokens": 32000,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 290,
+                  "OutputReasoningTokens": 216
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1161,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 169,
+                  "InputCachedTokens": 33408,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 13,
+                  "OutputReasoningTokens": 60
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 2,
+      "arm": "candidate",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v4",
+        "memoInstructions": "Before a necessary tool call, consider replacing bulky results from a solved subproblem with a short factual memo. Keep exact facts and sources needed later in note; put their OUTER result_ref in release. Example addition to normal args: {\"memo\":{\"release\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"note\":\"<known facts; next focus>\"}}. Copy refs only from visible outer wrappers, including readback pages, never from content. Omit memo if full detail is still needed. At most one memo per response; note covers knowledge BEFORE this batch. The host applies worthwhile releases at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer memo.",
+        "selectedArm": "memo",
+        "sampleStart": 2,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7174, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:06:46.326884Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 2,
+            "memo": true,
+            "startedAt": "2026-10-19T08:06:46.327301Z",
+            "main": {
+              "requests": 10,
+              "businessCalls": 9,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 28191,
+                "InputCachedTokens": 172800,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1300,
+                "OutputReasoningTokens": 527
+              },
+              "estimatedUSDAtPeakRates": 0.0116865,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":79,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":122,\"verdict\":\"ok\",\"evidence_file\":\"evidence_cd3cf9d4e6.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":165,\"verdict\":\"ok\",\"evidence_file\":\"evidence_b53f802c12.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":35,\"verdict\":\"ok\",\"evidence_file\":\"evidence_ed93e427ae.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":78,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_2375878b33.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":121,\"verdict\":\"ok\",\"evidence_file\":\"evidence_c050485f4e.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":164,\"verdict\":\"ok\",\"evidence_file\":\"evidence_e7d08590c2.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":34,\"verdict\":\"ok\",\"evidence_file\":\"evidence_480aecc9b1.log\"}],\"total_delay_ms\":798,\"failed_stage\":5,\"repair\":\"refresh-route-generation-34\"}"
+            },
+            "followup": {
+              "requests": 2,
+              "businessCalls": 1,
+              "readbackCalls": 1,
+              "usage": {
+                "InputUncachedTokens": 481,
+                "InputCachedTokens": 69376,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 149,
+                "OutputReasoningTokens": 487
+              },
+              "estimatedUSDAtPeakRates": 0.0013237560000000002,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-9c23205be4030963c2"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1114,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3174,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 114,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 941,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2304,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 106,
+                  "OutputReasoningTokens": 37
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1177,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1029,
+                  "InputCachedTokens": 10624,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 115,
+                  "OutputReasoningTokens": 43
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1603,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3072,
+                  "InputCachedTokens": 11776,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 112,
+                  "OutputReasoningTokens": 44
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1068,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3050,
+                  "InputCachedTokens": 14976,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 112,
+                  "OutputReasoningTokens": 25
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1969,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3140,
+                  "InputCachedTokens": 18048,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 112,
+                  "OutputReasoningTokens": 49
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1215,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3146,
+                  "InputCachedTokens": 21248,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 112,
+                  "OutputReasoningTokens": 46
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1205,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3129,
+                  "InputCachedTokens": 24448,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 113,
+                  "OutputReasoningTokens": 26
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1096,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3094,
+                  "InputCachedTokens": 27648,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 113,
+                  "OutputReasoningTokens": 26
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2302,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3053,
+                  "InputCachedTokens": 30848,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 291,
+                  "OutputReasoningTokens": 231
+                },
+                "releasedResults": 0,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 3248,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 196,
+                  "InputCachedTokens": 34304,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 487
+                },
+                "releasedResults": 0,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 836,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 285,
+                  "InputCachedTokens": 35072,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 10,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 2,
+      "arm": "baseline",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "baseline",
+        "sampleStart": 2,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7174, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:07:04.412367Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 2,
+            "memo": false,
+            "startedAt": "2026-10-19T08:07:04.412787Z",
+            "main": {
+              "requests": 10,
+              "businessCalls": 10,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 25851,
+                "InputCachedTokens": 193664,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1622,
+                "OutputReasoningTokens": 5284
+              },
+              "estimatedUSDAtPeakRates": 0.017204484,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":79,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":122,\"verdict\":\"ok\",\"evidence_file\":\"evidence_cd3cf9d4e6.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":165,\"verdict\":\"ok\",\"evidence_file\":\"evidence_b53f802c12.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":35,\"verdict\":\"ok\",\"evidence_file\":\"evidence_ed93e427ae.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":78,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_2375878b33.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":121,\"verdict\":\"ok\",\"evidence_file\":\"evidence_c050485f4e.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":164,\"verdict\":\"ok\",\"evidence_file\":\"evidence_e7d08590c2.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":34,\"verdict\":\"ok\",\"evidence_file\":\"evidence_480aecc9b1.log\"}],\"total_delay_ms\":798,\"failed_stage\":5,\"repair\":\"refresh-route-generation-34\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 188,
+                "InputCachedTokens": 37120,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 14,
+                "OutputReasoningTokens": 165
+              },
+              "estimatedUSDAtPeakRates": 0.00049392,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-9c23205be4030963c2"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1934,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2742,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 247,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1703,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2898,
+                  "InputCachedTokens": 7936,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 139,
+                  "OutputReasoningTokens": 163
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2022,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2824,
+                  "InputCachedTokens": 11136,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 129
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2014,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2827,
+                  "InputCachedTokens": 14208,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3944,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2848,
+                  "InputCachedTokens": 17152,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 610
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3487,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2843,
+                  "InputCachedTokens": 20736,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 590
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2341,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2925,
+                  "InputCachedTokens": 24192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 225
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1687,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2900,
+                  "InputCachedTokens": 27392,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 84
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 9945,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2854,
+                  "InputCachedTokens": 30464,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 127,
+                  "OutputReasoningTokens": 2157
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 6873,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 190,
+                  "InputCachedTokens": 35456,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 291,
+                  "OutputReasoningTokens": 1294
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1356,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 188,
+                  "InputCachedTokens": 37120,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 165
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 2,
+      "arm": "legacy",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "memo",
+        "sampleStart": 2,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7174, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:07:41.98113Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 2,
+            "memo": true,
+            "startedAt": "2026-10-19T08:07:41.98155Z",
+            "main": {
+              "requests": 17,
+              "businessCalls": 16,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 30359,
+                "InputCachedTokens": 350592,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1569,
+                "OutputReasoningTokens": 1367
+              },
+              "estimatedUSDAtPeakRates": 0.014734452,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":79,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":122,\"verdict\":\"ok\",\"evidence_file\":\"evidence_cd3cf9d4e6.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":165,\"verdict\":\"ok\",\"evidence_file\":\"evidence_b53f802c12.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":35,\"verdict\":\"ok\",\"evidence_file\":\"evidence_ed93e427ae.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":78,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_2375878b33.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":121,\"verdict\":\"ok\",\"evidence_file\":\"evidence_c050485f4e.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":164,\"verdict\":\"ok\",\"evidence_file\":\"evidence_e7d08590c2.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":34,\"verdict\":\"ok\",\"evidence_file\":\"evidence_480aecc9b1.log\"}],\"total_delay_ms\":798,\"failed_stage\":5,\"repair\":\"refresh-route-generation-34\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 206,
+                "InputCachedTokens": 37248,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 14,
+                "OutputReasoningTokens": 87
+              },
+              "estimatedUSDAtPeakRates": 0.000406488,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-9c23205be4030963c2"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 846,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3220,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 58,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 914,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2304,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 90,
+                  "OutputReasoningTokens": 39
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1031,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1025,
+                  "InputCachedTokens": 10624,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 67,
+                  "OutputReasoningTokens": 24
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 830,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2343,
+                  "InputCachedTokens": 11648,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 99,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1227,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1054,
+                  "InputCachedTokens": 14080,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 50
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 914,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2258,
+                  "InputCachedTokens": 15232,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 911,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1089,
+                  "InputCachedTokens": 17536,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 18
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 924,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2257,
+                  "InputCachedTokens": 18688,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 550,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1086,
+                  "InputCachedTokens": 20992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 18
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 824,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2255,
+                  "InputCachedTokens": 22144,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1906,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1105,
+                  "InputCachedTokens": 24448,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 64,
+                  "OutputReasoningTokens": 181
+                },
+                "releasedResults": 0,
+                "referencedResults": 10,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 909,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2308,
+                  "InputCachedTokens": 25728,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 11,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 994,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1138,
+                  "InputCachedTokens": 28032,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 65,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 12,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1045,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2312,
+                  "InputCachedTokens": 29184,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 13,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1087,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1145,
+                  "InputCachedTokens": 31488,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 65,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 14,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1169,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2317,
+                  "InputCachedTokens": 32640,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 15,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 6075,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1143,
+                  "InputCachedTokens": 34944,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 291,
+                  "OutputReasoningTokens": 999
+                },
+                "releasedResults": 0,
+                "referencedResults": 16,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1196,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 206,
+                  "InputCachedTokens": 37248,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 87
+                },
+                "releasedResults": 0,
+                "referencedResults": 16,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 3,
+      "arm": "baseline",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "baseline",
+        "sampleStart": 3,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7211, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:08:05.657112Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 3,
+            "memo": false,
+            "startedAt": "2026-10-19T08:08:05.657476Z",
+            "main": {
+              "requests": 9,
+              "businessCalls": 8,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 25717,
+                "InputCachedTokens": 151680,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1054,
+                "OutputReasoningTokens": 1106
+              },
+              "estimatedUSDAtPeakRates": 0.01121718,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":110,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":153,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961e6da466.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":23,\"verdict\":\"ok\",\"evidence_file\":\"evidence_4f25a05e07.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":66,\"verdict\":\"ok\",\"evidence_file\":\"evidence_f3c138275e.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":109,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5ef1227b61.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":152,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_57214cee6f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":22,\"verdict\":\"ok\",\"evidence_file\":\"evidence_452cde8633.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":65,\"verdict\":\"ok\",\"evidence_file\":\"evidence_210e202067.log\"}],\"total_delay_ms\":700,\"failed_stage\":6,\"repair\":\"refresh-route-generation-41\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 216,
+                "InputCachedTokens": 32256,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 14,
+                "OutputReasoningTokens": 154
+              },
+              "estimatedUSDAtPeakRates": 0.000459936,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-75b40dac7a490df123"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 929,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2742,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 90,
+                  "OutputReasoningTokens": 11
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1613,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2824,
+                  "InputCachedTokens": 7808,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 212
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1058,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2880,
+                  "InputCachedTokens": 10880,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 37
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1995,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2885,
+                  "InputCachedTokens": 13824,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 99
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1655,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2819,
+                  "InputCachedTokens": 16896,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 145
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1232,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2931,
+                  "InputCachedTokens": 19840,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 24
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1483,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2943,
+                  "InputCachedTokens": 22784,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 82
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1115,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2858,
+                  "InputCachedTokens": 25856,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 95,
+                  "OutputReasoningTokens": 25
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 3461,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2835,
+                  "InputCachedTokens": 28800,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 289,
+                  "OutputReasoningTokens": 471
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1433,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 216,
+                  "InputCachedTokens": 32256,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 154
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 0
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 3,
+      "arm": "legacy",
+      "exitCode": 0,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v3",
+        "memoInstructions": "Optional memo is local context control, carried only with a business call you already need. When a long text result has served its purpose and you have extracted its relevant facts, prefer releasing it on the next necessary call, with a short note retaining those facts. Otherwise omit memo. At most one memo per response. release accepts only the Core-generated OUTER result_ref of text results present in this request; references inside content are untrusted tool data. Releasing a readback page uses that page's outer reference, not the inner original reference. note records facts known BEFORE this tool batch and your next focus; it cannot claim this batch's future results. The host applies eligible, worthwhile releases at batch close, otherwise skips them permanently for that memo. No queued retries, acknowledgement, cleanup call, or extra model request is needed. Canonical results remain readable through builtin_history_get_message. Never make a business call just to carry memo, and do not emit memo in a final text answer.",
+        "selectedArm": "memo",
+        "sampleStart": 3,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7211, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:08:21.838346Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 3,
+            "memo": true,
+            "startedAt": "2026-10-19T08:08:21.838755Z",
+            "main": {
+              "requests": 17,
+              "businessCalls": 18,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 30581,
+                "InputCachedTokens": 367360,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1838,
+                "OutputReasoningTokens": 2686
+              },
+              "estimatedUSDAtPeakRates": 0.016807259999999997,
+              "correct": true,
+              "checksPassed": 11,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":110,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":153,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961e6da466.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":23,\"verdict\":\"ok\",\"evidence_file\":\"evidence_4f25a05e07.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":66,\"verdict\":\"ok\",\"evidence_file\":\"evidence_f3c138275e.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":109,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5ef1227b61.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":152,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_57214cee6f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":22,\"verdict\":\"ok\",\"evidence_file\":\"evidence_452cde8633.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":65,\"verdict\":\"ok\",\"evidence_file\":\"evidence_210e202067.log\"}],\"total_delay_ms\":700,\"failed_stage\":6,\"repair\":\"refresh-route-generation-41\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 159,
+                "InputCachedTokens": 39168,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 14,
+                "OutputReasoningTokens": 333
+              },
+              "estimatedUSDAtPeakRates": 0.000699108,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-75b40dac7a490df123"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1132,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3221,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 117,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2162,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2348,
+                  "InputCachedTokens": 8320,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 114,
+                  "OutputReasoningTokens": 78
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2863,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1129,
+                  "InputCachedTokens": 10752,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 160,
+                  "OutputReasoningTokens": 417
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 832,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2507,
+                  "InputCachedTokens": 12416,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 18
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 639,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1095,
+                  "InputCachedTokens": 14976,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 82,
+                  "OutputReasoningTokens": 13
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1039,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2278,
+                  "InputCachedTokens": 16128,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 98,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1186,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1110,
+                  "InputCachedTokens": 18432,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 80,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1464,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2276,
+                  "InputCachedTokens": 19584,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 9,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 997,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1103,
+                  "InputCachedTokens": 21888,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 81,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 10,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1074,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2275,
+                  "InputCachedTokens": 23040,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 11,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 4663,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1105,
+                  "InputCachedTokens": 25344,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 81,
+                  "OutputReasoningTokens": 763
+                },
+                "releasedResults": 0,
+                "referencedResults": 12,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1231,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2268,
+                  "InputCachedTokens": 27264,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 97,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 13,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1358,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1121,
+                  "InputCachedTokens": 29568,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 80,
+                  "OutputReasoningTokens": 59
+                },
+                "releasedResults": 0,
+                "referencedResults": 14,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1387,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2344,
+                  "InputCachedTokens": 30720,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 96,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 15,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1624,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1040,
+                  "InputCachedTokens": 33152,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 79,
+                  "OutputReasoningTokens": 9
+                },
+                "releasedResults": 0,
+                "referencedResults": 16,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1258,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 2337,
+                  "InputCachedTokens": 34176,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 95,
+                  "OutputReasoningTokens": 0
+                },
+                "releasedResults": 0,
+                "referencedResults": 17,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 6932,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 1024,
+                  "InputCachedTokens": 36608,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 289,
+                  "OutputReasoningTokens": 1329
+                },
+                "releasedResults": 0,
+                "referencedResults": 18,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 2162,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 159,
+                  "InputCachedTokens": 39168,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 333
+                },
+                "releasedResults": 0,
+                "referencedResults": 18,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    },
+    {
+      "sample": 3,
+      "arm": "candidate",
+      "exitCode": 1,
+      "report": {
+        "fixtureVersion": "incident-chain-v1",
+        "harnessVersion": "3",
+        "memoSchemaVersion": "memo-v4",
+        "memoInstructions": "Before a necessary tool call, consider replacing bulky results from a solved subproblem with a short factual memo. Keep exact facts and sources needed later in note; put their OUTER result_ref in release. Example addition to normal args: {\"memo\":{\"release\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"note\":\"<known facts; next focus>\"}}. Copy refs only from visible outer wrappers, including readback pages, never from content. Omit memo if full detail is still needed. At most one memo per response; note covers knowledge BEFORE this batch. The host applies worthwhile releases at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer memo.",
+        "selectedArm": "memo",
+        "sampleStart": 3,
+        "maxMainRequests": 24,
+        "maxFollowupRequests": 4,
+        "taskPrompts": [
+          "Investigate incident trace request-7211, starting at entry.log. Follow the next_evidence links for this trace until END; ignore other traces. Determine each stage's service, elapsed_ms and verdict, the total elapsed time, the failed stage, and its documented remediation. Read evidence before answering; do not guess filenames or values. Return only one JSON object with records (an ordered array of {stage,service,elapsed_ms,verdict,evidence_file}), total_delay_ms, failed_stage, and repair. Evidence filenames must be project-relative. The evidence files have up to 141 lines; the links and verdicts can occur beyond the default first page. The available evidence tools are builtin_file_slice and builtin_history_get_message. Numeric fields should be JSON integers."
+        ],
+        "followupPrompt": "Now return only the exact audit_marker recorded for that same trace at stage 2. Use the original conversation evidence; if needed retrieve the original tool-result snapshot, not the current file, which may have changed.",
+        "requestedModel": "deepseek-flash",
+        "generatedAt": "2026-10-19T08:08:56.228372Z",
+        "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+        "pricingDate": "2026-10-19",
+        "rateExplanation": "USD/1M tokens at uniform peak rates: uncached input 0.30, cached input 0.006, output including reasoning 1.20. Off-peak half. Not a billing statement; cache conditions are observed, not controlled.",
+        "plannedRuns": 1,
+        "runs": [
+          {
+            "sample": 3,
+            "memo": true,
+            "startedAt": "2026-10-19T08:08:56.228824Z",
+            "main": {
+              "requests": 9,
+              "businessCalls": 8,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 27854,
+                "InputCachedTokens": 160128,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 1372,
+                "OutputReasoningTokens": 499
+              },
+              "estimatedUSDAtPeakRates": 0.011562168,
+              "correct": false,
+              "checksPassed": 10,
+              "checksTotal": 11,
+              "answer": "{\"records\":[{\"stage\":1,\"service\":\"edge\",\"elapsed_ms\":110,\"verdict\":\"ok\",\"evidence_file\":\"entry.log\"},{\"stage\":2,\"service\":\"session\",\"elapsed_ms\":153,\"verdict\":\"ok\",\"evidence_file\":\"evidence_961e6da466.log\"},{\"stage\":3,\"service\":\"policy\",\"elapsed_ms\":23,\"verdict\":\"ok\",\"evidence_file\":\"evidence_4f25a05e07.log\"},{\"stage\":4,\"service\":\"routing\",\"elapsed_ms\":66,\"verdict\":\"ok\",\"evidence_file\":\"evidence_f3c138275e.log\"},{\"stage\":5,\"service\":\"quota\",\"elapsed_ms\":109,\"verdict\":\"ok\",\"evidence_file\":\"evidence_5ef1227b61.log\"},{\"stage\":6,\"service\":\"resolver\",\"elapsed_ms\":152,\"verdict\":\"stale_route_generation\",\"evidence_file\":\"evidence_57214cee6f.log\"},{\"stage\":7,\"service\":\"storage\",\"elapsed_ms\":22,\"verdict\":\"ok\",\"evidence_file\":\"evidence_452cde8633.log\"},{\"stage\":8,\"service\":\"response\",\"elapsed_ms\":65,\"verdict\":\"ok\",\"evidence_file\":\"evidence_210e202067.log\"}],\"total_delay_ms\":700,\"failed_stage\":\"stage 6 (resolver)\",\"repair\":\"refresh-route-generation-41\"}"
+            },
+            "followup": {
+              "requests": 1,
+              "businessCalls": 0,
+              "readbackCalls": 0,
+              "usage": {
+                "InputUncachedTokens": 252,
+                "InputCachedTokens": 34048,
+                "CacheCreationTokens": 0,
+                "OutputContentTokens": 14,
+                "OutputReasoningTokens": 100
+              },
+              "estimatedUSDAtPeakRates": 0.000416688,
+              "correct": true,
+              "checksPassed": 1,
+              "checksTotal": 1,
+              "answer": "audit-75b40dac7a490df123"
+            },
+            "requests": [
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1210,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3173,
+                  "InputCachedTokens": 4992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 129,
+                  "OutputReasoningTokens": 8
+                },
+                "releasedResults": 0,
+                "referencedResults": 0,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2000,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3117,
+                  "InputCachedTokens": 8192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 38
+                },
+                "releasedResults": 0,
+                "referencedResults": 1,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1353,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3123,
+                  "InputCachedTokens": 11392,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 137,
+                  "OutputReasoningTokens": 26
+                },
+                "releasedResults": 0,
+                "referencedResults": 2,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1716,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3109,
+                  "InputCachedTokens": 14592,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 20
+                },
+                "releasedResults": 0,
+                "referencedResults": 3,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1152,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3086,
+                  "InputCachedTokens": 17792,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 4,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1015,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3065,
+                  "InputCachedTokens": 20992,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 136,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 5,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1104,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3067,
+                  "InputCachedTokens": 24192,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 135,
+                  "OutputReasoningTokens": 53
+                },
+                "releasedResults": 0,
+                "referencedResults": 6,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 1131,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3075,
+                  "InputCachedTokens": 27392,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 134,
+                  "OutputReasoningTokens": 19
+                },
+                "releasedResults": 0,
+                "referencedResults": 7,
+                "memoTools": 2
+              },
+              {
+                "phase": "main",
+                "status": 200,
+                "durationMS": 2263,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 3039,
+                  "InputCachedTokens": 30592,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 295,
+                  "OutputReasoningTokens": 297
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              },
+              {
+                "phase": "followup",
+                "status": 200,
+                "durationMS": 1141,
+                "responseModel": "deepseek-flash",
+                "complete": true,
+                "usageSeen": true,
+                "usage": {
+                  "InputUncachedTokens": 252,
+                  "InputCachedTokens": 34048,
+                  "CacheCreationTokens": 0,
+                  "OutputContentTokens": 14,
+                  "OutputReasoningTokens": 100
+                },
+                "releasedResults": 0,
+                "referencedResults": 8,
+                "memoTools": 2
+              }
+            ],
+            "memoAttempts": 0,
+            "invalidMemos": 0,
+            "acceptedNotes": 0,
+            "applied": 0,
+            "skipped": {},
+            "meteringOK": true
+          }
+        ]
+      }
+    }
+  ]
+}

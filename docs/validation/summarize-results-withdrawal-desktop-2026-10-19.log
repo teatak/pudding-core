@@ -1,0 +1,78 @@
+✔ a background completed snapshot retires activity when no terminal SSE arrives (4.63725ms)
+✔ a background failed snapshot retires activity when no terminal SSE arrives (0.357ms)
+✔ a background cancelled snapshot retires activity when no terminal SSE arrives (0.260083ms)
+✔ a still-running canonical turn cannot be ended by an older idle session list (0.188041ms)
+✔ an old completion cannot clear a newer unacknowledged submission (0.227291ms)
+✔ an old completion cannot clear a newer streaming submission (0.220125ms)
+✔ an accepted background submission completes even before its start event was received (0.167458ms)
+✔ summary cards remain between ordinary outputs in one canonical turn (1.056209ms)
+✔ canonical compact prefix replaces streamed tools once while preserving new output (0.226291ms)
+✔ reconnect retains canonical compact cards and only fresh streamed output (0.094833ms)
+✔ child activity never duplicates the rail's root subscriptions (2.661791ms)
+✔ late submit acknowledgement cannot revive a completed turn or its sidebar spinner (4.969333ms)
+✔ late submit acknowledgement cannot revive a failed turn or its sidebar spinner (1.078958ms)
+✔ late submit acknowledgement cannot revive a cancelled turn or its sidebar spinner (0.406166ms)
+✔ HTTP acknowledgement only reconciles pending input, before and after streaming starts (0.638834ms)
+✔ canonical completed snapshot clears sidebar activity before-ack without a terminal event (5.987792ms)
+✔ canonical completed snapshot clears sidebar activity after-ack without a terminal event (0.389583ms)
+✔ canonical completed snapshot clears sidebar activity after-started without a terminal event (0.822333ms)
+✔ canonical failed snapshot clears sidebar activity before-ack without a terminal event (0.26175ms)
+✔ canonical failed snapshot clears sidebar activity after-ack without a terminal event (0.28ms)
+✔ canonical failed snapshot clears sidebar activity after-started without a terminal event (1.046291ms)
+✔ canonical cancelled snapshot clears sidebar activity before-ack without a terminal event (0.384458ms)
+✔ canonical cancelled snapshot clears sidebar activity after-ack without a terminal event (0.199791ms)
+✔ canonical cancelled snapshot clears sidebar activity after-started without a terminal event (0.288791ms)
+✔ terminal history cannot clear a different pending or streaming turn (0.213917ms)
+✔ terminal rendering wins over stale phases and stale session running summaries (16.356667ms)
+✔ one fixed-height turn clock survives phase changes, steering and canonical reconciliation (65.382334ms)
+✔ cancelled/failed turns without assistant output retain the clock; compact-only markers do not gain a header (22.218583ms)
+✔ an answer without structured parts never renders the summary text as a bubble (8.513542ms)
+✔ an accepted form answer keeps the tool and structured bubble before the REST snapshot arrives (0.537541ms)
+✔ the first output ID in a terminal event cannot retire a later live answer (0.634542ms)
+✔ a compacted event preserves the running turn and its phase (0.38475ms)
+✔ manual compaction completion waits for canonical without inventing a live assistant row (0.120333ms)
+✔ steering after compaction never attaches the old compact card to the new live segment (0.593541ms)
+✔ failed compaction keeps its row identity and stays before later conversation turns (0.645459ms)
+✔ initial message when SSE skips turn.started still pairs user bubble with live assistant (0.262042ms)
+✔ continuous deltas flush on a fixed deadline without dropping content (4.179042ms)
+✔ session, part, tool and steering boundaries retain event order (0.521375ms)
+✔ turn.completed flushes the last text before canonical reconciliation (0.152042ms)
+✔ turn.cancelled flushes the last text before canonical reconciliation (0.0945ms)
+✔ turn.failed flushes the last text before canonical reconciliation (0.092417ms)
+✔ subagent reset lifecycle reconciles history without completion notifications (17.836917ms)
+✔ subagent reset reconnect reconciles history without completion notifications (1.893666ms)
+failed to hydrate pending approvals CancelledError: CancelledError
+    at Object.cancel (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/retryer.js:31:21)
+    at Query.cancel (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/query.js:83:20)
+    at Query.destroy (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/query.js:88:10)
+    at QueryCache.remove (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/queryCache.js:42:13)
+    at file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/queryCache.js:52:14
+    at Array.forEach (<anonymous>)
+    at file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/queryCache.js:51:21
+    at Object.batch (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/notifyManager.js:41:18)
+    at QueryCache.clear (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/queryCache.js:50:19)
+    at QueryClient.clear (file:///Users/yanggang/workspace/github.com/teatak/pudding-desktop/web/node_modules/@tanstack/query-core/build/modern/queryClient.js:297:22) {
+  revert: undefined,
+  silent: true
+}
+✔ subagent reset background reconciles history without completion notifications (0.812458ms)
+✔ background completion and approval notifications use list-only sessions without interrupting SSE application (3.660333ms)
+✔ reconnecting and leaving the app surface pending approvals from the canonical snapshot (1.789708ms)
+✔ an in-flight pre-reset snapshot gets one trailing refresh for a burst of changes (16.511625ms)
+✔ a change during the trailing request schedules another serialized refresh (1.810834ms)
+✔ a failed obsolete request does not discard a pending lifecycle refresh (1.006459ms)
+✔ a final failure rejects all callers and permits a later retry without polling (1.7845ms)
+✔ refresh coalescing is scoped to the QueryClient that owns the cache (1.933791ms)
+✔ trailing refresh keeps loaded history and does not overwrite a newer terminal turn (1.859292ms)
+✔ a refresh with no transcript cache does not create background history (0.877834ms)
+✔ a completed refresh releases its slot for the next independent request (3.041333ms)
+✔ reconnect replay refreshes reset history and context usage without completion alerts (464.264375ms)
+✔ refreshing an empty conversation preserves the page that receives later canonical turns (7.007209ms)
+ℹ tests 56
+ℹ suites 0
+ℹ pass 56
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2452.52825

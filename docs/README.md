@@ -37,6 +37,20 @@
 - `archive/reports/`：工具问题样本、CLI Eval 等阶段报告。
 - `archive/` 原有历史文件：旧架构、移动端概念和早期进度，不恢复主线。
 
+### summarize_results 实验（已停止并撤回）
+
+2026-10-19 撤回 Core／Desktop 功能接入；以下文件保留当时的设计与评测结论，不代表当前可用功能。入口、撤回范围及证据边界见 [失败总结](tool-result-summaries-withdrawal.md)。原始报告位于 `docs/validation/`，离线分析入口见 [说明](../cmd/memo-prototype/README.md)。
+
+| 历史文档 | 记录范围 |
+| --- | --- |
+| [工具结果摘要原型](tool-result-memo-prototype.md) | 隔离 Chat Completions 验证入口、最终可见清单、即时释放、原生续接及快照回读；保留独立验证入口 |
+| [工具结果摘要：Core 实验接入](tool-result-memo-engine.md) | 默认关闭的 Engine／SQLite、公开历史／事件、Desktop note 展示与 DeepSeek Flash 验证 |
+| [工具结果 memo：长任务对照](tool-result-memo-benchmark.md) | DeepSeek Flash 自然采用、任务质量、缓存与完整成本；保留 pilot 和逐请求实测记录 |
+| [工具结果 memo：触发与开销优化](tool-result-memo-optimization.md) | 可选参数示例、精简封装与关闭／旧版／优化版三组对照 |
+| [summarize_results 真实仓库长任务对照](tool-result-summaries-repository-benchmark.md) | 冻结真实源码、自然采用、事实与引用质量、完整请求用量及失败记录 |
+| [summarize_results 提示与触发诊断](tool-result-summaries-trigger-diagnosis.md) | 2×2 对照及结果提醒探针；区分未采用、超长拒绝与实际释放，候选已撤回 |
+| [summarize_results 简短约束与复测](tool-result-summaries-brief-notes.md) | 新提示四组任务仍 0/4 采用；无摘要长度样本，附模型复核、质量与完整用量 |
+
 ## 跨仓路径
 
 `internal/`、`cmd/`、`contracts/` 相对 core；`web/`、`electron/`、`native/` 相对 desktop。历史文件中的路径、行号、版本和临时证据目录对应记录时基线。公共契约由 core 维护，desktop 的 `web/contracts/` 为生成文件，不手改、不提交。

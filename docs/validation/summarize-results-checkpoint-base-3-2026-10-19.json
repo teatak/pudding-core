@@ -1,0 +1,18 @@
+{
+  "version": "repository-review-v1",
+  "harnessVersion": "5",
+  "arm": "memo",
+  "httpTimeoutSeconds": 240,
+  "phaseTimeoutSeconds": 600,
+  "generatedAt": "2026-10-19T10:20:54.580144Z",
+  "manifestSHA256": "201b4697c4cb8cfd662d82cc56a7d82e3eac0296ec57f765f97ab11c9eeedc33",
+  "schemaVersion": "summarize-results-v2-brief",
+  "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep summary brief, usually 1-3 short sentences: only the selected results' facts, identifiers and source references needed later, not a process recap or copied result bodies. Never exceed 800 characters; select fewer results if their necessary evidence will not fit. Copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003cknown facts; next focus\u003e\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 1,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": null
+}

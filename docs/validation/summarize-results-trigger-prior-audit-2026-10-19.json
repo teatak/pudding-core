@@ -1,0 +1,70 @@
+{
+  "source": "summarize-results-repository-deepseek-2026-10-19.json",
+  "notes": "Opportunity counts corroborated against finishReason=tool_calls in retained execution log. Structural availability does not imply semantic discardability. Reasoning token counts are aggregate usage, not thought text.",
+  "rows": [
+    {
+      "task": "draft-restart",
+      "mainRequests": 8,
+      "structuralNextReadOpportunities": 6,
+      "visibleRefsPerRequest": [
+        0,
+        2,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11
+      ],
+      "intermediateReasoningTokens": 192,
+      "finalReasoningTokens": 22668,
+      "controlAttempts": 0
+    },
+    {
+      "task": "attachment-acknowledgement",
+      "mainRequests": 6,
+      "structuralNextReadOpportunities": 4,
+      "visibleRefsPerRequest": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        11
+      ],
+      "intermediateReasoningTokens": 185,
+      "finalReasoningTokens": 13048,
+      "controlAttempts": 0
+    },
+    {
+      "task": "widget-install-upgrade",
+      "mainRequests": 4,
+      "structuralNextReadOpportunities": 2,
+      "visibleRefsPerRequest": [
+        0,
+        4,
+        8,
+        9
+      ],
+      "intermediateReasoningTokens": 844,
+      "finalReasoningTokens": 12894,
+      "controlAttempts": 0
+    },
+    {
+      "task": "history-result-readback",
+      "mainRequests": 6,
+      "structuralNextReadOpportunities": 4,
+      "visibleRefsPerRequest": [
+        0,
+        3,
+        6,
+        9,
+        10,
+        11
+      ],
+      "intermediateReasoningTokens": 4025,
+      "finalReasoningTokens": 3694,
+      "controlAttempts": 0
+    }
+  ]
+}

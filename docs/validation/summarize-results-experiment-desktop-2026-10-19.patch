@@ -1,0 +1,323 @@
+diff --git a/web/src/components/transcript/TurnParts.tsx b/web/src/components/transcript/TurnParts.tsx
+--- a/web/src/components/transcript/TurnParts.tsx
++++ b/web/src/components/transcript/TurnParts.tsx
+@@ -47,6 +47,7 @@
+ import { useCodeHighlight } from "@/hooks/useCodeHighlight";
+ import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
+ import { NEXT_PROMPT_TOOL } from "@/state/nextPrompt";
++import { toolMemoNotes } from "./toolMemoNotes";
+ 
+ import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
+ import { useElapsedDuration } from "./time";
+@@ -417,11 +418,12 @@
+ }
+ 
+ export function partsFromMessages(messages: Message[]): TurnPartVM[] {
++  const seenMemos = new Set<string>();
+   return withPartKeys(
+     dedupeAttachmentParts(
+       mergeToolParts(
+         messages.flatMap((message) =>
+-          message.parts.flatMap((part): TurnPartVM[] => {
++          [...message.parts.flatMap((part): TurnPartVM[] => {
+             const viewPart = partFromContentPart(part);
+             if (!viewPart) {
+               return [];
+@@ -429,7 +431,11 @@
+             return viewPart.type === "text"
+               ? [{ ...viewPart, messageID: message.id }]
+               : [viewPart.type === "tool_use" ? {...viewPart, turnID: message.turnID} : viewPart];
+-          }),
++          }), ...toolMemoNotes(message).flatMap((note): TurnPartVM[] => {
++            if (seenMemos.has(note.id)) return [];
++            seenMemos.add(note.id);
++            return [{ type: "text", text: note.note, key: `memo:${note.id}`, messageID: message.id }];
++          })],
+         ),
+       ),
+     ),
+@@ -438,10 +444,16 @@
+ 
+ export function assistantTextFromMessages(messages: Message[]) {
+   const textParts: string[] = [];
++  const seenMemos = new Set<string>();
+   for (const message of messages) {
+     const text = textFromContentParts(message.parts);
+     if (text.trim()) {
+       textParts.push(text);
++    }
++    for (const note of toolMemoNotes(message)) {
++      if (seenMemos.has(note.id)) continue;
++      seenMemos.add(note.id);
++      textParts.push(note.note);
+     }
+   }
+   return textParts.join("\n\n");
+@@ -661,7 +673,7 @@
+   return parts.map((part) => {
+     switch (part.type) {
+       case "text":
+-        return { ...part, key: `text:${textIndex++}` };
++        return { ...part, key: part.key || `text:${textIndex++}` };
+       case "attachment":
+         return { ...part, key: part.attachment.id ? `attachment:${part.attachment.id}` : `attachment:${attachmentIndex++}` };
+       case "thought":
+diff --git a/web/src/components/transcript/compactOutput.ts b/web/src/components/transcript/compactOutput.ts
+--- a/web/src/components/transcript/compactOutput.ts
++++ b/web/src/components/transcript/compactOutput.ts
+@@ -1,5 +1,6 @@
+ import type { Message } from "@/api/client";
+ import type { AssistantOverlay } from "@/state/overlayStore";
++import { toolMemoNotes } from "./toolMemoNotes";
+ 
+ export function isCompactMessage(message: Message) {
+   const metadata = message.metadata;
+@@ -23,17 +24,18 @@
+   return groups;
+ }
+ 
+-// Render committed output through the latest summary from canonical messages.
++// Render through the latest summary or committed memo batch from canonical
++// messages. Notes live only in that snapshot, never in streamed text/overlays.
+ // The overlay may still contain those streamed tool exchanges; their call IDs
+ // identify the prefix to omit. After reconnect, absent IDs mean it contains only
+ // fresh output. No summary body or extra boundary state lives in the overlay.
+ export function compactLiveOutput(messages: Message[], overlay: AssistantOverlay) {
+   let boundary = messages.length - 1;
+-  while (boundary >= 0 && !isCompactMessage(messages[boundary])) boundary--;
++  while (boundary >= 0 && !isCompactMessage(messages[boundary]) && !toolMemoNotes(messages[boundary]).length) boundary--;
+   if (boundary < 0) return { messages: [], overlay };
+   const prefix = messages.slice(0, boundary + 1);
+   const committedCalls = new Set(prefix.flatMap(message => message.parts.flatMap(part =>
+-    part.type === "tool_result" ? [part.id] : [],
++    part.type === "tool_result" || part.type === "tool_use" ? [part.id] : [],
+   )));
+   let end = overlay.parts.length - 1;
+   while (end >= 0) {
+diff --git a/web/src/components/transcript/useTranscriptTurns.ts b/web/src/components/transcript/useTranscriptTurns.ts
+--- a/web/src/components/transcript/useTranscriptTurns.ts
++++ b/web/src/components/transcript/useTranscriptTurns.ts
+@@ -4,6 +4,7 @@
+ 
+ import { listTurns, type ConversationTurn } from "@/api/client";
+ import { queryKeys } from "@/api/queryKeys";
++import { toolMemoNotes } from "./toolMemoNotes";
+ 
+ const TURNS_PAGE_SIZE = 20;
+ type TurnsPage = { turns: ConversationTurn[]; hasMore: boolean };
+@@ -260,6 +261,10 @@
+   if (existing.status !== "running" && incoming.status === "running") {
+     return true;
+   }
++  // Memo commits can share a millisecond with an earlier tool snapshot. Notes
++  // are immutable and additive; that late response must not erase one.
++  const incomingMemos = new Set(incoming.messages.flatMap(message => toolMemoNotes(message).map(note => note.id)));
++  if (existing.messages.some(message => toolMemoNotes(message).some(note => !incomingMemos.has(note.id)))) return true;
+   const existingUpdatedAt = Date.parse(existing.updatedAt);
+   const incomingUpdatedAt = Date.parse(incoming.updatedAt);
+   return Number.isFinite(existingUpdatedAt) && Number.isFinite(incomingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt;
+diff --git a/web/src/hooks/useSessionEvents.ts b/web/src/hooks/useSessionEvents.ts
+--- a/web/src/hooks/useSessionEvents.ts
++++ b/web/src/hooks/useSessionEvents.ts
+@@ -235,7 +235,7 @@
+     ) {
+       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+     }
+-    if (data.kind === "turn.started" || data.kind === "turn.compacted" || isTurnTerminalEvent(data)) {
++    if (data.kind === "turn.started" || data.kind === "turn.compacted" || data.kind === "turn.memo" || isTurnTerminalEvent(data)) {
+       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
+     }
+     if (data.kind === "turn.started" || isTurnTerminalEvent(data)) {
+@@ -245,7 +245,7 @@
+       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
+       void invalidateStudioItems(queryClient);
+     }
+-    if ((data.kind === "turn.started" || data.kind === "turn.compacted" || isTurnTerminalEvent(data)) && syncMessages) {
++    if ((data.kind === "turn.started" || data.kind === "turn.compacted" || data.kind === "turn.memo" || isTurnTerminalEvent(data)) && syncMessages) {
+       syncedTurnIDs.add(data.turnID);
+       syncTurn(queryClient, token, sessionID, data.turnID);
+     }
+@@ -276,6 +276,7 @@
+   source.addEventListener("turn.started", handleMessage);
+   source.addEventListener("turn.delta", handleMessage);
+   source.addEventListener("turn.tool", handleMessage);
++  source.addEventListener("turn.memo", handleMessage);
+   source.addEventListener("turn.completed", handleMessage);
+   source.addEventListener("turn.compacted", handleMessage);
+   source.addEventListener("widget.notice", handleMessage);
+diff --git a/web/src/state/overlayStore.ts b/web/src/state/overlayStore.ts
+--- a/web/src/state/overlayStore.ts
++++ b/web/src/state/overlayStore.ts
+@@ -476,7 +476,7 @@
+   applyEvent: (event) =>
+     set((state) => {
+       if (isStaleSessionEvent(state, event)) return state;
+-      if (event.kind === "widget.notice" || event.kind === "turn.compacted" || event.kind === "collaboration.changed") {
++      if (event.kind === "widget.notice" || event.kind === "turn.compacted" || event.kind === "turn.memo" || event.kind === "collaboration.changed") {
+         return { lastEventSeqs: recordEventSeq(state.lastEventSeqs, event) };
+       }
+       if (event.kind === "ping" || event.kind === "session.titled") {
+diff --git a/web/test/compact-output.test.ts b/web/test/compact-output.test.ts
+--- a/web/test/compact-output.test.ts
++++ b/web/test/compact-output.test.ts
+@@ -1,6 +1,8 @@
+ import assert from "node:assert/strict";
+ import { test } from "node:test";
+-import { compactLiveOutput, splitCompactMessages } from "../src/components/transcript/compactOutput.ts";
++import { createTestViteServer } from "./vite-test-server.ts";
++const server = await createTestViteServer();
++const { compactLiveOutput, splitCompactMessages } = await server.ssrLoadModule("/src/components/transcript/compactOutput.ts");
+ 
+ const result = (id: string) => ({ id, role: "tool", parts: [{ type: "tool_result", id, name: "time", ok: true, content: "result" }] });
+ const summary = (id: string) => ({ id, role: "summary", parts: [{ type: "text", text: "summary" }], metadata: { compact: { source_message_ids: ["old"] } } });
+diff --git a/web/src/components/transcript/toolMemoNotes.ts b/web/src/components/transcript/toolMemoNotes.ts
+new file mode 100644
+--- /dev/null
++++ b/web/src/components/transcript/toolMemoNotes.ts
+@@ -0,0 +1,17 @@
++import type { Message } from "@/api/client";
++import type { ToolMemoNote } from "@/contracts/api";
++
++// Metadata is open-ended. Only committed, version-compatible notes are shown;
++// never infer acceptance by reading a model's tool arguments.
++export function toolMemoNotes(message: Pick<Message, "metadata">): ToolMemoNote[] {
++  const metadata = message.metadata;
++  if (!metadata || typeof metadata !== "object" || !("toolMemos" in metadata) || !Array.isArray(metadata.toolMemos)) return [];
++  const seen = new Set<string>();
++  return metadata.toolMemos.filter((value): value is ToolMemoNote => {
++    if (!value || typeof value !== "object" || typeof value.id !== "string" || !value.id ||
++      typeof value.batchID !== "string" || !value.batchID || typeof value.note !== "string" || !value.note.trim() ||
++      !Array.isArray(value.callIDs) || !value.callIDs.length || !value.callIDs.every((id: unknown) => typeof id === "string" && id.length > 0) || seen.has(value.id)) return false;
++    seen.add(value.id);
++    return true;
++  });
++}
+diff --git a/web/test/tool-memo.test.ts b/web/test/tool-memo.test.ts
+new file mode 100644
+--- /dev/null
++++ b/web/test/tool-memo.test.ts
+@@ -0,0 +1,124 @@
++import assert from "node:assert/strict";
++import { test } from "node:test";
++import { createElement } from "react";
++import { renderToString } from "react-dom/server";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { createTestViteServer } from "./vite-test-server.ts";
++
++const server = await createTestViteServer();
++const { partsFromMessages, assistantTextFromMessages, TurnParts } = await server.ssrLoadModule("/src/components/transcript/TurnParts.tsx");
++const { compactLiveOutput } = await server.ssrLoadModule("/src/components/transcript/compactOutput.ts");
++const { toolMemoNotes } = await server.ssrLoadModule("/src/components/transcript/toolMemoNotes.ts");
++const { useOverlayStore: overlays } = await server.ssrLoadModule("/src/state/overlayStore.ts");
++const { upsertTurnIntoPages } = await server.ssrLoadModule("/src/components/transcript/useTranscriptTurns.ts");
++const { sessionEvent } = await server.ssrLoadModule("/contracts/events.ts");
++const { toolMemoNote } = await server.ssrLoadModule("/contracts/api.ts");
++const { openSessionEventSource } = await server.ssrLoadModule("/src/hooks/useSessionEvents.ts");
++const { queryKeys } = await server.ssrLoadModule("/src/api/queryKeys.ts");
++
++const note = { id: "memo-1", batchID: "batch-1", callIDs: ["a", "b"], note: "已检查 **登录模块**，继续检查重置流程。" };
++const at = "2026-10-19T00:00:00Z";
++const message = (id: string, role: string, parts: unknown[], metadata?: unknown) => ({ id, sessionID: "s", turnID: "t", role, kind: role === "tool" ? "tool_result" : "tool_use", text: "", parts, metadata, turnIndex: 1, createdAt: at });
++const call = (id: string) => ({ type: "tool_use", id, name: "read", args: {} });
++const result = (id: string) => ({ type: "tool_result", id, name: "read", ok: true, content: "evidence" });
++const tool = (callID: string) => ({ type: "tool", callID, name: "read", argsText: "{}", phase: "ok" });
++const text = (text: string) => ({ type: "text", text });
++const messages = [message("calls", "assistant", [call("a"), call("b")]), message("results", "tool", [result("b"), result("a")], { toolMemos: [note] })];
++const live = (parts: any[]) => ({ sessionID: "s", turnID: "t", status: "streaming", parts, text: parts.flatMap(p => p.type === "text" ? [p.text] : []).join("") });
++const memoEvent = { kind: "turn.memo", seq: 2, sessionID: "s", turnID: "t", messageID: "results", memoID: note.id };
++const turn = (items = messages) => ({ id: "t", sessionID: "s", clientMessageID: "c", status: "running", createdAt: at, updatedAt: at, messages: items });
++
++test("accepted notes render once after the entire parallel batch as normal Markdown", () => {
++  assert.deepEqual(toolMemoNote.parse(note), note);
++  const parts = partsFromMessages(messages);
++  assert.deepEqual(parts.map((p: any) => p.key), ["tool:a", "tool:b", "memo:memo-1"]);
++  assert.equal(parts[2].text, note.note);
++  assert.equal(partsFromMessages([...messages, messages[1]]).filter((p: any) => p.key === "memo:memo-1").length, 1);
++  assert.equal(assistantTextFromMessages([...messages, messages[1]]), note.note, "copy includes the displayed note once");
++  const client = new QueryClient();
++  const html = renderToString(createElement(QueryClientProvider, { client }, createElement(TurnParts, { parts, token: "", disclosureRootKey: "t" })));
++  client.clear();
++  assert.equal(html.split("<strong>登录模块</strong>").length - 1, 1);
++  assert.ok(html.indexOf("登录模块") > html.indexOf("read"));
++});
++
++test("live, reconnect, compact and cancelled batches share canonical note identity", () => {
++  const overlay = live([text("before"), tool("a"), tool("b"), text("after"), tool("c")]);
++  const projection = compactLiveOutput(messages, overlay);
++  assert.deepEqual(projection.messages, messages);
++  assert.deepEqual(projection.overlay.parts, [text("after"), tool("c")]);
++  assert.equal(projection.overlay.text, "after");
++  const resumed = live([text("resumed"), tool("c")]);
++  assert.equal(compactLiveOutput(messages, resumed).overlay, resumed);
++  const summary = message("summary", "summary", [text("summary")], { compact: {} });
++  assert.deepEqual(compactLiveOutput([...messages, summary], overlay).overlay.parts, [text("after"), tool("c")]);
++  const cancelled = [message("cancelled", "assistant", [call("a")], { toolMemos: [{ ...note, callIDs: ["a"] }] })];
++  assert.deepEqual(compactLiveOutput(cancelled, live([tool("a")])).overlay.parts, []);
++  assert.equal(partsFromMessages(cancelled).at(-1).key, "memo:memo-1");
++});
++
++test("optional or rejected memo arguments create no note, malformed metadata is ignored", () => {
++  const raw = [message("raw", "assistant", [{ ...call("a"), args: { memo: { note: "NOT ACCEPTED" } } }])];
++  assert.equal(partsFromMessages(raw).filter((p: any) => p.type === "text").length, 0);
++  assert.deepEqual(toolMemoNotes({ metadata: { toolMemos: [null, {}, { ...note, callIDs: [] }, note, note] } }), [note]);
++});
++
++test("memo lifecycle replay does not finish a turn or revive a terminated overlay", () => {
++  overlays.getState().clearSession("s");
++  overlays.getState().applyEvent({ kind: "turn.started", seq: 1, sessionID: "s", turnID: "t", clientMessageID: "c" });
++  overlays.getState().applyEvent(sessionEvent.parse(memoEvent));
++  const state = overlays.getState();
++  assert.equal(state.runningTurns.s, "t");
++  assert.equal(state.lastEventSeqs.s, 2);
++  overlays.getState().applyEvent(memoEvent);
++  assert.equal(overlays.getState(), state);
++  overlays.getState().applyEvent({ kind: "turn.cancelled", seq: 3, sessionID: "s", turnID: "t" });
++  overlays.getState().applyEvent(memoEvent);
++  assert.equal(overlays.getState().runningTurns.s, undefined);
++  overlays.getState().clearSession("s");
++});
++
++test("a late pre-memo snapshot with the same timestamp cannot erase the note", () => {
++  const current = upsertTurnIntoPages({ pages: [{ turns: [], hasMore: false }], pageParams: [undefined] }, turn());
++  const stale = turn(messages.map(m => ({ ...m, metadata: undefined })));
++  const restored = upsertTurnIntoPages(current, stale);
++  assert.deepEqual(restored.pages[0].turns[0], turn());
++});
++
++test("SSE commits and reconnect refresh recover the same canonical note", async (t) => {
++  const listeners = new Map<string, (event: { data: string }) => void>();
++  let eventSource: { onopen?: () => void };
++  const oldSource = Object.getOwnPropertyDescriptor(globalThis, "EventSource");
++  Object.defineProperty(globalThis, "EventSource", { configurable: true, value: class {
++    onopen?: () => void;
++    constructor() { eventSource = this; }
++    addEventListener(kind: string, listener: (event: { data: string }) => void) { listeners.set(kind, listener); }
++    close() {}
++  } });
++  let requests = 0;
++  t.mock.method(globalThis, "fetch", async input => {
++    if (String(input).includes("/turns/t")) { requests++; return Response.json(turn()); }
++    if (String(input).includes("/turns")) return Response.json({ turns: [turn()], hasMore: false });
++    return Response.json({ approvals: [] });
++  });
++  const client = new QueryClient();
++  t.mock.method(client, "invalidateQueries", async () => {});
++  client.setQueryData(queryKeys.turns("s"), { pages: [{ turns: [], hasMore: false }], pageParams: [undefined] });
++  const source = openSessionEventSource({ queryClient: client, sessionID: "s", token: "test", syncMessages: true,
++    applyEvent: (event: any) => overlays.getState().applyEvent(event) });
++  try {
++    listeners.get("turn.memo")!({ data: JSON.stringify(memoEvent) });
++    await new Promise(resolve => setImmediate(resolve));
++    assert.equal(requests, 1);
++    listeners.get("turn.memo")!({ data: JSON.stringify(memoEvent) });
++    assert.equal(requests, 1, "duplicate SSE is ignored");
++    eventSource!.onopen!();
++    await new Promise(resolve => setImmediate(resolve));
++    const cached: any = client.getQueryData(queryKeys.turns("s"));
++    assert.equal(partsFromMessages(cached.pages[0].turns[0].messages).filter((p: any) => p.key === "memo:memo-1").length, 1);
++  } finally {
++    await Promise.allSettled(client.getQueryCache().getAll().map(q => q.promise));
++    source.close(); client.clear(); overlays.getState().clearSession("s");
++    if (oldSource) Object.defineProperty(globalThis, "EventSource", oldSource); else Reflect.deleteProperty(globalThis, "EventSource");
++  }
++});

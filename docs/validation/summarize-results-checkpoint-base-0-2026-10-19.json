@@ -1,0 +1,570 @@
+{
+  "version": "repository-review-v1",
+  "harnessVersion": "5",
+  "arm": "memo",
+  "httpTimeoutSeconds": 240,
+  "phaseTimeoutSeconds": 600,
+  "generatedAt": "2026-10-19T10:12:24.75368Z",
+  "manifestSHA256": "51e7549fbaa5982605ecfb55a093d921b39f24ab08f6858505532172358e3b0f",
+  "schemaVersion": "summarize-results-v2-brief",
+  "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep summary brief, usually 1-3 short sentences: only the selected results' facts, identifiers and source references needed later, not a process recap or copied result bodies. Never exceed 800 characters; select fewer results if their necessary evidence will not fit. Copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003cknown facts; next focus\u003e\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 1,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": [
+    {
+      "taskID": "draft-restart",
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T10:12:24.754143Z",
+      "main": {
+        "requests": 5,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 29815,
+          "InputCachedTokens": 85248,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 3511,
+          "OutputReasoningTokens": 20925
+        },
+        "estimatedUSDAtPeakRates": 0.038779188,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"storage\":\"localStorage\",\"debounce_ms\":250,\"unfinished_upload_restored\":false,\"empty_queue_edit_restored\":true,\"retry_same_message_id\":true,\"late_ack_keeps_new_text\":true,\"bad_entry_blocks_all\":false,\"delete_failure_keeps_draft\":true,\"new_conversation_retry_id\":true},\"evidence\":{\"storage\":[{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":98,\"end_line\":99,\"quote\":\"storage = window.localStorage;\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":20,\"end_line\":20,\"quote\":\"const entries = () =\u003e Object.fromEntries(Object.entries(dom.window.localStorage));\"}],\"debounce_ms\":[{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":150,\"end_line\":152,\"quote\":\"timer = setTimeout(flush, 250);\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":154,\"end_line\":160,\"quote\":\"immediate ||= !draft || draft.text === \\\"\\\" || draft.submission !== old?.submission || draft.attachments !== old?.attachments;\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":49,\"end_line\":54,\"quote\":\"await delay(300);\"}],\"unfinished_upload_restored\":[{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":36,\"end_line\":40,\"quote\":\"const attachments = draft.attachments.filter((item) =\u003e item.status === \\\"uploaded\\\" \u0026\u0026 item.attachment);\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":13,\"end_line\":20,\"quote\":\"attachments: z.array(uploadedAttachment),\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":61,\"end_line\":75,\"quote\":\"assert.equal(restored.attachments[0].file, undefined);\"}],\"empty_queue_edit_restored\":[{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":158,\"end_line\":159,\"quote\":\"const keepEmpty = Object.entries(next.queueEdits).some(([sid, id]) =\u003e id \u0026\u0026 queuedDraftKey(sid, id) === key);\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":58,\"end_line\":64,\"quote\":\"if (!hasContent(content) \u0026\u0026 !draft.submission \u0026\u0026 !keepEmpty) return;\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":162,\"end_line\":165,\"quote\":\"enqueue(\\\"queue\\\", key, () =\u003e inputID ? JSON.stringify(inputID) : undefined);\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":263,\"end_line\":265,\"quote\":\"return JSON.stringify([sessionID, clientMessageID]);\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":167,\"end_line\":173,\"quote\":\"assert.equal(state().queueEdits.a, \\\"queued\\\"); assert.equal(state().drafts[key].text, \\\"\\\");\"}],\"retry_same_message_id\":[{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":134,\"end_line\":141,\"quote\":\"if (previous \u0026\u0026 sameSubmissionContent(previous, content)) return previous;\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":79,\"end_line\":89,\"quote\":\"return previous.map((item) =\u003e matches.get(JSON.stringify(item)) ?? item);\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":112,\"end_line\":119,\"quote\":\"if (draft.submission) relinkSnapshot(draft, draft.submission);\"},{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":113,\"end_line\":116,\"quote\":\"clientMessageID: sameConversation \u0026\u0026 previous.input.text === input.text \u0026\u0026 JSON.stringify(previous.input.parts) === JSON.stringify(input.parts) ? previous.clientMessageID : newClientID(),\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":21,\"end_line\":22,\"quote\":\"const sessionContent = savedContent.extend({ clientMessageID: z.string().min(1) });\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":102,\"end_line\":110,\"quote\":\"assert.equal(retry.clientMessageID, sent.clientMessageID);\"}],\"late_ack_keeps_new_text\":[{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":143,\"end_line\":166,\"quote\":\"text: current.text === submission.text ? \\\"\\\" : current.text,\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":145,\"end_line\":145,\"quote\":\"if (!current || current.submission !== submission) return;\"},{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":139,\"end_line\":143,\"quote\":\"text: current.text === snapshot.text ? \\\"\\\" : current.text,\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":117,\"end_line\":125,\"quote\":\"assert.equal(state().ensure(\\\"a\\\").text, \\\"typed during send\\\");\"}],\"bad_entry_blocks_all\":[{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":109,\"end_line\":123,\"quote\":\"} catch { /* A damaged entry must not prevent other drafts from loading. */ }\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":219,\"end_line\":224,\"quote\":\"assert.equal(state().ensure(\\\"a\\\").text, \\\"recoverable\\\"); assert.equal(state().drafts.broken, undefined);\"}],\"delete_failure_keeps_draft\":[{\"file\":\"desktop/web/src/lib/deleteSessionAndDrafts.ts\",\"start_line\":4,\"end_line\":7,\"quote\":\"await deleteSession(token, sessionID);\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":187,\"end_line\":200,\"quote\":\"assert.equal(state().ensure(\\\"a\\\").text, \\\"ordinary draft\\\");\"}],\"new_conversation_retry_id\":[{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":110,\"end_line\":119,\"quote\":\"clientRequestID: sameConversation ? previous.clientRequestID : newClientID(),\"},{\"file\":\"desktop/web/src/state/draftPersistence.ts\",\"start_line\":23,\"end_line\":31,\"quote\":\"clientRequestID: z.string().min(1), clientMessageID: z.string().min(1),\"},{\"file\":\"desktop/web/test/draft-persistence.test.ts\",\"start_line\":134,\"end_line\":139,\"quote\":\"assert.equal(retry.clientRequestID, sent.clientRequestID); assert.equal(retry.clientMessageID, sent.clientMessageID);\"}]},\"explanation\":\"链路为：输入先进入 useSessionDraftStore/useDraftStore，draftPersistence 订阅两个 store，把 session、draft、queue 分别编码成 localStorage 键。普通非空文本修改只触发 250ms 防抖；文本清空、submission/attachments 变化和队列编辑会立即 flush，pagehide/visibilitychange 也会 flush。prepareSubmission 写入 submission 后订阅同步落盘，因此刷新后仍可凭快照重试。持久化只保留 status=uploaded 且有服务端 attachment 的条目，File、blob 预览及 uploading/error 项不写入，所以未完成上传的 File 本体不会恢复。队列编辑使用独立 JSON 键，并用 keepEmpty 让“已清空但未提交”的编辑也能恢复，不影响同会话普通草稿。重载时 relinkSnapshot 把 JSON 相同的快照条目重新指向当前对象，使未变更重试通过身份比较并复用 clientMessageID；内容变化则生成新 clientMessageID。新会话草稿在已有快照且 projectID/widgetDraft 相同时复用 clientRequestID，只有文本和 parts 都相同才复用 clientMessageID。确认仅在 submission 仍是同一对象时生效，且只清除与快照相同的内容，因此后输入的不同文本会保留；但若用户重新输入与快照完全相同的文本，确认会将其清空（边界性丢输入）。单个损坏键在逐条 try/catch 中跳过，不阻断其他草稿；若 localStorage 整体不可访问或迭代失败，则持久化退化为内存态。删除先 await 服务端成功，失败时不 discardSession，本地草稿和队列编辑保留。风险边界：崩溃或强杀可能丢失最后 250ms 内未 flush 的文本；localStorage 配额/setItem 失败只保留内存，刷新后可能丢失文本和提交快照，进而重试生成新 ID，若服务端已接受原请求则可能重复；尚未完成上传的 File 无法恢复；同一键多窗口并发编辑为最后写入者获胜；新会话内容改变但 projectID/widgetDraft 不变时仍复用 clientRequestID，是否判重取决于服务端幂等语义；服务端删除成功但本地 removeItem 失败时，旧草稿可能在下次启动复活。测试断言与上述实现一致，仅作旁证。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 261,
+          "InputCachedTokens": 58880,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 5,
+          "OutputReasoningTokens": 74
+        },
+        "estimatedUSDAtPeakRates": 0.00052638,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "\"pagehide\""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1711,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3700,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 267,
+            "OutputReasoningTokens": 50
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_0JYTqgXm6Xh0IKdVsSo11106",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/state/draftPersistence.ts\", \"start\": 1, \"end\": 191}"
+            },
+            {
+              "id": "call_01_bZrELFAoT1CUovEC84uf2693",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/state/draftStore.ts\", \"start\": 1, \"end\": 151}"
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1751,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 6552,
+            "InputCachedTokens": 8960,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 398,
+            "OutputReasoningTokens": 23
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_YJLc3oCj9MFY1mdLl0I42993",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 313, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/state/sessionDraftStore.ts\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_pFMXQT79oAV5u4Rf561g9273",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 90, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/lib/attachmentUploads.ts\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_Ep7LBfE4umSujY0qpBJo7011",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 8, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/lib/deleteSessionAndDrafts.ts\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_0JYTqgXm6Xh0IKdVsSo11106"
+              },
+              "view": "content",
+              "contentBytes": 11433
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_bZrELFAoT1CUovEC84uf2693"
+              },
+              "view": "content",
+              "contentBytes": 7978
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1921,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 5320,
+            "InputCachedTokens": 15872,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 528,
+            "OutputReasoningTokens": 65
+          },
+          "releasedResults": 0,
+          "referencedResults": 5,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_fzh5HOzg8EivmEA1j1Oo6462",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 200, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/state/sessionDraftStore.ts\", \"scope\": \"project\", \"start\": 100}"
+            },
+            {
+              "id": "call_01_KryPAiMGblziy60E38sD2253",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 313, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/src/state/sessionDraftStore.ts\", \"scope\": \"project\", \"start\": 200}"
+            },
+            {
+              "id": "call_02_TlyJq5nWxAddLkVZwpPB6010",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 230, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/test/draft-persistence.test.ts\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_03_XuwFXYPORlpwpdnc95Kg7533",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 125, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/test/session-draft-submission.test.ts\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_0JYTqgXm6Xh0IKdVsSo11106"
+              },
+              "view": "content",
+              "contentBytes": 11433
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_bZrELFAoT1CUovEC84uf2693"
+              },
+              "view": "content",
+              "contentBytes": 7978
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_YJLc3oCj9MFY1mdLl0I42993"
+              },
+              "view": "content",
+              "contentBytes": 8859
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_pFMXQT79oAV5u4Rf561g9273"
+              },
+              "view": "content",
+              "contentBytes": 5231
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_Ep7LBfE4umSujY0qpBJo7011"
+              },
+              "view": "content",
+              "contentBytes": 825
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 9043,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 10193,
+            "InputCachedTokens": 21760,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 266,
+            "OutputReasoningTokens": 1499
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_497KHPYOjLa3Y4p6BO4P6898",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 160, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/test/draft-persistence.test.ts\", \"scope\": \"project\", \"start\": 83}"
+            },
+            {
+              "id": "call_01_CCSr9uhxMrDWCIhLTstn3277",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 230, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4250796568/desktop/web/test/draft-persistence.test.ts\", \"scope\": \"project\", \"start\": 160}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_0JYTqgXm6Xh0IKdVsSo11106"
+              },
+              "view": "content",
+              "contentBytes": 11433
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_bZrELFAoT1CUovEC84uf2693"
+              },
+              "view": "content",
+              "contentBytes": 7978
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_YJLc3oCj9MFY1mdLl0I42993"
+              },
+              "view": "content",
+              "contentBytes": 8859
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_pFMXQT79oAV5u4Rf561g9273"
+              },
+              "view": "content",
+              "contentBytes": 5231
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_Ep7LBfE4umSujY0qpBJo7011"
+              },
+              "view": "content",
+              "contentBytes": 825
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_fzh5HOzg8EivmEA1j1Oo6462"
+              },
+              "view": "content",
+              "contentBytes": 5266
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_KryPAiMGblziy60E38sD2253"
+              },
+              "view": "content",
+              "contentBytes": 5408
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_TlyJq5nWxAddLkVZwpPB6010"
+              },
+              "view": "content",
+              "contentBytes": 9295
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_03_XuwFXYPORlpwpdnc95Kg7533"
+              },
+              "view": "content",
+              "contentBytes": 7985
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 88538,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4050,
+            "InputCachedTokens": 33664,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 2052,
+            "OutputReasoningTokens": 19288
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_0JYTqgXm6Xh0IKdVsSo11106"
+              },
+              "view": "content",
+              "contentBytes": 11433
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_bZrELFAoT1CUovEC84uf2693"
+              },
+              "view": "content",
+              "contentBytes": 7978
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_YJLc3oCj9MFY1mdLl0I42993"
+              },
+              "view": "content",
+              "contentBytes": 8859
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_pFMXQT79oAV5u4Rf561g9273"
+              },
+              "view": "content",
+              "contentBytes": 5231
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_Ep7LBfE4umSujY0qpBJo7011"
+              },
+              "view": "content",
+              "contentBytes": 825
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_fzh5HOzg8EivmEA1j1Oo6462"
+              },
+              "view": "content",
+              "contentBytes": 5266
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_KryPAiMGblziy60E38sD2253"
+              },
+              "view": "content",
+              "contentBytes": 5408
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_TlyJq5nWxAddLkVZwpPB6010"
+              },
+              "view": "content",
+              "contentBytes": 9295
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_03_XuwFXYPORlpwpdnc95Kg7533"
+              },
+              "view": "content",
+              "contentBytes": 7985
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_497KHPYOjLa3Y4p6BO4P6898"
+              },
+              "view": "content",
+              "contentBytes": 5495
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_CCSr9uhxMrDWCIhLTstn3277"
+              },
+              "view": "content",
+              "contentBytes": 5429
+            }
+          ]
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1025,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 261,
+            "InputCachedTokens": 58880,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 5,
+            "OutputReasoningTokens": 74
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "b7867e17d0cc8ad7c8f18adc1cf7917fa58bd27f083abb102d450217ccd66021",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_0JYTqgXm6Xh0IKdVsSo11106"
+              },
+              "view": "content",
+              "contentBytes": 11433
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_bZrELFAoT1CUovEC84uf2693"
+              },
+              "view": "content",
+              "contentBytes": 7978
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_YJLc3oCj9MFY1mdLl0I42993"
+              },
+              "view": "content",
+              "contentBytes": 8859
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_pFMXQT79oAV5u4Rf561g9273"
+              },
+              "view": "content",
+              "contentBytes": 5231
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_Ep7LBfE4umSujY0qpBJo7011"
+              },
+              "view": "content",
+              "contentBytes": 825
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_fzh5HOzg8EivmEA1j1Oo6462"
+              },
+              "view": "content",
+              "contentBytes": 5266
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_KryPAiMGblziy60E38sD2253"
+              },
+              "view": "content",
+              "contentBytes": 5408
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_02_TlyJq5nWxAddLkVZwpPB6010"
+              },
+              "view": "content",
+              "contentBytes": 9295
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_03_XuwFXYPORlpwpdnc95Kg7533"
+              },
+              "view": "content",
+              "contentBytes": 7985
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_00_497KHPYOjLa3Y4p6BO4P6898"
+              },
+              "view": "content",
+              "contentBytes": 5495
+            },
+            {
+              "ref": {
+                "turn_id": "turn_981fc8cdbaaef905",
+                "call_id": "call_01_CCSr9uhxMrDWCIhLTstn3277"
+              },
+              "view": "content",
+              "contentBytes": 5429
+            }
+          ]
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    }
+  ]
+}

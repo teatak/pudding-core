@@ -1,0 +1,62 @@
+ok  	github.com/teatak/pudding-core/cmd/puddingd	0.950s
+?   	github.com/teatak/pudding-core/cmd/widget-package	[no test files]
+?   	github.com/teatak/pudding-core/contracts	[no test files]
+ok  	github.com/teatak/pudding-core/internal/agenteval	0.793s
+ok  	github.com/teatak/pudding-core/internal/api	10.885s
+ok  	github.com/teatak/pudding-core/internal/applog	(cached)
+ok  	github.com/teatak/pudding-core/internal/attachment	0.585s
+?   	github.com/teatak/pudding-core/internal/audio/asr	[no test files]
+ok  	github.com/teatak/pudding-core/internal/audio/asr/sherpa	(cached)
+?   	github.com/teatak/pudding-core/internal/audio/driver	[no test files]
+ok  	github.com/teatak/pudding-core/internal/audio/driver/portaudio	(cached)
+?   	github.com/teatak/pudding-core/internal/audio/dsp/aec	[no test files]
+?   	github.com/teatak/pudding-core/internal/audio/dsp/ns	[no test files]
+ok  	github.com/teatak/pudding-core/internal/audio/dsp/resample	(cached)
+?   	github.com/teatak/pudding-core/internal/audio/frame	[no test files]
+ok  	github.com/teatak/pudding-core/internal/audio/prompt	(cached)
+ok  	github.com/teatak/pudding-core/internal/audio/runtimeassets	0.562s
+ok  	github.com/teatak/pudding-core/internal/audio/voice	0.932s
+ok  	github.com/teatak/pudding-core/internal/browser	0.624s
+?   	github.com/teatak/pudding-core/internal/buildinfo	[no test files]
+ok  	github.com/teatak/pudding-core/internal/canvaslegacy	0.573s
+ok  	github.com/teatak/pudding-core/internal/computer	0.598s
+ok  	github.com/teatak/pudding-core/internal/config	0.663s
+ok  	github.com/teatak/pudding-core/internal/contextbuilder	2.222s
+ok  	github.com/teatak/pudding-core/internal/daemon	1.083s
+?   	github.com/teatak/pudding-core/internal/desktopcamera	[no test files]
+?   	github.com/teatak/pudding-core/internal/desktopscreen	[no test files]
+ok  	github.com/teatak/pudding-core/internal/engine	62.193s
+ok  	github.com/teatak/pudding-core/internal/event	0.457s
+ok  	github.com/teatak/pudding-core/internal/githubapp	0.496s
+ok  	github.com/teatak/pudding-core/internal/home	(cached)
+ok  	github.com/teatak/pudding-core/internal/lsp	(cached)
+ok  	github.com/teatak/pudding-core/internal/oauthbroker	0.484s
+ok  	github.com/teatak/pudding-core/internal/plugin	0.566s
+ok  	github.com/teatak/pudding-core/internal/pluginexec	0.423s
+ok  	github.com/teatak/pudding-core/internal/projectfs	(cached)
+ok  	github.com/teatak/pudding-core/internal/projectgit	6.991s
+ok  	github.com/teatak/pudding-core/internal/projectpath	(cached)
+ok  	github.com/teatak/pudding-core/internal/prompt	0.432s
+ok  	github.com/teatak/pudding-core/internal/provider	0.581s
+ok  	github.com/teatak/pudding-core/internal/provider/anthropic	5.514s
+ok  	github.com/teatak/pudding-core/internal/provider/google	5.504s
+?   	github.com/teatak/pudding-core/internal/provider/mock	[no test files]
+ok  	github.com/teatak/pudding-core/internal/provider/openai	5.637s
+ok  	github.com/teatak/pudding-core/internal/provider/registry	0.735s
+ok  	github.com/teatak/pudding-core/internal/searchtext	(cached)
+ok  	github.com/teatak/pudding-core/internal/sessionworkspace	0.639s
+ok  	github.com/teatak/pudding-core/internal/skill	(cached)
+ok  	github.com/teatak/pudding-core/internal/store	0.642s
+ok  	github.com/teatak/pudding-core/internal/store/sqlitestore	8.011s
+?   	github.com/teatak/pudding-core/internal/store/storetest	[no test files]
+--- FAIL: TestMacOSCommandSandboxCorepackColdCacheHonorsVersionSelection (0.16s)
+    command_corepack_darwin_test.go:58: cold cache selected latest instead of a known version: pin="" exit=1 stderr=""
+2026/10/19 18:33:50 WARN plugin mcp: list endpoint bindings failed err="connection config unavailable"
+FAIL
+FAIL	github.com/teatak/pudding-core/internal/tool	37.695s
+ok  	github.com/teatak/pudding-core/internal/tooleval	0.937s
+ok  	github.com/teatak/pudding-core/internal/toolreport	0.587s
+ok  	github.com/teatak/pudding-core/internal/turnfiles	1.057s
+ok  	github.com/teatak/pudding-core/internal/widget	0.502s
+ok  	github.com/teatak/pudding-core/scripts/restore-canvas-dev	0.945s
+FAIL

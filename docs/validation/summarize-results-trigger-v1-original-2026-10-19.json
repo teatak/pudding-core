@@ -1,0 +1,589 @@
+{
+  "version": "summary-trigger-diagnosis-v1-original",
+  "harnessVersion": "4",
+  "arm": "memo",
+  "httpTimeoutSeconds": 240,
+  "phaseTimeoutSeconds": 600,
+  "generatedAt": "2026-10-19T09:21:05.966817Z",
+  "manifestSHA256": "74f9e0642b4091757e7befc70c28a5b47d2cad977d683b7a9c03341c7d340fec",
+  "schemaVersion": "summarize-results-v1",
+  "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep exact facts and sources needed later in summary; copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003cknown facts; next focus\u003e\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 1,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": [
+    {
+      "taskID": "widget-original",
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T09:21:05.967323Z",
+      "main": {
+        "requests": 5,
+        "businessCalls": 10,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 30738,
+          "InputCachedTokens": 100864,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2714,
+          "OutputReasoningTokens": 14036
+        },
+        "estimatedUSDAtPeakRates": 0.029926584,
+        "correct": false,
+        "checksPassed": 17,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"http_registry_accepted\":false,\"reinstall_duplicates\":false,\"upgrade_activates\":false,\"upgrade_keeps_data\":true,\"copy_upgrade_allowed\":false,\"edited_draft_error\":\"widget_local_changes\",\"same_version_changed_hash_allowed\":false,\"changed_file_hash_accepted\":false,\"archived_reinstall_conflicts\":true},\"evidence\":{\"http_registry_accepted\":[{\"file\":\"core/internal/config/widget_sources.go\",\"start_line\":28,\"end_line\":32,\"quote\":\"if err != nil || u.Scheme != \\\"https\\\" || u.Hostname() == \\\"\\\" || u.User != nil || u.Fragment != \\\"\\\" || len(raw) \u003e 2048 {\"},{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":40,\"end_line\":43,\"quote\":\"req.RegistryURL, err = config.NormalizeWidgetRegistryURL(req.RegistryURL)\"}],\"reinstall_duplicates\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":82,\"end_line\":88,\"quote\":\"\\t\\t\\t\\tif item.Origin != nil \u0026\u0026 !item.Origin.Copy \u0026\u0026 item.Origin.RegistryURL == req.RegistryURL \u0026\u0026 item.Origin.PackageID == pkg.ID {\\n\\t\\t\\t\\t\\tif item.ArchivedAt != nil {\\n\\t\\t\\t\\t\\t\\treturn s.studioItemError(c, store.ErrStudioItemConflict)\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\tc.JSON(http.StatusOK, item)\\n\\t\\t\\t\\t\\treturn nil\\n\\t\\t\\t\\t}\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":16,\"end_line\":16,\"quote\":\"CREATE UNIQUE INDEX studio_items_package ON studio_items(json_extract(origin, '$.registryURL'), json_extract(origin, '$.packageID')) WHERE deleted=0 AND json_extract(origin, '$.copy')=0;\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":73,\"end_line\":76,\"quote\":\"\\tagain := install(request(pkg, \\\"install\\\", \\\"install-2\\\", nil))\\n\\tif again.ID != w.ID {\\n\\t\\tt.Fatal(\\\"duplicate install\\\", again.ID, w.ID)\\n\\t}\"}],\"upgrade_activates\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":20,\"end_line\":21,\"quote\":\"// Source, provenance and item creation commit together. Activation remains an explicit build/activate step.\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":70,\"end_line\":70,\"quote\":\"_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":103,\"end_line\":103,\"quote\":\"if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != \\\"2.0.0-preview.1\\\" || !w.Origin.Preview {\"}],\"upgrade_keeps_data\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":62,\"end_line\":70,\"quote\":\"r := \u0026store.StudioItemRevision{ItemID: id, Hash: w.Origin.SourceHash, ClientRequestID: fmt.Sprintf(\\\"package:%s:%d\\\", w.Origin.PackageHash, expected), CreatedAt: w.UpdatedAt}\\n\\t\\tif err := saveStudioItemRevisionTx(ctx, tx, r, base); err != nil {\\n\\t\\t\\treturn err\\n\\t\\t}\\n\\t\\torigin, err := json.Marshal(w.Origin)\\n\\t\\tif err != nil {\\n\\t\\t\\treturn err\\n\\t\\t}\\n\\t\\t_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":109,\"end_line\":112,\"quote\":\"\\tdata, _ := st.GetWidgetData(context.Background(), w.ID)\\n\\tif !bytes.Contains(data.Data, []byte(\\\"Keep me\\\")) {\\n\\t\\tt.Fatal(\\\"upgrade lost data\\\", data)\\n\\t}\"}],\"copy_upgrade_allowed\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":97,\"end_line\":99,\"quote\":\"if current.Origin == nil || current.Origin.Copy || current.HeadRevision != current.Origin.SourceHash || current.Revision != req.ExpectedRevision {\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":47,\"end_line\":49,\"quote\":\"if current == nil || current.Revision != expected || current.Kind != store.StudioItemKindWidget || current.Origin == nil || current.Origin.Copy || current.Origin.RegistryURL != w.Origin.RegistryURL || current.Origin.PackageID != w.Origin.PackageID || current.HeadRevision != current.Origin.SourceHash {\"}],\"edited_draft_error\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":104,\"end_line\":107,\"quote\":\"\\t\\t\\tif draft.DraftHash != current.HeadRevision {\\n\\t\\t\\t\\tc.JSON(http.StatusConflict, map[string]string{\\\"error\\\": \\\"widget_local_changes\\\"})\\n\\t\\t\\t\\treturn nil\\n\\t\\t\\t}\"}],\"same_version_changed_hash_allowed\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":50,\"end_line\":55,\"quote\":\"\\t\\t\\tif current.Origin.Version == w.Origin.Version {\\n\\t\\t\\t\\tif current.Origin.PackageHash != w.Origin.PackageHash {\\n\\t\\t\\t\\t\\treturn store.ErrStudioItemConflict\\n\\t\\t\\t\\t}\\n\\t\\t\\t\\treturn nil\\n\\t\\t\\t}\"}],\"changed_file_hash_accepted\":[{\"file\":\"core/internal/widget/distribution.go\",\"start_line\":80,\"end_line\":84,\"quote\":\"\\tfor name, content := range d.Source.Files {\\n\\t\\th := sha256.Sum256([]byte(content))\\n\\t\\tif d.FileHashes[name] != fmt.Sprintf(\\\"%x\\\", h) {\\n\\t\\t\\treturn d, \\\"\\\", fmt.Errorf(\\\"widget file hash mismatch: %s\\\", name)\\n\\t\\t}\"},{\"file\":\"core/internal/widget/distribution_test.go\",\"start_line\":58,\"end_line\":58,\"quote\":\"\\t\\t{\\\"changed file\\\", func(d *Distribution) { d.Source.Files[\\\"src/App.tsx\\\"] += \\\"//edit\\\" }, false},\"}],\"archived_reinstall_conflicts\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":83,\"end_line\":85,\"quote\":\"\\t\\t\\t\\t\\tif item.ArchivedAt != nil {\\n\\t\\t\\t\\t\\t\\treturn s.studioItemError(c, store.ErrStudioItemConflict)\\n\\t\\t\\t\\t\\t}\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":35,\"end_line\":36,\"quote\":\"\\t\\tif current != nil \u0026\u0026 (current.Deleted || current.ArchivedAt != nil) {\\n\\t\\t\\treturn store.ErrStudioItemConflict\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":173,\"end_line\":174,\"quote\":\"\\tcall(\\\"POST\\\", base+\\\"/archive\\\", map[string]any{\\\"expectedRevision\\\": w.Revision}, 200)\\n\\tcall(\\\"POST\\\", \\\"/studio/items/install\\\", request(pkg, \\\"install\\\", \\\"install-3\\\", nil), 409)\"}]},\"explanation\":\"调用链为：API 先规范化 registry URL，再由 DecodeDistribution 校验外层包哈希、文件清单和逐文件哈希；随后在 DraftMu 内按 (registryURL, packageID, copy=false) 查找既有来源，store 事务再用唯一索引兜底。install 模式命中原有活动项时直接返回旧项且不比较 version，命中归档项则返回冲突，因此新 clientRequestID 不会创建第二份原始安装。upgrade 只允许未修改的原始安装（head 等于 Origin.SourceHash 且非 Copy）；未提交草稿哈希不等于 head 时返回 widget_local_changes，已提交修改则更早以 conflict 拒绝。升级事务只写新 revision 和 origin/icon，ActiveRevision 保持不变，widget_data 按同一 itemID 保留，因此源码 head、运行版本和持久业务数据是分离的。主要风险边界：WritePackage 在 store 事务之前执行，同版本不同 PackageHash 会在源码文件已覆盖后才被 store 拒绝；未修改草稿也会在事务前删除；DraftMu 仅限本进程，跨进程一致性依赖数据库唯一索引。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 217,
+          "InputCachedTokens": 52096,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 54
+        },
+        "estimatedUSDAtPeakRates": 0.00045447600000000004,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"min\":8,\"max\":100}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1751,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3577,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 291,
+            "OutputReasoningTokens": 39
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_I2mTquNTckaeJhdUflYp3382",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"lines\": 140}"
+            },
+            {
+              "id": "call_01_7LdKfaKrKF0vCRbgfYvF0982",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"lines\": 100}"
+            },
+            {
+              "id": "call_02_bk3fASd4T1BsjloakiQo6238",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"lines\": 150}"
+            },
+            {
+              "id": "call_03_nTwPSRpNmSu8znqoTHzu4486",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"lines\": 150}"
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 3201,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 9313,
+            "InputCachedTokens": 8832,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 285,
+            "OutputReasoningTokens": 342
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_TTzZMTSLxOtLM0Ix37la5640",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 200, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_01_VZMxsPo8syoVu5tPBfad7895",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 100, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_02_6vPb47dskiqyrtvrB6Eh4242",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 330, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_03_K7TvA77B8DbqRUTGMS9M7770",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 250, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\"}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2058,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 14122,
+            "InputCachedTokens": 18688,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 94,
+            "OutputReasoningTokens": 150
+          },
+          "releasedResults": 0,
+          "referencedResults": 8,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_bjmZYey0myOGcKusbUeg7701",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 240, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 130}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1754,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2186,
+            "InputCachedTokens": 33024,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 94,
+            "OutputReasoningTokens": 101
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_79ZGsk4DOTWgTpaNk9F40681",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 241}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_bjmZYey0myOGcKusbUeg7701"
+              },
+              "view": "content",
+              "contentBytes": 5432
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 59317,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1540,
+            "InputCachedTokens": 35328,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1950,
+            "OutputReasoningTokens": 13404
+          },
+          "releasedResults": 0,
+          "referencedResults": 10,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_bjmZYey0myOGcKusbUeg7701"
+              },
+              "view": "content",
+              "contentBytes": 5432
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_79ZGsk4DOTWgTpaNk9F40681"
+              },
+              "view": "content",
+              "contentBytes": 3309
+            }
+          ]
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1256,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 217,
+            "InputCachedTokens": 52096,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 54
+          },
+          "releasedResults": 0,
+          "referencedResults": 10,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "832337cab7abcf609946f0fa973f2c181c836b6b53320fd7385c9677eb7b7f58",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_bjmZYey0myOGcKusbUeg7701"
+              },
+              "view": "content",
+              "contentBytes": 5432
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_79ZGsk4DOTWgTpaNk9F40681"
+              },
+              "view": "content",
+              "contentBytes": 3309
+            }
+          ]
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    }
+  ]
+}

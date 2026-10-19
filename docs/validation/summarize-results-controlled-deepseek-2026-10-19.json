@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "summarize-results-v1",
+  "parameterName": "summarize_results",
+  "requestedModel": "deepseek-flash",
+  "protocol": "openai-compatible",
+  "fixture": "inventory-handler-status",
+  "explicitControl": true,
+  "recoveryFollowUp": true,
+  "command": "go run ./cmd/memo-prototype -engine -engine-recovery -provider DeepSeek -model deepseek-flash -protocol openai-compatible -max-requests 6 -output /tmp/pudding-summarize-results-controlled-2026-10-19.json",
+  "sourceSHA256": {
+    "internal/toolmemo/schema.go": "cfc46ac2520bc25340fffca65f3bbb7a2653b3b3c1a2279b0b05602834fd4454",
+    "internal/toolmemo/projection.go": "68704031410ac4c27209479a19c85961fc07c32f40938c917cf69b8d783fb9ea",
+    "internal/engine/tool_memo.go": "c427fc0b6e254a1554d1b108ed553f11100545f07b77ccc39f29e7ae3ffc3604",
+    "cmd/memo-prototype/engine.go": "1c20f46d753e1a94bfceecad3da758c7504730fa23150e961358557d7ab654cf",
+    "cmd/memo-prototype/main.go": "d7774221b1344aaadec657b228d5c629d29fda019283aa5cb5504507ec3b892e"
+  },
+  "runs": [
+    {
+      "recoveryUsage": {
+        "InputUncachedTokens": 3341,
+        "InputCachedTokens": 4992,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 14,
+        "OutputReasoningTokens": 33
+      },
+      "taskRequests": 3,
+      "recoveryRequests": 1,
+      "recoveryPassed": true,
+      "recoveredNoteSent": true,
+      "engine": true,
+      "memo": true,
+      "model": "deepseek-flash",
+      "httpRequests": 4,
+      "businessCalls": 2,
+      "applied": 1,
+      "releasedSent": 1,
+      "nativeReplayChecked": 3,
+      "reasoningSeen": true,
+      "restartOK": true,
+      "snapshotReadbackOK": true,
+      "publicNotesOK": true,
+      "memoReplayOK": true,
+      "passed": true,
+      "usage": {
+        "sessionID": "session",
+        "requestCount": 3,
+        "lastProvider": "prof_deepseek_2744049df1c3",
+        "lastModel": "deepseek-flash",
+        "lastEstimatedInputTokens": 9805,
+        "lastInputUncachedTokens": 642,
+        "lastInputCachedTokens": 8320,
+        "lastCacheCreationTokens": 0,
+        "lastOutputContentTokens": 57,
+        "lastOutputReasoningTokens": 60,
+        "cumulativeInputUncachedTokens": 5877,
+        "cumulativeInputCachedTokens": 21632,
+        "cumulativeCacheCreationTokens": 0,
+        "cumulativeOutputContentTokens": 379,
+        "cumulativeOutputReasoningTokens": 262,
+        "updatedAt": "2026-10-19T16:49:22.856+08:00"
+      }
+    }
+  ],
+  "scope": "One explicitly prompted controlled run. Recovery is a separately counted user follow-up. No baseline or natural-adoption/cost experiment; public history and persisted events checked, Desktop UI not exercised."
+}

@@ -30,6 +30,7 @@ const (
 	SettingShowReasoning               = "show_reasoning"
 	SettingShowRawToolInfo             = "show_raw_tool_info"
 	SettingShowPluginPreviewVersions   = "show_plugin_preview_versions"
+	SettingShowWidgetPreviewVersions   = "show_widget_preview_versions"
 	SettingEditorFontFamily            = "editor_font_family"
 	SettingEditorFontSize              = "editor_font_size"
 	SettingEditorLineHeight            = "editor_line_height"
@@ -266,6 +267,7 @@ type settingsYAML struct {
 	Display displaySettingsYAML `yaml:"display,omitempty"`
 	Editor  editorSettingsYAML  `yaml:"editor,omitempty"`
 	Plugins pluginsSettingsYAML `yaml:"plugins,omitempty"`
+	Widgets widgetsSettingsYAML `yaml:"widgets,omitempty"`
 }
 
 type compactSettingsYAML struct {
@@ -289,6 +291,10 @@ type pluginsSettingsYAML struct {
 	ContentPluginsSplit bool            `yaml:"content_plugins_split,omitempty"`
 	ShowPreviewVersions *bool           `yaml:"show_preview_versions,omitempty"`
 	Enabled             map[string]bool `yaml:"enabled,omitempty"`
+}
+
+type widgetsSettingsYAML struct {
+	ShowPreviewVersions *bool `yaml:"show_preview_versions,omitempty"`
 }
 
 func (m *Manager) ListPluginEnablement(_ context.Context) (map[string]bool, error) {
@@ -359,6 +365,7 @@ func (s settingsYAML) asMap() map[string]string {
 		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
 		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
 		SettingShowPluginPreviewVersions:   formatBoolSetting(s.showPluginPreviewVersions()),
+		SettingShowWidgetPreviewVersions:   formatBoolSetting(s.Widgets.ShowPreviewVersions != nil && *s.Widgets.ShowPreviewVersions),
 		SettingEditorFontFamily:            s.editorFontFamily(),
 		SettingEditorFontSize:              strconv.Itoa(s.editorFontSize()),
 		SettingEditorLineHeight:            strconv.Itoa(s.editorLineHeight()),
@@ -403,6 +410,12 @@ func (s *settingsYAML) set(key, raw string) error {
 			return err
 		}
 		s.Plugins.ShowPreviewVersions = &v
+	case SettingShowWidgetPreviewVersions:
+		v, err := parseBoolSetting(raw)
+		if err != nil {
+			return err
+		}
+		s.Widgets.ShowPreviewVersions = &v
 	case SettingEditorFontFamily:
 		v := strings.TrimSpace(raw)
 		if v == "" || len(v) > 256 || strings.ContainsAny(v, "\r\n\x00") {

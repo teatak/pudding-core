@@ -1634,8 +1634,8 @@ func TestInstalledPluginToolsAreExposedOnlyWhenLoaded(t *testing.T) {
 	if !hasToolDef(loadedDefs, tool.RESTRequest) || hasToolDef(loadedDefs, tool.GraphQLRequest) || !hasToolDef(loadedDefs, "plugin_mcp__search__hash") {
 		t.Fatalf("installed app tools not routed directly: %+v", loadedDefs)
 	}
-	if len(runner.definitionPluginIDs) == 0 || !sameStrings(runner.definitionPluginIDs[len(runner.definitionPluginIDs)-1], []string{"github"}) {
-		t.Fatalf("scoped definitions received app ids: %+v", runner.definitionPluginIDs)
+	if ids := runner.lastDefinitionPluginIDs(); !sameStrings(ids, []string{"github"}) {
+		t.Fatalf("scoped definitions received app ids: %+v", ids)
 	}
 	loaded := []string{}
 	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
@@ -5002,6 +5002,7 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 }
 
 type recordingToolRunner struct {
+	definitionMu        sync.Mutex
 	defs                []provider.ToolDef
 	result              tool.Result
 	progress            []tool.Progress
@@ -5056,8 +5057,19 @@ func (r *recordingToolRunner) Definitions(context.Context, string) ([]provider.T
 }
 
 func (r *recordingToolRunner) DefinitionsForPlugins(_ context.Context, _ string, pluginIDs []string) ([]provider.ToolDef, error) {
+	r.definitionMu.Lock()
+	defer r.definitionMu.Unlock()
 	r.definitionPluginIDs = append(r.definitionPluginIDs, append([]string(nil), pluginIDs...))
 	return r.defs, nil
+}
+
+func (r *recordingToolRunner) lastDefinitionPluginIDs() []string {
+	r.definitionMu.Lock()
+	defer r.definitionMu.Unlock()
+	if len(r.definitionPluginIDs) == 0 {
+		return nil
+	}
+	return append([]string(nil), r.definitionPluginIDs[len(r.definitionPluginIDs)-1]...)
 }
 
 func (r *recordingToolRunner) Call(ctx context.Context, call tool.Call) tool.Result {

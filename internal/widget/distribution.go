@@ -16,6 +16,8 @@ type Distribution struct {
 	SchemaVersion int               `json:"schemaVersion"`
 	ID            string            `json:"id"`
 	Version       string            `json:"version"`
+	Channel       string            `json:"channel,omitempty"`
+	Preview       bool              `json:"preview,omitempty"`
 	Title         map[string]string `json:"title"`
 	Icon          string            `json:"icon,omitempty"`
 	Description   map[string]string `json:"description"`
@@ -52,7 +54,7 @@ func DecodeDistribution(data []byte, expectedHash string) (Distribution, string,
 	if d.Requires.ProtocolVersion < policy.Distribution.MinProtocolVersion || d.Requires.ProtocolVersion > contracts.Runtime().ProtocolVersion || d.Requires.SDKVersion != policy.SDKVersion {
 		return d, "", errors.New("unsupported widget host requirements")
 	}
-	if len(d.Title) == 0 || len(d.Title) > 20 || len(d.Description) > 20 {
+	if len(d.Title) == 0 || len(d.Title) > 20 || len(d.Description) > 20 || len(d.Channel) > 64 {
 		return d, "", errors.New("invalid widget metadata")
 	}
 	for _, title := range d.Title {

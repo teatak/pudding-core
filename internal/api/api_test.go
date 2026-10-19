@@ -601,6 +601,20 @@ func TestSettingsPluginPreviewAPI(t *testing.T) {
 	if persisted[config.SettingShowPluginPreviewVersions] != "true" {
 		t.Fatalf("invalid update changed preview setting: %+v", persisted)
 	}
+	resp = req(t, http.MethodPut, srv.URL+"/settings", map[string]string{"show_widget_preview_versions": "true"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("widget preview PUT status = %d", resp.StatusCode)
+	}
+	updated = decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil))
+	if updated.Settings["show_widget_preview_versions"] != "true" || updated.Settings["show_plugin_preview_versions"] != "true" {
+		t.Fatal(updated.Settings)
+	}
+	resp = req(t, http.MethodPut, srv.URL+"/settings", map[string]string{"show_app_preview_versions": "true"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("obsolete frontend key status = %d", resp.StatusCode)
+	}
 }
 
 func TestSettingsResetAPIs(t *testing.T) {

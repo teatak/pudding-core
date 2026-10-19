@@ -1,0 +1,1372 @@
+{
+  "version": "repository-review-v1",
+  "generatedAt": "2026-10-19T08:59:42.919274Z",
+  "manifestSHA256": "a2ed030f478a2d767dff542a4ccb90a9d185fb5c1155cada73519319bf0444c6",
+  "schemaVersion": "summarize-results-v1",
+  "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep exact facts and sources needed later in summary; copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003cknown facts; next focus\u003e\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 8,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": [
+    {
+      "taskID": "draft-restart",
+      "sample": 0,
+      "memo": false,
+      "startedAt": "2026-10-19T08:59:42.919861Z",
+      "main": {
+        "requests": 4,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 22279,
+          "InputCachedTokens": 33152,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 831,
+          "OutputReasoningTokens": 175
+        },
+        "estimatedUSDAtPeakRates": 0.008089812,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 18,
+        "answer": ""
+      },
+      "followup": {
+        "requests": 0,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 0,
+          "InputCachedTokens": 0,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 0,
+          "OutputReasoningTokens": 0
+        },
+        "estimatedUSDAtPeakRates": 0,
+        "correct": false,
+        "checksPassed": 0,
+        "checksTotal": 0,
+        "answer": ""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2220,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3128,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 455,
+            "OutputReasoningTokens": 6
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1815,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 10769,
+            "InputCachedTokens": 8576,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 278,
+            "OutputReasoningTokens": 15
+          },
+          "releasedResults": 0,
+          "referencedResults": 1,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1696,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 8382,
+            "InputCachedTokens": 19584,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 98,
+            "OutputReasoningTokens": 154
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 120000,
+          "responseModel": "deepseek-flash",
+          "complete": false,
+          "usageSeen": false,
+          "usage": {
+            "InputUncachedTokens": 0,
+            "InputCachedTokens": 0,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 0,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": false,
+      "error": "main turn status: failed"
+    },
+    {
+      "taskID": "draft-restart",
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T09:01:48.832891Z",
+      "main": {
+        "requests": 8,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 30210,
+          "InputCachedTokens": 163200,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 3036,
+          "OutputReasoningTokens": 22860
+        },
+        "estimatedUSDAtPeakRates": 0.04111739999999999,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\n  \"answers\": {\n    \"storage\": \"localStorage\",\n    \"debounce_ms\": 250,\n    \"unfinished_upload_restored\": false,\n    \"empty_queue_edit_restored\": true,\n    \"retry_same_message_id\": true,\n    \"late_ack_keeps_new_text\": true,\n    \"bad_entry_blocks_all\": false,\n    \"delete_failure_keeps_draft\": true,\n    \"new_conversation_retry_id\": true\n  },\n  \"evidence\": {\n    \"storage\": [\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 98,\n        \"end_line\": 99,\n        \"quote\": \"try { storage = window.localStorage; } catch { return () =\u003e {}; }\"\n      }\n    ],\n    \"debounce_ms\": [\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 150,\n        \"end_line\": 152,\n        \"quote\": \"else { clearTimeout(timer); timer = setTimeout(flush, 250); }\"\n      }\n    ],\n    \"unfinished_upload_restored\": [\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 36,\n        \"end_line\": 39,\n        \"quote\": \"const attachments = draft.attachments.filter((item) =\u003e item.status === \\\"uploaded\\\" \u0026\u0026 item.attachment);\"\n      }\n    ],\n    \"empty_queue_edit_restored\": [\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 158,\n        \"end_line\": 159,\n        \"quote\": \"const keepEmpty = Object.entries(next.queueEdits).some(([sid, id]) =\u003e id \u0026\u0026 queuedDraftKey(sid, id) === key);\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 61,\n        \"end_line\": 61,\n        \"quote\": \"if (!hasContent(content) \u0026\u0026 !draft.submission \u0026\u0026 !keepEmpty) return;\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 162,\n        \"end_line\": 164,\n        \"quote\": \"enqueue(\\\"queue\\\", key, () =\u003e inputID ? JSON.stringify(inputID) : undefined);\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 126,\n        \"end_line\": 128,\n        \"quote\": \"if (!Object.hasOwn(sessions, queuedDraftKey(sessionID, inputID))) delete queueEdits[sessionID];\"\n      }\n    ],\n    \"retry_same_message_id\": [\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 138,\n        \"end_line\": 138,\n        \"quote\": \"if (previous \u0026\u0026 sameSubmissionContent(previous, content)) return previous;\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 112,\n        \"end_line\": 114,\n        \"quote\": \"if (draft.submission) relinkSnapshot(draft, draft.submission);\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 62,\n        \"end_line\": 63,\n        \"quote\": \"clientMessageID: draft.submission.clientMessageID\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 271,\n        \"end_line\": 275,\n        \"quote\": \"const sameItems = \u003cT,\u003e(left: T[], right: T[]) =\u003e left.length === right.length \u0026\u0026 left.every((item, index) =\u003e item === right[index]);\"\n      }\n    ],\n    \"late_ack_keeps_new_text\": [\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 163,\n        \"end_line\": 163,\n        \"quote\": \"text: current.text === submission.text ? \\\"\\\" : current.text,\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/sessionDraftStore.ts\",\n        \"start_line\": 143,\n        \"end_line\": 145,\n        \"quote\": \"const current = get().drafts[draftKey];\\n    if (!current || current.submission !== submission) return;\"\n      }\n    ],\n    \"bad_entry_blocks_all\": [\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 109,\n        \"end_line\": 123,\n        \"quote\": \"} catch { /* A damaged entry must not prevent other drafts from loading. */ }\"\n      }\n    ],\n    \"delete_failure_keeps_draft\": [\n      {\n        \"file\": \"desktop/web/src/lib/deleteSessionAndDrafts.ts\",\n        \"start_line\": 6,\n        \"end_line\": 7,\n        \"quote\": \"await deleteSession(token, sessionID);\\n  useSessionDraftStore.getState().discardSession(sessionID);\"\n      }\n    ],\n    \"new_conversation_retry_id\": [\n      {\n        \"file\": \"desktop/web/src/state/draftStore.ts\",\n        \"start_line\": 113,\n        \"end_line\": 113,\n        \"quote\": \"const sameConversation = previous \u0026\u0026 previous.input.projectID === input.projectID \u0026\u0026 previous.input.widgetDraft === input.widgetDraft;\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftStore.ts\",\n        \"start_line\": 115,\n        \"end_line\": 115,\n        \"quote\": \"clientRequestID: sameConversation ? previous.clientRequestID : newClientID(),\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftStore.ts\",\n        \"start_line\": 116,\n        \"end_line\": 116,\n        \"quote\": \"clientMessageID: sameConversation \u0026\u0026 previous.input.text === input.text \u0026\u0026 JSON.stringify(previous.input.parts) === JSON.stringify(input.parts) ? previous.clientMessageID : newClientID(),\"\n      },\n      {\n        \"file\": \"desktop/web/src/state/draftPersistence.ts\",\n        \"start_line\": 71,\n        \"end_line\": 73,\n        \"quote\": \"return JSON.stringify({ ...content, submission: draft.submission \u0026\u0026 {\\n    ...draft.submission, snapshot: projectContent(draft.submission.snapshot),\\n  }});\"\n      }\n    ]\n  },\n  \"explanation\": \"输入链路：draftPersistence 订阅两个 zustand store，按 [kind,id] 独立键写入 localStorage；普通非空文本修改走 250ms 防抖，空文本、submission 变化或 attachments 引用变化会立即 flush，pagehide 和 visibilitychange(hidden) 也会同步 flush，所以正常刷新/关闭不会丢最近输入。真正的丢失窗口是防抖期间的进程崩溃、localStorage 被禁用/配额异常，以及未完成上传：projectContent 只保留 status=uploaded 且有服务端 attachment 的条目，File/blob/preview 不落盘，刷新后未完成上传无法恢复；完全空的普通草稿会删除键，但有意清空的队列编辑通过 queueEdits 的 keepEmpty 例外保留独立草稿。单条损坏记录由内层 try/catch 隔离，不影响其他草稿；但整个 localStorage 不可访问时持久化会整体停用。删除会话先 await 服务端删除成功，再 discardSession，失败时内存和本地草稿都保留。\\n\\n发送与幂等：prepareSubmission 先把包含 clientMessageID（新会话还有 clientRequestID）和内容快照的 submission 写入 store，订阅会立即持久化。会话草稿刷新后，relinkSnapshot 按 JSON 结构把快照中的列表条目重新指向当前草稿的同一对象，使 sameSubmissionContent 的引用比较成立；未改动重试直接返回旧 submission，复用 clientMessageID，避免同一消息重复提交。会话草稿中任何文本/附件/顺序等变化都会生成新的 clientMessageID，旧确认因 submission 对象身份不匹配而无法消费新提交。新会话草稿只要 projectID 与 widgetDraft 相同就复用 clientRequestID，只有 text 和 parts 序列化完全一致才复用 clientMessageID。\\n\\n迟到确认：acknowledgeSubmission 只清理本次快照；若当前 text 已改成不同内容则保留，列表按不可变条目身份过滤，之后新增/替换/上传中的卡片不会被旧确认删除。剩余风险是提交快照未成功落盘（存储异常或条目损坏）时刷新会丢失幂等键，从而可能重复提交；此外同一草稿在多窗口并发编辑是最后写入者覆盖。回归测试 draft-persistence.test.ts 的 102-115、167-177、187-201、219-224 与 session-draft-submission.test.ts 的 43-68、79-99 覆盖了这些路径的断言。\"\n}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 165,
+          "InputCachedTokens": 60544,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 5,
+          "OutputReasoningTokens": 60
+        },
+        "estimatedUSDAtPeakRates": 0.000490764,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "\"pagehide\""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1316,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3578,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 155,
+            "OutputReasoningTokens": 82
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1917,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 6605,
+            "InputCachedTokens": 8704,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 230,
+            "OutputReasoningTokens": 17
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1722,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 5326,
+            "InputCachedTokens": 15488,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 116,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0,
+          "referencedResults": 5,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1122,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2047,
+            "InputCachedTokens": 20864,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 116,
+            "OutputReasoningTokens": 18
+          },
+          "releasedResults": 0,
+          "referencedResults": 6,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1095,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 1646,
+            "InputCachedTokens": 23040,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 156,
+            "OutputReasoningTokens": 29
+          },
+          "releasedResults": 0,
+          "referencedResults": 7,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1212,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 6565,
+            "InputCachedTokens": 24832,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 114,
+            "OutputReasoningTokens": 28
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1152,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2316,
+            "InputCachedTokens": 31488,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 114,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 10,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 99532,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2127,
+            "InputCachedTokens": 33792,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 2035,
+            "OutputReasoningTokens": 22668
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1244,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 165,
+            "InputCachedTokens": 60544,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 5,
+            "OutputReasoningTokens": 60
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "sample": 1,
+      "memo": true,
+      "startedAt": "2026-10-19T09:03:39.420073Z",
+      "main": {
+        "requests": 6,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 31143,
+          "InputCachedTokens": 100992,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 3018,
+          "OutputReasoningTokens": 13233
+        },
+        "estimatedUSDAtPeakRates": 0.029450052,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"empty_file_uploaded\":false,\"failed_payload_retained\":true,\"success_payload_retained\":false,\"late_upload_revives_removed\":false,\"double_retry_requests\":1,\"replacement_kept_after_ack\":true,\"changed_input_reuses_message_id\":false,\"queue_key_is_session_id\":false,\"order_deduplicated\":true},\"evidence\":{\"empty_file_uploaded\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":54,\"end_line\":55,\"quote\":\"if (!file.size) return [];\"}],\"failed_payload_retained\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":41,\"end_line\":42,\"quote\":\"const failed: DraftAttachment = { ...attempt, status: \\\"error\\\"\"},{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":72,\"end_line\":72,\"quote\":\"const item = current.find(item =\u003e item.id === id \u0026\u0026 item.status === \\\"error\\\" \u0026\u0026 item.file \u0026\u0026 item.upload);\"}],\"success_payload_retained\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":35,\"end_line\":39,\"quote\":\"const { file: _file, upload: _target, errorKey: _error, ...retained } = attempt;\"}],\"late_upload_revives_removed\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":37,\"end_line\":40,\"quote\":\"setAttachments(current =\u003e !current.includes(attempt) ? current : current.map(item =\u003e item === attempt\"}],\"double_retry_requests\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":71,\"end_line\":76,\"quote\":\"const item = current.find(item =\u003e item.id === id \u0026\u0026 item.status === \\\"error\\\" \u0026\u0026 item.file \u0026\u0026 item.upload);\"},{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":77,\"end_line\":78,\"quote\":\"// Claim the item synchronously: a second click sees uploading and is ignored.\"}],\"replacement_kept_after_ack\":[{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":127,\"end_line\":130,\"quote\":\"const attachments = current.attachments.filter((item) =\u003e !snapshot.attachments.includes(item));\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":146,\"end_line\":149,\"quote\":\"const attachments = current.attachments.filter((item) =\u003e !submission.attachments.includes(item));\"}],\"changed_input_reuses_message_id\":[{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":114,\"end_line\":116,\"quote\":\"clientMessageID: sameConversation \u0026\u0026 previous.input.text === input.text \u0026\u0026 JSON.stringify(previous.input.parts) === JSON.stringify(input.parts) ? previous.clientMessageID : newClientID(),\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":138,\"end_line\":138,\"quote\":\"if (previous \u0026\u0026 sameSubmissionContent(previous, content)) return previous;\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":139,\"end_line\":139,\"quote\":\"const submission = { ...content, clientMessageID: previous ? newClientID() : content.clientMessageID };\"}],\"queue_key_is_session_id\":[{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":262,\"end_line\":262,\"quote\":\"// Local draft key only; it must never be passed as a business sessionID.\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":263,\"end_line\":264,\"quote\":\"return JSON.stringify([sessionID, clientMessageID]);\"}],\"order_deduplicated\":[{\"file\":\"desktop/web/src/lib/submitParts.ts\",\"start_line\":31,\"end_line\":37,\"quote\":\"if (item \u0026\u0026 !seenAttachments.has(item.id)) {\"},{\"file\":\"desktop/web/src/lib/submitParts.ts\",\"start_line\":55,\"end_line\":59,\"quote\":\"if (!seenAttachments.has(item.id)) {\"}]},\"explanation\":\"attachmentUploads 为每次上传绑定具体的 attempt 对象：addFiles 先过滤 size=0，再同时写入 attachments 与 partOrder；成功时从 attempt 中剥离 file/upload，只保留 attachment 与 previewURL，失败时用 {...attempt,status:'error'} 保留原 File 和上传目标。所有成功/失败回调都先检查 current.includes(attempt)，所以移除条目、用同 ID 新对象替换、清空或删除草稿后的迟到响应都不会重建卡片；sessionDraftStore 的 setAttachments 在 key 缺失时可能重新建立一个空草稿，但不会恢复该条目或 partOrder。retryAttachment 在同步的 store 更新中把 error 改成 uploading 并取得 attempt，第二次点击已看不到 error，因此连续两次重试最多只发起 1 个新请求。draftStore/sessionDraftStore 的提交快照是浅拷贝：确认时只按对象身份删除快照中仍存在的条目，文本仅在与快照完全一致时清空，partOrder 按剩余 ID 过滤，所以发送期间新增的文本、上传中/已上传附件、文件夹、项目/Studio 引用，以及同 ID 的新对象都会保留；只有被删除快照条目的 previewURL 会被 revoke。关键竞态是发送时附件仍在上传：buildDraftSubmitParts 只输出已有 attachment 字段的条目，因此该附件不会进入本次已发送 parts；若上传先完成，成功回调产生新对象，旧确认会把它当作后加内容保留到下一轮发送；若确认先到，条目先被移除，迟到成功因身份检查被忽略，附件彻底丢弃，结果取决于时序。此外，同 ID 替换会使旧 previewURL 不在 current 中而无法被确认逻辑 revoke，存在泄漏边界。ID 语义上，draftStore 只有 text 与 parts 都未变才复用 clientMessageID（同会话重试保留 clientRequestID），sessionDraftStore 只有 sameSubmissionContent 逐元素全等才返回旧 submission，实际改动内容后必然换新 clientMessageID。队列确认还要求 queueEdits 指针、clientMessageID 与全部内容逐元素一致，任一后续编辑都会返回 false 并整体保留替换草稿；测试里用 newer 快照确认成功只是夹具调用方式，不能理解为服务端确认了新内容。queuedDraftKey 是 JSON 复合本地键，discardSession 需解析它识别归属，不能作为后端业务 sessionID。orderedDraftItems 以 partOrder 为顺序、按类型用 seen 集合去重，再把未列出的卡片按类型追加，保证同 ID 单卡且可用卡片顺序稳定；回归测试的断言（如 attachment-uploads 50-51、draft-acknowledgement 63-74、session-draft-submission 79-98、queued-draft-acknowledgement 35-57）与上述实现一致。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 213,
+          "InputCachedTokens": 52096,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 108
+        },
+        "estimatedUSDAtPeakRates": 0.000518076,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "\"composer.draftUploadUnavailable\""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1516,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3615,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 264,
+            "OutputReasoningTokens": 45
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1168,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4723,
+            "InputCachedTokens": 8832,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 265,
+            "OutputReasoningTokens": 16
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1800,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4711,
+            "InputCachedTokens": 13824,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 266,
+            "OutputReasoningTokens": 55
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1583,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 5621,
+            "InputCachedTokens": 18816,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 269,
+            "OutputReasoningTokens": 19
+          },
+          "releasedResults": 0,
+          "referencedResults": 6,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1685,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4683,
+            "InputCachedTokens": 24704,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 402,
+            "OutputReasoningTokens": 50
+          },
+          "releasedResults": 0,
+          "referencedResults": 8,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 65239,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 7790,
+            "InputCachedTokens": 29824,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1552,
+            "OutputReasoningTokens": 13048
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1523,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 213,
+            "InputCachedTokens": 52096,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 108
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "sample": 1,
+      "memo": false,
+      "startedAt": "2026-10-19T09:04:54.120892Z",
+      "main": {
+        "requests": 7,
+        "businessCalls": 12,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 24739,
+          "InputCachedTokens": 105856,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2280,
+          "OutputReasoningTokens": 14649
+        },
+        "estimatedUSDAtPeakRates": 0.028371636,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"empty_file_uploaded\":false,\"failed_payload_retained\":true,\"success_payload_retained\":false,\"late_upload_revives_removed\":false,\"double_retry_requests\":1,\"replacement_kept_after_ack\":true,\"changed_input_reuses_message_id\":false,\"queue_key_is_session_id\":false,\"order_deduplicated\":true},\"evidence\":{\"empty_file_uploaded\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":54,\"end_line\":55,\"quote\":\"if (!file.size) return [];\"}],\"failed_payload_retained\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":41,\"end_line\":42,\"quote\":\"const failed: DraftAttachment = { ...attempt, status: \\\"error\\\"\"},{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":72,\"end_line\":72,\"quote\":\"const item = current.find(item =\u003e item.id === id \u0026\u0026 item.status === \\\"error\\\" \u0026\u0026 item.file \u0026\u0026 item.upload);\"}],\"success_payload_retained\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":35,\"end_line\":37,\"quote\":\"const { file: _file, upload: _target, errorKey: _error, ...retained } = attempt;\"}],\"late_upload_revives_removed\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":38,\"end_line\":38,\"quote\":\"setAttachments(current =\u003e !current.includes(attempt) ? current : current.map(item =\u003e item === attempt\"},{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":44,\"end_line\":44,\"quote\":\"setAttachments(current =\u003e !current.includes(attempt) ? current : current.map(item =\u003e {\"}],\"double_retry_requests\":[{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":71,\"end_line\":72,\"quote\":\"const item = current.find(item =\u003e item.id === id \u0026\u0026 item.status === \\\"error\\\" \u0026\u0026 item.file \u0026\u0026 item.upload);\"},{\"file\":\"desktop/web/src/lib/attachmentUploads.ts\",\"start_line\":74,\"end_line\":75,\"quote\":\"attempt = { ...item, status: \\\"uploading\\\", errorKey: undefined };\"}],\"replacement_kept_after_ack\":[{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":127,\"end_line\":129,\"quote\":\"const attachments = current.attachments.filter((item) =\u003e !snapshot.attachments.includes(item));\"},{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":146,\"end_line\":148,\"quote\":\"const attachments = current.attachments.filter((item) =\u003e !submission.attachments.includes(item));\"}],\"changed_input_reuses_message_id\":[{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":138,\"end_line\":139,\"quote\":\"if (previous \u0026\u0026 sameSubmissionContent(previous, content)) return previous;\"},{\"file\":\"desktop/web/src/state/draftStore.ts\",\"start_line\":116,\"end_line\":116,\"quote\":\"clientMessageID: sameConversation \u0026\u0026 previous.input.text === input.text \u0026\u0026 JSON.stringify(previous.input.parts) === JSON.stringify(input.parts) ? previous.clientMessageID : newClientID(),\"}],\"queue_key_is_session_id\":[{\"file\":\"desktop/web/src/state/sessionDraftStore.ts\",\"start_line\":262,\"end_line\":264,\"quote\":\"// Local draft key only; it must never be passed as a business sessionID.\"}],\"order_deduplicated\":[{\"file\":\"desktop/web/src/lib/submitParts.ts\",\"start_line\":31,\"end_line\":34,\"quote\":\"for (const orderItem of partOrder) {\"},{\"file\":\"desktop/web/src/lib/submitParts.ts\",\"start_line\":34,\"end_line\":36,\"quote\":\"if (item \u0026\u0026 !seenAttachments.has(item.id)) {\"}]},\"explanation\":\"上传层：addFiles 对 size=0 的文件直接 flatMap 返回空数组，既不建卡片也不报错；上传失败时 failed 对象整体展开 attempt，保留 file、upload、previewURL 供重试；上传成功时显式剥离 file/upload，之后只能依赖 attachmentKey，无法再次上传。所有成功/失败写回都先检查 current.includes(attempt)，因此条目被删除或被同 ID 新对象替换后，晚到响应不会让它复活。retryAttachment 只匹配 status=error 且同时有 file/upload 的条目，并在同步的 set 中立刻改成 uploading，所以同一 error 条目连续点两次，第二次看到的已是 uploading，最多只启动 1 个新请求。确认层：draftStore 与 sessionDraftStore 都按对象身份过滤快照，snapshot 中同一对象的卡片会被删除，而发送后新增的卡片、同 ID 的新对象、以及改过的文本都会保留；文本只有在 current.text === snapshot.text 时才清空，因此用户改后又改回原文会被误清。partOrder 按保留下来的 ID 过滤但保持当前顺序；未出现在 partOrder 的卡片由 orderedDraftItems 按类型追加，文本始终追加为最后一个 part。会话 prepareSubmission 在文本/部件实际变化时轮换 clientMessageID；draftStore 在同一会话中即使内容变化仍复用 clientRequestID，若后端按 request ID 去重会有幂等语义风险。queuedDraftKey 返回 JSON 数组字符串，只是本地 drafts map 的键，不能当业务 sessionID 使用。最大的跨文件竞态：prepare 时仍处于 uploading/error 的卡片会被 buildDraftSubmitParts 跳过（没有 attachment 字段），但其旧对象仍在 snapshot.attachments 中；若延迟确认先到，它会被当作已发送内容过滤删除，随后上传完成又因身份守卫不再写回，附件被静默丢失；若上传先完成并用新对象替换，则确认会保留它。回归测试覆盖了删除/同 ID 替换、连点重试和发送后编辑的确认，但没有覆盖『prepare 时已存在的 uploading 卡片 + 确认先于上传完成』这一分支。此外，同 ID 替换时旧对象的 previewURL 不在 current 中，确认循环不会 revoke，存在预览 URL 泄漏；成功条目丢失 file/upload 后也无法在后续失败中重试。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 244,
+          "InputCachedTokens": 45824,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 69
+        },
+        "estimatedUSDAtPeakRates": 0.000442944,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "\"composer.draftUploadUnavailable\""
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 968,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3166,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 132,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 879,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3246,
+            "InputCachedTokens": 8192,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 156,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1274,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3225,
+            "InputCachedTokens": 11392,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 155,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1441,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3400,
+            "InputCachedTokens": 14720,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 156,
+            "OutputReasoningTokens": 23
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2652,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3927,
+            "InputCachedTokens": 18176,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 157,
+            "OutputReasoningTokens": 239
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2411,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3378,
+            "InputCachedTokens": 22400,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 130,
+            "OutputReasoningTokens": 189
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 72758,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4397,
+            "InputCachedTokens": 25984,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1394,
+            "OutputReasoningTokens": 14198
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1037,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 244,
+            "InputCachedTokens": 45824,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 69
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "widget-install-upgrade",
+      "sample": 2,
+      "memo": false,
+      "startedAt": "2026-10-19T09:06:17.654907Z",
+      "main": {
+        "requests": 5,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 25712,
+          "InputCachedTokens": 66176,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2342,
+          "OutputReasoningTokens": 14372
+        },
+        "estimatedUSDAtPeakRates": 0.028167455999999997,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"http_registry_accepted\":false,\"reinstall_duplicates\":false,\"upgrade_activates\":false,\"upgrade_keeps_data\":true,\"copy_upgrade_allowed\":false,\"edited_draft_error\":\"widget_local_changes\",\"same_version_changed_hash_allowed\":false,\"changed_file_hash_accepted\":false,\"archived_reinstall_conflicts\":true},\"evidence\":{\"http_registry_accepted\":[{\"file\":\"core/internal/config/widget_sources.go\",\"start_line\":29,\"end_line\":32,\"quote\":\"if err != nil || u.Scheme != \\\"https\\\" || u.Hostname() == \\\"\\\" || u.User != nil || u.Fragment != \\\"\\\" || len(raw) \u003e 2048 {\"}],\"reinstall_duplicates\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":81,\"end_line\":88,\"quote\":\"if item.Origin != nil \u0026\u0026 !item.Origin.Copy \u0026\u0026 item.Origin.RegistryURL == req.RegistryURL \u0026\u0026 item.Origin.PackageID == pkg.ID {\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":38,\"end_line\":44,\"quote\":\"id = current.ID\"}],\"upgrade_activates\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":20,\"end_line\":21,\"quote\":\"// Source, provenance and item creation commit together. Activation remains an explicit build/activate step.\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":62,\"end_line\":70,\"quote\":\"_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":101,\"end_line\":105,\"quote\":\"if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != \\\"2.0.0-preview.1\\\" || !w.Origin.Preview {\"}],\"upgrade_keeps_data\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":22,\"end_line\":23,\"quote\":\"id := w.ID\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":62,\"end_line\":70,\"quote\":\"_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":109,\"end_line\":112,\"quote\":\"if !bytes.Contains(data.Data, []byte(\\\"Keep me\\\")) {\"}],\"copy_upgrade_allowed\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":92,\"end_line\":99,\"quote\":\"if current.Origin == nil || current.Origin.Copy || current.HeadRevision != current.Origin.SourceHash || current.Revision != req.ExpectedRevision {\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":46,\"end_line\":49,\"quote\":\"if current == nil || current.Revision != expected || current.Kind != store.StudioItemKindWidget || current.Origin == nil || current.Origin.Copy || current.Origin.RegistryURL != w.Origin.RegistryURL || current.Origin.PackageID != w.Origin.PackageID || current.HeadRevision != current.Origin.SourceHash {\"}],\"edited_draft_error\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":104,\"end_line\":108,\"quote\":\"c.JSON(http.StatusConflict, map[string]string{\\\"error\\\": \\\"widget_local_changes\\\"})\"}],\"same_version_changed_hash_allowed\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":50,\"end_line\":55,\"quote\":\"if current.Origin.Version == w.Origin.Version {\\n\\t\\t\\t\\tif current.Origin.PackageHash != w.Origin.PackageHash {\\n\\t\\t\\t\\t\\treturn store.ErrStudioItemConflict\\n\\t\\t\\t\\t}\"}],\"changed_file_hash_accepted\":[{\"file\":\"core/internal/widget/distribution.go\",\"start_line\":80,\"end_line\":84,\"quote\":\"if d.FileHashes[name] != fmt.Sprintf(\\\"%x\\\", h) {\\n\\t\\t\\treturn d, \\\"\\\", fmt.Errorf(\\\"widget file hash mismatch: %s\\\", name)\"}],\"archived_reinstall_conflicts\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":83,\"end_line\":85,\"quote\":\"if item.ArchivedAt != nil {\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":35,\"end_line\":37,\"quote\":\"if current != nil \u0026\u0026 (current.Deleted || current.ArchivedAt != nil) {\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":173,\"end_line\":174,\"quote\":\"call(\\\"POST\\\", \\\"/studio/items/install\\\", request(pkg, \\\"install\\\", \\\"install-3\\\", nil), 409)\"}]},\"explanation\":\"安装/升级链路：API 先用 NormalizeWidgetRegistryURL 规范化 registry（强制 https，且拒绝凭据/片段），再用 DecodeDistribution 校验外层 SHA-256、严格 JSON、ID/版本格式、主机要求，以及 FileHashes 与 Source.Files 逐文件一致；随后 API 处理幂等/升级前置条件，最后由 InstallWidgetPackage 在单事务中写 revision 与 origin。安装幂等由两层保证：handler 扫描 active+archived 中 copy=0 的同 registryURL+packageID 项，active 直接返回已有项、archived 返回冲突；store 在 expected==0 时按同一键查找 canonical 安装并返回，迁移中的部分唯一索引兜底。升级只允许非 copy、head==origin.sourceHash 且 expectedRevision 匹配的原始安装；事务只新增 revision（parent=当前 head）并更新 origin/icon，ActiveRevision 不变，因此 HeadRevision 可以先于运行版本，激活仍是显式 build/activate 步骤。widget_data 以 item id 为键，升级事务没有删除或改写它，所以持久业务数据保留（副本在 fork 时单独快照）。本地修改保护仅在存在 working draft 时生效：draftHash != current.HeadRevision 返回 409 和 widget_local_changes；只有未修改 draft 才删除重建。风险边界：registryURL 只校验 scheme/凭据/片段，不校验是否属于配置的 WidgetSources，且没有包签名，packageHash 由调用方/registry 提供，只能证明自洽完整性而非来源真实性；install 模式只按 registryURL+packageID 命中并返回旧项，不比较版本，新版本必须走 upgrade；store 对同版本不同 PackageHash 返回冲突，但 API 在调用 store 前已 WritePackage，可能留下未被引用的包 blob；升级无版本单调性检查，允许降级，且业务数据不做 schema 迁移。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 154,
+          "InputCachedTokens": 47104,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 48
+        },
+        "estimatedUSDAtPeakRates": 0.00039842400000000003,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"min\":8,\"max\":100}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1225,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3127,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 179,
+            "OutputReasoningTokens": 43
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1187,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3874,
+            "InputCachedTokens": 8320,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 186,
+            "OutputReasoningTokens": 13
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1559,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 4435,
+            "InputCachedTokens": 12288,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 178,
+            "OutputReasoningTokens": 11
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1759,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 6580,
+            "InputCachedTokens": 16896,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 265,
+            "OutputReasoningTokens": 48
+          },
+          "releasedResults": 0,
+          "referencedResults": 1,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 65508,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 7696,
+            "InputCachedTokens": 23680,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1534,
+            "OutputReasoningTokens": 14257
+          },
+          "releasedResults": 0,
+          "referencedResults": 1,
+          "memoTools": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1009,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 154,
+            "InputCachedTokens": 47104,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 48
+          },
+          "releasedResults": 0,
+          "referencedResults": 1,
+          "memoTools": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "widget-install-upgrade",
+      "sample": 2,
+      "memo": true,
+      "startedAt": "2026-10-19T09:07:30.006418Z",
+      "main": {
+        "requests": 4,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 29563,
+          "InputCachedTokens": 66560,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2557,
+          "OutputReasoningTokens": 13738
+        },
+        "estimatedUSDAtPeakRates": 0.02882226,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"http_registry_accepted\":false,\"reinstall_duplicates\":false,\"upgrade_activates\":false,\"upgrade_keeps_data\":true,\"copy_upgrade_allowed\":false,\"edited_draft_error\":\"widget_local_changes\",\"same_version_changed_hash_allowed\":false,\"changed_file_hash_accepted\":false,\"archived_reinstall_conflicts\":true},\"evidence\":{\"http_registry_accepted\":[{\"file\":\"core/internal/config/widget_sources.go\",\"start_line\":28,\"end_line\":32,\"quote\":\"\\tif err != nil || u.Scheme != \\\"https\\\" || u.Hostname() == \\\"\\\" || u.User != nil || u.Fragment != \\\"\\\" || len(raw) \u003e 2048 {\"}],\"reinstall_duplicates\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":81,\"end_line\":88,\"quote\":\"\\t\\t\\t\\tif item.Origin != nil \u0026\u0026 !item.Origin.Copy \u0026\u0026 item.Origin.RegistryURL == req.RegistryURL \u0026\u0026 item.Origin.PackageID == pkg.ID {\\n\\t\\t\\t\\t\\tif item.ArchivedAt != nil {\\n\\t\\t\\t\\t\\t\\treturn s.studioItemError(c, store.ErrStudioItemConflict)\\n\\t\\t\\t\\t\\t}\\n\\t\\t\\t\\t\\tc.JSON(http.StatusOK, item)\\n\\t\\t\\t\\t\\treturn nil\\n\\t\\t\\t\\t}\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":38,\"end_line\":43,\"quote\":\"\\t\\tif expected == 0 \u0026\u0026 current != nil {\\n\\t\\t\\tif current.Origin == nil || current.Origin.RegistryURL != w.Origin.RegistryURL || current.Origin.PackageID != w.Origin.PackageID {\\n\\t\\t\\t\\treturn store.ErrStudioItemConflict\\n\\t\\t\\t}\\n\\t\\t\\tid = current.ID\\n\\t\\t\\treturn nil\\n\\t\\t}\"}],\"upgrade_activates\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":20,\"end_line\":21,\"quote\":\"// expected==0 installs (or returns the canonical install); a positive revision stages an upgrade.\\n// Source, provenance and item creation commit together. Activation remains an explicit build/activate step.\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":62,\"end_line\":65,\"quote\":\"\\t\\tr := \u0026store.StudioItemRevision{ItemID: id, Hash: w.Origin.SourceHash, ClientRequestID: fmt.Sprintf(\\\"package:%s:%d\\\", w.Origin.PackageHash, expected), CreatedAt: w.UpdatedAt}\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":66,\"end_line\":71,\"quote\":\"\\t\\t_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":101,\"end_line\":104,\"quote\":\"\\tif w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != \\\"2.0.0-preview.1\\\" || !w.Origin.Preview {\"}],\"upgrade_keeps_data\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":45,\"end_line\":71,\"quote\":\"\\t\\t_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":109,\"end_line\":112,\"quote\":\"\\tdata, _ := st.GetWidgetData(context.Background(), w.ID)\\n\\tif !bytes.Contains(data.Data, []byte(\\\"Keep me\\\")) {\\n\\t\\tt.Fatal(\\\"upgrade lost data\\\", data)\\n\\t}\"}],\"copy_upgrade_allowed\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":92,\"end_line\":99,\"quote\":\"\\t\\tif current.Origin == nil || current.Origin.Copy || current.HeadRevision != current.Origin.SourceHash || current.Revision != req.ExpectedRevision {\\n\\t\\t\\treturn s.studioItemError(c, store.ErrStudioItemConflict)\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":22,\"end_line\":27,\"quote\":\"\\t\\tif w.Origin == nil || w.Origin.Copy || w.Kind != store.StudioItemKindWidget {\"}],\"edited_draft_error\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":100,\"end_line\":108,\"quote\":\"\\t\\t\\tif draft.DraftHash != current.HeadRevision {\\n\\t\\t\\t\\tc.JSON(http.StatusConflict, map[string]string{\\\"error\\\": \\\"widget_local_changes\\\"})\"}],\"same_version_changed_hash_allowed\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":46,\"end_line\":56,\"quote\":\"\\t\\t\\tif current.Origin.Version == w.Origin.Version {\\n\\t\\t\\t\\tif current.Origin.PackageHash != w.Origin.PackageHash {\\n\\t\\t\\t\\t\\treturn store.ErrStudioItemConflict\\n\\t\\t\\t\\t}\"}],\"changed_file_hash_accepted\":[{\"file\":\"core/internal/widget/distribution.go\",\"start_line\":77,\"end_line\":85,\"quote\":\"\\tfor name, content := range d.Source.Files {\\n\\t\\th := sha256.Sum256([]byte(content))\\n\\t\\tif d.FileHashes[name] != fmt.Sprintf(\\\"%x\\\", h) {\\n\\t\\t\\treturn d, \\\"\\\", fmt.Errorf(\\\"widget file hash mismatch: %s\\\", name)\"}],\"archived_reinstall_conflicts\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":81,\"end_line\":88,\"quote\":\"\\t\\t\\t\\tif item.Origin != nil \u0026\u0026 !item.Origin.Copy \u0026\u0026 item.Origin.RegistryURL == req.RegistryURL \u0026\u0026 item.Origin.PackageID == pkg.ID {\\n\\t\\t\\t\\t\\tif item.ArchivedAt != nil {\\n\\t\\t\\t\\t\\t\\treturn s.studioItemError(c, store.ErrStudioItemConflict)\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":29,\"end_line\":37,\"quote\":\"\\t\\tif current != nil \u0026\u0026 (current.Deleted || current.ArchivedAt != nil) {\\n\\t\\t\\treturn store.ErrStudioItemConflict\\n\\t\\t}\"}]},\"explanation\":\"HeadRevision 是已写入包源码的源码哈希，ActiveRevision 是运行版本；升级事务只保存新 revision、更新 origin/icon，不改 active_revision 与 widget_data，所以升级只暂存、不激活且保留数据。原始安装以 (registryURL, packageID, copy=0) 去重：API 命中 active 时直接返回已有项，命中 archived 时报冲突，存储层用同一查询及部分唯一索引兜底，故正常重装不会产生第二个原始安装（软删除项不在去重范围是例外）。包升级要求非副本、head==origin.sourceHash、revision 匹配，且同版本必须同 PackageHash；副本升级被 API 和存储层双重拒绝。DecodeDistribution 先验外层哈希，再按 FileHashes 逐个文件复算，故外层哈希正确不能掩盖文件篡改；registry URL 仅接受 HTTPS。草稿哈希与当前 head 不同返回 409 widget_local_changes；未修改草稿会被删除并从新 head 重建。风险边界：API 在存储事务前已 WritePackage 写文件系统，若事务随后冲突/失败，包目录可能已更新而 DB 未提交，且无文件系统回滚；不同版本未校验单调递增，升级可暂存更低版本；mode=install 命中已有 origin 时直接返回旧项，即使请求带了不同版本也不会升级。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 226,
+          "InputCachedTokens": 50432,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 27
+        },
+        "estimatedUSDAtPeakRates": 0.000414792,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"min\":8,\"max\":100}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2020,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3577,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 355,
+            "OutputReasoningTokens": 123
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 4675,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 9330,
+            "InputCachedTokens": 8960,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 349,
+            "OutputReasoningTokens": 672
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1465,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 14150,
+            "InputCachedTokens": 19200,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 94,
+            "OutputReasoningTokens": 49
+          },
+          "releasedResults": 0,
+          "referencedResults": 8,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 58388,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2506,
+            "InputCachedTokens": 33408,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1759,
+            "OutputReasoningTokens": 12894
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 908,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 226,
+            "InputCachedTokens": 50432,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 27
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "history-result-readback",
+      "sample": 3,
+      "memo": true,
+      "startedAt": "2026-10-19T09:08:37.626927Z",
+      "main": {
+        "requests": 6,
+        "businessCalls": 11,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 39548,
+          "InputCachedTokens": 160000,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2730,
+          "OutputReasoningTokens": 7719
+        },
+        "estimatedUSDAtPeakRates": 0.025363200000000002,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\n  \"answers\": {\n    \"default_char_limit\": 4000,\n    \"maximum_char_limit\": 8000,\n    \"duplicate_call_error\": \"ambiguous_result\",\n    \"query_case_sensitive\": true,\n    \"filtered_offsets_renumbered\": false,\n    \"json_string_as_items\": false,\n    \"shorten_without_reader\": false,\n    \"slice_duplicates_content\": false,\n    \"readback_reexecutes\": false\n  },\n  \"evidence\": {\n    \"default_char_limit\": [\n      {\n        \"file\": \"core/internal/tool/context_result.go\",\n        \"start_line\": 15,\n        \"end_line\": 15,\n        \"quote\": \"resultPageDefaultChars = 4000\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 28,\n        \"end_line\": 32,\n        \"quote\": \"offset, limit, maxLimit := 0, resultPageDefaultChars, resultPageMaxChars\"\n      }\n    ],\n    \"maximum_char_limit\": [\n      {\n        \"file\": \"core/internal/tool/context_result.go\",\n        \"start_line\": 16,\n        \"end_line\": 16,\n        \"quote\": \"resultPageMaxChars     = 8000\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 48,\n        \"end_line\": 50,\n        \"quote\": \"limit is 1-8000 for chars or 1-200 for lines/items\"\n      }\n    ],\n    \"duplicate_call_error\": [\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 74,\n        \"end_line\": 76,\n        \"quote\": \"return toolJSONError(out, \\\"ambiguous_result\\\", \\\"multiple results have this call_id; cannot select a snapshot safely\\\")\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result_test.go\",\n        \"start_line\": 60,\n        \"end_line\": 64,\n        \"quote\": \"decodeToolResult(t, result)[\\\"reason\\\"] != \\\"ambiguous_result\\\"\"\n      }\n    ],\n    \"query_case_sensitive\": [\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 158,\n        \"end_line\": 159,\n        \"quote\": \"if query != nil \u0026\u0026 !strings.Contains(lines[i], *query) {\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 51,\n        \"end_line\": 53,\n        \"quote\": \"matching is case-sensitive\"\n      }\n    ],\n    \"filtered_offsets_renumbered\": [\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 153,\n        \"end_line\": 163,\n        \"quote\": \"size, next := 2, total // JSON array brackets; offsets always refer to the original snapshot.\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 170,\n        \"end_line\": 170,\n        \"quote\": \"record = resultJSON(map[string]any{\\\"line\\\": i + 1, \\\"text\\\": lines[i]})\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result_test.go\",\n        \"start_line\": 114,\n        \"end_line\": 120,\n        \"quote\": \"page[\\\"total_lines\\\"] != float64(602) || page[\\\"has_more\\\"] != true || page[\\\"next_offset\\\"] != float64(601)\"\n      }\n    ],\n    \"json_string_as_items\": [\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 133,\n        \"end_line\": 136,\n        \"quote\": \"unit=items requires a JSON array, not a string containing JSON\"\n      }\n    ],\n    \"shorten_without_reader\": [\n      {\n        \"file\": \"core/internal/tool/context_result.go\",\n        \"start_line\": 71,\n        \"end_line\": 73,\n        \"quote\": \"if !canRead || utf8.RuneCountInString(content) \u003c= modelResultMaxChars {\"\n      },\n      {\n        \"file\": \"core/internal/tool/context_result_test.go\",\n        \"start_line\": 214,\n        \"end_line\": 216,\n        \"quote\": \"ModelResultContent(CommandRun, false, original, \\\"t1\\\", \\\"c1\\\", false) != original\"\n      }\n    ],\n    \"slice_duplicates_content\": [\n      {\n        \"file\": \"core/internal/tool/context_result.go\",\n        \"start_line\": 42,\n        \"end_line\": 46,\n        \"quote\": \"if value := fields[\\\"numberedContent\\\"]; len(value) \u003e 0 \u0026\u0026 value[0] == '\\\"' \u0026\u0026 json.Unmarshal(value, \u0026numbered) == nil {\"\n      },\n      {\n        \"file\": \"core/internal/tool/context_result.go\",\n        \"start_line\": 45,\n        \"end_line\": 45,\n        \"quote\": \"delete(fields, \\\"content\\\")\"\n      },\n      {\n        \"file\": \"core/internal/tool/context_result_test.go\",\n        \"start_line\": 108,\n        \"end_line\": 118,\n        \"quote\": \"if _, exists := fields[\\\"content\\\"]; exists || fields[\\\"numberedContent\\\"] != numbered || fields[\\\"truncated\\\"] != true {\"\n      }\n    ],\n    \"readback_reexecutes\": [\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 21,\n        \"end_line\": 24,\n        \"quote\": \"// Read the saved tool result, not a re-execution of its command or a fresh file\"\n      },\n      {\n        \"file\": \"core/internal/tool/history_result.go\",\n        \"start_line\": 57,\n        \"end_line\": 57,\n        \"quote\": \"turn, err := r.historyTurns.GetConversationTurn(ctx, sessionID, ref.TurnID)\"\n      },\n      {\n        \"file\": \"core/internal/tool/history.go\",\n        \"start_line\": 123,\n        \"end_line\": 131,\n        \"quote\": \"return r.historyReadResult(ctx, out, sessionID, *args.ResultRef, args.resultReadOptions)\"\n      }\n    ]\n  },\n  \"explanation\": \"context_result.go 的 ModelResultContent 只改模型视图：结果超过 12000 字符且 canRead 为真时才生成 preview_only 视图（附 result_ref；FileSlice 在 numberedContent 合法时删除重复 content，FileSearch 截到 20 条），canRead 为假或 turn/call 缺失时原样返回。模型取回原证据的路径是 history.go 将 result_ref 路由到 history_result.go 的 historyReadResult：它按 session/turn 从 store 读取已保存的 ContentPart 快照，不重新执行工具，并在同一 turn 出现重复 call_id 时以 ambiguous_result 拒绝选择。分页上 chars 默认 4000、上限 8000；lines/items 默认 40/20、上限 200，整页另受 8000 字符预算约束，单条超限报 record_too_large。lines 的 query 仅支持单行、最多 500 字符、区分大小写；过滤从原 offset 开始扫描，next_offset 与 line 编号仍取原快照位置，不重新编号。items 只接受真实 JSON 数组，字符串形式的数组报 invalid_field。读取结果是不可信快照：字段必须存在于原 JSON 对象，非 JSON 对象只能整段读取；preview_only 表示有省略，不能当作完整证据，读取调用的 ok 与原工具结果的 result_ok 也分开保留。\"\n}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 194,
+          "InputCachedTokens": 54656,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 53
+        },
+        "estimatedUSDAtPeakRates": 0.00046173599999999997,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"lines\":40,\"items\":20}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1439,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3551,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 267,
+            "OutputReasoningTokens": 72
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 5180,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 12789,
+            "InputCachedTokens": 8832,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 270,
+            "OutputReasoningTokens": 646
+          },
+          "releasedResults": 0,
+          "referencedResults": 3,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1729,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 10540,
+            "InputCachedTokens": 22528,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 271,
+            "OutputReasoningTokens": 87
+          },
+          "releasedResults": 0,
+          "referencedResults": 6,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1079,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 8227,
+            "InputCachedTokens": 33408,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 52
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 14995,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3623,
+            "InputCachedTokens": 41728,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 96,
+            "OutputReasoningTokens": 3168
+          },
+          "releasedResults": 0,
+          "referencedResults": 10,
+          "memoTools": 2
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 20347,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 818,
+            "InputCachedTokens": 48512,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1729,
+            "OutputReasoningTokens": 3694
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1404,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 194,
+            "InputCachedTokens": 54656,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 53
+          },
+          "releasedResults": 0,
+          "referencedResults": 11,
+          "memoTools": 2
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    },
+    {
+      "taskID": "history-result-readback",
+      "sample": 3,
+      "memo": false,
+      "startedAt": "2026-10-19T09:09:24.060572Z",
+      "main": {
+        "requests": 7,
+        "businessCalls": 10,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 35443,
+          "InputCachedTokens": 153600,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 3270,
+          "OutputReasoningTokens": 11588
+        },
+        "estimatedUSDAtPeakRates": 0.0293841,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"default_char_limit\":4000,\"maximum_char_limit\":8000,\"duplicate_call_error\":\"ambiguous_result\",\"query_case_sensitive\":true,\"filtered_offsets_renumbered\":false,\"json_string_as_items\":false,\"shorten_without_reader\":false,\"slice_duplicates_content\":false,\"readback_reexecutes\":false},\"evidence\":{\"default_char_limit\":[{\"file\":\"core/internal/tool/context_result.go\",\"start_line\":15,\"end_line\":16,\"quote\":\"\\tresultPageDefaultChars = 4000\\n\\tresultPageMaxChars     = 8000\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":28,\"end_line\":32,\"quote\":\"\\tunit := options.Unit\\n\\tif unit == \\\"\\\" {\\n\\t\\tunit = \\\"chars\\\"\\n\\t}\\n\\toffset, limit, maxLimit := 0, resultPageDefaultChars, resultPageMaxChars\"}],\"maximum_char_limit\":[{\"file\":\"core/internal/tool/context_result.go\",\"start_line\":16,\"end_line\":16,\"quote\":\"\\tresultPageMaxChars     = 8000\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":48,\"end_line\":50,\"quote\":\"\\tif offset \u003c 0 || limit \u003c 1 || limit \u003e maxLimit {\\n\\t\\treturn toolJSONError(out, \\\"invalid_arguments\\\", \\\"offset must be non-negative; limit is 1-8000 for chars or 1-200 for lines/items\\\")\\n\\t}\"}],\"duplicate_call_error\":[{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":74,\"end_line\":76,\"quote\":\"\\t\\t\\tif found != nil {\\n\\t\\t\\t\\treturn toolJSONError(out, \\\"ambiguous_result\\\", \\\"multiple results have this call_id; cannot select a snapshot safely\\\")\\n\\t\\t\\t}\"},{\"file\":\"core/internal/tool/history_result_test.go\",\"start_line\":60,\"end_line\":64,\"quote\":\"\\tsrc.turn.Messages[0].Parts = append(src.turn.Messages[0].Parts, src.turn.Messages[0].Parts[0])\\n\\tresult := read(map[string]any{})\\n\\tif result.Ok || decodeToolResult(t, result)[\\\"reason\\\"] != \\\"ambiguous_result\\\" {\\n\\t\\tt.Fatalf(\\\"ambiguous snapshot accepted: %+v\\\", result)\\n\\t}\"}],\"query_case_sensitive\":[{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":51,\"end_line\":52,\"quote\":\"\\tif options.Query != nil \u0026\u0026 (unit != \\\"lines\\\" || *options.Query == \\\"\\\" || utf8.RuneCountInString(*options.Query) \u003e 500 || strings.ContainsAny(*options.Query, \\\"\\\\r\\\\n\\\")) {\\n\\t\\treturn toolJSONError(out, \\\"invalid_arguments\\\", \\\"query requires unit=lines and a non-empty single-line literal of at most 500 characters; matching is case-sensitive\\\")\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":158,\"end_line\":158,\"quote\":\"\\t\\tif query != nil \u0026\u0026 !strings.Contains(lines[i], *query) {\"}],\"filtered_offsets_renumbered\":[{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":149,\"end_line\":153,\"quote\":\"\\tif query != nil {\\n\\t\\tpayload[\\\"query\\\"] = *query\\n\\t}\\n\\trecords := make([]json.RawMessage, 0, min(limit, total-offset))\\n\\tsize, next := 2, total // JSON array brackets; offsets always refer to the original snapshot.\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":158,\"end_line\":164,\"quote\":\"\\t\\tif query != nil \u0026\u0026 !strings.Contains(lines[i], *query) {\\n\\t\\t\\tcontinue\\n\\t\\t}\\n\\t\\tif len(records) \u003e= limit {\\n\\t\\t\\tnext = i\\n\\t\\t\\tbreak\\n\\t\\t}\"}],\"json_string_as_items\":[{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":94,\"end_line\":100,\"quote\":\"\\t\\tisString := len(value) \u003e 0 \u0026\u0026 value[0] == '\\\"'\\n\\t\\tif unit == \\\"lines\\\" \u0026\u0026 !isString {\\n\\t\\t\\treturn toolJSONError(out, \\\"invalid_field\\\", \\\"unit=lines requires a string field; use unit=items for an array\\\")\\n\\t\\t}\\n\\t\\tif isString \u0026\u0026 unit != \\\"items\\\" {\\n\\t\\t\\t_ = json.Unmarshal(value, \u0026content)\\n\\t\\t}\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":133,\"end_line\":136,\"quote\":\"\\tif unit == \\\"items\\\" {\\n\\t\\tif !strings.HasPrefix(strings.TrimSpace(content), \\\"[\\\") || json.Unmarshal([]byte(content), \u0026items) != nil {\\n\\t\\t\\treturn toolJSONError(out, \\\"invalid_field\\\", \\\"unit=items requires a JSON array, not a string containing JSON\\\")\\n\\t\\t}\"},{\"file\":\"core/internal/tool/history_result_test.go\",\"start_line\":222,\"end_line\":222,\"quote\":\"\\t\\t{name: \\\"string is not array\\\", raw: `{\\\"data\\\":\\\"[1,2]\\\"}`, extra: `\\\"field\\\":\\\"data\\\",\\\"unit\\\":\\\"items\\\"`, reason: \\\"invalid_field\\\"},\"}],\"shorten_without_reader\":[{\"file\":\"core/internal/tool/context_result.go\",\"start_line\":11,\"end_line\":13,\"quote\":\"\\tmodelResultMaxChars    = 12000\\n\\tmodelResultHeadChars   = 6000\\n\\tmodelResultTailChars   = 2000\"},{\"file\":\"core/internal/tool/context_result.go\",\"start_line\":71,\"end_line\":73,\"quote\":\"\\tif !canRead || utf8.RuneCountInString(content) \u003c= modelResultMaxChars {\\n\\t\\treturn content\\n\\t}\"},{\"file\":\"core/internal/tool/context_result_test.go\",\"start_line\":214,\"end_line\":216,\"quote\":\"\\tif ModelResultContent(CommandRun, false, original, \\\"t1\\\", \\\"c1\\\", false) != original || ModelResultContent(CommandRun, false, original, \\\"\\\", \\\"c1\\\", true) != original {\\n\\t\\tt.Fatal(\\\"shortened result without an available canonical reader\\\")\\n\\t}\"}],\"slice_duplicates_content\":[{\"file\":\"core/internal/tool/context_result.go\",\"start_line\":41,\"end_line\":46,\"quote\":\"\\t\\t\\tswitch name {\\n\\t\\t\\tcase FileSlice:\\n\\t\\t\\t\\tvar numbered string\\n\\t\\t\\t\\tif value := fields[\\\"numberedContent\\\"]; len(value) \u003e 0 \u0026\u0026 value[0] == '\\\"' \u0026\u0026 json.Unmarshal(value, \u0026numbered) == nil {\\n\\t\\t\\t\\t\\tdelete(fields, \\\"content\\\")\\n\\t\\t\\t\\t}\"},{\"file\":\"core/internal/tool/context_result_test.go\",\"start_line\":116,\"end_line\":116,\"quote\":\"\\t\\tif _, exists := fields[\\\"content\\\"]; exists || fields[\\\"numberedContent\\\"] != numbered || fields[\\\"truncated\\\"] != true {\"}],\"readback_reexecutes\":[{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":21,\"end_line\":24,\"quote\":\"// Read the saved tool result, not a re-execution of its command or a fresh file\\n// read. This also works within a running turn: results are committed before the\\n// next model request. No hidden provider state is exposed by this path.\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":57,\"end_line\":58,\"quote\":\"\\tturn, err := r.historyTurns.GetConversationTurn(ctx, sessionID, ref.TurnID)\\n\\tif err != nil {\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":67,\"end_line\":79,\"quote\":\"\\tvar found *store.ContentPart\\n\\tfor _, message := range turn.Messages {\\n\\t\\tfor i := range message.Parts {\\n\\t\\t\\tpart := \u0026message.Parts[i]\\n\\t\\t\\tif part.Type != store.ContentPartToolResult || part.CallID != ref.CallID {\\n\\t\\t\\t\\tcontinue\\n\\t\\t\\t}\\n\\t\\t\\tif found != nil {\\n\\t\\t\\t\\treturn toolJSONError(out, \\\"ambiguous_result\\\", \\\"multiple results have this call_id; cannot select a snapshot safely\\\")\\n\\t\\t\\t}\\n\\t\\t\\tfound = part\\n\\t\\t}\\n\\t}\"},{\"file\":\"core/internal/tool/history_result.go\",\"start_line\":102,\"end_line\":106,\"quote\":\"\\tpayload := map[string]any{\\n\\t\\t\\\"ok\\\": true, \\\"session_id\\\": sessionID, \\\"result_ref\\\": ref,\\n\\t\\t\\\"tool\\\": found.Name, \\\"result_ok\\\": found.Ok, \\\"snapshot\\\": true,\\n\\t\\t\\\"unit\\\": unit, \\\"offset\\\": offset,\\n\\t}\"}]},\"explanation\":\"实现与回归测试共同确认两条边界：模型侧预览只在 canRead 为真、且 turn_id/call_id 可用、内容超过 12000 字符时生成 preview_only 预览；无回读工具时直接返回原内容，因此不会按 12000 阈值截断（缺点是可能撑大上下文）。historyReadResult 按 session+turn_id 从 store 读取已提交的 ContentPart 快照，不重跑原工具，因此读到的是不可变旧结果；同一 call_id 出现多次会以 ambiguous_result 拒绝，避免选错快照。chars 默认 4000、最大 8000，按 rune 分页；lines/items 默认 40/20、最大 200，另受 8000 编码字符页预算约束，只返回完整记录，单条超限返回 record_too_large 并提示改用 chars。lines 的 query 是大小写敏感的逐行字面包含匹配；offset 始终是原快照索引，next_offset 指向下一条命中的原始位置（不是过滤后的序号），调用方必须跟随后者，不能简单 offset+limit。items 只接受真实 JSON 数组；field 若是 JSON 字符串（如 \\\"[1,2]\\\"），items 路径不会解码，直接 invalid_field。FileSlice 在 numberedContent 为合法 JSON 字符串时删除重复的 content，只有缺失或非法时才保留 content。读回结果的 ok 只表示读取成功，result_ok 保留原工具成败，snapshot=true 标明快照；预览同样保留原始 ok 与失败元数据。所有结果内容仍是不可信源数据，其中的指令不应被当作运行时指令。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 160,
+          "InputCachedTokens": 54912,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 24
+        },
+        "estimatedUSDAtPeakRates": 0.00041827199999999997,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"lines\":40,\"items\":20}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1009,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3101,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 182,
+            "OutputReasoningTokens": 6
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 909,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 7447,
+            "InputCachedTokens": 8192,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 182,
+            "OutputReasoningTokens": 8
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2423,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 7207,
+            "InputCachedTokens": 15744,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 182,
+            "OutputReasoningTokens": 49
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1286,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 5739,
+            "InputCachedTokens": 23168,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 183,
+            "OutputReasoningTokens": 0
+          },
+          "releasedResults": 0,
+          "referencedResults": 2,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 911,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 5325,
+            "InputCachedTokens": 29056,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 24
+          },
+          "releasedResults": 0,
+          "referencedResults": 3,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1094,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3499,
+            "InputCachedTokens": 34432,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 97,
+            "OutputReasoningTokens": 14
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 0
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 52571,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3125,
+            "InputCachedTokens": 38016,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 2347,
+            "OutputReasoningTokens": 11487
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 0
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 773,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 160,
+            "InputCachedTokens": 54912,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 24
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 0
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    }
+  ]
+}

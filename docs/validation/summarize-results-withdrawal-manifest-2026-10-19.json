@@ -1,0 +1,378 @@
+{
+  "date": "2026-10-19",
+  "status": "runtime-withdrawn-evaluation-stopped",
+  "direction": "Apply each patch in its own repository to restore the experimental source from the withdrawal state. This does not resume model requests.",
+  "schemaVersionRetained": 47,
+  "repositories": {
+    "core": {
+      "headAtWithdrawal": "33cd0abce47bd9115b4ce574ddadba555118dcc5",
+      "patch": "summarize-results-experiment-core-2026-10-19.patch",
+      "patchSHA256": "76debe1de20d9c230c7e9d48814244195dd8f93e59427175385b456d6da8b128",
+      "patchApplyCheck": "passed",
+      "sourceFiles": {
+        "contracts/api.ts": {
+          "experimentalSHA256": "2105b1dcf458370d62c5cdc4855b5c4606ab89c668bffab8f294005132bb604f",
+          "withdrawnSHA256": "c787cc6ff6880ea487789d4664d5dbb54e6bc6c2be2dd20820ec130587248ba4"
+        },
+        "contracts/events.ts": {
+          "experimentalSHA256": "a586242d00ef72756ee7502019d8bc929d189af42bc7524c61e490e7c5d73f74",
+          "withdrawnSHA256": "0b771b15918e65d99049927d7c79893149f5f2711fc94fa88c47386fc6a55c2b"
+        },
+        "docs/contracts-checklist.md": {
+          "experimentalSHA256": "c8c038181667628e7f725176b303c5d6aaded413200a42b35bda530bf84b8b39",
+          "withdrawnSHA256": "5aa92579461dd754658e187e51c9227d99a3c22fc17fae9d5ee36fda007db1dd"
+        },
+        "internal/contextbuilder/builder.go": {
+          "experimentalSHA256": "025db3d3e94f74795861882e86b930cb7f3f59beffb07d33837033dd5e04e9c7",
+          "withdrawnSHA256": "432ded9e7c33fdd9299a17e58d2940953bf486e88929979e28cbe9d9493ca725"
+        },
+        "internal/engine/compact.go": {
+          "experimentalSHA256": "6ea9cb01ae86a31d67dc379e92ee9b24a4a945acbc2d82bcbfef4515cadfb2ab",
+          "withdrawnSHA256": "bc3fe2e929db0f5d2671b7a21ad6c209437b06523747cfec3cf8d3774b7b86f2"
+        },
+        "internal/engine/compact_batches.go": {
+          "experimentalSHA256": "5662112b3d31799735de240b30fdb306acb50eb97053842355a741456a4ce4be",
+          "withdrawnSHA256": "17e76b69f8d649e8eba6f72ec830717a0c18b4abf30b0140feeae6092c8a3a90"
+        },
+        "internal/engine/engine.go": {
+          "experimentalSHA256": "b55b8eddd267dd67469956268783dfc713d387a562bc3cec86c95f74a15c2923",
+          "withdrawnSHA256": "a002eafe64bbd2eb25f6d3bf43a847f4e6d67568cc5827bc880500460e8877dd"
+        },
+        "internal/event/types.go": {
+          "experimentalSHA256": "ec536175867e1e7f0c0c338a0e2c92bf45f1d724aac7e86923f559503119cc16",
+          "withdrawnSHA256": "500c96d5ba6421ffa0ee19f831c41fe94d1f211ac348f52c8d8e5985dbccc90a"
+        },
+        "internal/provider/provider.go": {
+          "experimentalSHA256": "7c82bdbab7117d409e391b0634b90e28b1eaec36d3bcbd9b12d59f6be92a36fa",
+          "withdrawnSHA256": "ec70f0cee8b7448b7da5b351afe93d23bb8263da8029b36a834e08f12c407296"
+        },
+        "internal/store/schema.sql": {
+          "experimentalSHA256": "5788bc4fcc876f8f3c8d86630f158b273c4bf81f21983491c470b1293dae1133",
+          "withdrawnSHA256": "4b0251cf9b9ea456b4b051cce0ef71c05912ba45445edce66fd6cafcc6d59317"
+        },
+        "internal/store/sqlitestore/migrations.go": {
+          "experimentalSHA256": "8ffbac38841b403fdb279de8b094219bb15ead84728c2a249a22dda5b4d42b34",
+          "withdrawnSHA256": "6d75fa0a0f196d7d6d3940db87cc7503f872524cd1a64fddf2ad2caf7bee2c10"
+        },
+        "internal/store/sqlitestore/migrations_test.go": {
+          "experimentalSHA256": "43c5ad68f157e2f3b05bb68106709aaf2c6da358f1b3c17c5d9aeb6ef219e195",
+          "withdrawnSHA256": "7938ba12896f6260688c53990e8ffe162870863428e8f6a558446efd84e41831"
+        },
+        "internal/store/sqlitestore/sqlitestore.go": {
+          "experimentalSHA256": "27d7e39ca44ee659f0f6dc0f758a66bdda9f07f9c0ee70be9799c3ddba7e33d0",
+          "withdrawnSHA256": "762673c8d3321655d3039d9c0565a65bf9525a48a0f5adb54eba76c851f09d9d"
+        },
+        "internal/store/store.go": {
+          "experimentalSHA256": "6c74a4bda4eb5b4fa9e8a2ba816f6898218790adec705503479c8d1fa25c03a3",
+          "withdrawnSHA256": "9b930e56c8ee0f79d5b886f6b78426e2373d6d5212a57efe1cf0f03d6a6d3d53"
+        },
+        "internal/api/tool_memo_test.go": {
+          "experimentalSHA256": "cf74f848654d732b9b25217c59511bf0dacc5a859872934bb5aef1e03e11eb3d",
+          "withdrawnSHA256": null
+        },
+        "internal/engine/tool_memo.go": {
+          "experimentalSHA256": "c427fc0b6e254a1554d1b108ed553f11100545f07b77ccc39f29e7ae3ffc3604",
+          "withdrawnSHA256": null
+        },
+        "internal/engine/tool_memo_test.go": {
+          "experimentalSHA256": "abe99a9748cf7e5e2209861559e1876ce42854f5f4f8f1540216b2fb4b82b817",
+          "withdrawnSHA256": null
+        },
+        "internal/provider/openai/prepared.go": {
+          "experimentalSHA256": "2d086e3ee367b27b3bc31cc2063b8070e0d7860b1e0571b7596e94405f7ffd69",
+          "withdrawnSHA256": null
+        },
+        "internal/provider/openai/prepared_test.go": {
+          "experimentalSHA256": "5be9ea1d698435ece120222103961e523348493a183dff4ae891d9e4460da7a2",
+          "withdrawnSHA256": null
+        },
+        "internal/store/sqlitestore/tool_memo.go": {
+          "experimentalSHA256": "33999b98278d22f761fd177b4bd7a78ff66385f8846beb7301c6ff98e2cd8d25",
+          "withdrawnSHA256": null
+        },
+        "internal/store/sqlitestore/tool_memo_test.go": {
+          "experimentalSHA256": "ee1fc301f0179fb384d6635f7bffba7027406bc89c69dbd8803f5fb7ee236521",
+          "withdrawnSHA256": null
+        },
+        "internal/store/tool_memo.go": {
+          "experimentalSHA256": "2b0b43ee97babfec536a832c33d7b05c5c79e84e7d44340d4c8588e672d2a890",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/benchmark.go": {
+          "experimentalSHA256": "f259b0b8425fecc8ae98f62ed10c95741051e518504ebeee820073d44840268e",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/probe_test.go": {
+          "experimentalSHA256": "c8c8c4f2f563e4a9399a5a8ef489154949d47728fb84ff74abedb9eae17c3719",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/adoption_review.go": {
+          "experimentalSHA256": "99212b8602221025bc3b0302d0f38f201c87588a5559e43ba19b6bc78da59dbb",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/adoption_review_test.go": {
+          "experimentalSHA256": "aba9b7c4b3401f920c724589f07d09d9bc4ac9a02759e2efd7472e4eedc1ebc6",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/probe.go": {
+          "experimentalSHA256": "c80d7ffd39a7ab0924420c59ce9d6077ef411e5c7f8168772173f160b76066e7",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/repository_test.go": {
+          "experimentalSHA256": "0ca1183e26bc0b60c9eaae89e5de3eb41cede54aa51187ff4fa8136aa7da3779",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/engine.go": {
+          "experimentalSHA256": "1c20f46d753e1a94bfceecad3da758c7504730fa23150e961358557d7ab654cf",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/benchmark_test.go": {
+          "experimentalSHA256": "6a4942e304fc695bc591da0185d9952dc5ca1daaa92ec7b971d7f35f25d5c876",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/repository.go": {
+          "experimentalSHA256": "74af6e522d106dc6f914055ddb3947e866234a8f14d5227b743c7c7d0c8f0fde",
+          "withdrawnSHA256": null
+        },
+        "cmd/memo-prototype/main.go": {
+          "experimentalSHA256": "ac8e9e81a94a15e696d36994c28b63c44b3b386992198302631c134622f98e5a",
+          "withdrawnSHA256": null
+        },
+        "internal/toolmemo/projection_test.go": {
+          "experimentalSHA256": "f3384e6061f0a34b3984d7fcc6e7d7578d6c3bd69e6bd74f33946cc82460f068",
+          "withdrawnSHA256": null
+        },
+        "internal/toolmemo/schema.go": {
+          "experimentalSHA256": "a8efbcf25cf0f91bd6e40efbe021a20a8ffe3f0f2004b1b23b21258e2b40a7bd",
+          "withdrawnSHA256": null
+        },
+        "internal/toolmemo/projection.go": {
+          "experimentalSHA256": "7f3de89a9b6446a8bd2a12db95046c75d321bf26d247f7d744c7c9b0edff6a75",
+          "withdrawnSHA256": null
+        },
+        "internal/memoprototype/runner.go": {
+          "experimentalSHA256": "5c090ce3c64c4114aaf8e55ac1828d124fdd54f623b668a8669dfc6e4c3f26e7",
+          "withdrawnSHA256": null
+        },
+        "internal/memoprototype/prototype_test.go": {
+          "experimentalSHA256": "1898a6f018f29413fb600c06558ff1f51d80eaac32cfc91faae86be980858103",
+          "withdrawnSHA256": null
+        },
+        "internal/memoprototype/schema.go": {
+          "experimentalSHA256": "ab1d27964b9f05e806c1f70a024dce9a443eea65b1a0bf5304acb53b4fd0134c",
+          "withdrawnSHA256": null
+        },
+        "internal/memoprototype/state.go": {
+          "experimentalSHA256": "496365507f69fc0ef0406915307f1d9d3f8872acaca01af045b166cc64102c36",
+          "withdrawnSHA256": null
+        },
+        "internal/memoprototype/projection.go": {
+          "experimentalSHA256": "e7359286d493603c958aae2dc8b5a1e046f210b183810bede4d84580bd89d298",
+          "withdrawnSHA256": null
+        },
+        "contracts/README.md": {
+          "experimentalSHA256": "d417260c9fbc850e98bae695304ca1c8325d42d967fe538c9319a859a659093a",
+          "withdrawnSHA256": "83fc7a8ca15d45fa6d08a2a5608378adfadad9d27671145a4836baf89e6a6ab4"
+        },
+        "cmd/memo-prototype/compare.py": {
+          "experimentalSHA256": "c329b3e1ce51d641228093f854ffb0f5b22c274a11696f1524c7680ce481da86",
+          "withdrawnSHA256": null
+        }
+      },
+      "unchangedRecordsSHA256": {
+        "cmd/memo-prototype/__pycache__/brief_analyze.cpython-314.pyc": "69bfb85c8ba82c4fda46544f48cf80b04895379c5cb50882322447dcc4737d3f",
+        "cmd/memo-prototype/__pycache__/repository_analyze.cpython-314.pyc": "592326597de919feee3cdf7871e0266253ffa563c5c53e03f688972c89bc386f",
+        "cmd/memo-prototype/__pycache__/trigger_analyze.cpython-314.pyc": "8021639361624e05db1b01dbf385fa6557c487af650d94ef53cb2ee2ac3e18cc",
+        "cmd/memo-prototype/brief_analyze.py": "1a84f51ccd64e7f6e004f9a043a2d91af2489a5d601764e3a3d61c15d172d4f1",
+        "cmd/memo-prototype/checkpoint_analyze.py": "512e75c4699ff417664c568e8e9ed6de4bf52c25cd113a6b24416f4d1d14717b",
+        "cmd/memo-prototype/repository_analyze.py": "c3e64c23a90106565a699051c7915f54e5834a6180699d485160e5a75da3cc91",
+        "cmd/memo-prototype/repository_fixtures.py": "39363ef58c66675de6058c04a1db66ad59fcb1caf4be3163ecb3be1e274e3ddc",
+        "cmd/memo-prototype/trigger_analyze.py": "cb17483145ddd42cfcbe151409445cdd9d9cdf2739737800fd4d216e70890f12",
+        "docs/tool-result-memo-benchmark.md": "d5f81a1c0fbc445fee649c6e78700eb9307d672ba8db723fb3aaf513bc03b03c",
+        "docs/tool-result-memo-engine.md": "918aa4f258f05b9e5d3e2df38ff0d2c097e80d9796f9d4ea05bcbf621b7c4a68",
+        "docs/tool-result-memo-optimization.md": "62989b66d49e5486ac19a2597c332233789e9aca320b99e86ef63f3140765eb3",
+        "docs/tool-result-memo-prototype.md": "bf2888de0d6dd7afe43fcc9458ed49a891eca3f4d1fad36c429b85f873490982",
+        "docs/tool-result-summaries-brief-notes.md": "f3176fe3e9a9789b62db05cd81fe5f37564556c81ef7292bd0dae5deda4b23cf",
+        "docs/tool-result-summaries-repository-benchmark.md": "83a84fc392143bd298ce6388427b297fc4fe4927c70e50343080c9a664a64a45",
+        "docs/tool-result-summaries-trigger-diagnosis.md": "838a5bb2f96d2bdd4196a883efcd9a167c924f0f6a9c33ecc7f85b5b41e6d140",
+        "docs/validation/memo-long-deepseek-2026-10-19-pilot.json": "e2d83a27c65e19b7ad35a204b995e9920b996faf5b253fa2f069772e97ce928e",
+        "docs/validation/memo-long-deepseek-2026-10-19.json": "1f8010edb6ac8b1dc91c5a6145b6267aebadb6e83b1cdd4820086a56c31f9f25",
+        "docs/validation/memo-three-arms-deepseek-2026-10-19.json": "641adc7a47aaf6bfe5a936a8c52781f9d10a22917f049503c6142e66d4e867e7",
+        "docs/validation/summarize-results-adoption-review-deepseek-2026-10-19.json": "37588aa8e76853847d959b632cabdc35936c5ea3d8411b6784d4b9cb9506c455",
+        "docs/validation/summarize-results-adoption-review-input-2026-10-19.json": "dd148ebdbedd796d7b115e6f9772ca628760117563c3176e7f35eb806296af7a",
+        "docs/validation/summarize-results-brief-analysis-2026-10-19.json": "afee1278fd350f494d90f27dc705610383150d9e36962f0960a29aac6ef2a6d9",
+        "docs/validation/summarize-results-brief-deepseek-2026-10-19.json": "b932fa338410b4cbfa9005d46964ebd41ac6f071def7a5fc3049d21f3ff5637c",
+        "docs/validation/summarize-results-brief-quality-notes-2026-10-19.json": "c49329ff1d99917277ec2271987d531363e4c254769fed471e381252d1011f23",
+        "docs/validation/summarize-results-brief-run-metadata-2026-10-19.json": "a0b19d505c8be1550310e10d01e16a2310720d0281500d4d13d6cf3067f35919",
+        "docs/validation/summarize-results-checkpoint-base-0-2026-10-19.json": "caf138e09c78bdc5618537bc7b9a7b3d9f9dca120f0945a77c98ecbb24c5a301",
+        "docs/validation/summarize-results-checkpoint-base-1-2026-10-19.json": "f1765ba797557ab5989adec0dfb3314f55c8c7b89628eca18123f848781609ff",
+        "docs/validation/summarize-results-checkpoint-base-2-2026-10-19.json": "6365a6d6c56cf2bf4cbf7ec9a0e6885b35dcc4dd401a389a45f07eb7b2cf3760",
+        "docs/validation/summarize-results-checkpoint-base-3-2026-10-19.json": "8e24b727946f97fac120cbe70de31670d546160e408289a5ed5f20657743f4df",
+        "docs/validation/summarize-results-checkpoint-candidate-0-2026-10-19.json": "39ed9d07ef8e163edc170abded68f81c61eb1a08a326554852350279ad0567a5",
+        "docs/validation/summarize-results-checkpoint-candidate-1-2026-10-19.json": "426bea81c33498bb7c70084079b4e30266560b7b1ae15928ed466a5c3cef0b4c",
+        "docs/validation/summarize-results-checkpoint-candidate-2-2026-10-19.json": "b3600ddaabfce411cece4a11de59fa6da7ce4a5120e004bbbb837255adcad88c",
+        "docs/validation/summarize-results-checkpoint-candidate-3-2026-10-19.json": "87990e4397cca4b0d982f69463c2fe3358af4b51b2edd12e37c5e100ed5fc6b4",
+        "docs/validation/summarize-results-checkpoint-run-metadata-2026-10-19.json": "254af5489abda4c46b77396d2d0994d255b810c080fe8f3eee113fd0a35efb6d",
+        "docs/validation/summarize-results-checkpoint-task-0-2026-10-19.json": "51e7549fbaa5982605ecfb55a093d921b39f24ab08f6858505532172358e3b0f",
+        "docs/validation/summarize-results-checkpoint-task-1-2026-10-19.json": "a3418bae3357779dad174eec34af97fdbd554ac3cfe72c32b1ce2c9cd5fae54c",
+        "docs/validation/summarize-results-checkpoint-task-2-2026-10-19.json": "149e5eadde702413e2adaf4708fe2ab23acd61b2bee2170dc496ba9729bcd33d",
+        "docs/validation/summarize-results-checkpoint-task-3-2026-10-19.json": "201b4697c4cb8cfd662d82cc56a7d82e3eac0296ec57f765f97ab11c9eeedc33",
+        "docs/validation/summarize-results-controlled-deepseek-2026-10-19.json": "0ba8eb9eb7778a55b7475beba802af92d735f8de4c101e8bee369cb4541da667",
+        "docs/validation/summarize-results-repository-analysis-2026-10-19.json": "304f7e1da30fba2561958c873e7fe711bd488478f25c8471835966eabc25e9fb",
+        "docs/validation/summarize-results-repository-deepseek-2026-10-19.json": "88ab358b81e8e6799d9c15572081ac61fb7f5bd2f85a3efedccbb5424a84a98e",
+        "docs/validation/summarize-results-repository-fixtures-2026-10-19.json": "a2ed030f478a2d767dff542a4ccb90a9d185fb5c1155cada73519319bf0444c6",
+        "docs/validation/summarize-results-repository-quality-notes-2026-10-19.json": "f49d63023de08e86ce6f03131ec1ac12c72a3dc2763a6af7ef12d85185b04afc",
+        "docs/validation/summarize-results-repository-run-metadata-2026-10-19.json": "ede7c17cc17fabc005b0b58eb69c0f5812dc4f66b8fe3b1cfec3a85cb26373bc",
+        "docs/validation/summarize-results-trigger-analysis-2026-10-19.json": "ddcfbb1f82282d46043ea4f8f8b321189e7ff4131841932b85b9e2f88fff921c",
+        "docs/validation/summarize-results-trigger-full-analysis-2026-10-19.json": "0a9b4f38196685777c0b3344ad2caa854d777a662998164a949aa87a27433b94",
+        "docs/validation/summarize-results-trigger-original-fixture-2026-10-19.json": "74f9e0642b4091757e7befc70c28a5b47d2cad977d683b7a9c03341c7d340fec",
+        "docs/validation/summarize-results-trigger-prior-audit-2026-10-19.json": "a6fb64d722a0309973bb4216304a4ef212bc0f0561fa7adb111ba295ea090671",
+        "docs/validation/summarize-results-trigger-run-metadata-2026-10-19.json": "e472202a9d4c36f278380e9857ba6882e072433ed6a5b3830194f115b724b600",
+        "docs/validation/summarize-results-trigger-staged-fixture-2026-10-19.json": "cd77dafa00f4b77430728d3527e68e349cec18e50a0d80297ec5ac4009884909",
+        "docs/validation/summarize-results-trigger-v1-original-2026-10-19.json": "2e094742aadfc126fec97aecc3169b18bf9e2716c7dafbdc7d22223000e248a3",
+        "docs/validation/summarize-results-trigger-v1-staged-2026-10-19.json": "a4ac08da0cafc19e6e174fbe45c7f5c57ad407633afef3dc6a62dd19d4823d1b",
+        "docs/validation/summarize-results-trigger-v2-original-2026-10-19.json": "c2e2dd5bbb2118de3dfb4dc5271a06824043323115972a4d0205cd2e1c66c871",
+        "docs/validation/summarize-results-trigger-v2-staged-2026-10-19.json": "5db0e21a35f5f7c02ed03b311ba03d6075baefd7005939166451d01d2c7714f8",
+        "docs/validation/summarize-results-trigger-v3-probe-analysis-2026-10-19.json": "dc9c8f1b2be57c3cee6ba8210238c6b25df2fbb7f717cc52cba154f280220788",
+        "docs/validation/summarize-results-trigger-v3-probe-original-2026-10-19.json": "98d050a8d6b3e184e831e1ad812be0fad017d7cdfb7aafdc786dd2b85b00a2a3",
+        "docs/validation/summarize-results-trigger-v4-probe-original-2026-10-19.json": "41b3e334d19b67dc6c81e43e02d4e4b3c84d6ed4d1ef36655beb249e13bd45ca"
+      },
+      "unrelatedDirtyFilesVerifiedUnchanged": 12
+    },
+    "desktop": {
+      "headAtWithdrawal": "77b1e949efc5023f908e8ffb87d57eb1805a929f",
+      "patch": "summarize-results-experiment-desktop-2026-10-19.patch",
+      "patchSHA256": "acbdb9268032d4f6bbfbcc85ba6a6f79e10bbc70b1e90b9d6a4410a30ad6d59c",
+      "patchApplyCheck": "passed",
+      "sourceFiles": {
+        "web/src/components/transcript/TurnParts.tsx": {
+          "experimentalSHA256": "787b540d82251af735fd7ea09d40a743cccaa18490dc2041ae8deed2ce118385",
+          "withdrawnSHA256": "c678a4933e72fd765a238d1e2bb4d3137a07311e3ebdac8cb19233ea407fde8e"
+        },
+        "web/src/components/transcript/compactOutput.ts": {
+          "experimentalSHA256": "b59d9f443d1768cdd81088558835f5a198b28090b242e1c49de3fdfde014a926",
+          "withdrawnSHA256": "e39e95126a22069df88cdef1e77184196f4503cac738af9d6295bd430d1ac200"
+        },
+        "web/src/components/transcript/useTranscriptTurns.ts": {
+          "experimentalSHA256": "0d5ca5d353a3ce5f4132059accaf447b34f6d643af20b343afb45d5d3baab322",
+          "withdrawnSHA256": "f5a6303402e77fdbaf53f7efabaf83cc728f321301cf4e7532b4f0970fd67712"
+        },
+        "web/src/hooks/useSessionEvents.ts": {
+          "experimentalSHA256": "cf521064924b0639bf8608de3e15c86bc5ad99c460e4d7dcbab9ce209461b75b",
+          "withdrawnSHA256": "0db1d5109d7e3888d0d0f44827dda40a507f964eb3b3d2f0c5cdce178123c3d9"
+        },
+        "web/src/state/overlayStore.ts": {
+          "experimentalSHA256": "91a7571510159eea9939d6f4a3d5962e4e43c81fb8fec4bc3817350c5cec5c24",
+          "withdrawnSHA256": "d38861a9392b0d00244f53d86186aff853ee91f4c3b868282b5bb4d20b60b3cc"
+        },
+        "web/test/compact-output.test.ts": {
+          "experimentalSHA256": "ce4b8c95ec6b3be7aba0f032d38eaf6bfea5b53a83b6b483d71a0e207bfb87ae",
+          "withdrawnSHA256": "c9842b02cc04aa41b8cd6e1a2ea7a164f5ed8b4cfcfdb4cea8a57885c041b886"
+        },
+        "web/src/components/transcript/toolMemoNotes.ts": {
+          "experimentalSHA256": "93ec75a6cb6f6e9c7567fe795253005c39a19755df70b3ad4d6b0574e1fa22aa",
+          "withdrawnSHA256": null
+        },
+        "web/test/tool-memo.test.ts": {
+          "experimentalSHA256": "d81a9f91dd906977a2a0636d2a8925fec60446993c3f7653c4227ca547a9925c",
+          "withdrawnSHA256": null
+        }
+      },
+      "unchangedRecordsSHA256": {},
+      "unrelatedDirtyFilesVerifiedUnchanged": 21
+    }
+  },
+  "validation": {
+    "status": "passed-with-environment-recheck",
+    "coreSuite": {
+      "command": "go test ./...",
+      "initialExitCode": 1,
+      "note": "All packages passed except the Corepack cold-cache sandbox test under the default Node 20.11.0 environment. The same test and full internal/tool package both passed with /opt/homebrew/bin (Node 24.6.0) first on PATH. No production code changed to address this environment failure.",
+      "correctiveCommands": [
+        "PATH=/opt/homebrew/bin:$PATH go test ./internal/tool -run ^TestMacOSCommandSandboxCorepackColdCacheHonorsVersionSelection$ -count=1",
+        "PATH=/opt/homebrew/bin:$PATH go test ./internal/tool"
+      ],
+      "correctiveExitCodes": [
+        0,
+        0
+      ]
+    },
+    "desktop": {
+      "node": "24.6.0",
+      "tests": 56,
+      "failed": 0,
+      "typecheck": "tsc -b",
+      "typecheckExitCode": 0
+    },
+    "archivePatchApplyChecks": "both passed",
+    "originalEvaluationRecords": "hashes unchanged",
+    "unrelatedDirtyFiles": "hashes unchanged",
+    "offlineReplays": {
+      "repository": "identical JSON to original analysis",
+      "brief": "identical JSON to original analysis",
+      "triggerFull": "identical JSON to original analysis"
+    },
+    "runtimeReferenceScan": "no remaining summarize_results/toolmemo integration",
+    "gitDiffCheck": "both repositories passed",
+    "logs": {
+      "core-suite": {
+        "path": "summarize-results-withdrawal-core-suite-2026-10-19.log",
+        "sha256": "5f233eb6ee094041610387806ca46dd49f5a8be6b5908b3629fad35fa5f30d2c"
+      },
+      "corepack-node24": {
+        "path": "summarize-results-withdrawal-corepack-node24-2026-10-19.log",
+        "sha256": "666b39f8674545d1139a63164b7eddd74589f6bd207c5ef0b928f91c7c8eebf1"
+      },
+      "tool-package-node24": {
+        "path": "summarize-results-withdrawal-tool-package-node24-2026-10-19.log",
+        "sha256": "7e4228ef821108b055fc3bfdcdc3a44a8a5285fa9d375b7b8f52c288af526763"
+      },
+      "desktop": {
+        "path": "summarize-results-withdrawal-desktop-2026-10-19.log",
+        "sha256": "ed8b7986f7f767f36849d2df68521ad1b1e7dd5f1bec1a359cc09cde3482ac86"
+      }
+    }
+  },
+  "checkpointLogCopies": [
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-base-0.log",
+      "archivedPath": "pudding-summary-checkpoint-base-0-2026-10-19.log",
+      "sha256": "78ed0e29b799da9fcb603b9f5c5bf815fdf5d65f0ff6a79857b32365c9c0cd4c"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-candidate-0.log",
+      "archivedPath": "pudding-summary-checkpoint-candidate-0-2026-10-19.log",
+      "sha256": "be43467ecd61f8d997863a6f8644d248e39e57135c068b88a0bb37d8ec19c31f"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-candidate-1.log",
+      "archivedPath": "pudding-summary-checkpoint-candidate-1-2026-10-19.log",
+      "sha256": "0f0d398b125d71921038cc90d2763bca619b096176d52c9c178b13605550cdf8"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-base-1.log",
+      "archivedPath": "pudding-summary-checkpoint-base-1-2026-10-19.log",
+      "sha256": "388953ff1e21a39dbb2321b9518c53988116f0586886fd68750333dd2af597f2"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-base-2.log",
+      "archivedPath": "pudding-summary-checkpoint-base-2-2026-10-19.log",
+      "sha256": "addcf3c54d044914ed3bfab026934d7acb9da26b4e2f8b9c268aeb19c7add893"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-candidate-2.log",
+      "archivedPath": "pudding-summary-checkpoint-candidate-2-2026-10-19.log",
+      "sha256": "662db2fdaf19b560300c57beccfaf2b01e07c702f5167201ae72f6d397fd131e"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-candidate-3.log",
+      "archivedPath": "pudding-summary-checkpoint-candidate-3-2026-10-19.log",
+      "sha256": "ad8dfd110b00a548daa10bf82a9ef0756f542f3043a35dcebff71df73aebca6f"
+    },
+    {
+      "originalPath": "/tmp/pudding-summary-checkpoint-base-3.log",
+      "archivedPath": "pudding-summary-checkpoint-base-3-2026-10-19.log",
+      "sha256": "a0ffc0d28b047d59b1dc99838cdcaf414aea6b97c08d08a405a5f9e38698037a"
+    }
+  ]
+}

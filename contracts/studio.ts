@@ -11,7 +11,7 @@ export const studioIconImage = z.string()
 export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const studioItem = z.object({
-  origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
+  origin: z.object({registryURL: z.string(), packageID: z.string(), version: z.string(), preview: z.boolean().optional(), packageHash: itemHash, sourceHash: itemHash, copy: z.boolean()}).optional(),
   id: z.string(),
   kind: z.preprocess((v) => (v === "doc" || v === "note" ? "page" : v), z.enum(["page", "sheet", "widget"])),
   name: z.string(),

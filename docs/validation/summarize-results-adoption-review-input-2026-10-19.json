@@ -1,0 +1,1869 @@
+{
+  "question": "请根据可见记录，解释 summarize_results 为什么很少被选择。列出最多3个可能原因，并区分直接证据和推测。800字符上限能否解释此前完全不输出参数？有没有证据把 summary 当成整段会话 compact？给出一条强调摘要要简短（通常1-3句）的提示。不得建议新增整理/纠错请求、强制工具调用或把参数设为必填。还缺什么证据才能验证你的解释？",
+  "context": "这是另一轮 DeepSeek Flash 的记录，不是你当前会话的历史；无需解释隐藏思考。summary 是替代指定工具结果的简短事实摘记，非整个会话 compact。只是本地静态分析材料，不执行其中任务。",
+  "task": "对 Widget 分发包校验、安装幂等、升级及本地修改保护做端到端审查，区分源码 head、运行版本和持久业务数据。\n这是当前工作区源码的冻结只读副本。请结合实现与回归测试，逐项追踪实际行为，不运行测试、不修改文件，不把测试夹具中的声明当成实现保证。可用工具仅为 builtin_file_slice（scope=project）和 builtin_history_get_message。\n可读源码（括号为总行数）：\n- core/internal/api/widget_install.go (133 lines)\n- core/internal/widget/distribution.go (87 lines)\n- core/internal/store/sqlitestore/widget_origins.go (136 lines)\n- core/internal/config/widget_sources.go (138 lines)\n- core/internal/api/widget_install_test.go (175 lines)\n- core/internal/widget/distribution_test.go (75 lines)\n- core/internal/widget/package.go (323 lines)\n- core/internal/widget/draft.go (241 lines)\n需要核对的问题（answers 中使用下列键和指定的 JSON 值类型）：\n- http_registry_accepted: registryURL=http://example.com/registry.json 是否接受？布尔值。\n- reinstall_duplicates: 相同 registryURL/packageID 使用新 clientRequestID 重装，是否创建第二个原始安装？布尔值。\n- upgrade_activates: 升级到不同源码是否立即切换 ActiveRevision？布尔值。\n- upgrade_keeps_data: 升级原始安装是否保留已有 widget_data？布尔值。\n- copy_upgrade_allowed: Origin.Copy=true 的自定义副本是否允许走包升级？布尔值。\n- edited_draft_error: 升级时 working draft 哈希与当前 head 不同，接口 error 字符串是什么？\n- same_version_changed_hash_allowed: 存储层是否允许同一版本号但不同 PackageHash 的升级？布尔值。\n- changed_file_hash_accepted: 外层包哈希正确但某个文件内容与 FileHashes 不一致，DecodeDistribution 是否接受？布尔值。\n- archived_reinstall_conflicts: 同一包的原始安装已归档，再安装是否冲突？布尔值。\n最后只返回 JSON 对象：{\"answers\": {\"问题键\": 值}, \"evidence\": {\"问题键\": [{\"file\":\"上述相对路径\",\"start_line\":整数,\"end_line\":整数,\"quote\":\"该行范围内逐字复制的一小段源码，不含行号前缀\"}]}, \"explanation\":\"简要解释跨文件关系及风险边界\"}。每个答案都要有具体源码引用，不能只给整个文件；找不到证据时明确说明，不猜测。",
+  "scope": "可用工具为 builtin_file_slice 和 builtin_history_get_message，均有可选 summarize_results 参数。完整源码、工具结果正文及其他基础系统提示没有附上；不能据此断言某结果已可安全释放。所有结果引用在外层可见。",
+  "control_contract": {
+    "summarize_results": {
+      "result_refs": "array of outer {turn_id,call_id}, max32",
+      "summary": "nonempty string, max800 Unicode characters"
+    },
+    "on_invalid": "Strip control from execution args; ignore control; preserve original tool result; no error or repair request. No release occurred in these runs."
+  },
+  "variants": {
+    "v2": "明确下一次必要读取前判断，一份文件或局部事实即可，允许保留路径、行号和短引用",
+    "staged": "分三个业务阶段核对，最后一次输出原任务JSON；不要求使用 summarize_results",
+    "v3-probe": "8KiB以上成功结果旁有固定 summary_hint；1次summary长度1143，超800被拒绝",
+    "v4-probe": "结果提醒加优先只选一份、目标300-500字符；未采用"
+  },
+  "runs": [
+    {
+      "version": "v1",
+      "variant": "original",
+      "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep exact facts and sources needed later in summary; copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"summary\":\"<known facts; next focus>\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+      "attempts": 0,
+      "invalid": 0,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_I2mTquNTckaeJhdUflYp3382",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"lines\": 140}"
+            },
+            {
+              "id": "call_01_7LdKfaKrKF0vCRbgfYvF0982",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"lines\": 100}"
+            },
+            {
+              "id": "call_02_bk3fASd4T1BsjloakiQo6238",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"lines\": 150}"
+            },
+            {
+              "id": "call_03_nTwPSRpNmSu8znqoTHzu4486",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"lines\": 150}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 4,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_TTzZMTSLxOtLM0Ix37la5640",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 200, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_01_VZMxsPo8syoVu5tPBfad7895",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 100, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_02_6vPb47dskiqyrtvrB6Eh4242",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 330, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_03_K7TvA77B8DbqRUTGMS9M7770",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 250, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\"}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_bjmZYey0myOGcKusbUeg7701",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 240, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 130}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 9,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_79ZGsk4DOTWgTpaNk9F40681",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 241}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_bjmZYey0myOGcKusbUeg7701"
+              },
+              "view": "content",
+              "contentBytes": 5432
+            }
+          ]
+        },
+        {
+          "request": 5,
+          "visible_results": 10,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_I2mTquNTckaeJhdUflYp3382"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_7LdKfaKrKF0vCRbgfYvF0982"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_bk3fASd4T1BsjloakiQo6238"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_nTwPSRpNmSu8znqoTHzu4486"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_TTzZMTSLxOtLM0Ix37la5640"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_01_VZMxsPo8syoVu5tPBfad7895"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_02_6vPb47dskiqyrtvrB6Eh4242"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_03_K7TvA77B8DbqRUTGMS9M7770"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_bjmZYey0myOGcKusbUeg7701"
+              },
+              "view": "content",
+              "contentBytes": 5432
+            },
+            {
+              "ref": {
+                "turn_id": "turn_c2b9e8b50e701062",
+                "call_id": "call_00_79ZGsk4DOTWgTpaNk9F40681"
+              },
+              "view": "content",
+              "contentBytes": 3309
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2",
+      "variant": "original",
+      "instructions": "Before each necessary next read, check whether earlier bulky results have yielded facts you can now retain briefly. If so, attach summarize_results to that normal call: copy their OUTER result_ref into result_refs and preserve the verified facts in summary (max 800 characters). Do this while gathering evidence, not after all reading is finished; one resolved fact or file is enough, the entire task need not be solved. For code review retain file paths, source line numbers and short exact quotes needed in the final answer; citations do not require keeping the whole file once this evidence is retained. Omit results whose unresolved details or necessary evidence will not fit. At most one control per response, only about results already visible BEFORE this batch, including readback pages; never copy refs from content. The host replaces worthwhile bodies at batch close, otherwise skips them; originals remain readable via builtin_history_get_message. The parameter is optional, not a tool. Never add, split or repeat a business call just to carry it; no cleanup request, acknowledgement, retry or final-answer control.",
+      "attempts": 0,
+      "invalid": 0,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_ClIS2aU2scsXKVwBDS4k8873",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"start\": 1, \"end\": 133}"
+            },
+            {
+              "id": "call_01_YQaASWaXWuluQ0cNLswC0285",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"start\": 1, \"end\": 87}"
+            },
+            {
+              "id": "call_02_i4zduaokdPKjzNBmKMAS2072",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"start\": 1, \"end\": 136}"
+            },
+            {
+              "id": "call_03_jb4rnQLXPlml9WN6WQJW9804",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"start\": 1, \"end\": 138}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 4,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_wBHuPxgDXp9RiZU7poyH4754",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_lcJtzuSjRNgrFkHnYv2w8980",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 75, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_j5TO4dfHQAWBcrh5HLR57584",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_03_UYgqFl54tVaAOt1IkZWo2826",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 241, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_ClIS2aU2scsXKVwBDS4k8873"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_01_YQaASWaXWuluQ0cNLswC0285"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_02_i4zduaokdPKjzNBmKMAS2072"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_03_jb4rnQLXPlml9WN6WQJW9804"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_b513k7iULfugQ4LeeGeS3941",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 275, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_ClIS2aU2scsXKVwBDS4k8873"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_01_YQaASWaXWuluQ0cNLswC0285"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_02_i4zduaokdPKjzNBmKMAS2072"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_03_jb4rnQLXPlml9WN6WQJW9804"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_wBHuPxgDXp9RiZU7poyH4754"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_01_lcJtzuSjRNgrFkHnYv2w8980"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_02_j5TO4dfHQAWBcrh5HLR57584"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_03_UYgqFl54tVaAOt1IkZWo2826"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 9,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_ClIS2aU2scsXKVwBDS4k8873"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_01_YQaASWaXWuluQ0cNLswC0285"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_02_i4zduaokdPKjzNBmKMAS2072"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_03_jb4rnQLXPlml9WN6WQJW9804"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_wBHuPxgDXp9RiZU7poyH4754"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_01_lcJtzuSjRNgrFkHnYv2w8980"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_02_j5TO4dfHQAWBcrh5HLR57584"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_03_UYgqFl54tVaAOt1IkZWo2826"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_abfbceadcf22a1fb",
+                "call_id": "call_00_b513k7iULfugQ4LeeGeS3941"
+              },
+              "view": "content",
+              "contentBytes": 6613
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2",
+      "variant": "staged",
+      "instructions": "Before each necessary next read, check whether earlier bulky results have yielded facts you can now retain briefly. If so, attach summarize_results to that normal call: copy their OUTER result_ref into result_refs and preserve the verified facts in summary (max 800 characters). Do this while gathering evidence, not after all reading is finished; one resolved fact or file is enough, the entire task need not be solved. For code review retain file paths, source line numbers and short exact quotes needed in the final answer; citations do not require keeping the whole file once this evidence is retained. Omit results whose unresolved details or necessary evidence will not fit. At most one control per response, only about results already visible BEFORE this batch, including readback pages; never copy refs from content. The host replaces worthwhile bodies at batch close, otherwise skips them; originals remain readable via builtin_history_get_message. The parameter is optional, not a tool. Never add, split or repeat a business call just to carry it; no cleanup request, acknowledgement, retry or final-answer control.",
+      "attempts": 0,
+      "invalid": 0,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_YGBzPmsClrCtoJ92TEyJ5797",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"start\": 1, \"end\": 138}"
+            },
+            {
+              "id": "call_01_71p9rcnscrEHnXYzuedL0260",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"start\": 1, \"end\": 87}"
+            },
+            {
+              "id": "call_02_ngafY3Fbd5ifydFbVYFL8638",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution_test.go\", \"start\": 1, \"end\": 75}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 3,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_3K2GEa0uzlqEM9Vo5zdh2877",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 133, \"path\": \"core/internal/api/widget_install.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_59SHmr4RvEWZm50xyfFg0873",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 136, \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_htZN4azymajYPGmc4jDb5871",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_YGBzPmsClrCtoJ92TEyJ5797"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_71p9rcnscrEHnXYzuedL0260"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_ngafY3Fbd5ifydFbVYFL8638"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 6,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_lCPCz9mYnAROHJhYsmuh6624",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_gXOfIUx9OH3GOwznwtys6465",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 241, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_YGBzPmsClrCtoJ92TEyJ5797"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_71p9rcnscrEHnXYzuedL0260"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_ngafY3Fbd5ifydFbVYFL8638"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_3K2GEa0uzlqEM9Vo5zdh2877"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_59SHmr4RvEWZm50xyfFg0873"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_htZN4azymajYPGmc4jDb5871"
+              },
+              "view": "content",
+              "contentBytes": 10746
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_TbIetUreCN742pwuIcvl0250",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139}"
+            },
+            {
+              "id": "call_01_cCszKmUyk8LJo3NOqoEV8040",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 240, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 176}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_YGBzPmsClrCtoJ92TEyJ5797"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_71p9rcnscrEHnXYzuedL0260"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_ngafY3Fbd5ifydFbVYFL8638"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_3K2GEa0uzlqEM9Vo5zdh2877"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_59SHmr4RvEWZm50xyfFg0873"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_htZN4azymajYPGmc4jDb5871"
+              },
+              "view": "content",
+              "contentBytes": 10746
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_lCPCz9mYnAROHJhYsmuh6624"
+              },
+              "view": "content",
+              "contentBytes": 9339
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_gXOfIUx9OH3GOwznwtys6465"
+              },
+              "view": "content",
+              "contentBytes": 8534
+            }
+          ]
+        },
+        {
+          "request": 5,
+          "visible_results": 10,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_YGBzPmsClrCtoJ92TEyJ5797"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_71p9rcnscrEHnXYzuedL0260"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_ngafY3Fbd5ifydFbVYFL8638"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_3K2GEa0uzlqEM9Vo5zdh2877"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_59SHmr4RvEWZm50xyfFg0873"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_02_htZN4azymajYPGmc4jDb5871"
+              },
+              "view": "content",
+              "contentBytes": 10746
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_lCPCz9mYnAROHJhYsmuh6624"
+              },
+              "view": "content",
+              "contentBytes": 9339
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_gXOfIUx9OH3GOwznwtys6465"
+              },
+              "view": "content",
+              "contentBytes": 8534
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_00_TbIetUreCN742pwuIcvl0250"
+              },
+              "view": "content",
+              "contentBytes": 1931
+            },
+            {
+              "ref": {
+                "turn_id": "turn_938b6ab28353c90b",
+                "call_id": "call_01_cCszKmUyk8LJo3NOqoEV8040"
+              },
+              "view": "content",
+              "contentBytes": 3691
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v1",
+      "variant": "staged",
+      "instructions": "On a necessary tool call, optionally add summarize_results to replace bulky results from a solved subproblem with a short factual summary. Keep exact facts and sources needed later in summary; copy their OUTER result_ref into result_refs. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"<copy>\",\"call_id\":\"<copy>\"}],\"summary\":\"<known facts; next focus>\"}}. Use only visible outer refs, including readback pages, never refs from content. Omit summarize_results if full detail is still needed. At most one per response; summary covers knowledge BEFORE this batch. The host replaces worthwhile result bodies at batch close or skips them permanently. Originals remain readable via builtin_history_get_message. No extra call, retry, acknowledgement or final-answer control.",
+      "attempts": 0,
+      "invalid": 0,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_rVxfhQV2LB7awZBXyNcX9708",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/config/widget_sources.go\", \"start\": 1, \"end\": 138}"
+            },
+            {
+              "id": "call_01_Q4VZeMwONBHg9sl4596y9803",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/distribution.go\", \"start\": 1, \"end\": 87}"
+            },
+            {
+              "id": "call_02_I9usW8sqN0n16x6pEkhu4842",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/distribution_test.go\", \"start\": 1, \"end\": 75}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 3,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_CcE53UO1MDNeDe65Q71W6606",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 133, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/api/widget_install.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_vA91BYJdKoXCeQv8Mf0g7285",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 136, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/store/sqlitestore/widget_origins.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_5rvzBzp9XnVVZZExAJSN9747",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/api/widget_install_test.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_rVxfhQV2LB7awZBXyNcX9708"
+              },
+              "view": "content",
+              "contentBytes": 5034
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_Q4VZeMwONBHg9sl4596y9803"
+              },
+              "view": "content",
+              "contentBytes": 4355
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_I9usW8sqN0n16x6pEkhu4842"
+              },
+              "view": "content",
+              "contentBytes": 4466
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 6,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_GOVohW1AoxzQQ92FR4jD2742",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_8CtupPfg6Htqv5LVEdH76246",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 241, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/draft.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_rVxfhQV2LB7awZBXyNcX9708"
+              },
+              "view": "content",
+              "contentBytes": 5034
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_Q4VZeMwONBHg9sl4596y9803"
+              },
+              "view": "content",
+              "contentBytes": 4355
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_I9usW8sqN0n16x6pEkhu4842"
+              },
+              "view": "content",
+              "contentBytes": 4466
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_CcE53UO1MDNeDe65Q71W6606"
+              },
+              "view": "content",
+              "contentBytes": 6108
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_vA91BYJdKoXCeQv8Mf0g7285"
+              },
+              "view": "content",
+              "contentBytes": 7157
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_5rvzBzp9XnVVZZExAJSN9747"
+              },
+              "view": "content",
+              "contentBytes": 10742
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_LZe3DgDJHLXr1zslDjw57581",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 250, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_rVxfhQV2LB7awZBXyNcX9708"
+              },
+              "view": "content",
+              "contentBytes": 5034
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_Q4VZeMwONBHg9sl4596y9803"
+              },
+              "view": "content",
+              "contentBytes": 4355
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_I9usW8sqN0n16x6pEkhu4842"
+              },
+              "view": "content",
+              "contentBytes": 4466
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_CcE53UO1MDNeDe65Q71W6606"
+              },
+              "view": "content",
+              "contentBytes": 6108
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_vA91BYJdKoXCeQv8Mf0g7285"
+              },
+              "view": "content",
+              "contentBytes": 7157
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_5rvzBzp9XnVVZZExAJSN9747"
+              },
+              "view": "content",
+              "contentBytes": 10742
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_GOVohW1AoxzQQ92FR4jD2742"
+              },
+              "view": "content",
+              "contentBytes": 9335
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_8CtupPfg6Htqv5LVEdH76246"
+              },
+              "view": "content",
+              "contentBytes": 8530
+            }
+          ]
+        },
+        {
+          "request": 5,
+          "visible_results": 9,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_0bE5k3BHxsYMEcwCcrkX5967",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 280, \"path\": \"/var/folders/wc/ltznt28159l3xvv4wqkrvzbh0000gn/T/pudding-memo-long-4873130/core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 250}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_rVxfhQV2LB7awZBXyNcX9708"
+              },
+              "view": "content",
+              "contentBytes": 5034
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_Q4VZeMwONBHg9sl4596y9803"
+              },
+              "view": "content",
+              "contentBytes": 4355
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_I9usW8sqN0n16x6pEkhu4842"
+              },
+              "view": "content",
+              "contentBytes": 4466
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_CcE53UO1MDNeDe65Q71W6606"
+              },
+              "view": "content",
+              "contentBytes": 6108
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_vA91BYJdKoXCeQv8Mf0g7285"
+              },
+              "view": "content",
+              "contentBytes": 7157
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_5rvzBzp9XnVVZZExAJSN9747"
+              },
+              "view": "content",
+              "contentBytes": 10742
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_GOVohW1AoxzQQ92FR4jD2742"
+              },
+              "view": "content",
+              "contentBytes": 9335
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_8CtupPfg6Htqv5LVEdH76246"
+              },
+              "view": "content",
+              "contentBytes": 8530
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_LZe3DgDJHLXr1zslDjw57581"
+              },
+              "view": "content",
+              "contentBytes": 5513
+            }
+          ]
+        },
+        {
+          "request": 6,
+          "visible_results": 10,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_rVxfhQV2LB7awZBXyNcX9708"
+              },
+              "view": "content",
+              "contentBytes": 5034
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_Q4VZeMwONBHg9sl4596y9803"
+              },
+              "view": "content",
+              "contentBytes": 4355
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_I9usW8sqN0n16x6pEkhu4842"
+              },
+              "view": "content",
+              "contentBytes": 4466
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_CcE53UO1MDNeDe65Q71W6606"
+              },
+              "view": "content",
+              "contentBytes": 6108
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_vA91BYJdKoXCeQv8Mf0g7285"
+              },
+              "view": "content",
+              "contentBytes": 7157
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_02_5rvzBzp9XnVVZZExAJSN9747"
+              },
+              "view": "content",
+              "contentBytes": 10742
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_GOVohW1AoxzQQ92FR4jD2742"
+              },
+              "view": "content",
+              "contentBytes": 9335
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_01_8CtupPfg6Htqv5LVEdH76246"
+              },
+              "view": "content",
+              "contentBytes": 8530
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_LZe3DgDJHLXr1zslDjw57581"
+              },
+              "view": "content",
+              "contentBytes": 5513
+            },
+            {
+              "ref": {
+                "turn_id": "turn_f70af1b0e3f62740",
+                "call_id": "call_00_0bE5k3BHxsYMEcwCcrkX5967"
+              },
+              "view": "content",
+              "contentBytes": 1680
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v3-probe",
+      "variant": "original",
+      "instructions": "Before each necessary next read, check whether earlier bulky results have yielded facts you can now retain briefly. If so, attach summarize_results to that normal call: copy their OUTER result_ref into result_refs and preserve the verified facts in summary (max 800 characters). Do this while gathering evidence, not after all reading is finished; one resolved fact or file is enough, the entire task need not be solved. The host's outer summary_hint marks a large result: apply this checkpoint when its evidence is understood; it does not mean unresolved details are safe to discard. For code review retain file paths, source line numbers and short exact quotes needed in the final answer; citations do not require keeping the whole file once this evidence is retained. Omit results whose unresolved details or necessary evidence will not fit. At most one control per response, only about results already visible BEFORE this batch, including readback pages; never copy refs from content. The host replaces worthwhile bodies at batch close, otherwise skips them; originals remain readable via builtin_history_get_message. The parameter is optional, not a tool. Never add, split or repeat a business call just to carry it; no cleanup request, acknowledgement, retry or final-answer control.",
+      "attempts": 1,
+      "invalid": 1,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_WhImgA0q0rYcPPqcct413211",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"start\": 1, \"end\": 133}"
+            },
+            {
+              "id": "call_01_ZlUINouZSRIrIxevMY4Q3177",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"start\": 1, \"end\": 87}"
+            },
+            {
+              "id": "call_02_YJRg7pTg8AVj35tePk3j7167",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"start\": 1, \"end\": 136}"
+            },
+            {
+              "id": "call_03_U3529vTxHqhnRXOO6WWt4853",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"start\": 1, \"end\": 138}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 4,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_hIysnE26lbW18Dkv493H8128",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_28fSqP8ElEuUCDD8yzKV7450",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 75, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_vhHGay41mwQoYrrxgwY41624",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_03_iyfNMRPwLhUeiHQeVPRl4151",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 241, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_WhImgA0q0rYcPPqcct413211"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_01_ZlUINouZSRIrIxevMY4Q3177"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_02_YJRg7pTg8AVj35tePk3j7167"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_03_U3529vTxHqhnRXOO6WWt4853"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_LDchhr3vhbYYf5WHAUN72281",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 260, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139, \"summarize_results\": {\"result_refs\": [{\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_00_WhImgA0q0rYcPPqcct413211\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_01_ZlUINouZSRIrIxevMY4Q3177\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_02_YJRg7pTg8AVj35tePk3j7167\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_03_U3529vTxHqhnRXOO6WWt4853\"}, {\"turn_id\": \"turn_66af992c18c1844b\", \"call_id\": \"call_00_hIysnE26lbW18Dkv493H8128\"}], \"summary\": \"widget_install.go: NormalizeWidgetRegistryURL at L40; install dedupe scan L75-91 (matches origin registryURL+packageID, non-copy, active+archived; archived -> conflict L83-85; active -> 200 cached L86-87); upgrade guard L97-99 rejects nil/Copy/diverged head/stale revision; draft check L100-108 returns 409 {\\\"error\\\":\\\"widget_local_changes\\\"} when DraftHash!=HeadRevision, removes unmodified draft root L109-116; WritePackage L119; InstallWidgetPackage stores Origin PackageHash=req.PackageHash, SourceHash=hash L127. distribution.go: https not checked; outer hash L41-44; per-file hash check L80-85 rejects mismatch; inventory length L77. store: expected==0 lookup by registryURL/packageID/copy=0 L30; archived/deleted conflict L35-36; same version different PackageHash conflict L50-53; same version+hash no-op L54; upgrade base=HeadRevision L56; revision insert L62-65; UPDATE only origin/icon L70. config: scheme must be https L30. API test: duplicate install same ID L73-76; upgrade keeps ActiveRevision L101-105; data 'Keep me' L109-112; copy upgrade 409 L154-155; archived install 409 L173-174; file changed rejected L58 distribution_test.\"}}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_WhImgA0q0rYcPPqcct413211"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_01_ZlUINouZSRIrIxevMY4Q3177"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_02_YJRg7pTg8AVj35tePk3j7167"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_03_U3529vTxHqhnRXOO6WWt4853"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_hIysnE26lbW18Dkv493H8128"
+              },
+              "view": "content",
+              "contentBytes": 10746
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_01_28fSqP8ElEuUCDD8yzKV7450"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_02_vhHGay41mwQoYrrxgwY41624"
+              },
+              "view": "content",
+              "contentBytes": 9339
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_03_iyfNMRPwLhUeiHQeVPRl4151"
+              },
+              "view": "content",
+              "contentBytes": 8534
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 9,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_WhImgA0q0rYcPPqcct413211"
+              },
+              "view": "content",
+              "contentBytes": 6112
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_01_ZlUINouZSRIrIxevMY4Q3177"
+              },
+              "view": "content",
+              "contentBytes": 4359
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_02_YJRg7pTg8AVj35tePk3j7167"
+              },
+              "view": "content",
+              "contentBytes": 7161
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_03_U3529vTxHqhnRXOO6WWt4853"
+              },
+              "view": "content",
+              "contentBytes": 5038
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_hIysnE26lbW18Dkv493H8128"
+              },
+              "view": "content",
+              "contentBytes": 10746
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_01_28fSqP8ElEuUCDD8yzKV7450"
+              },
+              "view": "content",
+              "contentBytes": 4470
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_02_vhHGay41mwQoYrrxgwY41624"
+              },
+              "view": "content",
+              "contentBytes": 9339
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_03_iyfNMRPwLhUeiHQeVPRl4151"
+              },
+              "view": "content",
+              "contentBytes": 8534
+            },
+            {
+              "ref": {
+                "turn_id": "turn_66af992c18c1844b",
+                "call_id": "call_00_LDchhr3vhbYYf5WHAUN72281"
+              },
+              "view": "content",
+              "contentBytes": 6021
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v4-probe",
+      "variant": "original",
+      "instructions": "Before each necessary next read, check whether earlier bulky results have yielded facts you can now retain briefly. If so, attach summarize_results to that normal call: copy their OUTER result_ref into result_refs and preserve the verified facts in summary. Prefer ONE fully understood large result at a time. Summarize only the selected result, not the entire investigation: aim for 300-500 characters, with an absolute maximum of 800. Select fewer results when their necessary evidence will not fit; never truncate quotes to force a fit. Do this while gathering evidence, not after all reading is finished; one resolved fact or file is enough, the entire task need not be solved. The host's outer summary_hint marks a large result: apply this checkpoint when its evidence is understood; it does not mean unresolved details are safe to discard. For code review retain file paths, source line numbers and short exact quotes needed in the final answer; citations do not require keeping the whole file once this evidence is retained. Omit results whose unresolved details or necessary evidence will not fit. At most one control per response, only about results already visible BEFORE this batch, including readback pages; never copy refs from content. The host replaces worthwhile bodies at batch close, otherwise skips them; originals remain readable via builtin_history_get_message. The parameter is optional, not a tool. Never add, split or repeat a business call just to carry it; no cleanup request, acknowledgement, retry or final-answer control.",
+      "attempts": 0,
+      "invalid": 0,
+      "accepted": 0,
+      "released": 0,
+      "steps": [
+        {
+          "request": 1,
+          "visible_results": 0,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_io1ysBGFzTRMuowr14LT3315",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"lines\": 200}"
+            },
+            {
+              "id": "call_01_KWzX9i9m1fy1hOW4Nxx55927",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"lines\": 120}"
+            },
+            {
+              "id": "call_02_DqpLIDxM47nFiQSPOB7r4242",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"lines\": 160}"
+            },
+            {
+              "id": "call_03_pE0U3UpIJrUbFR8AZm9c4503",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"lines\": 160}"
+            }
+          ],
+          "result_views": []
+        },
+        {
+          "request": 2,
+          "visible_results": 4,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_ky7WsfRf3av22k0NImta1448",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 340, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_01_0YHajNx0qNEGKFyzSOlr1612",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 260, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_02_IFDqpziduiH7LLrrLant6301",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 190, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\"}"
+            },
+            {
+              "id": "call_03_lPszLABi2QIEgOeqsxkV7004",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 100, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\"}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_io1ysBGFzTRMuowr14LT3315"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_01_KWzX9i9m1fy1hOW4Nxx55927"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_02_DqpLIDxM47nFiQSPOB7r4242"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_03_pE0U3UpIJrUbFR8AZm9c4503"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            }
+          ]
+        },
+        {
+          "request": 3,
+          "visible_results": 8,
+          "released_results": 0,
+          "calls": [
+            {
+              "id": "call_00_RxtV4mgiw2iGXwNT3uqN2871",
+              "name": "builtin_file_slice",
+              "arguments": "{\"lines\": 112, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139}"
+            }
+          ],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_io1ysBGFzTRMuowr14LT3315"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_01_KWzX9i9m1fy1hOW4Nxx55927"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_02_DqpLIDxM47nFiQSPOB7r4242"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_03_pE0U3UpIJrUbFR8AZm9c4503"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_ky7WsfRf3av22k0NImta1448"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_01_0YHajNx0qNEGKFyzSOlr1612"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_02_IFDqpziduiH7LLrrLant6301"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_03_lPszLABi2QIEgOeqsxkV7004"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            }
+          ]
+        },
+        {
+          "request": 4,
+          "visible_results": 9,
+          "released_results": 0,
+          "calls": [],
+          "result_views": [
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_io1ysBGFzTRMuowr14LT3315"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_01_KWzX9i9m1fy1hOW4Nxx55927"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_02_DqpLIDxM47nFiQSPOB7r4242"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_03_pE0U3UpIJrUbFR8AZm9c4503"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_ky7WsfRf3av22k0NImta1448"
+              },
+              "view": "content",
+              "contentBytes": 9341
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_01_0YHajNx0qNEGKFyzSOlr1612"
+              },
+              "view": "content",
+              "contentBytes": 8536
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_02_IFDqpziduiH7LLrrLant6301"
+              },
+              "view": "content",
+              "contentBytes": 10748
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_03_lPszLABi2QIEgOeqsxkV7004"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_1e3ff30356b5d0e8",
+                "call_id": "call_00_RxtV4mgiw2iGXwNT3uqN2871"
+              },
+              "view": "content",
+              "contentBytes": 5519
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limits": "每格仅运行一次，缓存/读取分批/推理量未被强制控制；仅说明行为，不证明动机或因果。"
+}

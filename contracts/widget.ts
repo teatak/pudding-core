@@ -269,6 +269,7 @@ export const widgetReleaseRequirements = z.object({ protocolVersion: z.number().
 export const widgetRegistryRelease = z.object({
   version: z.string().regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[a-zA-Z0-9][a-zA-Z0-9.-]*)?$/),
   package: z.string().min(1), packageHash: widgetHash, requires: widgetReleaseRequirements,
+  channel: z.string().max(64).optional(), preview: z.boolean().optional(),
 }).strict();
 export const widgetRegistry = z.object({
   kind: z.literal("pudding.widget.registry"), schemaVersion: z.literal(2),

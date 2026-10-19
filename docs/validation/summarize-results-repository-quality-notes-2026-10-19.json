@@ -1,0 +1,41 @@
+{
+  "scope": "Manual review of final explanations, separately from the frozen factual/citation rubric. No model requests added.",
+  "notes": [
+    {
+      "taskID": "draft-restart",
+      "arm": "on",
+      "finding": "九项事实和有效引用均通过；解释正确区分持久化失败、未完成附件、发送幂等和晚到确认。未见影响本任务结论的额外事实错误。"
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "arm": "both",
+      "finding": "九项事实均正确。两组将直接调用 store 时的 uploading/ack 顺序推断为产品级附件丢失风险，但给定材料不含 Composer 的发送入口保护，该结论缺少上层可达性验证。此项不作为已确认产品缺陷。",
+      "additionalReviewSource": "Desktop web/src/components/Composer.tsx detects uploading/error attachments; this source was not part of the model fixture."
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "arm": "on",
+      "finding": "解释称 key 缺失时 setter 可能重建空草稿，但同一冻结 sessionDraftStore.setAttachments 的 attachments===current.attachments 分支直接返回 state；晚到回调返回原空数组时不会重建。固定问题答案未受影响。"
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "arm": "off",
+      "finding": "clientRequestID 复用被描述为潜在后端幂等风险，但没有审查后端会话创建与消息幂等边界，属于未验证推断。"
+    },
+    {
+      "taskID": "widget-install-upgrade",
+      "arm": "both",
+      "finding": "九项事实与引用正确，head/active/data 区分正确。解释指出文件系统写入先于数据库事务，但没有把这一观察当作已复现的运行数据损坏；包内容按源码哈希保存，失败后的新包残留与覆盖正在运行版本应区分。"
+    },
+    {
+      "taskID": "history-result-readback",
+      "arm": "both",
+      "finding": "九项事实、所需引用和分页默认值追问全部正确。解释对无回读工具时的预览阈值、原始偏移、JSON 数组和快照状态区分正确。"
+    },
+    {
+      "taskID": "draft-restart",
+      "arm": "off",
+      "finding": "最终回答请求在 120000 ms 超时，没有最终答案或 usage。属于执行/测量失败，不能据此判定模型事实回答错误，也不能把该请求费用记为零。"
+    }
+  ]
+}

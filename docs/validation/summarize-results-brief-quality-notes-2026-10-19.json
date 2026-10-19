@@ -1,0 +1,26 @@
+{
+  "scope": "Manual review of the four final explanations, separate from fixed factual/citation checks. No additional model requests or newly transmitted sources.",
+  "reportSHA256": "b932fa338410b4cbfa9005d46964ebd41ac6f071def7a5fc3049d21f3ff5637c",
+  "notes": [
+    {
+      "taskID": "draft-restart",
+      "finding": "九项事实与所需引用通过。解释区分防抖窗口、存储失败、未完成上传、幂等 ID 和晚到确认；关于服务端去重的风险明确属于给定前端材料无法验证的边界。"
+    },
+    {
+      "taskID": "attachment-acknowledgement",
+      "finding": "九项事实与所需引用通过。解释没有重现此前“迟到回调重建空草稿”的错误。但仍将直接调用 store 时 uploading/ack 顺序描述为附件丢失风险；冻结材料不含 Composer 发送入口保护，不能认定产品中可触发。与上一轮相同，此项不作为已确认缺陷。"
+    },
+    {
+      "taskID": "widget-install-upgrade",
+      "finding": "九项事实与所需引用通过。解释区分 head、active 与 data，并将 DB 提交前写文件的风险表述为未引用源码目录残留；没有据此声称覆盖正在运行版本。"
+    },
+    {
+      "taskID": "history-result-readback",
+      "finding": "九项事实与所需引用通过。解释正确区分原始分页偏移、chars 与记录索引、JSON 数组类型、原始历史快照及编号内容的类型级去重。"
+    }
+  ],
+  "limits": [
+    "自动检查仅验证九项固定事实和至少一条符合来源、范围及逐字匹配的引用；不自动证明每句解释或引用的逻辑充分性。",
+    "人工检查未在本轮运行新的产品复现实验；未验证的风险推断不作为新缺陷。"
+  ]
+}

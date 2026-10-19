@@ -24,6 +24,7 @@ type WidgetOrigin struct {
 	RegistryURL string `json:"registryURL"`
 	PackageID   string `json:"packageID"`
 	Version     string `json:"version"`
+	Preview     bool   `json:"preview,omitempty"`
 	PackageHash string `json:"packageHash"`
 	SourceHash  string `json:"sourceHash"`
 	Copy        bool   `json:"copy"`

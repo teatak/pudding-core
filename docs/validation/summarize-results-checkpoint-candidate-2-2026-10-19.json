@@ -1,0 +1,480 @@
+{
+  "version": "repository-review-v1",
+  "harnessVersion": "5",
+  "arm": "memo",
+  "httpTimeoutSeconds": 240,
+  "phaseTimeoutSeconds": 600,
+  "generatedAt": "2026-10-19T10:18:37.222781Z",
+  "manifestSHA256": "149e5eadde702413e2adaf4708fe2ab23acd61b2bee2170dc496ba9729bcd33d",
+  "schemaVersion": "summarize-results-v3-checkpoint",
+  "instructions": "Maintain concise evidence while gathering it. OUTER summary_candidate:true marks a large tool result, not permission to discard it. Before your next necessary tool call, check these candidates: if one has answered its question and its needed facts and citations fit briefly, include summarize_results on that call. This is the normal action for a consumed candidate; do not wait for the whole task to finish. Prefer one result at a time. Copy its OUTER result_ref into result_refs. Write 1-3 short factual sentences, usually under 400 characters, never over 800. Keep source paths, line numbers and short exact quotes needed later; omit process recaps and unused details. Example addition to normal args: {\"summarize_results\":{\"result_refs\":[{\"turn_id\":\"\u003ccopy\u003e\",\"call_id\":\"\u003ccopy\u003e\"}],\"summary\":\"\u003csource:line; needed exact evidence; conclusion\u003e\"}}. Omit if details remain unresolved or necessary evidence will not fit. Use only visible outer refs, including readback pages, never refs from content. At most one control per response, about knowledge BEFORE this batch. The host replaces worthwhile bodies at batch close or skips them; originals remain readable via builtin_history_get_message. Never add, split or repeat a business call just for this parameter. When ready to answer, answer directly: no cleanup request, retry, acknowledgement or final-answer control.",
+  "requestedModel": "deepseek-flash",
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "plannedRuns": 1,
+  "pricingSource": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "rateExplanation": "Verified 2026-10-19. Uniform peak USD/1M: uncached input 0.30, cached input 0.006, all output including reasoning 1.20. Includes follow-up/readback and failed attempts. Cache observed, not controlled; not a billing statement.",
+  "runs": [
+    {
+      "taskID": "widget-install-upgrade",
+      "sample": 0,
+      "memo": true,
+      "startedAt": "2026-10-19T10:18:37.223719Z",
+      "main": {
+        "requests": 4,
+        "businessCalls": 9,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 29879,
+          "InputCachedTokens": 67200,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 2268,
+          "OutputReasoningTokens": 18887
+        },
+        "estimatedUSDAtPeakRates": 0.0347529,
+        "correct": true,
+        "checksPassed": 18,
+        "checksTotal": 18,
+        "answer": "{\"answers\":{\"http_registry_accepted\":false,\"reinstall_duplicates\":false,\"upgrade_activates\":false,\"upgrade_keeps_data\":true,\"copy_upgrade_allowed\":false,\"edited_draft_error\":\"widget_local_changes\",\"same_version_changed_hash_allowed\":false,\"changed_file_hash_accepted\":false,\"archived_reinstall_conflicts\":true},\"evidence\":{\"http_registry_accepted\":[{\"file\":\"core/internal/config/widget_sources.go\",\"start_line\":30,\"end_line\":30,\"quote\":\"if err != nil || u.Scheme != \\\"https\\\" || u.Hostname() == \\\"\\\" || u.User != nil || u.Fragment != \\\"\\\" || len(raw) \u003e 2048 {\"},{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":40,\"end_line\":42,\"quote\":\"req.RegistryURL, err = config.NormalizeWidgetRegistryURL(req.RegistryURL)\"}],\"reinstall_duplicates\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":82,\"end_line\":82,\"quote\":\"if item.Origin != nil \u0026\u0026 !item.Origin.Copy \u0026\u0026 item.Origin.RegistryURL == req.RegistryURL \u0026\u0026 item.Origin.PackageID == pkg.ID {\"},{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":86,\"end_line\":86,\"quote\":\"c.JSON(http.StatusOK, item)\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":42,\"end_line\":42,\"quote\":\"id = current.ID\"}],\"upgrade_activates\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":21,\"end_line\":21,\"quote\":\"// Source, provenance and item creation commit together. Activation remains an explicit build/activate step.\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":70,\"end_line\":70,\"quote\":\"_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":103,\"end_line\":103,\"quote\":\"if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != \\\"2.0.0-preview.1\\\" || !w.Origin.Preview {\"}],\"upgrade_keeps_data\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":70,\"end_line\":70,\"quote\":\"_, err = tx.ExecContext(ctx, `UPDATE studio_items SET origin=?, icon=? WHERE id=?`, string(origin), w.Icon, id)\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":110,\"end_line\":110,\"quote\":\"if !bytes.Contains(data.Data, []byte(\\\"Keep me\\\")) {\"}],\"copy_upgrade_allowed\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":97,\"end_line\":97,\"quote\":\"if current.Origin == nil || current.Origin.Copy || current.HeadRevision != current.Origin.SourceHash || current.Revision != req.ExpectedRevision {\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":47,\"end_line\":47,\"quote\":\"if current == nil || current.Revision != expected || current.Kind != store.StudioItemKindWidget || current.Origin == nil || current.Origin.Copy || current.Origin.RegistryURL != w.Origin.RegistryURL || current.Origin.PackageID != w.Origin.PackageID || current.HeadRevision != current.Origin.SourceHash {\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":155,\"end_line\":155,\"quote\":\"call(\\\"POST\\\", \\\"/studio/items/install\\\", request(third, \\\"upgrade\\\", \\\"copy-upgrade\\\", \u0026custom), 409)\"}],\"edited_draft_error\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":106,\"end_line\":106,\"quote\":\"c.JSON(http.StatusConflict, map[string]string{\\\"error\\\": \\\"widget_local_changes\\\"})\"}],\"same_version_changed_hash_allowed\":[{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":50,\"end_line\":52,\"quote\":\"if current.Origin.PackageHash != w.Origin.PackageHash {\"}],\"changed_file_hash_accepted\":[{\"file\":\"core/internal/widget/distribution.go\",\"start_line\":80,\"end_line\":84,\"quote\":\"if d.FileHashes[name] != fmt.Sprintf(\\\"%x\\\", h) {\"}],\"archived_reinstall_conflicts\":[{\"file\":\"core/internal/api/widget_install.go\",\"start_line\":83,\"end_line\":84,\"quote\":\"return s.studioItemError(c, store.ErrStudioItemConflict)\"},{\"file\":\"core/internal/store/sqlitestore/widget_origins.go\",\"start_line\":35,\"end_line\":35,\"quote\":\"if current != nil \u0026\u0026 (current.Deleted || current.ArchivedAt != nil) {\"},{\"file\":\"core/internal/api/widget_install_test.go\",\"start_line\":174,\"end_line\":174,\"quote\":\"call(\\\"POST\\\", \\\"/studio/items/install\\\", request(pkg, \\\"install\\\", \\\"install-3\\\", nil), 409)\"}]},\"explanation\":\"静态追踪的跨文件链路是：config.NormalizeWidgetRegistryURL 先把来源限制为 HTTPS；api/widget_install.go 再以 (registryURL, packageID, copy=false) 在 active 与 archived 两个 scope 做安装幂等；store/sqlitestore/widget_origins.go 以 expected==0 查询和唯一索引兜底。升级要求非副本、HeadRevision==Origin.SourceHash 且 Revision 匹配；working draft 存在且 DraftHash!=HeadRevision 时直接 409 widget_local_changes，只有未修改 draft 会被删除重建。InstallWidgetPackage 只追加源码 revision 并更新 origin/icon，不写 active_revision，也不触碰 widget_data，因此源码 head 前移、运行版本仍停在旧 ActiveRevision，业务数据按 item 保留，激活仍需显式 build/activate。包入口先校验外层 SHA-256，再校验 FileHashes 清单长度和逐文件 SHA-256；存储层拒绝同版本不同 PackageHash。风险边界：对已有活跃原件的 install 重装会静默返回旧条目，即使请求的是新版本/新哈希；归档原件不能重装；存储层只比较版本是否相同，不校验版本单调性，降级可进入 upgrade；升级不迁移 widget_data，新版本与旧数据的 schema 兼容性无人保证；同版本冲突发生在写包和清理未修改 draft 之后。以上为静态代码路径结论，未运行测试。\"}"
+      },
+      "followup": {
+        "requests": 1,
+        "businessCalls": 0,
+        "readbackCalls": 0,
+        "usage": {
+          "InputUncachedTokens": 12349,
+          "InputCachedTokens": 43648,
+          "CacheCreationTokens": 0,
+          "OutputContentTokens": 10,
+          "OutputReasoningTokens": 50
+        },
+        "estimatedUSDAtPeakRates": 0.004038588,
+        "correct": true,
+        "checksPassed": 1,
+        "checksTotal": 1,
+        "answer": "{\"min\":8,\"max\":100}"
+      },
+      "requests": [
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 2016,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 3877,
+            "InputCachedTokens": 4992,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 355,
+            "OutputReasoningTokens": 46
+          },
+          "releasedResults": 0,
+          "referencedResults": 0,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "1a3f1cdd90b3d53e417a7729f433a832e3dc4ff77dcffddcab2159b7b629cf5f",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_pG7fCZW3QJEv0nua22QT0553",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/api/widget_install.go\", \"start\": 1, \"end\": 133}"
+            },
+            {
+              "id": "call_01_CfgkzNScNEbvc8dmmGMD4378",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/widget/distribution.go\", \"start\": 1, \"end\": 87}"
+            },
+            {
+              "id": "call_02_fR17lvtKhqFSdxgYXTb60599",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/store/sqlitestore/widget_origins.go\", \"start\": 1, \"end\": 136}"
+            },
+            {
+              "id": "call_03_7yqVtQU4TuX6lkvqY5jW8895",
+              "name": "builtin_file_slice",
+              "arguments": "{\"scope\": \"project\", \"path\": \"core/internal/config/widget_sources.go\", \"start\": 1, \"end\": 138}"
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 1661,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 9299,
+            "InputCachedTokens": 9216,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 349,
+            "OutputReasoningTokens": 7
+          },
+          "releasedResults": 0,
+          "referencedResults": 4,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "1a3f1cdd90b3d53e417a7729f433a832e3dc4ff77dcffddcab2159b7b629cf5f",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_lCvRXmK2LmAeLPQw8Jfj8398",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 175, \"path\": \"core/internal/api/widget_install_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_01_vlILzppuY4ZHU6Rr6b820123",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 75, \"path\": \"core/internal/widget/distribution_test.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_02_uhfvtbqXZeMSSvb5ltcM3563",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 323, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 1}"
+            },
+            {
+              "id": "call_03_VfXAYMk4N9lKoCXmkqW38752",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 241, \"path\": \"core/internal/widget/draft.go\", \"scope\": \"project\", \"start\": 1}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_pG7fCZW3QJEv0nua22QT0553"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_CfgkzNScNEbvc8dmmGMD4378"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_fR17lvtKhqFSdxgYXTb60599"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_7yqVtQU4TuX6lkvqY5jW8895"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 6987,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 14111,
+            "InputCachedTokens": 18816,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 94,
+            "OutputReasoningTokens": 1166
+          },
+          "releasedResults": 0,
+          "referencedResults": 8,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "1a3f1cdd90b3d53e417a7729f433a832e3dc4ff77dcffddcab2159b7b629cf5f",
+          "finishReason": "tool_calls",
+          "calls": [
+            {
+              "id": "call_00_Rtk8kVUdzGln0w9iBfIR5093",
+              "name": "builtin_file_slice",
+              "arguments": "{\"end\": 270, \"path\": \"core/internal/widget/package.go\", \"scope\": \"project\", \"start\": 139}"
+            }
+          ],
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_pG7fCZW3QJEv0nua22QT0553"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_CfgkzNScNEbvc8dmmGMD4378"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_fR17lvtKhqFSdxgYXTb60599"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_7yqVtQU4TuX6lkvqY5jW8895"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_lCvRXmK2LmAeLPQw8Jfj8398"
+              },
+              "view": "content",
+              "contentBytes": 10748,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_vlILzppuY4ZHU6Rr6b820123"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_uhfvtbqXZeMSSvb5ltcM3563"
+              },
+              "view": "content",
+              "contentBytes": 9341,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_VfXAYMk4N9lKoCXmkqW38752"
+              },
+              "view": "content",
+              "contentBytes": 8536,
+              "summaryCandidate": true
+            }
+          ]
+        },
+        {
+          "phase": "main",
+          "status": 200,
+          "durationMS": 79081,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 2592,
+            "InputCachedTokens": 34176,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 1470,
+            "OutputReasoningTokens": 17668
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "1a3f1cdd90b3d53e417a7729f433a832e3dc4ff77dcffddcab2159b7b629cf5f",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_pG7fCZW3QJEv0nua22QT0553"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_CfgkzNScNEbvc8dmmGMD4378"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_fR17lvtKhqFSdxgYXTb60599"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_7yqVtQU4TuX6lkvqY5jW8895"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_lCvRXmK2LmAeLPQw8Jfj8398"
+              },
+              "view": "content",
+              "contentBytes": 10748,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_vlILzppuY4ZHU6Rr6b820123"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_uhfvtbqXZeMSSvb5ltcM3563"
+              },
+              "view": "content",
+              "contentBytes": 9341,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_VfXAYMk4N9lKoCXmkqW38752"
+              },
+              "view": "content",
+              "contentBytes": 8536,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_Rtk8kVUdzGln0w9iBfIR5093"
+              },
+              "view": "content",
+              "contentBytes": 6481
+            }
+          ]
+        },
+        {
+          "phase": "followup",
+          "status": 200,
+          "durationMS": 1289,
+          "responseModel": "deepseek-flash",
+          "complete": true,
+          "usageSeen": true,
+          "usage": {
+            "InputUncachedTokens": 12349,
+            "InputCachedTokens": 43648,
+            "CacheCreationTokens": 0,
+            "OutputContentTokens": 10,
+            "OutputReasoningTokens": 50
+          },
+          "releasedResults": 0,
+          "referencedResults": 9,
+          "memoTools": 2,
+          "instructionsSeen": true,
+          "systemSHA256": "1a3f1cdd90b3d53e417a7729f433a832e3dc4ff77dcffddcab2159b7b629cf5f",
+          "finishReason": "stop",
+          "resultViews": [
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_pG7fCZW3QJEv0nua22QT0553"
+              },
+              "view": "content",
+              "contentBytes": 6114
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_CfgkzNScNEbvc8dmmGMD4378"
+              },
+              "view": "content",
+              "contentBytes": 4361
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_fR17lvtKhqFSdxgYXTb60599"
+              },
+              "view": "content",
+              "contentBytes": 7163
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_7yqVtQU4TuX6lkvqY5jW8895"
+              },
+              "view": "content",
+              "contentBytes": 5040
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_lCvRXmK2LmAeLPQw8Jfj8398"
+              },
+              "view": "content",
+              "contentBytes": 10748,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_01_vlILzppuY4ZHU6Rr6b820123"
+              },
+              "view": "content",
+              "contentBytes": 4472
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_02_uhfvtbqXZeMSSvb5ltcM3563"
+              },
+              "view": "content",
+              "contentBytes": 9341,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_03_VfXAYMk4N9lKoCXmkqW38752"
+              },
+              "view": "content",
+              "contentBytes": 8536,
+              "summaryCandidate": true
+            },
+            {
+              "ref": {
+                "turn_id": "turn_9209044ea92d6ad4",
+                "call_id": "call_00_Rtk8kVUdzGln0w9iBfIR5093"
+              },
+              "view": "content",
+              "contentBytes": 6481
+            }
+          ]
+        }
+      ],
+      "memoAttempts": 0,
+      "invalidMemos": 0,
+      "acceptedNotes": 0,
+      "applied": 0,
+      "skipped": {},
+      "meteringOK": true
+    }
+  ]
+}

@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v26 are immutable. Unpublished Studio
 	// layouts 27–29 are consolidated into the final v30 upgrade.
 	releasedFingerprints := map[int]string{
+		47: "4b0251cf9b9ea456b4b051cce0ef71c05912ba45445edce66fd6cafcc6d59317", // Withdrawn experiment: same canonical layout as v46.
 		46: "4b0251cf9b9ea456b4b051cce0ef71c05912ba45445edce66fd6cafcc6d59317",
 		45: "876bbae46aabf9cfe082c3f7fdd063b2a55fa2c9c4e708454559a458f4ce106c",
 		44: "56b3ae2f6ba13df9dfe4ed2ff024748299458cc2be346b280fc7d317e2d7f897", // Repair skipped Page edit tables; the canonical schema is unchanged.
@@ -90,6 +91,62 @@ func TestOpenCreatesVersionedSchema(t *testing.T) {
 	}
 	if version != currentSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+func TestOpenAfterExperimentWithdrawal(t *testing.T) {
+	for _, version := range []int{46, 47} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pudding.db")
+			st, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			createTestSession(t, st, "sess_withdrawal")
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db := openMigrationTestDB(t, path)
+			if version == 47 {
+				// Reproduce an existing experimental database without loading its code.
+				if _, err := db.Exec(`CREATE TABLE tool_memo_contexts (
+					session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+					revision INTEGER NOT NULL, data TEXT NOT NULL);
+					INSERT INTO tool_memo_contexts VALUES ('sess_withdrawal', 1, '{"retained":true}');`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := setSchemaVersion(db, version); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if got, err := schemaVersion(reopened.db); err != nil || got != currentSchemaVersion {
+				t.Fatalf("reopened schema = %d, err = %v", got, err)
+			}
+			var sessions, tables int
+			if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = 'sess_withdrawal'`).Scan(&sessions); err != nil || sessions != 1 {
+				t.Fatalf("session retained = %d, err = %v", sessions, err)
+			}
+			if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'tool_memo_contexts'`).Scan(&tables); err != nil {
+				t.Fatal(err)
+			}
+			if version == 46 && tables != 0 {
+				t.Fatal("upgrade recreated the withdrawn experimental table")
+			}
+			if version == 47 {
+				var data string
+				if err := reopened.db.QueryRow(`SELECT data FROM tool_memo_contexts WHERE session_id = 'sess_withdrawal'`).Scan(&data); err != nil || data != `{"retained":true}` {
+					t.Fatalf("experimental data retained = %q, err = %v", data, err)
+				}
+			}
+		})
 	}
 }
 

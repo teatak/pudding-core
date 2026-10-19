@@ -124,7 +124,7 @@ func (s *Server) installWidgetPackage(c *cart.Context) error {
 		icon = "component"
 	}
 	now := time.Now().UTC()
-	item, err := s.store.InstallWidgetPackage(c.Request.Context(), &store.StudioItem{ID: id, Kind: store.StudioItemKindWidget, Name: title, Icon: icon, IconColor: "violet", CreatedAt: now, UpdatedAt: now, Origin: &store.WidgetOrigin{RegistryURL: req.RegistryURL, PackageID: pkg.ID, Version: pkg.Version, PackageHash: req.PackageHash, SourceHash: hash}}, req.ExpectedRevision)
+	item, err := s.store.InstallWidgetPackage(c.Request.Context(), &store.StudioItem{ID: id, Kind: store.StudioItemKindWidget, Name: title, Icon: icon, IconColor: "violet", CreatedAt: now, UpdatedAt: now, Origin: &store.WidgetOrigin{RegistryURL: req.RegistryURL, PackageID: pkg.ID, Version: pkg.Version, Preview: pkg.Preview, PackageHash: req.PackageHash, SourceHash: hash}}, req.ExpectedRevision)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}

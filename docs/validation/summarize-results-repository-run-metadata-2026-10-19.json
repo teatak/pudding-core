@@ -1,0 +1,51 @@
+{
+  "binarySHA256": "b6985a662e80e3be5e551d6bf7ce17ef2d85475c6e0e3bbe28df853b46d38782",
+  "manifestSHA256": "a2ed030f478a2d767dff542a4ccb90a9d185fb5c1155cada73519319bf0444c6",
+  "sourceSHA256": {
+    "cmd/memo-prototype/benchmark.go": "e7fee7ef9194a4060e8d87503562dfc8768cf56f95c831b12aa1fd6622e7f953",
+    "cmd/memo-prototype/benchmark_test.go": "a50af62dc793c2134e63b9a2f1d28bab28fa45cde9448470e4ecaf74d98a711e",
+    "cmd/memo-prototype/engine.go": "1c20f46d753e1a94bfceecad3da758c7504730fa23150e961358557d7ab654cf",
+    "cmd/memo-prototype/main.go": "92e75f25310cf45fc5aab3fc1f5126a3ec42272ef4cde6ff651cd5398a78497a",
+    "cmd/memo-prototype/probe.go": "c80d7ffd39a7ab0924420c59ce9d6077ef411e5c7f8168772173f160b76066e7",
+    "cmd/memo-prototype/probe_test.go": "c8c8c4f2f563e4a9399a5a8ef489154949d47728fb84ff74abedb9eae17c3719",
+    "cmd/memo-prototype/repository.go": "8a819fadf08ebedd8b702609f7fe8298f717c086785f995245449eff56c89e6e",
+    "cmd/memo-prototype/repository_test.go": "0ca1183e26bc0b60c9eaae89e5de3eb41cede54aa51187ff4fa8136aa7da3779"
+  },
+  "taskOrder": [
+    "draft-restart",
+    "attachment-acknowledgement",
+    "widget-install-upgrade",
+    "history-result-readback"
+  ],
+  "armOrder": [
+    [
+      "off",
+      "on"
+    ],
+    [
+      "on",
+      "off"
+    ],
+    [
+      "off",
+      "on"
+    ],
+    [
+      "on",
+      "off"
+    ]
+  ],
+  "model": "deepseek-flash",
+  "schemaVersion": "summarize-results-v1",
+  "reasoningEffort": "high",
+  "maxOutputTokens": 4096,
+  "maxMainRequests": 24,
+  "maxFollowupRequests": 4,
+  "retryPolicy": "no experiment reruns; retain all outcomes",
+  "authorization": "User explicitly approved sending these four frozen source sets to DeepSeek before execution.",
+  "exitCode": 1,
+  "exitExplanation": "One original baseline stream timed out without usage; all eight outcomes retained, no rerun.",
+  "completedRuns": 8,
+  "unmeteredRequests": 1,
+  "reportSHA256": "88ab358b81e8e6799d9c15572081ac61fb7f5bd2f85a3efedccbb5424a84a98e"
+}

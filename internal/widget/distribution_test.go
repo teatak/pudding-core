@@ -34,6 +34,8 @@ func TestDistributionRejectsTamperingAndUnsupportedHost(t *testing.T) {
 		ok     bool
 	}{
 		{"valid", func(*Distribution) {}, true},
+		{"preview", func(d *Distribution) { d.Version = "1.1.0-preview.1"; d.Channel = "preview"; d.Preview = true }, true},
+		{"invalid channel", func(d *Distribution) { d.Channel = strings.Repeat("x", 65) }, false},
 		{"SVG icon", func(d *Distribution) {
 			d.Icon = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`))
 		}, true},
@@ -61,9 +63,12 @@ func TestDistributionRejectsTamperingAndUnsupportedHost(t *testing.T) {
 			d := makePackage()
 			tc.mutate(&d)
 			raw, _ := json.Marshal(d)
-			_, hash, err := DecodeDistribution(raw, fmt.Sprintf("%x", sha256.Sum256(raw)))
+			decoded, hash, err := DecodeDistribution(raw, fmt.Sprintf("%x", sha256.Sum256(raw)))
 			if (err == nil) != tc.ok {
 				t.Fatalf("hash %s error %v", hash, err)
+			}
+			if tc.ok && (decoded.Preview != d.Preview || decoded.Channel != d.Channel) {
+				t.Fatal("release metadata lost", decoded)
 			}
 		})
 	}
