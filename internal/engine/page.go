@@ -143,6 +143,7 @@ func (e *Engine) executePage(ctx context.Context, sessionID, turnID string, call
 			return nil, errors.New("item is not a page")
 		}
 		item.Name = name
+		item.NameMode = store.PageNameManual
 		updated, err := e.store.UpdateStudioItem(ctx, item, item.Revision)
 		if err != nil {
 			return nil, err

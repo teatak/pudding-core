@@ -29,20 +29,32 @@ func (s *Server) renameStudioItem(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	var in struct {
 		Name             string `json:"name"`
+		NameMode         string `json:"nameMode,omitempty"`
 		ExpectedRevision int64  `json:"expectedRevision"`
 	}
 	if err := decodeStudioRequest(c, &in); err != nil {
 		return badRequest(c, err.Error())
 	}
 	in.Name = strings.TrimSpace(in.Name)
-	if in.Name == "" || len(in.Name) > 200 {
+	if (in.Name == "" && in.NameMode != store.PageNameAuto) || len(in.Name) > 200 {
 		return badRequest(c, "name is required (max 200 bytes)")
 	}
 	item, err := s.store.GetStudioItem(c.Request.Context(), id)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	item.Name = in.Name
+	if in.NameMode != "" && (item.Kind != store.StudioItemKindPage || (in.NameMode != store.PageNameAuto && in.NameMode != store.PageNameManual)) {
+		return badRequest(c, "invalid name mode")
+	}
+	if item.Kind == store.StudioItemKindPage {
+		item.NameMode = store.PageNameManual
+		if in.NameMode == store.PageNameAuto {
+			item.NameMode = store.PageNameAuto
+		}
+	}
+	if in.Name != "" {
+		item.Name = in.Name
+	}
 	item, err = s.store.UpdateStudioItem(c.Request.Context(), item, in.ExpectedRevision)
 	if err != nil {
 		return s.studioItemError(c, err)

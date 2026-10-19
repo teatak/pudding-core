@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 45
+	currentSchemaVersion       = 46
 )
 
 var (
@@ -37,6 +37,7 @@ type schemaMigration func(*sql.Tx) error
 var schemaMigrations = map[int]schemaMigration{
 	44: migratePageEdits,
 	45: migratePageDocuments,
+	46: migratePageNames,
 	43: migratePages,
 	42: migrateSheets,
 	41: func(tx *sql.Tx) error { return nil },

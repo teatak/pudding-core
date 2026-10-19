@@ -77,6 +77,11 @@ func saveNativeContentTx(ctx context.Context, tx *sql.Tx, d *store.ContentSnapsh
 	if _, err := tx.ExecContext(ctx, `UPDATE studio_items SET head_revision=?,revision=revision+1,updated_at=? WHERE id=?`, revision, now, d.ItemID); err != nil {
 		return err
 	}
+	if d.Structure != nil && (in.ClientRequestID != "create" || d.Body != "") {
+		if err := updatePageNameTx(ctx, tx, d.ItemID, d.Body); err != nil {
+			return err
+		}
+	}
 	d.RevisionID = revision
 	return nil
 }

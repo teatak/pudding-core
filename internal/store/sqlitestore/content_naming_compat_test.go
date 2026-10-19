@@ -36,6 +36,7 @@ func TestContentNamingPreservesHistoricalStorageAndRetries(t *testing.T) {
 		// The frozen dump predates explicit format columns; keep its value bytes.
 		sqlText := strings.ReplaceAll(string(fixture), `INSERT INTO "studio_item_content" VALUES`, `INSERT INTO "studio_item_content"(item_id,body,content_hash) VALUES`)
 		sqlText = strings.ReplaceAll(sqlText, `INSERT INTO "studio_item_revisions" VALUES`, `INSERT INTO "studio_item_revisions"(item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id) VALUES`)
+		sqlText = strings.ReplaceAll(sqlText, `INSERT INTO "studio_items" VALUES`, `INSERT INTO "studio_items"(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin) VALUES`)
 		_, err := tx.ExecContext(ctx, sqlText)
 		return err
 	}); err != nil {

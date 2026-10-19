@@ -106,6 +106,8 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
 		Name            string          `json:"name"`
+		NameMode        string          `json:"nameMode,omitempty"`
+		NameFallback    string          `json:"nameFallback,omitempty"`
 		Kind            string          `json:"kind"`
 		Body            json.RawMessage `json:"body,omitempty"`
 		SourceSessionID string          `json:"sourceSessionID,omitempty"`
@@ -125,6 +127,9 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if req.Name == "" || len(req.Name) > 200 {
 		return badRequest(c, "name is required (max 200 bytes)")
 	}
+	if (req.NameMode != "" && (req.Kind != store.StudioItemKindPage || (req.NameMode != store.PageNameAuto && req.NameMode != store.PageNameManual))) || len(req.NameFallback) > 200 {
+		return badRequest(c, "invalid name mode or fallback")
+	}
 	if !validItemAppearance(req.Icon, req.IconColor) {
 		return badRequest(c, "invalid item appearance")
 	}
@@ -135,7 +140,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		return badRequest(c, "widget cannot have a content body")
 	}
 	now := time.Now().UTC()
-	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
+	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, NameMode: req.NameMode, NameFallback: strings.TrimSpace(req.NameFallback), Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
 	var err error
 	if req.Kind == store.StudioItemKindPage {
 		if w.Icon == "" {

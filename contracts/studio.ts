@@ -15,6 +15,8 @@ export const studioItem = z.object({
   id: z.string(),
   kind: z.preprocess((v) => (v === "doc" || v === "note" ? "page" : v), z.enum(["page", "sheet", "widget"])),
   name: z.string(),
+  nameMode: z.enum(["auto", "manual"]).optional(),
+  nameFallback: z.string().optional(),
   icon: z.string().optional(),
   iconColor: z.string().optional(),
   sourceSessionID: z.string().optional(),

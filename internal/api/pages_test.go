@@ -33,6 +33,9 @@ func TestPageAPIAndWidgetBoundary(t *testing.T) {
 	if item.Kind != "page" {
 		t.Fatalf("expected kind page, got %s", item.Kind)
 	}
+	if item.Name != "Hello" || item.NameMode != store.PageNameAuto {
+		t.Fatalf("automatic name missing: %+v", item)
+	}
 	path := "/studio/items/" + item.ID
 
 	var doc store.PageContent
@@ -73,6 +76,28 @@ func TestPageAPIAndWidgetBoundary(t *testing.T) {
 	commit, _ := json.Marshal(map[string]any{"clientRequestID": "commit", "operationID": op.ID, "leaseToken": op.LeaseToken, "replacement": "Done"})
 	call("PUT", path+"/content", commit, 200)
 	call("PUT", path+"/content", commit, 200)
+	json.Unmarshal(call("GET", path, nil, 200), &item)
+	if item.Name != "Done" {
+		t.Fatalf("leased commit did not update name: %+v", item)
+	}
+	// Legacy rename requests pin even an unchanged visible name.
+	rename, _ := json.Marshal(map[string]any{"name": "Done", "expectedRevision": item.Revision})
+	json.Unmarshal(call("PATCH", path, rename, 200), &item)
+	if item.NameMode != store.PageNameManual {
+		t.Fatal("rename did not pin the name")
+	}
+	json.Unmarshal(call("GET", path+"/content", nil, 200), &doc)
+	next, _ := json.Marshal(map[string]any{"clientRequestID": "after-rename", "expectedHash": doc.ContentHash, "body": "# Later"})
+	call("PUT", path+"/content", next, 200)
+	json.Unmarshal(call("GET", path, nil, 200), &item)
+	if item.Name != "Done" {
+		t.Fatal("body edit replaced independent name")
+	}
+	follow, _ := json.Marshal(map[string]any{"nameMode": "auto", "expectedRevision": item.Revision})
+	json.Unmarshal(call("PATCH", path, follow, 200), &item)
+	if item.Name != "Later" || item.NameMode != store.PageNameAuto {
+		t.Fatalf("follow did not recompute name: %+v", item)
+	}
 	cancel, _ := json.Marshal(map[string]any{"clientRequestID": "cancel", "action": "cancel", "operationID": op.ID})
 	terminal := call("POST", path+"/edit-operations", cancel, 200)
 	if !bytes.Contains(terminal, []byte(`"state":"committed"`)) {

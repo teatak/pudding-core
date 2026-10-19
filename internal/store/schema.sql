@@ -345,7 +345,9 @@ CREATE TABLE studio_items (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     archived_at INTEGER NOT NULL DEFAULT 0,
-    origin TEXT NOT NULL DEFAULT 'null'
+    origin TEXT NOT NULL DEFAULT 'null',
+    name_mode TEXT NOT NULL DEFAULT '',
+    name_fallback TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX studio_items_archived_at ON studio_items(archived_at);
 CREATE TABLE studio_item_revisions (

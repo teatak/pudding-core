@@ -10,13 +10,13 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin`
+const studioItemColumns = `id,kind,name,icon,icon_color,coalesce(source_session_id,''),revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,archived_at,origin,name_mode,name_fallback`
 
 func scanStudioItem(row messageScanner) (*store.StudioItem, error) {
 	w := &store.StudioItem{}
 	var bindings, origin string
 	var created, updated, archived int64
-	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated, &archived, &origin); err != nil {
+	if err := row.Scan(&w.ID, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &w.HeadRevision, &w.ActiveRevision, &bindings, &w.BindingVersion, &w.Deleted, &created, &updated, &archived, &origin, &w.NameMode, &w.NameFallback); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -83,11 +83,20 @@ func createStudioItemTx(ctx context.Context, tx *sql.Tx, w *store.StudioItem) er
 		}
 		session = w.SourceSessionID
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO studio_items(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'','','{}',1,0,?,?)`, w.ID, w.Kind, w.Name, w.Icon, w.IconColor, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt))
+	_, err := tx.ExecContext(ctx, `INSERT INTO studio_items(id,kind,name,icon,icon_color,source_session_id,revision,head_revision,active_revision,bindings,binding_version,deleted,created_at,updated_at,name_mode,name_fallback) VALUES(?,?,?,?,?,?,1,'','','{}',1,0,?,?,?,?)`, w.ID, w.Kind, w.Name, w.Icon, w.IconColor, session, unixMS(w.CreatedAt), unixMS(w.UpdatedAt), w.NameMode, w.NameFallback)
 	return err
 }
 func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expected int64) (*store.StudioItem, error) {
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if w.Kind == store.StudioItemKindPage {
+			current, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=?`, w.ID))
+			if err != nil {
+				return err
+			}
+			if w.Name != current.Name && w.NameMode == current.NameMode {
+				w.NameMode = store.PageNameManual
+			}
+		}
 		if w.ActiveRevision != "" {
 			var receipt string
 			if err := tx.QueryRowContext(ctx, `SELECT build_receipt FROM studio_item_revisions WHERE item_id=? AND hash=?`, w.ID, w.ActiveRevision).Scan(&receipt); err != nil {
@@ -101,7 +110,7 @@ func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expec
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE studio_items SET name=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0 AND archived_at=0`, w.Name, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.ID, expected)
+		result, err := tx.ExecContext(ctx, `UPDATE studio_items SET name=?,name_mode=?,icon=?,icon_color=?,active_revision=?,bindings=?,binding_version=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0 AND archived_at=0`, w.Name, w.NameMode, w.Icon, w.IconColor, w.ActiveRevision, string(bindings), w.BindingVersion, w.ID, expected)
 		if err != nil {
 			return err
 		}
@@ -111,6 +120,13 @@ func (s *Store) UpdateStudioItem(ctx context.Context, w *store.StudioItem, expec
 		}
 		if count != 1 {
 			return store.ErrStudioItemConflict
+		}
+		if w.Kind == store.StudioItemKindPage && w.NameMode == store.PageNameAuto {
+			content, err := scanContentSnapshot(tx.QueryRowContext(ctx, pageSelect, w.ID))
+			if err != nil {
+				return err
+			}
+			return updatePageNameTx(ctx, tx, w.ID, content.Body)
 		}
 		return nil
 	})

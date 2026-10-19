@@ -34,6 +34,8 @@ type StudioItem struct {
 	ID              string            `json:"id"`
 	Kind            string            `json:"kind"`
 	Name            string            `json:"name"`
+	NameMode        string            `json:"nameMode,omitempty"`
+	NameFallback    string            `json:"nameFallback,omitempty"`
 	Icon            string            `json:"icon,omitempty"`
 	IconColor       string            `json:"iconColor,omitempty"`
 	SourceSessionID string            `json:"sourceSessionID,omitempty"`

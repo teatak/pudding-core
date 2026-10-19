@@ -29,6 +29,15 @@ func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body str
 	if item.Kind == "note" {
 		item.Kind = store.StudioItemKindPage
 	}
+	if item.NameMode == "" {
+		item.NameMode = store.PageNameAuto
+	}
+	if item.NameMode != store.PageNameAuto && item.NameMode != store.PageNameManual {
+		return nil, &store.InvalidContent{Message: "invalid name mode"}
+	}
+	if item.NameFallback == "" {
+		item.NameFallback = store.PageNameFallback
+	}
 	var out *store.PageContent
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
