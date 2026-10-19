@@ -118,7 +118,7 @@ func TestSheetMigrationFailureRollsBackSchemaAndVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("injected after rename")
-	err := runSchemaMigration(db, 42, func(tx *sql.Tx) error {
+	err := runSchemaMigration(db, 47, func(tx *sql.Tx) error {
 		if err := migrateSheets(tx); err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func TestSheetMigrationFailureRollsBackSchemaAndVersion(t *testing.T) {
 	if !strings.Contains(ddl, "'table'") || strings.Contains(ddl, "'sheet'") {
 		t.Fatal("DDL was not rolled back", ddl)
 	}
-	if err := runSchemaMigration(db, 42, migrateSheets); err != nil {
+	if err := runSchemaMigration(db, 47, migrateSheets); err != nil {
 		t.Fatal("retry", err)
 	}
 }

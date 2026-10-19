@@ -47,10 +47,19 @@ PRAGMA user_version=39;`, pageEditLegacyBody, hash, pageEditLegacyBody, hash); e
 	}
 	if version == 43 {
 		// Reproduce the defective upgrade, including its recorded v43 marker.
-		for _, next := range []int{40, 41, 42, 43} {
-			if err := runSchemaMigration(db, next, schemaMigrations[next]); err != nil {
-				t.Fatal(err)
+		if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+			t.Fatal(err)
+		}
+		if err := runSchemaMigration(db, 43, func(tx *sql.Tx) error {
+			if err := migrateSheets(tx); err != nil {
+				return err
 			}
+			return migratePages(tx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+			t.Fatal(err)
 		}
 	}
 	assertWorkspaceMigrationValue(t, db, "PRAGMA user_version", fmt.Sprint(version))

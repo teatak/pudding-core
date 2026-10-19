@@ -33,35 +33,9 @@ type schemaMigration func(*sql.Tx) error
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
 // Unpublished workspace migrations 14–16 are consolidated into destination 17.
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
-// Unpublished document migrations 40–41 are consolidated into destination 42.
+// Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
-	// v47 was used by a withdrawn experiment. Keep the version accepted without
-	// creating its table; existing experimental data is left untouched.
-	47: func(*sql.Tx) error { return nil },
-	44: migratePageEdits,
-	45: migratePageDocuments,
-	46: migratePageNames,
-	43: migratePages,
-	42: migrateSheets,
-	41: func(tx *sql.Tx) error { return nil },
-	40: func(tx *sql.Tx) error { return nil },
-	39: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS subtask_archives (
-    child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
-    archived_at INTEGER NOT NULL
-);
-`)
-		return err
-	},
-	38: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE session_usage SET last_estimated_input_tokens=0`)
-		return err
-	},
-	37: migrateWidgetParticipantIdentities,
-	36: migrateWidgetPagePins,
-	35: migrateWidgetPages,
-	34: migrateWidgetOrigins,
-	33: migrateWidgetData,
+	47: migrateStudioV47,
 	32: migratePreauthorizedRemotePairings,
 	31: migrateRemoteAccess,
 	30: func(tx *sql.Tx) error { return migrateStudioAndPlugins(tx, "") },
@@ -686,7 +660,7 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 			}
 		}
 	}
-	if version != baselineSchemaVersion && schemaMigrations[version] == nil {
+	if !supportedSchemaVersion(version) {
 		return fmt.Errorf("%w: no supported migration from v%d", ErrUnsupportedSchema, version)
 	}
 	migrated := version < currentSchemaVersion
@@ -763,14 +737,22 @@ func setSchemaVersion(db *sql.DB, version int) error {
 	return nil
 }
 
-func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) error {
+func supportedSchemaVersion(version int) bool {
+	return version == baselineSchemaVersion || schemaMigrations[version] != nil || (version >= 33 && version < 47)
+}
+
+func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) (err error) {
 	// Rebuilding the parent table must not cascade-delete dependent content.
 	// Startup has exclusive access and this pool has a single connection.
-	if version == 41 || version == 42 || version == 43 {
+	if version == 47 {
 		if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 			return err
 		}
-		defer db.Exec(`PRAGMA foreign_keys=ON`)
+		defer func() {
+			if _, restoreErr := db.Exec(`PRAGMA foreign_keys=ON`); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("sqlite: restore foreign keys: %w", restoreErr))
+			}
+		}()
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -779,6 +761,21 @@ func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) erro
 	defer tx.Rollback()
 	if err := migration(tx); err != nil {
 		return fmt.Errorf("sqlite: migrate to v%d: %w", version, err)
+	}
+	if version == 47 {
+		rows, err := tx.Query(`PRAGMA foreign_key_check`)
+		if err != nil {
+			return err
+		}
+		invalid := rows.Next()
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if invalid {
+			return fmt.Errorf("sqlite: foreign key violation in migration v%d", version)
+		}
 	}
 	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, version)); err != nil {
 		return fmt.Errorf("sqlite: record migration v%d: %w", version, err)
@@ -1018,7 +1015,12 @@ func extendSchemaContract(base schemaContract, tables map[string][]string, index
 	return out
 }
 
-func validateCurrentSchema(db *sql.DB) error {
+type schemaReader interface {
+	Query(string, ...any) (*sql.Rows, error)
+	QueryRow(string, ...any) *sql.Row
+}
+
+func validateCurrentSchema(db schemaReader) error {
 	if err := validateSchema(db, currentSchemaContract); err != nil {
 		return err
 	}
@@ -1044,7 +1046,7 @@ func validateCurrentSchema(db *sql.DB) error {
 	return nil
 }
 
-func validateSchema(db *sql.DB, contract schemaContract) error {
+func validateSchema(db schemaReader, contract schemaContract) error {
 	for table, required := range contract.tables {
 		columns, err := tableColumns(db, table)
 		if err != nil {
@@ -1077,7 +1079,7 @@ func validateSchema(db *sql.DB, contract schemaContract) error {
 	return nil
 }
 
-func tableColumns(db *sql.DB, table string) (map[string]struct{}, error) {
+func tableColumns(db schemaReader, table string) (map[string]struct{}, error) {
 	quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
 	rows, err := db.Query(`PRAGMA table_info(` + quoted + `)`)
 	if err != nil {

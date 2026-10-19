@@ -16,8 +16,8 @@ import (
 )
 
 func TestSchemaReleaseContract(t *testing.T) {
-	// Published fingerprints through v26 are immutable. Unpublished Studio
-	// layouts 27–29 are consolidated into the final v30 upgrade.
+	// Published fingerprints through v32 are immutable. Unpublished Studio
+	// layouts 33–46 remain recognized sources, with v47 the only destination.
 	releasedFingerprints := map[int]string{
 		47: "4b0251cf9b9ea456b4b051cce0ef71c05912ba45445edce66fd6cafcc6d59317", // Withdrawn experiment: same canonical layout as v46.
 		46: "4b0251cf9b9ea456b4b051cce0ef71c05912ba45445edce66fd6cafcc6d59317",
@@ -72,7 +72,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		t.Fatalf("schema.sql changed without a new schema version: got %s, want %s", got, want)
 	}
 	for version := range releasedFingerprints {
-		if version != baselineSchemaVersion && schemaMigrations[version] == nil {
+		if !supportedSchemaVersion(version) {
 			t.Fatalf("schema v%d has no migration", version)
 		}
 	}
@@ -975,7 +975,7 @@ func TestWireEstimateMigrationRollsBackOnFailure(t *testing.T) {
 	}
 	sentinel := errors.New("after reset")
 	err = runSchemaMigration(st.db, 38, func(tx *sql.Tx) error {
-		if err := schemaMigrations[38](tx); err != nil {
+		if err := migrateWireEstimates(tx); err != nil {
 			return err
 		}
 		return sentinel
