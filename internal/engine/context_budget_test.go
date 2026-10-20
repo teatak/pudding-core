@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -43,7 +47,9 @@ func TestRequestOutputFitsRemainingWindow(t *testing.T) {
 		{name: "within configured limit", window: 1050000, input: 563028, configured: 384000, want: 384000},
 		{name: "shrinking remaining window", window: 1050000, input: 800000, configured: 384000, want: 250000},
 		{name: "small configured output", window: 1050000, input: 800000, configured: 4096, want: 4096},
-		{name: "unconfigured OpenAI", protocol: "openai-compatible", window: 128000, input: 100000, want: 28000},
+		{name: "unconfigured OpenAI", protocol: "openai-compatible", window: 128000, input: 100000},
+		{name: "unconfigured Responses", protocol: "openai-responses", window: 128000, input: 100000},
+		{name: "unconfigured Google", protocol: "google", window: 128000, input: 100000},
 		{name: "Anthropic default", protocol: "anthropic", window: 128000, input: 10000, want: 64000},
 		{name: "Anthropic default capped", protocol: "anthropic", window: 128000, input: 100000, want: 28000},
 		{name: "chat option", protocol: "openai-compatible", window: 128000, input: 100000, options: options, want: 28000},
@@ -178,5 +184,63 @@ func TestContextPreflightCountsNativeReasoningAcrossTurnBoundary(t *testing.T) {
 		if output != 100000-before.Total() {
 			t.Fatalf("historical=%v output=%d input=%d", historical, output, before.Total())
 		}
+	}
+}
+
+type contextBudgetTransport func(*http.Request) (*http.Response, error)
+
+func (f contextBudgetTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestContextPreflightResponsesWireOutputLimit(t *testing.T) {
+	for _, configured := range []int{0, 4096, 384000} {
+		t.Run(fmt.Sprint(configured), func(t *testing.T) {
+			eng, ms, _, sid := newTestEngine(t)
+			defer eng.Stop()
+			ctx := context.Background()
+			if err := ms.SetSettings(ctx, map[string]string{config.SettingCompactAutoThresholdPercent: "0"}); err != nil {
+				t.Fatal(err)
+			}
+			req := provider.Request{Model: "fixture", Config: provider.ModelConfig{ContextWindow: 100000}, Messages: []provider.Message{{Role: provider.RoleUser, Text: "question"}}}
+			if configured > 0 {
+				req.Config.Limits = &provider.ModelLimits{MaxOutputTokens: configured}
+			}
+			estimate, err := contextbuilder.EstimateRequest(req, "openai-responses")
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved := &resolvedModel{providerName: "mock", model: "mock-model", protocol: "openai-responses", config: req.Config}
+			if compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req); err != nil || compacted {
+				t.Fatalf("preflight: compacted=%v err=%v", compacted, err)
+			}
+			var body map[string]json.RawMessage
+			client := openai.NewResponses(openai.Config{BaseURL: "https://fixture.invalid", HTTPClient: &http.Client{Transport: contextBudgetTransport(func(r *http.Request) (*http.Response, error) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					return nil, err
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))}, nil
+			})}})
+			ch, err := client.Stream(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for chunk := range ch {
+				if chunk.Err != nil {
+					t.Fatal(chunk.Err)
+				}
+			}
+			if configured == 0 {
+				if body["max_output_tokens"] != nil {
+					t.Fatalf("blank setting inserted max_output_tokens: %s", body["max_output_tokens"])
+				}
+			} else {
+				var got int
+				if err := json.Unmarshal(body["max_output_tokens"], &got); err != nil {
+					t.Fatal(err)
+				}
+				if want := min(configured, req.Config.ContextWindow-estimate.Total()); got != want {
+					t.Fatalf("wire output limit = %d, want %d", got, want)
+				}
+			}
+		})
 	}
 }

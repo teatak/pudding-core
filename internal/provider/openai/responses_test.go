@@ -34,6 +34,35 @@ func TestResponsesStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestResponsesContext400IsReturnedWithoutRetry(t *testing.T) {
+	const body = `{"error":{"type":"invalid_request_error","message":"This model's maximum context length is 1048576 tokens. However, you requested 1056071 tokens (672071 in the messages, 384000 in the completion)."}}`
+	limits := make(chan int, 3)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Limit int `json:"max_output_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		limits <- request.Limit
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	chunks := collect(t, responsesStreamForTest(t, srv.URL, provider.Request{Model: "fixture", Config: provider.ModelConfig{
+		ContextWindow: 1050000, Limits: &provider.ModelLimits{MaxOutputTokens: 384000},
+	}}))
+	if len(limits) != 1 {
+		t.Fatalf("HTTP attempts = %d, want one without adjusting from error text", len(limits))
+	}
+	if limit := <-limits; limit != 384000 {
+		t.Fatalf("request limit changed: %d", limit)
+	}
+	if len(chunks) != 1 || chunks[0].Err == nil || chunks[0].Err.Error() != "openai responses: status 400: "+body {
+		t.Fatalf("original rejection was not returned: %+v", chunks)
+	}
+}
+
 func TestResponsesReadSSEUsage(t *testing.T) {
 	out := make(chan provider.Chunk, 3)
 	err := readResponsesSSE(context.Background(), strings.NewReader(

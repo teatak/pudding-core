@@ -185,6 +185,12 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 			}
 			return errors.New("openai responses: response failed")
 		case "response.incomplete":
+			if frame.Response.Usage != nil {
+				usage := responsesUsageInfo(*frame.Response.Usage)
+				if !usage.Empty() && !emit(ctx, out, provider.Chunk{Usage: &usage}) {
+					return ctx.Err()
+				}
+			}
 			if frame.Response.IncompleteDetails.Reason != "" {
 				message := "openai responses: incomplete: " + frame.Response.IncompleteDetails.Reason
 				if frame.Response.IncompleteDetails.Reason == "max_output_tokens" {

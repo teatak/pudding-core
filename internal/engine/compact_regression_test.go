@@ -103,7 +103,7 @@ func TestCompactRegressionSnapshotPreservesConcurrentCompletedTurn(t *testing.T)
 func TestCompactRegressionInputPreservesPreviousSummaryTail(t *testing.T) {
 	text := strings.Repeat("A", 4100) + "\n## TODO / Open Questions\nCRITICAL_UNFINISHED_TASK"
 	msg := &store.Message{ID: "summary_old", Role: store.RoleSummary, Text: text, Parts: store.TextPart(text)}
-	dump := compactMessageRecord(msg, compactMessageText(msg))
+	dump := compactMessageRecord(msg, compactMessageText(msg), "summarize")
 	if !strings.Contains(dump, "CRITICAL_UNFINISHED_TASK") {
 		t.Fatal("previous summary TODO is removed before the summarizer receives it")
 	}
@@ -179,7 +179,7 @@ func TestCompactRegressionInputPreservesToolArguments(t *testing.T) {
 		{Type: store.ContentPartToolResult, Name: "builtin_command_run", CallID: "c", Ok: true, Content: "{\"exitCode\":0}"},
 	}
 	msg := &store.Message{ID: "toolmsg", Role: store.RoleAssistant, Parts: parts}
-	dump := compactMessageRecord(msg, compactMessageText(msg))
+	dump := compactMessageRecord(msg, compactMessageText(msg), "summarize")
 	if !strings.Contains(dump, "UNIQUE_TARGET") {
 		t.Fatalf("tool arguments absent from summary input: %s", dump)
 	}
@@ -315,7 +315,7 @@ func TestManualCompactKeepsGainWhenFixedOverheadExceedsCapacity(t *testing.T) {
 	}
 }
 
-func TestCompactBatchesFitActualSummaryAboveTarget(t *testing.T) {
+func TestCompactOversizedInputFailsBeforeProvider(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t)
 	defer eng.Stop()
 	ctx := context.Background()
@@ -329,18 +329,12 @@ func TestCompactBatchesFitActualSummaryAboveTarget(t *testing.T) {
 	calls := 0
 	client := compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		calls++
-		if requestInputTokens(req) > contextInputLimit(req.Config) {
-			t.Fatal("batch exceeded input budget")
-		}
-		if calls > 1 && !strings.Contains(req.Messages[0].Text, "ROLLING_FACT") {
-			t.Fatal("rolling summary was lost")
-		}
-		return compactChunks(provider.Chunk{Delta: "ROLLING_FACT " + strings.Repeat("summary ", 1000), Done: true, Finish: provider.FinishStop}), nil
+		return compactChunks(provider.Chunk{Delta: "must not call", Done: true, Finish: provider.FinishStop}), nil
 	})
-	summary, err := eng.summarizeCompactHistory(ctx, sid, resolved, client,
-		[]*store.Message{{ID: "large", Role: store.RoleUser, Text: strings.Repeat("source ", 12000)}}, "", 100)
-	if err != nil || calls < 2 || !strings.Contains(summary, "ROLLING_FACT") {
-		t.Fatalf("above-target rolling summary must fit subsequent fragments: calls=%d error=%v", calls, err)
+	messages := []*store.Message{{ID: "large", Role: store.RoleUser, Text: strings.Repeat("source ", 12000)}}
+	summary, err := eng.summarizeCompactHistory(ctx, sid, resolved, client, messages, messages, "", 100)
+	if !errors.Is(err, ErrContextBudget) || calls != 0 || summary != "" {
+		t.Fatalf("oversized history must fail without splitting or calling provider: calls=%d error=%v", calls, err)
 	}
 }
 
@@ -359,7 +353,7 @@ func TestCompactEmptySummaryDoesNotChangeHistory(t *testing.T) {
 	}
 }
 
-func TestCompactRegressionLongTailFitsContextWindow(t *testing.T) {
+func TestCompactRegressionOversizedTailPreservesHistory(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"short summary"}), mock.WithDelay(0))
 	defer eng.Stop()
 	ctx := context.Background()
@@ -371,16 +365,15 @@ func TestCompactRegressionLongTailFitsContextWindow(t *testing.T) {
 	for i := 2; i <= 3; i++ {
 		appendEngineTestTurn(t, ms, sid, fmt.Sprint(i), strings.Repeat("x", 160000), "answer")
 	}
-	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); err != nil {
-		t.Fatal(err)
+	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+	eng.resolver = registry.Static(capture)
+	before, _ := ms.ListMessages(ctx, sid, 0)
+	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); !errors.Is(err, ErrContextBudget) {
+		t.Fatalf("oversized retained context must fail: %v", err)
 	}
-	usage, err := eng.SessionUsage(ctx, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("post-compact estimated tokens=%d context window=%d threshold=%d", usage.ContextEstimatedTokens, usage.ContextWindow, usage.AutoCompactThresholdTokens)
-	if usage.ContextEstimatedTokens >= usage.ContextWindow {
-		t.Fatal("compact succeeds but protected two-turn tail exceeds the entire context window")
+	after, _ := ms.ListMessages(ctx, sid, 0)
+	if len(after) != len(before) || len(capture.reqCh) != 0 {
+		t.Fatal("oversized history was silently split or modified")
 	}
 }
 
@@ -389,29 +382,33 @@ func TestCompactRegressionSummaryRequestFitsContextWindow(t *testing.T) {
 	defer eng.Stop()
 	ctx := context.Background()
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
-		Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 64000}}}); err != nil {
+		Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 1048576}}}); err != nil {
 		t.Fatal(err)
 	}
-	capture := &captureClient{reqCh: make(chan provider.Request, 128)}
-	eng.resolver = registry.Static(capture)
+	requests := make(chan provider.Request, 2)
+	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+		requests <- req
+		return compactChunks(provider.Chunk{Delta: "short summary", Done: true, Finish: provider.FinishStop}), nil
+	}))
 	for i := 0; i < 102; i++ {
 		appendEngineTestTurn(t, ms, sid, fmt.Sprint(i), strings.Repeat("x", 4000), strings.Repeat("y", 4000))
 	}
 	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); err != nil {
 		t.Fatal(err)
 	}
-	count := len(capture.reqCh)
-	if count < 2 {
-		t.Fatalf("large history was not batched: %d requests", count)
+	count := len(requests)
+	if count != 1 {
+		t.Fatalf("large history must be summarized in one request: %d requests", count)
 	}
 	for i := 0; i < count; i++ {
-		req := <-capture.reqCh
+		req := <-requests
 		n := requestInputTokens(req)
-		if n > contextInputLimit(req.Config) {
+		output, _ := req.Config.MaxOutputTokens()
+		if n <= 64000 || n+output+compactInputMargin(n) > req.Config.ContextWindow {
 			t.Fatalf("oversized summary request: %d", n)
 		}
-		if i > 0 && !strings.Contains(req.Messages[0].Text, "Previous summary") {
-			t.Fatal("lost earlier batch summary")
+		if strings.Count(req.Messages[0].Text, "action=\"summarize\">") != 200 || strings.Count(req.Messages[0].Text, "action=\"retain\">") != 4 {
+			t.Fatal("summary request lost source or retained messages")
 		}
 	}
 }
@@ -501,17 +498,21 @@ func TestCompactCancellationDoesNotChangeBoundary(t *testing.T) {
 }
 
 func TestCompactRejectsTruncatedSummary(t *testing.T) {
-	eng, ms, _, sid := newTestEngine(t, mock.WithChunks([]provider.Chunk{{Delta: "partial", Done: true, Finish: provider.FinishLength}}), mock.WithDelay(0))
-	defer eng.Stop()
-	for i := 0; i < 3; i++ {
-		appendEngineTestTurn(t, ms, sid, fmt.Sprint(i), strings.Repeat("facts ", 100), "answer")
-	}
-	if _, err := eng.Compact(context.Background(), CompactInput{SessionID: sid}); err == nil {
-		t.Fatal("truncated summary accepted")
-	}
-	messages, _ := ms.ListMessages(context.Background(), sid, 0)
-	if len(messages) != 6 {
-		t.Fatal("truncated summary changed boundary")
+	for _, finish := range []provider.FinishReason{provider.FinishLength, "", provider.FinishToolCalls} {
+		t.Run(string(finish), func(t *testing.T) {
+			eng, ms, _, sid := newTestEngine(t, mock.WithChunks([]provider.Chunk{{Delta: "partial", Done: true, Finish: finish}}), mock.WithDelay(0))
+			defer eng.Stop()
+			for i := 0; i < 3; i++ {
+				appendEngineTestTurn(t, ms, sid, fmt.Sprint(i), strings.Repeat("facts ", 100), "answer")
+			}
+			if _, err := eng.Compact(context.Background(), CompactInput{SessionID: sid}); !errors.Is(err, ErrCompactIncomplete) {
+				t.Fatal("truncated summary accepted")
+			}
+			messages, _ := ms.ListMessages(context.Background(), sid, 0)
+			if len(messages) != 6 {
+				t.Fatal("truncated summary changed boundary")
+			}
+		})
 	}
 }
 

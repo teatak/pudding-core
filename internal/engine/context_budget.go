@@ -37,9 +37,12 @@ func limitRequestOutput(req *provider.Request, protocol string, inputTokens int)
 		return fmt.Errorf("%w: estimated input %d leaves no output space in window %d", ErrContextBudget, inputTokens, cfg.ContextWindow)
 	}
 	output := configuredOutputLimit(cfg, protocol)
-	if output <= 0 || output > remaining {
-		output = remaining
+	// Optional provider limits remain omitted when the user has not set one.
+	// Anthropic's required max_tokens is supplied by configuredOutputLimit.
+	if output <= 0 {
+		return nil
 	}
+	output = min(output, remaining)
 	limits := provider.ModelLimits{}
 	if cfg.Limits != nil {
 		limits = *cfg.Limits
