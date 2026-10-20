@@ -185,16 +185,24 @@ func TestCompactRegressionInputPreservesToolArguments(t *testing.T) {
 	}
 }
 
-func TestCompactExcludesNextPromptHistory(t *testing.T) {
+func TestCompactExcludesUIOnlyHistory(t *testing.T) {
+	for _, name := range []string{tool.SetNextPrompt, "builtin_plan_update"} {
+		t.Run(name, func(t *testing.T) {
+			testCompactExcludesUIOnlyHistory(t, name)
+		})
+	}
+}
+
+func testCompactExcludesUIOnlyHistory(t *testing.T, name string) {
 	msg := &store.Message{Role: store.RoleAssistant, Parts: []store.ContentPart{
 		{Type: store.ContentPartText, Text: "Task completed"},
-		{Type: store.ContentPartToolUse, Name: tool.SetNextPrompt, CallID: "ui", Args: json.RawMessage(`{"text":"SUGGESTION_ONLY"}`)},
-		{Type: store.ContentPartToolResult, Name: tool.SetNextPrompt, CallID: "ui", Ok: true, Content: `{"text":"SUGGESTION_ONLY"}`},
+		{Type: store.ContentPartToolUse, Name: name, CallID: "ui", Args: json.RawMessage(`{"text":"SUGGESTION_ONLY"}`)},
+		{Type: store.ContentPartToolResult, Name: name, CallID: "ui", Ok: true, Content: `{"text":"SUGGESTION_ONLY"}`},
 		{Type: store.ContentPartToolUse, Name: tool.TimeGetCurrent, CallID: "time", Args: json.RawMessage(`{}`)},
 		{Type: store.ContentPartToolResult, Name: tool.TimeGetCurrent, CallID: "time", Ok: true, Content: `{"time":"BUSINESS_RESULT"}`},
 	}}
 	text := compactMessageText(msg)
-	if strings.Contains(text, tool.SetNextPrompt) || strings.Contains(text, "SUGGESTION_ONLY") {
+	if strings.Contains(text, name) || strings.Contains(text, "SUGGESTION_ONLY") {
 		t.Fatalf("suggestion leaked into summary input: %s", text)
 	}
 	if !strings.Contains(text, "Task completed") || !strings.Contains(text, tool.TimeGetCurrent) || !strings.Contains(text, "BUSINESS_RESULT") {

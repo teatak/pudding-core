@@ -17,10 +17,6 @@ var chatCoreTools = map[string]bool{
 	MediaRead: true, WeatherGet: true,
 }
 
-var workCoreTools = map[string]bool{
-	PlanUpdate: true,
-}
-
 var codeCoreTools = map[string]bool{
 	CommandRun: true, CommandSession: true,
 	FileList: true, FileRead: true, AttachmentExport: true,
@@ -69,9 +65,6 @@ func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []pro
 	}
 	appendNames(mapKeys(chatCoreTools))
 	appendNames(dynamicChatNames)
-	if mode == store.ModeWork || mode == store.ModeCode {
-		appendNames(mapKeys(workCoreTools))
-	}
 	if mode == store.ModeCode {
 		appendNames(mapKeys(codeCoreTools))
 	}
@@ -85,7 +78,7 @@ func attachmentOnlyMediaReadDefinition(def provider.ToolDef) provider.ToolDef {
 }
 
 func IsCoreTool(name string) bool {
-	return name == RequestCapability || name == RequestUserInput || chatCoreTools[name] || workCoreTools[name] || codeCoreTools[name]
+	return name == RequestCapability || name == RequestUserInput || chatCoreTools[name] || codeCoreTools[name]
 }
 
 func mapKeys(values map[string]bool) []string {

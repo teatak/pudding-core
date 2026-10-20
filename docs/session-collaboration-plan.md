@@ -1,5 +1,9 @@
 # 当前会话内的子会话协作：设计与实施计划
 
+## 会话步骤退役（2026-10-20）
+
+当前工作区移除 `builtin_plan_update` 的工具定义、执行入口和模式提示词，Desktop 移除输入框计划进度及协作面板里的主会话步骤。子 agent 派发、状态、结果回收、停止与归档保持原有语义。旧计划调用与结果成对过滤出模型上下文及压缩输入，原始历史保留。后文涉及旧步骤组件的内容是首版实施记录，不再代表当前界面；发布版本仍以 Desktop 锁定的 Core 为准。
+
 ## 子 agent 生命周期改版（2026-10-15 已确认，尚未发布）
 
 实施分支：core [PR #22](https://github.com/teatak/pudding-core/pull/22)，desktop [PR #14](https://github.com/teatak/pudding-desktop/pull/14)。本节为改版的目标规则；后文保留改版前基线和首版历史，不代表本次改版已经验收。准确发布范围仍由 desktop 的 `core.lock.json` 与发布报告确定。

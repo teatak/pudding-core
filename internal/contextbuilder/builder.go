@@ -310,11 +310,11 @@ func providerStateAllowedForTools(msg *store.Message, mode store.AgentMode, allo
 }
 
 func toolReplayedInHistory(mode store.AgentMode, name string, allowedTools map[string]struct{}) bool {
-	// The suggestion remains in canonical history for the composer, but is not
-	// model context. This also rejects its native continuation chain above, so
+	// UI suggestions and retired plans remain in canonical history, but are not
+	// model context. This also rejects their native continuation chain above, so
 	// hidden provider state cannot reintroduce the call or shift onto another
 	// assistant segment after filtering. Other content uses canonical parts.
-	if name == tool.SetNextPrompt {
+	if name == tool.SetNextPrompt || name == "builtin_plan_update" {
 		return false
 	}
 	if allowedTools != nil {

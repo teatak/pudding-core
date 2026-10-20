@@ -52,7 +52,7 @@ func TestBuiltinPluginDefinitionsListOwnedTools(t *testing.T) {
 
 func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	defs := BuiltinDefinitions()
-	for _, removed := range []string{"builtin_project_inspect", "builtin_project_instructions"} {
+	for _, removed := range []string{"builtin_project_inspect", "builtin_project_instructions", "builtin_plan_update"} {
 		if HasDefinition(defs, removed) {
 			t.Fatalf("removed project helper still exposed as a tool: %s", removed)
 		}
@@ -63,7 +63,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 		t.Fatal("core tool definitions are not stable")
 	}
 	for _, name := range []string{
-		RequestCapability, PlanUpdate, SetNextPrompt, CommandRun, CommandSession, WebSearch, MediaRead,
+		RequestCapability, SetNextPrompt, CommandRun, CommandSession, WebSearch, MediaRead,
 		FileList, FileRead, AttachmentExport, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
@@ -141,14 +141,11 @@ func TestFileSearchDescriptionMatchesContextLinesLimit(t *testing.T) {
 	}
 }
 
-func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
+func TestRetiredPlanUpdateIsNotAvailable(t *testing.T) {
 	defs := BuiltinDefinitions()
-	if HasDefinition(CoreDefinitionsForMode(store.ModeChat, defs), PlanUpdate) {
-		t.Fatal("plan update leaked into Chat Core")
-	}
-	for _, mode := range []store.AgentMode{store.ModeWork, store.ModeCode} {
-		if !HasDefinition(CoreDefinitionsForMode(mode, defs), PlanUpdate) {
-			t.Fatalf("plan update missing from %s Core", mode)
+	for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
+		if HasDefinition(CoreDefinitionsForMode(mode, defs), "builtin_plan_update") || IsCoreTool("builtin_plan_update") {
+			t.Fatalf("retired plan update exposed in %s Core", mode)
 		}
 	}
 }

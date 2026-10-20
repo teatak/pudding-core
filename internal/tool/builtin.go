@@ -26,7 +26,6 @@ const (
 	HistorySearch     = "builtin_history_search"
 	HistoryGetMessage = "builtin_history_get_message"
 	SkillRead         = "builtin_skill_read"
-	PlanUpdate        = "builtin_plan_update"
 	SetNextPrompt     = "builtin_set_next_prompt"
 	CodeSymbols       = "builtin_code_symbols"
 	CodeDefinition    = "builtin_code_definition"
@@ -369,12 +368,6 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		NextPromptDefinition(),
-		{
-			Name:        PlanUpdate,
-			Description: "Create or replace the progress plan for substantial multi-step work. Update only when a major step changes status. Keep exactly one ordered in_progress step while unfinished, after completed steps and before pending steps. Mark only finished work completed; report blocked or cancelled work without falsely completing its steps. Skip short or single-step work.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"plan":{"type":"array","minItems":2,"maxItems":12,"items":{"type":"object","properties":{"step":{"type":"string","minLength":1,"maxLength":200,"description":"Short task description shown beside the progress segments."},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"required":["step","status"],"additionalProperties":false}}},"required":["plan"],"additionalProperties":false}`),
-			Capability:  store.ModeWork,
-		},
 		{
 			Name:        CodeSymbols,
 			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract for Go and TypeScript/JavaScript.",
@@ -719,8 +712,6 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.historyGetMessage(ctx, call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
-	case PlanUpdate:
-		return planUpdate(call)
 	case SetNextPrompt:
 		return nextPrompt(call)
 	case CodeSymbols:

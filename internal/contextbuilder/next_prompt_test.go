@@ -19,7 +19,15 @@ import (
 
 // Exercise the wire serializers: a canonical-only assertion would miss native
 // continuations, which adapters prefer over visible parts when replaying history.
-func TestNextPromptHistoryExcludedFromEveryProvider(t *testing.T) {
+func TestUIOnlyHistoryExcludedFromEveryProvider(t *testing.T) {
+	for _, name := range []string{tool.SetNextPrompt, "builtin_plan_update"} {
+		t.Run(name, func(t *testing.T) {
+			testUIOnlyHistoryExcludedFromEveryProvider(t, name)
+		})
+	}
+}
+
+func testUIOnlyHistoryExcludedFromEveryProvider(t *testing.T, name string) {
 	for _, protocol := range []struct {
 		kind, text, call string
 		wire             func(provider.Request) provider.WireInput
@@ -64,10 +72,10 @@ func TestNextPromptHistoryExcludedFromEveryProvider(t *testing.T) {
 				if scenario.answer {
 					parts = store.TextPart("final-answer")
 				}
-				parts = append(parts, store.ContentPart{Type: store.ContentPartToolUse, Name: tool.SetNextPrompt, CallID: "ui-call", Args: json.RawMessage(`{"text":"suggestion-secret"}`)})
-				history = append(history, &store.Message{Role: store.RoleAssistant, Parts: parts, ProviderState: state(protocol.call)})
+				parts = append(parts, store.ContentPart{Type: store.ContentPartToolUse, Name: name, CallID: "ui-call", Args: json.RawMessage(`{"text":"suggestion-secret"}`)})
+				history = append(history, &store.Message{Role: store.RoleAssistant, Parts: parts, ProviderState: state(strings.ReplaceAll(protocol.call, tool.SetNextPrompt, name))})
 				if scenario.result {
-					history = append(history, &store.Message{Role: store.RoleTool, Parts: []store.ContentPart{{Type: store.ContentPartToolResult, Name: tool.SetNextPrompt, CallID: "ui-call", Ok: true, Content: `{"text":"suggestion-secret"}`}}})
+					history = append(history, &store.Message{Role: store.RoleTool, Parts: []store.ContentPart{{Type: store.ContentPartToolResult, Name: name, CallID: "ui-call", Ok: true, Content: `{"text":"suggestion-secret"}`}}})
 				}
 				history = append(history,
 					&store.Message{Role: store.RoleUser, Parts: store.TextPart("Later task")},
@@ -81,7 +89,9 @@ func TestNextPromptHistoryExcludedFromEveryProvider(t *testing.T) {
 					copy.ProviderState = store.CloneProviderState(message.ProviderState)
 					before[i] = &copy
 				}
-				defs := []provider.ToolDef{tool.NextPromptDefinition(), {Name: tool.TimeGetCurrent}}
+				// Even a caller supplying an obsolete definition cannot reenable
+				// UI-only history or its opaque provider continuation.
+				defs := []provider.ToolDef{{Name: name}, {Name: tool.TimeGetCurrent}}
 				req, err := New(st, nil).BuildForProviderWithHistory(ctx, "s", "test", "model", "chat", defs, history, provider.ModelConfig{})
 				if err != nil {
 					t.Fatal(err)
@@ -90,7 +100,7 @@ func TestNextPromptHistoryExcludedFromEveryProvider(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, forbidden := range []string{tool.SetNextPrompt, "ui-call", "suggestion-secret", "native-suggestion", "native-business"} {
+				for _, forbidden := range []string{name, "ui-call", "suggestion-secret", "native-suggestion", "native-business"} {
 					if strings.Contains(string(wire), forbidden) {
 						t.Fatalf("filtered history leaked %q: %s", forbidden, wire)
 					}
@@ -127,6 +137,14 @@ func TestNextPromptHistoryExcludedFromEveryProvider(t *testing.T) {
 					t.Fatal("request filtering mutated canonical history")
 				}
 			})
+		}
+	}
+}
+
+func TestRetiredPlanHistoryExcludedWithoutToolDefinitions(t *testing.T) {
+	for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
+		if toolReplayedInHistory(mode, "builtin_plan_update", nil) {
+			t.Fatalf("retired plan replayed without a tool allowlist in %s", mode)
 		}
 	}
 }
