@@ -194,7 +194,24 @@ Git 子进程保留调用方显式设置的 `GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SY
 实现：[Git 仓库探测](../internal/projectgit/repository.go)、
 [Git 环境](../internal/projectgit/exec.go)、[结构化 Git 工具](../internal/tool/git.go)。
 
-## 9. 可选的下一步建议
+## 9. 网页搜索与抓取
+
+`builtin_web_search` / `builtin_web_fetch` 根据 `config/web.yaml` 中的 `search.provider` /
+`fetch.provider` 选择 `tavily` 或 `deepseek`，每次执行读取当前配置，切换无需重启。
+`PATCH /tools/web` 的 `providers` 只保存或清除各家的 Key；只有显式传入
+`searchProvider` / `fetchProvider` 才切换或停用。清除当前服务商的 Key 会停用对应工具，
+不自动选择另一家；已有 Tavily 配置保留原选择。两家的 Key 分别存储，不跟随模型配置。
+
+DeepSeek 使用独立的 `/v1/tools/search` 和 `/v1/tools/fetch`。搜索默认返回 5 条、最多 10 条，
+`query` 最多 128 个 Unicode 字符；保留 `snippet`、供模型阅读的 `summary`、来源 URL、
+日期和排序信息，不生成综合 `answer`。正文按需通过 Fetch 获取并沿用 UTF-8 安全截断。
+`depth`、`topic`、`include_answer` 属于 Tavily，DeepSeek 在结果中报告 `ignored_parameters`。
+
+统一区分鉴权、余额、访问限制、无可用内容、限流与超时。408、429、5xx 和网络超时最多重试一次，
+总时间受调用方取消与 15 秒超时约束；超过短重试窗口的 `Retry-After` 交回调用方处理。
+失败不跨服务商重试。接口参考 [DeepSeek 搜索与抓取](https://api-docs.deepseek.com/zh-cn/guides/search/)。
+
+## 10. 可选的下一步建议
 
 `builtin_set_next_prompt({"text":"帮我补上测试"})` 在 Chat / Work / Code 的工具列表中提供，
 用于任务完成后的输入框建议。`text` 是用户可直接发送的指令，规范化为空白分隔的单行文本，

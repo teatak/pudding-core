@@ -103,12 +103,6 @@ func (m *Manager) PatchWebTools(_ context.Context, upd WebToolsUpdate) (*WebTool
 			continue
 		}
 		cfg.Providers[name] = webToolProviderYAML{APIKey: next}
-		if cfg.Search.Provider == "" {
-			cfg.Search.Provider = name
-		}
-		if cfg.Fetch.Provider == "" {
-			cfg.Fetch.Provider = name
-		}
 	}
 	if cfg.Version == 0 {
 		cfg.Version = 1
@@ -130,6 +124,33 @@ func (m *Manager) TavilyAPIKey(ctx context.Context) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+// ResolveWebTool reads the selected provider and its key from one config snapshot.
+func (m *Manager) ResolveWebTool(ctx context.Context, feature string) (string, string, error) {
+	view, err := m.WebTools(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	var name string
+	switch feature {
+	case "search":
+		name = view.SearchProvider
+	case "fetch":
+		name = view.FetchProvider
+	default:
+		return "", "", fmt.Errorf("config: unsupported web feature %q", feature)
+	}
+	name, err = normalizeWebProvider(name)
+	if err != nil {
+		return "", "", err
+	}
+	for _, provider := range view.Providers {
+		if provider.Name == name {
+			return name, provider.APIKey, nil
+		}
+	}
+	return name, "", nil
 }
 
 func (m *Manager) readWebTools() (webToolsYAML, error) {
@@ -165,6 +186,7 @@ func webToolsView(cfg webToolsYAML) *WebToolsView {
 		FetchProvider:  cfg.Fetch.Provider,
 		Providers: []WebToolProviderView{
 			webToolProviderView(cfg, "tavily"),
+			webToolProviderView(cfg, "deepseek"),
 		},
 	}
 }
@@ -178,7 +200,7 @@ func webToolProviderView(cfg webToolsYAML, name string) WebToolProviderView {
 func normalizeWebProvider(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {
-	case "", "tavily":
+	case "", "tavily", "deepseek":
 		return name, nil
 	default:
 		return "", fmt.Errorf("config: unsupported web provider %q", name)

@@ -505,7 +505,7 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initial.SearchProvider != "" || initial.FetchProvider != "" || len(initial.Providers) != 1 {
+	if initial.SearchProvider != "" || initial.FetchProvider != "" || len(initial.Providers) != 2 {
 		t.Fatalf("unexpected initial web tools: %+v", initial)
 	}
 	if initial.Providers[0].Name != "tavily" || initial.Providers[0].APIKeySet || initial.Providers[0].APIKey != "" {
@@ -521,8 +521,13 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.SearchProvider != "tavily" || updated.FetchProvider != "tavily" {
-		t.Fatalf("saving key should enable tavily providers: %+v", updated)
+	if updated.SearchProvider != "" || updated.FetchProvider != "" {
+		t.Fatalf("saving a key must not select a provider: %+v", updated)
+	}
+	selected := "tavily"
+	updated, err = m.PatchWebTools(ctx, WebToolsUpdate{SearchProvider: &selected, FetchProvider: &selected})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got := updated.Providers[0].APIKey; got != "tvly-secret" {
 		t.Fatalf("api key should be trimmed, got %q", got)

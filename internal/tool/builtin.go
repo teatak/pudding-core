@@ -81,7 +81,7 @@ const (
 )
 
 type WebConfigSource interface {
-	TavilyAPIKey(ctx context.Context) (string, bool, error)
+	ResolveWebTool(ctx context.Context, feature string) (provider string, apiKey string, err error)
 }
 
 type PluginEndpointSource interface {
@@ -150,6 +150,8 @@ type BuiltinRunner struct {
 	webHTTPClient            *http.Client
 	tavilySearch             string
 	tavilyExtract            string
+	deepseekSearch           string
+	deepseekFetch            string
 	weatherEndpoint          string
 	weatherMu                sync.Mutex
 	weatherCache             map[string]weatherCacheEntry
@@ -170,6 +172,8 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		webHTTPClient:   &http.Client{Timeout: webDefaultTimeout},
 		tavilySearch:    tavilySearchEndpoint,
 		tavilyExtract:   tavilyExtractEndpoint,
+		deepseekSearch:  deepseekSearchEndpoint,
+		deepseekFetch:   deepseekFetchEndpoint,
 		weatherEndpoint: weatherDefaultEndpoint,
 		weatherCache:    map[string]weatherCacheEntry{},
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
@@ -317,6 +321,17 @@ func WithTavilyEndpoints(searchURL, extractURL string) BuiltinOption {
 	}
 }
 
+func WithDeepSeekEndpoints(searchURL, fetchURL string) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		if strings.TrimSpace(searchURL) != "" {
+			r.deepseekSearch = searchURL
+		}
+		if strings.TrimSpace(fetchURL) != "" {
+			r.deepseekFetch = fetchURL
+		}
+	}
+}
+
 func WithWeatherEndpoint(endpoint string) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		if strings.TrimSpace(endpoint) != "" {
@@ -339,14 +354,14 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        WebSearch,
-			Description: "Search the web for current or external information. Returns a short answer plus relevant results.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query in natural language. Use one topic per call."},"max_results":{"type":"integer","description":"Optional result count, 1-10, default 5."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional search depth. Defaults to basic."},"topic":{"type":"string","enum":["general","news"],"description":"Optional topic. Use news for recent/current events."},"include_answer":{"type":"boolean","description":"Optional, defaults to true."}},"required":["query"],"additionalProperties":false}`),
+			Description: "Search the web using the provider selected in Settings > Tools. Returns relevant results with source URLs and summaries; a synthesized answer is available only with Tavily.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query. Use one topic per call. DeepSeek allows at most 128 Unicode characters and supports site:, -site:, lang:, after:, before: and quoted phrases."},"max_results":{"type":"integer","description":"Optional result count, 1-10, default 5."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Tavily only: search depth, default basic. Not applied by DeepSeek."},"topic":{"type":"string","enum":["general","news"],"description":"Tavily only: use news for recent/current events. Not applied by DeepSeek; express date/site constraints in query instead."},"include_answer":{"type":"boolean","description":"Tavily only: include a synthesized answer, default true. Not applied by DeepSeek."}},"required":["query"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        WebFetch,
 			Description: "Fetch readable body text from one URL. Use for page reading and summarization, not API calls.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Full URL starting with http:// or https://."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional extract depth. Defaults to basic."},"max_chars":{"type":"integer","description":"Optional maximum body characters, default 4000 and cap 20000."}},"required":["url"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Full URL starting with http:// or https://, without embedded credentials. DeepSeek allows at most 8192 characters."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Tavily only: extract depth, default basic. Not applied by DeepSeek."},"max_chars":{"type":"integer","description":"Optional maximum body characters, default 4000 and cap 20000."}},"required":["url"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{

@@ -39,17 +39,20 @@ func (r *BuiltinRunner) webSearch(ctx context.Context, call Call) Result {
 	if query == "" {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "missing_query"})
 	}
-	apiKey, ok, err := r.tavilyAPIKey(ctx)
+	provider, apiKey, err := r.resolveWebTool(ctx, "search")
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "config_error", "error": err.Error()})
 	}
-	if !ok {
-		return toolJSON(out, false, tavilyKeyMissingResult())
+	if provider == "" || apiKey == "" {
+		return toolJSON(out, false, webKeyMissingResult(provider))
 	}
 
 	maxResults := clampInt(intArg(args, "max_results"), 1, webMaxResults)
 	if maxResults == 0 {
 		maxResults = webDefaultMaxResults
+	}
+	if provider == "deepseek" {
+		return r.deepSeekWebSearch(ctx, out, args, query, apiKey, maxResults)
 	}
 	depth := strings.ToLower(strings.TrimSpace(stringArg(args, "depth")))
 	if depth != "advanced" {
@@ -72,12 +75,12 @@ func (r *BuiltinRunner) webSearch(ctx context.Context, call Call) Result {
 		"include_answer":      includeAnswer,
 		"include_raw_content": false,
 	}
-	data, elapsed, status, err := r.tavilyPost(ctx, r.tavilySearch, apiKey, payload, 512*1024)
+	data, elapsed, status, err := r.webPost(ctx, r.tavilySearch, apiKey, payload, 512*1024)
 	if err != nil {
-		return toolJSON(out, false, tavilyError("network_error", status, err, data))
+		return toolJSON(out, false, webRequestError(provider, status, err))
 	}
 	if status != http.StatusOK {
-		return toolJSON(out, false, tavilyHTTPError(status, data))
+		return toolJSON(out, false, webHTTPError(provider, status, data))
 	}
 
 	var parsed tavilySearchResponse
@@ -124,15 +127,15 @@ func (r *BuiltinRunner) webFetch(ctx context.Context, call Call) Result {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "missing_url"})
 	}
 	parsedURL, err := url.Parse(rawURL)
-	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
-		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_url", "hint": "url must start with http:// or https://"})
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.User != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_url", "hint": "url must start with http:// or https:// and must not contain credentials"})
 	}
-	apiKey, ok, err := r.tavilyAPIKey(ctx)
+	provider, apiKey, err := r.resolveWebTool(ctx, "fetch")
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "config_error", "error": err.Error()})
 	}
-	if !ok {
-		return toolJSON(out, false, tavilyKeyMissingResult())
+	if provider == "" || apiKey == "" {
+		return toolJSON(out, false, webKeyMissingResult(provider))
 	}
 
 	depth := strings.ToLower(strings.TrimSpace(stringArg(args, "depth")))
@@ -143,16 +146,19 @@ func (r *BuiltinRunner) webFetch(ctx context.Context, call Call) Result {
 	if maxChars == 0 {
 		maxChars = webDefaultMaxChars
 	}
+	if provider == "deepseek" {
+		return r.deepSeekWebFetch(ctx, out, args, rawURL, apiKey, maxChars)
+	}
 	payload := map[string]any{
 		"urls":          []string{rawURL},
 		"extract_depth": depth,
 	}
-	data, elapsed, status, err := r.tavilyPost(ctx, r.tavilyExtract, apiKey, payload, 2*1024*1024)
+	data, elapsed, status, err := r.webPost(ctx, r.tavilyExtract, apiKey, payload, 2*1024*1024)
 	if err != nil {
-		return toolJSON(out, false, tavilyError("network_error", status, err, data))
+		return toolJSON(out, false, webRequestError(provider, status, err))
 	}
 	if status != http.StatusOK {
-		return toolJSON(out, false, tavilyHTTPError(status, data))
+		return toolJSON(out, false, webHTTPError(provider, status, data))
 	}
 
 	var parsed tavilyExtractResponse
@@ -184,76 +190,135 @@ func (r *BuiltinRunner) webFetch(ctx context.Context, call Call) Result {
 	}), SummaryReadChars, utf8.RuneCountInString(content))
 }
 
-func (r *BuiltinRunner) tavilyAPIKey(ctx context.Context) (string, bool, error) {
+func (r *BuiltinRunner) resolveWebTool(ctx context.Context, feature string) (string, string, error) {
 	if r.webConfig == nil {
-		return "", false, nil
+		return "", "", nil
 	}
-	key, ok, err := r.webConfig.TavilyAPIKey(ctx)
-	return strings.TrimSpace(key), ok && strings.TrimSpace(key) != "", err
+	provider, key, err := r.webConfig.ResolveWebTool(ctx, feature)
+	if err == nil && provider != "" && provider != "tavily" && provider != "deepseek" {
+		err = fmt.Errorf("unsupported web provider %q", provider)
+	}
+	return provider, strings.TrimSpace(key), err
 }
 
-func (r *BuiltinRunner) tavilyPost(ctx context.Context, endpoint, apiKey string, payload map[string]any, limit int64) ([]byte, time.Duration, int, error) {
+func (r *BuiltinRunner) webPost(ctx context.Context, endpoint, apiKey string, payload map[string]any, limit int64) ([]byte, time.Duration, int, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	ctx, cancel := context.WithTimeout(ctx, webDefaultTimeout)
+	defer cancel()
 	start := time.Now()
-	resp, err := r.webHTTPClient.Do(req)
-	elapsed := time.Since(start)
-	if err != nil {
-		return nil, elapsed, 0, err
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, time.Since(start), 0, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		resp, err := r.webHTTPClient.Do(req)
+		status := 0
+		var data []byte
+		delay := 250 * time.Millisecond
+		if resp != nil && err == nil {
+			status = resp.StatusCode
+			data, err = io.ReadAll(io.LimitReader(resp.Body, limit+1))
+			resp.Body.Close()
+			if int64(len(data)) > limit {
+				return nil, time.Since(start), status, fmt.Errorf("web response exceeds %d bytes", limit)
+			}
+			if value := resp.Header.Get("Retry-After"); value != "" {
+				if seconds, parseErr := strconv.Atoi(value); parseErr == nil {
+					if seconds > 2 {
+						delay = 3 * time.Second
+					} else if seconds >= 0 {
+						delay = time.Duration(seconds) * time.Second
+					}
+				} else if until, parseErr := http.ParseTime(value); parseErr == nil {
+					delay = time.Until(until)
+				}
+			}
+		}
+		var netErr net.Error
+		retry := status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 || (errors.As(err, &netErr) && netErr.Timeout())
+		if ctx.Err() != nil {
+			return nil, time.Since(start), status, ctx.Err()
+		}
+		if attempt >= 1 || !retry || delay > 2*time.Second {
+			return data, time.Since(start), status, err
+		}
+		timer := time.NewTimer(max(delay, 0))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, time.Since(start), status, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
-	if err != nil {
-		return data, elapsed, resp.StatusCode, err
-	}
-	return data, elapsed, resp.StatusCode, nil
 }
 
-func tavilyHTTPError(status int, data []byte) map[string]any {
+func webHTTPError(provider string, status int, data []byte) map[string]any {
+	result := map[string]any{"ok": false, "provider": provider, "reason": "http_error", "status": status, "body": truncateString(string(data), 512)}
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		result := tavilyKeyMissingResult()
+		if status == http.StatusForbidden && provider == "deepseek" {
+			result["reason"] = "access_denied"
+			result["hint"] = "DeepSeek rejected this request; Fetch may block a URL by security policy"
+			break
+		}
+		result = webKeyMissingResult(provider)
 		result["reason"] = "auth_failed"
 		result["status"] = status
-		result["hint"] = "check or replace the Tavily API Key in Settings > Tools"
-		result["next_step"] = "Open Settings > Tools > Web search (Tavily), get a Tavily API Key if needed, paste it, then save."
-		return result
+		result["hint"] = "check or replace the selected provider's API Key in Settings > Tools"
+	case http.StatusPaymentRequired:
+		result["reason"] = "insufficient_balance"
+		result["hint"] = "top up the selected provider account before retrying"
+	case http.StatusNotFound:
+		result["reason"] = "not_found"
+		result["hint"] = "the provider could not retrieve usable content; check the URL or use another source"
 	case http.StatusTooManyRequests:
-		return map[string]any{"ok": false, "reason": "rate_limited", "status": status, "hint": "Tavily quota exhausted; try later or upgrade"}
-	default:
-		return map[string]any{"ok": false, "reason": "http_error", "status": status, "body": truncateString(string(data), 512)}
+		result["reason"] = "rate_limited"
+		result["hint"] = "provider rate limit or quota reached; wait before retrying"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		result["reason"] = "timeout"
 	}
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 {
+		result["retryable"] = true
+	}
+	return result
 }
 
-func tavilyError(reason string, status int, err error, data []byte) map[string]any {
+func webRequestError(provider string, status int, err error) map[string]any {
+	reason := "network_error"
 	if status != 0 {
-		return map[string]any{"ok": false, "reason": "read_error", "status": status, "error": err.Error(), "body": truncateString(string(data), 512)}
+		reason = "read_error"
 	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 		reason = "timeout"
+	} else if errors.Is(err, context.Canceled) {
+		reason = "canceled"
 	}
-	return map[string]any{"ok": false, "reason": reason, "error": err.Error()}
+	return map[string]any{"ok": false, "provider": provider, "reason": reason, "status": status, "error": err.Error()}
 }
 
-func tavilyKeyMissingResult() map[string]any {
-	return map[string]any{
+func webKeyMissingResult(provider string) map[string]any {
+	result := map[string]any{
 		"ok":            false,
 		"reason":        "api_key_missing",
-		"provider":      "tavily",
-		"settings_path": "Settings > Tools > Web search (Tavily)",
-		"signup_url":    "https://app.tavily.com/home",
-		"hint":          "configure Tavily API Key in Settings > Tools",
-		"next_step":     "Open Settings > Tools > Web search (Tavily), get a Tavily API Key at https://app.tavily.com/home, paste it, then save.",
+		"provider":      provider,
+		"settings_path": "Settings > Tools > Web search and fetch",
+		"hint":          "save an API Key, then select a provider in Settings > Tools",
+		"next_step":     "Open Settings > Tools > Web search and fetch, save a Tavily or DeepSeek API Key, then select the provider to enable search and fetch.",
 	}
+	if provider == "deepseek" {
+		result["signup_url"] = "https://platform.deepseek.com/api_keys"
+	} else if provider == "tavily" {
+		result["signup_url"] = "https://app.tavily.com/home"
+	} else {
+		result["reason"] = "provider_not_configured"
+	}
+	return result
 }
 
 func decodeToolArgs(raw json.RawMessage) (map[string]any, error) {

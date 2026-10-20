@@ -9,13 +9,13 @@ import (
 )
 
 type fakeWebConfig struct {
-	key string
-	ok  bool
-	err error
+	key      string
+	provider string
+	err      error
 }
 
-func (f fakeWebConfig) TavilyAPIKey(context.Context) (string, bool, error) {
-	return f.key, f.ok, f.err
+func (f fakeWebConfig) ResolveWebTool(context.Context, string) (string, string, error) {
+	return f.provider, f.key, f.err
 }
 
 func TestBuiltinWebSearchCallsTavily(t *testing.T) {
@@ -42,7 +42,7 @@ func TestBuiltinWebSearchCallsTavily(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{key: "tvly-secret", ok: true}), WithTavilyEndpoints(srv.URL+"/search", srv.URL+"/extract"))
+	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{key: "tvly-secret", provider: "tavily"}), WithTavilyEndpoints(srv.URL+"/search", srv.URL+"/extract"))
 	res := runner.Call(context.Background(), Call{Name: WebSearch, Args: json.RawMessage(`{"query":"pudding latest","max_results":3,"topic":"news"}`)})
 	if !res.Ok {
 		t.Fatalf("search should succeed: %+v", res)
@@ -83,7 +83,7 @@ func TestBuiltinWebFetchCallsTavilyExtract(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{key: "tvly-secret", ok: true}), WithTavilyEndpoints(srv.URL+"/search", srv.URL+"/extract"))
+	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{key: "tvly-secret", provider: "tavily"}), WithTavilyEndpoints(srv.URL+"/search", srv.URL+"/extract"))
 	res := runner.Call(context.Background(), Call{Name: WebFetch, Args: json.RawMessage(`{"url":"https://example.com/a","depth":"advanced","max_chars":4}`)})
 	if !res.Ok {
 		t.Fatalf("fetch should succeed: %+v", res)
@@ -98,7 +98,7 @@ func TestBuiltinWebFetchCallsTavilyExtract(t *testing.T) {
 }
 
 func TestBuiltinWebSearchMissingAPIKey(t *testing.T) {
-	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{}))
+	runner := NewBuiltinRunner(WithWebConfig(fakeWebConfig{provider: "tavily"}))
 	res := runner.Call(context.Background(), Call{Name: WebSearch, Args: json.RawMessage(`{"query":"x"}`)})
 	if res.Ok {
 		t.Fatalf("missing key should fail: %+v", res)

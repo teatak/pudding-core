@@ -2229,7 +2229,7 @@ func TestWebToolsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got := decodeJSON[config.WebToolsView](t, resp)
-	if got.SearchProvider != "" || got.FetchProvider != "" || len(got.Providers) != 1 {
+	if got.SearchProvider != "" || got.FetchProvider != "" || len(got.Providers) != 2 {
 		t.Fatalf("unexpected initial web tools: %+v", got)
 	}
 	if got.Providers[0].Name != "tavily" || got.Providers[0].APIKeySet {
@@ -2245,8 +2245,16 @@ func TestWebToolsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got = decodeJSON[config.WebToolsView](t, resp)
+	if got.SearchProvider != "" || got.FetchProvider != "" {
+		t.Fatalf("saving a key must not select a provider: %+v", got)
+	}
+	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{"searchProvider": "tavily", "fetchProvider": "tavily"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got = decodeJSON[config.WebToolsView](t, resp)
 	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" {
-		t.Fatalf("patch should enable tavily providers: %+v", got)
+		t.Fatalf("explicit selection should enable tavily: %+v", got)
 	}
 	if got.Providers[0].APIKey != "tvly-http-secret" || !got.Providers[0].APIKeySet {
 		t.Fatalf("patch should return editable key and status: %+v", got.Providers[0])
@@ -2257,6 +2265,24 @@ func TestWebToolsAPI(t *testing.T) {
 	}
 	if !ok || stored != "tvly-http-secret" {
 		t.Fatalf("unexpected stored tavily api key: %q %v", stored, ok)
+	}
+	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{
+		"providers": map[string]any{"deepseek": map[string]string{"apiKey": "ds-http-key"}},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got = decodeJSON[config.WebToolsView](t, resp)
+	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" || got.Providers[1].Name != "deepseek" || got.Providers[1].APIKey != "ds-http-key" {
+		t.Fatalf("saving DeepSeek must keep Tavily selected: %+v", got)
+	}
+	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{"searchProvider": "deepseek", "fetchProvider": "deepseek"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got = decodeJSON[config.WebToolsView](t, resp)
+	if got.SearchProvider != "deepseek" || got.FetchProvider != "deepseek" || got.Providers[0].APIKey != "tvly-http-secret" {
+		t.Fatalf("switching to DeepSeek must retain Tavily credentials: %+v", got)
 	}
 
 	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{"searchProvider": "unsupported"})
