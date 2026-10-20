@@ -94,3 +94,41 @@ func TestWidgetEditingCopyTransactionAndRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestWidgetLegacyTitlesBackfillPreservesIdentityAndData(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	w := createDataWidget(t, st, "legacy")
+	origin := `{"registryURL":"https://hub.test/registry.json","packageID":"test/hub/widgets/todo","version":"1.0.0","packageHash":"same","sourceHash":"%s","copy":false}`
+	if _, err := st.db.Exec(`UPDATE studio_items SET origin=? WHERE id=?`, fmt.Sprintf(origin, w.HeadRevision), w.ID); err != nil {
+		t.Fatal(err)
+	}
+	w, _ = st.GetStudioItem(ctx, w.ID)
+	if _, err := st.WriteWidgetData(ctx, w.ID, w.ActiveRevision, "", 0, []byte(`{"tasks":["keep"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	revision := w.Revision
+	w.Origin.Titles = map[string]string{"en": "Todo", "zh-CN": "待办"}
+	got, err := st.InstallWidgetPackage(ctx, w, revision)
+	if err != nil || got.ID != w.ID || got.Revision != revision || got.Origin.Titles["zh-CN"] != "待办" {
+		t.Fatal(got, err)
+	}
+	st.Close()
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	got, err = st.GetStudioItem(ctx, w.ID)
+	if err != nil || got.Origin.Titles["zh-CN"] != "待办" {
+		t.Fatal(got, err)
+	}
+	data, err := st.GetWidgetData(ctx, w.ID)
+	if err != nil || string(data.Data) != `{"tasks":["keep"]}` {
+		t.Fatal(data, err)
+	}
+	mount := store.ProjectStudioMount(&store.StudioMount{}, got)
+	if mount.Origin.Titles["zh-CN"] != "待办" {
+		t.Fatal("mount lost titles")
+	}
+}

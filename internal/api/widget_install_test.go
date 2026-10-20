@@ -63,12 +63,21 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	pkg := distributionFixture(t, "1.0.0", "export default ()=> <p>One</p>")
 	icon := "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`))
 	pkg["icon"] = icon
+	pkg["title"] = map[string]string{"en": "Todo", "zh-CN": "待办", "zh-TW": "待辦"}
 	w := install(request(pkg, "install", "install-1", nil))
 	if w.Origin == nil || w.HeadRevision != w.Origin.SourceHash || w.ActiveRevision != "" {
 		t.Fatalf("initial %+v", w)
 	}
 	if w.Icon != icon {
 		t.Fatal("installation lost artwork")
+	}
+	if w.Origin.Titles["zh-CN"] != "待办" || w.Origin.Titles["zh-TW"] != "待辦" {
+		t.Fatal("localized titles not retained", w.Origin)
+	}
+	call("PATCH", "/studio/items/"+w.ID+"/appearance", map[string]any{"expectedRevision": w.Revision, "icon": "star", "iconColor": "blue"}, 409)
+	unchanged, _ := st.GetStudioItem(context.Background(), w.ID)
+	if unchanged.Icon != icon || unchanged.Revision != w.Revision {
+		t.Fatal("installed icon was changed")
 	}
 	again := install(request(pkg, "install", "install-2", nil))
 	if again.ID != w.ID {
@@ -128,6 +137,7 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 		t.Fatal("retry created another copy")
 	}
 	customBase := "/studio/items/" + custom.ID
+	json.Unmarshal(call("PATCH", customBase+"/appearance", map[string]any{"expectedRevision": custom.Revision, "icon": "star", "iconColor": "blue"}, 200), &custom)
 	call("PUT", base+"/draft/file", map[string]any{"path": "src/App.tsx", "content": "bad", "expectedDraftHash": opened.DraftHash}, 409)
 	call("POST", base+"/draft/commit", map[string]any{"expectedDraftHash": opened.DraftHash, "clientRequestID": "bad-edit-original"}, 409)
 	var customDraft struct {

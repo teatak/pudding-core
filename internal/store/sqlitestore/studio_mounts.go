@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -10,18 +11,22 @@ import (
 )
 
 const studioMountSelect = `SELECT m.session_id,m.id,m.item_id,m.visible,m.created_at,
- w.kind,w.name,w.icon,w.icon_color,coalesce(w.source_session_id,''),w.revision,w.updated_at
+ w.kind,w.name,w.icon,w.icon_color,coalesce(w.source_session_id,''),w.revision,w.updated_at,w.origin
  FROM studio_mounts m JOIN studio_items w ON w.id=m.item_id AND w.deleted=0 AND w.archived_at=0`
 
 func scanStudioMount(row messageScanner) (*store.StudioMount, error) {
 	m := &store.StudioMount{}
 	w := &store.StudioItem{}
 	var created, updated int64
+	var origin string
 
-	if err := row.Scan(&m.SessionID, &m.ID, &m.ItemID, &m.Visible, &created, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &updated); err != nil {
+	if err := row.Scan(&m.SessionID, &m.ID, &m.ItemID, &m.Visible, &created, &w.Kind, &w.Name, &w.Icon, &w.IconColor, &w.SourceSessionID, &w.Revision, &updated, &origin); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(origin), &w.Origin); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = timeFromMS(created)

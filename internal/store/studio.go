@@ -21,13 +21,14 @@ type WidgetData struct {
 const StudioItemKindWidget = "widget"
 
 type WidgetOrigin struct {
-	RegistryURL string `json:"registryURL"`
-	PackageID   string `json:"packageID"`
-	Version     string `json:"version"`
-	Preview     bool   `json:"preview,omitempty"`
-	PackageHash string `json:"packageHash"`
-	SourceHash  string `json:"sourceHash"`
-	Copy        bool   `json:"copy"`
+	Titles      map[string]string `json:"titles,omitempty"`
+	RegistryURL string            `json:"registryURL"`
+	PackageID   string            `json:"packageID"`
+	Version     string            `json:"version"`
+	Preview     bool              `json:"preview,omitempty"`
+	PackageHash string            `json:"packageHash"`
+	SourceHash  string            `json:"sourceHash"`
+	Copy        bool              `json:"copy"`
 }
 
 type StudioItem struct {
@@ -153,5 +154,6 @@ func ProjectStudioMount(mount *StudioMount, w *StudioItem) *StudioMount {
 	out.Title, out.SourceSessionID, out.UpdatedAt = w.Name, w.SourceSessionID, w.UpdatedAt
 	out.Icon, out.IconColor = w.Icon, w.IconColor
 	out.Kind = w.Kind
+	out.Origin = w.Origin
 	return &out
 }

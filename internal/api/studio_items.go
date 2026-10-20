@@ -22,7 +22,8 @@ func validItemAppearance(icon, color string) bool {
 		return false
 	}
 	switch color {
-	case "", "violet", "blue", "teal", "green", "amber", "rose", "slate":
+	case "", "violet", "blue", "teal", "green", "amber", "rose", "slate",
+		"red", "orange", "yellow", "emerald", "cyan", "indigo", "purple", "pink", "zinc":
 		return true
 	default:
 		return false
@@ -205,6 +206,10 @@ func (s *Server) patchStudioItemAppearance(c *cart.Context) error {
 	w, err := s.store.GetStudioItem(c.Request.Context(), id)
 	if err != nil {
 		return s.studioItemError(c, err)
+	}
+	if w.Kind == store.StudioItemKindWidget && w.Origin != nil && !w.Origin.Copy {
+		c.JSON(http.StatusConflict, map[string]string{"error": "widget_installed_readonly"})
+		return nil
 	}
 	w.Icon, w.IconColor = *req.Icon, *req.IconColor
 	updated, err := s.store.UpdateStudioItem(c.Request.Context(), w, req.ExpectedRevision)

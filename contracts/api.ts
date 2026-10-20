@@ -1,6 +1,7 @@
 // REST payload 的 web 侧镜像。Go 侧来源:internal/store/store.go(实体)
 // 与 internal/api/server.go(请求/响应);字段名一一对应。
 import { z } from "zod";
+import { studioItem } from "./studio";
 
 export const createSessionRequest = z.object({
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
@@ -302,6 +303,7 @@ export const saveProjectFileRequest = z.object({
 });
 
 export const studioMount = z.object({
+  origin: studioItem.shape.origin,
   id: z.string(),
   sessionID: z.string(),
   sourceSessionID: z.string().optional(),

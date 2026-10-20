@@ -83,6 +83,12 @@ func (s *Server) installWidgetPackage(c *cart.Context) error {
 					if item.ArchivedAt != nil {
 						return s.studioItemError(c, store.ErrStudioItemConflict)
 					}
+					if item.Origin.PackageHash == req.PackageHash && len(item.Origin.Titles) == 0 {
+						item.Origin.Titles = pkg.Title
+						if _, e = s.store.InstallWidgetPackage(c.Request.Context(), item, 0); e != nil {
+							return s.studioItemError(c, e)
+						}
+					}
 					c.JSON(http.StatusOK, item)
 					return nil
 				}
@@ -124,7 +130,7 @@ func (s *Server) installWidgetPackage(c *cart.Context) error {
 		icon = "component"
 	}
 	now := time.Now().UTC()
-	item, err := s.store.InstallWidgetPackage(c.Request.Context(), &store.StudioItem{ID: id, Kind: store.StudioItemKindWidget, Name: title, Icon: icon, IconColor: "violet", CreatedAt: now, UpdatedAt: now, Origin: &store.WidgetOrigin{RegistryURL: req.RegistryURL, PackageID: pkg.ID, Version: pkg.Version, Preview: pkg.Preview, PackageHash: req.PackageHash, SourceHash: hash}}, req.ExpectedRevision)
+	item, err := s.store.InstallWidgetPackage(c.Request.Context(), &store.StudioItem{ID: id, Kind: store.StudioItemKindWidget, Name: title, Icon: icon, IconColor: "violet", CreatedAt: now, UpdatedAt: now, Origin: &store.WidgetOrigin{RegistryURL: req.RegistryURL, PackageID: pkg.ID, Version: pkg.Version, Preview: pkg.Preview, PackageHash: req.PackageHash, SourceHash: hash, Titles: pkg.Title}}, req.ExpectedRevision)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}

@@ -40,6 +40,15 @@ func (s *Store) InstallWidgetPackage(ctx context.Context, w *store.StudioItem, e
 				return store.ErrStudioItemConflict
 			}
 			id = current.ID
+			if len(current.Origin.Titles) == 0 && len(w.Origin.Titles) > 0 && current.Origin.PackageHash == w.Origin.PackageHash {
+				current.Origin.Titles = w.Origin.Titles
+				origin, e := json.Marshal(current.Origin)
+				if e != nil {
+					return e
+				}
+				_, e = tx.ExecContext(ctx, `UPDATE studio_items SET origin=? WHERE id=?`, string(origin), id)
+				return e
+			}
 			return nil
 		}
 		base := ""
@@ -50,6 +59,15 @@ func (s *Store) InstallWidgetPackage(ctx context.Context, w *store.StudioItem, e
 			if current.Origin.Version == w.Origin.Version {
 				if current.Origin.PackageHash != w.Origin.PackageHash {
 					return store.ErrStudioItemConflict
+				}
+				if len(current.Origin.Titles) == 0 && len(w.Origin.Titles) > 0 {
+					current.Origin.Titles = w.Origin.Titles
+					origin, e := json.Marshal(current.Origin)
+					if e != nil {
+						return e
+					}
+					_, e = tx.ExecContext(ctx, `UPDATE studio_items SET origin=? WHERE id=?`, string(origin), id)
+					return e
 				}
 				return nil
 			}
