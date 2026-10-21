@@ -312,6 +312,46 @@ func TestAssembleOmitsPluginsIndexWhenAllPluginsAreDisabled(t *testing.T) {
 	}
 }
 
+func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
+	var web *plugin.Definition
+	for _, definition := range plugin.BuiltinDefinitions() {
+		if definition.ID == plugin.BuiltinWebID {
+			web = definition
+			break
+		}
+	}
+	if web == nil {
+		t.Fatal("built-in Web Search & Fetch is missing")
+	}
+	for _, mode := range []string{"chat", "work", "code"} {
+		t.Run(mode, func(t *testing.T) {
+			out := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}})
+			for _, want := range []string{
+				"Plugin `web` (Web Search & Fetch), requires Chat",
+				"Default skill `web`",
+				"It works in Chat, Work and Code without a browser, desktop runtime or capability upgrade",
+				"Plugins > Web Search & Fetch > Provider configuration",
+			} {
+				if !strings.Contains(out.SystemInstruction, want) {
+					t.Fatalf("missing Web guidance %q", want)
+				}
+			}
+			if strings.Contains(out.SystemInstruction, "Status: not connected") || strings.Contains(out.SystemInstruction, "Status: loaded for this session") {
+				t.Fatal("Web should be available without a connection but initially unloaded")
+			}
+			loaded := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebID}})
+			if !strings.Contains(loaded.SystemInstruction, "Status: loaded for this session") {
+				t.Fatal("loaded Web state missing from model prompt")
+			}
+		})
+	}
+	web.Enabled = false
+	out := Assemble(Input{Mode: "chat", Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebID}})
+	if hasSegment(out.Segments, "plugins_index") || strings.Contains(out.SystemInstruction, "Plugin `web`") {
+		t.Fatal("disabled Web must not be advertised, even when loaded in the session")
+	}
+}
+
 func TestAssembleModeLayersAndAllModesShowPlugins(t *testing.T) {
 	plugins := []*plugin.Definition{{ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work"}}
 	chat := Assemble(Input{Mode: "chat", Plugins: plugins})

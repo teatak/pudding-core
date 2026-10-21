@@ -354,7 +354,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        WebSearch,
-			Description: "Search the web using the provider selected in Settings > Tools. Returns relevant results with source URLs and summaries; a synthesized answer is available only with Tavily.",
+			Description: "Search the web using the provider configured in Plugins > Web Search & Fetch. Returns relevant results with source URLs and summaries; a synthesized answer is available only with Tavily.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query. Use one topic per call. DeepSeek allows at most 128 Unicode characters and supports site:, -site:, lang:, after:, before: and quoted phrases."},"max_results":{"type":"integer","description":"Optional result count, 1-10, default 5."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Tavily only: search depth, default basic. Not applied by DeepSeek."},"topic":{"type":"string","enum":["general","news"],"description":"Tavily only: use news for recent/current events. Not applied by DeepSeek; express date/site constraints in query instead."},"include_answer":{"type":"boolean","description":"Tavily only: include a synthesized answer, default true. Not applied by DeepSeek."}},"required":["query"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},

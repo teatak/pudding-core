@@ -63,7 +63,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 		t.Fatal("core tool definitions are not stable")
 	}
 	for _, name := range []string{
-		RequestCapability, SetNextPrompt, CommandRun, CommandSession, WebSearch, MediaRead,
+		RequestCapability, SetNextPrompt, CommandRun, CommandSession, MediaRead,
 		FileList, FileRead, AttachmentExport, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
@@ -73,7 +73,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	for _, name := range []string{CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, PluginSave} {
+	for _, name := range []string{WebSearch, WebFetch, CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, PluginSave} {
 		if HasDefinition(first, name) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}

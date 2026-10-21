@@ -196,11 +196,20 @@ Git 子进程保留调用方显式设置的 `GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SY
 
 ## 9. 网页搜索与抓取
 
+`builtin_web_search` / `builtin_web_fetch` 归属内置 Web Search & Fetch（`web`）插件。
+插件默认启用，Chat / Work / Code 均可按会话显式加载；未加载返回 `plugin_not_loaded`，
+关闭后返回 `plugin_disabled`，不会通过旧的 Core 工具入口绕过开关。工具名称和历史结果保持兼容，
+不依赖 Desktop runtime，因此定时任务和子会话也可加载使用。`GET /tools/builtin` 不再列出这两个插件工具。
+
 `builtin_web_search` / `builtin_web_fetch` 根据 `config/web.yaml` 中的 `search.provider` /
 `fetch.provider` 选择 `tavily` 或 `deepseek`，每次执行读取当前配置，切换无需重启。
 `PATCH /tools/web` 的 `providers` 只保存或清除各家的 Key；只有显式传入
 `searchProvider` / `fetchProvider` 才切换或停用。清除当前服务商的 Key 会停用对应工具，
 不自动选择另一家；已有 Tavily 配置保留原选择。两家的 Key 分别存储，不跟随模型配置。
+
+配置入口为 Plugins → Web Search & Fetch → Provider configuration。
+`PUT /plugins/web/enabled` 只改变插件启用状态，不改 Key 或服务商选择；
+`PATCH /tools/web` 不改变插件启用状态。插件关闭时仍允许修改配置，重新启用沿用最新配置。
 
 DeepSeek 使用独立的 `/v1/tools/search` 和 `/v1/tools/fetch`。搜索默认返回 5 条、最多 10 条，
 `query` 最多 128 个 Unicode 字符；保留 `snippet`、供模型阅读的 `summary`、来源 URL、

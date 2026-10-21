@@ -2145,7 +2145,7 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if !hasToolDef(client.requests[0].Tools, tool.WebSearch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
+	if !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || hasToolDef(client.requests[0].Tools, tool.WebSearch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat request should expose chat tools only: %+v", client.requests[0].Tools)
 	}
 	if len(runner.calls) != 0 {
@@ -2692,10 +2692,10 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
+	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || hasToolDef(client.requests[0].Tools, tool.WebSearch) || hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.PluginLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.PluginLoad) || hasToolDef(client.requests[1].Tools, tool.WebSearch) || hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("code tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)

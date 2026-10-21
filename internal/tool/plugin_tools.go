@@ -3,6 +3,7 @@ package tool
 import "github.com/teatak/pudding-core/internal/plugin"
 
 var builtinPluginTools = map[string]string{
+	WebSearch: plugin.BuiltinWebID, WebFetch: plugin.BuiltinWebID,
 	ArtifactList: plugin.BuiltinArtifactsID, ArtifactOpen: plugin.BuiltinArtifactsID,
 	PageCreate: plugin.BuiltinPageAuthoringID, PageRead: plugin.BuiltinPageAuthoringID, PageEdit: plugin.BuiltinPageAuthoringID, PageRename: plugin.BuiltinPageAuthoringID,
 	SheetCreate: plugin.BuiltinSheetAuthoringID, SheetRead: plugin.BuiltinSheetAuthoringID, SheetEdit: plugin.BuiltinSheetAuthoringID,

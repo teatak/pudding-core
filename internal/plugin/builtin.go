@@ -14,6 +14,7 @@ const (
 	BuiltinSheetAuthoringID  = "sheet-authoring"
 	BuiltinCollaborationID   = "subagent"
 	BuiltinBrowserID         = "browser"
+	BuiltinWebID             = "web"
 	BuiltinSkillAuthoringID  = "skill-authoring"
 	BuiltinPluginAuthoringID = "plugin-authoring"
 	BuiltinCaptureID         = "capture"
@@ -49,6 +50,7 @@ type builtinDefinition struct {
 }
 
 var builtinDefinitions = []builtinDefinition{
+	webBuiltin(),
 	contentBuiltin(BuiltinArtifactsID, "Content Library", "List and open existing Studio content of any type.",
 		[]string{"builtin_artifact_list", "builtin_artifact_open"}, contentBrowserInstructions),
 	contentBuiltin(BuiltinPageAuthoringID, "Page Authoring", "Create, read, edit and rename lightweight Studio pages with Markdown support.",
@@ -121,7 +123,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 - Check browser status before assuming a tab exists.
 - Observe the page before clicking or typing.
 - Re-observe after navigation or a significant page change.
-- Use web search or fetch instead when no interactive browser state is needed.
+- For public web search or page text, use Web Search & Fetch (plugin ID: web) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.
 `,
 			},
 		},

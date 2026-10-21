@@ -17,6 +17,7 @@ Pudding 使用统一的**插件**概念承载需要说明、工具、界面和�
 
 | 插件 | 最低模式 | 边界 |
 | --- | --- | --- |
+| Web Search & Fetch（网页搜索与抓取） | Chat | Tavily / DeepSeek 搜索和抓取，daemon 执行，不依赖客户端 runtime |
 | Browser | Work | 浏览器标签页、页面状态和页面交互工具 |
 | Subagents（子任务调度） | Work | 主会话派发、补充、等待和停止子任务；关闭后已接受任务继续收尾，结果回收不依赖工具开关 |
 | Computer Use | Work | 本机应用的观察与操作 |
@@ -27,6 +28,12 @@ Pudding 使用统一的**插件**概念承载需要说明、工具、界面和�
 | Widget Authoring（小组件创作） | Code | 由已连接 Desktop 动态提供的小组件源码编辑、提交、预览、检查与启用工具 |
 
 文件、Git 与代码导航工具属于 Code Core，不再作为插件加载。
+
+网页搜索与抓取属于内置插件 `web`，不再常驻 Core 工具列表。它默认启用，模型首次使用时通过
+`builtin_plugin_load` 加载；Chat 即可加载和调用，后续会话轮次及 daemon 重启复用已保存的加载状态。
+禁用后撤下索引和工具并拒绝新的调用，重新启用不清除已有加载状态。
+配置在插件详情页管理，沿用 `config/web.yaml` 中的 Tavily、DeepSeek Key 和服务商选择。
+保存 Key、切换服务商、启停插件分别更新凭据、服务商选择、插件开关，互不隐式触发；不迁移或双写 Key。
 
 `builtin_command_run` 与 `builtin_command_session` 都属于 Code Core。前者执行一次性命令
 或启动后台会话,后者负责读取、输入和停止,不再通过 Terminal 插件动态加载。

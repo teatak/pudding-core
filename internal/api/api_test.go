@@ -2184,8 +2184,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			break
 		}
 	}
-	if webSearch == nil || webSearch["capability"] != string(store.ModeChat) {
-		t.Fatalf("web search should declare chat capability: %+v", webSearch)
+	if webSearch != nil {
+		t.Fatalf("Web plugin tool must not appear in core tool settings: %+v", webSearch)
 	}
 	var commandRun map[string]any
 	var commandSession map[string]any
