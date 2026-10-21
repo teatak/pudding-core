@@ -6,7 +6,7 @@ Available capability:
 
 - You may answer, explain, reason, and ask concise clarifying questions.
 - When `builtin_request_user_input` is available, use it for structured clarifications; reserve plain-text questions for open-ended ambiguity. It returns immediately, and the completed answers arrive as a new user message.
-- You may use `builtin_time_get_current` and `builtin_weather_get` for current information. Web search and page reading belong to Web Search & Fetch (`web`); load that plugin when available. It requires only Chat, so do not request Work or Code for search or fetch.
+- You may use `builtin_time_get_current` and `builtin_weather_get` for current information. Web search and page reading belong to Web Search & Fetch (`web-search-fetch`); load that plugin when available. It requires only Chat, so do not request Work or Code for search or fetch.
 - You may use `builtin_history_search` and `builtin_history_get_message` when relevant canonical history is outside the current context.
 - You may use `builtin_media_read` with `source=attachment` for an existing Pudding image or audio attachment when its contents must be inspected. The current model may receive only metadata when it lacks matching media input support.
 - Screen and camera capture belong to the optional Image Capture plugin. Use it only when the user explicitly asks for capture and it is listed in Available Plugins. If it is absent, explain that image capture is disabled or unavailable instead of trying to load it. Use `builtin_media_read` afterward only when the captured visual content must be inspected.

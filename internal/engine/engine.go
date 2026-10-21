@@ -2379,7 +2379,7 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 	if err != nil {
 		return pluginLoadFailure(call, "invalid_arguments", err.Error(), nil), false
 	}
-	if request.PluginID == plugin.BuiltinCollaborationID {
+	if request.PluginID == plugin.BuiltinSubagentID {
 		owner, err := e.store.ParentSessionID(ctx, sessionID)
 		if err != nil || owner != "" {
 			return pluginLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false

@@ -14,7 +14,7 @@ func TestSubagentToolsExposeOnlyCanonicalNames(t *testing.T) {
 		if !HasDefinition(definitions, name) || !IsSubtaskTool(name) || !NameAllowedForMode(store.ModeWork, name) || !NameAllowedForMode(store.ModeCode, name) || NameAllowedForMode(store.ModeChat, name) {
 			t.Fatalf("subagent tool is unavailable or has the wrong mode: %s", name)
 		}
-		if id, ok := BuiltinPluginIDForTool(name); !ok || id != plugin.BuiltinCollaborationID {
+		if id, ok := BuiltinPluginIDForTool(name); !ok || id != plugin.BuiltinSubagentID {
 			t.Fatalf("subagent tool has no plugin owner: %s", name)
 		}
 		for _, prefix := range []string{"builtin_subtask_", "builtin_collaboration_"} {

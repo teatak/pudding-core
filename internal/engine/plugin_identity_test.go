@@ -14,7 +14,7 @@ import (
 )
 
 func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent", "web": "web-search-fetch"} {
 		t.Run(old, func(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)

@@ -102,6 +102,60 @@ func TestStoredStudioSkillResolvesCurrentArtifactInstructions(t *testing.T) {
 	}
 }
 
+func TestStoredWebSkillResolvesCurrentInstructionsAndRespectsDisablement(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t)
+	if err := st.CreateSession(ctx, &store.Session{ID: "legacy-web", Provider: "mock", Model: "mock", LoadedPluginIDs: []string{"web"}}); err != nil {
+		t.Fatal(err)
+	}
+	plugins := plugin.NewService(t.TempDir(), st.Manager)
+	b := New(st, nil, WithSkillSources(plugins, nil))
+	type instructions struct {
+		Content           string              `json:"content"`
+		InstructionStatus string              `json:"instructionStatus"`
+		Reference         tool.SkillReference `json:"reference"`
+	}
+	for _, selector := range []string{"web", "skills/web/SKILL.md"} {
+		body, _ := json.Marshal(map[string]any{"reference": tool.SkillReference{Kind: tool.PluginSkillReference, PluginID: "web", SkillID: selector}})
+		req := provider.Request{Messages: []provider.Message{{Role: provider.RoleAssistant, Parts: []provider.Part{referencePart(tool.PluginLoad, "load", string(body))}}}}
+		before, _ := json.Marshal(req)
+		resolved, err := b.ResolveSkillReferences(ctx, "legacy-web", "chat", req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := resolved.Messages[0].Parts[0]
+		var payload instructions
+		if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !result.Ok || !strings.Contains(payload.Content, "# Web Search & Fetch") || payload.InstructionStatus != "current" || payload.Reference.PluginID != plugin.BuiltinWebSearchFetchID {
+			t.Fatalf("legacy Web instructions not resolved: %+v", result)
+		}
+		after, _ := json.Marshal(req)
+		if string(before) != string(after) {
+			t.Fatal("resolving a legacy reference rewrote historical input")
+		}
+		if _, err := plugins.SetEnabled(ctx, "web", false); err != nil {
+			t.Fatal(err)
+		}
+		resolved, err = b.ResolveSkillReferences(ctx, "legacy-web", "chat", req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result = resolved.Messages[0].Parts[0]
+		payload = instructions{}
+		if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if result.Ok || payload.Content != "" || payload.InstructionStatus != "unavailable" {
+			t.Fatalf("legacy reference bypassed plugin disablement: %+v", result)
+		}
+		if _, err := plugins.SetEnabled(ctx, "web", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestResolveSkillReferencesUsesCurrentBodiesAtOriginalPositions(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)

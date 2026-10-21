@@ -32,8 +32,8 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 	if owner != "" {
 		return fail(store.ErrInvalidSessionRelation)
 	}
-	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinCollaborationID, mode) {
-		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinCollaborationID)
+	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinSubagentID, mode) {
+		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinSubagentID)
 	}
 	var dispatchArgs struct {
 		Title  string `json:"title"`
@@ -180,7 +180,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 		e.collaborationMu.Unlock()
 		return nil, err
 	}
-	if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinCollaborationID, mode) {
+	if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubagentID, mode) {
 		e.collaborationMu.Unlock()
 		return nil, errors.New("collaboration plugin is unavailable")
 	}
@@ -192,7 +192,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	child := &store.Session{ID: store.NewID("session"), Title: strings.TrimSpace(title), Provider: parent.Provider, Model: parent.Model, ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey, ProjectID: parent.ProjectID, ActiveMode: parent.ActiveMode, ModeLease: parent.ModeLease}
 	// Capability grants scoped only to this parent turn do not transfer.
 	for _, id := range parent.LoadedPluginIDs {
-		if id != plugin.BuiltinCollaborationID {
+		if id != plugin.BuiltinSubagentID {
 			child.LoadedPluginIDs = append(child.LoadedPluginIDs, id)
 		}
 	}

@@ -24,7 +24,7 @@ type collaborationPlugins struct{ enabled atomic.Bool }
 func (a *collaborationPlugins) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
 	defs := plugin.BuiltinDefinitions()
 	for _, d := range defs {
-		if d.ID == plugin.BuiltinCollaborationID {
+		if d.ID == plugin.BuiltinSubagentID {
 			d.Enabled = a.enabled.Load()
 		}
 	}
@@ -41,7 +41,7 @@ func newCollaborationEngine(t *testing.T, client provider.Client) (*Engine, *sto
 	st := storetest.New(t)
 	plugins := &collaborationPlugins{}
 	plugins.enabled.Store(true)
-	if err := st.CreateSession(ctx, &store.Session{ID: "root", Title: "Root", Provider: client.Name(), Model: "model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedPluginIDs: []string{plugin.BuiltinCollaborationID}}); err != nil {
+	if err := st.CreateSession(ctx, &store.Session{ID: "root", Title: "Root", Provider: client.Name(), Model: "model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedPluginIDs: []string{plugin.BuiltinSubagentID}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.PutProviderProfile(ctx, &store.ProviderProfile{ID: client.Name(), Protocol: "openai-compatible", BaseURL: "http://example.invalid", Models: []store.ProviderModel{{ID: "model"}}}); err != nil {
@@ -95,7 +95,7 @@ func TestCollaborationAdmissionStopAndGate(t *testing.T) {
 		t.Fatal("reused fourth child should queue")
 	}
 	// Children do not even receive the recursive tool definitions.
-	ids := []string{plugin.BuiltinCollaborationID}
+	ids := []string{plugin.BuiltinSubagentID}
 	if _, err := st.UpdateSession(ctx, children[0].ID, store.SessionUpdate{LoadedPluginIDs: &ids}); err != nil {
 		t.Fatal(err)
 	}

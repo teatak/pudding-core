@@ -1,6 +1,6 @@
 # Built-in plugin IDs
 
-Current canonical IDs, updated 2026-10-18:
+Current canonical IDs, updated 2026-10-21:
 
 | Previous ID | Canonical ID | Default Skill ID |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ Current canonical IDs, updated 2026-10-18:
 | `markdown`, `note-authoring` | `page-authoring` | `page-authoring` |
 | `tables` | `sheet-authoring` | `sheet-authoring` |
 | `collaboration` | `subagent` | `subagent` |
+| `web` | `web-search-fetch` | `web-search-fetch` |
 
 The earlier `docx` / `document-authoring` product is not part of the current Page/Sheet catalog. Do not relabel its retained structured data as Markdown. Canonical content kinds, references and tool names are listed in [Content naming](content-naming.md).
 
@@ -31,6 +32,12 @@ fingerprints, content hashes and global/third-party Skill IDs are not rewritten.
 Old plugin Skill references are projected only when building current context.
 Desktop shares one local identity adapter for builtin labels, icons and alias
 search; installed plugin metadata is not relabeled or rewritten.
+
+The Web Search & Fetch rename also accepts the old `skills/web/SKILL.md`
+selector and existing plugin-page links. It retains the existing `config/web.yaml`
+credentials and provider selection, `/tools/web` API, and `builtin_web_search` /
+`builtin_web_fetch` tool names. Enabling the plugin, saving credentials and
+selecting a provider remain separate operations.
 
 Ship the paired Core and Desktop changes together by pinning the Core source
 in `core.lock.json`. Do not infer a need to rewrite database history from a

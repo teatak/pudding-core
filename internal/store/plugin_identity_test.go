@@ -13,6 +13,7 @@ func TestCanonicalPluginIDsAndOwnedSkillSelectors(t *testing.T) {
 		"note-authoring": "page-authoring",
 		"tables":         "sheet-authoring",
 		"collaboration":  "subagent",
+		"web":            "web-search-fetch",
 	} {
 		t.Run(old, func(t *testing.T) {
 			if got := CurrentPluginID(" " + old + " "); got != current || CurrentPluginID(got) != current {

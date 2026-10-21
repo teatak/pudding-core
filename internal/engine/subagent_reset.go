@@ -32,7 +32,7 @@ func (e *Engine) resetSubagent(ctx context.Context, parentID, parentTurnID, call
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinCollaborationID, mode) {
+		if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubagentID, mode) {
 			return nil, errors.New("collaboration plugin is unavailable")
 		}
 		owner, err := e.store.ParentSessionID(ctx, childID)

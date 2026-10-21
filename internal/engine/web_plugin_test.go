@@ -47,7 +47,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, def := range defs {
-			if def.ID == plugin.BuiltinWebID {
+			if def.ID == plugin.BuiltinWebSearchFetchID {
 				if def.Enabled != want || def.RequiredMode != "chat" || def.Runtime != "" || def.Source != plugin.SourceBuiltin || def.CanUninstall || len(def.Tools) != 2 {
 					t.Fatalf("unexpected Web plugin: %+v", def)
 				}
@@ -137,7 +137,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	if requests.Load() != 0 {
 		t.Fatal("unloaded plugin made a request")
 	}
-	load := tool.Call{Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"web"}`)}
+	load := tool.Call{Name: tool.PluginLoad, Args: json.RawMessage(fmt.Sprintf(`{"plugin_id":%q}`, plugin.BuiltinWebSearchFetchID))}
 	out, changed := e.loadPlugin(ctx, "web-session", load, store.ModeChat)
 	if !out.Ok || !changed {
 		t.Fatalf("Web must load in Chat: %+v", out)
@@ -145,7 +145,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	defs = definitions(e, true)
 	run(tool.WebSearch, defs, "", "tavily")
 	run(tool.WebFetch, defs, "", "tavily")
-	if _, err := plugins.SetEnabled(ctx, plugin.BuiltinWebID, false); err != nil {
+	if _, err := plugins.SetEnabled(ctx, plugin.BuiltinWebSearchFetchID, false); err != nil {
 		t.Fatal(err)
 	}
 	assertEnabled(false)
@@ -167,7 +167,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	selected = "deepseek"
 	patch(config.WebToolsUpdate{SearchProvider: &selected, FetchProvider: &selected})
 	assertEnabled(false)
-	if _, err := plugins.SetEnabled(ctx, plugin.BuiltinWebID, true); err != nil {
+	if _, err := plugins.SetEnabled(ctx, plugin.BuiltinWebSearchFetchID, true); err != nil {
 		t.Fatal(err)
 	}
 	defs = definitions(e, true)
@@ -185,7 +185,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	if requests.Load() != 4 {
 		t.Fatalf("unexpected upstream request count: %d", requests.Load())
 	}
-	out, changed = e.unloadPlugin(ctx, "web-session", tool.Call{Name: tool.PluginUnload, Args: json.RawMessage(`{"plugin_id":"web"}`)})
+	out, changed = e.unloadPlugin(ctx, "web-session", tool.Call{Name: tool.PluginUnload, Args: json.RawMessage(fmt.Sprintf(`{"plugin_id":%q}`, plugin.BuiltinWebSearchFetchID))})
 	if !out.Ok || !changed {
 		t.Fatal(out)
 	}

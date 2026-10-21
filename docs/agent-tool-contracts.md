@@ -196,7 +196,7 @@ Git 子进程保留调用方显式设置的 `GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SY
 
 ## 9. 网页搜索与抓取
 
-`builtin_web_search` / `builtin_web_fetch` 归属内置 Web Search & Fetch（`web`）插件。
+`builtin_web_search` / `builtin_web_fetch` 归属内置 Web Search & Fetch（`web-search-fetch`）插件。
 插件默认启用，Chat / Work / Code 均可按会话显式加载；未加载返回 `plugin_not_loaded`，
 关闭后返回 `plugin_disabled`，不会通过旧的 Core 工具入口绕过开关。工具名称和历史结果保持兼容，
 不依赖 Desktop runtime，因此定时任务和子会话也可加载使用。`GET /tools/builtin` 不再列出这两个插件工具。

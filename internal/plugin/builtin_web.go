@@ -3,14 +3,14 @@ package plugin
 func webBuiltin() builtinDefinition {
 	return builtinDefinition{
 		definition: &Definition{
-			Kind: KindPlugin, ID: BuiltinWebID, Name: "Web Search & Fetch",
+			Kind: KindPlugin, ID: BuiltinWebSearchFetchID, Name: "Web Search & Fetch",
 			Description: "Search the web for current information and fetch readable webpages using Tavily or DeepSeek.",
-			Source:      SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "chat", DefaultSkillID: BuiltinWebID,
+			Source:      SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "chat", DefaultSkillID: BuiltinWebSearchFetchID,
 			Tools:  []ToolRef{{Name: "builtin_web_search"}, {Name: "builtin_web_fetch"}},
-			Skills: []SkillRef{{ID: BuiltinWebID, Name: "Web Search & Fetch", Description: "Search for external information and read source webpages.", Path: "skills/web/SKILL.md"}},
+			Skills: []SkillRef{{ID: BuiltinWebSearchFetchID, Name: "Web Search & Fetch", Description: "Search for external information and read source webpages.", Path: "skills/web-search-fetch/SKILL.md"}},
 		},
-		skills: map[string]SkillDetail{BuiltinWebID: {
-			ID: BuiltinWebID, Name: "Web Search & Fetch", Description: "Search for external information and read source webpages.", Path: "skills/web/SKILL.md",
+		skills: map[string]SkillDetail{BuiltinWebSearchFetchID: {
+			ID: BuiltinWebSearchFetchID, Name: "Web Search & Fetch", Description: "Search for external information and read source webpages.", Path: "skills/web-search-fetch/SKILL.md",
 			Content: `# Web Search & Fetch
 
 Use builtin_web_search for current or external information, and builtin_web_fetch to read a source URL. Fetch a known URL directly when the user asks about its content; search first when sources need to be discovered. Both tools are available in Chat, Work and Code after this plugin is loaded. They run in the daemon and do not require a desktop browser, client runtime or capability upgrade.

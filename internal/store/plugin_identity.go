@@ -17,6 +17,8 @@ func CurrentPluginID(id string) string {
 		return "sheet-authoring"
 	case "collaboration":
 		return "subagent"
+	case "web":
+		return "web-search-fetch"
 	default:
 		return id
 	}
@@ -27,7 +29,7 @@ func CurrentPluginID(id string) string {
 func CurrentPluginSkillID(pluginID, selector string) string {
 	pluginID, selector = CurrentPluginID(pluginID), strings.TrimSpace(selector)
 	switch pluginID {
-	case "artifact", "page-authoring", "sheet-authoring", "subagent":
+	case "artifact", "page-authoring", "sheet-authoring", "subagent", "web-search-fetch":
 	default:
 		return selector
 	}

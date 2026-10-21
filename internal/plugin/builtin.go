@@ -12,9 +12,9 @@ const (
 	BuiltinPageAuthoringID = "page-authoring"
 
 	BuiltinSheetAuthoringID  = "sheet-authoring"
-	BuiltinCollaborationID   = "subagent"
+	BuiltinSubagentID        = "subagent"
 	BuiltinBrowserID         = "browser"
-	BuiltinWebID             = "web"
+	BuiltinWebSearchFetchID  = "web-search-fetch"
 	BuiltinSkillAuthoringID  = "skill-authoring"
 	BuiltinPluginAuthoringID = "plugin-authoring"
 	BuiltinCaptureID         = "capture"
@@ -57,10 +57,10 @@ var builtinDefinitions = []builtinDefinition{
 		[]string{"builtin_page_create", "builtin_page_read", "builtin_page_edit", "builtin_page_rename"}, pageInstructions),
 	contentBuiltin(BuiltinSheetAuthoringID, "Sheet Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
 		[]string{"builtin_sheet_create", "builtin_sheet_read", "builtin_sheet_edit"}, sheetInstructions),
-	{definition: &Definition{Kind: KindPlugin, ID: BuiltinCollaborationID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinCollaborationID,
+	{definition: &Definition{Kind: KindPlugin, ID: BuiltinSubagentID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinSubagentID,
 		Tools:  []ToolRef{{Name: "builtin_subagent_list"}, {Name: "builtin_subagent_dispatch"}, {Name: "builtin_subagent_send"}, {Name: "builtin_subagent_wait"}, {Name: "builtin_subagent_stop"}, {Name: "builtin_subagent_archive"}, {Name: "builtin_subagent_restore"}, {Name: "builtin_subagent_reset"}},
-		Skills: []SkillRef{{ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md"}}},
-		skills: map[string]SkillDetail{BuiltinCollaborationID: {ID: BuiltinCollaborationID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md", Content: `# Subagents
+		Skills: []SkillRef{{ID: BuiltinSubagentID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md"}}},
+		skills: map[string]SkillDetail{BuiltinSubagentID: {ID: BuiltinSubagentID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md", Content: `# Subagents
 
 Use child conversations for bounded work that can make useful progress independently. Supply the objective, relevant context, constraints, and expected output in the dispatch prompt. Children do not inherit the main conversation history or temporary approvals. Use only the current builtin_subagent_* tools.
 
@@ -123,7 +123,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 - Check browser status before assuming a tab exists.
 - Observe the page before clicking or typing.
 - Re-observe after navigation or a significant page change.
-- For public web search or page text, use Web Search & Fetch (plugin ID: web) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.
+- For public web search or page text, use Web Search & Fetch (plugin ID: web-search-fetch) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.
 `,
 			},
 		},

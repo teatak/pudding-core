@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -315,7 +316,7 @@ func TestAssembleOmitsPluginsIndexWhenAllPluginsAreDisabled(t *testing.T) {
 func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
 	var web *plugin.Definition
 	for _, definition := range plugin.BuiltinDefinitions() {
-		if definition.ID == plugin.BuiltinWebID {
+		if definition.ID == plugin.BuiltinWebSearchFetchID {
 			web = definition
 			break
 		}
@@ -327,8 +328,9 @@ func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			out := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}})
 			for _, want := range []string{
-				"Plugin `web` (Web Search & Fetch), requires Chat",
-				"Default skill `web`",
+				"Web Search & Fetch (`web-search-fetch`)",
+				fmt.Sprintf("Plugin `%s` (Web Search & Fetch), requires Chat", plugin.BuiltinWebSearchFetchID),
+				fmt.Sprintf("Default skill `%s`", plugin.BuiltinWebSearchFetchID),
 				"It works in Chat, Work and Code without a browser, desktop runtime or capability upgrade",
 				"Plugins > Web Search & Fetch > Provider configuration",
 			} {
@@ -339,15 +341,15 @@ func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
 			if strings.Contains(out.SystemInstruction, "Status: not connected") || strings.Contains(out.SystemInstruction, "Status: loaded for this session") {
 				t.Fatal("Web should be available without a connection but initially unloaded")
 			}
-			loaded := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebID}})
+			loaded := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebSearchFetchID}})
 			if !strings.Contains(loaded.SystemInstruction, "Status: loaded for this session") {
 				t.Fatal("loaded Web state missing from model prompt")
 			}
 		})
 	}
 	web.Enabled = false
-	out := Assemble(Input{Mode: "chat", Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebID}})
-	if hasSegment(out.Segments, "plugins_index") || strings.Contains(out.SystemInstruction, "Plugin `web`") {
+	out := Assemble(Input{Mode: "chat", Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebSearchFetchID}})
+	if hasSegment(out.Segments, "plugins_index") || strings.Contains(out.SystemInstruction, fmt.Sprintf("Plugin `%s`", plugin.BuiltinWebSearchFetchID)) {
 		t.Fatal("disabled Web must not be advertised, even when loaded in the session")
 	}
 }

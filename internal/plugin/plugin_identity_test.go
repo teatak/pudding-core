@@ -6,7 +6,7 @@ import (
 )
 
 func TestRenamedBuiltinCatalogAndLegacySkillSelectors(t *testing.T) {
-	aliases := map[string]string{"studio": "artifact", "artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent"}
+	aliases := map[string]string{"studio": "artifact", "artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent", "web": "web-search-fetch"}
 	defs := BuiltinDefinitions()
 	seen := map[string]bool{}
 	for _, def := range defs {

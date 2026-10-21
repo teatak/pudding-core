@@ -49,7 +49,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_skill_read`
 - `builtin_media_read`
 - `builtin_weather_get`
-- 加载 Web Search & Fetch（`web`）插件后的 `builtin_web_search` 与 `builtin_web_fetch`
+- 加载 Web Search & Fetch（`web-search-fetch`）插件后的 `builtin_web_search` 与 `builtin_web_fetch`
 - 加载 Image Capture 插件后的 `builtin_desktop_screenshot` 与 `builtin_camera_capture`
 - 当前 Runtime 提供且已通过 `builtin_plugin_load` 加载的 UI 插件工具
 
