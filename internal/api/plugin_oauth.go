@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -75,9 +76,112 @@ type pluginOAuthTokenResp struct {
 	TokenType             string `json:"token_type"`
 	Scope                 string `json:"scope"`
 	ExpiresIn             int64  `json:"expires_in"`
+	IDToken               string `json:"id_token,omitempty"`
 	Error                 string `json:"error"`
 	ErrorDescription      string `json:"error_description"`
 	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
+}
+
+type googleIDTokenPayload struct {
+	Sub     string `json:"sub"`
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+}
+
+func parseGoogleIDToken(idToken string) (*googleIDTokenPayload, error) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) < 2 {
+		return nil, errors.New("invalid jwt token")
+	}
+	seg := parts[1]
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(seg)
+	if err != nil {
+		payloadBytes, err = base64.URLEncoding.DecodeString(seg)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var payload googleIDTokenPayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Sub == "" && payload.Email == "" {
+		return nil, errors.New("empty id_token payload")
+	}
+	return &payload, nil
+}
+
+func fetchGoogleAccountInfo(ctx context.Context, accessToken, idToken string) (*plugin.ConnectionAccount, error) {
+	return fetchGoogleAccountInfoWithClient(ctx, nil, accessToken, idToken)
+}
+
+func fetchGoogleAccountInfoWithClient(ctx context.Context, client *http.Client, accessToken, idToken string) (*plugin.ConnectionAccount, error) {
+	var account plugin.ConnectionAccount
+	if idToken != "" {
+		if p, err := parseGoogleIDToken(idToken); err == nil && p != nil {
+			account.ID = p.Sub
+			account.Login = p.Email
+			account.Name = p.Name
+			account.AvatarURL = p.Picture
+			account.Type = "User"
+		}
+	}
+	if account.ID != "" && account.Login != "" && account.AvatarURL != "" {
+		return &account, nil
+	}
+	if strings.TrimSpace(accessToken) == "" {
+		if account.ID != "" || account.Login != "" {
+			return &account, nil
+		}
+		return nil, errors.New("no access token to fetch google userinfo")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v3/userinfo", nil)
+	if err != nil {
+		if account.ID != "" || account.Login != "" {
+			return &account, nil
+		}
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if client == nil {
+		client = &http.Client{Timeout: 8 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if account.ID != "" || account.Login != "" {
+			return &account, nil
+		}
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var info struct {
+			Sub     string `json:"sub"`
+			Name    string `json:"name"`
+			Picture string `json:"picture"`
+			Email   string `json:"email"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&info); err == nil {
+			if info.Sub != "" {
+				account.ID = info.Sub
+			}
+			if info.Email != "" {
+				account.Login = info.Email
+			}
+			if info.Name != "" {
+				account.Name = info.Name
+			}
+			if info.Picture != "" {
+				account.AvatarURL = info.Picture
+			}
+			account.Type = "User"
+		}
+	}
+	if account.ID == "" && account.Login == "" {
+		return nil, errors.New("could not extract google account info")
+	}
+	return &account, nil
 }
 
 var pluginOAuthProviders = map[string]pluginOAuthProvider{
@@ -273,12 +377,39 @@ func (s *Server) pluginOAuthCallback(c *cart.Context) error {
 	if token.ExpiresIn > 0 {
 		auth.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
+	targetID := start.ConnectionID
+	name := strings.TrimSpace(start.ConnectionName)
+	var account *plugin.ConnectionAccount
+	if providerID == "gmail" {
+		if acc, err := fetchGoogleAccountInfo(c.Request.Context(), token.AccessToken, token.IDToken); err == nil && acc != nil {
+			account = acc
+			connections, err := cfg.ListPluginConnections(c.Request.Context())
+			if err == nil {
+				for _, connection := range connections {
+					if connection == nil || connection.PluginID != start.PluginID || connection.Auth.Type != plugin.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID || connection.ID == targetID {
+						continue
+					}
+					targetID = connection.ID
+					if strings.TrimSpace(connection.Name) != "" {
+						name = connection.Name
+					}
+					break
+				}
+			}
+			if name == "" || name == "Gmail" {
+				if account.Login != "" {
+					name = "Gmail · " + account.Login
+				}
+			}
+		}
+	}
 	conn := &plugin.Connection{
-		ID:           start.ConnectionID,
-		Name:         start.ConnectionName,
+		ID:           targetID,
+		Name:         name,
 		PluginID:     start.PluginID,
 		Fields:       start.Fields,
 		EndpointURLs: start.EndpointURLs,
+		Account:      account,
 		Auth:         auth,
 	}
 	if err := cfg.PutPluginConnection(c.Request.Context(), conn); err != nil {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/plugin"
@@ -461,6 +462,20 @@ func (s *Server) listPluginConnections(c *cart.Context) error {
 	}
 	views := make([]plugin.ConnectionView, 0, len(conns))
 	for _, conn := range conns {
+		if conn != nil && conn.PluginID == "gmail" && conn.Account == nil && conn.Auth.AccessToken != "" {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+			acc, err := fetchGoogleAccountInfo(ctx, conn.Auth.AccessToken, "")
+			cancel()
+			if err == nil && acc != nil {
+				conn.Account = acc
+				if conn.Name == "" || conn.Name == "Gmail" {
+					if acc.Login != "" {
+						conn.Name = "Gmail · " + acc.Login
+					}
+				}
+				_ = cfg.PutPluginConnection(c.Request.Context(), conn)
+			}
+		}
 		views = append(views, plugin.ViewConnection(conn))
 	}
 	c.JSON(http.StatusOK, plugin.PluginConnectionsView{Connections: views})
@@ -480,6 +495,20 @@ func (s *Server) getPluginConnection(c *cart.Context) error {
 			return nil
 		}
 		return s.fail(c, err)
+	}
+	if conn != nil && conn.PluginID == "gmail" && conn.Account == nil && conn.Auth.AccessToken != "" {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		acc, err := fetchGoogleAccountInfo(ctx, conn.Auth.AccessToken, "")
+		cancel()
+		if err == nil && acc != nil {
+			conn.Account = acc
+			if conn.Name == "" || conn.Name == "Gmail" {
+				if acc.Login != "" {
+					conn.Name = "Gmail · " + acc.Login
+				}
+			}
+			_ = cfg.PutPluginConnection(c.Request.Context(), conn)
+		}
 	}
 	c.JSON(http.StatusOK, plugin.ViewConnectionDetail(conn))
 	return nil
