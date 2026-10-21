@@ -88,6 +88,8 @@ connection:
 for `single_active` plugins: `{ "bindings": { "active": "connection-id" } }`.
 An empty ID clears the selection. Standard `/plugin-connections` CRUD only changes
 credentials. Saving, selecting, and enabling/disabling a plugin are independent.
+Both policies support configuration-only connections (`authType: none`) when
+authentication is optional, including plugins without an `auth` declaration.
 
 For `user` plugins, `GET/PUT /sessions/:id/plugins/:pluginID/connection` exposes
 redacted candidates and accepts `{ "connectionID": "connection-id" }` from the

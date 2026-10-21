@@ -12,6 +12,7 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/plugin"
+	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
@@ -107,5 +108,62 @@ func TestPluginConnectionBindingsAPIAndNativeWebCompatibility(t *testing.T) {
 	binding, err := plugins.ResolveEndpoint(ctx, "session", "demo_api", "")
 	if err != nil || binding.ConnectionID != "demo" {
 		t.Fatal(binding, err)
+	}
+}
+
+func TestConnectionOnlyPluginsSupportExplicitSelection(t *testing.T) {
+	for _, selection := range []string{"user", "single_active"} {
+		for _, auth := range []string{"", "auth: {required: false}\n"} {
+			authName := "no-auth"
+			if auth != "" {
+				authName = "optional-auth"
+			}
+			t.Run(selection+"/"+authName, func(t *testing.T) {
+				ctx := context.Background()
+				home := t.TempDir()
+				cfg := config.NewManager(home)
+				if err := cfg.Prepare(); err != nil {
+					t.Fatal(err)
+				}
+				dir := filepath.Join(home, "plugins", "connection-only")
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				definition := "id: connection-only\nname: Connection only\n" + auth + "connection:\n  selection: " + selection + "\n  fields:\n    - {id: workspace, label: Workspace, required: true}\nendpoints:\n  config_api: {kind: rest, url: 'https://example.com'}\n"
+				if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(definition), 0600); err != nil {
+					t.Fatal(err)
+				}
+				st := storetest.New(t)
+				if err := st.CreateSession(ctx, &store.Session{ID: "chat", Provider: "mock", Model: "mock"}); err != nil {
+					t.Fatal(err)
+				}
+				plugins := plugin.NewService(home, cfg)
+				hub := event.NewHub()
+				eng := engine.New(st, hub, nil, cfg, engine.WithPlugins(plugins))
+				srv := httptest.NewServer(New(eng, st, cfg, hub).WithPlugins(plugins).Handler(testToken, nil))
+				defer srv.Close()
+				resp := req(t, http.MethodPut, srv.URL+"/plugin-connections/workspace", map[string]any{"pluginID": "connection-only", "authType": "none", "fields": map[string]string{"workspace": "work"}})
+				if resp.StatusCode != 200 {
+					t.Fatal("connection could not be saved", resp.StatusCode, decodeJSON[map[string]any](t, resp))
+				}
+				resp.Body.Close()
+				if _, err := plugins.ResolveEndpoint(ctx, "chat", "config_api", ""); err == nil {
+					t.Fatal("saving implicitly selected a connection")
+				}
+				if selection == "single_active" {
+					resp = req(t, http.MethodPatch, srv.URL+"/plugins/connection-only/connection-bindings", map[string]any{"bindings": map[string]string{"active": "workspace"}})
+				} else {
+					resp = req(t, http.MethodPut, srv.URL+"/sessions/chat/plugins/connection-only/connection", map[string]string{"connectionID": "workspace"})
+				}
+				if resp.StatusCode != 200 {
+					t.Fatal("connection could not be selected", resp.StatusCode, decodeJSON[map[string]any](t, resp))
+				}
+				resp.Body.Close()
+				binding, err := plugins.ResolveEndpoint(ctx, "chat", "config_api", "")
+				if err != nil || binding.ConnectionID != "workspace" || binding.ConnectionFields["workspace"] != "work" {
+					t.Fatal(binding, err)
+				}
+			})
+		}
 	}
 }

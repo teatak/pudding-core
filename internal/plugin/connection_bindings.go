@@ -79,8 +79,7 @@ func (s *Service) PatchConnectionBindings(ctx context.Context, id string, update
 		if store.CurrentPluginID(conn.PluginID) != def.ID {
 			return nil, fmt.Errorf("%w: connection belongs to another plugin", ErrInvalidID)
 		}
-		method, ok := FindAuthMethod(def, conn.Auth.MethodID, conn.Auth.Type)
-		if !ok || (method.Type != AuthTypeNone && !ViewConnection(conn).TokenSet) {
+		if !connectionConfiguredFor(def, conn) {
 			return nil, fmt.Errorf("%w: connection is not configured", ErrInvalidID)
 		}
 	}
@@ -118,7 +117,7 @@ func (s *Service) ResolveConnectionBinding(ctx context.Context, id, purpose stri
 	if store.CurrentPluginID(conn.PluginID) != def.ID {
 		return nil, ErrNotFound
 	}
-	if _, ok := FindAuthMethod(def, conn.Auth.MethodID, conn.Auth.Type); !ok {
+	if !connectionConfiguredFor(def, conn) {
 		return nil, ErrNotFound
 	}
 	return conn, nil

@@ -133,8 +133,10 @@ func connectionConfiguredFor(def *Definition, c *Connection) bool {
 	if c == nil || store.CurrentPluginID(c.PluginID) != def.ID {
 		return false
 	}
-	if def.Auth == nil && (c.Auth.Type == AuthTypeNone || c.Auth.Type == "") {
-		return true
+	// The standard connection API also accepts configuration-only connections
+	// without a declared auth method when authentication is optional.
+	if c.Auth.MethodID == "" && (c.Auth.Type == AuthTypeNone || c.Auth.Type == "") && (def.Auth == nil || !def.Auth.Required) {
+		return !ViewConnection(c).ReauthorizationRequired
 	}
 	method, ok := FindAuthMethod(def, c.Auth.MethodID, c.Auth.Type)
 	return ok && method.Type == c.Auth.Type && (method.Type == AuthTypeNone || ViewConnection(c).TokenSet) && !ViewConnection(c).ReauthorizationRequired
