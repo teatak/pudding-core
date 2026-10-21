@@ -32,8 +32,9 @@ Pudding 使用统一的**插件**概念承载需要说明、工具、界面和�
 网页搜索与抓取属于内置插件 `web-search-fetch`，不再常驻 Core 工具列表。它默认启用，模型首次使用时通过
 `builtin_plugin_load` 加载；Chat 即可加载和调用，后续会话轮次及 daemon 重启复用已保存的加载状态。
 禁用后撤下索引和工具并拒绝新的调用，重新启用不清除已有加载状态。
-配置在插件详情页管理，沿用 `config/web.yaml` 中的 Tavily、DeepSeek Key 和服务商选择。
-保存 Key、切换服务商、启停插件分别更新凭据、服务商选择、插件开关，互不隐式触发；不迁移或双写 Key。
+配置使用插件详情页的标准 Connections，可保存多个 Tavily、DeepSeek 连接，仅一个当前连接生效，搜索与抓取共用。
+旧 `config/web.yaml` 的 Key 和原选择一次性迁到 `config/plugin-connections.yaml`，迁移成功后移除旧凭据文件；旧 `/tools/web` 为兼容投影，不双写。
+保存连接、设为当前使用、启停插件分别更新凭据、当前连接、插件开关，互不隐式触发。删除当前连接后不自动选择其他连接。
 
 `builtin_command_run` 与 `builtin_command_session` 都属于 Code Core。前者执行一次性命令
 或启动后台会话,后者负责读取、输入和停止,不再通过 Terminal 插件动态加载。

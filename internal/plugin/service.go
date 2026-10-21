@@ -13,6 +13,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 var (
@@ -53,6 +54,7 @@ type ConnectionChoice struct {
 
 type EndpointResolveError struct {
 	Reason      string             `json:"reason"`
+	PluginID    string             `json:"pluginID,omitempty"`
 	Endpoint    string             `json:"endpoint,omitempty"`
 	Connection  string             `json:"connection,omitempty"`
 	Connections []ConnectionChoice `json:"connections,omitempty"`
@@ -64,10 +66,7 @@ func (e *EndpointResolveError) Error() string {
 	}
 	switch e.Reason {
 	case "connection_required":
-		if len(e.Connections) > 1 {
-			return fmt.Sprintf("multiple connections are available for endpoint %q; choose one by connection name and account identity, or ask the user when the intended connection is ambiguous", e.Endpoint)
-		}
-		return fmt.Sprintf("no connection is available for endpoint %q", e.Endpoint)
+		return "the user must select a connection for this chat; ask the user to use the connection picker. A model-supplied connection ID does not authorize an account or change the binding"
 	case "connection_not_found":
 		return fmt.Sprintf("connection %q is not available for endpoint %q", e.Connection, e.Endpoint)
 	case "endpoint_ambiguous":
@@ -78,6 +77,7 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
+	sessionConnections   SessionConnectionStore
 	pluginsRoot          string
 	connections          ConnectionSource
 	enablement           EnablementSource
@@ -644,76 +644,31 @@ func (s *Service) mcpOverrideFilePath(pluginID string) string {
 }
 
 func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*EndpointBinding, error) {
-	endpointName = strings.TrimSpace(endpointName)
-	connectionRef = strings.TrimSpace(connectionRef)
-	sessionID = strings.TrimSpace(sessionID)
-	if s == nil {
-		return nil, errors.New("plugin service unavailable")
-	}
-	if sessionID == "" || endpointName == "" {
+	sessionID, endpointName, connectionRef = strings.TrimSpace(sessionID), strings.TrimSpace(endpointName), strings.TrimSpace(connectionRef)
+	if s == nil || sessionID == "" || endpointName == "" {
 		return nil, errors.New("sessionID and endpoint are required")
 	}
 	defs, err := s.ListDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var matches []*EndpointBinding
-	var connections []*Connection
-	if s.connections != nil {
-		connections, err = s.connections.ListPluginConnections(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	allChoices := make([]ConnectionChoice, 0)
-	endpointSeen := false
+	var matched *Definition
 	for _, def := range defs {
-		if def == nil || !def.Enabled {
+		if !def.Enabled {
 			continue
 		}
-		endpoint, ok := def.Endpoints[endpointName]
-		if !ok {
+		if _, ok := def.Endpoints[endpointName]; !ok {
 			continue
 		}
-		endpointSeen = true
-		if connectionRef == "" {
-			if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
-				matches = append(matches, binding)
-				continue
-			}
-		}
-		for _, conn := range connections {
-			if conn == nil || conn.PluginID != def.ID {
-				continue
-			}
-			allChoices = append(allChoices, viewConnectionChoice(conn))
-			if connectionRef != "" && !connectionMatches(conn, connectionRef) {
-				continue
-			}
-			matches = append(matches, endpointBindingForConnection(def, endpointName, endpoint, conn))
-		}
-	}
-	switch len(matches) {
-	case 0:
-		if !endpointSeen {
-			return nil, &EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
-		}
-		reason := "connection_required"
-		if connectionRef != "" {
-			reason = "connection_not_found"
-		}
-		if len(allChoices) == 0 {
-			return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName}
-		}
-		return nil, &EndpointResolveError{Reason: reason, Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
-	case 1:
-		return s.readyEndpointBinding(ctx, matches[0])
-	default:
-		if len(allChoices) == 0 {
+		if matched != nil {
 			return nil, &EndpointResolveError{Reason: "endpoint_ambiguous", Endpoint: endpointName}
 		}
-		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
+		matched = def
 	}
+	if matched == nil {
+		return nil, &EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
+	}
+	return s.ResolveSessionEndpoint(ctx, sessionID, matched.ID, endpointName, connectionRef)
 }
 
 func (s *Service) ReadyConnection(ctx context.Context, id string) (*Connection, error) {
@@ -741,6 +696,15 @@ func (s *Service) ResolveBoundEndpoint(ctx context.Context, pluginID, endpointNa
 		endpoint, ok := def.Endpoints[endpointName]
 		if !ok || (endpoint.Kind != EndpointKindREST && endpoint.Kind != EndpointKindGraphQL) {
 			return nil, "", ErrNotFound
+		}
+		if ConnectionSelection(def) == ConnectionSelectionSingleActive {
+			selected, err := s.ResolveConnectionBinding(ctx, def.ID, "active")
+			if err != nil {
+				return nil, "", err
+			}
+			if connectionID != selected.ID {
+				return nil, "", ErrNotFound
+			}
 		}
 		if connectionID == "" {
 			binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint)
@@ -863,6 +827,18 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 				continue
 			}
 			pluginConnections := connectionsForPlugin(connections, def.ID)
+			if ConnectionSelection(def) == ConnectionSelectionSingleActive {
+				conn, err := s.ResolveConnectionBinding(ctx, def.ID, "active")
+				if err != nil {
+					var required *EndpointResolveError
+					if errors.As(err, &required) || errors.Is(err, store.ErrNotFound) {
+						continue
+					}
+					return nil, err
+				}
+				out = append(out, endpointBindingForConnection(def, endpointName, endpoint, conn))
+				continue
+			}
 			if len(pluginConnections) == 0 {
 				if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
 					out = append(out, binding)

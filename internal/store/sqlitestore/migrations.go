@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 47
+	currentSchemaVersion       = 48
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	48: func(tx *sql.Tx) error { _, err := tx.Exec(sessionPluginConnectionsSchema); return err },
 	47: migrateStudioV47,
 	32: migratePreauthorizedRemotePairings,
 	31: migrateRemoteAccess,
@@ -951,24 +952,25 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
-		"remote_identity":       {"singleton", "desktop_id"},
-		"remote_pairings":       {"id", "mode", "origin", "code_hash", "expires_at"},
-		"remote_devices":        {"id", "name", "mode", "origin", "credential_hash", "created_at", "expires_at"},
-		"session_children":      {"child_session_id", "parent_session_id"},
-		"session_dispatches":    {"child_session_id", "parent_turn_id", "call_id"},
-		"collaboration_stops":   {"parent_turn_id"},
-		"studio_items":          {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
-		"studio_item_revisions": {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id", "content_format"},
-		"studio_item_content":   {"item_id", "body", "content_hash", "content_format"},
-		"studio_sheet_ids":      {"item_id", "entity_kind", "entity_id"},
-		"widget_links":          {"id", "item_id", "left_entity", "right_entity", "created_at"},
-		"widget_actions":        {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
-		"studio_item_saves":     {"item_id", "client_request_id", "hash", "request_hash"},
-		"scheduled_tasks":       {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
-		"scheduled_task_runs":   {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
-		"computer_app_grants":   {"session_id", "app_id", "created_at"},
-		"library_favorites":     {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
-		"library_recent_opens":  {"id", "kind", "source_session_id", "studio_mount_id", "root_path", "path", "opened_at"},
+		"remote_identity":            {"singleton", "desktop_id"},
+		"remote_pairings":            {"id", "mode", "origin", "code_hash", "expires_at"},
+		"remote_devices":             {"id", "name", "mode", "origin", "credential_hash", "created_at", "expires_at"},
+		"session_children":           {"child_session_id", "parent_session_id"},
+		"session_plugin_connections": {"session_id", "plugin_id", "connection_id", "identity"},
+		"session_dispatches":         {"child_session_id", "parent_turn_id", "call_id"},
+		"collaboration_stops":        {"parent_turn_id"},
+		"studio_items":               {"id", "kind", "name", "icon", "icon_color", "source_session_id", "revision", "head_revision", "active_revision", "bindings", "binding_version", "deleted", "created_at", "updated_at", "archived_at"},
+		"studio_item_revisions":      {"item_id", "hash", "parent_revision", "client_request_id", "created_at", "build_receipt", "content", "content_hash", "author_kind", "author_session_id", "author_turn_id", "content_format"},
+		"studio_item_content":        {"item_id", "body", "content_hash", "content_format"},
+		"studio_sheet_ids":           {"item_id", "entity_kind", "entity_id"},
+		"widget_links":               {"id", "item_id", "left_entity", "right_entity", "created_at"},
+		"widget_actions":             {"id", "item_id", "client_request_id", "request_hash", "state", "spec", "result", "created_at"},
+		"studio_item_saves":          {"item_id", "client_request_id", "hash", "request_hash"},
+		"scheduled_tasks":            {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
+		"scheduled_task_runs":        {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
+		"computer_app_grants":        {"session_id", "app_id", "created_at"},
+		"library_favorites":          {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
+		"library_recent_opens":       {"id", "kind", "source_session_id", "studio_mount_id", "root_path", "path", "opened_at"},
 	})
 	delete(out.tables, "canvas_items")
 	delete(out.tables, "canvas_saved_items")
@@ -1021,7 +1023,11 @@ type schemaReader interface {
 }
 
 func validateCurrentSchema(db schemaReader) error {
-	if err := validateSchema(db, currentSchemaContract); err != nil {
+	return validateSchemaWithRetiredColumns(db, currentSchemaContract)
+}
+
+func validateSchemaWithRetiredColumns(db schemaReader, contract schemaContract) error {
+	if err := validateSchema(db, contract); err != nil {
 		return err
 	}
 	for table, retired := range map[string][]string{

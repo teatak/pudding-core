@@ -186,6 +186,11 @@ func WithTools(runner tool.Runner) Option {
 func WithPlugins(source PluginSource) Option {
 	return func(e *Engine) {
 		e.plugins = source
+		if service, ok := source.(*plugin.Service); ok {
+			if storage, ok := e.store.(plugin.SessionConnectionStore); ok {
+				service.WithSessionConnections(storage)
+			}
+		}
 		e.rebuildBuilder()
 	}
 }
@@ -2454,6 +2459,22 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 		"newlyLoaded":        !alreadyLoaded,
 		"alreadyLoaded":      alreadyLoaded,
 		"message":            "the plugin is loaded; its tools are available on the next model step",
+	}
+	if source, ok := e.plugins.(interface {
+		SessionConnection(context.Context, string, string) (*plugin.SessionConnectionView, error)
+	}); ok {
+		selection, err := source.SessionConnection(ctx, sessionID, request.PluginID)
+		if err != nil {
+			return pluginLoadFailure(call, "connection_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), !alreadyLoaded
+		}
+		payload["connectionSelection"] = selection.Selection
+		if selection.ConnectionID != "" {
+			payload["connectionID"] = selection.ConnectionID
+		}
+		if selection.Selection == plugin.ConnectionSelectionUser && selection.Required {
+			payload["connectionRequired"] = true
+			payload["message"] = "Plugin loaded. Ask the user to select a connection in the connection picker for this chat before calling its tools. Do not choose an account yourself."
+		}
 	}
 	summaryKind := tool.SummaryReturnedFields
 	summaryCount := len(payload)

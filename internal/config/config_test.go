@@ -542,12 +542,12 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	if !ok || stored != "tvly-secret" {
 		t.Fatalf("unexpected tavily api key: %q %v", stored, ok)
 	}
-	webToolsPath := home + "/config/web.yaml"
+	webToolsPath := home + "/config/plugin-connections.yaml"
 	b, err := os.ReadFile(webToolsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "api_key: tvly-secret") || !strings.Contains(string(b), "provider: tavily") {
+	if !strings.Contains(string(b), "token: tvly-secret") || !strings.Contains(string(b), "method_id: tavily") {
 		t.Fatalf("expected tavily config in web.yaml:\n%s", b)
 	}
 
@@ -577,7 +577,7 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), "tvly-secret") || strings.Contains(string(b), "api_key:") {
+	if strings.Contains(string(b), "tvly-secret") || strings.Contains(string(b), "token:") {
 		t.Fatalf("cleared web.yaml must not keep api key:\n%s", b)
 	}
 }

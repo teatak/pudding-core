@@ -107,6 +107,11 @@ func (s *Server) WithGitHubClient(client *githubapp.Client) *Server {
 
 func (s *Server) WithPlugins(plugins pluginService) *Server {
 	s.plugins = plugins
+	if service, ok := plugins.(*plugin.Service); ok {
+		if storage, ok := s.store.(plugin.SessionConnectionStore); ok {
+			service.WithSessionConnections(storage)
+		}
+	}
 	return s
 }
 
@@ -229,6 +234,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/archive").POST(s.archiveSession)
 	app.Route("/sessions/:id/restore").POST(s.restoreSession)
 	app.Route("/sessions/:id/plugins/:pluginID").DELETE(s.unloadSessionPlugin)
+	app.Route("/sessions/:id/plugins/:pluginID/connection").GET(s.getSessionPluginConnection).PUT(s.setSessionPluginConnection)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/turns/:turnID/steer").POST(s.steerTurn)
 	app.Route("/sessions/:id/turns/:turnID/retry").POST(s.retryTurn)
@@ -345,6 +351,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/plugins/install").POST(s.installPlugin)
 	app.Route("/plugins/mcp").POST(s.importMCPPlugins)
 	app.Route("/plugins/:id/enabled").PUT(s.putPluginEnabled)
+	app.Route("/plugins/:id/connection-bindings").GET(s.getPluginConnectionBindings).PATCH(s.patchPluginConnectionBindings)
 	app.Route("/plugins/:id/mcp-config").GET(s.getMCPPluginConfig).PUT(s.putMCPPluginConfig)
 	app.Route("/plugins/:id/mcp-overrides/:endpoint").GET(s.getPluginMCPOverride).PUT(s.putPluginMCPOverride).DELETE(s.deletePluginMCPOverride)
 	app.Route("/plugins/:id/mcp").GET(s.getPluginMCPStatus)

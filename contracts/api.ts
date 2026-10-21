@@ -1226,7 +1226,10 @@ export const pluginConnectionField = z.object({
   secret: z.boolean().optional(),
   inject: z.array(pluginConnectionFieldInject).optional(),
 });
+export const pluginConnectionBindings = z.object({ bindings: z.record(z.string(), z.string()), legacyBindings: z.record(z.string(), z.string()).optional() });
+export type PluginConnectionBindings = z.infer<typeof pluginConnectionBindings>;
 export const pluginConnectionConfig = z.object({
+  selection: z.enum(["user", "single_active", "automatic"]).optional(),
   fields: z.array(pluginConnectionField).optional(),
 });
 
@@ -1400,3 +1403,10 @@ export type RemoteModel = z.infer<typeof remoteModels>["models"][number];
 export type RemoteDevice = z.infer<typeof remoteDevice>;
 export type RemotePairing = z.infer<typeof remotePairing>;
 export type RemoteAccess = z.infer<typeof remoteAccess>;
+
+// Automatic selection is reserved; the daemon currently rejects it.
+export const sessionPluginConnection = z.object({
+ pluginID: z.string(), selection: z.enum(["user", "single_active", "automatic"]),
+ connectionID: z.string().optional(), required: z.boolean(), connections: z.array(pluginConnection),
+});
+export type SessionPluginConnection = z.infer<typeof sessionPluginConnection>;

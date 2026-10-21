@@ -473,3 +473,11 @@ CREATE TABLE widget_page_pins (
 );
 
 
+
+CREATE TABLE IF NOT EXISTS session_plugin_connections (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    plugin_id TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (session_id, plugin_id)
+);

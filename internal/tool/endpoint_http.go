@@ -57,6 +57,9 @@ func endpointResolveError(kind string, err error) map[string]any {
 	var resolveErr *plugin.EndpointResolveError
 	if errors.As(err, &resolveErr) {
 		out := map[string]any{"ok": false, "reason": resolveErr.Reason, "error": resolveErr.Error()}
+		if resolveErr.PluginID != "" {
+			out["pluginID"] = resolveErr.PluginID
+		}
 		if resolveErr.Endpoint != "" {
 			out["endpoint"] = resolveErr.Endpoint
 		}

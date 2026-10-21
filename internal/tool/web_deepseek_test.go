@@ -182,7 +182,7 @@ func TestWebProviderSelectionControlsExecution(t *testing.T) {
 	if res.Ok || decodeToolResult(t, res)["reason"] != "provider_not_configured" || calls.Load() != 0 {
 		t.Fatalf("saving credentials must not enable search: %+v calls=%d", res, calls.Load())
 	}
-	for _, selection := range [][2]string{{"tavily", "tavily"}, {"deepseek", "deepseek"}, {"deepseek", "tavily"}} {
+	for _, selection := range [][2]string{{"tavily", "tavily"}, {"deepseek", "deepseek"}} {
 		if _, err := cfg.PatchWebTools(ctx, config.WebToolsUpdate{SearchProvider: &selection[0], FetchProvider: &selection[1]}); err != nil {
 			t.Fatal(err)
 		}

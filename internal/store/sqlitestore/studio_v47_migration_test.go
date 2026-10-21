@@ -124,7 +124,7 @@ func TestStudioMigrationPreservesEachSourceAndRestart(t *testing.T) {
 					st.Close()
 				}
 			}()
-			assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "47")
+			assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 			assertWorkspaceMigrationValue(t, st.db, "PRAGMA foreign_keys", "1")
 			assertWorkspaceMigrationValue(t, st.db, "SELECT count(*) FROM pragma_foreign_key_check", "0")
 			assertWorkspaceMigrationValue(t, st.db, "SELECT text FROM messages WHERE id='m'", "canonical history")
@@ -159,7 +159,7 @@ func TestStudioMigrationPreservesEachSourceAndRestart(t *testing.T) {
 			}
 			backups := migrationBackupFiles(t, path)
 			want := 1
-			if source == 47 {
+			if source == currentSchemaVersion {
 				want = 0
 			}
 			if len(backups) != want {
@@ -209,7 +209,7 @@ func TestStudioMigrationRollsBackWholeBatch(t *testing.T) {
 		t.Fatal("retry after rollback", err)
 	}
 	defer st.Close()
-	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", "47")
+	assertWorkspaceMigrationValue(t, st.db, "PRAGMA user_version", fmt.Sprint(currentSchemaVersion))
 }
 
 func TestStudioMigrationRejectsForeignKeyViolationBeforeCommit(t *testing.T) {

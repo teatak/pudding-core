@@ -269,7 +269,7 @@ func webHTTPError(provider string, status int, data []byte) map[string]any {
 		result = webKeyMissingResult(provider)
 		result["reason"] = "auth_failed"
 		result["status"] = status
-		result["hint"] = "check or replace the selected provider's API Key in Plugins > Web Search & Fetch > Provider configuration"
+		result["hint"] = "check or replace the selected provider's API Key in Plugins > Web Search & Fetch > Connections"
 	case http.StatusPaymentRequired:
 		result["reason"] = "insufficient_balance"
 		result["hint"] = "top up the selected provider account before retrying"
@@ -307,9 +307,9 @@ func webKeyMissingResult(provider string) map[string]any {
 		"ok":            false,
 		"reason":        "api_key_missing",
 		"provider":      provider,
-		"settings_path": "Plugins > Web Search & Fetch > Provider configuration",
-		"hint":          "save an API Key, then select a provider in Plugins > Web Search & Fetch > Provider configuration",
-		"next_step":     "Open Plugins > Web Search & Fetch > Provider configuration, save a Tavily or DeepSeek API Key, then select the provider. Saving a key does not change the selected provider or the plugin enablement.",
+		"settings_path": "Plugins > Web Search & Fetch > Connections",
+		"hint":          "save a connection, then set it as the active connection shared by search and fetch in Plugins > Web Search & Fetch > Connections",
+		"next_step":     "Open Plugins > Web Search & Fetch > Connections, save a Tavily or DeepSeek connection, then set it as the active connection shared by search and fetch. Saving a connection does not change the active selection or plugin enablement.",
 	}
 	if provider == "deepseek" {
 		result["signup_url"] = "https://platform.deepseek.com/api_keys"

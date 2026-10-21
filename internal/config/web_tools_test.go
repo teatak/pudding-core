@@ -33,16 +33,18 @@ func TestWebToolsSaveAndSelectionAreIndependent(t *testing.T) {
 	patch(selectUpdate("tavily", "tavily"), "tavily", "tavily")
 	patch(keyUpdate("deepseek", "  ds-key  "), "tavily", "tavily")
 	patch(keyUpdate("tavily", "tvly-updated"), "tavily", "tavily")
-	patch(selectUpdate("deepseek", "tavily"), "deepseek", "tavily")
+	if _, err := m.PatchWebTools(ctx, selectUpdate("deepseek", "tavily")); err == nil {
+		t.Fatal("conflicting legacy selection accepted")
+	}
+	selected := "deepseek"
+	patch(WebToolsUpdate{SearchProvider: &selected}, "deepseek", "deepseek")
 
-	// Restarting retains both credentials and independent feature selections.
+	// Restarting retains both credentials and the shared selection.
 	m = NewManager(home)
 	for _, feature := range []string{"search", "fetch"} {
 		name, key, err := m.ResolveWebTool(ctx, feature)
 		wantName, wantKey := "deepseek", "ds-key"
-		if feature == "fetch" {
-			wantName, wantKey = "tavily", "tvly-updated"
-		}
+
 		if err != nil || name != wantName || key != wantKey {
 			t.Fatalf("resolve %s: provider=%q key=%q err=%v", feature, name, key, err)
 		}
@@ -71,7 +73,7 @@ func TestWebToolsLegacyTavilyConfig(t *testing.T) {
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
-	// Existing web.yaml files need no migration and retain their selection.
+	// The previous release has one configured provider; migration retains its selection.
 	err := m.writeWebTools(webToolsYAML{
 		Version: 1, Search: webToolFeatureYAML{Provider: "tavily"}, Fetch: webToolFeatureYAML{Provider: "tavily"},
 		Providers: map[string]webToolProviderYAML{"tavily": {APIKey: "legacy-key"}},

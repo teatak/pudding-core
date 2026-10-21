@@ -67,9 +67,48 @@ endpoints:
 
 For MCP endpoints, use `transport: streamable_http` with `url`, or
 `transport: stdio` with `command` and optional `args` / `env`. Runtime tool
-discovery exposes configured MCP endpoints as model-callable tools after the plugin
+discovery exposes only user-selected MCP endpoints as model-callable tools after the plugin
 is loaded. The daemon starts `stdio` endpoints on demand and stops their process
 when the session plugin binding is cleared or the daemon exits.
+
+## Connection selection
+
+`connection.selection` declares the plugin's connection policy. Omission means
+`user`: the user must pick a connection for each chat, even when only one is saved.
+`single_active` allows multiple saved connections but at most one active connection
+shared by all tools. `automatic` is reserved and rejected by manifest validation;
+there is no automatic-selection control in the UI.
+
+```yaml
+connection:
+  selection: single_active
+```
+
+`GET/PATCH /plugins/:id/connection-bindings` reads or changes the global selection
+for `single_active` plugins: `{ "bindings": { "active": "connection-id" } }`.
+An empty ID clears the selection. Standard `/plugin-connections` CRUD only changes
+credentials. Saving, selecting, and enabling/disabling a plugin are independent.
+
+For `user` plugins, `GET/PUT /sessions/:id/plugins/:pluginID/connection` exposes
+redacted candidates and accepts `{ "connectionID": "connection-id" }` from the
+user UI. The chat header and the load/error result provide a picker. Selecting
+from a blocked tool offers **Use and continue**; its continuation is a canonical
+user message with an idempotent client message ID. No model-callable tool writes
+this binding, and a `connection` argument cannot establish or change it.
+
+REST, GraphQL and MCP resolve only the session selection. Unbound MCP accounts
+are not discovered for model use; cached MCP calls revalidate the current binding
+and credentials before execution. Another session, including a cloned or child
+session, does not inherit the selection. The SQLite binding survives restarts and
+is removed with its session. Missing/deleted/recreated connections and changed
+account identities require a new selection, with no automatic fallback.
+User-bound widgets retain their own explicit resource bindings.
+
+Web Search & Fetch declares `single_active`, keeps Chat availability, and migrates
+the previous release's single provider record into standard Connections. The
+legacy `web` plugin ID and `/tools/web` API remain compatible. The latter projects
+both features onto the one active connection: conflicting simultaneous provider
+selections are rejected atomically; saving keys alone never selects a connection.
 
 ## Connection Fields
 

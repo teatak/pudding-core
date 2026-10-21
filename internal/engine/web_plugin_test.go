@@ -185,6 +185,14 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	if requests.Load() != 4 {
 		t.Fatalf("unexpected upstream request count: %d", requests.Load())
 	}
+	// Saving another standard account never selects it. Explicitly binding it
+	// changes the next Chat call without a mode upgrade or plugin reload.
+	if err := cfg.PutPluginConnection(ctx, &plugin.Connection{ID:"second-account",PluginID:plugin.BuiltinWebSearchFetchID,Auth:plugin.Auth{MethodID:"deepseek",Type:plugin.AuthTypeBearer,Token:"ds-second"}}); err != nil { t.Fatal(err) }
+	if _, key, err := cfg.ResolveWebTool(ctx,"search"); err != nil || key != deepseekKey { t.Fatal("saving selected another account",err) }
+	if _, err := plugins.PatchConnectionBindings(ctx,plugin.BuiltinWebSearchFetchID,map[string]string{"search":"second-account"}); err != nil { t.Fatal(err) }
+	deepseekKey = "ds-second"
+	run(tool.WebSearch,defs,"","deepseek")
+	if len(e.PendingApprovals("web-session")) != 0 { t.Fatal("standard connection required a mode upgrade") }
 	out, changed = e.unloadPlugin(ctx, "web-session", tool.Call{Name: tool.PluginUnload, Args: json.RawMessage(fmt.Sprintf(`{"plugin_id":%q}`, plugin.BuiltinWebSearchFetchID))})
 	if !out.Ok || !changed {
 		t.Fatal(out)

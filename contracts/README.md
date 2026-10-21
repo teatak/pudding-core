@@ -5,6 +5,18 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 32 introduces declared plugin connection selection (`user` by default,
+`single_active`; `automatic` is reserved and currently rejected). Standard
+Connections own Web Search & Fetch credentials; `/plugins/:id/connection-bindings`
+reads/patches `{bindings:{active:connectionID}}`. Search and fetch share that one
+selection. Legacy `/tools/web` and `web` identities remain compatibility facades.
+`GET/PUT /sessions/:id/plugins/:pluginID/connection` provides a user-only chat
+selection; a model tool cannot choose an account by supplying its ID. Returned
+candidates omit credentials. REST/GraphQL/MCP execution and MCP discovery enforce
+the selection. Schema v48 adds `session_plugin_connections` with session-owned
+cascade deletion and an account/instance fingerprint; existing chats start with
+no implicit account selection. See [Plugins](../docs/plugins.md#connection-selection).
+
 Widget preview distribution adds optional `preview` (boolean) and `channel` (up to 64 characters) to source packages and registry releases. `preview: true` is the authoritative classification, matching plugins; neither the version suffix nor `channel` alone changes it. Widget installation persists `origin.preview` in the existing origin JSON, so an installed preview remains identifiable without its catalog. A subsequent stable installation clears the flag. Settings exposes independent `show_plugin_preview_versions` and `show_widget_preview_versions` booleans, both defaulting to false; settings.yaml stores them under `plugins.show_preview_versions` and `widgets.show_preview_versions`. No database schema change is required. The obsolete frontend key `show_app_preview_versions` remains invalid.
 
 Protocol 28 adds Studio document range leases at `GET/POST /studio/items/:itemID/edit-operations` and atomic `replacement` writes carrying `operationID` and `leaseToken`. Ranges are zero-based UTF-8 bytes `[from,to)`; begin requires the current content hash. Active leases last two minutes, may renew up to fifteen minutes, and survive daemon restarts. All working-content writes reject overlap with `409 document_locked`, including restore and undo; disjoint edits remap leases. GET omits tokens and target text. Authenticated users can cancel a lease; only its owner/token can commit or renew. Each action and commit is idempotent by client request ID. Successful commit stores both revision and terminal operation in the same transaction. Schema v40 stores leases and action receipts. Project filesystem writes are outside this Studio protocol.

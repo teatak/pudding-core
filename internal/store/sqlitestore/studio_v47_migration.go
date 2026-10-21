@@ -44,7 +44,9 @@ func migrateStudioV47(tx *sql.Tx) error {
 		}
 	}
 	// Validate while changes are still rollbackable, before recording v47.
-	return validateCurrentSchema(tx)
+	contract := extendSchemaContract(currentSchemaContract, nil)
+	delete(contract.tables, "session_plugin_connections")
+	return validateSchemaWithRetiredColumns(tx, contract)
 }
 
 func migrateWireEstimates(tx *sql.Tx) error {

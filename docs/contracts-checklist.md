@@ -228,8 +228,8 @@ backup + rename 提交,失败时逆序回滚。修改完成后由 Turn 文件 Di
 > REST settings 仍是扁平 k=v,value 一律纯字符串;磁盘事实源是
 > `<home>/config/settings.yaml`。
 > **只放标量偏好**;provider profiles 走 `<home>/config/profiles.yaml` +
-> 独立 REST 资源,web tools 配置走 `<home>/config/web.yaml` + 独立 REST
-> 资源,都不进 settings。主对话 system instruction 由 `internal/prompt`
+> 独立 REST 资源,网页搜索与抓取配置走 `<home>/config/plugin-connections.yaml` + 标准 Connections，
+> `/tools/web` 保留兼容投影,都不进 settings。主对话 system instruction 由 `internal/prompt`
 > 组装,用户补充提示词读取 `<home>/pudding.md`,不读取 `settings.yaml`
 > 的 `system_prompt`。
 

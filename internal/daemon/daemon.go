@@ -134,7 +134,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	plugins := appsvc.NewService(dir, cfg)
+	plugins := appsvc.NewService(dir, cfg).WithSessionConnections(st)
 	skills := skillsvc.NewService(dir)
 	browserService, err := newBrowserService(dir, st)
 	if err != nil {

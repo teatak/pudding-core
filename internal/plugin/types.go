@@ -102,8 +102,21 @@ type TokenExchangeSpec struct {
 	TokenType        string            `json:"tokenType,omitempty" yaml:"token_type,omitempty"`
 }
 
+const (
+	ConnectionSelectionUser         = "user"
+	ConnectionSelectionSingleActive = "single_active"
+	// Reserved for a future explicit opt-in; manifests cannot enable it yet.
+	ConnectionSelectionAutomatic = "automatic"
+)
+
 type ConnectionConfig struct {
-	Fields []ConnectionField `json:"fields,omitempty" yaml:"fields,omitempty"`
+	Selection string            `json:"selection,omitempty" yaml:"selection,omitempty"`
+	Fields    []ConnectionField `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
+type ConnectionBindingsView struct {
+	Bindings       map[string]string `json:"bindings"`
+	LegacyBindings map[string]string `json:"legacyBindings,omitempty"`
 }
 
 type ConnectionField struct {
@@ -194,8 +207,8 @@ type Connection struct {
 	Auth         Auth               `json:"-" yaml:"auth,omitempty"`
 	Fields       map[string]string  `json:"-" yaml:"fields,omitempty"`
 	EndpointURLs map[string]string  `json:"-" yaml:"endpoint_urls,omitempty"`
-	CreatedAt    time.Time          `json:"createdAt,omitempty" yaml:"-"`
-	UpdatedAt    time.Time          `json:"updatedAt,omitempty" yaml:"-"`
+	CreatedAt    time.Time          `json:"createdAt,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt    time.Time          `json:"updatedAt,omitempty" yaml:"updated_at,omitempty"`
 }
 
 type ConnectionAccount struct {

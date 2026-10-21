@@ -137,7 +137,7 @@ func (r *PluginMCPRunner) DefinitionsForPlugins(ctx context.Context, sessionID s
 		r.setSessionTools(sessionID, nil, nil)
 		return nil, nil
 	}
-	bindings, err := r.listBindings(ctx)
+	bindings, err := r.listSessionBindings(ctx, sessionID)
 	if err != nil {
 		r.setSessionTools(sessionID, nil, nil)
 		return nil, nil
@@ -170,6 +170,15 @@ func (r *PluginMCPRunner) Call(ctx context.Context, call Call) Result {
 	args, err := decodeToolArgs(call.Args)
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
+	}
+	if resolver, ok := r.source.(interface {
+		ResolveSessionEndpoint(context.Context, string, string, string, string) (*plugin.EndpointBinding, error)
+	}); ok {
+		binding, err := resolver.ResolveSessionEndpoint(ctx, call.SessionID, tool.binding.PluginID, tool.binding.EndpointName, tool.binding.ConnectionID)
+		if err != nil {
+			return toolJSON(out, false, endpointResolveError("mcp_endpoint", err))
+		}
+		tool.binding = binding
 	}
 	client, err := r.newClient(tool.binding)
 	if err != nil {
@@ -1275,4 +1284,13 @@ func cloneStringMapForPluginMCP(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func (r *PluginMCPRunner) listSessionBindings(ctx context.Context, sessionID string) ([]*plugin.EndpointBinding, error) {
+	if source, ok := r.source.(interface {
+		ListSessionEndpointBindings(context.Context, string, string) ([]*plugin.EndpointBinding, error)
+	}); ok {
+		return source.ListSessionEndpointBindings(ctx, sessionID, plugin.EndpointKindMCP)
+	}
+	return r.listBindings(ctx)
 }

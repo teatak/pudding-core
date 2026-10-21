@@ -326,13 +326,14 @@ func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
 	}
 	for _, mode := range []string{"chat", "work", "code"} {
 		t.Run(mode, func(t *testing.T) {
-			out := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}})
+			connections := []*plugin.Connection{{ID: "web-test", PluginID: plugin.BuiltinWebSearchFetchID, Auth: plugin.Auth{MethodID: "tavily", Type: "bearer", Token: "fixture"}}}
+			out := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, PluginConnections: connections})
 			for _, want := range []string{
 				"Web Search & Fetch (`web-search-fetch`)",
 				fmt.Sprintf("Plugin `%s` (Web Search & Fetch), requires Chat", plugin.BuiltinWebSearchFetchID),
 				fmt.Sprintf("Default skill `%s`", plugin.BuiltinWebSearchFetchID),
 				"It works in Chat, Work and Code without a browser, desktop runtime or capability upgrade",
-				"Plugins > Web Search & Fetch > Provider configuration",
+				"Plugins > Web Search & Fetch > Connections",
 			} {
 				if !strings.Contains(out.SystemInstruction, want) {
 					t.Fatalf("missing Web guidance %q", want)
@@ -341,7 +342,7 @@ func TestWebPluginDiscoveryAcrossModes(t *testing.T) {
 			if strings.Contains(out.SystemInstruction, "Status: not connected") || strings.Contains(out.SystemInstruction, "Status: loaded for this session") {
 				t.Fatal("Web should be available without a connection but initially unloaded")
 			}
-			loaded := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, LoadedPluginIDs: []string{plugin.BuiltinWebSearchFetchID}})
+			loaded := Assemble(Input{Mode: mode, Plugins: []*plugin.Definition{web}, PluginConnections: connections, LoadedPluginIDs: []string{plugin.BuiltinWebSearchFetchID}})
 			if !strings.Contains(loaded.SystemInstruction, "Status: loaded for this session") {
 				t.Fatal("loaded Web state missing from model prompt")
 			}

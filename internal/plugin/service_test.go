@@ -15,6 +15,8 @@ import (
 
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
+	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
 type fakeConnectionStore struct {
@@ -362,7 +364,7 @@ func TestSaveAuthoredPackageDoesNotCommitWhenEnablementReadFails(t *testing.T) {
 	}
 }
 
-func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
+func TestResolveEndpointRequiresUserSelectionEvenForOneConnection(t *testing.T) {
 	homeDir := writeTestPlugin(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
@@ -375,6 +377,10 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 		},
 	}})
 
+	if _, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "github-main"); err == nil {
+		t.Fatal("model supplied connection bypassed user selection")
+	}
+	bindServiceTestConnection(t, svc, "session-1", "github", "github-main")
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +407,7 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 		"github-personal": {
 			ID: "github-personal", Name: "Personal", PluginID: "github",
 			Account: &ConnectionAccount{ID: "43", Login: "hubot", Name: "Hubot", Type: "User"},
-			Auth:    Auth{MethodID: GitHubPATAuthMethodID, Type: AuthTypeBearer},
+			Auth:    Auth{MethodID: GitHubPATAuthMethodID, Type: AuthTypeBearer, Token: "test-key"},
 		},
 	}})
 
@@ -419,6 +425,10 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 		}
 	}
 
+	if _, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "Personal"); err == nil {
+		t.Fatal("model supplied name bypassed user selection")
+	}
+	bindServiceTestConnection(t, svc, "session-1", "github", "github-personal")
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "Personal")
 	if err != nil {
 		t.Fatal(err)
@@ -680,6 +690,14 @@ func writeTestPlugin(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(pluginDir, PluginFileName), []byte(`
 id: github
 name: GitHub
+auth:
+  required: true
+  methods:
+    - id: github-pat
+      type: bearer
+    - id: github-app
+      type: oauth2
+      provider: github
 connection:
   fields:
     - id: hotelCode
@@ -772,4 +790,53 @@ skills:
 		t.Fatal(err)
 	}
 	return homeDir
+}
+
+func bindServiceTestConnection(t *testing.T, svc *Service, sessionID, pluginID, connectionID string) {
+	t.Helper()
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "selection.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.CreateSession(context.Background(), &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	svc.WithSessionConnections(st)
+	if _, err := svc.SetSessionConnection(context.Background(), sessionID, pluginID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConnectionIdentityTracksAccountsWithoutDependingOnProfileDecoration(t *testing.T) {
+	c := &Connection{ID: "work", PluginID: "github", Auth: Auth{Type: "oauth2", MethodID: "github-app", AccessToken: "first"}, Account: &ConnectionAccount{ID: "42", Login: "old", Name: "Old", AvatarURL: "https://example.com/old"}}
+	original := connectionIdentity(c)
+	c.Auth.AccessToken = "refreshed"
+	c.Account.Login = "renamed"
+	c.Account.Name = "New"
+	c.Account.AvatarURL = "https://example.com/new"
+	if connectionIdentity(c) != original {
+		t.Fatal("token rotation/profile update changed account identity")
+	}
+	c.Account.ID = "other"
+	if connectionIdentity(c) == original {
+		t.Fatal("different account kept session authorization")
+	}
+	c.Account = nil
+	original = connectionIdentity(c)
+	c.Auth.AccessToken = "other-secret"
+	if connectionIdentity(c) == original {
+		t.Fatal("unknown account credential replacement kept session authorization")
+	}
+}
+
+func TestAutomaticConnectionSelectionRemainsUnavailable(t *testing.T) {
+	for _, selection := range []string{"", ConnectionSelectionUser, ConnectionSelectionSingleActive} {
+		if err := ValidateConnectionConfig(&ConnectionConfig{Selection: selection}); err != nil {
+			t.Fatal(selection, err)
+		}
+	}
+	if err := ValidateConnectionConfig(&ConnectionConfig{Selection: ConnectionSelectionAutomatic}); err == nil {
+		t.Fatal("automatic mode unexpectedly enabled")
+	}
 }

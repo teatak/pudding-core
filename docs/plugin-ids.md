@@ -34,10 +34,11 @@ Desktop shares one local identity adapter for builtin labels, icons and alias
 search; installed plugin metadata is not relabeled or rewritten.
 
 The Web Search & Fetch rename also accepts the old `skills/web/SKILL.md`
-selector and existing plugin-page links. It retains the existing `config/web.yaml`
-credentials and provider selection, `/tools/web` API, and `builtin_web_search` /
+selector and existing plugin-page links. The old `config/web.yaml` credentials
+and selection migrate once to standard Connections with a single active connection
+shared by search and fetch. It retains the `/tools/web` compatibility API and `builtin_web_search` /
 `builtin_web_fetch` tool names. Enabling the plugin, saving credentials and
-selecting a provider remain separate operations.
+selecting the active connection remain separate operations.
 
 Ship the paired Core and Desktop changes together by pinning the Core source
 in `core.lock.json`. Do not infer a need to rewrite database history from a

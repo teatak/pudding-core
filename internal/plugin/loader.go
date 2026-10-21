@@ -234,7 +234,7 @@ func normalizeConnectionConfig(raw *ConnectionConfig) *ConnectionConfig {
 	if raw == nil {
 		return nil
 	}
-	out := &ConnectionConfig{}
+	out := &ConnectionConfig{Selection: strings.TrimSpace(raw.Selection)}
 	for _, field := range raw.Fields {
 		field.ID = strings.TrimSpace(field.ID)
 		field.Label = strings.TrimSpace(field.Label)
@@ -263,7 +263,7 @@ func normalizeConnectionConfig(raw *ConnectionConfig) *ConnectionConfig {
 		}
 		out.Fields = append(out.Fields, field)
 	}
-	if len(out.Fields) == 0 {
+	if len(out.Fields) == 0 && out.Selection == "" {
 		return nil
 	}
 	return out
@@ -351,6 +351,10 @@ func normalizedDefinitionKind(kind string) string {
 }
 
 func ValidateConnectionConfig(connection *ConnectionConfig) error {
+	if connection != nil && connection.Selection != "" && connection.Selection != ConnectionSelectionUser && connection.Selection != ConnectionSelectionSingleActive {
+		return fmt.Errorf("unsupported connection selection %q (automatic selection is reserved)", connection.Selection)
+	}
+
 	if connection == nil {
 		return nil
 	}

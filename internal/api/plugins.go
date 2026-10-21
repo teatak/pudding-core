@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -528,7 +529,7 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	pluginID := strings.TrimSpace(req.PluginID)
+	pluginID := store.CurrentPluginID(req.PluginID)
 	if pluginID == "" {
 		return badRequest(c, "pluginID is required")
 	}
@@ -621,6 +622,9 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 		}
 	}
 	if err := cfg.PutPluginConnection(c.Request.Context(), conn); err != nil {
+		if errors.Is(err, config.ErrInvalidSetting) {
+			return badRequest(c, err.Error())
+		}
 		return s.fail(c, err)
 	}
 	updated, err := cfg.GetPluginConnection(c.Request.Context(), id)
@@ -751,6 +755,7 @@ func validatePluginConnectionAuth(auth plugin.Auth) error {
 }
 
 func (s *Server) getPluginDefinition(ctx context.Context, id string) (*plugin.Definition, error) {
+	id = store.CurrentPluginID(id)
 	if s.plugins == nil {
 		return nil, errors.New("plugin service unavailable")
 	}
