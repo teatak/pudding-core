@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/plugin"
@@ -44,8 +45,12 @@ func TestWebConnectionsMigrationPreservesSelectionsAndDoesNotResurrectDeletedKey
 		t.Fatal("migration enabled plugin", enabled, err)
 	}
 	info, err := os.Stat(m.path(pluginConnectionsFile))
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("credential file permissions", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows file modes do not represent Unix owner/group permissions.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("credential file permissions = %04o, want 0600", info.Mode().Perm())
 	}
 	// Deleting a selected connection clears only its bindings. Restart never reimports it.
 	if err := m.DeletePluginConnection(ctx, bindings["active"]); err != nil {
