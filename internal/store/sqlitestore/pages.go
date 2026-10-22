@@ -38,7 +38,7 @@ func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body str
 	if item.NameFallback == "" {
 		item.NameFallback = store.PageNameFallback
 	}
-	requestHash, err := prepareNativeCreation(item, body, author, requestID)
+	requestHash, err := prepareStudioCreation(item, body, author, requestID)
 	if err != nil {
 		return nil, err
 	}

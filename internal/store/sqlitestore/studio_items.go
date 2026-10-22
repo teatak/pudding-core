@@ -68,8 +68,34 @@ func (s *Store) GetStudioItem(ctx context.Context, id string) (*store.StudioItem
 	defer s.mu.Unlock()
 	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, id))
 }
-func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem) (*store.StudioItem, error) {
-	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error { return createStudioItemTx(ctx, tx, w) })
+func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem, creation ...store.StudioItemCreation) (*store.StudioItem, error) {
+	var fingerprint string
+	if len(creation) > 0 {
+		if len(creation) != 1 || w.Kind != store.StudioItemKindWidget {
+			return nil, &store.InvalidContent{Message: "widget creation requires one request identity"}
+		}
+		var err error
+		fingerprint, err = prepareStudioCreation(w, creation[0].InitialDraftHash, store.ContentAuthor{}, []string{creation[0].ClientRequestID})
+		if err != nil {
+			return nil, err
+		}
+	}
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if fingerprint != "" {
+			existing, err := replayStudioCreation(ctx, tx, w.ID, fingerprint)
+			if err != nil || existing != nil {
+				return err
+			}
+		}
+		if err := createStudioItemTx(ctx, tx, w); err != nil {
+			return err
+		}
+		if fingerprint != "" {
+			_, err := tx.ExecContext(ctx, `INSERT INTO studio_item_saves(item_id,client_request_id,hash,request_hash) VALUES(?,'create','',?)`, w.ID, fingerprint)
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}

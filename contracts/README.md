@@ -5,6 +5,29 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 34 extends `POST /studio/items` creation identity to Widgets. Optional
+`initialFiles` is a map of source paths to UTF-8 text, allowed only with Widget
+kind and `clientRequestID`. The initial draft obeys Widget source limits (no
+fixture writes), but need not yet be a buildable package. All files publish in
+one directory rename. The creation receipt fingerprints metadata and the initial
+source hash; replay returns current metadata and never replaces an existing draft
+or later committed source. An initialization failure retains the item identity
+for retry instead of deleting an uncertain result. Key reuse with different
+parameters is `400`; archived/tombstoned items are not revived, and permanent
+purge ends the key's lifetime. Widget keys use a
+separate namespace from Page/Sheet. The existing save receipt stores the creation
+fingerprint without adding a source revision; schema remains 48. Omitted keys
+retain the legacy independent creation API (without `initialFiles`).
+
+Clients creating a downloaded original's edit copy must also retain the existing
+`POST /studio/items/:id/draft` `clientRequestID` across retries. That operation
+returns the same current copy and draft, preserving independent edits and data.
+The Desktop authoring tool requires a stable logical `clientRequestID` for new
+widgets and first edit copies, namespaces it by its trusted session, and asks for
+a new ID only for a deliberately new creation. Resuming a returned copy ID needs
+no new creation identity. This also covers lost MCP results after HTTP succeeded;
+clients must not rotate IDs merely because their HTTP work finished.
+
 Protocol 33 adds optional `clientRequestID` to `POST /studio/items` for Page and
 Sheet creation (including their legacy kind aliases). Keys contain 1–200 ASCII
 letters, digits, underscores or hyphens. The same key and normalized creation

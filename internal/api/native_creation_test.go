@@ -53,7 +53,6 @@ func TestNativeCreationRequestAPI(t *testing.T) {
 	for _, key := range []string{"", "has spaces", "中文", strings.Repeat("x", 201)} {
 		post(map[string]any{"kind": "page", "name": "Invalid key", "clientRequestID": key}, 400)
 	}
-	post(map[string]any{"kind": "widget", "name": "Not supported", "clientRequestID": "widget"}, 400)
 	// Compatibility aliases normalize before fingerprinting.
 	legacy := map[string]any{"kind": "note", "name": "Alias", "clientRequestID": "alias"}
 	first := post(legacy, 201)

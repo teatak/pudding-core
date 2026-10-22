@@ -94,7 +94,7 @@ func (s *Store) CreateSheet(ctx context.Context, item *store.StudioItem, body st
 	if item.Kind != store.StudioItemKindSheet {
 		return nil, &store.InvalidSheet{Message: "table kind required"}
 	}
-	requestHash, err := prepareNativeCreation(item, body, author, requestID)
+	requestHash, err := prepareStudioCreation(item, body, author, requestID)
 	if err != nil {
 		return nil, err
 	}

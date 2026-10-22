@@ -1,5 +1,15 @@
 # Studio item contract
 
+Protocol 34 adds recoverable Widget creation to `POST /studio/items`: retain the
+same `clientRequestID` and creation parameters after an uncertain result. Optional
+`initialFiles` installs a complete starter draft atomically; replay returns the
+same current item and preserves later draft edits and committed source. Draft
+initialization failures retain the identity for retry. First edits of downloaded
+originals likewise retain the `clientRequestID` passed to `POST /studio/items/{id}/draft`
+to recover the same independent copy and data. See the [current contract](../contracts/README.md)
+for key scope, validation and lifetime. Earlier protocol sections below remain
+historical descriptions.
+
 Protocol 12 serves Studio items under `/studio/items`. Creation requires an explicit `kind`: `note` for Notes (native GFM Markdown), `document` for Documents (structured page-layout content), `table` for typed tabular data, or `widget` for LLM-authored React source packages built by Desktop. Shared schemas live in `contracts/studio.ts` (items, documents, tables and versions) and `contracts/widget.ts` (widget packages, manifests, builds, bridge, queries, actions and links). Limits live in `contracts/studio.json` and `contracts/widget.json`. Desktop product behavior and acceptance records live in its documentation.
 
 An item has an integer optimistic `revision`, a `headRevision` and optional `sourceSessionID`. Widgets additionally use `activeRevision` source hashes, source-slot `bindings` and `bindingVersion`. Note, document and table heads refer to immutable snapshot IDs; their content hash is separate. Deleting the origin session clears the provenance link without deleting the item. Widget sources are atomically installed under `<home>/studio/<id>/revisions/<hash>` before SQLite records the reference; failed saves cannot overwrite the active source. Session views are mounts that carry no content copies.

@@ -63,6 +63,13 @@ type StudioItemRevision struct {
 	Body            *string         `json:"body,omitempty"`
 	Author          *ContentAuthor  `json:"author,omitempty"`
 }
+
+// StudioItemCreation identifies a widget creation, including its optional
+// initial draft. The receipt must not be confused with a source revision.
+type StudioItemCreation struct {
+	ClientRequestID  string
+	InitialDraftHash string
+}
 type StudioStore interface {
 	WidgetPageStore
 	ForkWidgetForEditing(context.Context, string, string, string, int64) (*StudioItem, error)
@@ -88,7 +95,7 @@ type StudioStore interface {
 	PurgeDeletedStudioItem(context.Context, string) error
 	ListStudioItemsForCleanup(context.Context, time.Time) ([]*StudioItem, error)
 	GetStudioItem(context.Context, string) (*StudioItem, error)
-	CreateStudioItem(context.Context, *StudioItem) (*StudioItem, error)
+	CreateStudioItem(context.Context, *StudioItem, ...StudioItemCreation) (*StudioItem, error)
 	// UpdateStudioItem changes metadata (appearance, bindings, active revision) and keeps
 	// UpdatedAt: only a new revision is new work, so metadata changes do not reorder the list.
 	UpdateStudioItem(context.Context, *StudioItem, int64) (*StudioItem, error)

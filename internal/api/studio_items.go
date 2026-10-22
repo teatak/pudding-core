@@ -106,15 +106,16 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 }
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
-		ClientRequestID *string         `json:"clientRequestID,omitempty"`
-		Name            string          `json:"name"`
-		NameMode        string          `json:"nameMode,omitempty"`
-		NameFallback    string          `json:"nameFallback,omitempty"`
-		Kind            string          `json:"kind"`
-		Body            json.RawMessage `json:"body,omitempty"`
-		SourceSessionID string          `json:"sourceSessionID,omitempty"`
-		Icon            string          `json:"icon,omitempty"`
-		IconColor       string          `json:"iconColor,omitempty"`
+		ClientRequestID *string           `json:"clientRequestID,omitempty"`
+		Name            string            `json:"name"`
+		NameMode        string            `json:"nameMode,omitempty"`
+		NameFallback    string            `json:"nameFallback,omitempty"`
+		Kind            string            `json:"kind"`
+		Body            json.RawMessage   `json:"body,omitempty"`
+		SourceSessionID string            `json:"sourceSessionID,omitempty"`
+		Icon            string            `json:"icon,omitempty"`
+		IconColor       string            `json:"iconColor,omitempty"`
+		InitialFiles    map[string]string `json:"initialFiles,omitempty"`
 	}
 	if err := decodeNativeContentRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
@@ -143,10 +144,15 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	}
 	var creationKey []string
 	if req.ClientRequestID != nil {
-		if req.Kind == store.StudioItemKindWidget {
-			return badRequest(c, "clientRequestID requires page or sheet kind")
-		}
 		creationKey = []string{*req.ClientRequestID}
+	}
+	if req.InitialFiles != nil {
+		if req.Kind != store.StudioItemKindWidget || req.ClientRequestID == nil {
+			return badRequest(c, "initialFiles requires widget kind and clientRequestID")
+		}
+		if err := widget.ValidateInitialDraft(req.InitialFiles); err != nil {
+			return badRequest(c, err.Error())
+		}
 	}
 	now := time.Now().UTC()
 	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, NameMode: req.NameMode, NameFallback: strings.TrimSpace(req.NameFallback), Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
@@ -180,7 +186,24 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
 	} else {
-		w, err = s.store.CreateStudioItem(c.Request.Context(), w)
+		// Serialize with draft edits/commits. The identity is committed first;
+		// an initialization failure retains it so the same request can resume.
+		// InstallDraft publishes all starter files atomically and StartDraft never
+		// replaces an existing working copy or a later committed source.
+		widget.DraftMu.Lock()
+		defer widget.DraftMu.Unlock()
+		var creation []store.StudioItemCreation
+		if req.ClientRequestID != nil {
+			initialHash := ""
+			if req.InitialFiles != nil {
+				initialHash = widget.PackageHash(req.InitialFiles)
+			}
+			creation = []store.StudioItemCreation{{ClientRequestID: *req.ClientRequestID, InitialDraftHash: initialHash}}
+		}
+		w, err = s.store.CreateStudioItem(c.Request.Context(), w, creation...)
+		if err == nil && req.InitialFiles != nil {
+			_, err = widget.StartDraft(s.home, w.ID, w.HeadRevision, req.InitialFiles)
+		}
 	}
 	if err != nil {
 		return s.studioItemError(c, err)

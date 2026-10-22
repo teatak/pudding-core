@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -104,7 +105,37 @@ func draftHash(files map[string]string) string {
 	return PackageHash(files)
 }
 
-func StartDraft(home, id, baseHash string) (Draft, error) {
+// ValidateInitialDraft applies the same source limits as individual edits. A
+// starter need not be a complete buildable package, but cannot seed fixtures.
+func ValidateInitialDraft(files map[string]string) error {
+	policy := contracts.Widget()
+	if len(files) > policy.MaxFiles {
+		return errors.New("draft exceeds file count")
+	}
+	total := 0
+	for name, content := range files {
+		total += len(content)
+		if !ValidFilePath(name) || strings.HasPrefix(name, "fixtures/") || !utf8.ValidString(content) || len(content) > policy.MaxFileBytes || total > policy.MaxPackageBytes {
+			return errors.New("invalid initial draft source or limits")
+		}
+		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+			if _, exists := files[parent]; exists {
+				return errors.New("initial draft paths overlap")
+			}
+		}
+	}
+	return nil
+}
+
+func StartDraft(home, id, baseHash string, initial ...map[string]string) (Draft, error) {
+	if len(initial) > 1 {
+		return Draft{}, errors.New("only one initial draft is allowed")
+	}
+	if len(initial) == 1 {
+		if err := ValidateInitialDraft(initial[0]); err != nil {
+			return Draft{}, err
+		}
+	}
 	root, err := DraftRoot(home, id)
 	if err != nil {
 		return Draft{}, err
@@ -115,6 +146,9 @@ func StartDraft(home, id, baseHash string) (Draft, error) {
 		return Draft{}, err
 	}
 	files := map[string]string{}
+	if len(initial) == 1 {
+		files = initial[0]
+	}
 	if baseHash != "" {
 		base, err := ReadPackage(home, id, baseHash)
 		if err != nil {

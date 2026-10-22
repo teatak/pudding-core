@@ -15,7 +15,7 @@ var nativeCreationKey = regexp.MustCompile(`^[A-Za-z0-9_-]{1,200}$`)
 // A creation key owns a deterministic item ID. Its fingerprint is committed in
 // the existing initial-save receipt, atomically with the item/body/history.
 // Omitting a key retains the independent creation behavior of existing callers.
-func prepareNativeCreation(item *store.StudioItem, body any, author store.ContentAuthor, keys []string) (string, error) {
+func prepareStudioCreation(item *store.StudioItem, body any, author store.ContentAuthor, keys []string) (string, error) {
 	if len(keys) == 0 {
 		return "", nil
 	}
@@ -30,12 +30,16 @@ func prepareNativeCreation(item *store.StudioItem, body any, author store.Conten
 	if err != nil {
 		return "", err
 	}
-	// Both kinds share the namespace: reusing a key for another kind is an error.
+	// Page and Sheet keep their shared namespace. Widget creation has no native
+	// content snapshot and uses its own namespace and initial-draft fingerprint.
 	item.ID = "native_" + store.ContentHash(keys[0])
+	if item.Kind == store.StudioItemKindWidget {
+		item.ID = "widget_" + store.ContentHash(keys[0])
+	}
 	return store.ContentHash(string(payload)), nil
 }
 
-func replayNativeCreation(ctx context.Context, tx *sql.Tx, id, fingerprint string) (*store.ContentSnapshot, error) {
+func replayStudioCreation(ctx context.Context, tx *sql.Tx, id, fingerprint string) (*store.StudioItem, error) {
 	item, err := scanStudioItem(tx.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=?`, id))
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -52,6 +56,14 @@ func replayNativeCreation(ctx context.Context, tx *sql.Tx, id, fingerprint strin
 	}
 	if saved != fingerprint {
 		return nil, &store.InvalidContent{Message: "clientRequestID reused with different creation parameters"}
+	}
+	return item, nil
+}
+
+func replayNativeCreation(ctx context.Context, tx *sql.Tx, id, fingerprint string) (*store.ContentSnapshot, error) {
+	item, err := replayStudioCreation(ctx, tx, id, fingerprint)
+	if err != nil || item == nil {
+		return nil, err
 	}
 	// Read the current head, not the initial content: a retry never undoes edits.
 	return scanContentSnapshot(tx.QueryRowContext(ctx, `SELECT w.id,c.body,c.content_hash,w.head_revision,c.content_format FROM studio_items w JOIN studio_item_content c ON c.item_id=w.id WHERE w.id=?`, id))
