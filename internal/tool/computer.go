@@ -217,7 +217,7 @@ func computerActionsFailure(out Result, result computer.ActionsResult) Result {
 
 func (r *BuiltinRunner) computerReady(call Call, out Result) *Result {
 	if r.computer == nil {
-		result := toolJSONError(out, "computer_unavailable", "Computer Use is unavailable; launch Pudding from the macOS desktop app")
+		result := toolJSONError(out, "computer_unavailable", "Computer Use is unavailable in this environment")
 		return &result
 	}
 	if strings.TrimSpace(call.SessionID) == "" {

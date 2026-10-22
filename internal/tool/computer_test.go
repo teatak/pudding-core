@@ -11,6 +11,32 @@ import (
 	"github.com/teatak/pudding-core/internal/computer"
 )
 
+func TestComputerUnavailableGuidanceIsPlatformNeutral(t *testing.T) {
+	runner := NewBuiltinRunner()
+	for _, name := range []string{ComputerListApps, ComputerUseApp, ComputerQuitApp, ComputerObserve, ComputerAct} {
+		t.Run(name, func(t *testing.T) {
+			if runner.ToolAvailable(name) {
+				t.Fatal("Computer Use must stay unavailable without a controller")
+			}
+			out := runner.Call(context.Background(), Call{SessionID: "session_a", CallID: "unavailable", Name: name, Args: json.RawMessage(`{}`)})
+			var payload struct {
+				OK     bool   `json:"ok"`
+				Reason string `json:"reason"`
+				Detail string `json:"detail"`
+			}
+			if err := json.Unmarshal([]byte(out.Content), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if out.Ok || payload.OK || payload.Reason != "computer_unavailable" {
+				t.Fatalf("unexpected failure: %+v", out)
+			}
+			if payload.Detail != "Computer Use is unavailable in this environment" {
+				t.Fatalf("unexpected platform guidance: %q", payload.Detail)
+			}
+		})
+	}
+}
+
 func TestComputerActionGuidanceLeavesObservationTimingToTheModel(t *testing.T) {
 	for _, definition := range BuiltinDefinitions() {
 		if definition.Name != ComputerAct {
