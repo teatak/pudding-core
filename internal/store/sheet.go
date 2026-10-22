@@ -62,7 +62,7 @@ type SheetWrite struct {
 	Author          ContentAuthor    `json:"-"`
 }
 type SheetStore interface {
-	CreateSheet(context.Context, *StudioItem, SheetBody, ContentAuthor) (*SheetContent, error)
+	CreateSheet(context.Context, *StudioItem, SheetBody, ContentAuthor, ...string) (*SheetContent, error)
 	GetSheet(context.Context, string) (*SheetContent, error)
 	WriteSheet(context.Context, string, SheetWrite) (*SheetContent, error)
 }

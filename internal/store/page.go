@@ -41,7 +41,7 @@ type PageWrite struct {
 
 type PageStore interface {
 	PageEditOperationStore
-	CreatePage(context.Context, *StudioItem, string, ContentAuthor) (*PageContent, error)
+	CreatePage(context.Context, *StudioItem, string, ContentAuthor, ...string) (*PageContent, error)
 	GetPage(context.Context, string) (*PageContent, error)
 	WritePage(context.Context, string, PageWrite) (*PageContent, error)
 }

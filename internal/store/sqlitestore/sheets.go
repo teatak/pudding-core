@@ -87,17 +87,28 @@ func recordSheetIDs(ctx context.Context, tx *sql.Tx, id string, body store.Sheet
 	}
 	return nil
 }
-func (s *Store) CreateSheet(ctx context.Context, item *store.StudioItem, body store.SheetBody, author store.ContentAuthor) (*store.SheetContent, error) {
+func (s *Store) CreateSheet(ctx context.Context, item *store.StudioItem, body store.SheetBody, author store.ContentAuthor, requestID ...string) (*store.SheetContent, error) {
 	if err := store.ValidateSheet(body); err != nil {
 		return nil, err
 	}
 	if item.Kind != store.StudioItemKindSheet {
 		return nil, &store.InvalidSheet{Message: "table kind required"}
 	}
+	requestHash, err := prepareNativeCreation(item, body, author, requestID)
+	if err != nil {
+		return nil, err
+	}
 	var d *store.ContentSnapshot
-	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
+		}
+		if requestHash != "" {
+			var err error
+			d, err = replayNativeCreation(ctx, tx, item.ID, requestHash)
+			if err != nil || d != nil {
+				return err
+			}
 		}
 		if err := createStudioItemTx(ctx, tx, item); err != nil {
 			return err
@@ -110,7 +121,7 @@ func (s *Store) CreateSheet(ctx context.Context, item *store.StudioItem, body st
 		if err := recordSheetIDs(ctx, tx, item.ID, body, nil, false, nil); err != nil {
 			return err
 		}
-		return saveNativeContentTx(ctx, tx, d, nativeContentSave{ClientRequestID: "create", Author: author}, "")
+		return saveNativeContentTx(ctx, tx, d, nativeContentSave{ClientRequestID: "create", Author: author}, requestHash)
 	})
 	if err != nil {
 		return nil, err

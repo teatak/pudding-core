@@ -19,7 +19,7 @@ func (s *Store) GetPage(ctx context.Context, id string) (*store.PageContent, err
 	return scanContentSnapshot(s.db.QueryRowContext(ctx, pageSelect, id))
 }
 
-func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor) (*store.PageContent, error) {
+func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body string, author store.ContentAuthor, requestID ...string) (*store.PageContent, error) {
 	if err := store.ValidatePage(body); err != nil {
 		return nil, err
 	}
@@ -38,10 +38,21 @@ func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body str
 	if item.NameFallback == "" {
 		item.NameFallback = store.PageNameFallback
 	}
+	requestHash, err := prepareNativeCreation(item, body, author, requestID)
+	if err != nil {
+		return nil, err
+	}
 	var out *store.PageContent
-	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := validateContentAuthor(ctx, tx, author); err != nil {
 			return err
+		}
+		if requestHash != "" {
+			var err error
+			out, err = replayNativeCreation(ctx, tx, item.ID, requestHash)
+			if err != nil || out != nil {
+				return err
+			}
 		}
 		if err := createStudioItemTx(ctx, tx, item); err != nil {
 			return err
@@ -51,7 +62,7 @@ func (s *Store) CreatePage(ctx context.Context, item *store.StudioItem, body str
 			return err
 		}
 		out = &store.PageContent{ItemID: item.ID, Body: body, ContentHash: hash, Structure: store.LegacyPageDocument(item.ID, body)}
-		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: "create", Author: author}, "")
+		return saveNativeContentTx(ctx, tx, out, nativeContentSave{ClientRequestID: "create", Author: author}, requestHash)
 	})
 	return out, err
 }

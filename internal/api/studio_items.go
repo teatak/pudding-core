@@ -106,6 +106,7 @@ func (s *Server) listStudioItems(c *cart.Context) error {
 }
 func (s *Server) createStudioItem(c *cart.Context) error {
 	var req struct {
+		ClientRequestID *string         `json:"clientRequestID,omitempty"`
 		Name            string          `json:"name"`
 		NameMode        string          `json:"nameMode,omitempty"`
 		NameFallback    string          `json:"nameFallback,omitempty"`
@@ -140,6 +141,13 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 	if req.Kind == store.StudioItemKindWidget && len(req.Body) > 0 {
 		return badRequest(c, "widget cannot have a content body")
 	}
+	var creationKey []string
+	if req.ClientRequestID != nil {
+		if req.Kind == store.StudioItemKindWidget {
+			return badRequest(c, "clientRequestID requires page or sheet kind")
+		}
+		creationKey = []string{*req.ClientRequestID}
+	}
 	now := time.Now().UTC()
 	w := &store.StudioItem{ID: store.NewID(req.Kind), Kind: req.Kind, Name: req.Name, NameMode: req.NameMode, NameFallback: strings.TrimSpace(req.NameFallback), Icon: req.Icon, IconColor: req.IconColor, SourceSessionID: req.SourceSessionID, CreatedAt: now, UpdatedAt: now}
 	var err error
@@ -153,7 +161,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 				return badRequest(c, "document body must be a string")
 			}
 		}
-		_, err = s.store.CreatePage(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
+		_, err = s.store.CreatePage(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"}, creationKey...)
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}
@@ -167,7 +175,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		if w.Icon == "" {
 			w.Icon = "sheet"
 		}
-		_, err = s.store.CreateSheet(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"})
+		_, err = s.store.CreateSheet(c.Request.Context(), w, body, store.ContentAuthor{Kind: "user"}, creationKey...)
 		if err == nil {
 			w, err = s.store.GetStudioItem(c.Request.Context(), w.ID)
 		}

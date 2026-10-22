@@ -5,6 +5,21 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 33 adds optional `clientRequestID` to `POST /studio/items` for Page and
+Sheet creation (including their legacy kind aliases). Keys contain 1–200 ASCII
+letters, digits, underscores or hyphens. The same key and normalized creation
+parameters return the existing item's **current** metadata without adding an
+item or revision, including after daemon restart; later edits are preserved.
+Reusing a key with different kind, body, name/naming policy, appearance or source
+session returns `400`. Page and Sheet share the key namespace. The deterministic
+item ID and initial save fingerprint commit atomically with content and history;
+failed transactions do not consume the key. Archived or tombstoned content returns
+`404` rather than being revived; permanent purge ends the key's lifetime. Omitted
+keys retain independent creation, and Widget creation does not accept this field.
+Clients must retain the exact unacknowledged payload (including generated Sheet
+row/column IDs and appearance), then rotate the key after acknowledgement. No
+database migration is needed; schema remains 48.
+
 Protocol 32 introduces declared plugin connection selection (`user` by default,
 `single_active`; `automatic` is reserved and currently rejected). Standard
 Connections own Web Search & Fetch credentials; `/plugins/:id/connection-bindings`
