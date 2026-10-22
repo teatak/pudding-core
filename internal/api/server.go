@@ -482,9 +482,10 @@ func (s *Server) createSession(c *cart.Context) error {
 }
 
 type createProjectReq struct {
-	Name         string             `json:"name"`
-	RootDirs     []string           `json:"rootDirs"`
-	ApprovalMode store.ApprovalMode `json:"approvalMode"`
+	ClientRequestID *string            `json:"clientRequestID"`
+	Name            string             `json:"name"`
+	RootDirs        []string           `json:"rootDirs"`
+	ApprovalMode    store.ApprovalMode `json:"approvalMode"`
 }
 
 func (s *Server) createProject(c *cart.Context) error {
@@ -498,7 +499,11 @@ func (s *Server) createProject(c *cart.Context) error {
 		RootDirs:     req.RootDirs,
 		ApprovalMode: req.ApprovalMode,
 	}
-	if err := s.store.CreateProject(c.Request.Context(), project); err != nil {
+	var keys []string
+	if req.ClientRequestID != nil {
+		keys = []string{*req.ClientRequestID}
+	}
+	if err := s.store.CreateProject(c.Request.Context(), project, keys...); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusCreated, project)
@@ -547,9 +552,12 @@ func (s *Server) patchProject(c *cart.Context) error {
 }
 
 type mergeProjectReq struct {
-	SourceProjectID string   `json:"sourceProjectID"`
-	Name            string   `json:"name"`
-	RootDirs        []string `json:"rootDirs"`
+	ClientRequestID         *string    `json:"clientRequestID"`
+	ExpectedTargetUpdatedAt *time.Time `json:"expectedTargetUpdatedAt"`
+	ExpectedSourceUpdatedAt *time.Time `json:"expectedSourceUpdatedAt"`
+	SourceProjectID         string     `json:"sourceProjectID"`
+	Name                    string     `json:"name"`
+	RootDirs                []string   `json:"rootDirs"`
 }
 
 func (s *Server) mergeProject(c *cart.Context) error {
@@ -570,12 +578,19 @@ func (s *Server) mergeProject(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if req.ClientRequestID != nil && *req.ClientRequestID == "" {
+		return badRequest(c, "invalid_project")
+	}
+	option := store.ProjectMergeOptions{ExpectedTargetUpdatedAt: req.ExpectedTargetUpdatedAt, ExpectedSourceUpdatedAt: req.ExpectedSourceUpdatedAt}
+	if req.ClientRequestID != nil {
+		option.ClientRequestID = *req.ClientRequestID
+	}
 	name := req.Name
 	rootDirs := req.RootDirs
 	project, err := s.store.MergeProjects(c.Request.Context(), targetID, req.SourceProjectID, store.ProjectUpdate{
 		Name:     &name,
 		RootDirs: &rootDirs,
-	})
+	}, option)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -1721,6 +1736,10 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, store.ErrInvalidProject) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_project"})
+		return nil
+	}
+	if errors.Is(err, store.ErrProjectRequestConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "project_request_conflict"})
 		return nil
 	}
 	if errors.Is(err, store.ErrProjectMergeConflict) {

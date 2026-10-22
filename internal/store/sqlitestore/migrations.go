@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 48
+	currentSchemaVersion       = 49
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	49: func(tx *sql.Tx) error { _, err := tx.Exec(projectRequestsSchema); return err },
 	48: func(tx *sql.Tx) error { _, err := tx.Exec(sessionPluginConnectionsSchema); return err },
 	47: migrateStudioV47,
 	32: migratePreauthorizedRemotePairings,
@@ -952,6 +953,7 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
+		"project_requests":           {"request_key", "request_hash", "project_id"},
 		"remote_identity":            {"singleton", "desktop_id"},
 		"remote_pairings":            {"id", "mode", "origin", "code_hash", "expires_at"},
 		"remote_devices":             {"id", "name", "mode", "origin", "credential_hash", "created_at", "expires_at"},

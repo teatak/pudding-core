@@ -5,6 +5,24 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 35 adds optional `clientRequestID` to `POST /projects` and
+`POST /projects/:id/merge`. Keys contain 1–200 ASCII letters, digits, underscores
+or hyphens; creation and merge use separate namespaces. Schema v49 stores each
+normalized request fingerprint and result ID atomically with the project changes
+and session migration. Repeating the same operation returns the project's current
+metadata, including after daemon restart; it never reapplies the original name,
+roots or session migration. Reusing a key with different parameters returns
+`409 project_request_conflict`; a deleted result returns `404` and is not revived.
+Receipts survive deletion. Requests without a key retain independent execution.
+
+Merge may also carry `expectedTargetUpdatedAt` and `expectedSourceUpdatedAt` from
+the originally reviewed projects. The first execution checks these against stored
+millisecond timestamps and returns `409 project_merge_conflict` on a mismatch.
+An acknowledged receipt is checked first, so an uncertain successful merge can
+still be recovered after its source is deleted or its target changes. Clients
+must keep both the request ID and original payload across retries, and allocate
+a new identity for a deliberately new operation. Failed transactions consume no key.
+
 Protocol 34 extends `POST /studio/items` creation identity to Widgets. Optional
 `initialFiles` is a map of source paths to UTF-8 text, allowed only with Widget
 kind and `clientRequestID`. The initial draft obeys Widget source limits (no

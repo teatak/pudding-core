@@ -23,6 +23,7 @@ var (
 	ErrInvalidRetry             = errors.New("store: only the latest failed turn can be retried")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
 	ErrInvalidSessionRelation   = errors.New("store: invalid parent-child session relation")
+	ErrProjectRequestConflict   = errors.New("store: project request identity reused")
 	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrProjectMergeConflict     = errors.New("store: project merge directories changed")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
@@ -163,6 +164,12 @@ type Project struct {
 	// LastActivityAt 持久化项目最近活动时间，初值为创建时间。
 	// 会话内容活动只推进此值；删除、归档、元数据修改不改变它。
 	LastActivityAt time.Time `json:"lastActivityAt"`
+}
+
+type ProjectMergeOptions struct {
+	ClientRequestID         string
+	ExpectedTargetUpdatedAt *time.Time
+	ExpectedSourceUpdatedAt *time.Time
 }
 
 type ProjectUpdate struct {
@@ -2319,11 +2326,11 @@ type Store interface {
 	RemoteStore
 	StudioStore
 	ScheduledTaskStore
-	CreateProject(ctx context.Context, p *Project) error
+	CreateProject(ctx context.Context, p *Project, requestIDs ...string) error
 	GetProject(ctx context.Context, id string) (*Project, error)
 	ListProjects(ctx context.Context) ([]*Project, error)
 	UpdateProject(ctx context.Context, id string, upd ProjectUpdate) (*Project, error)
-	MergeProjects(ctx context.Context, targetID, sourceID string, upd ProjectUpdate) (*Project, error)
+	MergeProjects(ctx context.Context, targetID, sourceID string, upd ProjectUpdate, options ...ProjectMergeOptions) (*Project, error)
 	DeleteProject(ctx context.Context, id string) error
 
 	CreateSession(ctx context.Context, s *Session) error

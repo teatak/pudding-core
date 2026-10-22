@@ -118,18 +118,35 @@ const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) CreateProject(ctx context.Context, project *store.Project) error {
+func (s *Store) CreateProject(ctx context.Context, project *store.Project, requestIDs ...string) error {
 	if err := store.NormalizeProject(project); err != nil {
 		return err
 	}
+	key, hash, err := projectRequest("create", struct {
+		Name     string
+		Roots    []string
+		Approval store.ApprovalMode
+	}{project.Name, project.RootDirs, project.ApprovalMode}, requestIDs)
+	if err != nil {
+		return err
+	}
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if previous, err := replayProjectRequest(ctx, tx, key, hash); err != nil {
+			return err
+		} else if previous != nil {
+			*project = *previous
+			return nil
+		}
 		now := time.Now()
 		project.CreatedAt, project.UpdatedAt, project.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO projects(`+projectSelectColumns+`) VALUES(?,?,?,?,?,?,?)`,
 			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(now), unixMS(now), unixMS(now),
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		return saveProjectRequest(ctx, tx, key, hash, project.ID)
 	})
 }
 
@@ -194,7 +211,7 @@ func (s *Store) UpdateProject(ctx context.Context, id string, upd store.ProjectU
 	return out, err
 }
 
-func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, upd store.ProjectUpdate) (*store.Project, error) {
+func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, upd store.ProjectUpdate, options ...store.ProjectMergeOptions) (*store.Project, error) {
 	if err := store.NormalizeProjectUpdate(&upd); err != nil {
 		return nil, err
 	}
@@ -203,8 +220,33 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 	if targetID == "" || sourceID == "" || targetID == sourceID || upd.Name == nil || *upd.Name == "" || upd.RootDirs == nil {
 		return nil, store.ErrInvalidProject
 	}
+	if len(options) > 1 {
+		return nil, store.ErrInvalidProject
+	}
+	var option store.ProjectMergeOptions
+	var keys []string
+	if len(options) == 1 {
+		option = options[0]
+		if option.ClientRequestID != "" {
+			keys = []string{option.ClientRequestID}
+		}
+	}
+	key, hash, err := projectRequest("merge", struct {
+		Target, Source     string
+		Update             store.ProjectUpdate
+		TargetAt, SourceAt *time.Time
+	}{targetID, sourceID, upd, option.ExpectedTargetUpdatedAt, option.ExpectedSourceUpdatedAt}, keys)
+	if err != nil {
+		return nil, err
+	}
 	var out *store.Project
-	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if previous, err := replayProjectRequest(ctx, tx, key, hash); err != nil {
+			return err
+		} else if previous != nil {
+			out = previous
+			return nil
+		}
 		target, err := getProjectTx(ctx, tx, targetID)
 		if err != nil {
 			return err
@@ -212,6 +254,9 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 		source, err := getProjectTx(ctx, tx, sourceID)
 		if err != nil {
 			return err
+		}
+		if (option.ExpectedTargetUpdatedAt != nil && option.ExpectedTargetUpdatedAt.UnixMilli() != target.UpdatedAt.UnixMilli()) || (option.ExpectedSourceUpdatedAt != nil && option.ExpectedSourceUpdatedAt.UnixMilli() != source.UpdatedAt.UnixMilli()) {
+			return store.ErrProjectMergeConflict
 		}
 		if !store.SameProjectDirs(source.RootDirs, *upd.RootDirs) {
 			return store.ErrProjectMergeConflict
@@ -243,7 +288,7 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 			return err
 		}
 		out = target
-		return nil
+		return saveProjectRequest(ctx, tx, key, hash, target.ID)
 	})
 	return out, err
 }

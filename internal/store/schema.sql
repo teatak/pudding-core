@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS computer_app_grants (
     PRIMARY KEY (session_id, app_id)
 );
 
+CREATE TABLE IF NOT EXISTS project_requests (
+    request_key TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    project_id TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id            TEXT PRIMARY KEY,
     name          TEXT    NOT NULL DEFAULT '',

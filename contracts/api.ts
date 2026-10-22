@@ -105,6 +105,7 @@ export const listProjectsResponse = z.object({
 });
 
 export const createProjectRequest = z.object({
+  clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   name: z.string().optional(),
   rootDirs: z.array(z.string()),
   approvalMode: approvalMode.optional(),
@@ -117,6 +118,9 @@ export const patchProjectRequest = z.object({
 });
 
 export const mergeProjectRequest = z.object({
+  clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
+  expectedTargetUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  expectedSourceUpdatedAt: z.string().datetime({ offset: true }).optional(),
   sourceProjectID: z.string().min(1),
   name: z.string().min(1),
   rootDirs: z.array(z.string()),
