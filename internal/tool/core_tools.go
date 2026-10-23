@@ -10,10 +10,12 @@ import (
 )
 
 var chatCoreTools = map[string]bool{
-	SetNextPrompt:  true,
-	ScheduledTask:  true,
-	TimeGetCurrent: true,
-	HistorySearch:  true, HistoryGetMessage: true, SkillRead: true,
+	AssistantRename: true,
+	AssistantMemory: true,
+	SetNextPrompt:   true,
+	ScheduledTask:   true,
+	TimeGetCurrent:  true,
+	HistorySearch:   true, HistoryGetMessage: true, SkillRead: true,
 	MediaRead: true, WeatherGet: true,
 }
 

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 53
+	currentSchemaVersion       = 54
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	54: migrateAssistantMemoriesV54,
 	53: migrateAssistantV53,
 	52: migrateAssistantV52,
 	51: func(tx *sql.Tx) error { _, err := tx.Exec(assistantSchema); return err },
@@ -958,7 +959,8 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"assistants":                 {"id", "name", "user_name", "appearance", "revision", "created_at", "updated_at"},
-		"assistant_memories":         {"id", "assistant_id", "content", "scope", "source", "created_at", "updated_at"},
+		"assistant_memories":         {"id", "assistant_id", "content", "scope", "source", "created_at", "updated_at", "project_id", "revision", "source_session_id", "source_turn_id"},
+		"assistant_memory_terms":     {"memory_id", "term"},
 		"assistant_sessions":         {"assistant_id", "session_id"},
 		"project_requests":           {"request_key", "request_hash", "project_id"},
 		"remote_identity":            {"singleton", "desktop_id"},

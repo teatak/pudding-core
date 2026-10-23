@@ -98,7 +98,7 @@ func TestAssistantMigrationFrom50PreservesSessions(t *testing.T) {
 	s, path := openTestStore(t)
 	ctx := context.Background()
 	createTestSession(t, s, "existing")
-	if _, err := s.db.Exec(`DROP TABLE assistant_memories; DROP TABLE assistants;`); err != nil {
+	if _, err := s.db.Exec(`DROP TABLE assistant_memory_terms; DROP TABLE assistant_memories; DROP TABLE assistants;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := setSchemaVersion(s.db, 50); err != nil {
@@ -128,7 +128,7 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 	s, path := openTestStore(t)
 	ctx := context.Background()
 	initial, err := s.OpenAssistant(ctx, "Puddy", "", "")
-	if err != nil || initial.Assistant.Name != "Puddy" || initial.Assistant.SessionID != "" || initial.Assistant.Appearance.Eyewear != "classic" {
+	if err != nil || initial.Assistant.Name != "" || initial.Assistant.SessionID != "" || initial.Assistant.Appearance.Eyewear != "classic" {
 		t.Fatalf("default without model: %+v %v", initial, err)
 	}
 	var wg sync.WaitGroup
@@ -212,6 +212,7 @@ func TestAssistantMigrationFromBothV51Layouts(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			restoreAssistantMemoriesV53(t, s)
 			if err := setSchemaVersion(s.db, 51); err != nil {
 				t.Fatal(err)
 			}
@@ -252,6 +253,7 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			restoreAssistantMemoriesV53(t, s)
 			if err := setSchemaVersion(s.db, 52); err != nil {
 				t.Fatal(err)
 			}

@@ -1700,6 +1700,10 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 		if err != nil {
 			return nil, err
 		}
+		defs, err = e.assistantToolDefinitions(ctx, sessionID, defs)
+		if err != nil {
+			return nil, err
+		}
 		return tool.CoreDefinitionsForMode(mode, defs), nil
 	}
 	pluginStates, err := e.sessionPluginStates(ctx, sessionID)
@@ -1721,6 +1725,10 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 		defs = runnerDefs
 	}
 	defs, err = e.scheduledToolDefinitions(ctx, sessionID, defs)
+	if err != nil {
+		return nil, err
+	}
+	defs, err = e.assistantToolDefinitions(ctx, sessionID, defs)
 	if err != nil {
 		return nil, err
 	}
@@ -2119,7 +2127,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 	}
 	nextMode := currentMode
 	modeChanged := false
-	toolsChanged := false
+	contextChanged := false
 	for _, call := range calls {
 		call.SessionID = sessionID
 		call.TurnID = turnID
@@ -2147,11 +2155,11 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else if call.Name == tool.PluginLoad {
 			var changed bool
 			result, changed = e.loadPlugin(ctx, sessionID, call, nextMode)
-			toolsChanged = toolsChanged || changed
+			contextChanged = contextChanged || changed
 		} else if call.Name == tool.PluginUnload {
 			var changed bool
 			result, changed = e.unloadPlugin(ctx, sessionID, call)
-			toolsChanged = toolsChanged || changed
+			contextChanged = contextChanged || changed
 		} else if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
 			if !tool.NameAllowedForMode(nextMode, call.Name) {
 				result = toolNotAllowedResult(call, nextMode)
@@ -2198,6 +2206,8 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else {
 			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 		}
+		// Rebuild the profile before the next model step in this same turn.
+		contextChanged = contextChanged || (tool.IsAssistantTool(call.Name) && result.Ok)
 		// Cancellation stops subsequent work, but must not discard the result of
 		// an already dispatched tool (including completed prefixes/unknown effects).
 		// Persist and publish that result before the cancellation check below.
@@ -2233,11 +2243,17 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			return store.TurnCancelled, "", nextMode, modeChanged
 		}
 	}
-	return store.TurnRunning, "", nextMode, modeChanged || toolsChanged
+	return store.TurnRunning, "", nextMode, modeChanged || contextChanged
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
 	call.Name = tool.NormalizeLegacyContentTool(call.Name)
+	if call.Name == tool.AssistantRename {
+		return e.executeAssistantRename(ctx, sessionID, call)
+	}
+	if call.Name == tool.AssistantMemory {
+		return e.executeAssistantMemory(ctx, sessionID, turnID, call)
+	}
 	if tool.IsStudioTool(call.Name) {
 		return e.executeStudio(ctx, sessionID, turnID, call)
 	}

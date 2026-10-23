@@ -169,6 +169,42 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 	if err != nil {
 		return provider.Request{}, err
 	}
+	profile, err := b.store.GetAssistant(ctx)
+	if err != nil {
+		return provider.Request{}, fmt.Errorf("load assistant profile: %w", err)
+	}
+	if profile.Assistant != nil && profile.Assistant.SessionID == sessionID {
+		segment := prompt.PersonalAssistant(profile)
+		system.Segments = append(system.Segments, segment)
+		system.SystemInstruction = appendInstruction(system.SystemInstruction, segment.Content)
+		var query string
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == store.RoleUser {
+				query = store.TextFromParts(msgs[i].Parts)
+				break
+			}
+		}
+		if text := []rune(query); len(text) > 4000 {
+			query = string(text[:4000])
+		}
+		if strings.TrimSpace(query) != "" {
+			memories, err := b.store.SearchAssistantMemories(ctx, sessionID, store.AssistantMemoryQuery{Query: query, Limit: 8})
+			if err != nil {
+				return provider.Request{}, fmt.Errorf("retrieve assistant memories: %w", err)
+			}
+			if sess.ProjectID != "" {
+				projectMemories, err := b.store.SearchAssistantMemories(ctx, sessionID, store.AssistantMemoryQuery{Query: query, ProjectID: sess.ProjectID, Limit: 8})
+				if err != nil {
+					return provider.Request{}, fmt.Errorf("retrieve project memories: %w", err)
+				}
+				memories = append(projectMemories, memories...)
+			}
+			if memorySegment := prompt.RelevantAssistantMemories(memories); memorySegment.Content != "" {
+				system.Segments = append(system.Segments, memorySegment)
+				system.SystemInstruction = appendInstruction(system.SystemInstruction, memorySegment.Content)
+			}
+		}
+	}
 	if currentMode == store.ModeCode && strings.TrimSpace(sess.ProjectID) != "" {
 		project, err := b.store.GetProject(ctx, sess.ProjectID)
 		if err != nil {

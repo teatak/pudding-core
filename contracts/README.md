@@ -5,6 +5,38 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 44 expands assistant memories with `scope` (`personal` / `project`),
+`source` (`user_settings` / `conversation`), a positive `revision`, and optional
+`projectID`, `sourceSessionID`, `sourceTurnID`. Schema 54 preserves existing
+preferences, adds provenance and revision columns, and builds a local term index.
+`builtin_assistant_memory` supports search/save/update/delete only in the fixed
+assistant conversation; execution verifies that association independently of the
+model's tool list. Writes record the actual source turn, and updates/deletes use
+memory revisions. Conversation changes to `communication_preference` also advance
+the profile revision so stale forms cannot overwrite them. No memory management
+UI or new memory REST endpoints are added in this increment.
+
+The model judges which information is useful to retain; no trigger phrase or
+fixed category is required. Current identity and communication preference are
+always included. Other personal memories are selected using the latest user text
+and a Chinese/English term index, capped at six facts / 4000 content characters;
+project memories require the matching project scope. This is lexical retrieval,
+not vector similarity. The model can search further using the scoped tool.
+Updates replace indexed content; deletes remove it from future memory retrieval,
+without deleting the original conversation. Memory does not grant tool permission.
+
+Protocol 43 allows an empty assistant name to select the localized display default
+(小布 in Chinese, Puddy in English). New profiles store an empty name; existing
+names remain unchanged until explicitly cleared. Schema remains 53. The profile
+and its fixed conversation remain intact when clearing the name. Clients render
+the default according to the current UI locale, without rewriting it on locale changes.
+
+Protocol 42 separates assistant body shape from palette selection: body supports
+`classic`, `round`, `square`; palette adds `blue`, `coral`, `yellow`, `violet`,
+`emerald`. Both fields already exist in appearance JSON and persist independently.
+Schema remains 53; existing shapes, palettes and defaults are preserved. Clients
+and daemon must update together to validate and render these new values.
+
 Protocol 41 extends assistant parts: eyes add `curved` and `dots`; mouth adds
 `smile` and `surprised`; headwear adds `hat` and `beacon`; arms add `short` and
 `orb`; faceSticker adds `freckles` and `stars`. These are stable IDs in the existing
@@ -28,7 +60,7 @@ The snapshot includes `sessionID` once bound; this conversation is excluded from
 ordinary root listings. Archive/delete returns `409 assistant_conversation_protected`.
 Schema 52 upgrades the earlier schema 51 `palette` column to appearance JSON while
 preserving data, and also accepts the canonical schema 51 appearance layout. PUT requires
-`expectedRevision` (0 if the identity does not exist), a nonempty name, userName, appearance and
+`expectedRevision` (0 if the identity does not exist), name, userName, appearance and
 communicationPreference. Names are trimmed and limited to 80 characters without
 line breaks; the preference is trimmed and limited to 2000 characters. A stale
 changed form returns `409 assistant_conflict`. An identical current profile and
@@ -36,7 +68,8 @@ preference returns the current snapshot without another revision, making a retry
 after a lost response safe. Profile and preference commit atomically.
 
 Appearance persists as JSON with required `body`, `eyes`, and `mouth` asset IDs
-(default `classic`). Palette is `original`, `lavender` or `mint`. Eyes support
+(default `classic`). Body supports `classic`, `round`, `square`. Palette supports
+`original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`. Eyes support
 `classic`, `curved`, `dots`; mouth supports `classic`, `smile`, `surprised`.
 Decorative slots carry explicit IDs or `none`: headwear supports `antenna`, `hat`,
 `beacon`; arms support `classic`, `short`, `orb`; faceSticker supports `blush`,
@@ -45,7 +78,8 @@ Missing/unknown selections return `400 invalid_assistant`.
 The optional communication preference uses memory ID `communication_preference`,
 scope `personal` and source `user_settings`; an empty value deletes it. This
 increment provides profile persistence and one current assistant conversation.
-Memory retrieval, history management and cross-session scheduling remain deferred. The
+Cross-session scheduling remains deferred; the assistant always
+uses the same conversation, with no new-chat or conversation-switching entry. The
 Desktop remote gateway does not expose the assistant endpoint.
 
 Semantic rename (`builtin_code_rename`) returns `ok: false` with

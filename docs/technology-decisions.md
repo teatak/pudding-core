@@ -55,6 +55,11 @@ core 默认只提供 API；显式 `-ui-dir` 可挂载外置 UI。桌面构建、
 - profiles 与模型元数据来自 `<home>/config/profiles.yaml`；scalar settings、web tools 配置分别来自 `settings.yaml`、`web.yaml`。用户补充提示词来自 `<home>/pudding.md`。
 - provider/model/effective config 在 BeginTurn 时生成快照；运行中的 turn 不受随后配置编辑影响。
 - 每次请求由 canonical messages、当前输入以及明确的系统指令、工具和项目配置构造；provider client 不持有跨 turn 事实。
+- 固定助手聊天额外由 Context Builder 读取当前助手资料，并通过 `assistant_sessions` 关联限定注入范围：名称（留空时中文「小布」、英文「Puddy」，按回复语言使用）、用户称呼、虚拟形象描述及个人交流偏好。当前资料优先于历史里的旧名称；普通会话不注入。交流偏好只取 `communication_preference`、`personal`，来源为 `user_settings` 或 `conversation`，清空后不再注入；资料字段按 JSON 编码，用户偏好不升级工具权限。读取失败明确返回错误，重启、切换模型与压缩预算投影均复用这一链路。已接通长期记忆写入和检索，助手调度尚未接入。
+- `builtin_assistant_rename` 仅注入固定助手聊天，执行时再次核对聊天关联；普通聊天与子会话不可调用。提示词引导模型根据上下文识别「你叫小白吧」等自然命名意图，在当轮调用工具，无需再要求用户明确说“保存”或去设置；名字讨论和临时角色扮演由模型区分，不使用关键词硬匹配。改名复用 `SaveAssistant` 的版本检查和原子保存，保持其他资料与交流偏好；空名称恢复默认名。成功后工具循环重建当前身份提示词，Desktop 通过现有 `turn.tool` 成功事件刷新资料，重连时补取快照，无新增协议字段或 schema 变更。
+- 助手专用工具的范围由当前执行会话与数据库中的固定助手关联决定；Chat／Work／Code 模式、同名会话或助手的子会话均不能扩大范围。模型伪造工具调用或在参数中传入助手会话 ID 不能绕过工具列表与执行检查。后续助手专用工具同样遵守这两层限制。
+- `builtin_assistant_memory` 在固定助手聊天中提供 search/save/delete；由模型自行判断记忆价值，不要求用户说“记住”，不使用固定类别或关键词触发。保存记录真实来源会话与 turn，更新／删除要求最新记忆版本；个人和项目范围分别检索。`communication_preference` 与资料设置共用一条记录，工具修改也递增资料版本，防止旧弹窗覆盖。
+- schema 54 使用本地分词索引（复用中文／英文分词，不依赖 FTS5 编译标签）。每次构建请求按最近用户消息检索相关个人记忆，有项目关联时再读取该项目记忆；最多注入 6 条、4000 个内容字符。模型可继续使用工具检索，当前实现不做向量语义召回。更新同步替换索引，删除不再检索注入；原始对话仍按历史生命周期保存。成功工具调用后重建提示词；Desktop 刷新资料快照，不重开聊天。记忆查看／编辑／删除界面暂缓。
 - provider 只产出模型 delta / finish / error；生命周期事件由 engine 生成。
 - Responses 不以服务端会话 ID 续聊，reasoning continuation 按协议从 canonical 数据构造。
 - 图片与音频的模型投递按模型能力及 adapter 支持处理，不能把全部附件类型视为已原生支持。见 [附件说明](https://github.com/teatak/pudding-desktop/blob/main/docs/attachments.md)。

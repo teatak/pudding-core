@@ -89,18 +89,17 @@ func readAssistant(ctx context.Context, tx *sql.Tx) (*store.AssistantSnapshot, e
 	}
 	a.CreatedAt, a.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
 	out.Assistant = a
-	rows, err := tx.QueryContext(ctx, `SELECT id,content,scope,source,created_at,updated_at FROM assistant_memories WHERE assistant_id=? ORDER BY created_at,id`, a.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT `+assistantMemoryColumns+` FROM assistant_memories m WHERE assistant_id=? ORDER BY created_at,id`, a.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var m store.AssistantMemory
-		if err := rows.Scan(&m.ID, &m.Content, &m.Scope, &m.Source, &created, &updated); err != nil {
+		m, err := scanAssistantMemory(rows)
+		if err != nil {
 			return nil, err
 		}
-		m.CreatedAt, m.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
-		out.Memories = append(out.Memories, m)
+		out.Memories = append(out.Memories, *m)
 	}
 	return out, rows.Err()
 }
@@ -124,8 +123,8 @@ func (s *Store) OpenAssistant(ctx context.Context, defaultName, provider, model 
 	var out *store.AssistantSnapshot
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC().UnixMilli()
-		_, err := tx.ExecContext(ctx, `INSERT INTO assistants(id,name,user_name,appearance,revision,created_at,updated_at) VALUES(?,?,'',?,1,?,?) ON CONFLICT(id) DO NOTHING`,
-			store.PersonalAssistantID, defaultName, `{"palette":"original","body":"classic","eyes":"classic","mouth":"classic","headwear":"antenna","arms":"classic","eyewear":"classic","faceSticker":"blush"}`, now, now)
+		_, err := tx.ExecContext(ctx, `INSERT INTO assistants(id,name,user_name,appearance,revision,created_at,updated_at) VALUES(?,'','',?,1,?,?) ON CONFLICT(id) DO NOTHING`,
+			store.PersonalAssistantID, `{"palette":"original","body":"classic","eyes":"classic","mouth":"classic","headwear":"antenna","arms":"classic","eyewear":"classic","faceSticker":"blush"}`, now, now)
 		if err != nil {
 			return err
 		}
@@ -134,6 +133,9 @@ func (s *Store) OpenAssistant(ctx context.Context, defaultName, provider, model 
 			return err
 		}
 		session := &store.Session{ID: store.NewID("sess"), Title: out.Assistant.Name, Provider: provider, Model: model}
+		if session.Title == "" {
+			session.Title = defaultName
+		}
 		if err := store.NormalizeSessionProviderModel(session); err != nil {
 			return err
 		}
@@ -189,10 +191,15 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name,user_name=excluded.user_name,ap
 			_, err = tx.ExecContext(ctx, `DELETE FROM assistant_memories WHERE id=?`, communicationPreferenceID)
 		} else {
 			_, err = tx.ExecContext(ctx, `INSERT INTO assistant_memories(id,assistant_id,content,scope,source,created_at,updated_at) VALUES(?,?,?,'personal','user_settings',?,?)
-ON CONFLICT(id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at WHERE content<>excluded.content`, communicationPreferenceID, store.PersonalAssistantID, in.CommunicationPreference, now, now)
+ON CONFLICT(id) DO UPDATE SET content=excluded.content,source='user_settings',source_session_id='',source_turn_id='',revision=assistant_memories.revision+1,updated_at=excluded.updated_at WHERE content<>excluded.content`, communicationPreferenceID, store.PersonalAssistantID, in.CommunicationPreference, now, now)
 		}
 		if err != nil {
 			return err
+		}
+		if in.CommunicationPreference != "" {
+			if err := indexAssistantMemory(ctx, tx, communicationPreferenceID, in.CommunicationPreference); err != nil {
+				return err
+			}
 		}
 		out, err = readAssistant(ctx, tx)
 		return err

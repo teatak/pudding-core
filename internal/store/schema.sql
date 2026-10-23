@@ -511,7 +511,17 @@ CREATE TABLE IF NOT EXISTS assistant_memories (
     scope TEXT NOT NULL,
     source TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    source_session_id TEXT NOT NULL DEFAULT '',
+    source_turn_id TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS assistant_memory_terms (
+    memory_id TEXT NOT NULL REFERENCES assistant_memories(id) ON DELETE CASCADE,
+    term TEXT NOT NULL,
+    PRIMARY KEY (term, memory_id)
 );
 
 CREATE TABLE IF NOT EXISTS assistant_sessions (
