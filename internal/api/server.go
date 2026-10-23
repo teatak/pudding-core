@@ -152,7 +152,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
-	"/remote",
+	"/remote", "/assistant",
 	"/studio/items", "/studio/widget-sources", "/widget-runs", "/widget-pages",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/plugins", "/plugin-assets", "/plugin-skills", "/plugin-connections", "/plugin-oauth", "/mcp", "/desktop"}
 
@@ -182,6 +182,8 @@ type browserMCPService interface {
 func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	s.registerRemote(app)
+	app.Route("/assistant").GET(s.getAssistant).PUT(s.saveAssistant)
+	app.Route("/assistant/open").POST(s.openAssistant)
 	public := cart.New()
 
 	app.Route("/studio/items/:itemID/runs").POST(s.widgetOnly(s.createWidgetRun))
@@ -1739,6 +1741,10 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, store.ErrInvalidSessionRelation) {
 		return badRequest(c, "invalid_session_relation")
+	}
+	if errors.Is(err, store.ErrAssistantConversationProtected) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "assistant_conversation_protected"})
+		return nil
 	}
 	if errors.Is(err, store.ErrInvalidProject) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_project"})

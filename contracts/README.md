@@ -5,6 +5,49 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 41 extends assistant parts: eyes add `curved` and `dots`; mouth adds
+`smile` and `surprised`; headwear adds `hat` and `beacon`; arms add `short` and
+`orb`; faceSticker adds `freckles` and `stars`. These are stable IDs in the existing
+appearance JSON. Schema remains 53, with no data migration or default changes.
+Older renderers cannot display the new values and must update with the daemon.
+
+Protocol 40 adds mutually exclusive `eyewear` selections: `none`, `classic` (the
+original green frame, glass and reflection), and `goggles`. The body no longer
+contains a mask. Schema 53 maps the old `none` choice to `classic` to preserve
+its appearance and advances the profile revision, so stale forms cannot overwrite
+the migrated choice. Goggles remain selected; future `none` renders a bare face.
+
+Protocol 39 adds authenticated `POST /assistant/open` alongside `GET/PUT /assistant`. Schema 52 stores one local
+assistant (`id: personal`, enforced by the database) and explicit personal
+memories independently of sessions. GET returns `{assistant: null, memories: []}`
+until first opened; reading never creates an identity. POST accepts `locale`
+(`zh-CN`, `zh-TW`, or `en`) and an optional provider/model pair. It creates missing
+defaults (小布 or Puddy) and binds one conversation atomically when a model is
+available. Reopening preserves the existing identity, selections and conversation.
+The snapshot includes `sessionID` once bound; this conversation is excluded from
+ordinary root listings. Archive/delete returns `409 assistant_conversation_protected`.
+Schema 52 upgrades the earlier schema 51 `palette` column to appearance JSON while
+preserving data, and also accepts the canonical schema 51 appearance layout. PUT requires
+`expectedRevision` (0 if the identity does not exist), a nonempty name, userName, appearance and
+communicationPreference. Names are trimmed and limited to 80 characters without
+line breaks; the preference is trimmed and limited to 2000 characters. A stale
+changed form returns `409 assistant_conflict`. An identical current profile and
+preference returns the current snapshot without another revision, making a retry
+after a lost response safe. Profile and preference commit atomically.
+
+Appearance persists as JSON with required `body`, `eyes`, and `mouth` asset IDs
+(default `classic`). Palette is `original`, `lavender` or `mint`. Eyes support
+`classic`, `curved`, `dots`; mouth supports `classic`, `smile`, `surprised`.
+Decorative slots carry explicit IDs or `none`: headwear supports `antenna`, `hat`,
+`beacon`; arms support `classic`, `short`, `orb`; faceSticker supports `blush`,
+`freckles`, `stars`; eyewear supports `classic`, `goggles`.
+Missing/unknown selections return `400 invalid_assistant`.
+The optional communication preference uses memory ID `communication_preference`,
+scope `personal` and source `user_settings`; an empty value deletes it. This
+increment provides profile persistence and one current assistant conversation.
+Memory retrieval, history management and cross-session scheduling remain deferred. The
+Desktop remote gateway does not expose the assistant endpoint.
+
 Semantic rename (`builtin_code_rename`) returns `ok: false` with
 `reason: "rename_conflict"` when its saved-file snapshots or returned LSP
 versions no longer match. Clients should explain that changes were preserved

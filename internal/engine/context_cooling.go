@@ -65,7 +65,7 @@ func (e *Engine) tryCoolContext(ctx context.Context, sessionID, turnID string, r
 	}); err != nil {
 		return false, err
 	}
-	slog.Info("engine: tool results cooled", "sessionID", sessionID, "throughTurnID", next.ThroughTurnID, "keepEndedTurns", keep, "beforeInputEstimate", before, "afterInputEstimate", after, "savedTokens", before-after)
+	slog.Info("engine: tool results and notifications cooled", "sessionID", sessionID, "throughTurnID", next.ThroughTurnID, "keepEndedTurns", keep, "beforeInputEstimate", before, "afterInputEstimate", after, "savedTokens", before-after)
 	return true, nil
 }
 

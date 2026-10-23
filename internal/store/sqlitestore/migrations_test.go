@@ -19,6 +19,9 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v32 are immutable. Unpublished Studio
 	// layouts 33–46 remain recognized sources, with v47 the only destination.
 	releasedFingerprints := map[int]string{
+		53: "1ec2adc050939bc3b8026c93374f4396e52334f2fc98162c356a85fe55a79f0f", // Data-only: split classic mask from assistant body.
+		52: "1ec2adc050939bc3b8026c93374f4396e52334f2fc98162c356a85fe55a79f0f",
+		51: "56be6e95a5cae30592a45fb62baf43e0a5ba840a497b42786a82be983fcc82ee",
 		50: "d9418cae6c56d61bd5c7117f86b61f250b399eff5c425699f289114f19dbc38c",
 		49: "42d041a5317f529f2b6aad78fdee661e1dea1a9069fcbc5a9ac6ee9f71ca81a7",
 		48: "e37feda284e160a061c98287c7978d610fa7453217b35f22e08089376b5626d4",

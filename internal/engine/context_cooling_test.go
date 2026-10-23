@@ -125,6 +125,149 @@ func TestCoolingBeforeFirstRequestPreservesSummaryAndOriginals(t *testing.T) {
 	}
 }
 
+func notificationCoolingFixture(t *testing.T) (*Engine, *storetest.Store, *resolvedModel, provider.Request, []*store.Message) {
+	t.Helper()
+	e, db, _, sid := newTestEngine(t, mock.WithScript([]string{"summary of old notifications"}), mock.WithDelay(0))
+	t.Cleanup(e.Stop)
+	ctx := context.Background()
+	var notices []*store.Message
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprint(i)
+		if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: id, UserMessageID: "input" + id, ClientMessageID: "input" + id, UserText: "continue"}); err != nil {
+			t.Fatal(err)
+		}
+		payload := map[string]any{"title": "Game", "runID": "run", "notificationID": id, "summary": "South to play", "data": strings.Repeat("notification evidence ", 400)}
+		body, _ := json.Marshal(payload)
+		metadata, _ := json.Marshal(map[string]any{"widgetNotification": payload})
+		notice, err := db.RecordWidgetNotice(ctx, store.WidgetNoticeInput{SessionID: sid, ClientMessageID: "notice" + id, Text: string(body), Metadata: metadata})
+		if err != nil {
+			t.Fatal(err)
+		}
+		notices = append(notices, notice.Message)
+		if _, err := db.FinishTurn(ctx, store.FinishTurnInput{TurnID: id, Status: store.TurnCompleted}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "current", UserMessageID: "current", ClientMessageID: "current", UserText: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	e.tools = &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.HistoryGetMessage}}}
+	defs, err := e.toolDefinitions(ctx, sid, store.ModeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := e.builder.BuildForProviderWithTools(ctx, sid, "mock", "mock-model", "code", defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Tools = defs
+	before := requestInputTokens(req)
+	cfg := provider.ModelConfig{ContextWindow: before * 11 / 10}
+	req.Config = cfg
+	resolved := &resolvedModel{providerName: "mock", model: "mock-model", protocol: "openai-compatible", config: cfg}
+	return e, db, resolved, req, notices
+}
+
+func TestNotificationCoolingPreservesReadbackSummaryAndUsage(t *testing.T) {
+	e, db, resolved, req, notices := notificationCoolingFixture(t)
+	ctx, sid := context.Background(), "sess_1"
+	before, cfg, defs := requestInputTokens(req), resolved.config, req.Tools
+	canonical, err := db.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := messageInputTurnCount(canonical); got != 7 {
+		t.Fatalf("counted notification receipts as execution turns: %d", got)
+	}
+	changed, err := e.prepareContextRequest(ctx, sid, "current", resolved, store.ModeCode, &req, true)
+	if err != nil || !changed {
+		t.Fatalf("notification cooling failed: %v %v", changed, err)
+	}
+	state, err := db.ContextCooling(ctx, sid)
+	if err != nil || state.ThroughTurnID != notices[3].TurnID {
+		t.Fatalf("wrong notification watermark: %+v %v", state, err)
+	}
+	after, err := e.builder.BuildForProviderWithTools(ctx, sid, "mock", "mock-model", "code", defs, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after.Config, after.Tools = cfg, defs
+	if tokens := requestInputTokens(after); tokens >= before*80/100 {
+		t.Fatalf("estimate did not include notification cooling: before=%d after=%d", before, tokens)
+	}
+	stored, err := db.ListMessages(ctx, sid, 0)
+	if err != nil || !reflect.DeepEqual(canonical, stored) {
+		t.Fatalf("changed canonical notification history: %v", err)
+	}
+	for i, m := range stored {
+		if compactMessageText(m) != compactMessageText(canonical[i]) {
+			t.Fatal("cooling changed Compact input")
+		}
+	}
+	usage, err := db.SessionUsage(ctx, sid)
+	if err != nil || usage.RequestCount != 0 {
+		t.Fatalf("cooling made a model request: %+v %v", usage, err)
+	}
+	args, _ := json.Marshal(map[string]string{"message_id": notices[0].ID})
+	read := tool.NewBuiltinRunner(tool.WithHistorySearch(db)).Call(ctx, tool.Call{SessionID: sid, CallID: "read", Name: tool.HistoryGetMessage, Args: args})
+	if !read.Ok || !strings.Contains(read.Content, "notification evidence") || strings.Contains(read.Content, "cold_only") {
+		t.Fatalf("notification readback lost original: %s", read.Content)
+	}
+	if err := db.SetSettings(ctx, map[string]string{config.SettingToolResultCoolingEnabled: "false"}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := e.builder.BuildForProviderWithTools(ctx, sid, "mock", "mock-model", "code", defs, cfg)
+	if err != nil || !reflect.DeepEqual(req.Messages, restored.Messages) {
+		t.Fatalf("switch off did not restore notifications: %v", err)
+	}
+}
+
+func TestNotificationCoolingInsufficientGoesDirectlyToCompact(t *testing.T) {
+	e, db, resolved, req, _ := notificationCoolingFixture(t)
+	ctx, sid := context.Background(), "sess_1"
+	commits := &coolingCommitStore{Store: db}
+	e.store = commits
+	e.rebuildBuilder()
+	all, err := db.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := contextbuilder.CoolingCandidate(all, "current", 5)
+	trial, err := e.builder.BuildForProviderWithHistory(ctx, sid, "mock", "mock-model", "code", req.Tools, all, resolved.config, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial.Config, trial.Tools = resolved.config, req.Tools
+	after := requestInputTokens(trial)
+	if after >= requestInputTokens(req) {
+		t.Fatal("fixture must provide a real but insufficient cooling gain")
+	}
+	if pressure, err := summaryInputPressure(resolved, all, 1); err != nil || pressure {
+		t.Fatalf("fixture must reach the cooling trial: %v %v", pressure, err)
+	}
+	threshold := after * 100 / resolved.config.ContextWindow
+	if err := db.SetSettings(ctx, map[string]string{
+		config.SettingToolResultCoolingKeepTurns: "5", config.SettingCompactAutoThresholdPercent: fmt.Sprint(threshold),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := e.prepareContextRequest(ctx, sid, "current", resolved, store.ModeCode, &req, true)
+	if err != nil || !changed {
+		t.Fatalf("direct Compact failed: %v %v", changed, err)
+	}
+	if commits.commits != 0 {
+		t.Fatal("committed notification cooling before Compact")
+	}
+	state, err = db.ContextCooling(ctx, sid)
+	if err != nil || state.ThroughTurnID != "" {
+		t.Fatalf("unexpected watermark: %+v %v", state, err)
+	}
+	all, err = db.ListMessages(ctx, sid, 0)
+	if err != nil || all[len(all)-1].Role != store.RoleSummary {
+		t.Fatalf("missing Compact summary: %v", err)
+	}
+}
+
 func TestCoolingIneligibleGoesDirectlyToCompact(t *testing.T) {
 	for _, reason := range []string{"mid-turn", "disabled", "insufficient"} {
 		t.Run(reason, func(t *testing.T) {

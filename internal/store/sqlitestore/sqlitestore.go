@@ -490,6 +490,7 @@ func (s *Store) ListSessions(ctx context.Context, options ...store.SessionListOp
 	args := make([]any, 0, 2)
 	if resolved.Scope != store.SessionListAll {
 		where += " AND NOT EXISTS(SELECT 1 FROM session_children c WHERE c.child_session_id=s.id)"
+		where += " AND NOT EXISTS(SELECT 1 FROM assistant_sessions a WHERE a.session_id=s.id)"
 	}
 	if resolved.Query != "" {
 		where += " AND (instr(lower(s.title),lower(?))>0 OR instr(lower(coalesce(p.name,'')),lower(?))>0)"
@@ -625,6 +626,9 @@ func (s *Store) PrepareSessionDeletion(ctx context.Context, id string) error {
 }
 
 func archiveSessionGroupTx(ctx context.Context, tx *sql.Tx, id string, now time.Time) error {
+	if err := requireOrdinaryConversationTx(ctx, tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=?,updated_at=?
 		WHERE archived_at=0 AND (id=? OR id IN
 		(SELECT child_session_id FROM session_children WHERE parent_session_id=?))`, unixMS(now), unixMS(now), id, id); err != nil {
@@ -710,6 +714,9 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 
 func (s *Store) deleteSession(ctx context.Context, id string) error {
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireOrdinaryConversationTx(ctx, tx, id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
 			return err
 		}

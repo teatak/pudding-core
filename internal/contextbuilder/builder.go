@@ -483,6 +483,9 @@ func IsInputTurnBoundary(msg *store.Message) bool {
 	if msg == nil || msg.TurnID == "" || msg.TurnIndex != 0 {
 		return false
 	}
+	if widgetNotification(msg) != nil {
+		return false
+	}
 	return msg.Role == store.RoleUser || msg.Role == store.RoleSystem
 }
 

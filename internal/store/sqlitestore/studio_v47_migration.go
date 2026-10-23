@@ -45,6 +45,9 @@ func migrateStudioV47(tx *sql.Tx) error {
 	}
 	// Validate while changes are still rollbackable, before recording v47.
 	contract := extendSchemaContract(currentSchemaContract, nil)
+	delete(contract.tables, "assistants")
+	delete(contract.tables, "assistant_memories")
+	delete(contract.tables, "assistant_sessions")
 	delete(contract.tables, "session_plugin_connections")
 	delete(contract.tables, "project_requests")
 	return validateSchemaWithRetiredColumns(tx, contract)

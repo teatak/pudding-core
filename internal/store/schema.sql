@@ -494,3 +494,27 @@ CREATE TABLE IF NOT EXISTS session_plugin_connections (
     identity TEXT NOT NULL,
     PRIMARY KEY (session_id, plugin_id)
 );
+
+CREATE TABLE IF NOT EXISTS assistants (
+    id TEXT PRIMARY KEY CHECK (id = 'personal'),
+    name TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    appearance TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS assistant_memories (
+    id TEXT PRIMARY KEY,
+    assistant_id TEXT NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS assistant_sessions (
+    assistant_id TEXT PRIMARY KEY REFERENCES assistants(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE
+);

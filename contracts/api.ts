@@ -3,6 +3,36 @@
 import { z } from "zod";
 import { studioItem } from "./studio";
 
+export const assistantAppearance = z.object({
+  palette: z.enum(["original", "lavender", "mint"]),
+  body: z.literal("classic"), eyes: z.enum(["classic", "curved", "dots"]), mouth: z.enum(["classic", "smile", "surprised"]),
+  headwear: z.enum(["none", "antenna", "hat", "beacon"]), arms: z.enum(["none", "classic", "short", "orb"]),
+  eyewear: z.enum(["none", "classic", "goggles"]), faceSticker: z.enum(["none", "blush", "freckles", "stars"]),
+});
+export const assistant = z.object({
+  id: z.literal("personal"), name: z.string(), userName: z.string(), appearance: assistantAppearance,
+  sessionID: z.string().optional(),
+  revision: z.number().int().positive(), createdAt: z.string(), updatedAt: z.string(),
+});
+export const assistantMemory = z.object({
+  id: z.string(), content: z.string(), scope: z.literal("personal"), source: z.literal("user_settings"),
+  createdAt: z.string(), updatedAt: z.string(),
+});
+export const assistantSnapshot = z.object({ assistant: assistant.nullable(), memories: z.array(assistantMemory) });
+export const openAssistantRequest = z.object({
+  locale: z.enum(["zh-CN", "zh-TW", "en"]), provider: z.string().min(1).optional(), model: z.string().min(1).optional(),
+}).refine(value => Boolean(value.provider) === Boolean(value.model));
+const assistantName = z.string().trim().min(1).max(80).refine(value => !/[\r\n]/.test(value));
+export const saveAssistantRequest = z.object({
+  expectedRevision: z.number().int().nonnegative(), name: assistantName,
+  userName: z.string().trim().max(80).refine(value => !/[\r\n]/.test(value)),
+  appearance: assistantAppearance, communicationPreference: z.string().trim().max(2000),
+}).strict();
+export type Assistant = z.infer<typeof assistant>;
+export type AssistantAppearance = z.infer<typeof assistantAppearance>;
+export type AssistantSnapshot = z.infer<typeof assistantSnapshot>;
+export type SaveAssistantInput = z.infer<typeof saveAssistantRequest>;
+
 export const createSessionRequest = z.object({
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   title: z.string().optional(),

@@ -30,21 +30,43 @@ func (b *Builder) contextCooling(ctx context.Context, sessionID string) (store.C
 }
 
 // CoolingCandidate protects the current turn and keepEnded preceding input
-// turns. Steers and Compact's synthetic turns do not count as user turns.
+// turns. Notification receipts, steers and Compact's synthetic turns do not count.
 func CoolingCandidate(messages []*store.Message, currentTurnID string, keepEnded int) store.ContextCooling {
-	messages = EffectiveMessages(messages)
-	var turns []string
+	messages = historyInTurnOrder(EffectiveMessages(messages))
+	var turns []int
 	state := store.ContextCooling{}
-	for _, m := range messages {
+	for i, m := range messages {
 		if m.Role == store.RoleSummary {
 			state.SummaryMessageID = m.ID
 		}
 		if IsInputTurnBoundary(m) && m.TurnID != currentTurnID {
-			turns = append(turns, m.TurnID)
+			turns = append(turns, i)
 		}
 	}
-	if len(turns) > keepEnded {
-		state.ThroughTurnID = turns[len(turns)-keepEnded-1]
+	if len(turns) <= keepEnded {
+		return state
+	}
+	// Include receipts following the last cold input, up to the first hot input.
+	split := turns[len(turns)-keepEnded-1] + 1
+	for split < len(messages) && !IsInputTurnBoundary(messages[split]) {
+		split++
+	}
+	// A hot action can refer to a receipt recorded before that action started.
+	// Keep that source available too; this boundary is persisted, never slid.
+	sources := map[string]bool{}
+	for _, m := range messages[split:] {
+		if source := widgetActionSource(m); source != "" {
+			sources[source] = true
+		}
+	}
+	for i, m := range messages[:split] {
+		if sources[m.ID] {
+			split = i
+			break
+		}
+	}
+	if split > 0 && messages[split-1].Role != store.RoleSummary {
+		state.ThroughTurnID = messages[split-1].TurnID
 	}
 	return state
 }
@@ -60,7 +82,7 @@ func cooledMessages(messages []*store.Message, state store.ContextCooling) []*st
 		if m.Role == store.RoleSummary {
 			summaryID = m.ID
 		}
-		if !found && IsInputTurnBoundary(m) {
+		if !found && m.TurnID != "" && m.Role != store.RoleSummary {
 			coldTurns[m.TurnID] = true
 			found = m.TurnID == state.ThroughTurnID
 		}
@@ -71,7 +93,14 @@ func cooledMessages(messages []*store.Message, state store.ContextCooling) []*st
 	}
 	out := append([]*store.Message(nil), messages...)
 	for i, m := range messages {
-		if !coldTurns[m.TurnID] || (m.Role != store.RoleTool && m.Role != store.RoleAssistant) {
+		if !coldTurns[m.TurnID] {
+			continue
+		}
+		if notice := widgetNotification(m); notice != nil {
+			out[i] = coldWidgetNotification(m, notice)
+			continue
+		}
+		if m.Role != store.RoleTool && m.Role != store.RoleAssistant {
 			continue
 		}
 		copy := *m

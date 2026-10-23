@@ -2336,6 +2336,7 @@ func browserHistoryVisibleURL(rawURL string) string {
 // 事件 seq 由 Store 在事务内按 session 单调分配。
 // SQLite 实现要求 WAL + 单 writer;schema 契约见 schema.sql。
 type Store interface {
+	AssistantStore
 	// SetEventPublisher publishes persisted events after commit in seq order.
 	// The publisher must be nonblocking and must not call Store methods.
 	SetEventPublisher(func(event.Event))
