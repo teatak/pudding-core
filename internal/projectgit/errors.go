@@ -3,6 +3,10 @@ package projectgit
 import "errors"
 
 const (
+	CodeRequestConflict       = "git_request_conflict"
+	CodeStateConflict         = "git_state_conflict"
+	CodeInvalidRequest        = "git_invalid_request"
+	CodeReceiptFailed         = "git_receipt_failed"
 	CodeBranchCreateFailed    = "git_branch_create_failed"
 	CodeBranchDeleteFailed    = "git_branch_delete_failed"
 	CodeBranchListFailed      = "git_branch_list_failed"

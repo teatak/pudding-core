@@ -14,6 +14,7 @@ import (
 const projectGitDiffMaxBytes = 2 << 20
 
 type projectGitStatusView struct {
+	Revision        string                  `json:"revision,omitempty"`
 	RootID          string                  `json:"rootID"`
 	Available       bool                    `json:"available"`
 	Head            string                  `json:"head,omitempty"`
@@ -52,14 +53,18 @@ type projectGitPathsReq struct {
 }
 
 type projectGitCommitReq struct {
-	RootID   string `json:"rootID"`
-	Message  string `json:"message"`
-	StageAll bool   `json:"stageAll"`
+	ClientRequestID  string `json:"clientRequestID"`
+	ExpectedRevision string `json:"expectedRevision"`
+	RootID           string `json:"rootID"`
+	Message          string `json:"message"`
+	StageAll         bool   `json:"stageAll"`
 }
 
 type projectGitBranchReq struct {
-	RootID string `json:"rootID"`
-	Name   string `json:"name"`
+	ClientRequestID  string `json:"clientRequestID"`
+	ExpectedRevision string `json:"expectedRevision"`
+	RootID           string `json:"rootID"`
+	Name             string `json:"name"`
 }
 
 type projectGitBranchesView struct {
@@ -156,7 +161,8 @@ func (s *Server) commitProjectGit(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	status, err := projectgit.Commit(c.Request.Context(), repo, req.Message, req.StageAll)
+	sessionID, _ := c.Param("id")
+	status, err := projectgit.CommitOnce(c.Request.Context(), repo, req.Message, req.StageAll, projectgit.MutationRequest{ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision})
 	if err != nil {
 		return projectGitError(c, err)
 	}
@@ -178,7 +184,21 @@ func (s *Server) listProjectGitBranches(c *cart.Context) error {
 }
 
 func (s *Server) createProjectGitBranch(c *cart.Context) error {
-	return s.mutateProjectGitBranch(c, projectgit.CreateBranch)
+	var req projectGitBranchReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	root, repo, ok := s.projectGitRepository(c, req.RootID)
+	if !ok {
+		return nil
+	}
+	sessionID, _ := c.Param("id")
+	status, err := projectgit.CreateBranchOnce(c.Request.Context(), repo, req.Name, projectgit.MutationRequest{ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision})
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	c.JSON(http.StatusOK, projectGitStatusResponse(root.ID, status))
+	return nil
 }
 
 func (s *Server) switchProjectGitBranch(c *cart.Context) error {
@@ -273,7 +293,7 @@ func projectGitStatusResponse(rootID string, status projectgit.Status) projectGi
 		files = []projectgit.StatusFile{}
 	}
 	return projectGitStatusView{
-		RootID: rootID, Available: true,
+		RootID: rootID, Available: true, Revision: status.Revision,
 		Head: status.Head, Branch: status.Branch, Upstream: status.Upstream,
 		Detached: status.Detached, Ahead: status.Ahead, Behind: status.Behind,
 		Clean: len(files) == 0, Files: files, FileCount: len(files),
@@ -318,9 +338,9 @@ func projectGitError(c *cart.Context, err error) error {
 		return projectFileError(c, http.StatusInternalServerError, "git_operation_failed")
 	}
 	switch gitErr.Code {
-	case projectgit.CodeInvalidBranch:
+	case projectgit.CodeInvalidRequest, projectgit.CodeInvalidBranch:
 		return projectFileError(c, http.StatusBadRequest, gitErr.Code)
-	case projectgit.CodeBranchDeleteFailed:
+	case projectgit.CodeStateConflict, projectgit.CodeRequestConflict, projectgit.CodeBranchDeleteFailed:
 		return projectFileError(c, http.StatusConflict, gitErr.Code)
 	case projectgit.CodeCommitMessageRequired:
 		return projectFileError(c, http.StatusBadRequest, gitErr.Code)

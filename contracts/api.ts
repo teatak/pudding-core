@@ -208,6 +208,7 @@ export const projectGitStatusFile = z.object({
 export type ProjectGitStatusFile = z.infer<typeof projectGitStatusFile>;
 
 export const projectGitStatus = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   rootID: z.string(),
   available: z.boolean(),
   head: z.string().optional(),
@@ -261,11 +262,15 @@ export const projectGitPathsRequest = projectGitRootRequest.extend({
 });
 
 export const projectGitCommitRequest = projectGitRootRequest.extend({
+  clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
+  expectedRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   message: z.string().trim().min(1).max(16 * 1024),
   stageAll: z.boolean().default(false),
 });
 
 export const projectGitBranchRequest = projectGitRootRequest.extend({
+  clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
+  expectedRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   name: z.string().trim().min(1).max(1024),
 });
 

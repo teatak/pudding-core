@@ -167,6 +167,16 @@ func Discard(ctx context.Context, repo Repository, rawPaths []string) (Status, e
 
 // Commit creates a normal commit from the current index with hooks and signing disabled.
 func Commit(ctx context.Context, repo Repository, message string, stageAll bool) (Status, error) {
+	var status Status
+	err := withRepositoryLock(repo.Root, func() error {
+		var err error
+		status, err = commit(ctx, repo, message, stageAll)
+		return err
+	})
+	return status, err
+}
+
+func commit(ctx context.Context, repo Repository, message string, stageAll bool) (Status, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return Status{}, newError(CodeCommitMessageRequired, "Commit message is required", nil)
@@ -174,7 +184,7 @@ func Commit(ctx context.Context, repo Repository, message string, stageAll bool)
 	if !utf8.ValidString(message) || len(message) > commitMaxMessageBytes || strings.ContainsRune(message, '\x00') {
 		return Status{}, newError(CodeCommitMessageRequired, "Commit message is invalid", nil)
 	}
-	err := withRepositoryLock(repo.Root, func() error {
+	err := func() error {
 		status, err := ReadStatus(ctx, repo)
 		if err != nil {
 			return err
@@ -206,14 +216,13 @@ func Commit(ctx context.Context, repo Repository, message string, stageAll bool)
 			return commandError(commandCtx, CodeCommitFailed, result)
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return Status{}, err
 	}
 	return ReadStatus(ctx, repo)
 }
 
-// Sync fast-forwards from the configured upstream and then pushes local commits.
 func Sync(ctx context.Context, repo Repository) (Status, error) {
 	err := withRepositoryLock(repo.Root, func() error {
 		status, err := ReadStatus(ctx, repo)

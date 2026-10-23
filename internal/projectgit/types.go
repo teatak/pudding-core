@@ -14,6 +14,7 @@ type StatusFile struct {
 }
 
 type Status struct {
+	Revision   string
 	Head       string
 	Branch     string
 	Upstream   string

@@ -5,6 +5,33 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 36 adds optional `clientRequestID` and `expectedRevision` to Git commit
+and branch creation (`POST /sessions/:id/project/git/commit` and `/branches`).
+Available Git status responses include an opaque `revision` covering HEAD,
+branch, index status and changed worktree contents. A keyed first execution
+requires that reviewed revision; a mismatch is `409 git_state_conflict` without
+executing. IDs contain 1–200 ASCII letters, digits, underscores or hyphens.
+The scope is repository, session and operation. Missing/invalid revisions on
+keyed requests return `400 git_invalid_request`; requests without a key retain
+independent execution.
+
+Successful receipts persist in local Git metadata under `pudding/requests` and
+are not tracked project files. An identical retry checks the receipt before the
+revision and returns current repository status without committing, staging,
+creating a branch or switching HEAD again. Changed parameters with the same ID
+return `409 git_request_conflict`. Clients retain the exact ID, message/name,
+stage policy and original revision after uncertain responses; a deliberately
+new operation needs a new ID. A replay does not revive a subsequently deleted
+branch or override a later branch selection.
+
+Git mutation and receipt-file publication are separate filesystem operations.
+If the daemon stops or recording fails after Git changed, a missing receipt is
+not guessed from an equal message/branch name: the original revision guard
+rejects a retry after that change. Clients must show that the repository needs
+review and require a fresh explicit action. A receipt I/O failure is
+`git_receipt_failed`. This contract does not serialize external Git clients or
+restore receipts removed by a user, and adds no database schema migration.
+
 Protocol 35 adds optional `clientRequestID` to `POST /projects` and
 `POST /projects/:id/merge`. Keys contain 1–200 ASCII letters, digits, underscores
 or hyphens; creation and merge use separate namespaces. Schema v49 stores each

@@ -2,8 +2,13 @@ package projectgit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,6 +27,44 @@ func ReadStatus(ctx context.Context, repo Repository) (Status, error) {
 	if err != nil {
 		return Status{}, newError(CodeParseFailed, err.Error(), err)
 	}
+	hash := sha256.New()
+	hash.Write([]byte(result.stdout))
+	for _, file := range status.Files {
+		if file.WorktreeStatus == "." || file.WorktreeStatus == "D" {
+			continue
+		}
+		name := filepath.Join(repo.Root, filepath.FromSlash(file.Path))
+		info, err := os.Lstat(name)
+		if err != nil {
+			return Status{}, newError(CodeStatusFailed, "Unable to inspect changed file", err)
+		}
+		fmt.Fprintf(hash, "\x00%s\x00%s\x00%d\x00", file.Path, info.Mode(), info.Size())
+		switch {
+		case info.Mode().IsRegular():
+			f, err := os.Open(name)
+			if err != nil {
+				return Status{}, newError(CodeStatusFailed, "Unable to read changed file", err)
+			}
+			_, err = io.Copy(hash, f)
+			f.Close()
+			if err != nil {
+				return Status{}, newError(CodeStatusFailed, "Unable to hash changed file", err)
+			}
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(name)
+			if err != nil {
+				return Status{}, newError(CodeStatusFailed, "Unable to read changed link", err)
+			}
+			hash.Write([]byte(target))
+		case info.IsDir():
+			head := run(commandCtx, name, metadataLimitBytes, "rev-parse", "--verify", "--quiet", "HEAD")
+			if head.err != nil && exitCode(head.err) != 1 {
+				return Status{}, commandError(commandCtx, CodeStatusFailed, head)
+			}
+			hash.Write([]byte(head.stdout))
+		}
+	}
+	status.Revision = hex.EncodeToString(hash.Sum(nil))
 	return status, nil
 }
 

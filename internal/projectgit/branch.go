@@ -31,11 +31,21 @@ func ListBranches(ctx context.Context, repo Repository) ([]Branch, error) {
 }
 
 func CreateBranch(ctx context.Context, repo Repository, rawName string) (Status, error) {
+	var status Status
+	err := withRepositoryLock(repo.Root, func() error {
+		var err error
+		status, err = createBranch(ctx, repo, rawName)
+		return err
+	})
+	return status, err
+}
+
+func createBranch(ctx context.Context, repo Repository, rawName string) (Status, error) {
 	name, err := validateBranchName(ctx, repo.Root, rawName)
 	if err != nil {
 		return Status{}, err
 	}
-	err = withRepositoryLock(repo.Root, func() error {
+	err = func() error {
 		commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 		defer cancel()
 		result := runWithoutExternalFilters(commandCtx, repo.Root, metadataLimitBytes,
@@ -46,7 +56,7 @@ func CreateBranch(ctx context.Context, repo Repository, rawName string) (Status,
 			return commandError(commandCtx, CodeBranchCreateFailed, result)
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return Status{}, err
 	}
